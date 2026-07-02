@@ -29,7 +29,7 @@
 Sources:
 
 - Minitest 5.x CLI behavior from `minitest/autorun`.
-- VS Code Testing API concepts: https://code.visualstudio.com/api/extension-guides/testing
+- VS Code Testing API concepts: <https://code.visualstudio.com/api/extension-guides/testing>
 
 ## Discovery
 

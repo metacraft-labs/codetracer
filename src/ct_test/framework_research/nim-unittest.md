@@ -22,7 +22,7 @@
 
 ## Existing Editor Extension Research
 
-- The primary VS Code extension is `nim-lang/vscode-nim`: https://github.com/nim-lang/vscode-nim
+- The primary VS Code extension is `nim-lang/vscode-nim`: <https://github.com/nim-lang/vscode-nim>
 - Its README documents an experimental Test Explorer runner. It requires `unittest2 >= 0.2.4` and a configured `nim.test.entryPoint`, or Nimble `testEntryPoint`, and lists tests in VS Code's Test Explorer.
 - The extension is language-server based for ordinary Nim editing and does not document `std/unittest` TestItem/CodeLens support.
 - `nim-lang/langserver` README notes that listing/running tests requires `unittest2 >= 0.2.4` and a test entry point from the VS Code extension setting.

@@ -36,9 +36,9 @@
 
 Sources:
 
-- Vitest VS Code extension: https://github.com/vitest-dev/vscode
-- Vitest guide: https://vitest.dev/guide/
-- VS Code Testing API: https://code.visualstudio.com/api/extension-guides/testing
+- Vitest VS Code extension: <https://github.com/vitest-dev/vscode>
+- Vitest guide: <https://vitest.dev/guide/>
+- VS Code Testing API: <https://code.visualstudio.com/api/extension-guides/testing>
 
 ## Discovery
 

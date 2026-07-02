@@ -8,9 +8,9 @@ PKG_SRC="$REPO_ROOT/src/db-backend/wasm-testing/pkg"
 PKG_DST="$SCRIPT_DIR/app/pkg"
 
 if [ ! -d "$PKG_SRC" ]; then
-    echo "ERROR: WASM package not found at $PKG_SRC"
-    echo "Run: cd src/db-backend && bash build_wasm.sh"
-    exit 1
+	echo "ERROR: WASM package not found at $PKG_SRC"
+	echo "Run: cd src/db-backend && bash build_wasm.sh"
+	exit 1
 fi
 
 mkdir -p "$PKG_DST"

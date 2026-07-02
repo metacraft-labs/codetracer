@@ -10,6 +10,7 @@ and how to evaluate the screenshot against the CodeTracer design spec.
 **Purpose**: Establish the reference baseline that all other screens are compared against.
 
 **Expected content**:
+
 - Toolbar: debugger step controls (forward, backward, continue icons)
 - Left: FILESYSTEM panel with file tree showing `source folders > codetracer > test-programs > py_console_logs > main.py`
 - Center: Editor tab `py_console_logs/main.py` with Python source code visible, line numbers, syntax highlighting (keywords in purple/blue, strings in green/orange)
@@ -32,6 +33,7 @@ and how to evaluate the screenshot against the CodeTracer design spec.
 **How to trigger**: Click the "BUILD" label in the status bar footer. The BUILD pane slides up as an overlay from the bottom.
 
 **Expected data to inject**:
+
 ```
 $ nim c --sourcemap:on main.nim
 Hint: used 42 lines of code
@@ -40,6 +42,7 @@ Hint: [SuccessX]
 ```
 
 **Expected appearance**:
+
 - BUILD overlay visible at bottom, full-width, ~30% window height
 - Overlay header: "Build succeeded" in GREEN text, with header controls (stop, clear, auto-scroll, duration "0.8s")
 - Build output lines in monospace font with ANSI colors rendered (green "Hint:" text)
@@ -54,6 +57,7 @@ Hint: [SuccessX]
 **Purpose**: Show BUILD pane with compiler errors, demonstrating error parsing and color coding.
 
 **Expected data to inject**:
+
 ```
 $ cargo build
 error[E0308]: mismatched types
@@ -69,6 +73,7 @@ error: aborting due to previous error
 ```
 
 **Expected appearance**:
+
 - Overlay header: "Build failed (exit code 1)" in RED text
 - Error lines: red text (#f85149), clickable (underline on hover)
 - Warning lines: yellow text (#d29922)
@@ -83,11 +88,13 @@ error: aborting due to previous error
 **Purpose**: Show the PROBLEMS pane with structured error list from the failed build.
 
 **Expected data**: 2 errors + 1 warning:
+
 - ERROR: src/main.rs:42:5 — "mismatched types: expected `bool`, found integer"
 - ERROR: src/main.rs:55:12 — "cannot find value `undefined_var` in this scope"
 - WARNING: src/main.rs:10:9 — "unused variable: `y`"
 
 **Expected appearance**:
+
 - Overlay header: "3 problems (2 errors, 1 warning)" with filter buttons [All] [Errors] [Warnings]
 - Error rows: red circle icon (●), file path in dim color, line:col, error message
 - Warning row: yellow triangle icon (▲), same format
@@ -101,12 +108,14 @@ error: aborting due to previous error
 **Purpose**: Show search results grouped by file with match highlighting.
 
 **Expected data**: Search for "print" with 4 results across 2 files:
+
 - src/main.py:10 — `def print_to_stdout() -> None:`
-- src/main.py:15 — `    print("hello world")`
-- src/main.py:51 — `    print("1. print using print('text')")`
+- src/main.py:15 — `print("hello world")`
+- src/main.py:51 — `print("1. print using print('text')")`
 - src/utils.py:3 — `from io import print_function`
 
 **Expected appearance**:
+
 - Overlay header: "4 results for 'print'"
 - Results grouped by file: `src/main.py (3)` header, then 3 match rows
 - Then `src/utils.py (1)` header, 1 match row
@@ -120,6 +129,7 @@ error: aborting due to previous error
 **Purpose**: Show left auto-hide strip with FILESYSTEM panel overlay.
 
 **Expected appearance**:
+
 - Thin vertical strip (~28px) on the left edge with vertical text "FILESYSTEM"
 - Strip is TILED beside GL (not overlaying) — GL content starts after the strip
 - Overlay panel slides in from left showing the FILESYSTEM file tree
@@ -134,6 +144,7 @@ error: aborting due to previous error
 **Purpose**: Show the session tab bar with multiple traces.
 
 **Expected appearance**:
+
 - Session tab bar visible ABOVE the GL panels (between toolbar and GL)
 - Two tabs: first trace name (e.g., "py_console_logs/main.py"), second tab (e.g., "Trace 2")
 - Active tab highlighted with different background
@@ -148,6 +159,7 @@ error: aborting due to previous error
 **Purpose**: Show DeepReview mode using the standard CodeTracer GL layout with changed files.
 
 **Expected appearance (per DeepReview-GUI.md spec)**:
+
 - FILESYSTEM panel shows changed files with diff badges: M main.rs (+8/-3), A utils.rs (+8/-0), D config.rs (+0/-7)
 - Colors: M=orange, A=green, D=red
 - Editor area shows the first file's content with diff decorations (green lines for additions)

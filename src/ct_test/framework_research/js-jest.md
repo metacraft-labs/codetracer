@@ -39,9 +39,9 @@
 
 Sources:
 
-- VS Code Jest extension: https://github.com/jest-community/vscode-jest
-- VS Code Testing API: https://code.visualstudio.com/api/extension-guides/testing
-- Jest/Vitest Runner marketplace: https://marketplace.visualstudio.com/items?itemName=firsttris.vscode-jest-runner
+- VS Code Jest extension: <https://github.com/jest-community/vscode-jest>
+- VS Code Testing API: <https://code.visualstudio.com/api/extension-guides/testing>
+- Jest/Vitest Runner marketplace: <https://marketplace.visualstudio.com/items?itemName=firsttris.vscode-jest-runner>
 
 ## Discovery
 

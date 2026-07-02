@@ -23,17 +23,17 @@ Relevant source and docs:
 - rust-analyzer `runnables.rs`: `runnable_fn` checks `def.is_test`, computes a
   canonical path when available, falls back to the function name, and creates a
   `RunnableKind::Test`.
-  https://github.com/rust-lang/rust-analyzer/blob/master/crates/ide/src/runnables.rs
+  <https://github.com/rust-lang/rust-analyzer/blob/master/crates/ide/src/runnables.rs>
 - rust-analyzer LSP conversion: runnables carry a `location` and cargo
   `cargoArgs`/`executableArgs`.
-  https://github.com/rust-lang/rust-analyzer/blob/master/crates/rust-analyzer/src/lsp/to_proto.rs
+  <https://github.com/rust-lang/rust-analyzer/blob/master/crates/rust-analyzer/src/lsp/to_proto.rs>
 - rust-analyzer LSP extension model: `CargoRunnableArgs` separates cargo
   arguments from executable/libtest arguments.
-  https://github.com/rust-lang/rust-analyzer/blob/master/crates/rust-analyzer/src/lsp/ext.rs
+  <https://github.com/rust-lang/rust-analyzer/blob/master/crates/rust-analyzer/src/lsp/ext.rs>
 - rust-analyzer generated configuration documents CodeLens placement and test
   command placeholders including `${test_name}`, `${exact}`, and
   `${include_ignored}`.
-  https://rust-analyzer.github.io/book/configuration.html
+  <https://rust-analyzer.github.io/book/configuration.html>
 
 Conclusion for CodeTracer: source locations should come from a Rust-aware parser
 or rust-analyzer/LSP integration, not from regex-only scanning or from libtest
@@ -110,11 +110,11 @@ after `--` to the test binary.
 Official docs:
 
 - Cargo `cargo test` command:
-  https://doc.rust-lang.org/cargo/commands/cargo-test.html
+  <https://doc.rust-lang.org/cargo/commands/cargo-test.html>
 - Cargo guide on unit and integration tests:
-  https://doc.rust-lang.org/cargo/guide/tests.html
+  <https://doc.rust-lang.org/cargo/guide/tests.html>
 - rustc/libtest CLI arguments:
-  https://doc.rust-lang.org/rustc/tests/index.html
+  <https://doc.rust-lang.org/rustc/tests/index.html>
 
 Observed/expected mapping:
 

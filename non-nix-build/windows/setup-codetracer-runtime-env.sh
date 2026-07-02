@@ -15,7 +15,7 @@ fi
 INSTALL_ROOT="${WINDOWS_DIY_INSTALL_ROOT:-D:/metacraft-dev-deps}"
 # Convert Windows drive-letter paths (D:/...) to MSYS2/Git-Bash form (/d/...)
 # so that `which` and other POSIX tools resolve executables correctly.
-if [[ "$INSTALL_ROOT" =~ ^([A-Za-z]):/(.*) ]]; then
+if [[ $INSTALL_ROOT =~ ^([A-Za-z]):/(.*) ]]; then
 	_drive="${BASH_REMATCH[1],,}"
 	INSTALL_ROOT="/$_drive/${BASH_REMATCH[2]}"
 	unset _drive
@@ -23,9 +23,11 @@ fi
 
 # Source toolchain version pins so paths stay in sync with env.ps1.
 _tc_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/toolchain-versions.env"
-if [[ -f "$_tc_file" ]]; then
+if [[ -f $_tc_file ]]; then
 	# shellcheck disable=SC1090
-	set -a; source "$_tc_file"; set +a
+	set -a
+	source "$_tc_file"
+	set +a
 fi
 
 # Shims directory (created by env.ps1) — first-class, highest priority.
@@ -39,54 +41,63 @@ _tool_dirs=()
 
 # GNAT provides gnatmake (added first = lower priority than GCC)
 _gnat_ver="${GNAT_VERSION:-${GCC_VERSION:-}}"
-[[ -n "$_gnat_ver" && -d "$INSTALL_ROOT/gnat/$_gnat_ver/bin" ]] && \
+[[ -n $_gnat_ver && -d "$INSTALL_ROOT/gnat/$_gnat_ver/bin" ]] &&
 	_tool_dirs+=("$INSTALL_ROOT/gnat/$_gnat_ver/bin")
 
 # Standalone GCC (higher priority — its gcc/g++/gdb should override GNAT's)
-[[ -n "${GCC_VERSION:-}" && -d "$INSTALL_ROOT/gcc/$GCC_VERSION/bin" ]] && \
+[[ -n ${GCC_VERSION:-} && -d "$INSTALL_ROOT/gcc/$GCC_VERSION/bin" ]] &&
 	_tool_dirs+=("$INSTALL_ROOT/gcc/$GCC_VERSION/bin")
 
 # LDC (D compiler)
-if [[ -n "${LDC_VERSION:-}" ]]; then
+if [[ -n ${LDC_VERSION:-} ]]; then
 	for _ldc_cand in \
 		"$INSTALL_ROOT/ldc/$LDC_VERSION/ldc2-$LDC_VERSION-windows-x64/bin" \
 		"$INSTALL_ROOT/ldc/$LDC_VERSION/ldc2-$LDC_VERSION-windows-aarch64/bin"; do
-		[[ -d "$_ldc_cand" ]] && { _tool_dirs+=("$_ldc_cand"); break; }
+		[[ -d $_ldc_cand ]] && {
+			_tool_dirs+=("$_ldc_cand")
+			break
+		}
 	done
 fi
 
 # Nim
-if [[ -n "${NIM_VERSION:-}" ]]; then
+if [[ -n ${NIM_VERSION:-} ]]; then
 	for _nim_cand in \
 		"$INSTALL_ROOT/nim/$NIM_VERSION/prebuilt/nim-$NIM_VERSION/bin" \
 		"$INSTALL_ROOT/nim/$NIM_VERSION/nim-$NIM_VERSION/bin"; do
-		[[ -d "$_nim_cand" ]] && { _tool_dirs+=("$_nim_cand"); break; }
+		[[ -d $_nim_cand ]] && {
+			_tool_dirs+=("$_nim_cand")
+			break
+		}
 	done
 fi
 
 # Go
-[[ -n "${GO_VERSION:-}" && -d "$INSTALL_ROOT/go/$GO_VERSION/go/bin" ]] && \
+[[ -n ${GO_VERSION:-} && -d "$INSTALL_ROOT/go/$GO_VERSION/go/bin" ]] &&
 	_tool_dirs+=("$INSTALL_ROOT/go/$GO_VERSION/go/bin")
 
 # V-lang
-[[ -n "${VLANG_VERSION:-}" && -d "$INSTALL_ROOT/vlang/$VLANG_VERSION/v" ]] && \
+[[ -n ${VLANG_VERSION:-} && -d "$INSTALL_ROOT/vlang/$VLANG_VERSION/v" ]] &&
 	_tool_dirs+=("$INSTALL_ROOT/vlang/$VLANG_VERSION/v")
 
 # Free Pascal
-[[ -n "${FPC_VERSION:-}" && -d "$INSTALL_ROOT/fpc/$FPC_VERSION/bin/x86_64-win64" ]] && \
+[[ -n ${FPC_VERSION:-} && -d "$INSTALL_ROOT/fpc/$FPC_VERSION/bin/x86_64-win64" ]] &&
 	_tool_dirs+=("$INSTALL_ROOT/fpc/$FPC_VERSION/bin/x86_64-win64")
 
 # LLVM (provides clang, lldb, llvm-config)
-if [[ -n "${LLVM_VERSION:-}" ]]; then
+if [[ -n ${LLVM_VERSION:-} ]]; then
 	for _llvm_cand in \
 		"$INSTALL_ROOT/llvm/$LLVM_VERSION/LLVM-$LLVM_VERSION-x86_64-pc-windows-msvc/bin" \
 		"$INSTALL_ROOT/llvm/$LLVM_VERSION/LLVM-$LLVM_VERSION-aarch64-pc-windows-msvc/bin"; do
-		[[ -d "$_llvm_cand" ]] && { _tool_dirs+=("$_llvm_cand"); break; }
+		[[ -d $_llvm_cand ]] && {
+			_tool_dirs+=("$_llvm_cand")
+			break
+		}
 	done
 fi
 
 # Export LLVM_CONFIG and LLDB_LIB_PATH for lldb-sys crate build.rs
-if [[ -n "${LLVM_VERSION:-}" ]]; then
+if [[ -n ${LLVM_VERSION:-} ]]; then
 	for _llvm_dir in \
 		"$INSTALL_ROOT/llvm/$LLVM_VERSION/LLVM-$LLVM_VERSION-x86_64-pc-windows-msvc" \
 		"$INSTALL_ROOT/llvm/$LLVM_VERSION/LLVM-$LLVM_VERSION-aarch64-pc-windows-msvc"; do
@@ -101,14 +112,14 @@ fi
 # Prepend shims first, then tool dirs (shims take precedence).
 for _d in "${_tool_dirs[@]}"; do
 	case ":$PATH:" in
-		*":$_d:"*) ;;
-		*) export PATH="$_d:$PATH" ;;
+	*":$_d:"*) ;;
+	*) export PATH="$_d:$PATH" ;;
 	esac
 done
-if [[ -d "$SHIMS_DIR" ]]; then
+if [[ -d $SHIMS_DIR ]]; then
 	case ":$PATH:" in
-		*":$SHIMS_DIR:"*) ;;
-		*) export PATH="$SHIMS_DIR:$PATH" ;;
+	*":$SHIMS_DIR:"*) ;;
+	*) export PATH="$SHIMS_DIR:$PATH" ;;
 	esac
 fi
 

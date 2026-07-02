@@ -50,15 +50,15 @@
 Sources:
 
 - VS Code Python testing docs:
-  https://code.visualstudio.com/docs/python/testing
+  <https://code.visualstudio.com/docs/python/testing>
 - VS Code Testing API docs:
-  https://code.visualstudio.com/api/extension-guides/testing
+  <https://code.visualstudio.com/api/extension-guides/testing>
 - VS Code pytest plugin source:
-  https://github.com/microsoft/vscode-python/blob/main/python_files/vscode_pytest/__init__.py
+  <https://github.com/microsoft/vscode-python/blob/main/python_files/vscode_pytest/__init__.py>
 - pytest invocation docs:
-  https://docs.pytest.org/en/stable/how-to/usage.html
+  <https://docs.pytest.org/en/stable/how-to/usage.html>
 - pytest collection customization docs:
-  https://docs.pytest.org/en/stable/example/pythoncollection.html
+  <https://docs.pytest.org/en/stable/example/pythoncollection.html>
 
 ## Discovery
 

@@ -61,12 +61,12 @@ echo "Downloading ct-remote (${CT_REMOTE_VERSION}) from ${BASE_URL}/${ARCHIVE}"
 # an SSL error (exit code 60). DNS failures on GitHub-hosted macOS runners
 # are also retried.
 if ! curl --retry 3 --retry-delay 5 --retry-connrefused \
-         -L --fail --silent --show-error \
-         "${BASE_URL}/${ARCHIVE}" -o "${ARCHIVE_PATH}" 2>/dev/null; then
-  echo "  Retrying with --insecure (self-signed cert fallback)..."
-  curl --retry 3 --retry-delay 5 --retry-connrefused \
-       -L --fail --silent --show-error --insecure \
-       "${BASE_URL}/${ARCHIVE}" -o "${ARCHIVE_PATH}"
+	-L --fail --silent --show-error \
+	"${BASE_URL}/${ARCHIVE}" -o "${ARCHIVE_PATH}" 2>/dev/null; then
+	echo "  Retrying with --insecure (self-signed cert fallback)..."
+	curl --retry 3 --retry-delay 5 --retry-connrefused \
+		-L --fail --silent --show-error --insecure \
+		"${BASE_URL}/${ARCHIVE}" -o "${ARCHIVE_PATH}"
 fi
 
 tar -xzf "${ARCHIVE_PATH}" -C "${TMP_DIR}"

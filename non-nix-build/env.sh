@@ -55,8 +55,8 @@ export CARGO_HOME=$DEPS_DIR/cargo
 # See codetracer-specs Architecture/Build-Outputs-And-Path-Resolution.md.
 _ct_config="${CODETRACER_CONFIG:-debug}"
 case "$(uname -s)" in
-  Linux) _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}" ;;
-  *)     _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}-repro" ;;
+Linux) _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}" ;;
+*) _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}-repro" ;;
 esac
 export CODETRACER_BUILD_DIR="${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"

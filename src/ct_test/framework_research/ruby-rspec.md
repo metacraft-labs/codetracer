@@ -34,7 +34,7 @@
 Sources:
 
 - RSpec CLI help and JSON formatter behavior from RSpec 3.x.
-- VS Code Testing API concepts: https://code.visualstudio.com/api/extension-guides/testing
+- VS Code Testing API concepts: <https://code.visualstudio.com/api/extension-guides/testing>
 
 ## Discovery
 

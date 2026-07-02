@@ -121,10 +121,10 @@ with pkgs;
     # Recorders whose runtime compiler IS exercised today by the
     # CI lanes that ship in this repo. Add new ones here as they
     # come online; keep the dev-only lang compilers in main.nix.
-    ourPkgs.noir                  # codetracer-noir-recorder runtime
-    ourPkgs.circom                # codetracer-circom-recorder runtime
-    ourPkgs.cargo-stylus          # M28 (Stylus three-way parity)
-    foundry                       # M28: cast / forge / anvil
+    ourPkgs.noir # codetracer-noir-recorder runtime
+    ourPkgs.circom # codetracer-circom-recorder runtime
+    ourPkgs.cargo-stylus # M28 (Stylus three-way parity)
+    foundry # M28: cast / forge / anvil
 
     # Reprobuild MVP CLI — `just build-once`'s scripts/build-once.sh
     # invokes `repro` on Linux as a hard requirement. Sibling/public
@@ -132,7 +132,7 @@ with pkgs;
     # ci and default shells materialise identical reprobuild closures.
     runquotaPkgs.runquota
     reprobuildPkgs.reprobuild
-    toolchainsPkgs.go-default     # Go programs in record/replay tests
+    toolchainsPkgs.go-default # Go programs in record/replay tests
   ]
   ++ pkgs.lib.optionals (!stdenv.isDarwin) [
     # Tup is Linux-only (FUSE-based sandboxing). On Darwin we fall

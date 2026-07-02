@@ -202,7 +202,9 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
       self.scrollAreaHeight = containerHeight
       discard self.context.columns.adjust()
       self.syncScrollerMeasurements()
-      self.context.scroller.measure()
+      let scroller = self.context.scroller
+      if not scroller.isNil and scroller.toJs != jsUndefined:
+        scroller.measure()
 
 proc updateTableFooter*(self: DataTableComponent) =
   ## Synchronise the footer DOM (rendered statically by an IsoNim shell
@@ -252,7 +254,7 @@ proc updateTableRows*(self: DataTableComponent, redraw: bool = true) =
   # Guard: the Scroller plugin may not be ready yet when DataTables is
   # still processing its first server-side ajax request.  In that case
   # `scroller` is undefined or `scroller.page()` returns undefined.
-  if scroller.isNil:
+  if scroller.isNil or scroller.toJs == jsUndefined:
     return
   let page = scroller.page()
   if page.isNil:
@@ -290,11 +292,15 @@ proc scrollTable*(table: DataTableComponent, position: cstring) =
 
     if startRow != 0:
       let viewportHalf = max((table.endRow - table.startRow) div 2, 0)
-      table.context.scroller.toPosition(max(startRow - viewportHalf, 0))
-      table.updateTableRows()
+      let scroller = table.context.scroller
+      if not scroller.isNil and scroller.toJs != jsUndefined:
+        scroller.toPosition(max(startRow - viewportHalf, 0))
+        table.updateTableRows()
     else:
-      table.context.scroller.toPosition(startRow)
-      table.updateTableRows()
+      let scroller = table.context.scroller
+      if not scroller.isNil and scroller.toJs != jsUndefined:
+        scroller.toPosition(startRow)
+        table.updateTableRows()
 
   except:
     cerror getCurrentExceptionMsg()

@@ -14,13 +14,13 @@ TRACE_PATH="${CODETRACER_REAL_VISUAL_TRACE:-}"
 OUTPUT_DIR="${CODETRACER_BOOK_SCREENSHOT_DIR:-${REPO_ROOT}/docs/book/src/generated/visual_recordings}"
 CAPTURE_ATTEMPTS="${CODETRACER_BOOK_SCREENSHOT_TRACE_ATTEMPTS:-3}"
 
-if [[ ! -x "${CT_MCR}" ]]; then
+if [[ ! -x ${CT_MCR} ]]; then
 	echo "Missing executable MCR command: ${CT_MCR}" >&2
 	echo "Set CODETRACER_CT_MCR_CMD or build codetracer-native-recorder." >&2
 	exit 1
 fi
 
-if [[ ! -x "${GFX_PLAYER}" ]]; then
+if [[ ! -x ${GFX_PLAYER} ]]; then
 	echo "Missing executable visual replay player: ${GFX_PLAYER}" >&2
 	echo "Set CODETRACER_CT_GFX_PLAYER_CMD or build codetracer-visual-replay." >&2
 	exit 1
@@ -53,11 +53,11 @@ record_trace() {
 		"${CT_MCR}" record --use-interpose -o "${trace_path}" -- "${GL_SCENE}" "${frame_output_base}"
 }
 
-if [[ -n "${TRACE_PATH}" ]]; then
+if [[ -n ${TRACE_PATH} ]]; then
 	run_capture "${TRACE_PATH}"
 else
 	GL_SCENE="${NATIVE_TEST_PROGRAMS_REPO}/gl/gl_scene"
-	if [[ ! -x "${GL_SCENE}" ]]; then
+	if [[ ! -x ${GL_SCENE} ]]; then
 		echo "Missing GL scene fixture: ${GL_SCENE}" >&2
 		echo "Set CODETRACER_REAL_VISUAL_TRACE to an existing visual .ct trace or build codetracer-native-test-programs." >&2
 		exit 1
@@ -77,7 +77,7 @@ else
 		if run_capture "${TRACE_PATH}"; then
 			break
 		fi
-		if [[ "${attempt}" == "${CAPTURE_ATTEMPTS}" ]]; then
+		if [[ ${attempt} == "${CAPTURE_ATTEMPTS}" ]]; then
 			echo "Failed to capture visual recording screenshots after ${CAPTURE_ATTEMPTS} attempts." >&2
 			exit 1
 		fi

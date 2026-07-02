@@ -1141,6 +1141,46 @@ proc removeEditorFromLoading*(data: Data, path: cstring) =
   if editorPathIndex != -1:
     editorService.loading.delete(editorPathIndex)
 
+proc isAttachedToLayout*(item: GoldenContentItem, layout: GoldenLayout): bool =
+  ## Traverses the parent chain from the given item up to the root.
+  ## Checks if the item is actually connected to the layout's ground item
+  ## by verifying that each parent actually contains the current item in its
+  ## contentItems array.
+  if item.isNil or layout.isNil:
+    return false
+  var curr = item
+  while not curr.isNil:
+    if curr == layout.groundItem:
+      return true
+    let parent = curr.parent
+    if parent.isNil:
+      return false
+    # Check if parent actually contains curr in its contentItems
+    var found = false
+    for child in parent.contentItems:
+      if child == curr:
+        found = true
+        break
+    if not found:
+      return false
+    curr = parent
+  return false
+
+proc hasActiveOpenEditors*(data: Data): bool =
+  ## Returns true if there is at least one EditorView or NoInfo component
+  ## that is currently attached to the GoldenLayout tree.
+  for content in [Content.EditorView, Content.NoInfo]:
+    let openIds = data.ui.openComponentIds[content]
+    let mapping = data.ui.componentMapping[content]
+    for id in openIds:
+      if mapping.hasKey(id):
+        let comp = mapping[id]
+        if not comp.isNil and not comp.layoutItem.isNil:
+          if isAttachedToLayout(comp.layoutItem, data.ui.layout):
+            return true
+  return false
+
+
 proc openLayoutTab*(
   data: Data,
   content: Content,
@@ -1169,22 +1209,37 @@ proc openLayoutTab*(
     content != Content.AgentActivity and
     data.ui.componentMapping[content].len() > 0 and
     not data.ui.componentMapping[content][0].layoutItem.isNil and
-    not data.ui.componentMapping[content].toJs[0].isUndefined:
+    not data.ui.componentMapping[content].toJs[0].isUndefined and
+    isAttachedToLayout(data.ui.componentMapping[content][0].layoutItem, data.ui.layout):
       data.ui.componentMapping[content][0].
         layoutItem.parent.setActiveContentItem(
           data.ui.componentMapping[content][0].layoutItem)
       return
 
-  if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0 and
-    not similarComponents[openSimilarComponentsTabs[^1]].isNil and not similarComponents[openSimilarComponentsTabs[^1]].layoutItem.isNil:
-      let lastComponentIndex = openSimilarComponentsTabs[^1]
-      let lastComponent = similarComponents[lastComponentIndex]
-      parent = cast[GoldenContentItem](lastComponent.layoutItem.parent)
+  var similarParent: GoldenContentItem = nil
+  if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
+    for i in countdown(openSimilarComponentsTabs.len - 1, 0):
+      let similarId = openSimilarComponentsTabs[i]
+      if similarComponents.hasKey(similarId):
+        let comp = similarComponents[similarId]
+        if not comp.isNil and not comp.layoutItem.isNil and isAttachedToLayout(comp.layoutItem, data.ui.layout):
+          similarParent = cast[GoldenContentItem](comp.layoutItem.parent)
+          break
 
+  if not similarParent.isNil:
+    parent = similarParent
   else:
+    let hasOpenEditors = data.hasActiveOpenEditors()
     if (content == Content.EditorView or content == Content.NoInfo) and
-      not data.ui.editorPanels[EditorView.ViewSource].isNil:
-      parent = cast[GoldenContentItem](data.ui.editorPanels[EditorView.ViewSource])
+      not data.ui.editorPanels[EditorView.ViewSource].isNil and
+      hasOpenEditors:
+      let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
+      if isAttachedToLayout(activeEditorPanel, data.ui.layout):
+        parent = activeEditorPanel
+      else:
+        parent = data.openNewLayoutContainer(cstring"stack", isEditor)
+        if content == Content.EditorView:
+          data.ui.editorPanels[EditorView.ViewSource] = parent
     else:
       parent = data.openNewLayoutContainer(cstring"stack", isEditor)
       if content == Content.EditorView:

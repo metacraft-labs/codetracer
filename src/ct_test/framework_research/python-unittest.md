@@ -41,13 +41,13 @@
 Sources:
 
 - VS Code Python testing docs:
-  https://code.visualstudio.com/docs/python/testing
+  <https://code.visualstudio.com/docs/python/testing>
 - VS Code Testing API docs:
-  https://code.visualstudio.com/api/extension-guides/testing
+  <https://code.visualstudio.com/api/extension-guides/testing>
 - Microsoft vscode-python unittest adapter discussion:
-  https://github.com/microsoft/vscode-python/discussions/22604
+  <https://github.com/microsoft/vscode-python/discussions/22604>
 - Python unittest documentation:
-  https://docs.python.org/3/library/unittest.html
+  <https://docs.python.org/3/library/unittest.html>
 
 ## Discovery
 

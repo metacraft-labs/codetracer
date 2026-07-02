@@ -17,7 +17,14 @@
   self',
 }:
 let
-  base = import ./ci-base.nix { inherit pkgs inputs inputs' self'; };
+  base = import ./ci-base.nix {
+    inherit
+      pkgs
+      inputs
+      inputs'
+      self'
+      ;
+  };
 in
 pkgs.mkShell {
   hardeningDisable = [ "all" ];

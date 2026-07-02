@@ -11,7 +11,10 @@ include common_types
 macro time*(f: untyped): untyped =
   f
 
-let app* = getEnv("XDG_DATA_HOME", getHomeDir() / ".local" / "share") / "codetracer"
+when not defined(js):
+  let app* = getEnv("XDG_DATA_HOME", getHomeDir() / ".local" / "share") / "codetracer"
+else:
+  let app* = ""
 
 proc isNone*[T](value: T): bool =
   value.isNil

@@ -1735,7 +1735,7 @@ export const test = base.extend<
         }
 
         await use(result.page);
-
+      } finally {
         // Capture diagnostics on test failure (DOM snapshot, summary, error details)
         if (testInfo.status !== testInfo.expectedStatus) {
           try {
@@ -1766,12 +1766,9 @@ export const test = base.extend<
             for (const line of result.mainProcessOutput.slice(0, 100)) {
               console.log(`    ${line}`);
             }
-          } else {
-            console.log(`  FAIL main process output: (none captured)`);
           }
-          await captureFailureDiagnostics(result.page, testInfo);
+          await captureFailureDiagnostics(result.page, testInfo, result.consoleErrors);
         }
-      } finally {
         await result.teardown();
       }
     },

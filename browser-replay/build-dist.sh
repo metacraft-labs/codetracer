@@ -16,8 +16,8 @@ direnv exec "$REPO_ROOT" bash build_wasm.sh 2>&1 | tail -5
 cd "$REPO_ROOT"
 
 if [ ! -f "src/db-backend/wasm-testing/pkg/db_backend_bg.wasm" ]; then
-    echo "ERROR: WASM build failed — no .wasm file produced"
-    exit 1
+	echo "ERROR: WASM build failed — no .wasm file produced"
+	exit 1
 fi
 
 # Step 2: Create dist directory
@@ -38,7 +38,7 @@ cp "$REPO_ROOT/src/db-backend/wasm-testing/pkg/db_backend_bg.wasm" "$DIST_DIR/pk
 mkdir -p "$DIST_DIR/traces"
 
 # Step 6: Create a simple nginx config for the dist
-cat > "$DIST_DIR/serve.conf" << 'NGINX_EOF'
+cat >"$DIST_DIR/serve.conf" <<'NGINX_EOF'
 # Minimal nginx config for serving the dist directory.
 # Usage: nginx -c $(pwd)/serve.conf -p $(pwd)
 worker_processes 1;
@@ -61,7 +61,7 @@ http {
 NGINX_EOF
 
 # Step 7: Print summary
-WASM_SIZE=$(wc -c < "$DIST_DIR/pkg/db_backend_bg.wasm" | tr -d ' ')
+WASM_SIZE=$(wc -c <"$DIST_DIR/pkg/db_backend_bg.wasm" | tr -d ' ')
 TOTAL_SIZE=$(du -sh "$DIST_DIR" | cut -f1)
 
 echo ""
@@ -72,8 +72,8 @@ echo "  Total size: $TOTAL_SIZE"
 echo ""
 echo "  Files:"
 find "$DIST_DIR" -type f | sort | while read f; do
-    SIZE=$(wc -c < "$f" | tr -d ' ')
-    echo "    $(echo "$f" | sed "s|$DIST_DIR/||") ($SIZE bytes)"
+	SIZE=$(wc -c <"$f" | tr -d ' ')
+	echo "    $(echo "$f" | sed "s|$DIST_DIR/||") ($SIZE bytes)"
 done
 echo ""
 echo "  To serve locally:"

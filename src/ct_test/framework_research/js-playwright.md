@@ -14,11 +14,11 @@
 
 Sources:
 
-- Playwright CLI: https://playwright.dev/docs/test-cli
-- Playwright reporters and JSON reporter: https://playwright.dev/docs/test-reporters
-- Playwright TestResult API: https://playwright.dev/docs/api/class-testresult
-- Playwright trace viewer and trace modes: https://playwright.dev/docs/trace-viewer
-- Playwright run filters: https://playwright.dev/docs/running-tests
+- Playwright CLI: <https://playwright.dev/docs/test-cli>
+- Playwright reporters and JSON reporter: <https://playwright.dev/docs/test-reporters>
+- Playwright TestResult API: <https://playwright.dev/docs/api/class-testresult>
+- Playwright trace viewer and trace modes: <https://playwright.dev/docs/trace-viewer>
+- Playwright run filters: <https://playwright.dev/docs/running-tests>
 
 ## Project Detection
 

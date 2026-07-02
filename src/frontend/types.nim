@@ -589,6 +589,7 @@ type
     editorView*: EditorView
     lang*: Lang
     noInfoMessage*: cstring
+    isReparenting*: bool
 
   Component* = ref object of RootObj
     data*: Data

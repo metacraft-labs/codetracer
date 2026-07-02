@@ -2835,17 +2835,20 @@ proc setEditorMutationObserver(self: FLowComponent) =
   let editorLinesDom =
     jq(&"#editorComponent-{editorId} .monaco-editor .view-lines")
 
-  self.mutationObserver = createMutationObserver(
-    proc(mutationList: seq[MutationRecord], observer: MutationObserver) =
-      if mutationList.any(record => $(record.`type`) == cstring"childList"):
-        if not self.isFullyLoaded():
-          reloadFlow(self))
+  if not editorLinesDom.isNil:
+    self.mutationObserver = createMutationObserver(
+      proc(mutationList: seq[MutationRecord], observer: MutationObserver) =
+        if mutationList.any(record => $(record.`type`) == cstring"childList"):
+          if not self.isFullyLoaded():
+            reloadFlow(self))
 
-  self.mutationObserver.observe(
-    cast[Element](editorLinesDom),
-    js{ childList: true })
+    self.mutationObserver.observe(
+      cast[Element](editorLinesDom),
+      js{ childList: true })
 
-  cdebug "flow: OBSERVER STARTED"
+    cdebug "flow: OBSERVER STARTED"
+  else:
+    cdebug "flow: OBSERVER NOT STARTED — editor DOM lines not found yet"
 
 proc setLoopTotalWidth(self: FlowComponent, loopIndex: int) =
   let loop = self.flow.loops[loopIndex]

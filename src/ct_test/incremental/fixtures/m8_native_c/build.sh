@@ -24,4 +24,4 @@ out="${2:?output binary path required}"
 cc="${CC:-cc}"
 
 "$cc" -O0 -g -fno-stack-protector -fno-asynchronous-unwind-tables \
-  -o "$out" "$src"
+	-o "$out" "$src"

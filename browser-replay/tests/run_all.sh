@@ -7,15 +7,15 @@ PASS=0
 FAIL=0
 
 run_test() {
-    local name="$1"
-    local script="$2"
-    echo ""
-    echo ">>> $name"
-    if bash "$script"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-    fi
+	local name="$1"
+	local script="$2"
+	echo ""
+	echo ">>> $name"
+	if bash "$script"; then
+		PASS=$((PASS + 1))
+	else
+		FAIL=$((FAIL + 1))
+	fi
 }
 
 echo "=== Browser Replay Test Suite ==="
@@ -32,5 +32,5 @@ echo "  Test suites: $PASS passed, $FAIL failed"
 echo "=========================================="
 
 if [ "$FAIL" -gt 0 ]; then
-    exit 1
+	exit 1
 fi

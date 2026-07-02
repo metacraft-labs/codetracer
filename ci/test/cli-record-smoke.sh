@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 CT_BIN="${CODETRACER_E2E_CT_PATH:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct}"
 
-if [[ ! -x "$CT_BIN" ]]; then
+if [[ ! -x $CT_BIN ]]; then
 	echo "error: ct binary not found at $CT_BIN"
 	echo "  Build with: just build-once"
 	echo "  Or set CODETRACER_E2E_CT_PATH to a pre-built binary."
@@ -52,7 +52,7 @@ smoke_test() {
 	shift 2
 	local extra_args=("$@")
 
-	if [[ ! -f "$program" ]]; then
+	if [[ ! -f $program ]]; then
 		echo "  SKIP $lang — test program not found: $program"
 		((SKIPPED++)) || true
 		return
@@ -128,7 +128,7 @@ fi
 
 for lang in "${SELECTED[@]}"; do
 	program="${LANG_TESTS[$lang]:-}"
-	if [[ -z "$program" ]]; then
+	if [[ -z $program ]]; then
 		echo "  SKIP $lang — no test definition"
 		((SKIPPED++)) || true
 		continue
@@ -136,10 +136,26 @@ for lang in "${SELECTED[@]}"; do
 
 	# Check if the recorder is available on PATH before attempting.
 	case "$lang" in
-		ruby)    command -v codetracer-ruby-recorder &>/dev/null || { echo "  SKIP $lang — recorder not on PATH"; ((SKIPPED++)); continue; } ;;
-		bash)    command -v codetracer-bash-recorder &>/dev/null || { echo "  SKIP $lang — recorder not on PATH"; ((SKIPPED++)); continue; } ;;
-		javascript) command -v codetracer-js-recorder &>/dev/null || { echo "  SKIP $lang — recorder not on PATH"; ((SKIPPED++)); continue; } ;;
-		noir)    command -v nargo &>/dev/null || { echo "  SKIP $lang — nargo not on PATH"; ((SKIPPED++)); continue; } ;;
+	ruby) command -v codetracer-ruby-recorder &>/dev/null || {
+		echo "  SKIP $lang — recorder not on PATH"
+		((SKIPPED++))
+		continue
+	} ;;
+	bash) command -v codetracer-bash-recorder &>/dev/null || {
+		echo "  SKIP $lang — recorder not on PATH"
+		((SKIPPED++))
+		continue
+	} ;;
+	javascript) command -v codetracer-js-recorder &>/dev/null || {
+		echo "  SKIP $lang — recorder not on PATH"
+		((SKIPPED++))
+		continue
+	} ;;
+	noir) command -v nargo &>/dev/null || {
+		echo "  SKIP $lang — nargo not on PATH"
+		((SKIPPED++))
+		continue
+	} ;;
 	esac
 
 	smoke_test "$lang" "$program"

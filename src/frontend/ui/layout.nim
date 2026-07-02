@@ -8,12 +8,17 @@ import
   agent_activity, agent_activity_deepreview, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
-  ../[ types, renderer, config ],
+  ../[ types, renderer, config, utils ],
   ../lib/[ logging, misc_lib, jslib ]
 
 import kdom except Location
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
+
+template dispatchLayoutUpdated() =
+  {.emit: """
+    window.dispatchEvent(new CustomEvent('ct:layoutUpdated'));
+  """.}
 
 type
   ContextHandler* = proc(tab: js, args: seq[string])
@@ -273,8 +278,9 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   renderer.removeLegacyRendererInstance(label)
 
   # remove component from open components registry from the same content type (if there is any)
-  if data.ui.openComponentIds[content].find(id) != -1:
-    data.ui.openComponentIds[content].delete(id)
+  let idx = data.ui.openComponentIds[content].find(id)
+  if idx != -1:
+    data.ui.openComponentIds[content].delete(idx)
 
 # Track whether the shared (non-GL) global renderers have been initialised.
 # Menu/status/session-tab-bar/fixed-search are refreshed directly; the global
@@ -434,19 +440,30 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       return
 
     let componentLabel = cstring(fmt"editorComponent-{state.id}")
-    var element = container.getElement()
+    var element = cast[Element](container.getElement())
 
-    let panel = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
-    let isReparenting = not panel.isNil and not panel.liveElement.isNil and data.ui.isReparenting
+    let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
+    let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
+
+    cerror "[EDITOR_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
+
+    # Clean up the transient reparenting property from state so it is not saved to the layout database.
+    {.emit: """
+    if (`state`) {
+      delete `state`.isReparenting;
+    }
+    """.}
 
     if isReparenting:
+      cerror "[EDITOR_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
       element.innerHTML = cstring""
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
-      cdebug fmt"layout: reparented live editor DOM synchronously for {componentLabel}"
+      cerror "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      dispatchLayoutUpdated()
     else:
+      cerror "[EDITOR_REG] Regular mount (non-reparenting)"
       element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
-      cdebug fmt"layout: registering editor component {componentLabel}"
 
     container.on(cstring"tab") do (tab: GoldenTab):
       data.ui.saveLayout = true
@@ -546,8 +563,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       injectPinButton(tab.element, proc() =
         pinPanel(cast[GoldenLayout](layout), editorContentItem, AutoHideEdge.Left))
 
-    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
-    let isReparentingObj = not panelObj.isNil and not panelObj.liveElement.isNil and data.ui.isReparenting
+    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
+    let isReparentingObj = isReparenting
 
     if not isReparentingObj:
       var containerId: cstring
@@ -567,19 +584,30 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     if state.label.len == 0:
       return
     let editorLabel = state.label
-    var element = container.getElement()
+    var element = cast[Element](container.getElement())
 
-    let panel = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
-    let isReparenting = not panel.isNil and not panel.liveElement.isNil and data.ui.isReparenting
+    let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
+    let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
+
+    cerror "[GENERIC_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
+
+    # Clean up the transient reparenting property from state so it is not saved to the layout database.
+    {.emit: """
+    if (`state`) {
+      delete `state`.isReparenting;
+    }
+    """.}
 
     if isReparenting:
+      cerror "[GENERIC_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
       element.innerHTML = cstring""
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
-      cdebug "layout: reparented live generic DOM synchronously for " & $state.content
+      cerror "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      dispatchLayoutUpdated()
     else:
+      cerror "[GENERIC_REG] Regular mount (non-reparenting)"
       element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
-      cdebug "layout: register " & state.label
 
     container.on(cstring"tab") do (tab: GoldenTab):
       # prepare layout to be saved on upcoming stateChanged event
@@ -650,8 +678,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     var containerId: cstring
     containerId = state.label
 
-    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
-    let isReparentingObj = not panelObj.isNil and not panelObj.liveElement.isNil and data.ui.isReparenting
+    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
+    let isReparentingObj = isReparenting
 
     discard windowSetTimeout((proc =
       if isReparentingObj:
@@ -906,6 +934,63 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.
   initAutoHideState()
+  auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
+    let content = panel.content
+    let isEditor = panel.config.componentState.isEditor.to(bool)
+    var parent: GoldenContentItem = nil
+
+    let similarComponents = data.ui.componentMapping[content]
+    let openSimilarComponentsTabs = data.ui.openComponentIds[content]
+
+    cerror "[UNPIN] content=" & $content & " isEditor=" & $isEditor & " similarComponents.len=" & $similarComponents.len & " openSimilarComponentsTabs.len=" & $openSimilarComponentsTabs.len
+
+    var similarParent: GoldenContentItem = nil
+    if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
+      for i in countdown(openSimilarComponentsTabs.len - 1, 0):
+        let similarId = openSimilarComponentsTabs[i]
+        if similarComponents.hasKey(similarId):
+          let comp = similarComponents[similarId]
+          if not comp.isNil and not comp.layoutItem.isNil and isAttachedToLayout(comp.layoutItem, layout):
+            similarParent = cast[GoldenContentItem](comp.layoutItem.parent)
+            break
+
+    if not similarParent.isNil:
+      parent = similarParent
+      cerror "[UNPIN] selected parent from similarComponents"
+    else:
+      let hasOpenEditors = data.hasActiveOpenEditors()
+      cerror "[UNPIN] hasOpenEditors=" & $hasOpenEditors & " data.ui.editorPanels[ViewSource] isNil=" & $(data.ui.editorPanels[EditorView.ViewSource].isNil)
+      if isEditor and not data.ui.editorPanels[EditorView.ViewSource].isNil and hasOpenEditors:
+        let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
+        if isAttachedToLayout(activeEditorPanel, layout):
+          parent = activeEditorPanel
+          cerror "[UNPIN] selected parent from editorPanels"
+        else:
+          cerror "[UNPIN] opening new layout container stack"
+          parent = data.openNewLayoutContainer(cstring"stack", isEditor)
+          if isEditor:
+            data.ui.editorPanels[EditorView.ViewSource] = parent
+            cerror "[UNPIN] set editorPanels[ViewSource] to new parent"
+      else:
+        cerror "[UNPIN] opening new layout container stack"
+        parent = data.openNewLayoutContainer(cstring"stack", isEditor)
+        if isEditor:
+          data.ui.editorPanels[EditorView.ViewSource] = parent
+          cerror "[UNPIN] set editorPanels[ViewSource] to new parent"
+
+    cerror "[UNPIN] final parent isNil=" & $(parent.isNil)
+    if not parent.isNil:
+      cerror "[UNPIN] parent.addItem called"
+      discard parent.addItem(panel.config)
+    else:
+      let ground = layout.groundItem
+      cerror "[UNPIN] adding to ground, ground isNil=" & $(ground.isNil)
+      if not ground.isNil and ground.contentItems.len > 0:
+        cerror "[UNPIN] adding to ground.contentItems[0]"
+        discard ground.contentItems[0].addItem(panel.config)
+      else:
+        cerror "[UNPIN] adding to ground directly"
+        discard ground.addItem(panel.config)
   # When an auto-hide panel's overlay is shown, refresh that panel's mounted
   # surface so it displays current content after reparenting.
   autoHideState.onPanelShown = proc(panel: AutoHidePanel) =
@@ -1260,6 +1345,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           state: JSON.stringify(autoHideSerialized)
         }
 
+    dispatchLayoutUpdated()
+
   layout.on(cstring"stackCreated") do (event: js):
     cdebug "layout event: stackCreated"
 
@@ -1299,6 +1386,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       data.closeLayoutTab(componentState.content, componentState.id)
 
     data.ui.saveLayout = true
+    dispatchLayoutUpdated()
 
 # Wire the initLayout proc into session_switch to break the circular
 # import dependency (layout -> session_tabs -> session_switch -> layout).

@@ -38,9 +38,9 @@
 
 Sources:
 
-- Node test runner docs: https://nodejs.org/api/test.html
-- Node test runner VS Code extension: https://marketplace.visualstudio.com/items?itemName=connor4312.nodejs-testing
-- VS Code Testing API: https://code.visualstudio.com/api/extension-guides/testing
+- Node test runner docs: <https://nodejs.org/api/test.html>
+- Node test runner VS Code extension: <https://marketplace.visualstudio.com/items?itemName=connor4312.nodejs-testing>
+- VS Code Testing API: <https://code.visualstudio.com/api/extension-guides/testing>
 
 ## Discovery
 

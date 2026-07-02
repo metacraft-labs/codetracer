@@ -37,13 +37,17 @@ let
 
   # CodeTracer binaries the developer may cap. setcap is only meaningful on
   # the entrypoint binaries that perform privileged tracing.
-  allowedNames = [ "ct" "db-backend-record" "replay-server" "session-manager" ];
+  allowedNames = [
+    "ct"
+    "db-backend-record"
+    "replay-server"
+    "session-manager"
+  ];
 
   # Default target when no path is given: derived from repoPath when set, for
   # backward-compatible `codetracer-setcap` with no argument. The build graph
   # always passes an explicit path, so repoPath is otherwise unused.
-  defaultTarget =
-    if cfg.repoPath != "" then "${cfg.repoPath}/src/build-debug/bin/ct" else "";
+  defaultTarget = if cfg.repoPath != "" then "${cfg.repoPath}/src/build-debug/bin/ct" else "";
 
   # Helper script that applies BPF capabilities to CodeTracer binaries.
   # Installed on PATH as `codetracer-setcap`. The sudoers rule allows running

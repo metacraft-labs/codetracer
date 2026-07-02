@@ -16,7 +16,7 @@ res=$?
 
 # Propagate error if nix build fails
 if [ $res -ne 0 ]; then
-  exit $res
+	exit $res
 fi
 
 attic push "$ATTIC_CACHE" "$build_out"
@@ -30,7 +30,7 @@ res=$?
 
 # Propagate error if nix build fails
 if [ $res -ne 0 ]; then
-  exit $res
+	exit $res
 fi
 
 attic push "$ATTIC_CACHE" "$build_out"

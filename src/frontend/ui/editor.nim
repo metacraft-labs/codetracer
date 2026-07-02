@@ -2614,13 +2614,29 @@ when defined(js):
     let componentId = self.id
     var retryCount = 0
     var afterInitScheduled = false
+    var layoutListenerInstalled = false
+    var layoutListener: proc(ev: Event)
+
+    if isoNimEditorMountedIds.hasKey(componentId):
+      discard jsDelete(isoNimEditorMountedIds[componentId])
 
     proc doMount() =
       retryCount += 1
-      var host = dom_api.getElementById(dom_api.document, containerId)
+
+      # Query the container ID dynamically from layoutItem/contentItem metadata if available
+      var targetContainerId = containerId
+      if not self.layoutItem.isNil and not self.layoutItem.componentState.isNil:
+        let stateId = self.layoutItem.componentState.id
+        if stateId > 0:
+          targetContainerId = cstring("editorComponent-" & $stateId)
+
+      var host = dom_api.getElementById(dom_api.document, targetContainerId)
       if dom_api.isNodeNil(dom_api.Node(host)):
+        if not layoutListenerInstalled:
+          layoutListenerInstalled = true
+          domwindow.addEventListener(cstring"ct:layoutUpdated", layoutListener)
         if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 10)
+          discard setTimeout(proc() = doMount(), 20)
         return
 
       if self.editorView == ViewNoSource and not self.noInfo.isNil:
@@ -2628,13 +2644,22 @@ when defined(js):
         if not afterInitScheduled:
           afterInitScheduled = true
           discard self.afterInit()
+        if layoutListenerInstalled:
+          domwindow.removeEventListener(cstring"ct:layoutUpdated", layoutListener)
         return
 
       let panel = self.replaceWithIsoNimEditorPanel(host)
       if dom_api.isNodeNil(dom_api.Node(panel)):
+        if not layoutListenerInstalled:
+          layoutListenerInstalled = true
+          domwindow.addEventListener(cstring"ct:layoutUpdated", layoutListener)
         if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 10)
+          discard setTimeout(proc() = doMount(), 20)
         return
+
+      # Successfully replaced the host with the panel, we can remove the layout listener now.
+      if layoutListenerInstalled:
+        domwindow.removeEventListener(cstring"ct:layoutUpdated", layoutListener)
 
       if not afterInitScheduled:
         afterInitScheduled = true
@@ -2646,13 +2671,18 @@ when defined(js):
           discard setTimeout(proc() = doMount(), 25)
         return
 
-      let selector = cstring(&"#editorComponent-{componentId}")
+      let selector = cstring("#editorComponent-" & $componentId)
       if self.tabInfo.monacoEditor.isNil:
         self.initMonacoForEditor(selector)
 
       if not self.tabInfo.monacoEditor.isNil:
         self.tryMountIsoNimEditorPanel()
         self.editorAfterRedraw()
+
+    # Define the layout updated listener callback
+    layoutListener = proc(ev: Event) =
+      if not isoNimEditorMountedIds.hasKey(componentId):
+        doMount()
 
     doMount()
 

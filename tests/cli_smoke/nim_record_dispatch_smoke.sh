@@ -67,27 +67,29 @@ FAIL=0
 
 # .nims fixture: a trivial script. ``nim e --trace:<out.ct>`` should
 # emit a CTFS container that importTrace can ingest.
-cat > "$WORK/script.nims" <<'NIMSEOF'
+cat >"$WORK/script.nims" <<'NIMSEOF'
 echo "ct record nims dispatch smoke ok"
 NIMSEOF
 
 # .nim fixture: a single proc; ``nim c`` should produce a native binary,
 # then ``ct-mcr record`` records it.
-cat > "$WORK/program.nim" <<'NIMEOF'
+cat >"$WORK/program.nim" <<'NIMEOF'
 proc main() =
   echo "ct record nim dispatch smoke ok"
 main()
 NIMEOF
 
 run_record() {
-	local label="$1"; shift
-	local source="$1"; shift
+	local label="$1"
+	shift
+	local source="$1"
+	shift
 	local out
 	if ! out=$(
 		CODETRACER_NIM_EXE_PATH="$CT_NIM" \
-		CODETRACER_CT_MCR_PATH="$CT_MCR" \
-		CT_LICENSE_DEV_NO_FFI=1 \
-		"$CT" record "$source" 2>&1
+			CODETRACER_CT_MCR_PATH="$CT_MCR" \
+			CT_LICENSE_DEV_NO_FFI=1 \
+			"$CT" record "$source" 2>&1
 	); then
 		echo "FAIL: $label (ct record exited non-zero)"
 		printf '%s\n' "$out" | tail -20

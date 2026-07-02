@@ -30,7 +30,14 @@
   config,
 }:
 let
-  base = import ./ci-base.nix { inherit pkgs inputs inputs' self'; };
+  base = import ./ci-base.nix {
+    inherit
+      pkgs
+      inputs
+      inputs'
+      self'
+      ;
+  };
   ourPkgs = self'.packages;
   preCommit = config.pre-commit;
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
@@ -39,107 +46,109 @@ with pkgs;
 mkShell {
   hardeningDisable = [ "all" ];
 
-  packages = base.packages ++ [
-    # Developer convenience CLI tools.
-    delta
-    universal-ctags
-    pstree
-    viddy
-    hexdump
-    tmux
-    vim
-    unixtools.script
-    dash
-    lesspipe
+  packages =
+    base.packages
+    ++ [
+      # Developer convenience CLI tools.
+      delta
+      universal-ctags
+      pstree
+      viddy
+      hexdump
+      tmux
+      vim
+      unixtools.script
+      dash
+      lesspipe
 
-    # Inspect built .deb packages locally during release work.
-    dpkg
+      # Inspect built .deb packages locally during release work.
+      dpkg
 
-    # Docs build (mdbook). Not run by any CI lane today.
-    mdbook
+      # Docs build (mdbook). Not run by any CI lane today.
+      mdbook
 
-    # AI agent client — Codex's Agent Client Protocol bridge. Used
-    # by nim-acp / nim-agent-harbor integrations during local
-    # development. Never invoked by any CI lane; building it pulls a
-    # ~25-GB Rust workspace, so it intentionally stays out of CI.
-    ourPkgs.codex-acp
+      # AI agent client — Codex's Agent Client Protocol bridge. Used
+      # by nim-acp / nim-agent-harbor integrations during local
+      # development. Never invoked by any CI lane; building it pulls a
+      # ~25-GB Rust workspace, so it intentionally stays out of CI.
+      ourPkgs.codex-acp
 
-    # LSP / editor integrations.
-    nimlsp
-    nimlangserver
-    rust-analyzer
+      # LSP / editor integrations.
+      nimlsp
+      nimlangserver
+      rust-analyzer
 
-    # Ruby experimental support — only `ct record`able locally.
-    libyaml
-    ruby
-    ruby-lsp
+      # Ruby experimental support — only `ct record`able locally.
+      libyaml
+      ruby
+      ruby-lsp
 
-    # Lean 4 — theorem prover + functional lang. No CI lane traces
-    # Lean programs yet.
-    lean4
+      # Lean 4 — theorem prover + functional lang. No CI lane traces
+      # Lean programs yet.
+      lean4
 
-    # tree-sitter CLI for the local parser regen step in shellHook.
-    tree-sitter
+      # tree-sitter CLI for the local parser regen step in shellHook.
+      tree-sitter
 
-    # Extra native-language compiler coverage. Not exercised by any
-    # current CI lane — kept so `ct record` works locally for programs
-    # written in these languages. These four build cleanly on
-    # aarch64-darwin (verified 2026-06-22), so they live in the shared
-    # list and ship in the macOS dev shell. The remaining toolchains
-    # (gnat, gprbuild) and the blockchain runtimes stay gated below.
-    toolchainsPkgs.fpc       # Free Pascal compiler
-    toolchainsPkgs.gfortran  # GNU Fortran compiler
-    toolchainsPkgs.ldc       # LLVM-based D compiler
-    toolchainsPkgs.crystal   # Crystal compiler
-  ]
-  ++ pkgs.lib.optionals (!stdenv.isDarwin) [
-    # BPF process monitoring (used by `just developer-setup` Phase 2).
-    # Linux-kernel-only (eBPF): these tools target the Linux kernel BPF
-    # subsystem and have no aarch64-darwin build. Revisit only if/when
-    # CodeTracer grows a macOS process-monitoring backend (e.g.
-    # EndpointSecurity) — there is no eBPF on Darwin to revisit toward.
-    bpftrace
-    libbpf
-    bpftools
+      # Extra native-language compiler coverage. Not exercised by any
+      # current CI lane — kept so `ct record` works locally for programs
+      # written in these languages. These four build cleanly on
+      # aarch64-darwin (verified 2026-06-22), so they live in the shared
+      # list and ship in the macOS dev shell. The remaining toolchains
+      # (gnat, gprbuild) and the blockchain runtimes stay gated below.
+      toolchainsPkgs.fpc # Free Pascal compiler
+      toolchainsPkgs.gfortran # GNU Fortran compiler
+      toolchainsPkgs.ldc # LLVM-based D compiler
+      toolchainsPkgs.crystal # Crystal compiler
+    ]
+    ++ pkgs.lib.optionals (!stdenv.isDarwin) [
+      # BPF process monitoring (used by `just developer-setup` Phase 2).
+      # Linux-kernel-only (eBPF): these tools target the Linux kernel BPF
+      # subsystem and have no aarch64-darwin build. Revisit only if/when
+      # CodeTracer grows a macOS process-monitoring backend (e.g.
+      # EndpointSecurity) — there is no eBPF on Darwin to revisit toward.
+      bpftrace
+      libbpf
+      bpftools
 
-    # GNAT (Ada) + gprbuild stay Linux-only.
-    # fails on aarch64-darwin: `error: Unsupported system:
-    # aarch64-darwin` from the gnat-wrapper derivation — nixpkgs does
-    # not provide a GNAT bootstrap for aarch64-darwin (gprbuild depends
-    # on gnat and fails the same way). Verified against
-    # codetracer-toolchains 942c995a (2026-06-22). Revisit when nixpkgs
-    # ships an aarch64-darwin GNAT or codetracer-toolchains bumps to a
-    # nixpkgs that does.
-    toolchainsPkgs.gnat
-    toolchainsPkgs.gprbuild
+      # GNAT (Ada) + gprbuild stay Linux-only.
+      # fails on aarch64-darwin: `error: Unsupported system:
+      # aarch64-darwin` from the gnat-wrapper derivation — nixpkgs does
+      # not provide a GNAT bootstrap for aarch64-darwin (gprbuild depends
+      # on gnat and fails the same way). Verified against
+      # codetracer-toolchains 942c995a (2026-06-22). Revisit when nixpkgs
+      # ships an aarch64-darwin GNAT or codetracer-toolchains bumps to a
+      # nixpkgs that does.
+      toolchainsPkgs.gnat
+      toolchainsPkgs.gprbuild
 
-    # Blockchain recorder runtimes — not packaged for Darwin.
-    # fails on aarch64-darwin: `error: attribute '<pkg>' missing` —
-    # nix-blockchain-development's
-    # `legacyPackages.aarch64-darwin.metacraft-labs` set does not define
-    # forc / miden / cargo-build-sbf / sui (only the x86_64/aarch64-linux
-    # sets do). Verified against nix-blockchain-development a702258d
-    # (2026-06-22). Revisit when nix-blockchain-development packages
-    # these for aarch64-darwin.
-    ourPkgs.forc           # Sway/Fuel compiler (codetracer-fuel-recorder)
-    ourPkgs.miden          # Miden compiler (codetracer-miden-recorder)
-    ourPkgs.cargo-build-sbf # Solana BPF compiler (codetracer-solana-recorder)
-    ourPkgs.sui            # Sui compiler (codetracer-move-recorder)
+      # Blockchain recorder runtimes — not packaged for Darwin.
+      # fails on aarch64-darwin: `error: attribute '<pkg>' missing` —
+      # nix-blockchain-development's
+      # `legacyPackages.aarch64-darwin.metacraft-labs` set does not define
+      # forc / miden / cargo-build-sbf / sui (only the x86_64/aarch64-linux
+      # sets do). Verified against nix-blockchain-development a702258d
+      # (2026-06-22). Revisit when nix-blockchain-development packages
+      # these for aarch64-darwin.
+      ourPkgs.forc # Sway/Fuel compiler (codetracer-fuel-recorder)
+      ourPkgs.miden # Miden compiler (codetracer-miden-recorder)
+      ourPkgs.cargo-build-sbf # Solana BPF compiler (codetracer-solana-recorder)
+      ourPkgs.sui # Sui compiler (codetracer-move-recorder)
 
-    # AppImage build (local release artifacts).
-    inputs'.appimage-channel.legacyPackages.appimagekit
-    appimage-run
-    pax-utils
-  ]
-  ++ pkgs.lib.optionals stdenv.isDarwin [
-    # macOS DMG build (local release artefacts).
-    create-dmg
-  ]
-  # Pre-commit hooks (dev-only — CI runs `pre-commit run` explicitly
-  # against the staged diff, it doesn't need the hook scripts staged
-  # into .git/hooks).
-  ++ [ preCommit.settings.package ]
-  ++ preCommit.settings.enabledPackages;
+      # AppImage build (local release artifacts).
+      inputs'.appimage-channel.legacyPackages.appimagekit
+      appimage-run
+      pax-utils
+    ]
+    ++ pkgs.lib.optionals stdenv.isDarwin [
+      # macOS DMG build (local release artefacts).
+      create-dmg
+    ]
+    # Pre-commit hooks (dev-only — CI runs `pre-commit run` explicitly
+    # against the staged diff, it doesn't need the hook scripts staged
+    # into .git/hooks).
+    ++ [ preCommit.settings.package ]
+    ++ preCommit.settings.enabledPackages;
 
   # Compose: build-critical exports from ci-base, then dev-only tail.
   shellHook = base.shellHook + ''

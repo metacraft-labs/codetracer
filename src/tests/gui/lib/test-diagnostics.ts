@@ -20,6 +20,7 @@ const DIAGNOSTICS_DIR = path.join(process.cwd(), "test-diagnostics");
 export async function captureFailureDiagnostics(
   page: Page,
   testInfo: TestInfo,
+  consoleErrors?: string[],
 ): Promise<void> {
   try {
     fs.mkdirSync(DIAGNOSTICS_DIR, { recursive: true });
@@ -33,7 +34,7 @@ export async function captureFailureDiagnostics(
 
     await captureDom(page, baseName);
     await captureDomSummary(page, baseName);
-    saveExceptionDetails(baseName, testInfo);
+    saveExceptionDetails(baseName, testInfo, consoleErrors);
 
     const dir = DIAGNOSTICS_DIR;
     debugLogger.log(`Diagnostics saved to ${dir}/${baseName}.*`);
@@ -153,7 +154,7 @@ async function captureDomSummary(page: Page, baseName: string): Promise<void> {
   }
 }
 
-function saveExceptionDetails(baseName: string, testInfo: TestInfo): void {
+function saveExceptionDetails(baseName: string, testInfo: TestInfo, consoleErrors?: string[]): void {
   try {
     const errors = testInfo.errors
       .map(
@@ -162,7 +163,7 @@ function saveExceptionDetails(baseName: string, testInfo: TestInfo): void {
       )
       .join("\n\n");
 
-    const content = `Test Failure Report
+    let content = `Test Failure Report
 ===================
 Title: ${testInfo.title}
 File: ${testInfo.file}
@@ -174,6 +175,11 @@ Timestamp: ${new Date().toISOString()}
 
 ${errors || "No error details captured."}
 `;
+
+    if (consoleErrors && consoleErrors.length > 0) {
+      content += `\n\nCaptured Console Logs:\n======================\n${consoleErrors.join("\n")}\n`;
+    }
+
     const filePath = path.join(DIAGNOSTICS_DIR, `${baseName}.txt`);
     fs.writeFileSync(filePath, content, "utf-8");
   } catch (err) {

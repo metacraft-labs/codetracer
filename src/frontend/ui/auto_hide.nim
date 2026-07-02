@@ -60,6 +60,11 @@ when defined(js):
 proc newJsArray(): JsObject {.importjs: "(new Array())".}
 proc push(arr: JsObject, item: JsObject) {.importjs: "#.push(#)".}
 
+template dispatchLayoutUpdated() =
+  {.emit: """
+    window.dispatchEvent(new CustomEvent('ct:layoutUpdated'));
+  """.}
+
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -134,6 +139,16 @@ proc findPanelByContent*(state: AutoHideState, content: Content): AutoHidePanel 
     return nil
   for panel in state.panels:
     if panel.content == content:
+      return panel
+  return nil
+
+proc findPanelByContentAndId*(state: AutoHideState, content: Content, id: int): AutoHidePanel =
+  ## Return the auto-hidden panel matching the given Content type and component ID,
+  ## or nil if no such panel is pinned.
+  if state.isNil:
+    return nil
+  for panel in state.panels:
+    if panel.content == content and panel.componentId == id:
       return panel
   return nil
 
@@ -276,6 +291,8 @@ proc pinPanel*(
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
 
+  dispatchLayoutUpdated()
+
 proc addStandaloneAutoHidePanel*(
   title: cstring,
   content: Content,
@@ -318,6 +335,11 @@ proc addStandaloneAutoHidePanel*(
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
 
+type
+  UnpinPanelTargetProc* = proc(layout: GoldenLayout, panel: AutoHidePanel) {.nimcall.}
+
+var unpinPanelTarget*: UnpinPanelTargetProc
+
 proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   ## Re-attach a pinned panel back into Golden Layout and remove it
   ## from the auto-hide state. The live DOM element is reparented into
@@ -339,14 +361,26 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   # live DOM element.
   if not data.ui.isNil:
     data.ui.isReparenting = true
+
+  # Set isReparenting to true in the panel's component state so the GoldenLayout registration callback
+  # knows it needs to reparent the live DOM element.
+  {.emit: """
+  if (`panel`.config && `panel`.config.componentState) {
+    `panel`.config.componentState.isReparenting = true;
+  }
+  """.}
+
   try:
-    let ground = layout.groundItem
-    if not ground.isNil and ground.contentItems.len > 0:
-      let target = ground.contentItems[0]
-      discard target.addItem(panel.config)
+    if not unpinPanelTarget.isNil:
+      unpinPanelTarget(layout, panel)
     else:
-      console.warn cstring"auto_hide: no existing container — adding to root"
-      discard ground.addItem(panel.config)
+      let ground = layout.groundItem
+      if not ground.isNil and ground.contentItems.len > 0:
+        let target = ground.contentItems[0]
+        discard target.addItem(panel.config)
+      else:
+        console.warn cstring"auto_hide: no existing container — adding to root"
+        discard ground.addItem(panel.config)
   except:
     cerror "auto_hide: failed to re-add panel to GL: " & getCurrentExceptionMsg()
   finally:
@@ -362,6 +396,8 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
 
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
+
+  dispatchLayoutUpdated()
 
 # ---------------------------------------------------------------------------
 # Overlay show / hide
