@@ -324,62 +324,120 @@ when defined(js):
                                     ev.ctrlOrMetaKey(), ev.shiftKey()))
 
 # ---------------------------------------------------------------------------
-# Commit-detail tooltip (JS only)
+# Commit-detail tooltip
 # ---------------------------------------------------------------------------
 #
-# A single fixed-position tooltip div with id="vcs-commit-tooltip" is
-# rendered once in renderCommitGraph.  Hover events on each commit header
-# populate and reposition it via showVCSTooltip / hideVCSTooltip.
-# position:fixed lets it escape the panel's overflow:hidden so it can
-# appear to the right of the panel boundary.
+# A single fixed-position tooltip div appended to document.body is shared
+# across all commit rows.  Hover events populate and reposition it via
+# showVCSTooltip / hideVCSTooltip.  position:fixed lets it escape the
+# panel's overflow:hidden.  Fade-in/out is driven by CSS opacity transition.
 
 when defined(js):
-  ## Populate and show the commit-detail tooltip next to ``anchorEl``.
-  ## The tooltip element is found by its well-known id in the current document.
-  proc showVCSTooltip(hash, fullHash, author, relTime, dotColor: cstring;
+  proc showVCSTooltip(hash, fullHash, author, date: cstring;
                        anchorEl: isonim_dom.Element)
-    {.importjs: """(function(h, fh, a, t, c, el) {
+    {.importjs: """(function(h, fh, a, d, el) {
       var tip = document.getElementById('vcs-commit-tooltip');
       if (!tip) return;
+      if (window.__vcsTooltipTimer) { clearTimeout(window.__vcsTooltipTimer); window.__vcsTooltipTimer = null; }
+      if (window.__vcsTooltipHideTimer) { clearTimeout(window.__vcsTooltipHideTimer); window.__vcsTooltipHideTimer = null; }
       var rect = el.getBoundingClientRect();
       tip.style.top  = rect.top + 'px';
       tip.style.left = (rect.right + 8) + 'px';
       var dot = tip.querySelector('.vcs-tip-dot');
-      if (dot) dot.style.background = c;
+      if (dot) {
+        var parts = a.trim().split(/\s+/);
+        dot.textContent = parts.length >= 2
+          ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+          : (a[0] || '').toUpperCase();
+      }
       var hs = tip.querySelector('.vcs-tip-hash');
       if (hs) hs.textContent = h;
       var dt = tip.querySelector('.vcs-tip-date');
-      if (dt) dt.textContent = t;
+      if (dt) dt.textContent = d;
       var cm = tip.querySelector('.vcs-tip-commit');
       if (cm) cm.textContent = fh;
       var au = tip.querySelector('.vcs-tip-author');
       if (au) au.textContent = a;
-      tip.style.display = 'block';
-    })(#, #, #, #, #, #)""".}
+      window.__vcsTooltipTimer = setTimeout(function() {
+        tip.style.opacity = '1';
+        tip.style.visibility = 'visible';
+        tip.style.pointerEvents = 'auto';
+        window.__vcsTooltipTimer = null;
+      }, 500);
+    })(#, #, #, #, #)""".}
 
-  ## Hide the commit-detail tooltip.
   proc hideVCSTooltip()
     {.importjs: """(function() {
+      if (window.__vcsTooltipTimer) { clearTimeout(window.__vcsTooltipTimer); window.__vcsTooltipTimer = null; }
       var tip = document.getElementById('vcs-commit-tooltip');
-      if (tip) tip.style.display = 'none';
+      if (!tip) return;
+      window.__vcsTooltipHideTimer = setTimeout(function() {
+        tip.style.opacity = '0';
+        tip.style.visibility = 'hidden';
+        tip.style.pointerEvents = 'none';
+        window.__vcsTooltipHideTimer = null;
+      }, 100);
     })()""".}
 
-  ## Attach hover handlers that drive the commit-detail tooltip.
+  proc ensureTooltipInBodyJS(el: isonim_dom.Element)
+    {.importjs: """(function(tip) {
+      var existing = document.getElementById('vcs-commit-tooltip');
+      if (existing && existing !== tip) existing.parentNode.removeChild(existing);
+      tip.style.pointerEvents = 'none';
+      tip.addEventListener('mouseenter', function() {
+        if (window.__vcsTooltipHideTimer) { clearTimeout(window.__vcsTooltipHideTimer); window.__vcsTooltipHideTimer = null; }
+      });
+      tip.addEventListener('mouseleave', function() {
+        tip.style.opacity = '0';
+        tip.style.visibility = 'hidden';
+        tip.style.pointerEvents = 'none';
+      });
+      var copyBtn = tip.querySelector('.vcs-tip-copy');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var hash = tip.querySelector('.vcs-tip-hash');
+          var date = tip.querySelector('.vcs-tip-date');
+          var commit = tip.querySelector('.vcs-tip-commit');
+          var author = tip.querySelector('.vcs-tip-author');
+          var text = [
+            hash ? hash.textContent : '',
+            date ? 'DATE: ' + date.textContent : '',
+            commit ? 'COMMIT: ' + commit.textContent : '',
+            author ? 'AUTHOR: ' + author.textContent : ''
+          ].filter(Boolean).join('\n');
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).catch(function() {});
+          } else {
+            var ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+        });
+      }
+      document.body.appendChild(tip);
+    })(#)""".}
+
+  proc attachTooltipToBody(r: WebRenderer; tooltip: isonim_dom.Element) =
+    ensureTooltipInBodyJS(tooltip)
+
   proc attachCommitTooltip(r: WebRenderer; header: isonim_dom.Element;
-                            hash, fullHash, author, relTime, dotColor: string) =
+                            hash, fullHash, author, date: string) =
     let h  = cstring(hash)
     let fh = cstring(fullHash)
     let a  = cstring(author)
-    let t  = cstring(relTime)
-    let c  = cstring(dotColor)
+    let d  = cstring(date)
     isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseenter",
-      proc(ev: isonim_dom.Event) = showVCSTooltip(h, fh, a, t, c, header))
+      proc(ev: isonim_dom.Event) = showVCSTooltip(h, fh, a, d, header))
     isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseleave",
       proc(ev: isonim_dom.Event) = hideVCSTooltip())
 
 proc attachCommitTooltip(r: MockRenderer; header: MockNode;
-                          hash, fullHash, author, relTime, dotColor: string) =
-  ## No-op in the mock renderer.
+                          hash, fullHash, author, date: string) =
+  discard
+
+proc attachTooltipToBody(r: MockRenderer; tooltip: MockNode) =
   discard
 
 # ---------------------------------------------------------------------------
@@ -396,7 +454,7 @@ proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
   let chevronSvg = if isOpen: chevronUpSvg else: chevronDownSvg
   let panel = ui(r):
     tdiv(class = "vcs-branch-picker"):
-      tdiv(class = "vcs-branch-current",
+      tdiv(class = (if isOpen: "vcs-branch-current vcs-branch-current-open" else: "vcs-branch-current"),
            onclick = proc() = vm.invokeToggleBranchDropdown(callbacks)):
         span(ref = chevronHost, class = "vcs-branch-chevron")
         span(class = "vcs-branch-name"):
@@ -641,18 +699,12 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
         text abbreviateRelTime(commit.relativeTime)
       span(class = "vcs-commit-diff-btn",
            onclick = proc() = vm.invokeToggleUnifiedDiff(callbacks)):
-        text "⊟"
+        tdiv(class = "custom-tooltip"):
+          text "Open unified diff"
   r.appendRenderedChild(headerNode, body)
 
-  # Tooltip: attach hover handlers that show commit details in the floating
-  # fixed-position tooltip div.
-  let dotColorStr =
-    if commit.dotLane >= 0 and commit.dotLane < commit.graphCells.len:
-      branchColors[commit.graphCells[commit.dotLane].colorIdx mod branchColors.len]
-    else:
-      branchColors[0]
   r.attachCommitTooltip(headerNode, commit.hash, commit.fullHash,
-                        commit.author, commit.relativeTime, dotColorStr)
+                        commit.author, commit.date)
 
   r.appendRenderedChild(entryNode, header)
 
@@ -729,25 +781,23 @@ proc renderCommitGraph[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
   r.appendRenderedChild(list, bottomArea)
   r.attachScrollSentinel(sentinel, callbacks)
 
-  # Single commit-detail tooltip div, rendered once at the panel level.
-  # It stays hidden (display:none) until a commit header is hovered.
-  # position:fixed (via CSS) lets it escape the panel's overflow:hidden.
   let tooltip = ui(r):
     tdiv(id = "vcs-commit-tooltip", class = "vcs-commit-tooltip"):
-      tdiv(class = "vcs-tip-header"):
-        span(class = "vcs-tip-dot"): discard
+      tdiv(class = "vcs-tip-left"):
         span(class = "vcs-tip-hash"): discard
-      tdiv(class = "vcs-tip-row"):
-        span(class = "vcs-tip-label"): text "DATE"
-        span(class = "vcs-tip-date"): discard
-      tdiv(class = "vcs-tip-row"):
-        span(class = "vcs-tip-label"): text "COMMIT"
-        span(class = "vcs-tip-commit"): discard
-      tdiv(class = "vcs-tip-row"):
-        span(class = "vcs-tip-label"): text "AUTHOR"
-        span(class = "vcs-tip-author"): discard
-  r.appendRenderedChild(panel, tooltip)
-
+        tdiv(class = "vcs-tip-row"):
+          span(class = "vcs-tip-label"): text "DATE:"
+          span(class = "vcs-tip-date"): discard
+        tdiv(class = "vcs-tip-row"):
+          span(class = "vcs-tip-label"): text "COMMIT:"
+          span(class = "vcs-tip-commit"): discard
+        tdiv(class = "vcs-tip-row"):
+          span(class = "vcs-tip-label"): text "AUTHOR:"
+          span(class = "vcs-tip-author"): discard
+      tdiv(class = "vcs-tip-right"):
+        span(class = "vcs-tip-dot"): discard
+        span(class = "vcs-tip-copy"): discard
+  r.attachTooltipToBody(tooltip)
 
   panel
 

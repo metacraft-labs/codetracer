@@ -48,56 +48,72 @@
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  padding: 0.5em
+  padding: 0.25em
   background: colors-ui-surface-base-panel
 
+// Styled to match .ct-input-small — consistent with other panel input fields.
 .vcs-branch-current
   display: flex
   align-items: center
-  padding: 0.3125em 0.5em
+  height: 1.5rem
+  max-height: 1.5rem
+  padding: 0 0.5em
   cursor: pointer
-  gap: 0.5em
+  gap: 0.375em
   user-select: none
-  border: 1px solid colors-ui-text-primary-body-subtle
-  border-radius: 0.25em
-  background: colors-ui-surface-base-panel
+  border-radius: 0.375rem
+  border: 0.03125em solid transparent
+  background: colors-ui-surface-primary-default
+  font-family: "SpaceGrotesk"
+  font-size: 0.875rem
+  color: colors-ui-text-primary-label
 
   &:hover
-    border-color: colors-ui-text-primary-heading
+    border-color: colors-ui-border-primary-hover
+    color: colors-ui-text-primary-body
+
+  // Open/active state: thin blue border (like lm_controls active dropdown)
+  &.vcs-branch-current-open
+    border-color: colors-ui-border-action
+    color: colors-ui-text-primary-body
 
 .vcs-branch-chevron
   display: flex
   align-items: center
   flex-shrink: 0
+  opacity: 0.7
 
 .vcs-branch-name
   flex: 1
   overflow: hidden
   text-overflow: ellipsis
   white-space: nowrap
-  font-size: 0.8125em
 
 .vcs-branch-dropdown
   position: absolute
-  top: calc(100% - 0.25em)
-  left: 0.5em
-  right: 0.5em
+  top: calc(100% + 0.125em)
+  left: 0.25em
+  right: 0.25em
   z-index: 100
-  background: colors-ui-surface-base-panel
-  border: 1px solid colors-ui-text-primary-body-subtle
-  border-radius: 0.25em
+  background: colors-ui-surface-primary-default
+  border: 0.03125em solid colors-ui-border-primary
+  border-radius: 0.375rem
   max-height: 12.5em
   overflow-y: auto
 
 .vcs-branch-option
-  padding: 0.25em 0.5em
+  padding: 0.3125em 0.5em
   cursor: pointer
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
+  font-family: "SpaceGrotesk"
+  font-size: 0.875rem
+  color: colors-ui-text-primary-label
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body
 
 .vcs-branch-active-marker
   color: #4ec9b0
@@ -368,14 +384,35 @@
 .vcs-commit-diff-btn
   display: none
   flex-shrink: 0
+  position: relative
   cursor: pointer
-  font-size: 0.75em
-  color: colors-ui-text-primary-body-subtle
-  padding: 0 0.25em
-  line-height: 1
+  width: 0.6875em
+  height: 0.8125em
+  margin: 0 0.25em
+  background-image: url("../../public/resources/shared/vc-open-diff.svg")
+  background-repeat: no-repeat
+  background-size: contain
+  background-position: center
+
+  .custom-tooltip
+    right: 0
+    left: unset
+    z-index: 200
+
+    // Arrow: override centered default to sit under the icon button.
+    // Icon is 0.6875em wide, right-aligned → arrow at right edge of tooltip.
+    &:after
+      left: unset
+      right: 0.25em
 
 .vcs-commit-header:hover .vcs-commit-diff-btn
   display: block
+
+.vcs-commit-diff-btn:hover > .custom-tooltip
+  opacity: 1
+  visibility: visible
+  top: calc(100% + 0.3125em)
+  transition-delay: TOOLTIP_DELAY_TIMER
 
 // ---------------------------------------------------------------------------
 // Accordion expanded area: file list rendered inline under the commit header.
@@ -385,37 +422,61 @@
 // Shown on hover of a commit header row.  position:fixed lets it escape the
 // panel's overflow:hidden so it can appear to the right of the panel.
 // Populated and positioned by JS (showVCSTooltip / hideVCSTooltip).
+// 3-second delay + fade-in is driven by JS adding/removing .vcs-tip-visible.
+// Two-column layout: left = hash + rows, right = author badge + copy button.
 .vcs-commit-tooltip
-  display: none
+  opacity: 0
+  visibility: hidden
+  transition: opacity 0.3s ease, visibility 0.3s ease
   position: fixed
   z-index: 1000
-  background: #1e1e2e
-  border: 1px solid colors-ui-border-secondary
+  display: flex
+  gap: 0.75em
+  background: colors-ui-surface-base-raised
+  border: 0.0625em solid colors-ui-border-secondary
   border-radius: 0.5em
-  padding: 0.75em 1em
+  padding: 0.625em
   min-width: 16.25em
   max-width: 26.25em
   box-shadow: 0 0.25em 1.25em rgba(0, 0, 0, 0.5)
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 0.75em
-  pointer-events: none
 
-.vcs-tip-header
+// Left column: hash on its own line, then label/value rows.
+.vcs-tip-left
+  flex: 1
+  min-width: 0
+
+// Right column: author badge pinned top, copy button pinned bottom.
+.vcs-tip-right
   display: flex
-  align-items: center
-  gap: 0.5em
-  margin-bottom: 0.625em
-
-.vcs-tip-dot
-  width: 0.625em
-  height: 0.625em
-  border-radius: 50%
+  flex-direction: column
+  align-items: flex-end
+  justify-content: space-between
   flex-shrink: 0
 
 .vcs-tip-hash
-  color: CT_SECONDARY_BLUE
+  display: block
+  color: colors-ui-text-primary-label
   font-weight: 600
   letter-spacing: 0.03125em
+  white-space: nowrap
+  margin-bottom: 0.625em
+
+// Author-initial avatar.
+.vcs-tip-dot
+  width: 2em
+  height: 2em
+  border-radius: 50%
+  flex-shrink: 0
+  background: colors-ui-text-primary-active
+  color: colors-ui-text-on-color-body
+  font-family: "SpaceGrotesk"
+  font-size: 0.625em
+  font-weight: 600
+  display: flex
+  align-items: center
+  justify-content: center
 
 // A label + value row inside the tooltip (DATE, COMMIT, AUTHOR).
 .vcs-tip-row
@@ -423,14 +484,29 @@
   align-items: baseline
   gap: 0.5em
   margin-top: 0.375em
+  line-height: 1em
   color: TEXT_CONTENT_COLOR
   word-break: break-all
 
 .vcs-tip-label
   color: VALUE_TYPE_COLOR
   text-transform: uppercase
-  font-size: 0.625em
   flex-shrink: 0
+
+// Copy-to-clipboard icon button, pinned to bottom of right column.
+.vcs-tip-copy
+  display: block
+  cursor: pointer
+  width: 0.8125em
+  height: 0.8125em
+  background-image: url("../../public/resources/shared/vcs-copy-details.svg")
+  background-repeat: no-repeat
+  background-size: contain
+  background-position: center
+  opacity: 0.6
+
+  &:hover
+    opacity: 1
 
 // Inline file rows inside an expanded accordion entry.
 .vcs-accordion-files
@@ -467,13 +543,14 @@
   white-space: nowrap
   color: TEXT_CONTENT_COLOR
 
-// Status letter (M / A / D / …) shown left of the filename.
+// Status letter (M / A / D / …) shown right of the stats.
 .vcs-accordion-file-status
   font-family: "SpaceMono", monospace
   font-weight: 700
   flex-shrink: 0
   width: 1em
   text-align: center
+  order: 1
 
 // +N additions and -N deletions shown to the right of the filename,
 // matching the reference screenshot layout.
