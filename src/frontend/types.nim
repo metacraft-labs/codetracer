@@ -754,9 +754,13 @@ type
     forceRedraw*:   bool
 
   VCSCommit* = object
-    hash*: cstring
-    message*: cstring
-    relativeTime*: cstring
+    hash*: cstring         ## abbreviated SHA-1 (7 chars) for display
+    message*: cstring      ## commit subject line
+    relativeTime*: cstring ## human-readable relative age ("2 hours ago")
+    date*: cstring         ## absolute date in YYYY-MM-DD format (git %cs token)
+    fullHash*: cstring     ## full 40-char SHA-1; used for graph lane tracking
+    author*: cstring       ## author name shown in the expanded accordion row
+    parents*: seq[cstring] ## full hashes of parent commits (1 normal, 2+ merge)
 
   VCSChangedFile* = object
     status*: cstring       ## "M", "A", "D", etc.
@@ -769,7 +773,10 @@ type
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
     changedFiles*: seq[VCSChangedFile]
-    selectedCommitIndex*: int
+    selectedCommitIndices*: seq[int]   ## all expanded commit indices (multi-select)
+    lastClickedCommitIndex*: int       ## anchor for shift-click range (-1 = none)
+    commitFilesCache*: JsAssoc[int, seq[VCSChangedFile]]
+      ## files per commit index loaded on demand; keyed by commit index
     branchDropdownOpen*: bool
     initialized*: bool
     isGitRepo*: bool
@@ -804,6 +811,13 @@ type
       ## single-clicked hunk header.
     hunkCopyFeedback*: bool
       ## Briefly true after a successful "Copy as patch" to show feedback.
+    # Commit graph pagination state.
+    commitOffset*: int
+      ## Number of commits already fetched; used as the --skip argument when
+      ## loading the next page of commits for the infinite-scroll graph.
+    loadingMore*: bool
+      ## True while a background git-log call is in progress to load the
+      ## next commit page.  Prevents concurrent overlapping fetches.
 
   ViewKind* =       enum ViewTable, ViewLine, ViewPie
 

@@ -12,7 +12,7 @@
 
   .window-menu
     align-items: start
-    height: 28px
+    height: 1.75em
 
 #welcomeScreen .welcome-screen-root
   height: 100%
@@ -31,14 +31,14 @@
   justify-content: center
 
   &-text
-    padding-left: 10px
+    padding-left: 0.625em
     color: white
     font-size: x-large
     font-style: italic
 
   .welcome-screen-loading-overlay-icon
-    width: 32px
-    height: 32px
+    width: 2em
+    height: 2em
     background-repeat: no-repeat
     background-position: center
     background-image: url("../../public/resources/welcome/loading_sign_dots_32.svg")
@@ -48,11 +48,11 @@
 
 .welcome-logo
   background-image: url('../../public/resources/shared/codetracer_welcome_logo.svg')
-  min-width: 62px
-  min-height: 62px
-  background-size: 62px 62px
+  min-width: 3.875em
+  min-height: 3.875em
+  background-size: 3.875em 3.875em
   background-position: center
-  margin-right: 12px
+  margin-right: 0.75em
   background-repeat: no-repeat
 
 .welcome-screen-wrapper
@@ -73,15 +73,15 @@
     position: relative
     height: fit-content
     background-color: gradien
-    width: 900px
-    padding: 48px
-    padding-bottom: 60px
+    width: 56.25em
+    padding: 3em
+    padding-bottom: 3.75em
     background: WELCOME_SCREEN_BACKGROUND_COLOR
     display: flex
     flex-direction: column
-    border-radius: 12px
+    border-radius: 0.75em
     align-items: center
-    border: 1px solid LINE_STROKE
+    border: 0.0625em solid LINE_STROKE
 
     &.welcome-screen-loading
       cursor: wait !important
@@ -101,14 +101,13 @@
         display: flex
         align-items: center
         font-weight: BOLD_WEIGHT
-        width: 304px
-        font-size: 32px
-        line-height: 34px
-        letter-spacing: -0.32px
+        width: 19em
+        font-size: 2em
+        letter-spacing: -0.02em
 
       .welcome-version
         color: WELCOME_SCREEN_VERSION_TEXT_COLOR
-        font-size: 12px
+        font-size: 0.75em
         font-family: "SpaceMono"
         font-weight: 400
         line-height: normal
@@ -117,7 +116,7 @@
     .welcome-content
       display: flex
       flex-direction: row
-      gap: 16px
+      gap: 1em
       width: -webkit-fill-available
 
     .welcome-left-panel
@@ -137,6 +136,7 @@
       position: relative
       display: flex
       width: -webkit-fill-available
+      gap: 0.5em
       justify-content: space-between
 
       .start-option
@@ -145,7 +145,7 @@
         display: flex
         cursor: pointer
         justify-content: center
-        font-family: "SpaceMono"
+        font-family: "SpaceGrotesk"
 
         &.hovered
           opacity: 1
@@ -159,8 +159,8 @@
           opacity: 0.2
 
       .start-option-icon
-        width: 100px
-        height: 100px
+        width: 6.25em
+        height: 6.25em
         background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON
         background-repeat: no-repeat
         background-position: center
@@ -171,25 +171,25 @@
 
       .start-option-name
         text-align: center
-        font-size: 14px
+        font-size: 0.875em
         font-weight: BOLD_WEIGHT
-        letter-spacing: -0.14px
-        line-height: 18px
+        letter-spacing: -0.00875em
+        line-height: 1.125em
         background-color: ACTIVE_ROW
         display: flex
         align-items: center
         color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR
         justify-content: center
         white-space: nowrap
-        padding: 6px
-        padding-left: 14px
-        padding-right: 14px
-        border-radius: 6px
+        padding: 0.375em
+        padding-left: 0.875em
+        padding-right: 0.875em
+        border-radius: 0.375em
 
         &.hovered
           // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
           // background-color: PRIMARY_BASE
-          outline: 1px solid SEARCH_STROKE
+          outline: 0.0625em solid SEARCH_STROKE
           opacity: 1
 
     // Recent traces styles - in welcome-right-panel
@@ -197,24 +197,24 @@
       position: relative
       width: -webkit-fill-available
       background-color: SECONDARY_BASE
-      border-radius: 6px
-      padding: 8px
-      margin-top: 48px
-      margin-bottom: 48px
-      padding-right: 0px
+      border-radius: 0.375em
+      padding: 0.5em
+      margin-top: 3em
+      margin-bottom: 3em
+      padding-right: 0
       overflow: visible
 
     .recent-traces-title
       text-align: start
-      font-size: 18px
+      font-size: 1.125em
       font-weight: BOLD_WEIGHT
-      line-height: 18px
-      letter-spacing: -0.18px
-      font-family: "SpaceMono"
-      margin-bottom: 6px
+      line-height: 1.125em
+      letter-spacing: -0.01125em
+      font-family: "SpaceGrotesk"
+      margin-bottom: 0.375em
 
     .recent-traces-list
-      max-height: 172px
+      max-height: 10.75em
       overflow-y: auto
       overflow-x: visible
       // Allow tooltips to overflow - they use position: absolute and high z-index
@@ -223,17 +223,17 @@
       .empty-state-message
         display: flex
         flex-direction: column
-        gap: 8px
+        gap: 0.5em
 
         .empty-state-welcome
-          font-size: 16px
+          font-size: 1em
           font-weight: 600
-          font-family: "SpaceMono"
+          font-family: "SpaceGrotesk"
           color: PRIMARY_TEXT_COLOR
 
         .empty-state-text
-          font-size: 13px
-          font-family: "SpaceMono"
+          font-size: 0.8125em
+          font-family: "SpaceGrotesk"
           color: #888888
           line-height: 1.5
 
@@ -245,13 +245,13 @@
       .recent-trace
         color: WELCOME_SCREEN_RECENT_TRACE_COLOR
         background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
-        height: 28px
-        margin-top: 2px
-        margin-bottom: 6px
+        height: 1.75em
+        margin-top: 0.125em
+        margin-bottom: 0.375em
         display: flex
         position: relative
         text-align: left
-        border-radius: 4px
+        border-radius: 0.25em
         width: -webkit-fill-available
 
         &:hover
@@ -274,23 +274,23 @@
             border-color: WELCOME_SCREEN_SEPARATE_BAR_COLOR
 
           .recent-trace-title-time
-            margin-left: 8px
-            margin-right: 8px
-            font-size: 12px
-            font-family: "SpaceMono"
-            line-height: 18px
+            margin-left: 0.5em
+            margin-right: 0.5em
+            font-size: 0.75em
+            font-family: "SpaceGrotesk"
+            line-height: 1.125em
             color: #888888
             white-space: nowrap
-            min-width: 90px
+            // min-width: 90px
 
           .recent-trace-title-content
-            margin-left: 8px
-            margin-right: 8px
-            font-size: 14px
+            margin-left: 0.5em
+            margin-right: 0.5em
+            font-size: 0.875em
             font-weight: BOLD_WEIGHT
-            font-family: "SpaceMono"
-            line-height: 18px
-            letter-spacing: -0.14px
+            font-family: "SpaceGrotesk"
+            line-height: 1.125em
+            letter-spacing: -0.00875em
             position: relative
             overflow: hidden
             white-space: nowrap
@@ -301,64 +301,66 @@
           position: fixed
           background-color: #1B1B1B
           color: #f3f3f3
-          padding: 8px 12px
-          font-size: 12px
+          padding: 0.5em 0.75em
+          font-size: 0.75em
           font-family: "SpaceMono"
-          border-radius: 4px
+          border-radius: 0.25em
           white-space: pre-line
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4)
+          box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.4)
           opacity: 0
           visibility: hidden
           transition: opacity 0.2s ease, visibility 0.2s ease
           pointer-events: none
           z-index: 1000
-          max-width: 400px
+          max-width: 40em
           line-height: 1.4
-          // Position will be set via JavaScript on hover
-          // Fallback positioning for when JS isn't setting it
-          left: 50%
-          top: 50%
-          transform: translate(-50%, -50%)
+          overflow-wrap: break-word
+          word-break: break-all
+          // Position is set via JavaScript on hover (right of the trace row).
+          // Off-screen default in px so it never flashes at center.
+          left: -9999px
+          top: -9999px
+          transform: none
 
     // Recent folders styles - in welcome-left-panel
     .recent-folders
       position: relative
       width: -webkit-fill-available
       background-color: SECONDARY_BASE
-      border-radius: 6px
-      padding: 8px
-      margin-top: 48px
-      margin-bottom: 48px
-      padding-right: 0px
+      border-radius: 0.375em
+      padding: 0.5em
+      margin-top: 3em
+      margin-bottom: 3em
+      padding-right: 0
 
     .recent-folders-title
       text-align: start
-      font-size: 18px
+      font-size: 1.125em
       font-weight: BOLD_WEIGHT
-      line-height: 18px
-      letter-spacing: -0.18px
-      font-family: "SpaceMono"
-      margin-bottom: 6px
+      line-height: 1.125em
+      letter-spacing: -0.01125em
+      font-family: "SpaceGrotesk"
+      margin-bottom: 0.375em
 
     .recent-folders-list
-      max-height: 172px
+      max-height: 10.75em
       overflow-y: scroll
       overflow-x: visible
 
       .empty-state-message
         display: flex
         flex-direction: column
-        gap: 8px
+        gap: 0.5em
 
         .empty-state-welcome
-          font-size: 16px
+          font-size: 1em
           font-weight: 600
-          font-family: "SpaceMono"
+          font-family: "SpaceGrotesk"
           color: PRIMARY_TEXT_COLOR
 
         .empty-state-text
-          font-size: 13px
-          font-family: "SpaceMono"
+          font-size: 0.8125em
+          font-family: "SpaceGrotesk"
           color: #888888
           line-height: 1.5
 
@@ -370,13 +372,13 @@
       .recent-folder
         color: WELCOME_SCREEN_RECENT_TRACE_COLOR
         background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
-        height: 28px
-        margin-top: 2px
-        margin-bottom: 6px
+        height: 1.75em
+        margin-top: 0.125em
+        margin-bottom: 0.375em
         display: flex
         position: relative
         text-align: left
-        border-radius: 4px
+        border-radius: 0.25em
         width: -webkit-fill-available
 
         &:hover
@@ -384,13 +386,13 @@
           background-color: PRIMARY_BASE
 
         .recent-folder-name
-          margin-left: 8px
-          margin-right: 8px
-          font-size: 14px
+          margin-left: 0.5em
+          margin-right: 0.5em
+          font-size: 0.875em
           font-weight: BOLD_WEIGHT
           font-family: "SpaceMono"
-          line-height: 18px
-          letter-spacing: -0.14px
+          line-height: 1.125em
+          letter-spacing: -0.00875em
           position: relative
           overflow: hidden
           white-space: nowrap
@@ -410,30 +412,30 @@
 
     .new-record-screen-content
       position: relative
-      width: 700px
+      width: 43.75em
       background: WELCOME_SCREEN_BACKGROUND_COLOR
-      border: 1px solid LINE_STROKE
-      border-radius: 12px
-      padding: 48px
-      padding-bottom: 60px
+      border: 0.0625em solid LINE_STROKE
+      border-radius: 0.75em
+      padding: 3em
+      padding-bottom: 3.75em
 
       .welcome-logo
-        min-width: 40px
-        max-width: 40px
-        min-height: 40px
-        background-size: 40px 40px
+        min-width: 2.5em
+        max-width: 2.5em
+        min-height: 2.5em
+        background-size: 2.5em 2.5em
 
     .new-record-title
       position: relative
-      font-size: 32px
+      font-size: 2em
       font-family: "SpaceMono"
       font-weight: BOLD_WEIGHT
       text-align: start
       width: 100%
-      letter-spacing: -0.32px
-      line-height: 32px
-      margin-bottom: 32px
-      margin-top: 32px
+      letter-spacing: -0.02em
+      line-height: 2em
+      margin-bottom: 2em
+      margin-top: 2em
 
     .new-record-form
 
@@ -441,11 +443,11 @@
         display: flex;
         align-items: center;
         flex-direction: column;
-        margin-top: 5px
+        margin-top: 0.3125em
 
         .form-validation-row
-          height: 16px;
-          font-size: 14px;
+          height: 1em;
+          font-size: 0.875em;
           position: relative;
           width: 100%;
           text-indent: 13vw;
@@ -457,11 +459,11 @@
           width: 100%
           display: flex
           align-items: center
-          margin-bottom: 16px
+          margin-bottom: 1em
 
         .checkmark
           position: relative
-          margin-right: 8px !important
+          margin-right: 0.5em !important
           top: 0 !important
 
         label
@@ -472,7 +474,7 @@
           color: NEW_RECORD_LABEL_COLOR
           font-family: "SpaceMono"
           font-weight: bold
-          font-size: 14px
+          font-size: 0.875em
           font-weight: 400
 
         // input
@@ -545,21 +547,21 @@
       display: flex
       align-items: center
       justify-content: center
-      margin-bottom: 16px
-      border-radius: 6px
-      padding: 8px
+      margin-bottom: 1em
+      border-radius: 0.375em
+      padding: 0.5em
 
       &.empty
         outline: none
 
       &.in-progress
-        outline: 1px solid NOTIFICATION_INFO_COLOR
+        outline: 0.0625em solid NOTIFICATION_INFO_COLOR
 
       &.failed
-        outline: 1px solid NOTIFICATION_ERROR_COLOR
+        outline: 0.0625em solid NOTIFICATION_ERROR_COLOR
 
       &.success
-        outline: 1px solid NOTIFICATION_SUCCESS_COLOR
+        outline: 0.0625em solid NOTIFICATION_SUCCESS_COLOR
 
       .new-record-result
         position: relative
@@ -574,12 +576,12 @@
 
         .new-record-status-icon
           position: relative
-          width: 24px
-          height: 24px
+          width: 1.5em
+          height: 1.5em
           background-repeat: no-repeat
-          background-size: 18px 18px
+          background-size: 1.125em 1.125em
           background-position: center
-          margin-right: 4px
+          margin-right: 0.25em
 
           &.in-progress
             background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
@@ -596,26 +598,26 @@
           text-align: center
           position: relative
           width: 100%
-          height: 30px
+          height: 1.875em
           font-family: "SpaceMono"
-          font-size: 20px
+          font-size: 1.25em
 
 .online-functionality-buttons
   display: flex
-  padding-right: 2px
+  padding-right: 0.125em
 
   .recent-trace-buttons
-    margin-left: 8px
-    margin-top: 2px
-    margin-bottom: 6px
-    height: 28px
-    width: 28px
+    margin-left: 0.5em
+    margin-top: 0.125em
+    margin-bottom: 0.375em
+    height: 1.75em
+    width: 1.75em
     background-color: DEBUG_BUTTON_BORDER_COLOR
-    border-radius: 4px
+    border-radius: 0.25em
     cursor: pointer
   upload
     &:hover
-      outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+      outline: 0.0625em solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
 
     &:active
       background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
@@ -625,28 +627,28 @@
 
   .recent-trace-buttons-image
     background-repeat: no-repeat
-    background-size: 16px 16px
+    background-size: 1em 1em
     background-position: center
-    height: 28px
+    height: 1.75em
 
   .progress-circle
-    width: 20px
-    height: 20px
+    width: 1.25em
+    height: 1.25em
     border-radius: 50%
     position: absolute
     background-image: conic-gradient(#6B6B6B 0% 0%, #2C2C2C 0% 100%)
     background-size: auto
     z-index: 1
-    transform: translate(4px, 4px)
+    transform: translate(0.25em, 0.25em)
 
   .inner-circle
-    width: 14px
-    height: 14px
+    width: 0.875em
+    height: 0.875em
     border-radius: 50%
     background-color: ACTIVE_ROW
     position: absolute
     z-index: 2
-    transform: translate(7px, 7px)
+    transform: translate(0.4375em, 0.4375em)
 
   #progress-bar
     position: relative
@@ -669,14 +671,14 @@
   .welcome-path-active
     opacity: 1
     visibility: visible
-    height: 24px
-    left: calc(100% + 8px)
+    height: 1.5em
+    left: calc(100% + 0.5em)
     position: absolute
     width: fit-content
 
     &:after
       top: 18%
-      left: -14px
+      left: -0.875em
       border-color: transparent TOOLTIP_BACKGROUND transparent transparent !important
 
 .recent-trace-container
@@ -692,45 +694,45 @@
 .recent-transactions
   display: flex
   text-align: left
-  font-size: 18px
+  font-size: 1.125em
   font-weight: 700
   background-color: SECONDARY_BASE
-  border-radius: 6px
-  padding: 16px
+  border-radius: 0.375em
+  padding: 1em
   flex-direction: column
 
 .table-column-names
   display: flex
   text-align: left
   justify-content: space-between
-  font-size: 14px
+  font-size: 0.875em
   font-weight: 400
   font-family: "SpaceMono"
 
   #tx-hash
-    width: 118px
+    width: 7.375em
   #tx-status
-    width: 72px
-    padding-left: 4px
+    width: 4.5em
+    padding-left: 0.25em
   #tx-from
-    width: 120px
+    width: 7.5em
   #tx-to
-    width: 124px
+    width: 7.75em
   #tx-when
-    width: 60px
+    width: 3.75em
   #tx-action
-    width: 50px
+    width: 3.125em
     text-align: end
 
 .recent-transactions-container
   display: flex
   justify-content: space-between
-  font-size: 14px
+  font-size: 0.875em
   font-style: normal
   font-weight: 400
 
 .recent-transactions
-  max-height: 360px
+  max-height: 22.5em
   overflow: scroll
 
 .recent-transaction
@@ -749,24 +751,24 @@
     color: STATUS_UNSUCCESS
 
 .action-transaction-button
-  margin-left: 8px
-  margin-top: 2px
-  margin-bottom: 6px
-  height: 28px
-  width: 28px
+  margin-left: 0.5em
+  margin-top: 0.125em
+  margin-bottom: 0.375em
+  height: 1.75em
+  width: 1.75em
   background-color: DEBUG_BUTTON_BORDER_COLOR
-  border-radius: 4px
+  border-radius: 0.25em
   cursor: pointer
   background-image: RECENT_TRANSACTION_ACTION_BUTTON
   background-repeat: no-repeat
   background-position: center
-  min-width: 28px
+  min-width: 1.75em
 
 .recent-transaction-title
-  margin-bottom: 16px
+  margin-bottom: 1em
 
 .transactions
-  margin-bottom: 0px !important
+  margin-bottom: 0 !important
 
 .stylus-content
-  width: 850px !important
+  width: 53.125em !important

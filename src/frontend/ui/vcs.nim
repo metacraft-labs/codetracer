@@ -111,35 +111,219 @@ proc loadBranches(self: VCSComponent, cwd: cstring) =
       if trimmed.len > 0:
         self.branches.add(cstring(trimmed))
 
-proc loadCommits(self: VCSComponent, cwd: cstring) =
-  ## Load the 30 most recent commits with hash, subject and relative date.
-  ## Uses ASCII record separator (0x1e) as delimiter to avoid conflicts with
-  ## pipe characters that may appear in commit messages.
+# ---------------------------------------------------------------------------
+# Commit graph lane-tracking algorithm
+# ---------------------------------------------------------------------------
+
+const commitPageSize = 50
+  ## Number of commits fetched per page for the infinite-scroll commit graph.
+
+const branchPalette = [
+  "#818CF8", "#FB923C", "#4ADE80",
+  "#F472B6", "#38BDF8", "#A78BFA",
+]
+  ## Colour palette cycled across branch lanes.
+  ## Mirrors ``branchColors`` in ``isonim_vcs_view.nim``.
+
+type GraphLane = object
+  waitingFor: string ## full hash this lane is tracking towards
+  colorIdx: int      ## index into branchPalette
+
+type GraphRow = object
+  ## Per-commit graph data: lane cells, dot position, and merge connectors.
+  cells: seq[VCSGraphCell]
+  dotLane: int                       ## column of the commit dot (-1 = none)
+  connectors: seq[VCSGraphConnector] ## bezier connectors for this row
+
+proc computeGraphRows(commits: seq[VCSCommit]): seq[GraphRow] =
+  ## Assign branch-graph columns to each commit, computing merge/fork connectors.
+  ##
+  ## Algorithm (newest → oldest):
+  ##
+  ##  1. Collect ALL lanes waiting for this commit's hash.  The first match is
+  ##     the "primary" lane that becomes the dot position.  Any additional
+  ##     matches are lanes whose branches **converge** here (fork in forward
+  ##     time) — they get a connector drawn back to the dot lane and are then
+  ##     cleared.
+  ##  2. If no lane claims the commit, open a fresh lane (branch tip).
+  ##  3. Build the row cells: gckDot at the primary lane, gckLine at every other
+  ##     active lane, gckEmpty otherwise.
+  ##  4. Advance the primary lane to the first parent, or clear it for roots.
+  ##  5. For each additional merge parent open a new lane and record a connector
+  ##     so the view can draw a right-angle curve to it.
+  ##  6. **Lane compaction**: remove lanes whose ``waitingFor`` is empty so that
+  ##     the graph doesn't grow unboundedly wide.  Each row's cells are built
+  ##     using the pre-compaction indices so the visual stays correct.
+  result = newSeq[GraphRow](commits.len)
+  var lanes: seq[GraphLane] = @[]
+  var nextColor = 0
+
+  for i, commit in commits:
+    let myHash = $commit.fullHash
+    if myHash.len == 0:
+      result[i] = GraphRow(dotLane: -1)
+      continue
+
+    # Collect all lanes that converge on this commit.
+    var myLane = -1
+    var convergeLanes: seq[int] = @[]   ## additional lanes that end here
+    for j in 0 ..< lanes.len:
+      if lanes[j].waitingFor == myHash:
+        if myLane < 0:
+          myLane = j           ## primary dot lane
+        else:
+          convergeLanes.add(j) ## branch that merges back here
+
+    # No lane claimed us → new branch tip.
+    # Reuse the first freed (empty) slot before appending a new column so
+    # that lane positions stay stable and the graph doesn't grow unboundedly.
+    if myLane < 0:
+      for k in 0 ..< lanes.len:
+        if lanes[k].waitingFor.len == 0:
+          myLane = k
+          lanes[myLane] = GraphLane(
+            waitingFor: myHash,
+            colorIdx: nextColor mod branchPalette.len,
+          )
+          inc nextColor
+          break
+      if myLane < 0:
+        myLane = lanes.len
+        lanes.add(GraphLane(
+          waitingFor: myHash,
+          colorIdx: nextColor mod branchPalette.len,
+        ))
+        inc nextColor
+
+    # Build row cells (sized to current lane count).
+    # Converging lanes use gckEmpty: the top-half connector (vcs-gc-conn-tl /
+    # vcs-gc-conn-tr) provides the top-half vertical line and curve, so the
+    # slot only needs to exist for width reservation — no extra line is drawn.
+    var row = newSeq[VCSGraphCell](lanes.len)
+    for j in 0 ..< lanes.len:
+      if j == myLane:
+        row[j] = VCSGraphCell(kind: gckDot, colorIdx: lanes[j].colorIdx)
+      elif j in convergeLanes:
+        row[j] = VCSGraphCell(kind: gckEmpty)  # connector draws the visual
+      elif lanes[j].waitingFor.len > 0:
+        row[j] = VCSGraphCell(kind: gckLine, colorIdx: lanes[j].colorIdx)
+      # else gckEmpty (zero-value default)
+
+    # Connectors: start with converging lanes (branches that forked from here
+    # in forward time), then merge-parent lanes (extra parents of this commit).
+    var connectors: seq[VCSGraphConnector] = @[]
+
+    # Convergence connectors: curve from side lane back to dot lane.
+    # ``isTop = true`` tells the view to draw the top-half of the connector
+    # (from row top → row centre), matching the merge-in visual in the designer
+    # reference where a feature branch curves back into the main lane.
+    for cl in convergeLanes:
+      connectors.add(VCSGraphConnector(
+        fromLane: cl,
+        toLane:   myLane,
+        colorIdx: lanes[cl].colorIdx,
+        isTop:    true,
+      ))
+      lanes[cl].waitingFor = ""  # this lane is done after convergence
+
+    # Advance primary lane to first parent (or clear for root commits).
+    if commit.parents.len > 0:
+      lanes[myLane].waitingFor = $commit.parents[0]
+    else:
+      lanes[myLane].waitingFor = ""
+
+    # Merge-parent connectors: each extra parent opens a new lane.
+    # Reuse a freed slot before appending a new column; if no free slot
+    # exists, append.  The slot uses gckEmpty — the branch-out connector
+    # draws the bottom-half visual via its border-right / border-left.
+    for pIdx in 1 ..< commit.parents.len:
+      let extraColor = nextColor mod branchPalette.len
+      inc nextColor
+      var newLane = -1
+      for k in 0 ..< lanes.len:
+        if lanes[k].waitingFor.len == 0:
+          newLane = k
+          lanes[newLane] = GraphLane(
+            waitingFor: $commit.parents[pIdx],
+            colorIdx: extraColor,
+          )
+          break
+      if newLane < 0:
+        newLane = lanes.len
+        row.add(VCSGraphCell(kind: gckEmpty))  # slot for width; connector draws the visual
+        lanes.add(GraphLane(
+          waitingFor: $commit.parents[pIdx],
+          colorIdx: extraColor,
+        ))
+      connectors.add(VCSGraphConnector(
+        fromLane: myLane,
+        toLane:   newLane,
+        colorIdx: extraColor,
+      ))
+
+    result[i] = GraphRow(cells: row, dotLane: myLane, connectors: connectors)
+
+    # Trailing compaction: trim empty slots from the END of the lane array
+    # only.  Interior empty slots are kept in place so that active lanes to
+    # their right don't shift left (which would cause visual position jumps
+    # across rows).  New branches reuse interior empty slots before appending.
+    while lanes.len > 0 and lanes[^1].waitingFor.len == 0:
+      lanes.setLen(lanes.len - 1)
+
+proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
+  ## Fetch ``commitPageSize`` commits starting at ``skip``, parsing parent
+  ## hashes so the commit-graph algorithm can assign branch lanes.
+  ##
+  ## Format: ``<fullHash> <parent1> [<parent2> …>]\x1e<shortHash>\x1e<subject>\x1e<relDate>\x1e<absDate>\x1e<author>``
+  ## The ``%P`` token is a space-separated list of full parent hashes;
+  ## it is empty for root commits.  ``%cs`` produces the committer date in
+  ## short YYYY-MM-DD format (requires git ≥ 2.29).
   const sep = "\x1e"
+  let prettyFmt = "%H %P" & sep & "%h" & sep & "%s" & sep & "%cr" & sep & "%cs" & sep & "%an"
+  let skipStr = "--skip=" & $skip
+  let countStr = "-" & $commitPageSize
   let raw = gitExec(
-    @[cstring("log"), cstring("--pretty=format:%h" & sep & "%s" & sep & "%cr"), cstring"-30"], cwd)
-  self.commits = @[]
+    @[cstring"log",
+      cstring("--pretty=format:" & prettyFmt),
+      cstring(skipStr),
+      cstring(countStr)],
+    cwd)
+
+  if skip == 0:
+    self.commits = @[]
+
   if raw.len > 0:
     for line in ($raw).splitLines():
       let trimmed = line.strip()
       if trimmed.len == 0:
         continue
       let parts = trimmed.split(sep)
-      if parts.len >= 3:
-        self.commits.add(VCSCommit(
-          hash: cstring(parts[0]),
-          message: cstring(parts[1]),
-          relativeTime: cstring(parts[2])))
-      elif parts.len == 2:
-        self.commits.add(VCSCommit(
-          hash: cstring(parts[0]),
-          message: cstring(parts[1]),
-          relativeTime: cstring""))
-      elif parts.len == 1:
-        self.commits.add(VCSCommit(
-          hash: cstring(parts[0]),
-          message: cstring"",
-          relativeTime: cstring""))
+      if parts.len < 1:
+        continue
+      # First field: "<fullHash> [<parent1> <parent2> …]"
+      let hashAndParents = parts[0].strip().split(" ")
+      let fullH = if hashAndParents.len > 0: hashAndParents[0] else: ""
+      var parents: seq[cstring] = @[]
+      for pIdx in 1 ..< hashAndParents.len:
+        let p = hashAndParents[pIdx].strip()
+        if p.len > 0:
+          parents.add(cstring(p))
+      let shortH    = if parts.len > 1: parts[1].strip() else: fullH[0..min(6, fullH.high)]
+      let subject   = if parts.len > 2: parts[2] else: ""
+      let relDate   = if parts.len > 3: parts[3] else: ""
+      let absDate   = if parts.len > 4: parts[4] else: ""
+      let authorStr = if parts.len > 5: parts[5] else: ""
+      self.commits.add(VCSCommit(
+        hash: cstring(shortH),
+        message: cstring(subject),
+        relativeTime: cstring(relDate),
+        date: cstring(absDate),
+        fullHash: cstring(fullH),
+        author: cstring(authorStr),
+        parents: parents,
+      ))
+
+  self.commitOffset = skip + commitPageSize
 
 proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
   ## Load the files changed in a specific commit with diff --stat style info.
@@ -193,6 +377,18 @@ proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
             additions: 0,
             deletions: 0))
 
+proc loadChangedFilesForIndex*(self: VCSComponent; cwd: cstring;
+                               commitIndex: int) =
+  ## Load changed files for the commit at ``commitIndex`` and store the result
+  ## in ``commitFilesCache``.  A no-op if the index is out of range.
+  if commitIndex < 0 or commitIndex >= self.commits.len:
+    return
+  if self.commitFilesCache.isNil:
+    self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+  let hash = self.commits[commitIndex].hash
+  self.loadChangedFiles(cwd, hash)
+  self.commitFilesCache[commitIndex] = self.changedFiles
+
 proc getWorkingDirectory(self: VCSComponent): cstring =
   ## Determine the working directory for git commands.
   ## Prefers `startOptions.folder`, falling back to `process.cwd()`.
@@ -215,18 +411,40 @@ proc refreshVCSData*(self: VCSComponent) =
   self.loadBranches(cwd)
   self.loadCommits(cwd)
 
-  # If we have commits and a selection, load changed files.
-  if self.commits.len > 0:
-    if self.selectedCommitIndex < 0 or
-       self.selectedCommitIndex >= self.commits.len:
-      self.selectedCommitIndex = 0
-    self.loadChangedFiles(cwd, self.commits[self.selectedCommitIndex].hash)
+  # Reload files for all currently expanded commits after a refresh.
+  # Indices that are now out-of-range are silently skipped.
+  self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+  for idx in self.selectedCommitIndices:
+    self.loadChangedFilesForIndex(cwd, idx)
+
+proc commitRows(self: VCSComponent): seq[VCSCommitRow]
+
+proc loadMoreCommits*(self: VCSComponent) =
+  ## Append the next page of commits to ``self.commits`` and push the
+  ## updated list to the VM.  Guards against concurrent fetches with
+  ## ``self.loadingMore``.
+  if self.loadingMore:
+    return
+  if not self.isGitRepo:
+    return
+  self.loadingMore = true
+  let vm = if vcsVMInstances.hasKey(self.id): vcsVMInstances[self.id] else: nil
+  if not vm.isNil:
+    vm.setLoadingMore(true)
+  let cwd = self.getWorkingDirectory()
+  self.loadCommits(cwd, skip = self.commitOffset)
+  self.loadingMore = false
+  if not vm.isNil:
+    vm.setLoadingMore(false)
+    vm.setCommits(self.commitRows(), self.selectedCommitIndices,
+                  self.lastClickedCommitIndex)
 
 proc resetAndRefreshVCS*(self: VCSComponent) =
   ## Force the panel to reload from the current workspace folder.
   if self.isNil:
     return
   self.initialized = false
+  self.commitOffset = 0
   self.refreshVCSData()
   self.syncLegacyVCSIntoVM()
 
@@ -720,12 +938,24 @@ proc gitChangedRows(self: VCSComponent): seq[VCSFileRow] =
     ))
 
 proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
+  ## Convert the stored ``VCSCommit`` list to ``VCSCommitRow`` values suitable
+  ## for the VM, including the pre-computed graph-lane cells, dot position,
+  ## and merge connectors.
+  let graphRows = computeGraphRows(self.commits)
   result = @[]
-  for commit in self.commits:
+  for i, commit in self.commits:
+    let gr = if i < graphRows.len: graphRows[i]
+             else: GraphRow(dotLane: -1)
     result.add(VCSCommitRow(
       hash: safeStr(commit.hash),
       message: safeStr(commit.message),
       relativeTime: safeStr(commit.relativeTime),
+      date: safeStr(commit.date),
+      author: safeStr(commit.author),
+      fullHash: safeStr(commit.fullHash),
+      graphCells: gr.cells,
+      dotLane: gr.dotLane,
+      connectors: gr.connectors,
     ))
 
 proc diffRows(self: VCSComponent): seq[VCSDiffFileRow] =
@@ -780,7 +1010,7 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
     vm.setHeader(self.currentReviewTitle())
     vm.setGitRepoState(true)
     vm.setBranchState("", @[], false)
-    vm.setCommits(@[], -1)
+    vm.setCommits(@[], @[])
     vm.setChangedFiles(self.deepReviewRows())
     vm.setUnifiedDiff(false, @[])
     vm.setHunkState(@[], false, false)
@@ -793,7 +1023,26 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   vm.setBranchState(safeStr(self.currentBranch),
                     self.branches.mapIt(safeStr(it)),
                     self.branchDropdownOpen)
-  vm.setCommits(self.commitRows(), self.selectedCommitIndex)
+  vm.setCommits(self.commitRows(), self.selectedCommitIndices,
+                self.lastClickedCommitIndex)
+  # Push per-commit file lists from the cache so each expanded accordion shows
+  # its own file list independently of the others.
+  var fileEntries: seq[(int, seq[VCSFileRow])] = @[]
+  for idx in self.selectedCommitIndices:
+    if not self.commitFilesCache.isNil and self.commitFilesCache.hasKey(idx):
+      var rows: seq[VCSFileRow] = @[]
+      for file in self.commitFilesCache[idx]:
+        rows.add(VCSFileRow(
+          status: safeStr(file.status),
+          path: safeStr(file.filename),
+          baseName: basename(file.filename),
+          additions: file.additions,
+          deletions: file.deletions,
+          coverageText: "",
+          selected: false,
+        ))
+      fileEntries.add((idx, rows))
+  vm.syncCommitFilesMap(fileEntries)
   vm.setChangedFiles(self.gitChangedRows())
   vm.setUnifiedDiff(self.unifiedDiffActive, self.diffRows())
   vm.setHunkState(self.selectedHunks, self.hunkToolbarVisible,
@@ -857,10 +1106,10 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
         component.refreshVCSData()
         component.syncLegacyVCSIntoVM(),
       onSelectCommit: proc(index: int) =
-        component.selectedCommitIndex = index
-        if index >= 0 and index < component.commits.len:
-          component.loadChangedFiles(component.getWorkingDirectory(),
-                                     component.commits[index].hash)
+        component.selectedCommitIndices = @[index]
+        component.lastClickedCommitIndex = index
+        component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+        component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
         component.syncLegacyVCSIntoVM(),
       onSelectFile: proc(index: int; path: string) =
         component.handleVCSFileSelection(index, path),
@@ -884,6 +1133,50 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
         component.syncLegacyVCSIntoVM(),
       onClearSelectedHunks: proc() =
         component.clearHunkSelection()
+        component.syncLegacyVCSIntoVM(),
+      onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
+        ## Multi-select accordion toggle.
+        ## • ctrl+click  — toggle this commit in/out of the expanded set.
+        ## • shift+click — expand the range from lastClickedCommitIndex to index.
+        ## • plain click — exclusive expand, or collapse if already sole selection.
+        let cwd = component.getWorkingDirectory()
+        if ctrl:
+          # Toggle individual commit without affecting others.
+          var newSel = component.selectedCommitIndices
+          let pos = newSel.find(index)
+          if pos >= 0:
+            newSel.delete(pos)
+            # Cache entry is left intact; it is simply no longer visible since
+            # the index is absent from selectedCommitIndices.
+          else:
+            newSel.add(index)
+            component.loadChangedFilesForIndex(cwd, index)
+          component.selectedCommitIndices = newSel
+          component.lastClickedCommitIndex = index
+        elif shift and component.lastClickedCommitIndex >= 0:
+          # Range-select from anchor to current index (inclusive).
+          let lo = min(component.lastClickedCommitIndex, index)
+          let hi = max(component.lastClickedCommitIndex, index)
+          var newSel = component.selectedCommitIndices
+          for i in lo..hi:
+            if i notin newSel:
+              newSel.add(i)
+              component.loadChangedFilesForIndex(cwd, i)
+          component.selectedCommitIndices = newSel
+          # Do not update anchor on shift+click (matches standard list behaviour).
+        else:
+          # Plain click: exclusive select or collapse when already sole.
+          if component.selectedCommitIndices == @[index]:
+            component.selectedCommitIndices = @[]
+            component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+          else:
+            component.selectedCommitIndices = @[index]
+            component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+            component.loadChangedFilesForIndex(cwd, index)
+          component.lastClickedCommitIndex = index
+        component.syncLegacyVCSIntoVM(),
+      onLoadMoreCommits: proc() =
+        component.loadMoreCommits()
         component.syncLegacyVCSIntoVM(),
     )
     mountIsoNimVCSPanel(cast[isonim_dom_api.Element](container), vm,

@@ -228,7 +228,9 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
           tdiv(class = "welcome-text"):
             tdiv(class = "welcome-logo"):
               discard
-            text "Welcome to CodeTracer IDE"
+            tdiv:
+              tdiv: text "Welcome to"
+              tdiv: text "CodeTracer IDE"
           tdiv(class = "welcome-version"):
             text "Version " & CodeTracerVersionStr
         tdiv(class = "welcome-content"):
@@ -267,10 +269,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                     let recordingId = traceCopy.recordingId
                     tdiv(class = "recent-trace-container"):
                       tdiv(class = "recent-trace",
-                           onclick = traceClickHandler(vm, callbacks, recordingId),
-                           onmouseover = traceMouseOverHandler(vm, recordingId),
-                           onmouseleave = proc() =
-                             vm.clearHoveredTrace()):
+                           onclick = traceClickHandler(vm, callbacks, recordingId)):
                         tdiv(class = "recent-trace-title"):
                           span(class = "recent-trace-title-time"):
                             text formatWelcomeTimeAgo(traceCopy.date)
@@ -278,8 +277,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                             discard
                           span(class = "recent-trace-title-content"):
                             text traceCommandText(traceCopy)
-                        tdiv(class = traceTooltipClass(
-                               hoveredRecordingId == recordingId)):
+                        tdiv(class = "recent-trace-tooltip"):
                           text traceTooltipText(traceCopy)
                 else:
                   tdiv(class = "empty-state-message"):
@@ -564,7 +562,9 @@ when defined(js):
             tdiv(class = "welcome-text"):
               tdiv(class = "welcome-logo"):
                 discard
-              text "Welcome to CodeTracer IDE"
+              tdiv:
+                tdiv: text "Welcome to"
+                tdiv: text "CodeTracer IDE"
             tdiv(class = "welcome-version"):
               text "Version " & CodeTracerVersionStr
           tdiv(class = "welcome-content"):
@@ -603,10 +603,7 @@ when defined(js):
                       let recordingId = traceCopy.recordingId
                       tdiv(class = "recent-trace-container"):
                         tdiv(class = "recent-trace",
-                             onclick = traceClickHandler(vm, callbacks, recordingId),
-                             onmouseover = traceMouseOverHandler(vm, recordingId),
-                             onmouseleave = proc() =
-                               vm.clearHoveredTrace()):
+                             onclick = traceClickHandler(vm, callbacks, recordingId)):
                           tdiv(class = "recent-trace-title"):
                             span(class = "recent-trace-title-time"):
                               text formatWelcomeTimeAgo(traceCopy.date)
@@ -614,8 +611,7 @@ when defined(js):
                               discard
                             span(class = "recent-trace-title-content"):
                               text traceCommandText(traceCopy)
-                          tdiv(class = traceTooltipClass(
-                                 hoveredRecordingId == recordingId)):
+                          tdiv(class = "recent-trace-tooltip"):
                             text traceTooltipText(traceCopy)
                   else:
                     tdiv(class = "empty-state-message"):
@@ -882,3 +878,26 @@ when defined(js):
     let panel = renderWelcomeScreenPanel(r, vm, callbacks)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))
+    # Position each trace tooltip to the right of its row instead of the
+    # viewport center.  Event delegation on #welcomeScreen handles all
+    # traces without re-attaching listeners after reactive updates.
+    # ``mouseover`` bubbles, so ``closest('.recent-trace')`` reliably
+    # identifies the trace row even when the event originates from an inner
+    # span.  We query the container by id to avoid Nim variable-name
+    # mangling inside {.emit:}.
+    {.emit: """
+(function() {
+  var cont = document.getElementById('welcomeScreen');
+  if (!cont) return;
+  cont.addEventListener('mouseover', function(e) {
+    var trace = e.target.closest('.recent-trace');
+    if (!trace) return;
+    var tooltip = trace.querySelector('.recent-trace-tooltip');
+    if (!tooltip) return;
+    var rect = trace.getBoundingClientRect();
+    tooltip.style.left = (rect.right + 8) + 'px';
+    tooltip.style.top = (rect.top + rect.height / 2) + 'px';
+    tooltip.style.transform = 'translateY(-50%)';
+  });
+})();
+""".}
