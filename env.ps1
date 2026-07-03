@@ -205,7 +205,16 @@ function Invoke-AppxPackageQuery {
       ($msg -match "0x80131539") -or
       ($msg -match "not supported on this platform") -or
       ($msg -match "Appx") -or
-      ($msg -match "PackageManager")
+      ($msg -match "PackageManager") -or
+      # Windows Server 2022 / nested Windows guests sometimes ship with
+      # a broken AppX repository (SQLite database that never got the
+      # initial schema populated because no per-user App Installer ran).
+      # Get-AppxPackage then throws "The database disk image is
+      # malformed" (SQLite error 11).  Treat that the same way as the
+      # 0x80131539 platform-unsupported error: the box has no working
+      # AppX, degrade gracefully to "package unavailable" instead of
+      # blowing up env.ps1.
+      ($msg -match "database disk image is malformed")
     if ($isPlatformUnsupported) {
       return $null
     }
