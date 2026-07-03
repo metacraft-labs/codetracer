@@ -396,6 +396,7 @@ when defined(js):
       if (copyBtn) {
         copyBtn.addEventListener('click', function(e) {
           e.stopPropagation();
+          if (copyBtn.classList.contains('copied')) return;
           var hash = tip.querySelector('.vcs-tip-hash');
           var date = tip.querySelector('.vcs-tip-date');
           var commit = tip.querySelector('.vcs-tip-commit');
@@ -406,13 +407,18 @@ when defined(js):
             commit ? 'COMMIT: ' + commit.textContent : '',
             author ? 'AUTHOR: ' + author.textContent : ''
           ].filter(Boolean).join('\n');
+          function showCopied() {
+            copyBtn.classList.add('copied');
+            setTimeout(function() { copyBtn.classList.remove('copied'); }, 2500);
+          }
           if (navigator.clipboard) {
-            navigator.clipboard.writeText(text).catch(function() {});
+            navigator.clipboard.writeText(text).then(showCopied).catch(showCopied);
           } else {
             var ta = document.createElement('textarea');
             ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
             document.body.appendChild(ta); ta.select(); document.execCommand('copy');
             document.body.removeChild(ta);
+            showCopied();
           }
         });
       }
