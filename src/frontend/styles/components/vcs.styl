@@ -504,9 +504,15 @@
   background-size: contain
   background-position: center
   opacity: 0.6
+  transition: background-image 0s, opacity 150ms ease
 
   &:hover
     opacity: 1
+
+  &.copied
+    background-image: url("../../public/resources/shared/vcs-copy-success.svg")
+    opacity: 1
+    cursor: default
 
 // Inline file rows inside an expanded accordion entry.
 .vcs-accordion-files

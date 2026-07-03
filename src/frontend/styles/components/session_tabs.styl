@@ -93,19 +93,22 @@
   display flex
   align-items center
   justify-content center
-  flex 0 0 26px
-  width 26px
-  height 26px
+  flex 0 0 auto
+  width 1.75em
+  height 1.75em
   cursor pointer
-  color #b0b0b0
-  font-size 16px
   user-select none
-  border-radius 4px
+  border-radius 0.375em
+  border 0.03125em solid colors-ui-border-primary
+  background-color colors-ui-surface-primary-default
+  color colors-ui-text-primary-body-subtle
+  font-size 1em
+  line-height 1
   -webkit-app-region no-drag
   transition color 150ms ease, background-color 150ms ease
   &:hover
-    color PRIMARY_TEXT_COLOR
-    background-color ACTIVE_ROW
+    color colors-ui-text-primary-body
+    background-color colors-ui-surface-primary-default-hover
 
 .session-tab-overflow
   display none
