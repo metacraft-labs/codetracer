@@ -931,7 +931,7 @@ proc applyVCS(vm: VCSVM) =
     VCSCommitRow(hash: "4635f657",
                  message: "feat: scaffold terminal output storybook",
                  relativeTime: "today"),
-  ], 0)
+  ], [0], 0)
   vm.setChangedFiles([
     VCSFileRow(path: "src/frontend/storybook_components.nim", status: "modified",
                baseName: "storybook_components.nim", additions: 240,

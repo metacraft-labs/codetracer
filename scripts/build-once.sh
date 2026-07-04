@@ -77,10 +77,6 @@ if [ -n "$ct_reprobuild_host" ]; then
 		reprobuild_root="$REPROBUILD_SOURCE_ROOT"
 	fi
 
-	if [ -z "$repro_bin" ]; then
-		repro_bin="$(command -v repro || true)"
-	fi
-
 	# On Windows, `repro` ships as `repro.exe`; the `repro` (no extension)
 	# alias may not exist depending on how the sibling reprobuild was
 	# built. Probe both filenames under the sibling's `build/bin/`.
@@ -91,6 +87,10 @@ if [ -n "$ct_reprobuild_host" ]; then
 				break
 			fi
 		done
+	fi
+
+	if [ -z "$repro_bin" ]; then
+		repro_bin="$(command -v repro || true)"
 	fi
 
 	if [ -z "$repro_bin" ]; then

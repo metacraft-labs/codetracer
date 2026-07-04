@@ -162,10 +162,16 @@ proc recordCommand*(providerId: string; scope: TestScope; args,
       outputRoot = getTempDir() / ("ct-m11-record-" & $getCurrentProcessId() &
           "-" & $epochTime().int & "-" & $cpuTime())
       tracePath = outputRoot / "file.ct"
+      directCommandAvailable = toolAvailable(args[0])
       testCommand = commandWithNixFallback(args, nixPackages)
+      traceTargetArgs =
+        if directCommandAvailable:
+          args
+        else:
+          @["sh", "-lc", testCommand]
       recordArgs = nativeRecorderEnvironmentPrefix() & recorder & @["record",
           "--use-interpose", "--source", scope.file, "--output", tracePath,
-          "--", "sh", "-lc", testCommand]
+          "--"] & traceTargetArgs
       command = commandLine(recordArgs)
       runId = providerId & ":record:" & $scope.kind & ":" & scope.selector
       testId = if scope.testId.len > 0: scope.testId else: scope.selector

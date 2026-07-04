@@ -271,6 +271,7 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
   const
     SupportProfile = "macos-arm64-direct-hcr-in-codetracer-v1"
     EvidenceSchema = "codetracer.reprobuild-hcr-in-codetracer.evidence.v1"
+    ReproWatchBuildTimeoutMs = 120000
     PatchableFunction = "reprobuild_hcr_patchable_value"
     Gen0Breakpoint = "REPROBUILD_HCR_GEN0_BREAKPOINT"
     Gen0StepStart = "REPROBUILD_HCR_GEN0_STEP_START"
@@ -290,6 +291,7 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
     let mcrLog = parsed.artifacts / "mcr-record.log"
     let sourceEditLog = parsed.artifacts / "source-edit-driver.log"
     let readyFile = parsed.artifacts / "target-ready"
+    let hcrMetadataPath = parsed.artifacts / "hcr-watch-metadata.json"
     let gen0Snapshot = parsed.artifacts / "source-generation0-patchable.c"
     let gen1Snapshot = parsed.artifacts / "source-generation1-patchable.c"
     let symbolEvidence = parsed.artifacts / "symbol-registration-evidence.json"
@@ -299,6 +301,14 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
     if fileExists(socketPath):
       removeFile(socketPath)
     copyFile(sourcePath, gen0Snapshot)
+    writeFile(hcrMetadataPath, pretty(%*{
+      "schemaId": "codetracer.reprobuild-hcr-in-codetracer.metadata.v1",
+      "function": PatchableFunction,
+      "targetSymbol": PatchableFunction,
+      "objectSymbol": "_" & PatchableFunction,
+      "object": parsed.project / "build" / "patchable.o",
+      "source": sourcePath
+    }))
 
     let targetArg = parsed.project & "#" & parsed.target
     let coordinatorCmd = "exec " & shellCommand([
@@ -307,13 +317,15 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
       "--max-cycles=2",
       "--debounce-ms=100",
       "--hcr-agent-socket=" & socketPath,
-      "--hcr-artifacts=" & parsed.artifacts
+      "--hcr-artifacts=" & parsed.artifacts,
+      "--hcr-metadata=" & hcrMetadataPath
     ]) & " > " & q(coordinatorLog) & " 2>&1"
     let coordinator = startShell(coordinatorCmd, parsed.project)
     try:
       waitForFileContains(coordinatorLog,
         "repro watch: cycle 1 result exitCode=0",
-        "repro watch initial build")
+        "repro watch initial build",
+        ReproWatchBuildTimeoutMs)
     except CatchableError:
       terminateProcess(coordinator)
       raise
@@ -336,7 +348,8 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
         "repro watch agent handshake",
         recorder, "ct-mcr record", mcrLog)
       waitForFileContains(coordinatorLog, "repro watch: watching paths=",
-        "repro watch filesystem watcher")
+        "repro watch filesystem watcher",
+        ReproWatchBuildTimeoutMs)
       runShell(shellCommand([parsed.sourceEditDriver, parsed.project]),
         parsed.project, "source edit driver", sourceEditLog)
     except CatchableError:

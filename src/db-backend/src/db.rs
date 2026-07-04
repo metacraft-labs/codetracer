@@ -3006,6 +3006,39 @@ impl MaterializedReplaySession {
                 }
                 BackwardScanOutcome::RecordingStart { steps_scanned } => {
                     metrics.steps_scanned += steps_scanned;
+                    if let Some((source_expr, binding_step, source_text)) = self.resolve_ruby_block_argument_binding(
+                        &current_var_name,
+                        current_frame,
+                        current_step,
+                        expr_loader,
+                        meta_dat_sources_root,
+                    ) {
+                        let function_name = self.function_name_for_call(current_frame);
+                        let location = self.reader.load_location(binding_step, current_frame, expr_loader);
+                        hops.push(OriginHop {
+                            kind: WireOriginKind::ParameterPass,
+                            target_expr: current_var_name.clone(),
+                            source_expr: source_expr.clone(),
+                            source_variable: Some(source_expr.clone()),
+                            location,
+                            source_text,
+                            step_id: binding_step.0,
+                            frame_transition: Some(WireFrameTransition {
+                                kind: FrameTransitionKind::ParameterPass,
+                                from_function: function_name.clone(),
+                                to_function: function_name,
+                                call_key: current_frame.0,
+                            }),
+                            operand_snapshots: Vec::new(),
+                            truncated_operands: false,
+                            confidence: 0.75,
+                            classification_provenance: Some("built-in: Ruby block-argument parameter pass".to_string()),
+                            correlation_transition: None,
+                        });
+                        current_var_name = source_expr;
+                        current_step = StepId(binding_step.0 - 1);
+                        continue;
+                    }
                     terminator = Terminator::new(TerminatorKind::RecordingStart);
                     break;
                 }
@@ -3139,11 +3172,23 @@ impl MaterializedReplaySession {
                 });
 
             // (4) Build the hop. If classification failed, emit an
-            // Unknown terminator hop and stop.
+            // Unknown terminator hop and stop. A bare expression-statement
+            // call such as Noir's `println(c);` is not an assignment, but it
+            // still observes/forwards the queried value. Treat that as a
+            // no-op hop and continue walking the variable's earlier writes.
             let location = self.reader.load_location(last_change_step, current_frame, expr_loader);
             let (classification, ast_source) = match classification {
                 Some(pair) => pair,
                 None => {
+                    if last_change_step.0 > 0
+                        && let Some(lang) = classifier_lang
+                        && parse_call_arguments(&line_text, lang)
+                            .map(|args| args.iter().any(|arg| arg.trim() == current_var_name))
+                            .unwrap_or(false)
+                    {
+                        current_step = StepId(last_change_step.0 - 1);
+                        continue;
+                    }
                     // Spec §6.1.6: hitting the recording boundary
                     // (last_change_step == 0) with an unparseable line
                     // is the RecordingStart terminator. Otherwise it's
@@ -3648,6 +3693,55 @@ impl MaterializedReplaySession {
         None
     }
 
+    /// Ruby block parameters (`xs.each do |x|`) are not represented as a
+    /// separate call frame by the native Ruby recorder. The first observable
+    /// value for `x` can therefore be on the same step that consumes it inside
+    /// the block. When the generic backward scan reaches recording start for a
+    /// variable, use the block header as the parameter-pass source.
+    fn resolve_ruby_block_argument_binding(
+        &self,
+        param_name: &str,
+        frame: CallKey,
+        from_step: StepId,
+        expr_loader: &mut ExprLoader,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Option<(String, StepId, String)> {
+        let mut step_idx = from_step.0;
+        while step_idx >= 0 {
+            let sid = StepId(step_idx);
+            let step = self.reader.step(sid).copied()?;
+            if step.call_key != frame {
+                if step.call_key.0 < frame.0 {
+                    return None;
+                }
+                step_idx -= 1;
+                continue;
+            }
+
+            let path_str = self.reader.path(step.path_id)?;
+            if classifier_lang_for_path(path_str) != Some(ClassifierLang::Ruby) {
+                return None;
+            }
+            let workdir_path = self.reader.workdir().join(path_str);
+            let probe_path = if workdir_path.exists() {
+                workdir_path
+            } else {
+                PathBuf::from(path_str)
+            };
+            let row = step.line.0.max(0) as usize;
+            let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+            if origin == SourceOrigin::Unavailable {
+                step_idx -= 1;
+                continue;
+            }
+            if let Some(source_expr) = ruby_block_argument_source(&line_text, param_name) {
+                return Some((source_expr, sid, line_text));
+            }
+            step_idx -= 1;
+        }
+        None
+    }
+
     /// Look up the function name for a given `CallKey`. Empty string
     /// when the call key has no function metadata (e.g. NO_KEY).
     fn function_name_for_call(&self, call_key: CallKey) -> String {
@@ -3764,6 +3858,7 @@ fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
         "rs" => Some(ClassifierLang::Rust),
         "go" => Some(ClassifierLang::Go),
         "nim" | "nims" | "nimble" => Some(ClassifierLang::Nim),
+        "nr" => Some(ClassifierLang::Rust),
         _ => None,
     }
 }
@@ -3795,6 +3890,29 @@ fn track_source_digest(
             origin: origin_kind,
             sha256_hex: sha256_hex(&bytes),
         });
+    }
+}
+
+fn ruby_block_argument_source(line_text: &str, param_name: &str) -> Option<String> {
+    let line = line_text.trim();
+    let pipe_start = line.find('|')?;
+    let after_start = &line[pipe_start + 1..];
+    let pipe_end_rel = after_start.find('|')?;
+    let params = &after_start[..pipe_end_rel];
+    if !params.split(',').map(str::trim).any(|p| p == param_name) {
+        return None;
+    }
+
+    let before_params = line[..pipe_start].trim_end();
+    let header = before_params
+        .strip_suffix("do")
+        .or_else(|| before_params.strip_suffix('{'))?
+        .trim_end();
+    let receiver = header.split_once('.').map(|(receiver, _method)| receiver.trim())?;
+    if receiver.is_empty() {
+        None
+    } else {
+        Some(receiver.to_string())
     }
 }
 

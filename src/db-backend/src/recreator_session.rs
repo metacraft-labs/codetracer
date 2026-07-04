@@ -50,6 +50,15 @@ fn replay_query_timeout() -> Duration {
         .map(Duration::from_secs)
         .unwrap_or_else(|| Duration::from_secs(10))
 }
+
+fn replay_worker_startup_timeout() -> Duration {
+    std::env::var("CODETRACER_REPLAY_WORKER_STARTUP_TIMEOUT_SECS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| replay_query_timeout().max(Duration::from_secs(30)))
+}
 use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 
 #[cfg(unix)]
@@ -290,7 +299,8 @@ impl ReplayWorker {
 
         eprintln!("[rr-worker] connecting to socket {}", socket_path.display());
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let startup_timeout = replay_worker_startup_timeout();
+        let deadline = Instant::now() + startup_timeout;
         loop {
             if let Ok(stream) = UnixStream::connect(&socket_path) {
                 stream.set_read_timeout(Some(replay_query_timeout()))?;
@@ -301,8 +311,9 @@ impl ReplayWorker {
 
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "timeout after 10s waiting for worker socket at {}",
-                    socket_path.display()
+                    "timeout after {}s waiting for worker socket at {}",
+                    startup_timeout.as_secs(),
+                    socket_path.display(),
                 )
                 .into());
             }
@@ -320,7 +331,8 @@ impl ReplayWorker {
 
     #[cfg(windows)]
     fn setup_worker_sockets(&mut self) -> Result<(), Box<dyn Error>> {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let startup_timeout = replay_worker_startup_timeout();
+        let deadline = Instant::now() + startup_timeout;
         let poll_interval = Duration::from_millis(25);
         let mut last_error: Option<String> = None;
         let manifest_name = format!("ct_native_replay_{}_{}_from_.sock", self.name, self.index);

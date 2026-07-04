@@ -53,10 +53,16 @@ with pkgs;
     procps
 
     # C/C++ + linkers used by tup, nim's gcc backend, and Rust crates
-    # with native dependencies.
+    # with native dependencies. CMake/Ninja/GTest/Catch2 are exercised by
+    # `just test-ct-providers`' real C/C++ provider fixtures.
     gcc
+    clang
     binutils
+    cmake
+    ninja
     pkg-config
+    gtest.dev
+    catch2_3
 
     # Rust toolchain (see `rustToolchain` above) + nextest runner.
     rustToolchain
@@ -187,6 +193,14 @@ with pkgs;
     ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
       export C_INCLUDE_PATH="${libbpf}/include''${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}";
     ''}
+
+    # C/C++ provider fixtures build real GoogleTest/Catch2/CTest projects.
+    # Keep their toolchain independent from the user's profile so `just
+    # test-ct-providers` works the same in `devShells.default` and
+    # `devShells.ci`.
+    export CT_TEST_CC="${clang}/bin/clang"
+    export CT_TEST_CXX="${clang}/bin/clang++"
+    export CMAKE_PREFIX_PATH="${gtest.dev}:${catch2_3}''${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 
     # Frontend node_modules: bundled via Nix so tup picks them up
     # deterministically. The symlink is recreated every shell entry

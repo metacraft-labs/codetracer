@@ -11,4 +11,4 @@ DEPENDENCIES
   minitest (~> 5.25)
 
 BUNDLED WITH
-   2.7.2
+   2.5.22

@@ -251,6 +251,73 @@ proc fallbackRecord*(spec: M12FallbackSpec; scope: TestScope): ProviderResult[
       diagnostics: @[missingToolDiagnostic(spec.runTool, spec.nixPackages,
           scope.file)],
       value: @[])
+  {.cast(gcsafe).}:
+    case spec.providerId
+    of "pascal-fallback":
+      let
+        exe = tempExecutable("ct-m12-pascal", scope.file)
+        buildDir = exe & "-build"
+        buildCommand = commandWithNixShell(
+          "mkdir -p " & shellQuote(buildDir) & " && fpc -g -FU" &
+            shellQuote(buildDir) & " -o" & shellQuote(exe) & " " &
+            shellQuote(scope.file),
+          spec.runTool, spec.nixPackages)
+        build = execCapturedShell(buildCommand, cwd = scope.projectRoot)
+      if build.exitCode != 0:
+        return ProviderResult[seq[TestEvent]](
+          diagnostics: @[diagnostic(dsError,
+              "Pascal fixture build failed with exit code " & $build.exitCode,
+              scope.file)],
+          value: @[event(tekFailure, spec.providerId,
+              spec.providerId & ":record-build:" & scope.selector,
+              if scope.testId.len > 0: scope.testId else: scope.selector,
+              some(tsFailed), "Pascal fixture build failed", build.output)])
+      return recordCommand(spec.providerId, scope, @[exe], @[],
+          normalizedRelative(scope.projectRoot, scope.file))
+    of "fortran-fallback":
+      let
+        exe = tempExecutable("ct-m12-fortran", scope.file)
+        buildCommand = commandWithNixShell(
+          "gfortran -g -O0 -o " & shellQuote(exe) & " " &
+            shellQuote(scope.file),
+          spec.runTool, spec.nixPackages)
+        build = execCapturedShell(buildCommand, cwd = scope.projectRoot)
+      if build.exitCode != 0:
+        return ProviderResult[seq[TestEvent]](
+          diagnostics: @[diagnostic(dsError,
+              "Fortran fixture build failed with exit code " & $build.exitCode,
+              scope.file)],
+          value: @[event(tekFailure, spec.providerId,
+              spec.providerId & ":record-build:" & scope.selector,
+              if scope.testId.len > 0: scope.testId else: scope.selector,
+              some(tsFailed), "Fortran fixture build failed", build.output)])
+      return recordCommand(spec.providerId, scope, @[exe], @[],
+          normalizedRelative(scope.projectRoot, scope.file))
+    of "assembly-fallback":
+      let
+        exe = tempExecutable("ct-m12-asm", scope.file)
+        buildCommand = commandWithNixShell(
+          "gcc -g -no-pie -x assembler-with-cpp -o " & shellQuote(exe) &
+            " " & shellQuote(scope.file),
+          spec.runTool, spec.nixPackages)
+        build = execCapturedShell(buildCommand, cwd = scope.projectRoot)
+      if build.exitCode != 0:
+        return ProviderResult[seq[TestEvent]](
+          diagnostics: @[diagnostic(dsError,
+              "Assembly fixture build failed with exit code " & $build.exitCode,
+              scope.file)],
+          value: @[event(tekFailure, spec.providerId,
+              spec.providerId & ":record-build:" & scope.selector,
+              if scope.testId.len > 0: scope.testId else: scope.selector,
+              some(tsFailed), "Assembly fixture build failed", build.output)])
+      return recordCommand(spec.providerId, scope, @[exe], @[],
+          normalizedRelative(scope.projectRoot, scope.file))
+    of "lean-fallback":
+      return recordCommand(spec.providerId, scope, @["lean", "--run",
+          scope.file], spec.nixPackages,
+          normalizedRelative(scope.projectRoot, scope.file))
+    else:
+      discard
   let command = spec.fileCommand(scope.projectRoot, scope.file)
   recordCommand(spec.providerId, scope, @["sh", "-lc", commandWithNixShell(
       command, spec.runTool, spec.nixPackages)], @[],

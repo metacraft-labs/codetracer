@@ -247,6 +247,16 @@ impl FlowTestRunner {
         Self::new_with_target_pid(db_backend_bin, rr_trace_dir, None)
     }
 
+    /// Spawn db-backend with additional environment variables, then run the DAP
+    /// init sequence with the given RR/MCR trace folder.
+    pub fn new_with_envs(
+        db_backend_bin: &Path,
+        rr_trace_dir: &Path,
+        extra_envs: &[(&str, &str)],
+    ) -> Result<Self, BoxError> {
+        Self::new_with_target_pid_and_envs(db_backend_bin, rr_trace_dir, None, extra_envs)
+    }
+
     /// Spawn db-backend targeting a specific process in a multi-process trace.
     ///
     /// When `target_pid` is `Some(pid)`, the replay worker (`ct-native-replay`)
@@ -261,15 +271,34 @@ impl FlowTestRunner {
         rr_trace_dir: &Path,
         target_pid: Option<u32>,
     ) -> Result<Self, BoxError> {
+        Self::new_with_target_pid_and_envs(db_backend_bin, rr_trace_dir, target_pid, &[])
+    }
+
+    fn new_with_target_pid_and_envs(
+        db_backend_bin: &Path,
+        rr_trace_dir: &Path,
+        target_pid: Option<u32>,
+        extra_envs: &[(&str, &str)],
+    ) -> Result<Self, BoxError> {
         let t0 = std::time::Instant::now();
         let (launch_folder, wrapper) = prepare_trace_folder(rr_trace_dir)?;
-        let ct_rr_worker_exe = find_ct_rr_support()?;
+        let ct_rr_worker_exe = extra_envs
+            .iter()
+            .find_map(|(name, value)| match *name {
+                "CT_NATIVE_REPLAY_BIN" | "CODETRACER_CT_NATIVE_REPLAY_CMD" => {
+                    Some(PathBuf::from(value))
+                }
+                _ => None,
+            })
+            .filter(|path| path.is_file())
+            .map(Ok)
+            .unwrap_or_else(find_ct_rr_support)?;
 
         let pid_str = target_pid.map(|p| p.to_string());
-        let envs: Vec<(&str, &str)> = match pid_str.as_deref() {
-            Some(s) => vec![("CT_NATIVE_REPLAY_TARGET_PID", s)],
-            None => Vec::new(),
-        };
+        let mut envs = extra_envs.to_vec();
+        if let Some(s) = pid_str.as_deref() {
+            envs.push(("CT_NATIVE_REPLAY_TARGET_PID", s));
+        }
         let mut client = DapStdioClient::spawn_with_envs(db_backend_bin, &envs)?;
         eprintln!("[flow-runner] spawn: {:.1}s", t0.elapsed().as_secs_f64());
 

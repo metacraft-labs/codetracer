@@ -4472,14 +4472,11 @@ impl TestRecording {
 
         // Verify the essential trace files were produced.
         //
-        // Per Trace-Files/CTFS-Migration-Guide.md §3e, CTFS is the only
-        // supported materialized-trace format and a `.ct` container is
-        // self-contained — there is no sidecar `trace_metadata.json`,
-        // `trace.json`, or `trace.bin`.  Every recorder driven by this
-        // harness MUST emit exactly one `*.ct`; the previous tolerant
-        // fallback for recorders mid-migration was removed once the
-        // recorder convention compliance pass landed.
-        let _ = language;
+        // Per Trace-Files/CTFS-Migration-Guide.md §3e, CTFS is the default
+        // materialized-trace format and a `.ct` container is self-contained.
+        // Noir is the narrow exception: nargo 1.0.0-beta.2 documents and
+        // emits only `trace.json` plus sidecars, and the db-backend has a
+        // first-class legacy event-stream loader for exactly that pipeline.
         let ct_count = fs::read_dir(&trace_dir)
             .map(|entries| {
                 entries
@@ -4489,10 +4486,28 @@ impl TestRecording {
             })
             .unwrap_or(0);
         if ct_count == 0 {
+            if language == Language::Noir && trace_dir.join("trace.json").is_file() {
+                return Ok(TestRecording {
+                    trace_dir,
+                    source_path: source_path.to_path_buf(),
+                    binary_path: source_path.to_path_buf(), // interpreted langs have no binary
+                    temp_dir,
+                    language,
+                    version_label: version_label.to_string(),
+                });
+            }
             return Err(format!(
                 "no *.ct container produced in {} (CTFS is the only \
-                 supported materialized-trace format; legacy trace.json / \
-                 trace.bin / trace_metadata.json are no longer accepted)",
+                 supported materialized-trace format for {:?}; Noir is the \
+                 only accepted legacy trace.json event-stream producer)",
+                trace_dir.display(),
+                language,
+            ));
+        }
+        if language == Language::Noir && trace_dir.join("trace.json").is_file() {
+            return Err(format!(
+                "Noir recorder produced both CTFS and legacy trace.json in {}; \
+                 expected exactly one materialized trace layout",
                 trace_dir.display()
             ));
         }

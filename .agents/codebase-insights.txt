@@ -1,4 +1,24 @@
 # Codebase insights
+- 2026-07-04: macOS reprobuild monitoring cannot safely byte-copy Apple
+  platform binaries into sandbox tool directories. SIP/system binaries such as
+  `/usr/bin/iconutil`, `/usr/bin/hdiutil`, `/usr/bin/sw_vers`, and
+  `/usr/bin/codesign` need real non-SIP drop-ins seeded by
+  `nim-stackable-hooks` (its rewrite helper only rewrites to existing seeded
+  tools) or the build must avoid/cache-disable that action. `io-mon` also has
+  two narrow macOS allowances: CFPreferences shared-memory names
+  (`apple.cfprefs.daemonv1`, `apple.cfprefs.<uid>v1`) are ambient OS channels,
+  and `/dev/fd/N` FIFO aliases must be matched by fd device/inode so inherited
+  pipe reads are not misclassified as out-of-tree content.
+- 2026-07-04: macOS MCR capture/replay hooks must avoid interpose recursion for
+  low-level event primitives. In `ct_interpose`, `dlsym(RTLD_NEXT, "kqueue")`
+  and `kevent` can resolve back into the interposed symbol, so use raw syscall
+  helpers. For macOS arm64 raw reads, preserve Darwin errno/carry behavior;
+  routing through libc `syscall(2)` fixed bogus successful nonblocking reads
+  that broke Crystal's signal pipe.
+- 2026-07-04: Native-backend Go binary detection must recognize Mach-O Go
+  metadata (`__go_buildinfo`, `__gopclntab`, `__gosymtab`) and Mach-O symbol
+  spellings with a leading underscore or `.abi0` suffix. The older ELF-only
+  section/symbol checks classify macOS Go binaries as `Other`.
 - 2026-06-17: `MaterializedReplaySession::type_record` in
   `src/db-backend/src/db.rs` now returns a session-scoped `<unknown>`
   fallback when the supplied `TypeId` is outside both the base reader's

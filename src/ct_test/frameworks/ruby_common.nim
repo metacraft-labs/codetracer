@@ -391,20 +391,36 @@ proc event(
 proc executableAvailable(name: string): bool =
   findExe(name).len > 0
 
+proc nonSystemExecutable(name: string): string =
+  for dir in getEnv("PATH", "").split(PathSep):
+    if dir.len == 0:
+      continue
+    let candidate = dir / name
+    if fileExists(candidate) and not candidate.startsWith("/usr/bin/") and
+        not candidate.startsWith("/System/"):
+      return candidate
+  findExe(name)
+
+proc rubyExecutable*(): string =
+  nonSystemExecutable("ruby")
+
+proc bundleExecutable*(): string =
+  nonSystemExecutable("bundle")
+
 proc commandLine(args: seq[string]): string =
   args.mapIt(quoteShell(it)).join(" ")
 
 proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
     scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   {.cast(gcsafe).}:
-    if not executableAvailable("ruby"):
+    if rubyExecutable().len == 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "Ruby is required for test execution but was not found on PATH",
             scope.file)],
         value: @[])
     if fileExists(scope.projectRoot / "Gemfile") and
-        not executableAvailable("bundle"):
+        bundleExecutable().len == 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "bundle is required because the Ruby project has a Gemfile, " &
@@ -420,6 +436,16 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
         of tskSingle: rcsSingle
       args = buildRubyCommand(kind, scope.projectRoot, scope.file,
           scope.selector, commandScope)
+      execArgs =
+        if args.len >= 3 and args[0] == "bundle" and args[1] == "exec":
+          let executable =
+            if args[2] == "ruby": rubyExecutable() else: args[2]
+          if args.len > 3:
+            @[bundleExecutable(), "exec", executable] & args[3 .. ^1]
+          else:
+            @[bundleExecutable(), "exec", executable]
+        else:
+          args
       command = commandLine(args)
       runId = providerId & ":" & $scope.kind & ":" & scope.selector
       testId = if scope.testId.len > 0: scope.testId else: scope.selector
@@ -428,7 +454,7 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
       event(tekRunStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    let result = execCapturedShell(command, cwd = scope.projectRoot)
+    let result = execCaptured(execArgs, cwd = scope.projectRoot)
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
@@ -453,6 +479,9 @@ proc rubyRecorderCommandPrefix*(): seq[string] =
   let configured = getEnv("CODETRACER_RUBY_RECORDER_PATH", "")
   if configured.len > 0:
     return @[configured]
+  let rubyExe = rubyExecutable()
+  if rubyExe.len == 0:
+    return @[]
   let siblingRoots = [
     getCurrentDir().parentDir,
     currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir]
@@ -460,7 +489,7 @@ proc rubyRecorderCommandPrefix*(): seq[string] =
     let siblingCli = root / "codetracer-ruby-recorder" / "gems" /
         "codetracer-ruby-recorder" / "bin" / "codetracer-ruby-recorder"
     if fileExists(siblingCli):
-      return @["ruby", siblingCli]
+      return @[rubyExe, siblingCli]
   let onPath = findExe("codetracer-ruby-recorder")
   if onPath.len > 0:
     return @[onPath]
@@ -497,10 +526,14 @@ proc rubyEnvOptionPrefix(option: string): tuple[hadValue: bool; oldValue: string
     putEnv("RUBYOPT", option)
 
 proc resolveRspecExecutable(projectRoot: string): ProviderResult[string] =
-  let probe = execCapturedShell(
-    "ruby -rbundler/setup -e " &
-      quoteShell("print Gem.bin_path('rspec-core', 'rspec')"),
-    cwd = projectRoot)
+  let rubyExe = rubyExecutable()
+  if rubyExe.len == 0:
+    return ProviderResult[string](
+      diagnostics: @[diagnostic(dsError,
+          "Ruby recording could not resolve the RSpec executable: ruby not found")],
+      value: "")
+  let probe = execCaptured(@[rubyExe, "-rbundler/setup", "-e",
+      "print Gem.bin_path('rspec-core', 'rspec')"], cwd = projectRoot)
   if probe.exitCode != 0:
     return ProviderResult[string](
       diagnostics: @[diagnostic(dsError,
@@ -522,7 +555,7 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
       return recordRubyUnsupported(
         providerId & " M9 recording supports single-test scopes only",
         scope)
-    if not executableAvailable("ruby"):
+    if rubyExecutable().len == 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "Ruby is required for test recording but was not found on PATH",
@@ -576,7 +609,7 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
         else:
           none(tuple[hadValue: bool; oldValue: string])
     try:
-      result = execCapturedShell(command, cwd = scope.projectRoot)
+      result = execCaptured(args, cwd = scope.projectRoot)
     finally:
       if rubyOpt.isSome:
         restoreEnv("RUBYOPT", rubyOpt.get)

@@ -94,6 +94,7 @@ impl LazyOmniscientPrepTrigger for NoopLazyOmniscientPrepTrigger {
 /// supplied at construction time; the bootstrap is expected to wire
 /// these from the recording-launch metadata so the trigger inherits
 /// the same credentials the replay session uses.
+#[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
 pub struct HttpLazyOmniscientPrepTrigger {
     /// Base URL of the Monolith (e.g. `https://monolith.example.com`).
     /// The trigger appends
@@ -112,6 +113,7 @@ pub struct HttpLazyOmniscientPrepTrigger {
     agent: ureq::Agent,
 }
 
+#[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
 impl std::fmt::Debug for HttpLazyOmniscientPrepTrigger {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HttpLazyOmniscientPrepTrigger")
@@ -121,6 +123,7 @@ impl std::fmt::Debug for HttpLazyOmniscientPrepTrigger {
     }
 }
 
+#[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
 impl HttpLazyOmniscientPrepTrigger {
     /// Construct an HTTP trigger.
     /// * `base_url` — Monolith base URL, no trailing slash.
@@ -139,6 +142,7 @@ impl HttpLazyOmniscientPrepTrigger {
     }
 }
 
+#[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
 impl LazyOmniscientPrepTrigger for HttpLazyOmniscientPrepTrigger {
     fn trigger_for_recording(&self, recording_id: &str) -> TriggerOutcome {
         let url = format!(
@@ -331,6 +335,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
     fn http_trigger_posts_enqueued_decision() {
         let body = r#"{"decision":"enqueued","state":"pending","enqueuedJobId":42}"#;
         let (base_url, captured) = run_stub_server(body);
@@ -362,6 +367,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
     fn http_trigger_maps_already_enqueued() {
         let body = r#"{"decision":"already_enqueued","state":"pending","enqueuedJobId":null}"#;
         let (base_url, _) = run_stub_server(body);
@@ -370,6 +376,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "io-transport", not(target_arch = "wasm32")))]
     fn http_trigger_maps_unknown_decision_to_failed() {
         let body = r#"{"decision":"unexpected","state":"failed","enqueuedJobId":null}"#;
         let (base_url, _) = run_stub_server(body);

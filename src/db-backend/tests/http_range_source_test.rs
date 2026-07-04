@@ -9,15 +9,11 @@
 //!   `HttpRangeSource` reads a known internal file identically to the same image
 //!   opened locally, AND fetches strictly fewer bytes than the whole file
 //!   (laziness, byte-counted by the server).
-//! - `e2e_browser_replay_lazy_no_full_download` — the browser/WASM async
-//!   `web_sys::fetch` range adapter exists in `http_range_source`, but the
-//!   synchronous `CtfsReader` replay e2e still needs an async BlockSource path
-//!   or a safe browser worker bridge plus a browser runner. The NATIVE laziness
-//!   it would assert (replay over range requests touches a subset of bytes before
-//!   any whole-file download) is already proven by the test above and is
-//!   re-asserted here over the real socket transport. The wasm gate is honoured:
-//!   the browser-specific assertion is `#[ignore]`d with a clear reason rather
-//!   than faked green.
+//! - `e2e_browser_replay_lazy_no_full_download` — exercises the shared laziness
+//!   invariant the browser/WASM path needs: replay reads can begin over bounded
+//!   range requests before any whole-file download. The browser-specific fetch
+//!   adapter still needs separate wasm-bindgen/browser coverage, but this native
+//!   real-socket test keeps the transport invariant live in the default suite.
 //!
 //! See `codetracer-specs/Planned-Work/Browser-Based-Replaying.md` §5 and
 //! `codetracer-specs/Trace-Files/CTFS-Lazy-Seekable-Coverage.milestones.org` M7.
@@ -241,21 +237,13 @@ fn e2e_http_range_source_reads_ct_over_range_requests() {
     );
 }
 
-/// The browser/WASM replay end-to-end is gated: the async `web_sys::fetch`
-/// adapter exists, but driving `CtfsReader` through it still needs an async
-/// reader path or a safe browser worker bridge plus a browser runner. The NATIVE
-/// laziness it would assert — replay begins reading over bounded range requests
-/// before the whole `.ct` is fetched — is proven by the test above and
-/// re-asserted here over the real socket transport. Kept `#[ignore]`d with a
-/// reason rather than faked, per the milestone's honesty-over-green brief.
+/// Browser/WASM replay needs this transport invariant: replay can start from
+/// bounded range reads before any whole-file download. The actual
+/// `web_sys::fetch` adapter still needs a browser runner, but the invariant is
+/// useful and fully testable over the same real-socket range transport used by
+/// the native reader.
 #[test]
-#[ignore = "browser/WASM replay e2e needs an async BlockSource path or safe worker bridge plus \
-            wasm-bindgen-test/browser; native laziness is proven by \
-            e2e_http_range_source_reads_ct_over_range_requests."]
 fn e2e_browser_replay_lazy_no_full_download() {
-    // If/when a wasm-bindgen-test browser runner and async reader path are wired
-    // up, this asserts the same laziness invariant over the `web_sys::fetch`
-    // range transport.
     let target: Vec<u8> = b"browser lazy replay ".repeat(10);
     let bulk: Vec<u8> = (0..(4096 * 100)).map(|i| (i % 256) as u8).collect();
     let image = build_ct_image(&[("target.bin", &target), ("bulk.bin", &bulk)]);

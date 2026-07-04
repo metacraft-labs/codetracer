@@ -98,7 +98,8 @@ proc configureAndBuild(root: string): tuple[ok: bool; output: string] =
     return (false, configure.output)
   let build = execCmdEx("cmake --build build", options = {poUsePath},
       workingDir = root)
-  (build.exitCode == 0, configure.output & "\n" & build.output)
+  let output = "configure:\n" & configure.output & "\nbuild:\n" & build.output
+  (build.exitCode == 0, output)
 
 proc requireBuilt(root: string) =
   let built = configureAndBuild(root)

@@ -442,9 +442,13 @@ impl DapStdioClient {
     /// so later `recv_response` calls don't pick up a stale response
     /// belonging to this `continue` request.
     pub fn dap_continue(&mut self) -> Result<MoveState, BoxError> {
+        self.dap_continue_with_timeout(scaled(Duration::from_secs(10)))
+    }
+
+    pub fn dap_continue_with_timeout(&mut self, timeout: Duration) -> Result<MoveState, BoxError> {
         self.send_request("continue", json!({"threadId": 1}))?;
-        self.wait_for_stopped(scaled(Duration::from_secs(10)))?;
-        let event = self.recv_event("ct/complete-move", scaled(Duration::from_secs(10)))?;
+        self.wait_for_stopped(timeout)?;
+        let event = self.recv_event("ct/complete-move", timeout)?;
         let state: MoveState = serde_json::from_value(event.body)?;
         // Consume the trailing response sent by the step handler
         // (body is typically `0`).  Ignore errors — the response may
@@ -606,9 +610,13 @@ impl DapStdioClient {
     /// protocol for socket-based connections), this method uses the
     /// standard DAP command names that the stdio-based server expects.
     pub fn dap_step(&mut self, command: &str) -> Result<MoveState, BoxError> {
+        self.dap_step_with_timeout(command, scaled(Duration::from_secs(10)))
+    }
+
+    pub fn dap_step_with_timeout(&mut self, command: &str, timeout: Duration) -> Result<MoveState, BoxError> {
         self.send_request(command, json!({"threadId": 1}))?;
-        self.wait_for_stopped(scaled(Duration::from_secs(10)))?;
-        let event = self.recv_event("ct/complete-move", scaled(Duration::from_secs(10)))?;
+        self.wait_for_stopped(timeout)?;
+        let event = self.recv_event("ct/complete-move", timeout)?;
         let state: MoveState = serde_json::from_value(event.body)?;
         // Consume the trailing response sent by the step handler.
         let _ = self.recv_response(scaled(Duration::from_secs(5)));
@@ -619,6 +627,10 @@ impl DapStdioClient {
     /// CodeTracer move state from the matching `ct/complete-move` event.
     pub fn dap_reverse_continue(&mut self) -> Result<MoveState, BoxError> {
         self.dap_step("reverseContinue")
+    }
+
+    pub fn dap_reverse_continue_with_timeout(&mut self, timeout: Duration) -> Result<MoveState, BoxError> {
+        self.dap_step_with_timeout("reverseContinue", timeout)
     }
 
     /// Send standard DAP `stepBack` over stdio and return the CodeTracer

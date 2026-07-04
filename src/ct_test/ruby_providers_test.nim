@@ -51,10 +51,11 @@ proc allMessages(response: DiscoverResponse): string =
       result.add diagnostic.message & "\n"
 
 proc ensureRubyBundle(projectRoot: string) =
-  if findExe("bundle").len == 0:
+  let bundleExe = bundleExecutable()
+  if bundleExe.len == 0:
     checkpoint(
       "bundle executable is required for Ruby fixture integration tests")
-  check findExe("bundle").len > 0
+  check bundleExe.len > 0
 
   let bundleRoot = getTempDir() / "ct-ruby-fixture-bundles" /
       splitPath(projectRoot).tail
@@ -62,12 +63,12 @@ proc ensureRubyBundle(projectRoot: string) =
   putEnv("BUNDLE_PATH", bundleRoot)
   putEnv("BUNDLE_APP_CONFIG", bundleRoot / ".bundle")
 
-  let checkResult = execCmdEx("bundle check", options = {poUsePath},
+  let checkResult = execCmdEx(quoteShell(bundleExe) & " check",
       workingDir = projectRoot)
   if checkResult.exitCode == 0:
     return
 
-  let installResult = execCmdEx("bundle install", options = {poUsePath},
+  let installResult = execCmdEx(quoteShell(bundleExe) & " install",
       workingDir = projectRoot)
   if installResult.exitCode != 0:
     checkpoint(installResult.output)
@@ -324,7 +325,7 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
 
       withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
         if fileExists(siblingCli):
-          check rubyRecorderCommandPrefix() == @["ruby", siblingCli]
+          check rubyRecorderCommandPrefix() == @[rubyExecutable(), siblingCli]
         else:
           check rubyRecorderCommandPrefix() == @[fakeCli]
 
@@ -332,9 +333,9 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
       let oldCwd = getCurrentDir()
       setCurrentDir(getTempDir())
       try:
-        withEnvValue("PATH", fakeDir):
+        withEnvValue("PATH", fakeDir & PathSep & oldPath):
           withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
-            check rubyRecorderCommandPrefix() == @["ruby", siblingCli]
+            check rubyRecorderCommandPrefix() == @[rubyExecutable(), siblingCli]
       finally:
         setCurrentDir(oldCwd)
 

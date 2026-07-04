@@ -101,7 +101,9 @@ vfs = "0.12"
 # runtime); the trigger lives on the per-session dispatcher thread so
 # blocking I/O is fine. The crate is already in the transitive
 # dependency graph via codetracer_ctfs.
-ureq = { version = "2.10", default-features = false, features = ["tls"] }
+ureq = { version = "2.10", default-features = false, optional = true, features = [
+  "tls",
+] }
 
 shellexpand = { version = "3.1.1", optional = true }
 
@@ -246,7 +248,7 @@ debugging = []
 
 default = ["io-transport", "syntax-highlight", "nim-reader"]
 
-io-transport = ["dep:shellexpand"]
+io-transport = ["dep:shellexpand", "dep:ureq"]
 
 # Pulls in tree-sitter and all language grammars for source code analysis,
 # variable extraction, and tracepoint compilation.  Disable for WASM builds

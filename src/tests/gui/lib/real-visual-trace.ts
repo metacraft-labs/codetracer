@@ -32,6 +32,7 @@ const ctNativeReplay = process.env.CODETRACER_CT_NATIVE_REPLAY_CMD
   ?? path.join(visualReplayRepo, "ct-native-replay");
 const glScene = path.join(nativeTestProgramsRepo, "gl", "gl_scene");
 const glSceneSource = `${glScene}.c`;
+const darwinVisualFixtureScript = path.join(visualReplayRepo, "scripts", "record-vkcube-darwin.sh");
 const requiredGfxArtifacts = [
   "gfx_commands.dat",
   "gfx_bulkdata.dat",
@@ -485,6 +486,9 @@ function recordGlFixtureTrace(): RealVisualTrace {
     "visual replay player",
     "Set CODETRACER_CT_GFX_PLAYER_CMD or build codetracer-visual-replay.",
   );
+  if (process.platform === "darwin") {
+    return recordDarwinVisualFixtureTrace();
+  }
   buildGlSceneFixtureIfNeeded();
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ct-real-visual-trace-"));
@@ -544,6 +548,71 @@ function recordGlFixtureTrace(): RealVisualTrace {
       `MCR recording completed but did not create the expected .ct trace.\n`
       + `Expected path: ${tracePath}\n`
       + `Command: ${formatCommand(ctMcr, args)}`,
+    );
+  }
+
+  try {
+    extractGfxStreamForAvailability(tracePath, tempRoot);
+    process.env.CODETRACER_REAL_VISUAL_TRACE = tracePath;
+    return { tracePath, recordedFallback: true, tempRoot };
+  } catch (ex) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    throw ex;
+  }
+}
+
+function recordDarwinVisualFixtureTrace(): RealVisualTrace {
+  if (!fs.existsSync(darwinVisualFixtureScript)) {
+    throw new Error(
+      `Missing Darwin visual fixture recorder: ${darwinVisualFixtureScript}\n`
+      + `Set CODETRACER_REAL_VISUAL_TRACE to a current visual .ct trace or build codetracer-visual-replay.`,
+    );
+  }
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ct-real-visual-trace-"));
+  const tracePath = path.join(tempRoot, "trace.ct");
+  const gfxOutputDir = path.join(tempRoot, "darwin-gfx");
+  const env = {
+    ...process.env,
+    CT_CLI: ctMcr,
+    VKCUBE_TRACE: tracePath,
+    RECORDER_ROOT: nativeRecorderRepo,
+    TEST_PROGS_ROOT: nativeTestProgramsRepo,
+  };
+  const args = [darwinVisualFixtureScript, gfxOutputDir];
+  console.log(`# recording Darwin visual fixture: ${formatCommand("bash", args)}`);
+  const result = childProcess.spawnSync("bash", args, {
+    cwd: visualReplayRepo,
+    env,
+    encoding: "utf-8",
+    maxBuffer: 20 * 1024 * 1024,
+  });
+
+  if (result.error) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    throw new Error(
+      `Failed to record Darwin visual fixture.\n`
+      + `Command: ${formatCommand("bash", args)}\n`
+      + `Working directory: ${visualReplayRepo}\n`
+      + `Error: ${result.error.message}`,
+    );
+  }
+  if (result.status !== 0) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    throw new Error(
+      `Failed to record Darwin visual fixture; recorder exited with status ${result.status}.\n`
+      + `Command: ${formatCommand("bash", args)}\n`
+      + `Working directory: ${visualReplayRepo}\n`
+      + `stdout:\n${compactOutput(result.stdout)}\n`
+      + `stderr:\n${compactOutput(result.stderr)}`,
+    );
+  }
+  if (!fs.existsSync(tracePath)) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    throw new Error(
+      `Darwin visual fixture recorder completed but did not create the expected .ct trace.\n`
+      + `Expected path: ${tracePath}\n`
+      + `Command: ${formatCommand("bash", args)}`,
     );
   }
 

@@ -228,6 +228,18 @@ proc buildCrystalCommand*(projectRoot, filePath, selector: string;
   of ccsSingle:
     result.add selector
 
+proc crystalStringLiteral(value: string): string =
+  result = "\""
+  for ch in value:
+    case ch
+    of '\\':
+      result.add "\\\\"
+    of '"':
+      result.add "\\\""
+    else:
+      result.add ch
+  result.add "\""
+
 proc runCrystal(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   let commandScope =
     case scope.kind
@@ -252,10 +264,25 @@ proc recordCrystal(scope: TestScope): ProviderResult[seq[
       buildRoot = getTempDir() / ("ct-m11-crystal-build-" &
           $getCurrentProcessId() & "-" & $epochTime().int & "-" & $cpuTime())
       runner = buildRoot / "spec-runner"
-      buildCommand = commandWithNixFallback(@["crystal", "build", "--debug",
-          "-o", runner, normalizedRelative(scope.projectRoot, scope.file)],
-          @CrystalNixPackages)
+      wrapper = buildRoot / "ct_m11_spec_wrapper.cr"
+      requirePath = normalizedRelative(scope.projectRoot, scope.file).
+          changeFileExt("")
+      buildArgs = block:
+        var args = @["crystal", "build", "--debug"]
+        when defined(macosx):
+          args.add "-Devloop=libevent"
+        args.add @["-o", runner, wrapper]
+        args
+      crystalPath = scope.projectRoot & (
+          if getEnv("CRYSTAL_PATH", "").len > 0:
+            ":" & getEnv("CRYSTAL_PATH")
+          else:
+            "")
+      buildCommand = "env CRYSTAL_PATH=" & quoteShell(crystalPath) & " " &
+          commandWithNixFallback(buildArgs, @CrystalNixPackages)
     createDir(buildRoot)
+    writeFile(wrapper, "at_exit { |status| LibC._exit(status) }\n" &
+        "require " & crystalStringLiteral(requirePath) & "\n")
     let build = execCapturedShell(buildCommand, cwd = scope.projectRoot)
     if build.exitCode != 0:
       return ProviderResult[seq[TestEvent]](
@@ -267,7 +294,7 @@ proc recordCrystal(scope: TestScope): ProviderResult[seq[
             if scope.testId.len > 0: scope.testId else: scope.selector,
             some(tsFailed), "Crystal spec runner build failed",
             build.output)])
-    recordCommand(CrystalSpecProviderId, scope, @["sh", "-lc", runner], @[],
+    recordCommand(CrystalSpecProviderId, scope, @[runner], @[],
         normalizedRelative(scope.projectRoot, scope.file))
 
 proc newCrystalSpecM1Provider*(): M1Provider =

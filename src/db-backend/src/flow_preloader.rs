@@ -23,8 +23,8 @@ const STEP_COUNT_LIMIT: usize = 10000;
 const RETURN_VALUE_RR_DEPTH_LIMIT: usize = 7;
 const LOAD_FLOW_VALUE_RR_DEPTH_LIMIT: usize = 2;
 
-fn should_enter_materialized_call_body(location: &Location) -> bool {
-    location.rr_ticks.0 > 0 || (location.rr_ticks.0 == 0 && location.line > 0)
+fn should_seek_materialized_call_body_from_line_only_location(location: &Location) -> bool {
+    location.rr_ticks.0 == 0 && location.event == 0 && location.line > 0
 }
 
 #[derive(Debug)]
@@ -267,7 +267,7 @@ impl<'a> CallFlowPreloader<'a> {
             if self.trace_kind == TraceKind::Materialized
                 && self.lang != Lang::Elixir
                 && self.lang != Lang::Erlang
-                && should_enter_materialized_call_body(&self.location)
+                && should_seek_materialized_call_body_from_line_only_location(&self.location)
                 && let Ok(call_loc) = replay.jump_to_call(&self.location)
             {
                 // jump_to_call lands on the call entry step (the Call
@@ -1215,11 +1215,19 @@ mod tests {
     }
 
     #[test]
-    fn materialized_call_body_entry_guard_accepts_real_tick_zero_source_locations() {
-        assert!(should_enter_materialized_call_body(&make_location(1, 0, 0)));
-        assert!(should_enter_materialized_call_body(&make_location(-1, 42, 0)));
-        assert!(!should_enter_materialized_call_body(&make_location(-1, 0, 0)));
-        assert!(!should_enter_materialized_call_body(&make_location(0, 0, 0)));
+    fn materialized_call_body_entry_guard_accepts_only_line_only_source_locations() {
+        assert!(should_seek_materialized_call_body_from_line_only_location(
+            &make_location(1, 0, 0)
+        ));
+        assert!(!should_seek_materialized_call_body_from_line_only_location(
+            &make_location(-1, 42, 0)
+        ));
+        assert!(!should_seek_materialized_call_body_from_line_only_location(
+            &make_location(-1, 0, 0)
+        ));
+        assert!(!should_seek_materialized_call_body_from_line_only_location(
+            &make_location(0, 0, 0)
+        ));
     }
 
     #[test]

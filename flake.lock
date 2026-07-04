@@ -2545,6 +2545,23 @@
         "type": "github"
       }
     },
+    "io-mon-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783092237,
+        "narHash": "sha256-zXaqWdcFFpHrbWvH0je/hSVO6+RL2v3oLxqez+Y0AsY=",
+        "owner": "metacraft-labs",
+        "repo": "io-mon",
+        "rev": "b3fb1073b29b4eced88fd2731f98297853494854",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "io-mon",
+        "rev": "b3fb1073b29b4eced88fd2731f98297853494854",
+        "type": "github"
+      }
+    },
     "isonim": {
       "flake": false,
       "locked": {
@@ -4659,6 +4676,7 @@
         "git-hooks": [
           "git-hooks-nix"
         ],
+        "io-mon-src": "io-mon-src",
         "nimcrypto-src": "nimcrypto-src",
         "nixos-modules": [
           "nix-blockchain-development",
@@ -4675,11 +4693,11 @@
         "stackable-hooks-src": "stackable-hooks-src"
       },
       "locked": {
-        "lastModified": 1782914244,
-        "narHash": "sha256-3nNii6OvQRPXsuj8D1LXdceyIqB1mOh9jxVKTKtSUko=",
+        "lastModified": 1783095149,
+        "narHash": "sha256-Df1OIbQRirlFkVwwDygvdHLRBShCUb8mnqfNUXSNR0I=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "ab2ffbaee0853832949ff4ce34c24a71a86fee61",
+        "rev": "7f2f368051fe4a44383cf76eeaf9dce51b387943",
         "type": "github"
       },
       "original": {
@@ -5051,16 +5069,17 @@
     "stackable-hooks-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1781416261,
-        "narHash": "sha256-OJp7sJiG4/pYHx6R68nfIE5bSfBd+FbDOThQbJ1zf7U=",
+        "lastModified": 1782916661,
+        "narHash": "sha256-Jr6AjwYJaN6nanpaMCvXmdO6DH767qxarsylTff0uzk=",
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "13eeb0a11a7a0d769d44cfd5bbce3644f2b067b9",
+        "rev": "c6cf6ad1ac95201288825970b6ca53f630ea8996",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
+        "rev": "c6cf6ad1ac95201288825970b6ca53f630ea8996",
         "type": "github"
       }
     },

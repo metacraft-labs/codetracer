@@ -22,6 +22,37 @@ import init, {
 
 const wasmUrl = new URL('./pkg/db_backend_bg.wasm', import.meta.url);
 
+function describeError(err) {
+  if (!err) {
+    return 'unknown error';
+  }
+  if (err instanceof Error) {
+    return `${err.name}: ${err.message}\n${err.stack || ''}`;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch (_) {
+    return String(err);
+  }
+}
+
+self.addEventListener('error', (event) => {
+  self.postMessage({
+    type: 'worker-error',
+    error: event.message || describeError(event.error),
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+  });
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  self.postMessage({
+    type: 'worker-error',
+    error: describeError(event.reason),
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -45,7 +76,12 @@ async function fetchIntoVfs(url, vfsPath) {
 
 (async () => {
   // --- Phase 1: Initialise WASM ------------------------------------------
-  await init(wasmUrl);
+  try {
+    await init(wasmUrl);
+  } catch (err) {
+    self.postMessage({ type: 'worker-error', error: describeError(err) });
+    throw err;
+  }
   // `_start` (console_error_panic_hook + wasm_logger) runs automatically via
   // wasm_bindgen(start).
 

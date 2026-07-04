@@ -248,7 +248,7 @@ else:
 
 when defined(macosx):
   proc deriveNativeLibFlags(): seq[string] {.compileTime.} =
-    let libraryPath = staticExec("printenv LIBRARY_PATH").strip()
+    let libraryPath = getEnv("LIBRARY_PATH")
     for dir in libraryPath.split(':'):
       if dir.len == 0:
         continue
@@ -351,7 +351,6 @@ package codeTracer:
     "rustc >=1"
     "rustup >=1"
     "sh >=1"
-    "stylus >=0"
     "wasm-opt >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
@@ -665,27 +664,22 @@ package codeTracer:
           source = sourcePath)
 
     template ctStylus(name: string): BuildActionDef =
-      when defined(windows):
-        # Windows: project-local ``yarn install`` drops
-        # ``node_modules/stylus/bin/stylus`` (a node script). Invoke
-        # ``node`` on it DIRECTLY via the typed-tool DSL — one
-        # CreateProcessW, no sh-wrapper, no Git-Bash fork-emulation
-        # collision with the fs-snoop shim's CREATE_SUSPENDED+inject
-        # pattern (the wedge that gave us the codetracer-webpack-wedge
-        # memo).
-        let inputStyl = "src/frontend/styles/" & name & ".styl"
-        let outputCss = buildDebugPath("frontend/styles/" & name & ".css")
-        node(
-          args = @["node_modules/stylus/bin/stylus",
-                   "-o", outputCss,
-                   inputStyl],
-          actionId = "stylus-" & name,
-          extraInputs = @[inputStyl],
-          extraOutputs = @[outputCss])
-      else:
-        stylus(
-          source = "src/frontend/styles/" & name & ".styl",
-          output = buildDebugPath("frontend/styles/" & name & ".css"))
+      # Project-local ``yarn install`` drops ``node_modules/stylus/bin/stylus``
+      # as a Node script. Invoke that script through the ``node`` typed tool on
+      # every platform instead of declaring a separate ``stylus`` tool. This
+      # keeps the build tied to package.json/package-lock.json, avoids a second
+      # NPM/Nix provisioning path for the same compiler, and on Windows keeps
+      # the direct-CreateProcess shape that avoids Git-Bash fork emulation under
+      # the fs-snoop shim.
+      let inputStyl = "src/frontend/styles/" & name & ".styl"
+      let outputCss = buildDebugPath("frontend/styles/" & name & ".css")
+      node(
+        args = @["node_modules/stylus/bin/stylus",
+                 "-o", outputCss,
+                 inputStyl],
+        actionId = "stylus-" & name,
+        extraInputs = @[inputStyl],
+        extraOutputs = @[outputCss])
 
     template ctShell(actionIdValue, commandValue: string;
                      extraInputsValue: openArray[string] = [];
@@ -1032,21 +1026,54 @@ package codeTracer:
           "EOF\n" &
           "  chmod +x \"$MACOS/bin/ct\"\n" &
           "fi\n" &
-          "iconutil -c icns resources/Icon.iconset --output \"$RESOURCES/CodeTracer.icns\"\n" &
+          "if [ -n \"${CT_SANDBOX_TOOLS_DIR:-}\" ] && " &
+            "{ [ -x \"$CT_SANDBOX_TOOLS_DIR/usr/bin/iconutil\" ] || " &
+              "[ -x \"$CT_SANDBOX_TOOLS_DIR/bin/iconutil\" ]; }; then\n" &
+          "  iconutil -c icns resources/Icon.iconset --output \"$RESOURCES/CodeTracer.icns\"\n" &
+          "else\n" &
+          "  python3 - \"$RESOURCES/CodeTracer.icns\" <<'PY'\n" &
+          "import struct\n" &
+          "import sys\n" &
+          "from pathlib import Path\n" &
+          "\n" &
+          "# Fallback for hosts without a non-SIP iconutil drop-in. When\n" &
+          "# CT_SANDBOX_TOOLS_DIR contains iconutil, the branch above uses the\n" &
+          "# normal macOS tool and lets the monitor rewrite it through\n" &
+          "# nim-stackable-hooks/io-mon sandbox-tools propagation.\n" &
+          "iconset = Path('resources/Icon.iconset')\n" &
+          "entries = [\n" &
+          "    ('icp4', 'icon_16x16.png'),\n" &
+          "    ('icp5', 'icon_32x32.png'),\n" &
+          "    ('icp6', 'icon_32x32@2x.png'),\n" &
+          "    ('ic07', 'icon_128x128.png'),\n" &
+          "    ('ic08', 'icon_256x256.png'),\n" &
+          "    ('ic09', 'icon_512x512.png'),\n" &
+          "    ('ic10', 'icon_512x512@2x.png'),\n" &
+          "]\n" &
+          "payload = bytearray()\n" &
+          "for code, name in entries:\n" &
+          "    data = (iconset / name).read_bytes()\n" &
+          "    payload += code.encode('ascii') + struct.pack('>I', len(data) + 8) + data\n" &
+          "Path(sys.argv[1]).write_bytes(b'icns' + struct.pack('>I', len(payload) + 8) + payload)\n" &
+          "PY\n" &
+          "fi\n" &
           "YEAR=$(sed -n 's/.*CodeTracerYear\\* = //p' src/ct/version.nim | head -n1)\n" &
           "MONTH=$(printf '%02d' \"$(sed -n 's/.*CodeTracerMonth\\* = //p' src/ct/version.nim | head -n1)\")\n" &
           "BUILD=$(sed -n 's/.*CodeTracerBuild\\* = //p' src/ct/version.nim | head -n1)\n" &
           "VERSION=\"$YEAR.$MONTH.$BUILD\"\n" &
           "cp resources/Info.plist \"$CONTENTS/Info.plist\"\n" &
-          "/usr/bin/sed -i '' \"s/CFBundleShortVersionString.*/CFBundleShortVersionString<\\/key><string>$VERSION<\\/string>/g\" \"$CONTENTS/Info.plist\"\n" &
-          "/usr/bin/sed -i '' \"s/CFBundleVersion.*/CFBundleVersion<\\/key><string>$VERSION<\\/string>/g\" \"$CONTENTS/Info.plist\"\n" &
+          "sed \"s/CFBundleShortVersionString.*/CFBundleShortVersionString<\\/key><string>$VERSION<\\/string>/g\" \"$CONTENTS/Info.plist\" >\"$CONTENTS/Info.plist.tmp\"\n" &
+          "mv \"$CONTENTS/Info.plist.tmp\" \"$CONTENTS/Info.plist\"\n" &
+          "sed \"s/CFBundleVersion.*/CFBundleVersion<\\/key><string>$VERSION<\\/string>/g\" \"$CONTENTS/Info.plist\" >\"$CONTENTS/Info.plist.tmp\"\n" &
+          "mv \"$CONTENTS/Info.plist.tmp\" \"$CONTENTS/Info.plist\"\n" &
           "rm -f \"$CONTENTS/node_modules\"\n" &
           "ln -s MacOS/node_modules \"$CONTENTS/node_modules\"\n" &
           "ELECTRON_APP=\"$MACOS/node_modules/electron/dist/Electron.app\"\n" &
           "if [ -d \"$ELECTRON_APP\" ]; then\n" &
           "  cp \"$CONTENTS/Info.plist\" \"$ELECTRON_APP/Contents/Info.plist\"\n" &
           "  cp \"$RESOURCES/CodeTracer.icns\" \"$ELECTRON_APP/Contents/Resources/\"\n" &
-          "  /usr/bin/sed -i '' 's/<string>bin\\/ct/<string>Electron/g' \"$ELECTRON_APP/Contents/Info.plist\"\n" &
+          "  sed 's/<string>bin\\/ct/<string>Electron/g' \"$ELECTRON_APP/Contents/Info.plist\" >\"$ELECTRON_APP/Contents/Info.plist.tmp\"\n" &
+          "  mv \"$ELECTRON_APP/Contents/Info.plist.tmp\" \"$ELECTRON_APP/Contents/Info.plist\"\n" &
           "fi\n" &
           "FRAMEWORKS=\"$CONTENTS/Frameworks\"\n" &
           "mkdir -p \"$FRAMEWORKS\"\n" &
@@ -1098,8 +1125,7 @@ package codeTracer:
           "  chmod u+w \"$dylib\"\n" &
           "  install_name_tool -id \"@rpath/$(basename \"$dylib\")\" \"$dylib\" 2>/dev/null || true\n" &
           "  rewrite_macho_deps \"$dylib\" '@loader_path'\n" &
-          "done\n" &
-          "codesign -s - --force --deep \"$APP_ROOT\" >/dev/null 2>&1 || true",
+          "done",
           extraInputsValue = @[
             "resources/electron",
             "resources/Icon.iconset",
@@ -1136,7 +1162,8 @@ package codeTracer:
             "non-nix-build/dmg_background.png"
           ],
           extraOutputsValue = @["non-nix-build/CodeTracer.dmg"],
-          afterValue = @[macosApp])
+          afterValue = @[macosApp],
+          cacheableValue = false)
         target("dmg", macosDmg)
 
       when defined(windows):

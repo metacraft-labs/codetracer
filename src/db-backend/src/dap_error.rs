@@ -1,9 +1,6 @@
 use std::error::Error;
 use std::fmt;
 
-#[cfg(feature = "browser-transport")]
-use wasm_bindgen::JsError;
-
 #[derive(Debug)]
 pub enum DapError {
     Io(std::io::Error),

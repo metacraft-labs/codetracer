@@ -18,13 +18,12 @@ fn noir_project_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/noir")
 }
 
-/// Pre-flight check: skip early if `nargo` is not available.
-fn check_nargo_available() -> bool {
-    if std::process::Command::new("nargo").arg("--version").output().is_err() {
-        eprintln!("SKIPPED: nargo not found on PATH");
-        return false;
-    }
-    true
+/// Pre-flight check: fail loudly if `nargo` is not available.
+fn assert_nargo_available() {
+    std::process::Command::new("nargo")
+        .arg("--version")
+        .output()
+        .expect("nargo not found on PATH; Noir DAP tests require the recorder toolchain");
 }
 
 /// Return a human-readable nargo version label (e.g. "1.0.0-beta.3").
@@ -54,9 +53,7 @@ fn setup_noir_trace() -> Option<(TestRecording, PathBuf)> {
         project_path.display()
     );
 
-    if !check_nargo_available() {
-        return None;
-    }
+    assert_nargo_available();
 
     let version_label = nargo_version_label();
 

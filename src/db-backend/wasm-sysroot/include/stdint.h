@@ -39,6 +39,15 @@ typedef long unsigned int uintptr_t;
 #define INT64_MAX 9223372036854775807LL
 #define UINT64_MAX 18446744073709551615ULL
 
+#define INT8_C(c) c
+#define UINT8_C(c) c
+#define INT16_C(c) c
+#define UINT16_C(c) c
+#define INT32_C(c) c
+#define UINT32_C(c) c##U
+#define INT64_C(c) c##LL
+#define UINT64_C(c) c##ULL
+
 #if defined(__wasm32__)
 
 #define SIZE_MAX 4294967295UL

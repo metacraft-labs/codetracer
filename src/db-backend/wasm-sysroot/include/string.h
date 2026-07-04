@@ -24,6 +24,8 @@ size_t strlen(const char *s);
 
 char *strncpy(char *restrict dst, const char *restrict src, size_t n);
 
+char *strerror(int errnum);
+
 /* Internal implementations (no exported symbols).
  * These are stub-only: they satisfy the compiler but are never called
  * in practice (tree-sitter grammars are used for tracepoint parsing,

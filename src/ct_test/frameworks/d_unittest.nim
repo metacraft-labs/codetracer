@@ -1,4 +1,4 @@
-import std/[algorithm, os, strutils, tables]
+import std/[algorithm, options, os, osproc, strutils, tables, times]
 
 import ../contracts
 import ../discovery
@@ -178,9 +178,27 @@ proc recordD(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
           "D M11 recording supports file-level unittest scopes only",
           scope.file)],
       value: @[])
-  recordCommand(DUnittestProviderId, scope, buildDCommand(scope.projectRoot,
-      scope.file, scope.selector, dcsFile), @DNixPackages,
-      normalizedRelative(scope.projectRoot, scope.file))
+  {.cast(gcsafe).}:
+    let
+      buildRoot = getTempDir() / ("ct-m11-d-build-" &
+          $getCurrentProcessId() & "-" & $epochTime().int & "-" & $cpuTime())
+      runner = buildRoot / "d-unittest-runner"
+      rel = normalizedRelative(scope.projectRoot, scope.file)
+      buildArgs = @["ldc2", "-unittest", "-main", "-g", "-of=" & runner, rel]
+      buildCommand = commandWithNixFallback(buildArgs, @DNixPackages)
+    createDir(buildRoot)
+    let build = execCmdEx(buildCommand, options = {poUsePath},
+        workingDir = scope.projectRoot)
+    if build.exitCode != 0:
+      return ProviderResult[seq[TestEvent]](
+        diagnostics: @[diagnostic(dsError,
+            "D unittest runner build failed with exit code " & $build.exitCode,
+            scope.file)],
+        value: @[event(tekFailure, DUnittestProviderId,
+            DUnittestProviderId & ":record-build:" & scope.selector,
+            if scope.testId.len > 0: scope.testId else: scope.selector,
+            some(tsFailed), "D unittest runner build failed", build.output)])
+    recordCommand(DUnittestProviderId, scope, @[runner], @[], rel)
 
 proc newDUnittestM1Provider*(): M1Provider =
   var provider = TestProvider(info: providerInfo())

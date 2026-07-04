@@ -1,8 +1,6 @@
 //! Per-language headless DAP tests for Ruby `ct/originChain` against
 //! materialized traces (M3 of the Value Origin Tracking milestones).
 //!
-//! Tests SKIP cleanly when `ruby` or the Ruby recorder is missing.
-//!
 //! The shared per-DAP helper lives in `tests/common/origin_dap.rs`.
 
 mod test_harness;
@@ -12,31 +10,28 @@ mod origin_dap;
 
 use db_backend::task::{FrameTransitionKind, OriginKind, TerminatorKind};
 use origin_dap::{
-    OriginQueryConfig, QueryOutcome, assert_has_frame_transition, assert_hop_count, assert_hop_kinds,
-    assert_min_confidence, assert_operand_names_include, assert_terminator_kind, fixture_source,
-    load_fixture_and_query_or_skip,
+    OriginQueryConfig, assert_has_frame_transition, assert_hop_count, assert_hop_kinds, assert_min_confidence,
+    assert_operand_names_include, assert_terminator_kind, fixture_source, load_fixture_and_query,
 };
 use test_harness::Language;
 
-/// Skip reason emitted when Ruby is missing. Returns the Ruby version
-/// label used for the trace-dir name on success.
-fn require_ruby_recorder() -> Option<String> {
-    if !test_harness::is_command_available("ruby") {
-        eprintln!("SKIPPED: ruby is not available on PATH");
-        return None;
-    }
-    if test_harness::find_ruby_recorder().is_none() {
-        eprintln!("SKIPPED: Ruby recorder not found (set CODETRACER_RUBY_RECORDER_PATH or check out the sibling repo)");
-        return None;
-    }
-    let version = std::process::Command::new("ruby")
+/// Returns the Ruby version label used for the trace-dir name.
+fn require_ruby_recorder() -> String {
+    assert!(
+        test_harness::is_command_available("ruby"),
+        "ruby is not available on PATH"
+    );
+    assert!(
+        test_harness::find_ruby_recorder().is_some(),
+        "Ruby recorder not found (set CODETRACER_RUBY_RECORDER_PATH or check out the sibling repo)"
+    );
+    std::process::Command::new("ruby")
         .arg("--version")
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.split_whitespace().nth(1).map(|v| v.to_string()))
-        .unwrap_or_else(|| "unknown".to_string());
-    Some(version)
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn ruby_config(scenario: &str, version: &str, line: u32, variable: &str) -> OriginQueryConfig {
@@ -51,27 +46,19 @@ fn ruby_config(scenario: &str, version: &str, line: u32, variable: &str) -> Orig
     }
 }
 
-fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
-    match load_fixture_and_query_or_skip(config) {
-        QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: ruby/{}: {}", scenario, reason);
-            None
-        }
-    }
+fn run_fixture(scenario: &str, config: &OriginQueryConfig) -> Box<origin_dap::OriginQueryResult> {
+    let result = load_fixture_and_query(config)
+        .unwrap_or_else(|err| panic!("ruby/{scenario}: load_fixture_and_query failed: {err}"));
+    Box::new(result)
 }
 
 #[test]
 fn test_origin_ruby_simple_trivial_chain() {
-    let Some(version) = require_ruby_recorder() else {
-        return;
-    };
+    let version = require_ruby_recorder();
     // main.rb line 6 is `puts c`. Chain for `c` is
     //   c -> b -> a -> Literal(10).
     let config = ruby_config("simple_trivial_chain", &version, 6, "c");
-    let Some(result) = run_or_skip("simple_trivial_chain", &config) else {
-        return;
-    };
+    let result = run_fixture("simple_trivial_chain", &config);
     let chain = &result.chain;
 
     assert_terminator_kind(chain, TerminatorKind::Literal, "ruby simple_trivial_chain terminator");
@@ -86,15 +73,11 @@ fn test_origin_ruby_simple_trivial_chain() {
 
 #[test]
 fn test_origin_ruby_block_arg_pass() {
-    let Some(version) = require_ruby_recorder() else {
-        return;
-    };
+    let version = require_ruby_recorder();
     // main.rb line 8 is `puts inside` inside the block. Chain for `inside`
     // crosses the block-arg pass into `xs[i]`.
     let config = ruby_config("block_arg_pass", &version, 8, "inside");
-    let Some(result) = run_or_skip("block_arg_pass", &config) else {
-        return;
-    };
+    let result = run_fixture("block_arg_pass", &config);
     let chain = &result.chain;
 
     // ParameterPass classification or a FrameTransition (depending on
@@ -113,15 +96,11 @@ fn test_origin_ruby_block_arg_pass() {
 
 #[test]
 fn test_origin_ruby_swap_via_destructuring() {
-    let Some(version) = require_ruby_recorder() else {
-        return;
-    };
-    // main.rb line 6 is `puts a` (after the swap). Chain for `a` must be
+    let version = require_ruby_recorder();
+    // main.rb line 9 is `puts a` (after the swap). Chain for `a` must be
     // two hops: a -> b (TrivialCopy) -> Literal.
-    let config = ruby_config("swap_via_destructuring", &version, 6, "a");
-    let Some(result) = run_or_skip("swap_via_destructuring", &config) else {
-        return;
-    };
+    let config = ruby_config("swap_via_destructuring", &version, 9, "a");
+    let result = run_fixture("swap_via_destructuring", &config);
     let chain = &result.chain;
 
     assert_terminator_kind(chain, TerminatorKind::Literal, "ruby swap_via_destructuring terminator");

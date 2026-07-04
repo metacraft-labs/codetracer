@@ -1,6 +1,6 @@
-import { test, expect } from "../lib/fixtures";
-import * as helpers from "../lib/language-smoke-test-helpers";
-import { LayoutPage } from "../page-objects/layout_page";
+import { test, expect } from "../../lib/fixtures";
+import * as helpers from "../../lib/language-smoke-test-helpers";
+import { LayoutPage } from "../../page-objects/layout_page";
 
 test.describe("OmniscienceEyeIcon", () => {
   test.use({ sourcePath: "c_sudoku_solver/main.c", launchMode: "trace" });

@@ -4,7 +4,7 @@ import repro_dsl_stdlib
 
 package reprobuildHcrInCodetracer:
   uses:
-    "gcc >=1"
+    "clang >=1"
     "sh >=1"
 
   executable shell:
@@ -33,7 +33,7 @@ package reprobuildHcrInCodetracer:
         args = @[
           ": \"${REPROBUILD_SOURCE_ROOT:?REPROBUILD_SOURCE_ROOT is required}\"; " &
           "agent_dir=\"$REPROBUILD_SOURCE_ROOT/libs/repro_hcr_agent/c\"; " &
-          "gcc " & commonCflags & " -Isrc -I$agent_dir -c src/main.c -o build/main.o"
+          "clang " & commonCflags & " -Isrc -I$agent_dir -c src/main.c -o build/main.o"
         ]),
       deps = @["build-dir"],
       inputs = @[
@@ -45,7 +45,7 @@ package reprobuildHcrInCodetracer:
       "compile-patchable-object",
       reprobuildHcrInCodetracer.executable("sh").subcmd_2d_c(
         args = @[
-          "gcc " & commonCflags & " -Isrc -c src/patchable.c " &
+          "clang " & commonCflags & " -Isrc -c src/patchable.c " &
           "-o build/patchable.raw.o"
         ]),
       deps = @["build-dir"],
@@ -66,7 +66,7 @@ package reprobuildHcrInCodetracer:
         args = @[
           ": \"${REPROBUILD_SOURCE_ROOT:?REPROBUILD_SOURCE_ROOT is required}\"; " &
           "agent_dir=\"$REPROBUILD_SOURCE_ROOT/libs/repro_hcr_agent/c\"; " &
-          "gcc " & commonCflags & " -I$agent_dir -c \"$agent_dir/repro_hcr_agent.c\" " &
+          "clang " & commonCflags & " -I$agent_dir -c \"$agent_dir/repro_hcr_agent.c\" " &
           "-o build/repro_hcr_agent.o"
         ]),
       deps = @["build-dir"],
@@ -77,7 +77,7 @@ package reprobuildHcrInCodetracer:
       "link-hcr-target",
       reprobuildHcrInCodetracer.executable("sh").subcmd_2d_c(
         args = @[
-          "gcc build/main.o build/patchable.o build/repro_hcr_agent.o " &
+          "clang build/main.o build/patchable.o build/repro_hcr_agent.o " &
           (if hcrLinkFlags.len > 0: hcrLinkFlags & " " else: "") &
           "-lpthread -o build/hcr_target; " &
           "rm -rf build/hcr_target.dSYM; " &

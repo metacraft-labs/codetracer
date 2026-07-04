@@ -113,6 +113,9 @@ function waitForMessage(type, timeoutMs = 30_000) {
         resolve(data);
         return;
       }
+      if (data && data.type === 'worker-error') {
+        appendLog(`WORKER MESSAGE ERROR: ${safeStringify(data, 2000)}`);
+      }
     }
     worker.addEventListener('message', handler);
   });

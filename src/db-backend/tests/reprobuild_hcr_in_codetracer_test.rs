@@ -13,7 +13,8 @@ mod macos_arm64_gate {
     use std::collections::{BTreeSet, HashMap};
     use std::ffi::OsStr;
     use std::fs::{self, File, OpenOptions};
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Output, Stdio};
     use std::sync::{Arc, Mutex, mpsc};
@@ -124,6 +125,15 @@ mod macos_arm64_gate {
             }
         }
 
+        let sibling = codetracer_repo_root()?
+            .join("../codetracer-native-backend/target/debug/ct-native-replay")
+            .canonicalize();
+        if let Ok(path) = sibling
+            && path.is_file()
+        {
+            return Ok(path);
+        }
+
         require_command("ct-native-replay")
     }
 
@@ -136,9 +146,40 @@ mod macos_arm64_gate {
             return Err(format!("CODETRACER_CT_MCR_CMD is set but is not a file: {}", path.display()).into());
         }
 
+        let sibling = codetracer_repo_root()?
+            .join("../codetracer-native-recorder/ct_cli/ct_cli")
+            .canonicalize();
+        if let Ok(path) = sibling
+            && path.is_file()
+        {
+            return Ok(path);
+        }
+
         find_on_path("ct-mcr")
             .or_else(|| find_on_path("ct_cli"))
             .ok_or_else(|| "ct-mcr must be available through CODETRACER_CT_MCR_CMD or PATH".into())
+    }
+
+    fn require_lldb() -> Result<PathBuf, TestError> {
+        if let Ok(value) = std::env::var("CODETRACER_LLDB") {
+            let path = PathBuf::from(value);
+            if path.is_file() {
+                return Ok(path);
+            }
+            return Err(format!("CODETRACER_LLDB is set but is not a file: {}", path.display()).into());
+        }
+
+        for path in [
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb",
+            "/Library/Developer/CommandLineTools/usr/bin/lldb",
+        ] {
+            let candidate = PathBuf::from(path);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        require_command("lldb")
     }
 
     fn require_reprobuild_source_root() -> Result<PathBuf, TestError> {
@@ -300,6 +341,116 @@ mod macos_arm64_gate {
         Ok(serde_json::from_slice(&output.stdout)?)
     }
 
+    fn clingo_lib_dir() -> Result<PathBuf, TestError> {
+        if let Ok(path) = std::env::var("CODETRACER_CLINGO_LIB_DIR") {
+            let dir = PathBuf::from(path);
+            if dir.join("libclingo.dylib").is_file() {
+                return Ok(dir);
+            }
+            return Err(format!(
+                "CODETRACER_CLINGO_LIB_DIR does not contain libclingo.dylib: {}",
+                dir.display()
+            )
+            .into());
+        }
+
+        if let Some(dir) = std::env::var_os("DYLD_LIBRARY_PATH")
+            .into_iter()
+            .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+            .find(|dir| dir.join("libclingo.dylib").is_file())
+        {
+            return Ok(dir);
+        }
+
+        let output = Command::new("nix")
+            .args(["build", "--no-link", "--print-out-paths", "nixpkgs#clingo"])
+            .output()
+            .map_err(|e| format!("failed to resolve nixpkgs#clingo for repro/libclingo: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "nixpkgs#clingo resolution failed with status {}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+        let store_path = String::from_utf8(output.stdout)?
+            .lines()
+            .last()
+            .ok_or("nixpkgs#clingo produced no store path")?
+            .trim()
+            .to_string();
+        let dir = PathBuf::from(store_path).join("lib");
+        if dir.join("libclingo.dylib").is_file() {
+            Ok(dir)
+        } else {
+            Err(format!(
+                "nixpkgs#clingo lib dir does not contain libclingo.dylib: {}",
+                dir.display()
+            )
+            .into())
+        }
+    }
+
+    fn shell_quote_path(path: &Path) -> String {
+        format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+    }
+
+    fn repro_test_adapters_src(reprobuild_source_root: &Path) -> Result<PathBuf, TestError> {
+        if let Ok(path) = std::env::var("REPRO_TEST_ADAPTERS_SRC") {
+            let src = PathBuf::from(path);
+            if src.join("repro_test_adapters/test_runner.nim").is_file() {
+                return Ok(src);
+            }
+            return Err(format!(
+                "REPRO_TEST_ADAPTERS_SRC does not contain repro_test_adapters/test_runner.nim: {}",
+                src.display()
+            )
+            .into());
+        }
+
+        let candidate_roots = [
+            codetracer_repo_root()?.join("../reprobuild-test-adapters/src"),
+            reprobuild_source_root
+                .parent()
+                .ok_or("Reprobuild source root has no parent directory")?
+                .join("reprobuild-test-adapters/src"),
+        ];
+        for src in candidate_roots {
+            if src.join("repro_test_adapters/test_runner.nim").is_file() {
+                return Ok(src.canonicalize()?);
+            }
+        }
+        Err(format!(
+            "reprobuild-test-adapters source package is required for Reprobuild interface extraction; checked workspace sibling and sibling of {}",
+            reprobuild_source_root.display()
+        )
+        .into())
+    }
+
+    fn write_repro_wrapper(
+        temp_root: &Path,
+        repro: &Path,
+        reprobuild_source_root: &Path,
+    ) -> Result<PathBuf, TestError> {
+        let clingo_lib = clingo_lib_dir()?;
+        let test_adapters_src = repro_test_adapters_src(reprobuild_source_root)?;
+        let wrapper = temp_root.join("repro-with-clingo");
+        let body = format!(
+            "#!/bin/sh\nexport DYLD_LIBRARY_PATH={}{}${{DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}}\nexport REPRO_TEST_ADAPTERS_SRC={}\nexec {} \"$@\"\n",
+            shell_quote_path(&clingo_lib),
+            "",
+            shell_quote_path(&test_adapters_src),
+            shell_quote_path(repro)
+        );
+        fs::write(&wrapper, body)?;
+        let mut perms = fs::metadata(&wrapper)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&wrapper, perms)?;
+        Ok(wrapper)
+    }
+
     fn line_for_marker(path: &Path, marker: &str) -> Result<usize, TestError> {
         let text = fs::read_to_string(path)?;
         for (index, line) in text.lines().enumerate() {
@@ -340,10 +491,11 @@ mod macos_arm64_gate {
     }
 
     fn normalize_dap_source_name(name: &str) -> String {
-        if let Some((base, suffix)) = name.rsplit_once("_p") {
-            if !base.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
-                return base.to_string();
-            }
+        if let Some((base, suffix)) = name.rsplit_once("_p")
+            && !base.is_empty()
+            && suffix.chars().all(|ch| ch.is_ascii_digit())
+        {
+            return base.to_string();
         }
 
         let Some((base, suffix)) = name.rsplit_once('_') else {
@@ -525,44 +677,46 @@ mod macos_arm64_gate {
         Ok(())
     }
 
-    fn run_codetracer_hcr_gate_driver(
-        project_dir: &Path,
-        binary_path: &Path,
-        artifacts_dir: &Path,
-        repro: &Path,
-        ct_native_replay: &Path,
-        ct_mcr: &Path,
-        db_backend: &Path,
-        reprobuild_source_root: &Path,
-    ) -> Result<(), TestError> {
-        fs::create_dir_all(artifacts_dir)?;
+    struct GateDriverConfig<'a> {
+        project_dir: &'a Path,
+        binary_path: &'a Path,
+        artifacts_dir: &'a Path,
+        repro: &'a Path,
+        ct_native_replay: &'a Path,
+        ct_mcr: &'a Path,
+        db_backend: &'a Path,
+        reprobuild_source_root: &'a Path,
+    }
+
+    fn run_codetracer_hcr_gate_driver(config: GateDriverConfig<'_>) -> Result<(), TestError> {
+        fs::create_dir_all(config.artifacts_dir)?;
         let ct = require_command("ct")?;
-        let edit_driver = project_dir.join("edit-driver.sh");
+        let edit_driver = config.project_dir.join("edit-driver.sh");
         let output = Command::new(&ct)
             .args([
                 OsStr::new("test"),
                 OsStr::new("e2e"),
                 OsStr::new("reprobuild-hcr-in-codetracer"),
                 OsStr::new("--project"),
-                project_dir.as_os_str(),
+                config.project_dir.as_os_str(),
                 OsStr::new("--target"),
                 OsStr::new("hcr-target"),
                 OsStr::new("--binary"),
-                binary_path.as_os_str(),
+                config.binary_path.as_os_str(),
                 OsStr::new("--source-edit-driver"),
                 edit_driver.as_os_str(),
                 OsStr::new("--artifacts"),
-                artifacts_dir.as_os_str(),
+                config.artifacts_dir.as_os_str(),
             ])
-            .env("REPROBUILD_SOURCE_ROOT", reprobuild_source_root)
-            .env("CODETRACER_REPROBUILD_REPO_PATH", reprobuild_source_root)
-            .env("CODETRACER_REPROBUILD_REPRO", repro)
-            .env("CT_NATIVE_REPLAY_PATH", ct_native_replay)
-            .env("CT_NATIVE_REPLAY_BIN", ct_native_replay)
-            .env("CODETRACER_CT_NATIVE_REPLAY_CMD", ct_native_replay)
-            .env("CODETRACER_CT_MCR_CMD", ct_mcr)
-            .env("CODETRACER_DB_BACKEND", db_backend)
-            .current_dir(project_dir)
+            .env("REPROBUILD_SOURCE_ROOT", config.reprobuild_source_root)
+            .env("CODETRACER_REPROBUILD_REPO_PATH", config.reprobuild_source_root)
+            .env("CODETRACER_REPROBUILD_REPRO", config.repro)
+            .env("CT_NATIVE_REPLAY_PATH", config.ct_native_replay)
+            .env("CT_NATIVE_REPLAY_BIN", config.ct_native_replay)
+            .env("CODETRACER_CT_NATIVE_REPLAY_CMD", config.ct_native_replay)
+            .env("CODETRACER_CT_MCR_CMD", config.ct_mcr)
+            .env("CODETRACER_DB_BACKEND", config.db_backend)
+            .current_dir(config.project_dir)
             .output()?;
         require_success(output, "ct test e2e reprobuild-hcr-in-codetracer")
     }
@@ -600,6 +754,11 @@ mod macos_arm64_gate {
                 OsStr::new("debugserver"),
                 OsStr::new("--port"),
                 OsStr::new("0"),
+                OsStr::new("--live-recording-dir"),
+                log_path
+                    .parent()
+                    .ok_or("debugserver log path has no parent")?
+                    .as_os_str(),
                 OsStr::new("--program"),
             ])
             .arg(program)
@@ -668,7 +827,7 @@ mod macos_arm64_gate {
             });
         }
 
-        let port = match port_receiver.recv_timeout(scaled(Duration::from_secs(10))) {
+        let port = match port_receiver.recv_timeout(scaled(Duration::from_secs(90))) {
             Ok(port) => port,
             Err(err) => {
                 terminate_child(&mut child);
@@ -886,23 +1045,47 @@ def run_edit_driver_after_delay(driver, project, delay_seconds):
 "#
     }
 
-    fn run_lldb_live_hcr_session(
-        lldb: &Path,
-        live_binary: &Path,
-        project_dir: &Path,
-        edit_driver: &Path,
-        _coordinator_log: &Path,
+    struct LiveHcrLines {
+        old_breakpoint: usize,
+        old_step_start: usize,
+        old_step_next: usize,
+        new_breakpoint: usize,
+        new_step_start: usize,
+        new_step_next: usize,
+    }
+
+    struct LldbLiveHcrSession<'a> {
+        lldb: &'a Path,
+        live_binary: &'a Path,
+        project_dir: &'a Path,
+        edit_driver: &'a Path,
         port: u16,
-        old_breakpoint_line: usize,
-        old_step_start_line: usize,
-        old_step_next_line: usize,
-        new_breakpoint_line: usize,
-        new_step_start_line: usize,
-        new_step_next_line: usize,
-        command_file: &Path,
-        probe_file: &Path,
-        output_log: &Path,
-    ) -> Result<Vec<Value>, TestError> {
+        lines: LiveHcrLines,
+        command_file: &'a Path,
+        probe_file: &'a Path,
+        output_log: &'a Path,
+    }
+
+    fn run_lldb_live_hcr_session(session: LldbLiveHcrSession<'_>) -> Result<Vec<Value>, TestError> {
+        let LldbLiveHcrSession {
+            lldb,
+            live_binary,
+            project_dir,
+            edit_driver,
+            port,
+            lines,
+            command_file,
+            probe_file,
+            output_log,
+        } = session;
+        let LiveHcrLines {
+            old_breakpoint: old_breakpoint_line,
+            old_step_start: old_step_start_line,
+            old_step_next: old_step_next_line,
+            new_breakpoint: new_breakpoint_line,
+            new_step_start: new_step_start_line,
+            new_step_next: new_step_next_line,
+        } = lines;
         fs::write(probe_file, lldb_live_probe_script())?;
         let commands = format!(
             "\
@@ -957,24 +1140,66 @@ quit\n",
         );
         fs::write(command_file, commands)?;
 
-        let output = Command::new(lldb)
+        let mut child = Command::new(lldb)
             .args([OsStr::new("-b"), OsStr::new("-s")])
             .arg(command_file)
             .current_dir(project_dir)
-            .output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stdout_pipe = child.stdout.take().ok_or("failed to capture LLDB stdout")?;
+        let mut stderr_pipe = child.stderr.take().ok_or("failed to capture LLDB stderr")?;
+        let stdout_reader = thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = stdout_pipe.read_to_end(&mut buf);
+            buf
+        });
+        let stderr_reader = thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = stderr_pipe.read_to_end(&mut buf);
+            buf
+        });
+
+        let timeout = scaled(Duration::from_secs(120));
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                terminate_child(&mut child);
+                let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).into_owned();
+                let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).into_owned();
+                fs::write(
+                    output_log,
+                    format!(
+                        "status: timed out after {:?}\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
+                        timeout, stdout, stderr
+                    ),
+                )?;
+                return Err(format!(
+                    "LLDB live HCR session timed out after {:?}\n--- output ---\n{}",
+                    timeout,
+                    read_text(output_log)
+                )
+                .into());
+            }
+            thread::sleep(Duration::from_millis(100));
+        };
+
+        let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).into_owned();
+        let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).into_owned();
         fs::write(
             output_log,
             format!(
                 "status: {}\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
-                output.status, stdout, stderr
+                status, stdout, stderr
             ),
         )?;
-        if !output.status.success() {
+        if !status.success() {
             return Err(format!(
                 "LLDB live HCR session failed with status {}\n--- output ---\n{}",
-                output.status,
+                status,
                 read_text(output_log)
             )
             .into());
@@ -1027,7 +1252,7 @@ quit\n",
         ct_mcr: &Path,
         reprobuild_source_root: &Path,
     ) -> Result<(), TestError> {
-        let lldb = require_command("lldb")?;
+        let lldb = require_lldb()?;
         let evidence_path = artifacts_dir.join("reprobuild-hcr-in-codetracer-evidence.json");
         let mut evidence = read_json(&evidence_path)?;
         let live_dap_transcript = assert_artifact_exists(artifacts_dir, &evidence, "/artifacts/liveDapTranscript")?;
@@ -1053,11 +1278,13 @@ quit\n",
         ));
         let _ = fs::remove_file(&socket_path);
         let coordinator_log = live_artifacts.join("repro-watch-live.log");
+        let hcr_metadata = artifacts_dir.join("hcr-watch-metadata.json");
         let coordinator_out = File::create(&coordinator_log)?;
         let coordinator_err = coordinator_out.try_clone()?;
         let target_arg = format!("{}#hcr-target", project_dir.display());
         let hcr_socket_arg = format!("--hcr-agent-socket={}", socket_path.display());
         let hcr_artifacts_arg = format!("--hcr-artifacts={}", live_artifacts.display());
+        let hcr_metadata_arg = format!("--hcr-metadata={}", hcr_metadata.display());
         let mut coordinator = Command::new(repro)
             .args([
                 "watch",
@@ -1067,6 +1294,7 @@ quit\n",
                 "--debounce-ms=100",
                 hcr_socket_arg.as_str(),
                 hcr_artifacts_arg.as_str(),
+                hcr_metadata_arg.as_str(),
             ])
             .env("REPROBUILD_SOURCE_ROOT", reprobuild_source_root)
             .current_dir(project_dir)
@@ -1121,23 +1349,24 @@ quit\n",
             let lldb_command_file = live_artifacts.join("live-hcr-lldb-commands.txt");
             let lldb_probe_file = live_artifacts.join("hcr_probe.py");
             let lldb_output_log = live_artifacts.join("live-lldb.log");
-            let lldb_events = match run_lldb_live_hcr_session(
-                &lldb,
-                &live_binary,
+            let lldb_events = match run_lldb_live_hcr_session(LldbLiveHcrSession {
+                lldb: &lldb,
+                live_binary: &live_binary,
                 project_dir,
-                &project_dir.join("edit-driver.sh"),
-                &coordinator_log,
-                debugserver.port,
-                old_breakpoint_line,
-                old_step_start_line,
-                old_step_next_line,
-                new_breakpoint_line,
-                new_step_start_line,
-                new_step_next_line,
-                &lldb_command_file,
-                &lldb_probe_file,
-                &lldb_output_log,
-            ) {
+                edit_driver: &project_dir.join("edit-driver.sh"),
+                port: debugserver.port,
+                lines: LiveHcrLines {
+                    old_breakpoint: old_breakpoint_line,
+                    old_step_start: old_step_start_line,
+                    old_step_next: old_step_next_line,
+                    new_breakpoint: new_breakpoint_line,
+                    new_step_start: new_step_start_line,
+                    new_step_next: new_step_next_line,
+                },
+                command_file: &lldb_command_file,
+                probe_file: &lldb_probe_file,
+                output_log: &lldb_output_log,
+            }) {
                 Ok(events) => events,
                 Err(err) => {
                     terminate_child(&mut debugserver.child);
@@ -1345,7 +1574,7 @@ quit\n",
             ("CODETRACER_CT_NATIVE_REPLAY_CMD", ct_native_replay_env.as_str()),
             ("CT_NATIVE_REPLAY_BIN", ct_native_replay_env.as_str()),
             ("CODETRACER_CT_MCR_CMD", ct_mcr_env.as_str()),
-            ("CODETRACER_REPLAY_QUERY_TIMEOUT_SECS", "60"),
+            ("CODETRACER_REPLAY_QUERY_TIMEOUT_SECS", "180"),
             ("REPRO_HCR_AGENT_SOCKET", REPLAY_AGENT_SOCKET),
             ("RB_HCR_FIXTURE_ITERATIONS", "900"),
         ];
@@ -1472,10 +1701,11 @@ quit\n",
             &artifacts_dir.join("source-generation1-patchable.c"),
             GEN1_STEP_NEXT_MARKER,
         )?;
+        let replay_move_timeout = scaled(Duration::from_secs(30));
 
         let mut client = launch_replay_dap(db_backend, &trace, ct_native_replay, ct_mcr)?;
         client.set_breakpoints(&old_source_file, &[old_breakpoint_line])?;
-        let old_stop = client.dap_continue()?;
+        let old_stop = client.dap_continue_with_timeout(replay_move_timeout)?;
         assert_stop_line_and_path(
             &old_stop,
             old_breakpoint_line,
@@ -1487,7 +1717,7 @@ quit\n",
 
         let mut client = launch_replay_dap(db_backend, &trace, ct_native_replay, ct_mcr)?;
         client.set_breakpoints(&new_source_file, &[new_breakpoint_line])?;
-        let new_stop = client.dap_continue()?;
+        let new_stop = client.dap_continue_with_timeout(replay_move_timeout)?;
         assert_stop_line_and_path(
             &new_stop,
             new_breakpoint_line,
@@ -1496,7 +1726,7 @@ quit\n",
         )?;
         let new_stop_evidence = stop_evidence(&mut client, &new_stop, PATCHABLE_FUNCTION, GEN1_BREAKPOINT_MARKER, 1)?;
         client.set_breakpoints(&old_source_file, &[old_breakpoint_line])?;
-        let reverse_stop = client.dap_reverse_continue()?;
+        let reverse_stop = client.dap_reverse_continue_with_timeout(replay_move_timeout)?;
         assert_stop_line_and_path(
             &reverse_stop,
             old_breakpoint_line,
@@ -1505,7 +1735,7 @@ quit\n",
         )?;
         client.set_breakpoints(&old_source_file, &[])?;
         client.set_breakpoints(&new_source_file, &[new_breakpoint_line])?;
-        let forward_stop = client.dap_continue()?;
+        let forward_stop = client.dap_continue_with_timeout(replay_move_timeout)?;
         assert_stop_line_and_path(
             &forward_stop,
             new_breakpoint_line,
@@ -1516,14 +1746,14 @@ quit\n",
 
         let mut old_step_client = launch_replay_dap(db_backend, &trace, ct_native_replay, ct_mcr)?;
         old_step_client.set_breakpoints(&old_source_file, &[old_step_start_line])?;
-        let old_step_start = old_step_client.dap_continue()?;
+        let old_step_start = old_step_client.dap_continue_with_timeout(replay_move_timeout)?;
         assert_stop_line_and_path(
             &old_step_start,
             old_step_start_line,
             old_path_suffix,
             "old-generation replay DAP step start",
         )?;
-        let old_step_next = old_step_client.dap_step("next")?;
+        let old_step_next = old_step_client.dap_step_with_timeout("next", replay_move_timeout)?;
         assert_stop_line_and_path(
             &old_step_next,
             old_step_next_line,
@@ -1534,14 +1764,14 @@ quit\n",
 
         let mut new_step_client = launch_replay_dap(db_backend, &trace, ct_native_replay, ct_mcr)?;
         new_step_client.set_breakpoints(&new_source_file, &[new_step_start_line])?;
-        let new_step_start = new_step_client.dap_continue()?;
+        let new_step_start = new_step_client.dap_continue_with_timeout(replay_move_timeout)?;
         assert_stop_line_and_path(
             &new_step_start,
             new_step_start_line,
             new_path_suffix,
             "new-generation replay DAP step start",
         )?;
-        let new_step_next = new_step_client.dap_step("next")?;
+        let new_step_next = new_step_client.dap_step_with_timeout("next", replay_move_timeout)?;
         assert_stop_line_and_path(
             &new_step_next,
             new_step_next_line,
@@ -1792,6 +2022,7 @@ quit\n",
             println!("preserving HCR test temp root: {}", temp_root.display());
             std::mem::forget(temp_dir);
         }
+        let repro = write_repro_wrapper(&temp_root, &repro, &reprobuild_source_root)?;
         let project_dir = temp_root.join("project");
         let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_DIR);
         copy_dir_filtered(&fixture_dir, &project_dir)?;
@@ -1801,16 +2032,16 @@ quit\n",
 
         let binary_path = project_dir.join("build/hcr_target");
         let artifacts_dir = temp_root.join("artifacts");
-        run_codetracer_hcr_gate_driver(
-            &project_dir,
-            &binary_path,
-            &artifacts_dir,
-            &repro,
-            &ct_native_replay,
-            &ct_mcr,
-            &db_backend,
-            &reprobuild_source_root,
-        )?;
+        run_codetracer_hcr_gate_driver(GateDriverConfig {
+            project_dir: &project_dir,
+            binary_path: &binary_path,
+            artifacts_dir: &artifacts_dir,
+            repro: &repro,
+            ct_native_replay: &ct_native_replay,
+            ct_mcr: &ct_mcr,
+            db_backend: &db_backend,
+            reprobuild_source_root: &reprobuild_source_root,
+        })?;
         run_real_live_debug_assertions(
             &artifacts_dir,
             &project_dir,

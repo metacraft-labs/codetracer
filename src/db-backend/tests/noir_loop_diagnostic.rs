@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use codetracer_trace_types::StepId;
+use codetracer_trace_types::{StepId, TraceLowLevelEvent};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::db::{Db, MaterializedReplaySession};
 use db_backend::flow_preloader::FlowPreloader;
@@ -26,17 +26,8 @@ use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::task::{CoreTrace, CtLoadFlowArguments, FlowMode, RRTicks, TraceKind};
 use db_backend::trace_reader::TraceReader;
 
-/// Locate the unique `*.ct` CTFS container produced by `nargo trace`
-/// inside `target_dir`.  Returns `None` if no container is present so the
-/// caller can skip the test cleanly when running against a recorder build
-/// that does not yet emit CTFS — the diagnostic tests are best-effort and
-/// must not fail the suite when their input cannot be produced.
-///
-/// Per the CTFS migration directive
-/// (`Trace-Files/CTFS-Migration-Guide.md` §3e) the `.ct` bundle is the
-/// only supported materialized-trace format; the legacy sidecar files
-/// `trace_metadata.json` / `trace.json` / `trace.bin` are no longer
-/// accepted.
+/// Locate the unique `*.ct` CTFS container produced by a recorder inside
+/// `target_dir`.
 fn find_ct_container(target_dir: &Path) -> Option<PathBuf> {
     std::fs::read_dir(target_dir)
         .ok()?
@@ -45,18 +36,42 @@ fn find_ct_container(target_dir: &Path) -> Option<PathBuf> {
         .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
 }
 
-/// Load the `Db` from a `.ct` CTFS container in `target_dir`, or return
-/// `None` if no container is present.  All metadata + events are pulled
-/// from inside the container — there are no sidecar reads.
-fn load_db_from_ctfs(target_dir: &Path) -> Option<Db> {
-    let ct_path = find_ct_container(target_dir)?;
-    let reader = CTFSTraceReader::open(&ct_path)
-        .unwrap_or_else(|e| panic!("CTFSTraceReader::open({}): {}", ct_path.display(), e));
-    Some(reader.db().clone())
+/// Load the `Db` from the materialized trace in `target_dir`.
+///
+/// Current `nargo trace` (1.0.0-beta.2) emits the legacy runtime-tracing
+/// `trace.json` event stream rather than a `.ct` container.  The db-backend
+/// has a first-class reader path for that stream, so this diagnostic exercises
+/// it directly instead of skipping.
+fn load_db_from_trace(target_dir: &Path) -> Db {
+    if let Some(ct_path) = find_ct_container(target_dir) {
+        let reader = CTFSTraceReader::open(&ct_path)
+            .unwrap_or_else(|e| panic!("CTFSTraceReader::open({}): {}", ct_path.display(), e));
+        return reader.db().clone();
+    }
+
+    let json_path = target_dir.join("trace.json");
+    let json_bytes = std::fs::read(&json_path)
+        .unwrap_or_else(|e| panic!("failed to read legacy trace.json at {}: {e}", json_path.display()));
+    let events: Vec<TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
+        .unwrap_or_else(|e| panic!("failed to parse legacy trace.json at {}: {e}", json_path.display()));
+    let workdir = target_dir
+        .join("trace_metadata.json")
+        .is_file()
+        .then(|| target_dir.join("trace_metadata.json"))
+        .and_then(|p| std::fs::read(&p).ok())
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
+        .unwrap_or_else(|| target_dir.to_path_buf());
+    let reader = CTFSTraceReader::from_events(events, &workdir)
+        .unwrap_or_else(|e| panic!("legacy trace.json load failed for {}: {e}", json_path.display()));
+    reader.db().clone()
 }
 
-fn find_nargo() -> bool {
-    Command::new("nargo").arg("--version").output().is_ok()
+fn assert_nargo() {
+    Command::new("nargo")
+        .arg("--version")
+        .output()
+        .expect("nargo not found on PATH; Noir diagnostics require the recorder toolchain");
 }
 
 fn record_loop_trace(target_dir: &std::path::Path) -> Result<(), String> {
@@ -80,10 +95,7 @@ fn record_loop_trace(target_dir: &std::path::Path) -> Result<(), String> {
 
 #[test]
 fn dump_noir_loop_trace_steps() {
-    if !find_nargo() {
-        eprintln!("SKIPPED: nargo not on PATH");
-        return;
-    }
+    assert_nargo();
     let target_dir = PathBuf::from(format!(
         "{}/test-traces/noir_loop_diag_{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -92,15 +104,7 @@ fn dump_noir_loop_trace_steps() {
     let _ = std::fs::remove_dir_all(&target_dir);
     record_loop_trace(&target_dir).expect("nargo trace");
 
-    let Some(db) = load_db_from_ctfs(&target_dir) else {
-        eprintln!(
-            "SKIPPED: nargo did not produce a *.ct CTFS container in {} — \
-             the Noir recorder still emits the legacy layout, which is no \
-             longer supported by this diagnostic.",
-            target_dir.display()
-        );
-        return;
-    };
+    let db = load_db_from_trace(&target_dir);
     let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
 
     let mut step_lines: Vec<i64> = Vec::new();
@@ -141,10 +145,7 @@ fn dump_noir_loop_trace_steps() {
 /// `loops` entry with iteration > 0.
 #[test]
 fn dump_noir_loop_flow_update() {
-    if !find_nargo() {
-        eprintln!("SKIPPED: nargo not on PATH");
-        return;
-    }
+    assert_nargo();
     let target_dir = PathBuf::from(format!(
         "{}/test-traces/noir_loop_diag_flow_{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -153,16 +154,7 @@ fn dump_noir_loop_flow_update() {
     let _ = std::fs::remove_dir_all(&target_dir);
     record_loop_trace(&target_dir).expect("nargo trace");
 
-    // CTFS-only: pull the materialised `Db` directly from the `.ct`
-    // container.  The reader runs `TraceProcessor::postprocess` for us, so
-    // there is no need to drive event decode + postprocess by hand.
-    let Some(db) = load_db_from_ctfs(&target_dir) else {
-        eprintln!(
-            "SKIPPED: nargo did not produce a *.ct CTFS container in {}",
-            target_dir.display()
-        );
-        return;
-    };
+    let db = load_db_from_trace(&target_dir);
 
     // Find the first step inside the loop body (line 12 or 13).
     let target_step_id = {
@@ -245,10 +237,7 @@ fn dump_noir_loop_flow_update() {
 /// `loop iteration slider tracks remaining shield` test consumes.
 #[test]
 fn dump_noir_space_ship_flow_update() {
-    if !find_nargo() {
-        eprintln!("SKIPPED: nargo not on PATH");
-        return;
-    }
+    assert_nargo();
     let target_dir = PathBuf::from(format!(
         "{}/test-traces/noir_space_ship_{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -257,7 +246,7 @@ fn dump_noir_space_ship_flow_update() {
     let _ = std::fs::remove_dir_all(&target_dir);
     std::fs::create_dir_all(&target_dir).expect("mkdir");
 
-    let project_dir = PathBuf::from("/home/zahary/metacraft/codetracer/test-programs/noir_space_ship");
+    let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test-programs/noir_space_ship");
     let result = Command::new("nargo")
         .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
         .current_dir(&project_dir)
@@ -269,13 +258,7 @@ fn dump_noir_space_ship_flow_update() {
         String::from_utf8_lossy(&result.stderr)
     );
 
-    let Some(db) = load_db_from_ctfs(&target_dir) else {
-        eprintln!(
-            "SKIPPED: nargo did not produce a *.ct CTFS container in {}",
-            target_dir.display()
-        );
-        return;
-    };
+    let db = load_db_from_trace(&target_dir);
 
     // Dump line steps for shield.nr only.
     let shield_path = "src/shield.nr";
@@ -363,10 +346,7 @@ fn dump_noir_space_ship_flow_update() {
 /// `iterateEntry.activate()` does in the failing GUI test.
 #[test]
 fn dump_noir_space_ship_flow_from_call_entry() {
-    if !find_nargo() {
-        eprintln!("SKIPPED: nargo not on PATH");
-        return;
-    }
+    assert_nargo();
     let target_dir = PathBuf::from(format!(
         "{}/test-traces/noir_space_ship_entry_{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -374,7 +354,7 @@ fn dump_noir_space_ship_flow_from_call_entry() {
     ));
     let _ = std::fs::remove_dir_all(&target_dir);
     std::fs::create_dir_all(&target_dir).expect("mkdir");
-    let project_dir = PathBuf::from("/home/zahary/metacraft/codetracer/test-programs/noir_space_ship");
+    let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test-programs/noir_space_ship");
     let result = Command::new("nargo")
         .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
         .current_dir(&project_dir)
@@ -382,13 +362,7 @@ fn dump_noir_space_ship_flow_from_call_entry() {
         .expect("nargo trace");
     assert!(result.status.success());
 
-    let Some(db) = load_db_from_ctfs(&target_dir) else {
-        eprintln!(
-            "SKIPPED: nargo did not produce a *.ct CTFS container in {}",
-            target_dir.display()
-        );
-        return;
-    };
+    let db = load_db_from_trace(&target_dir);
 
     let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
 

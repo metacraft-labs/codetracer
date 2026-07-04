@@ -9,8 +9,11 @@ use core::ptr::null_mut;
 const HEADER_ALIGN: usize = align_of::<usize>();
 const HEADER_SIZE: usize = size_of::<usize>();
 
+#[unsafe(no_mangle)]
+pub static mut errno: c_int = 0;
+
 #[inline]
-unsafe fn layout_for_total(total: usize) -> Option<Layout> {
+fn layout_for_total(total: usize) -> Option<Layout> {
     Layout::from_size_align(total, HEADER_ALIGN).ok()
 }
 
@@ -27,23 +30,24 @@ unsafe fn alloc_with_header(size: usize) -> *mut u8 {
         Some(l) => l,
         None => return null_mut(),
     };
-    let header = sys_alloc(layout);
+    let header = unsafe { sys_alloc(layout) };
     if header.is_null() {
         return null_mut();
     }
-    // write payload size
-    (header as *mut usize).write(size);
-    header.add(HEADER_SIZE)
+    unsafe {
+        (header as *mut usize).write(size);
+        header.add(HEADER_SIZE)
+    }
 }
 
 #[inline]
 unsafe fn header_from_payload(p: *mut u8) -> *mut u8 {
-    p.sub(HEADER_SIZE)
+    unsafe { p.sub(HEADER_SIZE) }
 }
 
 #[inline]
 unsafe fn payload_size(p: *mut u8) -> usize {
-    (p as *mut usize).sub(1).read()
+    unsafe { (p as *mut usize).sub(1).read() }
 }
 
 #[unsafe(no_mangle)]
@@ -137,7 +141,55 @@ pub extern "C" fn fclose(_stream: *mut c_void) -> c_int {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn snprintf(buf: *mut c_char, n: usize, _fmt: *const c_char, _arg: usize) -> c_int {
+pub extern "C" fn ferror(_stream: *mut c_void) -> c_int {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn clearerr(_stream: *mut c_void) {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fflush(_stream: *mut c_void) -> c_int {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fopen(_filename: *const c_char, _mode: *const c_char) -> *mut c_void {
+    null_mut()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fread(_buffer: *mut c_void, _size: usize, _nmemb: usize, _stream: *mut c_void) -> usize {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fwrite(_buffer: *const c_void, _size: usize, nmemb: usize, _stream: *mut c_void) -> usize {
+    nmemb
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fseeko(_stream: *mut c_void, _offset: i64, _whence: c_int) -> c_int {
+    -1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ftello(_stream: *mut c_void) -> i64 {
+    -1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn setvbuf(_stream: *mut c_void, _buffer: *mut c_char, _mode: c_int, _size: usize) -> c_int {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn strerror(_errnum: c_int) -> *mut c_char {
+    c"wasm libc error".as_ptr().cast_mut()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn snprintf(_buf: *mut c_char, _n: usize, _fmt: *const c_char, _arg: usize) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `sprintf`");
 }
 
@@ -148,7 +200,7 @@ pub struct va_list__dummy {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vsnprintf(buf: *mut c_char, n: usize, _fmt: *const c_char, _ap: *mut va_list__dummy) -> c_int {
+pub extern "C" fn vsnprintf(_buf: *mut c_char, _n: usize, _fmt: *const c_char, _ap: *mut va_list__dummy) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
@@ -157,13 +209,8 @@ pub extern "C" fn abort() -> ! {
     wasm_bindgen::throw_str("abort");
 }
 
-#[inline]
-unsafe fn cstr_prefix_len(mut p: *const u8, limit: usize) -> usize {
-    unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
-}
-
 #[unsafe(no_mangle)]
-pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
+pub extern "C" fn strncmp(_s1: *const c_char, _s2: *const c_char, _n: usize) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
@@ -185,17 +232,17 @@ fn write_host(_s: &str, _stream: *mut c_void) {
 
 /// int fputc(int c, FILE *stream)
 #[unsafe(no_mangle)]
-pub extern "C" fn fputc(c: c_int, stream: *mut c_void) -> c_int {
+pub extern "C" fn fputc(_c: c_int, _stream: *mut c_void) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
 /// int fputs(const char *s, FILE *stream)
 #[unsafe(no_mangle)]
-pub extern "C" fn fputs(s: *const c_char, stream: *mut c_void) -> c_int {
+pub extern "C" fn fputs(_s: *const c_char, _stream: *mut c_void) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fdopen(fd: c_int, _mode: *const c_char) -> *mut c_void {
+pub extern "C" fn fdopen(_fd: c_int, _mode: *const c_char) -> *mut c_void {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }

@@ -1,4 +1,11 @@
 import type { StorybookConfig } from "@storybook/html-webpack5";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+const repoRoot = resolve(__dirname, "../..");
+const buildDir = existsSync(resolve(repoRoot, "src/build-debug-repro/frontend"))
+  ? "build-debug-repro"
+  : "build-debug";
 
 const config: StorybookConfig = {
   stories: ["../stories/**/*.stories.@(js|ts)"],
@@ -10,8 +17,8 @@ const config: StorybookConfig = {
   staticDirs: [
     { from: "../dist", to: "/dist" },
     { from: "../../src/frontend/index.html", to: "/codetracer-app-index.html" },
-    { from: "../../src/build-debug/frontend", to: "/frontend" },
-    { from: "../../src/build-debug/public", to: "/public" },
+    { from: `../../src/${buildDir}/frontend`, to: "/frontend" },
+    { from: `../../src/${buildDir}/public`, to: "/public" },
   ],
 };
 

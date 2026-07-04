@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -25,14 +26,8 @@ fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
 }
 
-fn require_env_path(var_name: &str) -> Result<PathBuf, TestError> {
-    let value = std::env::var(var_name)
-        .map_err(|_| format!("{var_name} must be set for the Reprobuild HCR + MCR + DAP test"))?;
-    let path = PathBuf::from(value);
-    if !path.exists() {
-        return Err(format!("{var_name} does not exist: {}", path.display()).into());
-    }
-    Ok(path)
+fn codetracer_repo_root() -> Result<PathBuf, TestError> {
+    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize()?)
 }
 
 fn find_on_path(name: &str) -> Option<PathBuf> {
@@ -45,6 +40,187 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 
 fn require_command(name: &str) -> Result<PathBuf, TestError> {
     find_on_path(name).ok_or_else(|| format!("{name} must be available on PATH").into())
+}
+
+fn require_reprobuild_source_root() -> Result<PathBuf, TestError> {
+    let sibling = codetracer_repo_root()?.join("../reprobuild").canonicalize();
+    if let Ok(path) = sibling
+        && path.join("libs/repro_hcr_agent").is_dir()
+    {
+        return Ok(path);
+    }
+
+    for var_name in ["CODETRACER_REPROBUILD_REPO_PATH", "REPROBUILD_SOURCE_ROOT"] {
+        if let Ok(value) = std::env::var(var_name) {
+            let path = PathBuf::from(value);
+            if path.join("libs/repro_hcr_agent").is_dir() {
+                return Ok(path);
+            }
+            return Err(format!("{var_name} must point at a Reprobuild source tree: {}", path.display()).into());
+        }
+    }
+
+    Err("Reprobuild source checkout is required as a workspace sibling or explicit environment override".into())
+}
+
+fn require_repro(reprobuild_source_root: &Path) -> Result<PathBuf, TestError> {
+    if let Ok(value) = std::env::var("REPROBUILD_REPRO_BIN") {
+        let path = PathBuf::from(value);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(format!("REPROBUILD_REPRO_BIN is set but is not a file: {}", path.display()).into());
+    }
+
+    let sibling_build = reprobuild_source_root.join("build/bin/repro");
+    if sibling_build.is_file() {
+        return Ok(sibling_build);
+    }
+
+    require_command("repro")
+}
+
+fn clingo_lib_dir() -> Result<PathBuf, TestError> {
+    if let Ok(path) = std::env::var("CODETRACER_CLINGO_LIB_DIR") {
+        let dir = PathBuf::from(path);
+        if dir.join("libclingo.dylib").is_file() {
+            return Ok(dir);
+        }
+        return Err(format!(
+            "CODETRACER_CLINGO_LIB_DIR does not contain libclingo.dylib: {}",
+            dir.display()
+        )
+        .into());
+    }
+
+    if let Some(dir) = std::env::var_os("DYLD_LIBRARY_PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .find(|dir| dir.join("libclingo.dylib").is_file())
+    {
+        return Ok(dir);
+    }
+
+    let output = Command::new("nix")
+        .args(["build", "--no-link", "--print-out-paths", "nixpkgs#clingo"])
+        .output()
+        .map_err(|e| format!("failed to resolve nixpkgs#clingo for repro/libclingo: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "nixpkgs#clingo resolution failed with status {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+    let store_path = String::from_utf8(output.stdout)?
+        .lines()
+        .last()
+        .ok_or("nixpkgs#clingo produced no store path")?
+        .trim()
+        .to_string();
+    let dir = PathBuf::from(store_path).join("lib");
+    if dir.join("libclingo.dylib").is_file() {
+        Ok(dir)
+    } else {
+        Err(format!(
+            "nixpkgs#clingo lib dir does not contain libclingo.dylib: {}",
+            dir.display()
+        )
+        .into())
+    }
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+}
+
+fn monitor_shim_lib(reprobuild_source_root: &Path) -> Result<PathBuf, TestError> {
+    if let Ok(path) = std::env::var("REPRO_MONITOR_SHIM_LIB") {
+        let shim = PathBuf::from(path);
+        if shim.is_file() {
+            return Ok(shim);
+        }
+        return Err(format!("REPRO_MONITOR_SHIM_LIB is set but is not a file: {}", shim.display()).into());
+    }
+
+    let candidate = reprobuild_source_root
+        .join("build/lib/librepro_monitor_shim.dylib")
+        .canonicalize();
+    if let Ok(path) = candidate
+        && path.is_file()
+    {
+        return Ok(path);
+    }
+
+    let workspace_candidate = codetracer_repo_root()?
+        .join("../io-mon/build/lib/librepro_monitor_shim.dylib")
+        .canonicalize();
+    if let Ok(path) = workspace_candidate
+        && path.is_file()
+    {
+        return Ok(path);
+    }
+
+    Err(format!(
+        "librepro_monitor_shim.dylib is required; checked REPRO_MONITOR_SHIM_LIB, {}, and workspace io-mon",
+        reprobuild_source_root
+            .join("build/lib/librepro_monitor_shim.dylib")
+            .display()
+    )
+    .into())
+}
+
+fn repro_test_adapters_src(reprobuild_source_root: &Path) -> Result<PathBuf, TestError> {
+    if let Ok(path) = std::env::var("REPRO_TEST_ADAPTERS_SRC") {
+        let src = PathBuf::from(path);
+        if src.join("repro_test_adapters/test_runner.nim").is_file() {
+            return Ok(src);
+        }
+        return Err(format!(
+            "REPRO_TEST_ADAPTERS_SRC does not contain repro_test_adapters/test_runner.nim: {}",
+            src.display()
+        )
+        .into());
+    }
+
+    let candidate_roots = [
+        codetracer_repo_root()?.join("../reprobuild-test-adapters/src"),
+        reprobuild_source_root
+            .parent()
+            .ok_or("Reprobuild source root has no parent directory")?
+            .join("reprobuild-test-adapters/src"),
+    ];
+    for src in candidate_roots {
+        if src.join("repro_test_adapters/test_runner.nim").is_file() {
+            return Ok(src.canonicalize()?);
+        }
+    }
+    Err(format!(
+        "reprobuild-test-adapters source package is required; checked workspace sibling and sibling of {}",
+        reprobuild_source_root.display()
+    )
+    .into())
+}
+
+fn write_repro_wrapper(temp_root: &Path, repro: &Path, reprobuild_source_root: &Path) -> Result<PathBuf, TestError> {
+    let clingo_lib = clingo_lib_dir()?;
+    let test_adapters_src = repro_test_adapters_src(reprobuild_source_root)?;
+    let shim = monitor_shim_lib(reprobuild_source_root)?;
+    let wrapper = temp_root.join("repro-with-clingo");
+    let body = format!(
+        "#!/bin/sh\nexport DYLD_LIBRARY_PATH={}${{DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}}\nexport REPRO_TEST_ADAPTERS_SRC={}\nexport REPRO_MONITOR_SHIM_LIB={}\nexec {} \"$@\"\n",
+        shell_quote_path(&clingo_lib),
+        shell_quote_path(&test_adapters_src),
+        shell_quote_path(&shim),
+        shell_quote_path(repro)
+    );
+    fs::write(&wrapper, body)?;
+    let mut perms = fs::metadata(&wrapper)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&wrapper, perms)?;
+    Ok(wrapper)
 }
 
 fn require_ct_native_replay() -> Result<PathBuf, TestError> {
@@ -62,6 +238,15 @@ fn require_ct_native_replay() -> Result<PathBuf, TestError> {
         }
     }
 
+    let sibling = codetracer_repo_root()?
+        .join("../codetracer-native-backend/target/debug/ct-native-replay")
+        .canonicalize();
+    if let Ok(path) = sibling
+        && path.is_file()
+    {
+        return Ok(path);
+    }
+
     require_command("ct-native-replay")
 }
 
@@ -72,6 +257,15 @@ fn require_ct_mcr() -> Result<PathBuf, TestError> {
             return Ok(path);
         }
         return Err(format!("CODETRACER_CT_MCR_CMD is set but is not a file: {}", path.display()).into());
+    }
+
+    let sibling = codetracer_repo_root()?
+        .join("../codetracer-native-recorder/ct_cli/ct_cli")
+        .canonicalize();
+    if let Ok(path) = sibling
+        && path.is_file()
+    {
+        return Ok(path);
     }
 
     find_on_path("ct-mcr")
@@ -105,15 +299,6 @@ fn copy_dir_filtered(src: &Path, dst: &Path) -> Result<(), TestError> {
         }
     }
     Ok(())
-}
-
-fn run_command<I, S>(program: &Path, args: I, cwd: &Path) -> Result<Output, TestError>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let output = Command::new(program).args(args).current_dir(cwd).output()?;
-    Ok(output)
 }
 
 fn require_success(output: Output, context: &str) -> Result<(), TestError> {
@@ -185,10 +370,11 @@ fn parse_dap_int(value: &Value) -> Option<i64> {
 }
 
 fn normalize_dap_source_name(name: &str) -> String {
-    if let Some((base, suffix)) = name.rsplit_once("_p") {
-        if !base.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
-            return base.to_string();
-        }
+    if let Some((base, suffix)) = name.rsplit_once("_p")
+        && !base.is_empty()
+        && suffix.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return base.to_string();
     }
 
     let Some((base, suffix)) = name.rsplit_once('_') else {
@@ -274,10 +460,10 @@ fn assert_json_i64(value: &Value, field: &str, expected: i64) {
 
 #[test]
 fn reprobuild_hcr_binary_records_with_mcr_and_exposes_dap_flow_values() -> Result<(), TestError> {
-    let repro = require_command("repro")?;
+    let reprobuild_source_root = require_reprobuild_source_root()?;
+    let repro = require_repro(&reprobuild_source_root)?;
     let ct_native_replay = require_ct_native_replay()?;
     let ct_mcr = require_ct_mcr()?;
-    let reprobuild_source_root = require_env_path("REPROBUILD_SOURCE_ROOT")?;
     let db_backend = find_db_backend();
 
     assert!(
@@ -297,12 +483,8 @@ fn reprobuild_hcr_binary_records_with_mcr_and_exposes_dap_flow_values() -> Resul
         std::env::consts::ARCH,
         command_output_text(Path::new("/usr/bin/uname"), &["-a"], Path::new("/"))
     );
-    println!(
-        "repro revision/capabilities: {}",
-        command_output_text(&repro, &["--version"], &reprobuild_source_root)
-    );
-
     let temp_dir = tempfile::tempdir()?;
+    let repro_wrapper = write_repro_wrapper(temp_dir.path(), &repro, &reprobuild_source_root)?;
     let project_dir = temp_dir.path().join("project");
     let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_DIR);
     copy_dir_filtered(&fixture_dir, &project_dir)?;
@@ -310,10 +492,16 @@ fn reprobuild_hcr_binary_records_with_mcr_and_exposes_dap_flow_values() -> Resul
     let writable_reprobuild_source = temp_dir.path().join("reprobuild-source");
     copy_dir_filtered(&reprobuild_source_root, &writable_reprobuild_source)?;
 
-    let repro_output = Command::new(&repro)
+    println!(
+        "repro revision/capabilities: {}",
+        command_output_text(&repro_wrapper, &["--version"], &reprobuild_source_root)
+    );
+
+    let repro_output = Command::new(&repro_wrapper)
         .args([
             "build",
             project_dir.to_str().unwrap(),
+            "--daemon=off",
             "--tool-provisioning=path",
             "--progress=none",
             "--log=actions",
@@ -353,18 +541,18 @@ fn reprobuild_hcr_binary_records_with_mcr_and_exposes_dap_flow_values() -> Resul
     );
 
     let trace_base = temp_dir.path().join("trace");
-    let record_output = run_command(
-        &ct_native_replay,
-        [
+    let record_output = Command::new(&ct_native_replay)
+        .args([
             OsStr::new("record"),
             OsStr::new("--backend"),
             OsStr::new("mcr"),
             OsStr::new("-o"),
             trace_base.as_os_str(),
             binary_path.as_os_str(),
-        ],
-        &project_dir,
-    )?;
+        ])
+        .env("CODETRACER_CT_MCR_CMD", &ct_mcr)
+        .current_dir(&project_dir)
+        .output()?;
     require_success(record_output, "ct-native-replay record --backend mcr")?;
 
     let trace_ct = trace_base.with_extension("ct");
@@ -385,7 +573,14 @@ fn reprobuild_hcr_binary_records_with_mcr_and_exposes_dap_flow_values() -> Resul
         "DAP anchors: pre_hcr_line={pre_hcr_line}, post_hcr_line={post_hcr_line}, step_start_line={step_start_line}, step_next_line={step_next_line}"
     );
 
-    let mut runner = FlowTestRunner::new(&db_backend, &trace_ct)?;
+    let ct_native_replay_env = ct_native_replay.to_string_lossy().to_string();
+    let ct_mcr_env = ct_mcr.to_string_lossy().to_string();
+    let dap_envs = [
+        ("CT_NATIVE_REPLAY_BIN", ct_native_replay_env.as_str()),
+        ("CODETRACER_CT_MCR_CMD", ct_mcr_env.as_str()),
+    ];
+
+    let mut runner = FlowTestRunner::new_with_envs(&db_backend, &trace_ct, &dap_envs)?;
     runner
         .client()
         .set_breakpoints(&source_file, &[pre_hcr_line, post_hcr_line])?;
@@ -414,7 +609,7 @@ fn reprobuild_hcr_binary_records_with_mcr_and_exposes_dap_flow_values() -> Resul
     );
     runner.finish()?;
 
-    let mut stepping_runner = FlowTestRunner::new(&db_backend, &trace_ct)?;
+    let mut stepping_runner = FlowTestRunner::new_with_envs(&db_backend, &trace_ct, &dap_envs)?;
     stepping_runner
         .client()
         .set_breakpoints(&source_file, &[step_start_line, step_next_line])?;

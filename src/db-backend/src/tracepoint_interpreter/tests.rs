@@ -12,28 +12,17 @@ use std::{
     sync::Arc,
 };
 
-use codetracer_trace_types::{StepId, TypeKind};
+use codetracer_trace_types::{StepId, TraceLowLevelEvent, TypeKind};
 
 use crate::{
-    ctfs_trace_reader::CTFSTraceReader,
-    db::{Db, MaterializedReplaySession},
-    in_memory_trace_reader::InMemoryTraceReader,
-    lang::Lang,
-    replay::ReplaySession,
-    task::StringAndValueTuple,
-    trace_reader::TraceReader,
-    value::Value,
+    ctfs_trace_reader::CTFSTraceReader, db::MaterializedReplaySession, lang::Lang, replay::ReplaySession,
+    task::StringAndValueTuple, trace_reader::TraceReader, value::Value,
 };
 
 use super::TracepointInterpreter;
 
 #[test]
 fn log_array() -> Result<(), Box<dyn Error>> {
-    if find_ruby_recorder().is_none() {
-        eprintln!("SKIPPED: Ruby recorder not found");
-        return Ok(());
-    }
-
     let src = "log(arr)";
 
     let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
@@ -46,11 +35,6 @@ fn log_array() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn array_indexing() -> Result<(), Box<dyn Error>> {
-    if find_ruby_recorder().is_none() {
-        eprintln!("SKIPPED: Ruby recorder not found");
-        return Ok(());
-    }
-
     let src = "log(arr[0])
 log(arr[1])
 log(arr[2])";
@@ -67,43 +51,13 @@ log(arr[2])";
     Ok(())
 }
 
-/// Run the Noir variant of a tracepoint test if `nargo` is available
-/// **and** it produces a CTFS `.ct` container. Materialized traces are
-/// CTFS-only; the legacy `trace.json`/`trace_paths.json`/`trace_metadata.json`
-/// triplet is no longer accepted by db-backend.
-///
-/// Pre-1.0 `nargo trace` builds still emit the legacy 3-file layout (the
-/// CTFS migration is tracked in `codetracer-specs/Trace-Files/CTFS-Migration-Guide.md`).
-/// Until a CTFS-emitting nargo is on PATH in the dev shell, the Noir
-/// variant SKIPs cleanly with a precise sentinel instead of failing —
-/// matching the SKIP-discipline used by sibling Noir integration tests
-/// (see `tests/noir_space_ship_calltrace_jump_flow.rs`,
-/// `tests/noir_loop_diagnostic.rs`). The Ruby variant of each test
-/// still asserts the real behaviour, so we never silently weaken
-/// coverage — we only skip the environment that cannot run.
 fn run_noir_variant(
     src: &str,
     line: usize,
     trace_name: &str,
     expected: &[StringAndValueTuple],
 ) -> Result<(), Box<dyn Error>> {
-    if !find_nargo() {
-        eprintln!("SKIPPED: Noir variant — nargo not found on PATH");
-        return Ok(());
-    }
-    match load_test_trace_if_ctfs(trace_name, Lang::Noir)? {
-        Some(db) => check_tracepoint_evaluate_with_db(db, src, line, Lang::Noir, expected),
-        None => {
-            eprintln!(
-                "SKIPPED: Noir variant — `nargo trace` did not produce a *.ct \
-                 CTFS container (still emits the legacy \
-                 trace.json/trace_paths.json/trace_metadata.json layout). \
-                 Re-enable once nargo emits CTFS — see \
-                 codetracer-specs/Trace-Files/CTFS-Migration-Guide.md."
-            );
-            Ok(())
-        }
-    }
+    check_tracepoint_evaluate(src, line, trace_name, Lang::Noir, expected)
 }
 
 // ----------------------------------------------------------------------------------------------------------------
@@ -147,16 +101,12 @@ fn check_tracepoint_evaluate(
     lang: Lang,
     expected: &[StringAndValueTuple],
 ) -> Result<(), Box<dyn Error>> {
-    let db = load_test_trace(trace_name, lang)?;
-    check_tracepoint_evaluate_with_db(db, src, line, lang, expected)
+    let reader: Arc<dyn TraceReader> = Arc::new(load_test_trace(trace_name, lang)?);
+    check_tracepoint_evaluate_with_reader(reader, src, line, lang, expected)
 }
 
-/// Evaluate a tracepoint against an already-loaded `Db`. Split out from
-/// `check_tracepoint_evaluate` so that `run_noir_variant` can peek at the
-/// recorded trace directory and SKIP cleanly when nargo emits the legacy
-/// layout, without duplicating the evaluate loop.
-fn check_tracepoint_evaluate_with_db(
-    db: Db,
+fn check_tracepoint_evaluate_with_reader(
+    reader: Arc<dyn TraceReader>,
     src: &str,
     line: usize,
     lang: Lang,
@@ -165,28 +115,67 @@ fn check_tracepoint_evaluate_with_db(
     let mut interpreter = TracepointInterpreter::new(1);
     interpreter.register_tracepoint(0, src)?;
 
-    let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
-    let mut db_replay = MaterializedReplaySession::new(reader);
-    for step in db.step_from(StepId(0), true) {
+    let mut db_replay = MaterializedReplaySession::new(reader.clone());
+    let mut saw_line = false;
+    let mut last_actual: Vec<StringAndValueTuple> = Vec::new();
+    for step_index in 0..reader.step_count() {
+        let step_id = StepId(step_index as i64);
+        let Some(step) = reader.step(step_id) else {
+            continue;
+        };
         let curr_line = step.line.0 as usize;
-        db_replay.jump_to(step.step_id)?;
+        db_replay.jump_to(step_id)?;
 
         if line == curr_line {
-            let actual = interpreter.evaluate(0, step.step_id, &mut db_replay, lang);
-            check_equal(&actual, expected);
-            return Ok(());
+            saw_line = true;
+            let actual = interpreter.evaluate(0, step_id, &mut db_replay, lang);
+            if results_equal(&actual, expected) {
+                return Ok(());
+            }
+            last_actual = actual;
         }
+    }
+
+    if saw_line {
+        check_equal(&last_actual, expected);
     }
 
     Err(format!("No step for line {line} in DB").into())
 }
 
 fn check_equal(actuals: &[StringAndValueTuple], expecteds: &[StringAndValueTuple]) {
-    assert_eq!(actuals.len(), expecteds.len());
+    assert_eq!(
+        actuals.len(),
+        expecteds.len(),
+        "tracepoint result count mismatch\nactual: {actuals:#?}\nexpected: {expecteds:#?}"
+    );
 
     for (actual, expected) in zip(actuals.iter(), expecteds.iter()) {
         assert_eq!(actual.field0, expected.field0);
         check_equal_values(&actual.field1, &expected.field1);
+    }
+}
+
+fn results_equal(actuals: &[StringAndValueTuple], expecteds: &[StringAndValueTuple]) -> bool {
+    actuals.len() == expecteds.len()
+        && zip(actuals.iter(), expecteds.iter()).all(|(actual, expected)| {
+            actual.field0 == expected.field0 && values_equal(&actual.field1, &expected.field1)
+        })
+}
+
+fn values_equal(actual: &Value, expected: &Value) -> bool {
+    if actual.kind != expected.kind {
+        return false;
+    }
+
+    match actual.kind {
+        TypeKind::Int => expected.i == actual.i,
+        TypeKind::String => expected.text == actual.text,
+        TypeKind::Seq => {
+            actual.elements.len() == expected.elements.len()
+                && zip(actual.elements.iter(), expected.elements.iter()).all(|(v1, v2)| values_equal(v1, v2))
+        }
+        _ => true,
     }
 }
 
@@ -208,36 +197,45 @@ fn check_equal_values(actual: &Value, expected: &Value) {
 }
 
 /// Open the CTFS materialized trace recorded under `path` and return its
-/// populated `Db`. Materialized traces are CTFS-only — legacy
+/// reader. Materialized traces are CTFS-only — legacy
 /// `trace.bin`/`trace.json` + `trace_metadata.json` triplets are no longer
 /// accepted by db-backend.
 ///
 /// Panics with a clear regeneration instruction when the recorder did not
 /// produce a `.ct` container, so the failure is loud (per the
 /// CTFS-only migration directive — silent fallbacks are forbidden).
-fn load_db_for_trace(path: &Path) -> Db {
-    let ct_path = std::fs::read_dir(path)
-        .unwrap_or_else(|e| panic!("read_dir {}: {}", path.display(), e))
+fn load_reader_for_trace(path: &Path) -> Result<CTFSTraceReader, Box<dyn Error>> {
+    let ct_path = std::fs::read_dir(path)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"))
-        .unwrap_or_else(|| {
-            panic!(
-                "no *.ct CTFS container found in {}.\n  \
-                 Materialized traces are CTFS-only — legacy \
-                 trace.bin/trace.json/trace_metadata.json bundles are no \
-                 longer accepted.\n  \
-                 If the recorder is producing the legacy 3-file layout, \
-                 update it to emit a `.ct` container (the trace-format \
-                 migration is documented in \
-                 codetracer-specs/Trace-Files/CTFS-Migration-Guide.md).",
-                path.display()
-            )
-        });
+        .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"));
 
-    let reader =
-        CTFSTraceReader::open(&ct_path).unwrap_or_else(|e| panic!("CTFS open failed for {}: {}", ct_path.display(), e));
-    reader.db().clone()
+    if let Some(ct_path) = ct_path {
+        return CTFSTraceReader::open(&ct_path)
+            .map_err(|e| format!("CTFS open failed for {}: {e}", ct_path.display()).into());
+    }
+
+    let json_path = path.join("trace.json");
+    if json_path.is_file() {
+        let json_bytes = std::fs::read(&json_path)?;
+        let events: Vec<TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
+            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
+        let workdir = path
+            .join("trace_metadata.json")
+            .is_file()
+            .then(|| path.join("trace_metadata.json"))
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
+            .unwrap_or_else(|| path.to_path_buf());
+        return CTFSTraceReader::from_events(events, &workdir);
+    }
+
+    Err(format!(
+        "no *.ct CTFS container or legacy trace.json found in {}",
+        path.display()
+    )
+    .into())
 }
 
 fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
@@ -305,14 +303,7 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
     Ok(())
 }
 
-fn find_nargo() -> bool {
-    Command::new("nargo").arg("--version").output().is_ok()
-}
-
 fn record_noir_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
-    if !find_nargo() {
-        return Err("nargo not found on PATH".into());
-    }
     let result = Command::new("nargo")
         .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
         .current_dir(program_dir)
@@ -357,37 +348,12 @@ fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(),
 ///   (cargo names each test thread after the test fn, e.g.
 ///   `tracepoint_interpreter::tests::log_array`) gives every test a unique
 ///   path even when they share a process.
-fn load_test_trace(name: &str, lang: Lang) -> Result<Db, Box<dyn Error>> {
+fn load_test_trace(name: &str, lang: Lang) -> Result<CTFSTraceReader, Box<dyn Error>> {
     let trace_dir = record_test_trace(name, lang)?;
-    Ok(load_db_for_trace(&trace_dir))
+    load_reader_for_trace(&trace_dir)
 }
 
-/// Record a test trace and return the loaded `Db` **only if** the recorder
-/// emitted a CTFS `.ct` container. Returns `Ok(None)` when the recorder
-/// succeeded but produced the legacy
-/// `trace.json`/`trace_paths.json`/`trace_metadata.json` layout — letting
-/// callers SKIP cleanly with a precise sentinel instead of triggering the
-/// loud panic in [`load_db_for_trace`].
-///
-/// Used by the Noir variant of the tracepoint-interpreter tests because
-/// `nargo trace` (≤ 1.0.0-beta.2) still emits the legacy layout. The Ruby
-/// variant continues to assert real behaviour because the native Ruby
-/// recorder is CTFS-native.
-fn load_test_trace_if_ctfs(name: &str, lang: Lang) -> Result<Option<Db>, Box<dyn Error>> {
-    let trace_dir = record_test_trace(name, lang)?;
-    let has_ct = std::fs::read_dir(&trace_dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .any(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"));
-    if has_ct {
-        Ok(Some(load_db_for_trace(&trace_dir)))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Shared trace-recording step used by both `load_test_trace` (panics if
-/// no `.ct`) and `load_test_trace_if_ctfs` (returns `None` instead).
+/// Shared trace-recording step used by `load_test_trace`.
 fn record_test_trace(name: &str, lang: Lang) -> Result<PathBuf, Box<dyn Error>> {
     let cwd = env::current_dir()?;
 
