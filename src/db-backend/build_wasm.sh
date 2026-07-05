@@ -10,7 +10,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RECORDER_ROOT="$WORKSPACE_ROOT/codetracer-native-recorder"
 EMULATOR_DIR="$RECORDER_ROOT/ct_emulator"
-EMULATOR_WASM_BUILD_SCRIPT="$EMULATOR_DIR/build_wasm_api.sh"
+PRIVATE_BUILD_ENV="$EMULATOR_DIR/export_build_env.sh"
+
+if [ -f "$PRIVATE_BUILD_ENV" ]; then
+	# shellcheck source=/dev/null
+	source "$PRIVATE_BUILD_ENV"
+	EMULATOR_WASM_BUILD_SCRIPT="$CT_MCR_EMULATOR_WASM_BUILD_SCRIPT"
+else
+	EMULATOR_WASM_BUILD_SCRIPT="$EMULATOR_DIR/build_wasm_api.sh"
+fi
 
 # make sure we use LLVM tools for wasm C/AR
 export CC_wasm32_unknown_unknown=clang
@@ -39,6 +47,7 @@ if [ -z "${AR_wasm32_unknown_unknown:-}" ]; then
 	fi
 fi
 if [ -z "${AR_wasm32_unknown_unknown:-}" ]; then
+	# shellcheck disable=SC2016
 	echo 'error: could not locate llvm-ar; install it or run `rustup component add llvm-tools`' >&2
 	exit 1
 fi
@@ -72,7 +81,8 @@ else
 fi
 
 if [ ! -x "$EMULATOR_WASM_BUILD_SCRIPT" ]; then
-	echo "error: missing executable emulator WASM build script: $EMULATOR_WASM_BUILD_SCRIPT" >&2
+	echo "error: missing private emulator WASM build script: $EMULATOR_WASM_BUILD_SCRIPT" >&2
+	echo "       browser MCR emulator replay requires sibling repo: $RECORDER_ROOT" >&2
 	exit 1
 fi
 
