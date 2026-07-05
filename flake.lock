@@ -2548,17 +2548,17 @@
     "io-mon-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1783092237,
-        "narHash": "sha256-zXaqWdcFFpHrbWvH0je/hSVO6+RL2v3oLxqez+Y0AsY=",
+        "lastModified": 1783120197,
+        "narHash": "sha256-gmmlVbF7Eo4OJxFZiJseeWV8xVLh9CJ/F+3KKqaigxs=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "b3fb1073b29b4eced88fd2731f98297853494854",
+        "rev": "9c9ea35365047df0fbec5f76268d6f403225d5b0",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "b3fb1073b29b4eced88fd2731f98297853494854",
+        "rev": "9c9ea35365047df0fbec5f76268d6f403225d5b0",
         "type": "github"
       }
     },
@@ -4693,16 +4693,16 @@
         "stackable-hooks-src": "stackable-hooks-src"
       },
       "locked": {
-        "lastModified": 1783095149,
-        "narHash": "sha256-Df1OIbQRirlFkVwwDygvdHLRBShCUb8mnqfNUXSNR0I=",
+        "lastModified": 1783195758,
+        "narHash": "sha256-uGLLKleOyfG1hBOJmQ1zyua07nOjvKc2U6w0pkV6mD0=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "7f2f368051fe4a44383cf76eeaf9dce51b387943",
+        "rev": "709a9ba647bf8ccc08e3f86f434f5a2bd64508e6",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "main",
+        "ref": "dev",
         "repo": "reprobuild",
         "type": "github"
       }
@@ -4796,16 +4796,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1781181394,
-        "narHash": "sha256-u9/Fl3UsOtGVDXBRdhJcBNq0geZxKIz46vnytjeqUnk=",
+        "lastModified": 1783195639,
+        "narHash": "sha256-jB5wPpKIHWbWdLGDJJhjtcl2aecHe38DweyR1pKwJ0w=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "d763c3a2abd7a0de3ef10cd0ceb62bde664c0492",
+        "rev": "f3382f579c31085c8b6d7eece97c78ee4617f8c8",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "main",
+        "ref": "dev",
         "repo": "runquota",
         "type": "github"
       }

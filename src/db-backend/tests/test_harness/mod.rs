@@ -1490,12 +1490,20 @@ pub fn is_ttd_available() -> bool {
 
 /// Check if the MCR recording backend is available.
 ///
-/// MCR requires both `ct-native-replay` and `ct-mcr` to be on PATH.
+/// MCR requires `ct-native-replay` plus the MCR CLI. Development builds expose
+/// that CLI as `ct_cli` and export `CODETRACER_CT_MCR_CMD`; production builds
+/// usually expose it as `ct-mcr`.
 pub fn is_mcr_available() -> bool {
     if find_ct_rr_support().is_none() {
         return false;
     }
-    find_on_path("ct-mcr").is_some()
+    if let Ok(path) = env::var("CODETRACER_CT_MCR_CMD") {
+        let p = PathBuf::from(path);
+        if p.exists() && p.is_file() {
+            return true;
+        }
+    }
+    find_on_path("ct-mcr").is_some() || find_on_path("ct_cli").is_some()
 }
 
 /// Check if a replay backend is available (rr on Unix, TTD on Windows).

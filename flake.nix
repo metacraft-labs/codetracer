@@ -113,7 +113,9 @@
     };
 
     runquota = {
-      url = "github:metacraft-labs/runquota/main";
+      # runquota/main is stale and lacks the bounded grant-stream API
+      # (pollNextGrantBounded / GrantPollResult) that current reprobuild uses.
+      url = "github:metacraft-labs/runquota/dev";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
@@ -122,7 +124,7 @@
     };
 
     reprobuild = {
-      url = "github:metacraft-labs/reprobuild/main";
+      url = "github:metacraft-labs/reprobuild/dev";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";

@@ -410,6 +410,16 @@ fn build_native(emulator_dir: &Path, target_arch: &str) {
             object_files.push(obj);
         }
     }
+    let xxh64_src = emulator_dir
+        .join("..")
+        .join("ct_interpose")
+        .join("src")
+        .join("ct_interpose")
+        .join("xxh64.c");
+    println!("cargo:rerun-if-changed={}", xxh64_src.display());
+    if xxh64_src.exists() {
+        object_files.push(compile_c_to_obj_native(&xxh64_src, &obj_dir, &nim_lib, emulator_dir));
+    }
     assert!(
         !object_files.is_empty(),
         "no .c files found in {} — did Nim regeneration succeed?",
