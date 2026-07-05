@@ -47,6 +47,8 @@ struct PrivateEmulatorBuild {
     wasm_build_script: PathBuf,
     include_dirs: Vec<PathBuf>,
     extra_sources: Vec<PathBuf>,
+    link_name: String,
+    exports_file: PathBuf,
     windows_cflags: Vec<String>,
     native_cflags: Vec<String>,
     wasm_cflags: Vec<String>,
@@ -120,7 +122,7 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
     let nim_lib = read_nim_lib_path(&native_c_dir);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let obj_dir = out_dir.join("mcr_emulator_obj");
+    let obj_dir = out_dir.join(format!("{}_obj", private_build.link_name));
     std::fs::create_dir_all(&obj_dir).expect("create obj_dir");
 
     // Windows: compile every generated .c TU into an object. We rely on
@@ -147,11 +149,11 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
     // needs `libgcc_s_seh-1.dll` next to the executable, which our
     // toolchain doesn't ship. The existing monitor shim build hit the
     // same issue.
-    let dll_path = link_shared_windows(&object_files, &out_dir);
+    let dll_path = link_shared_windows(&object_files, &out_dir, &private_build.link_name);
 
     let parent = dll_path.parent().expect("dll has parent");
     println!("cargo:rustc-link-search=native={}", parent.display());
-    println!("cargo:rustc-link-lib=dylib=mcr_emulator");
+    println!("cargo:rustc-link-lib=dylib={}", private_build.link_name);
 
     // Windows: deploy mcr_emulator.dll next to the final executable.
     // cargo's `rustc-link-search` only affects link time; at runtime
@@ -165,13 +167,14 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
         .and_then(|p| p.parent())
         .and_then(|p| p.parent())
         .expect("OUT_DIR has at least three parents (.../target/<profile>/build/<pkg>/out)");
-    let dest = profile_dir.join("mcr_emulator.dll");
-    std::fs::copy(&dll_path, &dest).expect("copy mcr_emulator.dll to profile dir");
+    let dll_name = format!("{}.dll", private_build.link_name);
+    let dest = profile_dir.join(&dll_name);
+    std::fs::copy(&dll_path, &dest).expect("copy emulator DLL to profile dir");
     // Also drop it into a `deps/` subdir if it exists, where some cargo
     // workspace targets place artifacts (test binaries, etc.).
     let deps_dir = profile_dir.join("deps");
     if deps_dir.exists() {
-        let _ = std::fs::copy(&dll_path, deps_dir.join("mcr_emulator.dll"));
+        let _ = std::fs::copy(&dll_path, deps_dir.join(&dll_name));
     }
     // Windows: drop mcr_emulator.lib (the MSVC import lib) next to the
     // DLL too, so cargo's standard link-search paths (profile dir +
@@ -181,11 +184,12 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
     // values under ``rust-lld``: replay-server's own OUT_DIR is missing
     // from the linker's /LIBPATH list, causing
     // ``could not open 'mcr_emulator.lib': no such file or directory``).
-    let implib_msvc_src = out_dir.join("mcr_emulator.lib");
+    let implib_msvc_src = out_dir.join(format!("{}.lib", private_build.link_name));
     if cfg!(target_env = "msvc") && implib_msvc_src.exists() {
-        let _ = std::fs::copy(&implib_msvc_src, profile_dir.join("mcr_emulator.lib"));
+        let implib_name = format!("{}.lib", private_build.link_name);
+        let _ = std::fs::copy(&implib_msvc_src, profile_dir.join(&implib_name));
         if deps_dir.exists() {
-            let _ = std::fs::copy(&implib_msvc_src, deps_dir.join("mcr_emulator.lib"));
+            let _ = std::fs::copy(&implib_msvc_src, deps_dir.join(&implib_name));
         }
         // Surface the profile + deps directories as link-search paths
         // so the rustc-driven linker invocation has a stable LIBPATH
@@ -195,9 +199,10 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
     }
 
     println!(
-        "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) into mcr_emulator.dll \
+        "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) into {} \
          (deployed to {})",
         object_files.len(),
+        dll_name,
         dest.display()
     );
 }
@@ -314,11 +319,12 @@ fn compile_c_to_obj_windows(
 /// `-static-libgcc` is required so the DLL does not pull in
 /// `libgcc_s_seh-1.dll` at runtime (which we'd then have to deploy
 /// alongside the .exe).
-fn link_shared_windows(objects: &[PathBuf], out_dir: &Path) -> PathBuf {
-    let dll_path = out_dir.join("mcr_emulator.dll");
-    let implib_a_path = out_dir.join("libmcr_emulator.dll.a");
-    let def_path = out_dir.join("mcr_emulator.def");
-    let implib_msvc_path = out_dir.join("mcr_emulator.lib");
+fn link_shared_windows(objects: &[PathBuf], out_dir: &Path, link_name: &str) -> PathBuf {
+    let dll_name = format!("{link_name}.dll");
+    let dll_path = out_dir.join(&dll_name);
+    let implib_a_path = out_dir.join(format!("lib{link_name}.dll.a"));
+    let def_path = out_dir.join(format!("{link_name}.def"));
+    let implib_msvc_path = out_dir.join(format!("{link_name}.lib"));
 
     // Windows: strip `\\?\` from every path we pass to gcc/lib.exe.
     let dll_arg = strip_unc_prefix(&dll_path);
@@ -368,7 +374,7 @@ fn link_shared_windows(objects: &[PathBuf], out_dir: &Path) -> PathBuf {
         } else if let Some(dlltool) = which_on_path("dlltool.exe") {
             let status = Command::new(&dlltool)
                 .arg("--dllname")
-                .arg("mcr_emulator.dll")
+                .arg(&dll_name)
                 .arg("--def")
                 .arg(&def_arg)
                 .arg("--output-lib")
@@ -385,8 +391,8 @@ fn link_shared_windows(objects: &[PathBuf], out_dir: &Path) -> PathBuf {
             );
         } else {
             panic!(
-                "neither lib.exe (MSVC Build Tools) nor dlltool.exe (MinGW) is on \
-                 PATH; cannot produce an MSVC-format import library for mcr_emulator.dll"
+                "neither lib.exe (MSVC Build Tools) nor dlltool.exe (MinGW) is on PATH; \
+                 cannot produce an MSVC-format import library for {dll_name}"
             );
         }
     }
@@ -425,7 +431,7 @@ fn build_native(private_build: &PrivateEmulatorBuild, target_arch: &str) {
     let nim_lib = read_nim_lib_path(&native_c_dir);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let obj_dir = out_dir.join("mcr_emulator_obj");
+    let obj_dir = out_dir.join(format!("{}_obj", private_build.link_name));
     std::fs::create_dir_all(&obj_dir).expect("create obj_dir");
 
     let mut object_files = Vec::new();
@@ -449,11 +455,11 @@ fn build_native(private_build: &PrivateEmulatorBuild, target_arch: &str) {
         native_c_dir.display()
     );
 
-    let so_path = link_shared(&object_files, &out_dir, target_arch);
+    let so_path = link_shared(&object_files, &out_dir, target_arch, private_build);
 
     let parent = so_path.parent().expect("so has parent");
     println!("cargo:rustc-link-search=native={}", parent.display());
-    println!("cargo:rustc-link-lib=dylib=mcr_emulator");
+    println!("cargo:rustc-link-lib=dylib={}", private_build.link_name);
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", parent.display());
 
     println!(
@@ -504,105 +510,21 @@ fn compile_c_to_obj_native(
 
 /// Link the previously-compiled object files into a shared library and
 /// return the path to the resulting `lib<name>.so` (or `.dylib`).
-fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBuf {
+fn link_shared(
+    objects: &[PathBuf],
+    out_dir: &Path,
+    target_arch: &str,
+    private_build: &PrivateEmulatorBuild,
+) -> PathBuf {
     let so_name = if cfg!(target_os = "macos") {
-        "libmcr_emulator.dylib"
+        format!("lib{}.dylib", private_build.link_name)
     } else {
-        "libmcr_emulator.so"
+        format!("lib{}.so", private_build.link_name)
     };
     let so_path = out_dir.join(so_name);
 
-    let version_script = out_dir.join("mcr_emulator.ver");
-    std::fs::write(
-        &version_script,
-        "{\n\
-            global:\n\
-                NimMain;\n\
-                mcrInit;\n\
-                mcrLoadMemoryRegion;\n\
-                mcrSetRegisters;\n\
-                mcrAddSyscallEvent;\n\
-                mcrStep;\n\
-                mcrRun;\n\
-                mcrGetPC;\n\
-                mcrGetSP;\n\
-                mcrGetRegister;\n\
-                mcrReadMemory;\n\
-                mcrGetStepCounter;\n\
-                mcrUndoMapReset;\n\
-                mcrUndoMapSetWindow;\n\
-                mcrUndoMapPushWrite;\n\
-                mcrUndoMapWriteCoverage;\n\
-                mcrUndoMapLastWriteBefore;\n\
-                mcrUndoMapLastWriteResultPc;\n\
-                mcrUndoMapLastWriteResultTick;\n\
-                mcrUndoMapLastWriteResultAddress;\n\
-                mcrUndoMapLastWriteResultSize;\n\
-                mcrUndoMapLastWriteResultValue;\n\
-                mcrLastMileReverseStepReset;\n\
-                mcrLastMileReverseStep;\n\
-                mcrLastMileReverseStepCurrentTick;\n\
-                mcrLastMileReverseStepCurrentPc;\n\
-                mcrLastMileReverseStepCount;\n\
-                mcrOmniscientReset;\n\
-                mcrOmniscientPushWrite;\n\
-                mcrOmniscientPushLineHit;\n\
-                mcrOmniscientFinalize;\n\
-                mcrOmniscientLoadFromPath;\n\
-                mcrOmniscientWriteToPath;\n\
-                mcrOmniscientWriteSliceSummaryToPath;\n\
-                mcrOmniscientLoadLineHitsFromPath;\n\
-                mcrOmniscientLoadGlobalMemwritesFromPath;\n\
-                mcrOmniscientLoadPartialGlobalMemwritesFromPath;\n\
-                mcrOmniscientPartialGapCount;\n\
-                mcrOmniscientPartialGapTickLo;\n\
-                mcrOmniscientPartialGapTickHi;\n\
-                mcrOmniscientPartialGapSliceIndex;\n\
-                mcrOmniscientLastWriteBefore;\n\
-                mcrOmniscientLastWriteResultTick;\n\
-                mcrOmniscientLastWriteResultPc;\n\
-                mcrOmniscientLastWriteResultAddress;\n\
-                mcrOmniscientLastWriteResultSize;\n\
-                mcrOmniscientLastWriteResultOldValue;\n\
-                mcrOmniscientLastWriteResultNewValue;\n\
-                mcrOmniscientValueAt;\n\
-                mcrOmniscientValueResultLow64;\n\
-                mcrOmniscientWritesInRange;\n\
-                mcrOmniscientRangeRecordTick;\n\
-                mcrOmniscientRangeRecordPc;\n\
-                mcrOmniscientRangeRecordAddress;\n\
-                mcrOmniscientRangeRecordSize;\n\
-                mcrOmniscientRangeRecordOldValue;\n\
-                mcrOmniscientRangeRecordNewValue;\n\
-                mcrOmniscientSourceLineHits;\n\
-                mcrOmniscientSourceLineHitAt;\n\
-                mcrOmniscientIntervalSchedule;\n\
-                mcrOmniscientIntervalMarkAnalyzed;\n\
-                mcrOmniscientIntervalIsAnalyzed;\n\
-                mcrOmniscientIntervalScheduledCount;\n\
-                mcrOmniscientWriteCount;\n\
-                mcrOmniscientLineHitCount;\n\
-                mcrDataWatchReset;\n\
-                mcrDataWatchInstall;\n\
-                mcrDataWatchClear;\n\
-                mcrDataWatchInstalledCount;\n\
-                mcrDataWatchCheckWrite;\n\
-                mcrDataWatchLastFireHandle;\n\
-                mcrDataWatchLastFireTick;\n\
-                mcrDataWatchLastFirePc;\n\
-                mcrDataWatchLastFireAddress;\n\
-                mcrDataWatchLastFireSize;\n\
-                mcrDataWatchLastFireOldValue;\n\
-                mcrDataWatchLastFireNewValue;\n\
-                mcrDataWatchWriteCheckCount;\n\
-                mcrDataWatchFireCount;\n\
-                mcrDataWatchHistoryLen;\n\
-                mcrDataWatchHistoryFindBefore;\n\
-            local:\n\
-                *;\n\
-        };\n",
-    )
-    .expect("write version script");
+    let version_script = out_dir.join(format!("{}.ver", private_build.link_name));
+    write_version_script(&version_script, &read_exported_symbols(&private_build.exports_file));
 
     let _ = target_arch;
 
@@ -623,6 +545,51 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
     let status = cmd.status().expect("invoke linker");
     assert!(status.success(), "failed linking {}", so_path.display());
     so_path
+}
+
+fn read_exported_symbols(exports_file: &Path) -> Vec<String> {
+    println!("cargo:rerun-if-changed={}", exports_file.display());
+    let contents = std::fs::read_to_string(exports_file)
+        .unwrap_or_else(|e| panic!("failed to read emulator export list {}: {e}", exports_file.display()));
+    let mut symbols = Vec::new();
+    for (index, line) in contents.lines().enumerate() {
+        let symbol = line.trim();
+        if symbol.is_empty() || symbol.starts_with('#') {
+            continue;
+        }
+        assert!(
+            symbol.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "invalid symbol `{symbol}` at {}:{}",
+            exports_file.display(),
+            index + 1
+        );
+        symbols.push(symbol.to_owned());
+    }
+    assert!(
+        !symbols.is_empty(),
+        "emulator export list {} did not contain any symbols",
+        exports_file.display()
+    );
+    symbols
+}
+
+fn validate_link_name(link_name: &str) {
+    assert!(!link_name.is_empty(), "emulator link name must not be empty");
+    assert!(
+        link_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        "invalid emulator link name `{link_name}`"
+    );
+}
+
+fn write_version_script(version_script: &Path, symbols: &[String]) {
+    let mut body = String::from("{\n    global:\n");
+    for symbol in symbols {
+        body.push_str("        ");
+        body.push_str(symbol);
+        body.push_str(";\n");
+    }
+    body.push_str("    local:\n        *;\n};\n");
+    std::fs::write(version_script, body).expect("write version script");
 }
 
 // =====================================================================
@@ -695,7 +662,7 @@ fn build_wasm32(private_build: &PrivateEmulatorBuild) {
         build.flag_if_supported(flag);
     }
     build.files(&sources);
-    build.compile("mcr_emulator");
+    build.compile(&private_build.link_name);
 
     println!(
         "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) from {} into wasm32 static archive",
@@ -754,6 +721,16 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
             .map(|v| v.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_else(|| default.iter().map(|s| (*s).to_owned()).collect())
     };
+    let string = |key: &str, default: &str| {
+        env_map
+            .get(key)
+            .filter(|v| !v.is_empty())
+            .cloned()
+            .unwrap_or_else(|| default.to_owned())
+    };
+
+    let link_name = string("CT_MCR_EMULATOR_LINK_NAME", "mcr_emulator");
+    validate_link_name(&link_name);
 
     let recorder_root = emulator_dir.parent().expect("ct_emulator has parent");
     PrivateEmulatorBuild {
@@ -778,6 +755,11 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
         extra_sources: path_list(
             "CT_MCR_EMULATOR_EXTRA_SOURCES",
             vec![recorder_root.join("ct_interpose/src/ct_interpose/xxh64.c")],
+        ),
+        link_name,
+        exports_file: path(
+            "CT_MCR_EMULATOR_EXPORTS_FILE",
+            emulator_dir.join("mcr_emulator.exports"),
         ),
         windows_cflags: flags(
             "CT_MCR_EMULATOR_WINDOWS_CFLAGS",
