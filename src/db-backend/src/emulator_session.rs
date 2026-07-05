@@ -158,7 +158,7 @@ const CP0_REGS_USER_STRUCT_LEN: usize = 27 * 8;
 /// Per-thread blob header: `(tid: u32, reg_data_len: u32)`.
 const CP0_REGS_THREAD_HEADER_LEN: usize = 8;
 
-/// Diagnostics produced by [`EmulatorReplaySession::seed_emulator_from_cp0`].
+/// Diagnostics produced by [`EmulatorReplaySession::seed_emulator_from_cp0_parts`].
 ///
 /// Kept distinct from the FFI getters (`mcrGetPC`, `mcrGetRegister`) so
 /// tests can assert on the *seeding action* rather than the emulator's
@@ -693,6 +693,17 @@ pub struct EmulatorReplaySession {
     /// keep this field so unit tests can deterministically inspect the
     /// last reported value without having to dispatch to FFI.
     current_step_id: StepId,
+    /// Raw checkpoint-0 memory snapshot from CTFS, retained so
+    /// [`ReplaySession::jump_to`] can reset the process-global Nim
+    /// emulator to the recorded entry state before replaying forward.
+    ///
+    /// Empty sessions created with [`Self::new`] do not have this
+    /// snapshot and therefore cannot implement standard seeking.
+    cp0_mem_bytes: Option<Vec<u8>>,
+    /// Raw checkpoint-0 register snapshot from CTFS. This is required
+    /// for any non-zero seek because the emulator needs the recorded RIP
+    /// and stack/register state before `mcrStep` can execute.
+    cp0_regs_bytes: Option<Vec<u8>>,
     /// Parsed DWARF index for the recorded program, when the `.ct`
     /// container bundled a `debug.dat` blob (M-DWARF-3). `None` when:
     ///
@@ -795,6 +806,8 @@ impl std::fmt::Debug for EmulatorReplaySession {
             .field("next_breakpoint_id", &self.next_breakpoint_id)
             .field("breakpoints_enabled", &self.breakpoints_enabled)
             .field("current_step_id", &self.current_step_id)
+            .field("has_cp0_mem", &self.cp0_mem_bytes.is_some())
+            .field("has_cp0_regs", &self.cp0_regs_bytes.is_some())
             .field(
                 "dwarf",
                 &self
@@ -859,6 +872,8 @@ impl EmulatorReplaySession {
             next_breakpoint_id: 1,
             breakpoints_enabled: true,
             current_step_id: StepId(0),
+            cp0_mem_bytes: None,
+            cp0_regs_bytes: None,
             dwarf: None,
             pc_rebase: None,
             stack_unwinder: None,
@@ -996,6 +1011,15 @@ impl EmulatorReplaySession {
         // needed.
         let pc_rebase = compute_pc_rebase_from_cp0_maps(&mut ctfs, &meta.program, elf_bytes.as_deref());
 
+        let cp0_mem_bytes = match ctfs.read_file(CP0_MEM_FILE) {
+            Ok(bytes) if !bytes.is_empty() => Some(bytes),
+            _ => None,
+        };
+        let cp0_regs_bytes = match ctfs.read_file(CP0_REGS_FILE) {
+            Ok(bytes) if !bytes.is_empty() => Some(bytes),
+            _ => None,
+        };
+
         ensure_nim_runtime();
         // SAFETY: see `new()`.
         unsafe { emulator_ffi::mcrInit() };
@@ -1012,7 +1036,7 @@ impl EmulatorReplaySession {
         // post-`mcrInit` zero state and rely on the M-DWARF-2 fallback
         // for `build_location`. This mirrors the recorder-side "best
         // effort" snapshotting contract.
-        Self::seed_emulator_from_cp0(&mut ctfs);
+        Self::seed_emulator_from_cp0_parts(cp0_mem_bytes.as_deref(), cp0_regs_bytes.as_deref());
 
         // M18 — surface the presence of the omniscient DB namespaces.
         // The Nim recorder writes `memwrites.tc` / `linehits.tc` per
@@ -1031,6 +1055,8 @@ impl EmulatorReplaySession {
             next_breakpoint_id: 1,
             breakpoints_enabled: true,
             current_step_id: StepId(0),
+            cp0_mem_bytes,
+            cp0_regs_bytes,
             dwarf,
             pc_rebase,
             stack_unwinder,
@@ -1047,21 +1073,18 @@ impl EmulatorReplaySession {
         })
     }
 
-    /// Read `cp0.mem` + `cp0.regs` from a CTFS reader and install them on
-    /// the active emulator instance.
-    ///
-    /// Returns the diagnostics tuple `(regions_installed, total_bytes,
-    /// registers_installed)` so unit tests can observe the seeding
-    /// outcome without dispatching to the FFI getters.
-    fn seed_emulator_from_cp0(ctfs: &mut CtfsReader) -> SeedDiagnostics {
+    /// Install `cp0.mem` + `cp0.regs` bytes on the active emulator
+    /// instance. Returns diagnostics so tests can observe the seeding
+    /// outcome without dispatching to FFI getters.
+    fn seed_emulator_from_cp0_parts(cp0_mem_bytes: Option<&[u8]>, cp0_regs_bytes: Option<&[u8]>) -> SeedDiagnostics {
         // ---- cp0.mem -----------------------------------------------------
         //
         // Even a 90 MB blob is decoded by streaming through it tuple-by-tuple
         // (`install_memory_regions` slices into `mem_bytes` without copying).
-        // The blob is dropped as soon as `seed_emulator_from_cp0` returns so
-        // the peak transient memory cost is one copy of cp0.mem — not two.
-        let (regions, total_bytes) = match ctfs.read_file(CP0_MEM_FILE) {
-            Ok(mem_bytes) if !mem_bytes.is_empty() => install_memory_regions(&mem_bytes),
+        // `new_from_ctfs_bytes` keeps the raw blob so later `jump_to` calls
+        // can replay from CP0 without reopening the CTFS container.
+        let (regions, total_bytes) = match cp0_mem_bytes {
+            Some(mem_bytes) if !mem_bytes.is_empty() => install_memory_regions(mem_bytes),
             // Missing or empty is a silent fallback — older traces lack
             // the cp0 stream entirely.
             _ => (0, 0u64),
@@ -1073,8 +1096,8 @@ impl EmulatorReplaySession {
         // emulator's `mcrSetRegisters` is a single-thread surface. Future
         // multi-thread work will iterate per-thread blobs and dispatch to a
         // forthcoming `mcrSetThreadRegisters` shim.
-        let registers_installed = match ctfs.read_file(CP0_REGS_FILE) {
-            Ok(reg_bytes) if !reg_bytes.is_empty() => match decode_first_thread_registers(&reg_bytes) {
+        let registers_installed = match cp0_regs_bytes {
+            Some(reg_bytes) if !reg_bytes.is_empty() => match decode_first_thread_registers(reg_bytes) {
                 Some(regs) => {
                     install_registers(&regs);
                     true
@@ -1096,6 +1119,25 @@ impl EmulatorReplaySession {
             total_bytes,
             registers_installed,
         }
+    }
+
+    fn reset_emulator_to_cp0(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some(regs) = self.cp0_regs_bytes.as_deref() else {
+            return Err(
+                "EmulatorReplaySession::jump_to requires a recorded cp0.regs snapshot; empty or legacy MCR sessions cannot seek"
+                    .into(),
+            );
+        };
+
+        ensure_nim_runtime();
+        // SAFETY: see `new()`.
+        unsafe { emulator_ffi::mcrInit() };
+        let diagnostics = Self::seed_emulator_from_cp0_parts(self.cp0_mem_bytes.as_deref(), Some(regs));
+        if !diagnostics.registers_installed {
+            return Err("EmulatorReplaySession::jump_to could not restore cp0.regs; snapshot is corrupt".into());
+        }
+        self.current_step_id = StepId(0);
+        Ok(())
     }
 
     /// Allocate and store a new breakpoint record under `(path, line)`.
@@ -1903,8 +1945,46 @@ impl ReplaySession for EmulatorReplaySession {
         Ok(())
     }
 
-    fn jump_to(&mut self, _step_id: StepId) -> Result<bool, Box<dyn Error>> {
-        todo!("F5c-3: rewind/fast-forward emulator to step_id")
+    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        if step_id.0 < 0 {
+            return Err(format!(
+                "EmulatorReplaySession::jump_to received invalid negative step id {}",
+                step_id.0
+            )
+            .into());
+        }
+
+        self.reset_emulator_to_cp0()?;
+
+        let target = usize::try_from(step_id.0)
+            .map_err(|_| format!("EmulatorReplaySession::jump_to target {} is too large", step_id.0))?;
+        for executed in 0..target {
+            // SAFETY: `mcrStep` advances the Nim-managed emulator state
+            // seeded by `reset_emulator_to_cp0`. It returns 0 on a
+            // completed instruction and non-zero on process exit or a
+            // decode/memory/register error.
+            let rc = unsafe { emulator_ffi::mcrStep() };
+            if rc != 0 {
+                let counter = unsafe { emulator_ffi::mcrGetStepCounter() };
+                self.current_step_id = StepId(counter as i64);
+                return Err(format!(
+                    "EmulatorReplaySession::jump_to could not reach step {}: mcrStep returned {} after {} instructions",
+                    step_id.0, rc, executed,
+                )
+                .into());
+            }
+        }
+
+        let counter = unsafe { emulator_ffi::mcrGetStepCounter() };
+        self.current_step_id = StepId(counter as i64);
+        if self.current_step_id != step_id {
+            return Err(format!(
+                "EmulatorReplaySession::jump_to reached emulator step {}, expected {}",
+                self.current_step_id.0, step_id.0,
+            )
+            .into());
+        }
+        Ok(true)
     }
 
     fn jump_to_call(&mut self, _location: &Location) -> Result<Location, Box<dyn Error>> {
@@ -3409,6 +3489,34 @@ mod tests {
     /// red-zone and call-pushed return address can both fit.
     const STACK_INIT_RBP: u64 = STACK_INIT_RSP + 0x100;
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct EmulatorStateSnapshot {
+        pc: u64,
+        sp: u64,
+        step_counter: u64,
+        registers: [u64; MCR_REG_COUNT],
+    }
+
+    fn capture_emulator_state() -> EmulatorStateSnapshot {
+        let mut registers = [0u64; MCR_REG_COUNT];
+        for (idx, slot) in registers.iter_mut().enumerate() {
+            *slot = unsafe { emulator_ffi::mcrGetRegister(idx as std::os::raw::c_int) };
+        }
+        EmulatorStateSnapshot {
+            pc: unsafe { emulator_ffi::mcrGetPC() },
+            sp: unsafe { emulator_ffi::mcrGetSP() },
+            step_counter: unsafe { emulator_ffi::mcrGetStepCounter() },
+            registers,
+        }
+    }
+
+    fn raw_mcr_steps(count: usize) {
+        for i in 0..count {
+            let rc = unsafe { emulator_ffi::mcrStep() };
+            assert_eq!(rc, 0, "raw mcrStep #{i} failed with rc={rc}");
+        }
+    }
+
     /// `step(_, false)` must surface a clear "reverse not supported"
     /// error so the DAP client can show a useful diagnostic.
     #[test]
@@ -3425,6 +3533,208 @@ mod tests {
                 "error must mention reverse stepping; got `{msg}` for action {action:?}",
             );
         }
+    }
+
+    /// `jump_to(0)` must reseed the process-global emulator from the
+    /// recorded CP0 snapshot, not leave it wherever prior stepping
+    /// happened to stop.
+    #[test]
+    fn jump_to_zero_restores_original_cp0_state_after_stepping() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let initial = capture_emulator_state();
+
+        session.step(Action::StepIn, true).expect("step-in must succeed");
+        let stepped = capture_emulator_state();
+        assert_ne!(stepped.pc, initial.pc, "precondition: stepping must mutate PC");
+        assert!(
+            session.current_step_id().0 > 0,
+            "precondition: stepping must advance ticks"
+        );
+
+        session.jump_to(StepId(0)).expect("jump_to(0) must restore CP0");
+        let restored = capture_emulator_state();
+        assert_eq!(restored, initial, "jump_to(0) must exactly restore CP0 emulator state");
+        assert_eq!(session.current_step_id(), StepId(0));
+    }
+
+    /// `jump_to(N)` must be equivalent to constructing a fresh session
+    /// from the same CTFS bytes and executing exactly N raw emulator
+    /// instructions from CP0.
+    #[test]
+    fn jump_to_n_matches_direct_fresh_run() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: usize = 4;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let _direct = EmulatorReplaySession::new_from_ctfs_bytes(bytes.clone()).unwrap();
+        raw_mcr_steps(TARGET);
+        let direct_state = capture_emulator_state();
+
+        let mut seek_session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        seek_session
+            .jump_to(StepId(TARGET as i64))
+            .expect("jump_to target must succeed");
+        let seek_state = capture_emulator_state();
+
+        assert_eq!(
+            seek_state, direct_state,
+            "jump_to(N) must replay exactly N instructions"
+        );
+        assert_eq!(seek_session.current_step_id(), StepId(TARGET as i64));
+    }
+
+    /// Repeated seeks must always replay from CP0. Seeking to a later
+    /// point in between must not make a later seek accumulate from that
+    /// intermediate state.
+    #[test]
+    fn repeated_jump_to_is_deterministic_and_non_accumulating() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        session.jump_to(StepId(3)).expect("first jump_to(3) must succeed");
+        let first = capture_emulator_state();
+
+        session
+            .jump_to(StepId(1))
+            .expect("intermediate jump_to(1) must succeed");
+        let intermediate = capture_emulator_state();
+        assert_ne!(
+            intermediate, first,
+            "precondition: a different target must produce a different emulator state",
+        );
+
+        session.jump_to(StepId(3)).expect("second jump_to(3) must succeed");
+        let second = capture_emulator_state();
+
+        assert_eq!(second, first, "repeated jump_to(3) must be deterministic");
+        assert_eq!(session.current_step_id(), StepId(3));
+    }
+
+    #[test]
+    fn jump_to_negative_step_id_errors_clearly() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let err = session
+            .jump_to(StepId(-1))
+            .expect_err("negative step id must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("negative") && msg.contains("-1"),
+            "error must identify the invalid negative target, got `{msg}`",
+        );
+    }
+
+    #[test]
+    fn jump_to_empty_session_reports_unsupported() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let mut session = EmulatorReplaySession::new();
+
+        let err = session
+            .jump_to(StepId(0))
+            .expect_err("empty sessions have no CP0 snapshot to restore");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cp0.regs") && msg.contains("cannot seek"),
+            "error must explain that no CP0 snapshot is available, got `{msg}`",
+        );
+    }
+
+    #[test]
+    fn jump_to_legacy_ctfs_without_cp0_regs_reports_unsupported() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(
+            /* cp0_regs */ None,
+            &install_hello_text_and_stack(),
+            /* include_dwarf */ true,
+        );
+        let mut session =
+            EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("legacy MCR CTFS must still construct");
+
+        let err = session
+            .jump_to(StepId(0))
+            .expect_err("legacy CTFS without cp0.regs cannot seek");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cp0.regs") && msg.contains("legacy") && msg.contains("cannot seek"),
+            "error must identify unsupported legacy seeking, got `{msg}`",
+        );
+    }
+
+    #[test]
+    fn jump_to_unreachable_target_errors_clearly() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(0xdead_beef, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let err = session
+            .jump_to(StepId(1))
+            .expect_err("target must be unreachable from an unmapped RIP");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("could not reach step 1") && msg.contains("mcrStep returned"),
+            "error must identify the unreachable target and emulator failure, got `{msg}`",
+        );
+    }
+
+    /// Handler-level coverage for the standard `ct/goto-ticks` command:
+    /// the DAP handler must route through `ReplaySession::jump_to` on an
+    /// emulator-backed session and publish the resulting move event.
+    #[test]
+    fn goto_ticks_handler_uses_emulator_jump_to_path() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 4;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let _direct = EmulatorReplaySession::new_from_ctfs_bytes(bytes.clone()).unwrap();
+        raw_mcr_steps(TARGET as usize);
+        let expected = capture_emulator_state();
+
+        let replay = Box::new(EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap());
+        let reader: std::sync::Arc<dyn crate::trace_reader::TraceReader> =
+            std::sync::Arc::new(crate::in_memory_trace_reader::InMemoryTraceReader::new(
+                crate::db::Db::new(&std::path::PathBuf::from("/tmp/emulator-goto-ticks")),
+            ));
+        let mut handler = crate::dap_handler::Handler::construct_with_replay(
+            crate::task::TraceKind::Emulator,
+            crate::recreator_session::RecreatorArgs::default(),
+            reader,
+            replay,
+            false,
+        );
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        handler
+            .goto_ticks(
+                crate::dap::Request::default(),
+                crate::task::GoToTicksArguments {
+                    thread_id: 0,
+                    ticks: TARGET,
+                },
+                sender,
+            )
+            .expect("ct/goto-ticks handler must succeed for emulator session");
+
+        assert_eq!(handler.step_id, StepId(TARGET));
+        assert_eq!(
+            capture_emulator_state(),
+            expected,
+            "ct/goto-ticks must leave the emulator in the exact jump_to target state",
+        );
+
+        let messages: Vec<_> = receiver.try_iter().collect();
+        assert!(
+            messages.iter().any(|msg| matches!(
+                msg,
+                crate::dap::DapMessage::Event(event) if event.event == "ct/complete-move"
+                    && event.body["location"]["rrTicks"].as_i64() == Some(TARGET)
+            )),
+            "ct/goto-ticks must emit a complete-move event for the target tick; got {messages:?}",
+        );
     }
 
     /// `add_breakpoint(hello.c, 24)` against a session with a bundled
