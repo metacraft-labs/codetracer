@@ -641,6 +641,12 @@ fn build_wasm32(emulator_dir: &Path) {
             sources.push(path);
         }
     }
+    let xxh64 = emulator_dir
+        .parent()
+        .expect("ct_emulator has recorder root parent")
+        .join("ct_interpose/src/ct_interpose/xxh64.c");
+    assert!(xxh64.exists(), "expected recorder xxh64 source at {}", xxh64.display());
+    sources.push(xxh64);
     assert!(
         !sources.is_empty(),
         "no .c files found in {} — did Nim regeneration succeed?",
@@ -684,15 +690,6 @@ fn build_wasm32(emulator_dir: &Path) {
         .flag_if_supported("-Wno-implicit-function-declaration")
         .files(&sources);
     build.compile("mcr_emulator");
-
-    // Allow the wasm-ld pass to leave a few libc symbols undefined.
-    // Rust's `compiler_builtins` will resolve `memcpy`/`memset`/`memmove`
-    // at link time, and our `c_compat`/`emulator_wasm_libc_shims` modules
-    // resolve `malloc`/`free`/`realloc`/`calloc`/`exit`. Anything we have
-    // missed (Nim runtime versions evolve) should still be allowed at
-    // link time so the build surfaces a clear "wasm-bindgen-side import"
-    // error rather than a hard link failure — easier to diagnose.
-    println!("cargo:rustc-link-arg=--import-undefined");
 
     println!(
         "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) from {} into wasm32 static archive",

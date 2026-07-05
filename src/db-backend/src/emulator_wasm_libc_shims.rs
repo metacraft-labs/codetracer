@@ -22,17 +22,50 @@
 //! are satisfied by Rust's `compiler_builtins` crate, which the rustc
 //! wasm32 build automatically pulls in. No explicit shim is needed.
 //!
-//! Symbols *not* referenced by the wasm-targeted output (verified by
-//! grepping `ct_emulator/build/wasm_c_files/*.c` after generation):
-//! `fwrite`, `fflush`, `stderr`, `fopen`, `__assert_fail`, `pthread_*`,
-//! `__tls_get_addr`, `setjmp`/`longjmp`, `signal`. We do not
-//! stub them; if a future Nim version starts emitting them, the
-//! wasm-ld pass will fail loudly and this module is where they belong.
+//! Additional stdio/environment symbols are present through Nim stdlib
+//! diagnostic paths. They are implemented as inert browser shims so wasm-bindgen
+//! does not emit bare `"env"` imports.
 
 #![cfg(target_arch = "wasm32")]
 #![allow(clippy::missing_safety_doc)]
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
+use core::ptr::null_mut;
+
+/// Minimal C `errno` storage for Nim stdlib code paths that reference it while
+/// formatting diagnostics. Browser replay does not expose host errno state.
+#[unsafe(no_mangle)]
+pub static mut errno: c_int = 0;
+
+static UNKNOWN_ERROR: &[u8] = b"unknown wasm errno\0";
+
+#[unsafe(no_mangle)]
+pub extern "C" fn clearerr(_stream: *mut c_void) {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ferror(_stream: *mut c_void) -> c_int {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fflush(_stream: *mut c_void) -> c_int {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fwrite(_ptr: *const c_void, size: usize, nmemb: usize, _stream: *mut c_void) -> usize {
+    size.saturating_mul(nmemb)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn getenv(_name: *const c_char) -> *mut c_char {
+    null_mut()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn strerror(_errnum: c_int) -> *mut c_char {
+    UNKNOWN_ERROR.as_ptr() as *mut c_char
+}
 
 /// `exit(int)` shim. Nim's `system.nim` calls this on unhandled
 /// exceptions; on the web we trap into JavaScript so the error
@@ -41,9 +74,4 @@ use core::ffi::{c_char, c_int};
 #[unsafe(no_mangle)]
 pub extern "C" fn exit(_status: c_int) -> ! {
     wasm_bindgen::throw_str("ct-mcr: Nim runtime called exit() — fatal emulator error");
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn getenv(_name: *const c_char) -> *mut c_char {
-    core::ptr::null_mut()
 }

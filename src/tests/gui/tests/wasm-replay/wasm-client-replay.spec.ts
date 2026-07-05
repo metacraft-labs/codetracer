@@ -39,7 +39,12 @@ import * as childProcess from "node:child_process";
 // `beforeAll`.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..", "..");
 const DB_BACKEND_DIR = path.join(REPO_ROOT, "src", "db-backend");
-const WASM_TESTING_DIR = path.join(REPO_ROOT, "src", "db-backend", "wasm-testing");
+const WASM_TESTING_DIR = path.join(
+  REPO_ROOT,
+  "src",
+  "db-backend",
+  "wasm-testing",
+);
 const WASM_PKG_DIR = path.join(WASM_TESTING_DIR, "pkg");
 const WASM_PACKAGE_FILES = [
   path.join(WASM_PKG_DIR, "db_backend.js"),
@@ -47,7 +52,11 @@ const WASM_PACKAGE_FILES = [
 ];
 const WASM_BINARY = path.join(WASM_PKG_DIR, "db_backend_bg.wasm");
 const WASM_BUILD_SCRIPT = path.join(DB_BACKEND_DIR, "build_wasm.sh");
-const NATIVE_RECORDER_ROOT = path.resolve(REPO_ROOT, "..", "codetracer-native-recorder");
+const NATIVE_RECORDER_ROOT = path.resolve(
+  REPO_ROOT,
+  "..",
+  "codetracer-native-recorder",
+);
 const NATIVE_RECORDER_WASM_MODULES = [
   "ct_emulator",
   "ct_time_model",
@@ -81,7 +90,13 @@ const BUILD_OUTPUT_DIR_NAMES = new Set([
   "node_modules",
 ]);
 
-const DB_FIXTURES_DIR = path.join(REPO_ROOT, "src", "db-backend", "tests", "fixtures");
+const DB_FIXTURES_DIR = path.join(
+  REPO_ROOT,
+  "src",
+  "db-backend",
+  "tests",
+  "fixtures",
+);
 
 // Materialized CTFS fixture: Stylus/WASM DAP flow.
 const STYLUS_TRACES_DIR = path.join(DB_FIXTURES_DIR, "stylus-fund-trace");
@@ -102,7 +117,10 @@ function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath);
 }
 
-function collectFiles(dir: string, predicate: (filePath: string) => boolean): string[] {
+function collectFiles(
+  dir: string,
+  predicate: (filePath: string) => boolean,
+): string[] {
   if (!fs.existsSync(dir)) {
     return [];
   }
@@ -122,7 +140,10 @@ function collectFiles(dir: string, predicate: (filePath: string) => boolean): st
   return files;
 }
 
-function collectDirectFiles(dir: string, predicate: (filePath: string) => boolean): string[] {
+function collectDirectFiles(
+  dir: string,
+  predicate: (filePath: string) => boolean,
+): string[] {
   if (!fs.existsSync(dir)) {
     return [];
   }
@@ -176,7 +197,9 @@ function parseCargoFeatures(cargoToml: string): Map<string, string[]> {
     }
 
     if (currentValue.includes("]")) {
-      const entries = [...currentValue.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+      const entries = [...currentValue.matchAll(/"([^"]+)"/g)].map(
+        (match) => match[1],
+      );
       features.set(currentFeature, entries);
       currentFeature = null;
       currentValue = "";
@@ -186,7 +209,10 @@ function parseCargoFeatures(cargoToml: string): Map<string, string[]> {
   return features;
 }
 
-function enabledOptionalDependencyNames(cargoToml: string, featureName: string): Set<string> {
+function enabledOptionalDependencyNames(
+  cargoToml: string,
+  featureName: string,
+): Set<string> {
   const features = parseCargoFeatures(cargoToml);
   const enabled = new Set<string>();
   const visited = new Set<string>();
@@ -311,7 +337,10 @@ function cargoLocalDependencyRefs(
   includeOptionalDependencies: boolean,
 ): CargoDependencyRef[] {
   const cargoToml = fs.readFileSync(manifestPath, "utf8");
-  const enabledOptionalDeps = enabledOptionalDependencyNames(cargoToml, "browser-transport");
+  const enabledOptionalDeps = enabledOptionalDependencyNames(
+    cargoToml,
+    "browser-transport",
+  );
   const dependencies: CargoDependencyRef[] = [];
   let sectionDependencies = new Map<string, CargoDependencyRef>();
   let section = "";
@@ -321,7 +350,11 @@ function cargoLocalDependencyRefs(
   function pushDependency(dependency: CargoDependencyRef): void {
     if (
       (dependency.pathValue || dependency.workspace) &&
-      cargoDependencyEnabled(dependency, includeOptionalDependencies, enabledOptionalDeps)
+      cargoDependencyEnabled(
+        dependency,
+        includeOptionalDependencies,
+        enabledOptionalDeps,
+      )
     ) {
       dependencies.push(dependency);
     }
@@ -361,16 +394,24 @@ function cargoLocalDependencyRefs(
       if (inlineMatch) {
         const dependencyName = inlineMatch[1];
         const dependencyConfig = inlineMatch[2];
-        const dependency = cargoDependencyRef(sectionDependencies, dependencyName);
+        const dependency = cargoDependencyRef(
+          sectionDependencies,
+          dependencyName,
+        );
         dependency.pathValue = tomlStringValue(dependencyConfig, "path");
         dependency.workspace = tomlBooleanValue(dependencyConfig, "workspace");
         dependency.optional = tomlBooleanValue(dependencyConfig, "optional");
         continue;
       }
 
-      const dottedMatch = strippedLine.match(/^\s*([\w-]+)\.(path|workspace|optional)\s*=\s*(.+)$/);
+      const dottedMatch = strippedLine.match(
+        /^\s*([\w-]+)\.(path|workspace|optional)\s*=\s*(.+)$/,
+      );
       if (dottedMatch) {
-        const dependency = cargoDependencyRef(sectionDependencies, dottedMatch[1]);
+        const dependency = cargoDependencyRef(
+          sectionDependencies,
+          dottedMatch[1],
+        );
         const key = dottedMatch[2];
         const value = dottedMatch[3];
         if (key === "path") {
@@ -401,7 +442,10 @@ function cargoLocalDependencyRefs(
 }
 
 function cargoTomlHasSection(cargoToml: string, sectionName: string): boolean {
-  return new RegExp(`^\\s*\\[${sectionName.replace(".", "\\.")}\\]\\s*$`, "m").test(cargoToml);
+  return new RegExp(
+    `^\\s*\\[${sectionName.replace(".", "\\.")}\\]\\s*$`,
+    "m",
+  ).test(cargoToml);
 }
 
 function nearestCargoWorkspaceManifest(manifestPath: string): string | null {
@@ -424,7 +468,9 @@ function nearestCargoWorkspaceManifest(manifestPath: string): string | null {
   }
 }
 
-function workspacePathDependencies(workspaceManifestPath: string): Map<string, string> {
+function workspacePathDependencies(
+  workspaceManifestPath: string,
+): Map<string, string> {
   const cargoToml = fs.readFileSync(workspaceManifestPath, "utf8");
   const dependencies = new Map<string, string>();
   let section = "";
@@ -445,7 +491,9 @@ function workspacePathDependencies(workspaceManifestPath: string): Map<string, s
     if (sectionMatch) {
       flushTableDependency();
       section = sectionMatch[1];
-      const workspaceDependencyTable = section.match(/^workspace\.dependencies\.([^.]+)$/);
+      const workspaceDependencyTable = section.match(
+        /^workspace\.dependencies\.([^.]+)$/,
+      );
       tableDependencyName = workspaceDependencyTable
         ? workspaceDependencyTable[1].replace(/^"|"$/g, "")
         : null;
@@ -463,7 +511,9 @@ function workspacePathDependencies(workspaceManifestPath: string): Map<string, s
         continue;
       }
 
-      const dottedPathMatch = strippedLine.match(/^\s*([\w-]+)\.path\s*=\s*"([^"]+)"/);
+      const dottedPathMatch = strippedLine.match(
+        /^\s*([\w-]+)\.path\s*=\s*"([^"]+)"/,
+      );
       if (dottedPathMatch) {
         dependencies.set(dottedPathMatch[1], dottedPathMatch[2]);
       }
@@ -509,14 +559,25 @@ function cargoLocalDependencyRoots(rootManifestPath: string): {
       workspaceManifests.push(workspaceManifest);
     }
 
-    for (const dependency of cargoLocalDependencyRefs(manifestPath, includeOptionalDependencies)) {
+    for (const dependency of cargoLocalDependencyRefs(
+      manifestPath,
+      includeOptionalDependencies,
+    )) {
       let dependencyRoot: string | null = null;
       if (dependency.pathValue) {
-        dependencyRoot = path.resolve(path.dirname(manifestPath), dependency.pathValue);
+        dependencyRoot = path.resolve(
+          path.dirname(manifestPath),
+          dependency.pathValue,
+        );
       } else if (dependency.workspace && workspaceManifest) {
-        const workspaceDependencyPath = workspaceDependencies.get(dependency.name);
+        const workspaceDependencyPath = workspaceDependencies.get(
+          dependency.name,
+        );
         if (workspaceDependencyPath) {
-          dependencyRoot = path.resolve(path.dirname(workspaceManifest), workspaceDependencyPath);
+          dependencyRoot = path.resolve(
+            path.dirname(workspaceManifest),
+            workspaceDependencyPath,
+          );
         }
       }
 
@@ -551,8 +612,8 @@ function cargoLocalDependencyRoots(rootManifestPath: string): {
 }
 
 function cargoRootBuildInputs(root: string): string[] {
-  const directInputs = ["Cargo.toml", "Cargo.lock", "build.rs"].map((fileName) =>
-    path.join(root, fileName),
+  const directInputs = ["Cargo.toml", "Cargo.lock", "build.rs"].map(
+    (fileName) => path.join(root, fileName),
   );
 
   return [
@@ -574,10 +635,14 @@ function nativeRecorderWasmBuildInputs(): string[] {
 
   for (const moduleName of NATIVE_RECORDER_WASM_MODULES) {
     const moduleRoot = path.join(NATIVE_RECORDER_ROOT, moduleName);
-    inputs.push(...collectFiles(path.join(moduleRoot, "src"), isMeaningfulSourceFile));
-    inputs.push(...collectDirectFiles(moduleRoot, (filePath) => {
-      return [".nimble", ".nims"].includes(path.extname(filePath));
-    }));
+    inputs.push(
+      ...collectFiles(path.join(moduleRoot, "src"), isMeaningfulSourceFile),
+    );
+    inputs.push(
+      ...collectDirectFiles(moduleRoot, (filePath) => {
+        return [".nimble", ".nims"].includes(path.extname(filePath));
+      }),
+    );
   }
 
   return inputs;
@@ -593,11 +658,14 @@ function wasmBuildInputs(): string[] {
 
   const cargoManifest = path.join(DB_BACKEND_DIR, "Cargo.toml");
   const localCargoDependencies = cargoLocalDependencyRoots(cargoManifest);
-  const pathDependencyInputs = localCargoDependencies.roots.flatMap(cargoRootBuildInputs);
+  const pathDependencyInputs =
+    localCargoDependencies.roots.flatMap(cargoRootBuildInputs);
 
   return uniqueExistingFiles([
     ...directInputs.filter((filePath) => fs.existsSync(filePath)),
-    ...collectFiles(path.join(DB_BACKEND_DIR, "src"), (filePath) => filePath.endsWith(".rs")),
+    ...collectFiles(path.join(DB_BACKEND_DIR, "src"), (filePath) =>
+      filePath.endsWith(".rs"),
+    ),
     ...localCargoDependencies.workspaceManifests,
     ...pathDependencyInputs,
     ...nativeRecorderWasmBuildInputs(),
@@ -615,7 +683,9 @@ function latestMtime(files: string[]): { filePath: string; mtimeMs: number } {
 }
 
 function wasmPackageFreshness(): { fresh: boolean; reason: string } {
-  const missingPackageFile = WASM_PACKAGE_FILES.find((filePath) => !fs.existsSync(filePath));
+  const missingPackageFile = WASM_PACKAGE_FILES.find(
+    (filePath) => !fs.existsSync(filePath),
+  );
   if (missingPackageFile) {
     return {
       fresh: false,
@@ -625,7 +695,9 @@ function wasmPackageFreshness(): { fresh: boolean; reason: string } {
 
   const inputs = wasmBuildInputs();
   if (inputs.length === 0) {
-    throw new Error(`No WASM build inputs found under ${repoRelative(DB_BACKEND_DIR)}`);
+    throw new Error(
+      `No WASM build inputs found under ${repoRelative(DB_BACKEND_DIR)}`,
+    );
   }
 
   const wasmMtimeMs = fs.statSync(WASM_BINARY).mtimeMs;
@@ -673,7 +745,9 @@ function rebuildWasmPackage(reason: string): void {
       [
         `${reason}. Automatic WASM rebuild failed.`,
         `Run this command to reproduce: ${command}`,
-        result.error ? `spawn error: ${result.error.message}` : `exit status: ${result.status}`,
+        result.error
+          ? `spawn error: ${result.error.message}`
+          : `exit status: ${result.status}`,
         tail(result.stdout) ? `stdout:\n${tail(result.stdout)}` : "",
         tail(result.stderr) ? `stderr:\n${tail(result.stderr)}` : "",
       ]
@@ -703,7 +777,11 @@ function ensureFreshWasmPackage(): void {
   wasmPackageFreshnessChecked = true;
 }
 
-function assertFixtureFilesExist(traceDir: string, fileNames: string[], label: string): void {
+function assertFixtureFilesExist(
+  traceDir: string,
+  fileNames: string[],
+  label: string,
+): void {
   for (const f of fileNames) {
     const fp = path.join(traceDir, f);
     if (!fs.existsSync(fp)) {
@@ -719,7 +797,9 @@ function findVariable(scope: any, name: string): any {
 function parseIntegerVariable(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (Number.isNaN(parsed)) {
-    throw new Error(`Expected integer variable value, got ${JSON.stringify(value)}`);
+    throw new Error(
+      `Expected integer variable value, got ${JSON.stringify(value)}`,
+    );
   }
   return parsed;
 }
@@ -758,7 +838,10 @@ function expectNonEmptyVariables(variablesByScope: any[]): any {
   expect(variablesByScope).toBeDefined();
   expect(variablesByScope.length).toBeGreaterThanOrEqual(1);
   const scope = variablesByScope.find((s: any) => s.variables?.length > 0);
-  expect(scope, "expected at least one populated variables scope").toBeDefined();
+  expect(
+    scope,
+    "expected at least one populated variables scope",
+  ).toBeDefined();
   for (const v of scope.variables) {
     expect(v.name).toBeTruthy();
     expect(v.value).toBeDefined();
@@ -766,6 +849,52 @@ function expectNonEmptyVariables(variablesByScope: any[]): any {
     expect(v.value.length).toBeGreaterThan(0);
   }
   return scope;
+}
+
+function expectSuccessfulGotoTicks(
+  seek: any,
+  direction: "back" | "forward",
+  ticks: number,
+): void {
+  const response =
+    direction === "back" ? seek.backResponse : seek.forwardResponse;
+  expect(
+    response,
+    `ct/goto-ticks ${direction} response should be present`,
+  ).not.toBeNull();
+  expect(response.command).toBe("ct/goto-ticks");
+  expect(response.success).toBe(true);
+
+  const completeMove =
+    direction === "back" ? seek.backCompleteMove : seek.forwardCompleteMove;
+  expect(
+    completeMove,
+    `ct/goto-ticks ${direction} should emit ct/complete-move`,
+  ).not.toBeNull();
+  expect(completeMove.event).toBe("ct/complete-move");
+  expect(completeMove.body?.location?.rrTicks).toBe(ticks);
+}
+
+function expectRegisterSignature(signature: any, label: string): void {
+  expect(signature, `${label} signature should be present`).toBeDefined();
+  expect(
+    signature.topFrame,
+    `${label} top frame should be present`,
+  ).toBeDefined();
+  expect(
+    signature.topFrame.name,
+    `${label} frame name should be stable`,
+  ).toBeTruthy();
+  expect(
+    signature.topFrame.sourcePath,
+    `${label} source path should be stable`,
+  ).toContain("xos_hello.c");
+  expect(
+    signature.topFrame.line,
+    `${label} source line should be useful`,
+  ).toBeGreaterThan(1);
+  expect(parseIntegerVariable(signature.rip)).not.toBe(0);
+  expect(parseIntegerVariable(signature.rsp)).not.toBe(0);
 }
 
 // ---------------------------------------------------------------------------
@@ -879,7 +1008,9 @@ async function runReplayTest(
   },
 ): Promise<any> {
   const consoleLogs: string[] = [];
-  page.on("console", (msg) => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
+  page.on("console", (msg) =>
+    consoleLogs.push(`[${msg.type()}] ${msg.text()}`),
+  );
   page.on("pageerror", (err) => consoleLogs.push(`[pageerror] ${err.message}`));
 
   const searchParams = new URLSearchParams({
@@ -972,22 +1103,31 @@ test.describe("WASM client-side replay -- materialized CTFS trace", () => {
     const topFrame = expectNonEmptyStack(result);
     expect(topFrame.name).toBe("new");
     expect(topFrame.source?.path).toBeTruthy();
-    expect(topFrame.source.path).toContain("test-programs/stylus_fund_tracker/src/lib.rs");
+    expect(topFrame.source.path).toContain(
+      "test-programs/stylus_fund_tracker/src/lib.rs",
+    );
     expect(topFrame.line).toBe(49);
 
     expect(result.steppingSucceeded).toBe(true);
-    expect(result.stackTraceAfterStep?.stackFrames?.length).toBeGreaterThanOrEqual(1);
+    expect(
+      result.stackTraceAfterStep?.stackFrames?.length,
+    ).toBeGreaterThanOrEqual(1);
     const frameAfterStep = result.stackTraceAfterStep.stackFrames[0];
     expect(frameAfterStep.name).toBe("deny_value");
     expect(frameAfterStep.source?.path).toBeTruthy();
-    expect(frameAfterStep.source.path).toContain("test-programs/stylus_fund_tracker/src/lib.rs");
+    expect(frameAfterStep.source.path).toContain(
+      "test-programs/stylus_fund_tracker/src/lib.rs",
+    );
     expect(frameAfterStep.line).toBe(38);
 
     const variablesScope = expectNonEmptyVariables(result.variablesAfterStep);
     expect(variablesScope.scopeName).toBe("deny_value");
 
     const selfVar = findVariable(variablesScope, "self");
-    expect(selfVar, "Stylus `self` local should be visible after stepping").toBeDefined();
+    expect(
+      selfVar,
+      "Stylus `self` local should be visible after stepping",
+    ).toBeDefined();
     expect(selfVar.value).toContain("Value { kind: Pointer");
 
     expect(result.eventLog).toBeDefined();
@@ -997,7 +1137,9 @@ test.describe("WASM client-side replay -- materialized CTFS trace", () => {
     expect(result.eventLog.content).toContain("input:");
   });
 
-  test("status element shows success for Stylus .ct trace", async ({ page }) => {
+  test("status element shows success for Stylus .ct trace", async ({
+    page,
+  }) => {
     const searchParams = new URLSearchParams({
       traceFolder: "trace",
       files: STYLUS_TRACE_FILES.join(","),
@@ -1080,7 +1222,7 @@ test.describe("WASM client-side replay -- MCR (CTFS .ct) trace", () => {
       files: XOS_TRACE_FILES.join(","),
       traceBaseUrl: "/xos-traces/",
       traceFile: XOS_TRACE_FILES[0],
-      mode: "comprehensive",
+      mode: "seek",
     });
 
     expectSuccessfulDapHandshake(result, "XOS");
@@ -1093,7 +1235,9 @@ test.describe("WASM client-side replay -- MCR (CTFS .ct) trace", () => {
     expect(rootFrame.line).toBeGreaterThan(1);
 
     expect(result.steppingSucceeded).toBe(true);
-    expect(result.stackTraceAfterStep?.stackFrames?.length).toBeGreaterThanOrEqual(1);
+    expect(
+      result.stackTraceAfterStep?.stackFrames?.length,
+    ).toBeGreaterThanOrEqual(1);
     const frameAfterStep = result.stackTraceAfterStep.stackFrames[0];
     expect(frameAfterStep.name).toBeTruthy();
     expect(frameAfterStep.source?.path).toContain("xos_hello.c");
@@ -1109,5 +1253,36 @@ test.describe("WASM client-side replay -- MCR (CTFS .ct) trace", () => {
     const rspVar = findVariable(variablesScope, "rsp");
     expect(rspVar, "XOS register local `rsp` should be visible").toBeDefined();
     expect(parseIntegerVariable(rspVar.value)).not.toBe(0);
+
+    expect(result.seek, "XOS seek verification should run").toBeDefined();
+    expect(result.seek.earlyTicks).toBe(0);
+    expect(result.seek.laterTicks).toBeGreaterThan(result.seek.earlyTicks);
+    expectRegisterSignature(result.seek.earlySignature, "early");
+    expectRegisterSignature(result.seek.laterSignature, "later");
+    expect(
+      result.seek.laterDistinctFromEarly,
+      "stepping must reach a distinct emulator state",
+    ).toBe(true);
+
+    expectSuccessfulGotoTicks(result.seek, "back", result.seek.earlyTicks);
+    expectRegisterSignature(result.seek.afterBackSignature, "after seek back");
+    expect(result.seek.afterBackSignature).toEqual(result.seek.earlySignature);
+    expect(
+      result.seek.backMatchesEarly,
+      "seek back should restore the earlier state exactly",
+    ).toBe(true);
+
+    expectSuccessfulGotoTicks(result.seek, "forward", result.seek.laterTicks);
+    expectRegisterSignature(
+      result.seek.afterForwardSignature,
+      "after seek forward",
+    );
+    expect(result.seek.afterForwardSignature).toEqual(
+      result.seek.laterSignature,
+    );
+    expect(
+      result.seek.forwardMatchesLater,
+      "seek forward should replay deterministically",
+    ).toBe(true);
   });
 });

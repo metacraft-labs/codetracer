@@ -12,7 +12,6 @@ void *realloc(void *, size_t);
 
 __attribute__((noreturn)) void abort(void);
 __attribute__((noreturn)) void exit(int);
-
 char *getenv(const char *);
 
 #endif // TREE_SITTER_WASM_STDLIB_H_

@@ -3683,7 +3683,7 @@ mod tests {
 
     /// Handler-level coverage for the standard `ct/goto-ticks` command:
     /// the DAP handler must route through `ReplaySession::jump_to` on an
-    /// emulator-backed session and publish the resulting move event.
+    /// emulator-backed session and publish the resulting response and move event.
     #[test]
     fn goto_ticks_handler_uses_emulator_jump_to_path() {
         let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -3710,7 +3710,14 @@ mod tests {
 
         handler
             .goto_ticks(
-                crate::dap::Request::default(),
+                crate::dap::Request {
+                    base: crate::dap::ProtocolMessage {
+                        seq: 42,
+                        type_: "request".to_string(),
+                    },
+                    command: "ct/goto-ticks".to_string(),
+                    arguments: serde_json::json!({}),
+                },
                 crate::task::GoToTicksArguments {
                     thread_id: 0,
                     ticks: TARGET,
@@ -3727,6 +3734,16 @@ mod tests {
         );
 
         let messages: Vec<_> = receiver.try_iter().collect();
+        assert!(
+            messages.iter().any(|msg| matches!(
+                msg,
+                crate::dap::DapMessage::Response(response)
+                    if response.command == "ct/goto-ticks"
+                        && response.request_seq == 42
+                        && response.success
+            )),
+            "ct/goto-ticks must emit a successful response; got {messages:?}",
+        );
         assert!(
             messages.iter().any(|msg| matches!(
                 msg,

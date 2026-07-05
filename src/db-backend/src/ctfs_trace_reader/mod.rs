@@ -4,12 +4,20 @@
 //! rationale and the two-format approach.
 
 pub mod block_overlay;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod call_stream_source;
+#[cfg(target_arch = "wasm32")]
+#[path = "call_stream_source_wasm.rs"]
 pub mod call_stream_source;
 pub mod collapse;
 pub mod coverage_namespace;
 pub mod cow_namespace_reader;
 pub mod cow_namespace_writer;
 pub mod ctfs_container;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod follow_stream_source;
+#[cfg(target_arch = "wasm32")]
+#[path = "follow_stream_source_wasm.rs"]
 pub mod follow_stream_source;
 pub mod http_range_source;
 pub mod interval_tagged_map;
@@ -20,6 +28,10 @@ pub mod memwrites_namespace;
 pub mod meta_dat;
 pub mod server_prep_encoding;
 pub mod step_map_namespace;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod step_value_stream_source;
+#[cfg(target_arch = "wasm32")]
+#[path = "step_value_stream_source_wasm.rs"]
 pub mod step_value_stream_source;
 
 use std::collections::HashMap;
