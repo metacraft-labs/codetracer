@@ -24,31 +24,39 @@
 # the `userId = 42` + `amount = 100` source-line literals. Two
 # terminal leaves, one chain.
 
-from aiohttp import web
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
-async def process_request(balance):
+def process_request(balance):
     # Helper kept intentionally trivial so the single-trace half of
     # the chain ends in a `TrivialCopy` hop into `balance` — the
     # M29 composer then crosses the HTTP boundary at the next hop.
     return balance
 
 
-async def balance_handler(request):
-    # The aiohttp recorder's HTTP boundary hook fires the
-    # `boundary_id = "account-balance-with-wasm"` receive marker
-    # here, paired with the frontend's send marker on the
-    # X-Codetracer-Origin header value.
-    payload = await request.json()
-    balance = payload["balance"]
-    stored = await process_request(balance)
-    return web.json_response({"stored": True, "value": stored})
+class BalanceHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/balance":
+            self.send_error(404)
+            return
+        # The HTTP recorder boundary hook fires the
+        # `boundary_id = "account-balance-with-wasm"` receive marker
+        # here, paired with the frontend's send marker on the
+        # X-Codetracer-Origin header value.
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        balance = payload["balance"]
+        stored = process_request(balance)
+        body = json.dumps({"stored": True, "value": stored}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-
-def make_app():
-    app = web.Application()
-    app.router.add_post("/balance", balance_handler)
-    return app
+    def log_message(self, format, *args):
+        return
 
 
 if __name__ == "__main__":
@@ -56,4 +64,4 @@ if __name__ == "__main__":
     # `/balance` here. `regenerate.sh` starts the server under the
     # codetracer recorder, drives one HTTP request through the
     # Vite-built frontend, then tears the server down.
-    web.run_app(make_app(), host="127.0.0.1", port=8080)
+    HTTPServer(("127.0.0.1", 8080), BalanceHandler).serve_forever()

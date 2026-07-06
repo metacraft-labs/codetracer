@@ -1,0 +1,1 @@
+[{"Path":"backend/server.py"},{"Step":{"path_id":0,"line":44}},{"Event":{"kind":12,"metadata":"{\"direction\":\"recv\",\"boundary\":\"account-balance-with-wasm\"}","content":"{\"key\":620,\"payload\":\"POST /balance request\"}"}},{"VariableName":"balance"},{"Value":{"variable_id":0,"value":{"kind":"Int","i":"620","type_id":0}}}]

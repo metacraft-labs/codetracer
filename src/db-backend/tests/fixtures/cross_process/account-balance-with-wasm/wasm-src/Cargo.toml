@@ -19,6 +19,7 @@ publish = false
 license = "MIT OR Apache-2.0"
 
 [lib]
+path = "lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

@@ -49,10 +49,11 @@ async function postBalance() {
   // The recorder injects the `X-Codetracer-Origin` header from the
   // boundary's match key (the computed `result`) so the backend's
   // recv-side marker pairs deterministically.
+  const balance = Number(result);
   const response = await fetch("/balance", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ balance: result }),
+    body: JSON.stringify({ balance }),
   });
   const payload = await response.json();
 

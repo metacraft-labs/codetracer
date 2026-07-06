@@ -1,0 +1,1 @@
+[{"Path":"wasm-src/lib.rs"},{"Path":"<browser>"},{"Step":{"path_id":0,"line":41}},{"Event":{"kind":12,"metadata":"{\"direction\":\"send\",\"boundary\":\"js-wasm-realm\"}","content":"{\"key\":1,\"payload\":\"compute_balance\"}"}},{"Step":{"path_id":0,"line":44}},{"Return":{"return_value":{"kind":"Int","i":"620","type_id":0}}}]
