@@ -272,7 +272,7 @@ when defined(js):
   proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
     r.appendChild(host, child)
 
-  proc setInnerHtml(r: WebRenderer; node: isonim_dom.Element; html: string) =
+  proc setInnerHtml(r: WebRenderer; node: Element; html: string) =
     node.innerHTML = cstring(html)
 
 # ---------------------------------------------------------------------------
