@@ -1554,7 +1554,7 @@ when not defined(ctInExtension):
           # Translate the BackendService string command to a CtEventKind
           # and forward it through the existing DapApi IPC channel.
           let kind = dapCommandToEventKind(cstring(command))
-          discard dapRef.asyncSendCtRequest(kind, argsJs),
+          dapRef.sendCtRequest(kind, argsJs),
         onBackendEvent = proc(handler: proc(kind: string, raw: JsObject)) =
           # Subscribe to every event kind that has a DAP mapping so the
           # ViewModel store receives the same events as the legacy UI.
