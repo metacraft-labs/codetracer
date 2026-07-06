@@ -1018,6 +1018,7 @@
             pkgs.libuv
             pkgs.libbpf
             pkgs.elfutils
+            pkgs.zstd
             # pkgs.zip
           ];
 
@@ -1030,6 +1031,16 @@
             # Ensure the C compiler can find libbpf headers for BPF backend modules
             export C_INCLUDE_PATH="${pkgs.libbpf}/include''${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
             export LIBRARY_PATH="${pkgs.libbpf.out}/lib:${pkgs.elfutils.out}/lib''${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
+            # `ct` is compiled with -d:ctTest and therefore imports the
+            # incremental test runner.  In a normal workspace these are sibling
+            # repos reached through src/ct_test/nim.cfg; in the Nix sandbox the
+            # flake inputs are the only available source layout.
+            export RUNQUOTA_SRC="${inputs.runquota}"
+            export CODETRACER_TRACE_FORMAT_NIM_SRC="${inputs.codetracer-trace-format-nim}/src"
+            export CODETRACER_RESULTS_SRC="$PWD/libs/nim-stew/stew"
+            export IO_MON_SRC="${inputs.io-mon}/src"
+            export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
 
             ${nim-codetracer.out}/bin/nim2 \
               -d:debug -d:asyncBackend=asyncdispatch \

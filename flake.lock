@@ -2545,6 +2545,23 @@
         "type": "github"
       }
     },
+    "io-mon": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783196280,
+        "narHash": "sha256-9bO+TbsTWeyAgMIKginK9YANeQOLlpsapMo0xXJRkkA=",
+        "owner": "metacraft-labs",
+        "repo": "io-mon",
+        "rev": "dd97afa4feae23025f90b237b6a5e409ca9f5113",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "io-mon",
+        "type": "github"
+      }
+    },
     "io-mon-src": {
       "flake": false,
       "locked": {
@@ -2839,6 +2856,23 @@
       "original": {
         "owner": "arnetheduck",
         "repo": "nim-results",
+        "type": "github"
+      }
+    },
+    "nim-stackable-hooks": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783196304,
+        "narHash": "sha256-wZV88bEEX5dpcQ/2N/42mpyS0pPJwuuWX5tbSItOUTI=",
+        "owner": "metacraft-labs",
+        "repo": "nim-stackable-hooks",
+        "rev": "171980881be3910fde4e320d5a2a503e7fd00045",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-stackable-hooks",
         "type": "github"
       }
     },
@@ -4754,6 +4788,7 @@
         "flake-parts": "flake-parts_5",
         "flake-utils": "flake-utils_6",
         "git-hooks-nix": "git-hooks-nix_2",
+        "io-mon": "io-mon",
         "isonim": "isonim",
         "isonim-gpui": "isonim-gpui",
         "isonim-tui": "isonim-tui",
@@ -4763,6 +4798,7 @@
         "nim-everywhere": "nim-everywhere",
         "nim-langserver": "nim-langserver",
         "nim-pty": "nim-pty",
+        "nim-stackable-hooks": "nim-stackable-hooks",
         "nim-termctl": "nim-termctl",
         "nix-blockchain-development": "nix-blockchain-development",
         "nix-blockchain-development-sui": "nix-blockchain-development-sui",

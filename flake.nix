@@ -169,6 +169,19 @@
       flake = false;
     };
 
+    # Non-flake inputs: ct_test's incremental runner imports the
+    # io-mon capture model and stackable-hooks propagation helpers at
+    # compile time.  Workspace dev shells resolve these as sibling repos;
+    # standalone Nix package builds need deterministic source fallbacks.
+    io-mon = {
+      url = "github:metacraft-labs/io-mon/dev";
+      flake = false;
+    };
+    nim-stackable-hooks = {
+      url = "github:metacraft-labs/nim-stackable-hooks/dev";
+      flake = false;
+    };
+
     # Non-flake input: the metacraft-labs/langserver fork (a.k.a. nim-langserver),
     # branch `codetracer`.  Carries patches on top of upstream nim-lang/langserver
     # that the CodeTracer GUI depends on — currently `nim/traceExpandMacro`
