@@ -29,6 +29,7 @@ when not defined(js):
   {.error: "real_backend.nim requires the JS backend (nim js)".}
 
 import std/[json, jsffi, asyncjs]
+import isonim/core/async_compat
 import backend_service
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ proc toJsObject(j: JsonNode): JsObject =
 # ---------------------------------------------------------------------------
 
 type
-  SendCommandProc* = proc(command: string, argsJs: JsObject)
+  SendCommandProc* = proc(command: string, argsJs: JsObject): BackendFuture[JsObject]
     ## Adapter that sends a command through DapApi.
     ## The call site translates the string command to a CtEventKind
     ## and calls DapApi.sendCtRequest.
@@ -84,14 +85,16 @@ proc newRealBackendService*(
   let sendProc = proc(command: string,
                       args: JsonNode): BackendFuture[JsonNode] =
     let jsArgs = toJsObject(args)
-    sendCommand(command, jsArgs)
-
-    # DapApi.sendCtRequest is fire-and-forget — the response arrives
-    # asynchronously via an event handler.  We return a resolved
-    # future with null; callers that need the response should use
-    # onEvent.  A future phase may add request-response correlation.
+    let future = sendCommand(command, jsArgs)
     return newPromise proc(resolve: proc(resp: JsonNode)) =
-      resolve(newJNull())
+      onComplete(future,
+        proc(raw: JsObject) =
+          if raw.isNil:
+            resolve(newJNull())
+          else:
+            resolve(parseJsonFromJs(raw)),
+        proc(message: string) =
+          resolve(newJNull()))
 
   let onEventProc = proc(handler: EventHandler) =
     onBackendEvent proc(kind: string, raw: JsObject) =

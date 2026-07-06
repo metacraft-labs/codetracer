@@ -163,6 +163,23 @@ suite "M25b — EventLogVM populates marker row metadata":
     )
     check formatShowValue(hexRow) == "616263"
 
+  test "test_event_log_vm_auto_load_applies_event_load_marker_response":
+    let (vm, store, mock) = makeEventLogVM()
+    mock.expect("ct/event-load", parseJson(SAMPLE_EVENT_LOAD_RESPONSE))
+
+    var debuggerState = store.debugger.val
+    debuggerState.rrTicks = 0'u64
+    debuggerState.location.file = "fixtures/account-balance-with-wasm/frontend.js"
+    debuggerState.location.line = 1
+    store.debugger.val = debuggerState
+    drain()
+
+    check mock.findCommand("ct/event-load").isSome
+    check vm.markerRows.val.len == 3
+    check vm.markerRows.val[0].boundaryId == "order-processing"
+    check vm.markerRows.val[0].keyValue == "K1"
+    check vm.markerRows.val[0].stepId == 10
+
 # ---------------------------------------------------------------------------
 # Layer-2 Test 5 — counterpart set resolves against cached pair index.
 # ---------------------------------------------------------------------------

@@ -758,6 +758,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     var lastQuery = ""
     var lastCol = -1
     var lastAsc = false
+    var lastHadDebuggerPosition = false
     var hasFired = false
     createEffect proc() =
       let page = currentPage.val
@@ -765,9 +766,14 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       let query = searchQuery.val
       let col = sortColumn.val
       let asc = sortAscending.val
-      let ticks = store.debugger.val.rrTicks
-      if ticks > 0'u64:
-        if hasFired and ticks == lastTicks and page == lastPage and
+      let debuggerState = store.debugger.val
+      let ticks = debuggerState.rrTicks
+      let location = debuggerState.location
+      let hasDebuggerPosition =
+        ticks > 0'u64 or location.file.len > 0 or location.line != 0
+      if hasDebuggerPosition or not hasFired:
+        if hasFired and hasDebuggerPosition == lastHadDebuggerPosition and
+            ticks == lastTicks and page == lastPage and
             ps == lastPageSize and query == lastQuery and
             col == lastCol and asc == lastAsc:
           return
@@ -777,6 +783,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         lastQuery = query
         lastCol = col
         lastAsc = asc
+        lastHadDebuggerPosition = hasDebuggerPosition
         hasFired = true
         let args = %*{
           "page": page,
@@ -786,6 +793,12 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           "sortAscending": asc,
           "rrTicks": ticks,
         }
-        discard store.backend.send("ct/event-load", args)
+        let future = store.backend.send("ct/event-load", args)
+        let vmRef = vm
+        onComplete(future,
+          proc(response: JsonNode) =
+            vmRef.applyMarkerRowsResponse(response),
+          proc(message: string) =
+            discard)
 
     vm

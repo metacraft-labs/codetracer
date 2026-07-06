@@ -282,9 +282,9 @@ when not defined(ctInExtension):
 
   proc stringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
-  proc asyncSendCtRequest(dap: DapApi,
-                        kind: CtEventKind,
-                        rawValue: JsObject) {.async.} =
+  proc asyncSendCtRequest*(dap: DapApi,
+                         kind: CtEventKind,
+                         rawValue: JsObject): Future[JsObject] {.async.} =
 
     let packet = JsObject{
       seq:        dap.seq,
@@ -300,14 +300,15 @@ when not defined(ctInExtension):
     packet["sessionId"] = dap.sessionId
 
     dap.ipc.send("CODETRACER::dap-raw-message", packet)
+    return js{}
 
 
 else:
   proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject)
 
-  proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
+  proc asyncSendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject): Future[JsObject] {.async.} =
     console.log cstring"-> dap request: ", toDapCommandOrEvent(kind), rawValue
-    discard dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
+    return await dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
 
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     let dap = DapApi(vscode: vscode, context: context)

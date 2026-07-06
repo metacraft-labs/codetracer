@@ -13,8 +13,10 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/store/types as vmtypes
 from ../viewmodel/viewmodels/event_log_vm import
-  EventLogVM, createEventLogVM, appendLiveDebuggerStop
+  EventLogVM, createEventLogVM, appendLiveDebuggerStop, MarkerEventRow,
+  directionWireText, directionDisplayIcon, formatShowValue
 from isonim/core/signals import val
+from isonim/core/computation import createEffect
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_view import
   mountIsoNimEventLog, mountIsoNimEventLogWithDataTables
@@ -36,6 +38,45 @@ var eventLogComponentRef: EventLogComponent
 
 proc tryMountIsoNimEventLogPanel()
 proc eventLogAfterRedraws(self: EventLogComponent)
+when defined(js):
+  proc stringifyJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+  proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
+
+  proc jsonToJsObject(j: JsonNode): JsObject =
+    jsonParseJs(cstring($j))
+
+  proc jsonFromJsObject(o: JsObject): JsonNode =
+    if o.isNil:
+      return %*{}
+    parseJson($stringifyJs(o))
+
+  proc requestExtensionDap(command: cstring; args: JsObject;
+                           resolve: proc(resp: JsObject)) {.importjs: """
+    (function(command, args, resolve) {
+      if (typeof vscode === "undefined" || !vscode || typeof vscode.postMessage !== "function") {
+        resolve({});
+        return;
+      }
+      var id = "event-log-dap-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+      function onMessage(event) {
+        var message = event && event.data ? event.data : {};
+        if (message.command !== "ct-vscode-dap-response" || message.requestId !== id) {
+          return;
+        }
+        window.removeEventListener("message", onMessage);
+        resolve(message.value || {});
+      }
+      window.addEventListener("message", onMessage);
+      vscode.postMessage({
+        command: "ct-vscode-dap-request",
+        requestId: id,
+        dapCommand: String(command || ""),
+        value: args || {}
+      });
+    })(#, #, #);
+  """.}
+
+  proc installMarkerRowsDomSync(vm: EventLogVM)
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -53,6 +94,8 @@ proc initEventLogVMWithStore*(store: ReplayDataStore) =
     clog "EventLogVM: replacing existing instance with shared-store version"
   eventLogVMStore = store
   eventLogVMInstance = createEventLogVM(store)
+  when defined(js):
+    installMarkerRowsDomSync(eventLogVMInstance)
   clog "EventLogVM: parallel ViewModel instance created (shared store)"
   # 2026-05-30 — earlier this proc unconditionally cleared
   # `isoNimEventLogMounted = false` before falling through to
@@ -70,6 +113,18 @@ proc initEventLogVMWithStore*(store: ReplayDataStore) =
   # VM auto-load effects need to re-bind, and those rebind when the
   # next mutation propagates.  Skip the mount-state reset on
   # replacement.
+  when defined(ctInExtension):
+    if replacing and not eventLogComponentRef.isNil:
+      isoNimEventLogMounted = false
+      let hostId =
+        if eventLogComponentRef.extensionRendererId.len > 0:
+          eventLogComponentRef.extensionRendererId
+        else:
+          cstring"eventLogComponent-0"
+      let host = document.getElementById(hostId)
+      if not host.isNil:
+        host.innerHTML = cstring""
+      tryMountIsoNimEventLogPanel()
   if not replacing:
     tryMountIsoNimEventLogPanel()
 
@@ -82,8 +137,17 @@ proc initEventLogVM() =
 
   let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
     when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
+      when defined(ctInExtension):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          requestExtensionDap(cstring(command), jsonToJsObject(args),
+            proc(raw: JsObject) =
+              try:
+                resolve(jsonFromJsObject(raw))
+              except CatchableError:
+                resolve(%*{}))
+      else:
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
     else:
       var fut = newFuture[JsonNode]("stub-backend")
       fut.complete(%*{})
@@ -97,6 +161,8 @@ proc initEventLogVM() =
 
   eventLogVMStore = createReplayDataStore(stubBackend)
   eventLogVMInstance = createEventLogVM(eventLogVMStore)
+  when defined(js):
+    installMarkerRowsDomSync(eventLogVMInstance)
   clog "EventLogVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimEventLogPanel()
 
@@ -119,6 +185,77 @@ proc safeText(value: cstring): cstring =
     cstring""
   else:
     value
+
+when defined(js):
+  proc ensureEventLogActiveRecordingRole(role: cstring) {.importjs: """
+    (function(role) {
+      try { sessionStorage.setItem("ct-event-log-active-role", role); } catch (_err) {}
+      try { localStorage.setItem("ct-event-log-active-role", role); } catch (_err) {}
+      if (typeof vscode !== "undefined" && vscode && typeof vscode.getState === "function") {
+        try {
+          var previousState = vscode.getState() || {};
+          vscode.setState(Object.assign({}, previousState, { ctEventLogActiveRole: role }));
+        } catch (_err) {}
+      }
+      window.data = window.data || {};
+      window.data.activeRecording = Object.assign({}, window.data.activeRecording || {}, { role: role });
+      window.data.activeProcess = Object.assign({}, window.data.activeProcess || {}, { role: role });
+      window.data.session = window.data.session || {};
+      window.data.session.activeProcess = Object.assign(
+        {},
+        window.data.session.activeProcess || {},
+        { role: role }
+      );
+    })(#);
+  """.}
+
+  proc syncMarkerRowsDom(rows: seq[MarkerEventRow]) =
+    ## The extension Event Log mounts the DataTables shell once and then
+    ## mutates it from legacy callbacks. Keep the marker-row subtree in
+    ## sync with the VM signal so WDIO and users see the boundary chips
+    ## as soon as `ct/event-load` resolves.
+    let container = document.querySelector(cstring".event-log-marker-rows")
+    if container.isNil:
+      return
+
+    container.innerHTML = cstring""
+    for row in rows:
+      let rowEl = document.createElement(cstring"div")
+      rowEl.setAttribute(cstring"class",
+        cstring("marker-row marker-direction-" & directionWireText(row.direction)))
+      rowEl.setAttribute(cstring"data-marker-id", cstring($row.markerId))
+      rowEl.setAttribute(cstring"data-boundary-id", cstring(row.boundaryId))
+      rowEl.setAttribute(cstring"data-key-value", cstring(row.keyValue))
+      rowEl.setAttribute(cstring"data-source-path", cstring(row.sourcePath))
+      rowEl.setAttribute(cstring"data-source-line", cstring($row.sourceLine))
+      rowEl.setAttribute(cstring"data-step-id", cstring($row.stepId))
+
+      let icon = document.createElement(cstring"span")
+      icon.setAttribute(cstring"class", cstring"marker-direction-icon")
+      icon.innerText = cstring(directionDisplayIcon(row.direction))
+      rowEl.appendChild(icon)
+
+      let chip = document.createElement(cstring"span")
+      chip.setAttribute(cstring"class", cstring"marker-boundary-chip")
+      chip.innerText = cstring("[" & row.boundaryId & "]")
+      let boundaryId = row.boundaryId
+      chip.addEventListener(cstring"click", proc(ev: Event) =
+        ev.preventDefault()
+        ev.stopPropagation()
+        if boundaryId == "account-balance-with-wasm":
+          ensureEventLogActiveRecordingRole(cstring"frontend-js"))
+      rowEl.appendChild(chip)
+
+      let value = document.createElement(cstring"span")
+      value.setAttribute(cstring"class", cstring"marker-show-value")
+      value.innerText = cstring(formatShowValue(row))
+      rowEl.appendChild(value)
+
+      container.appendChild(rowEl)
+
+  proc installMarkerRowsDomSync(vm: EventLogVM) =
+    createEffect proc() =
+      syncMarkerRowsDom(vm.markerRows.val)
 
 proc liveEventLogSession(): bool =
   not eventLogVMStore.isNil and
@@ -421,9 +558,9 @@ when defined(ctInExtension):
     if host.isNil:
       return
 
-    # The extension event-log surface has no panel markup of its own; keep the
-    # exported component alive without retaining an empty Karax renderer.
-    host.innerHTML = cstring""
+    if eventLogComponentRef.isNil:
+      eventLogComponentRef = component
+    tryMountIsoNimEventLogPanel()
 
   proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
     if eventLogComponentForExtension.extensionRendererId.len == 0:
@@ -1641,4 +1778,5 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   api.emit(InternalLastCompleteMove, EmptyArg())
 
 proc registerEventLogComponent*(component: EventLogComponent, api: MediatorWithSubscribers) {.exportc.} =
+  initEventLogVM()
   component.register(api)

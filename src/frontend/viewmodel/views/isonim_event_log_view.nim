@@ -326,9 +326,11 @@ when defined(js):
     ## placeholders; DataTables populates them after `afterMount`.
     ## `componentId` is threaded into the legacy `eventLogComponent-N`
     ## root id so page objects and DataTables helpers can locate it.
-    ui(r):
+    var markerContainer: isonim_dom.Element
+
+    let panel = ui(r):
       tdiv(id = "eventLogComponent-" & $componentId,
-           class = "component-container eventLog",
+           class = "component-container eventLog event-log-component",
            tabindex = "2"):
         tdiv(class = "ct-flex"):
           button(id = "category-image",
@@ -342,6 +344,17 @@ when defined(js):
           tdiv(class = "eventLog-switch eventLog-button eventLog-normal-color-button"):
             span(id = "detailed"):
               text "detailed"
+        tdiv(class = "event-log-marker-banner",
+             display = markerBannerDisplay(vm)):
+          text markerBannerText(vm)
+        tdiv(class = "event-log-marker-toast",
+             display = markerToastDisplay(vm)):
+          text markerToastText(vm)
+        tdiv(class = "event-log-marker-empty",
+             display = markerEmptyStateDisplay(vm)):
+          text markerEmptyStateText(vm)
+        tdiv(ref = markerContainer, class = "event-log-marker-rows"):
+          discard
         tdiv(class = "eventLog-dense-table data-table"):
           table(id = denseTableId):
             discard
@@ -362,6 +375,13 @@ when defined(js):
         tdiv(class = "eventLog-detailed-table data-table"):
           table(id = detailedTableId):
             discard
+
+    indexEach[MarkerEventRow, WebRenderer, isonim_dom.Element](r, markerContainer,
+      proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,
+      proc(item: proc(): MarkerEventRow, index: int): isonim_dom.Element =
+        renderMarkerRow(r, vm, item))
+
+    panel
 
   proc renderEventLogPanel*(r: WebRenderer;
                             vm: EventLogVM): isonim_dom.Element =
