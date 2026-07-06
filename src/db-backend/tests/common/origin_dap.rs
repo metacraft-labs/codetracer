@@ -119,6 +119,22 @@ pub fn load_fixture_and_query(config: &OriginQueryConfig) -> Result<OriginQueryR
     let recording = TestRecording::create_db_trace(&config.source_path, config.language, &config.version_label)
         .map_err(|e| format!("recording failed for {}: {}", config.source_path.display(), e))?;
 
+    let chain = query_recording_at_breakpoint(&recording, config)?;
+
+    Ok(OriginQueryResult { recording, chain })
+}
+
+/// Spawn db-backend for an existing recording, set the configured
+/// breakpoint, and issue `ct/originChain`.
+///
+/// This is used by regression tests that need to alter the recorder-time
+/// filesystem after trace creation. The returned chain must be answerable from
+/// the trace plus the debugger's breakpoint/source mapping, not from an
+/// accidental still-present original source path.
+pub fn query_recording_at_breakpoint(
+    recording: &TestRecording,
+    config: &OriginQueryConfig,
+) -> Result<OriginChain, String> {
     // When `breakpoint_source_path` is explicit (Noir / Sway / any
     // recorder whose `source_path` is a project directory), use it
     // verbatim; otherwise derive the breakpoint source from
@@ -126,12 +142,12 @@ pub fn load_fixture_and_query(config: &OriginQueryConfig) -> Result<OriginQueryR
     let breakpoint_source = if let Some(p) = &config.breakpoint_source_path {
         p.clone()
     } else {
-        resolve_breakpoint_source(&recording, &config.source_path, config.language)
+        resolve_breakpoint_source(recording, &config.source_path, config.language)
     };
 
     let mut client = DapStdioTestClient::start().map_err(|e| format!("failed to start DAP stdio client: {}", e))?;
     client
-        .initialize_and_launch(&recording)
+        .initialize_and_launch(recording)
         .map_err(|e| format!("failed to initialize DAP session: {}", e))?;
     client
         .set_breakpoint(&breakpoint_source, config.breakpoint_line)
@@ -150,7 +166,7 @@ pub fn load_fixture_and_query(config: &OriginQueryConfig) -> Result<OriginQueryR
     let chain = send_origin_chain_request(&mut client, &config.variable_name, &location, config.max_hops)
         .map_err(|e| format!("ct/originChain request failed: {}", e))?;
 
-    Ok(OriginQueryResult { recording, chain })
+    Ok(chain)
 }
 
 /// Same as [`load_fixture_and_query`] but folds clear environment
@@ -322,6 +338,16 @@ pub fn assert_terminator_kind(chain: &OriginChain, expected: TerminatorKind, con
         panic!(
             "[{}] expected terminator kind {:?}, got {:?} (terminator.expression={:?}, hops={:?})",
             context, expected, chain.terminator.kind, chain.terminator.expression, chain.hops
+        );
+    }
+}
+
+/// Assert the terminator expression contains the expected literal text.
+pub fn assert_terminator_expression_contains(chain: &OriginChain, expected: &str, context: &str) {
+    if !chain.terminator.expression.contains(expected) {
+        panic!(
+            "[{}] expected terminator expression to contain {:?}, got {:?} (terminator={:?}, hops={:?})",
+            context, expected, chain.terminator.expression, chain.terminator, chain.hops
         );
     }
 }

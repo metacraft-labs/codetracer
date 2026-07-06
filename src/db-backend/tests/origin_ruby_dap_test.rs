@@ -11,8 +11,10 @@ mod origin_dap;
 use db_backend::task::{FrameTransitionKind, OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, assert_has_frame_transition, assert_hop_count, assert_hop_kinds, assert_min_confidence,
-    assert_operand_names_include, assert_terminator_kind, fixture_source, load_fixture_and_query,
+    assert_operand_names_include, assert_terminator_expression_contains, assert_terminator_kind, fixture_source,
+    load_fixture_and_query, query_recording_at_breakpoint,
 };
+use std::{fs, process};
 use test_harness::Language;
 
 /// Returns the Ruby version label used for the trace-dir name.
@@ -62,6 +64,7 @@ fn test_origin_ruby_simple_trivial_chain() {
     let chain = &result.chain;
 
     assert_terminator_kind(chain, TerminatorKind::Literal, "ruby simple_trivial_chain terminator");
+    assert_terminator_expression_contains(chain, "10", "ruby simple_trivial_chain literal expression");
     assert_hop_count(chain, 3, "ruby simple_trivial_chain hops");
     assert_hop_kinds(
         chain,
@@ -69,6 +72,57 @@ fn test_origin_ruby_simple_trivial_chain() {
         "ruby simple_trivial_chain hop kinds",
     );
     assert_min_confidence(chain, 0.7, "ruby simple_trivial_chain confidence");
+}
+
+#[test]
+fn test_origin_ruby_simple_trivial_chain_survives_missing_recorded_source() {
+    let version = require_ruby_recorder();
+    let source_fixture = fixture_source("ruby", "simple_trivial_chain", "main.rb");
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ruby_origin_missing_source_{}_{}",
+        process::id(),
+        version.replace('.', "_")
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("create temp ruby origin source dir");
+    let temp_source = temp_dir.join("main.rb");
+    fs::copy(&source_fixture, &temp_source).expect("copy ruby origin fixture to temp source");
+
+    let recording = test_harness::TestRecording::create_db_trace(&temp_source, Language::Ruby, &version)
+        .expect("Ruby recording failed");
+    fs::remove_file(&temp_source).expect("remove recorder-time ruby source");
+
+    let config = OriginQueryConfig {
+        source_path: temp_source.clone(),
+        language: Language::Ruby,
+        version_label: version,
+        breakpoint_line: 6,
+        variable_name: "c".to_string(),
+        max_hops: None,
+        breakpoint_source_path: Some(temp_source),
+    };
+    let chain = query_recording_at_breakpoint(&recording, &config)
+        .unwrap_or_else(|err| panic!("ruby/simple_trivial_chain missing-source query failed: {err}"));
+
+    assert_terminator_kind(
+        &chain,
+        TerminatorKind::Literal,
+        "ruby simple_trivial_chain missing-source terminator",
+    );
+    assert_terminator_expression_contains(
+        &chain,
+        "10",
+        "ruby simple_trivial_chain missing-source literal expression",
+    );
+    assert_hop_count(&chain, 3, "ruby simple_trivial_chain missing-source hops");
+    assert_hop_kinds(
+        &chain,
+        &[OriginKind::TrivialCopy, OriginKind::TrivialCopy, OriginKind::Literal],
+        "ruby simple_trivial_chain missing-source hop kinds",
+    );
+    assert_min_confidence(&chain, 0.7, "ruby simple_trivial_chain missing-source confidence");
+
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
