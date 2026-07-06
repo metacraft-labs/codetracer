@@ -1499,9 +1499,12 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
 ///     (`TraceProcessor::postprocess`). See `M23e` in
 ///     `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
 fn is_codetracer_ctfs_file(path: &Path) -> bool {
-    let Ok(reader) = CtfsReader::open(path) else {
+    let Ok(mut reader) = CtfsReader::open(path) else {
         return false;
     };
+    if is_mcr_ctfs_container(&mut reader) {
+        return false;
+    }
     reader.has_file("steps.dat") || reader.has_file("events.log")
 }
 
@@ -3003,6 +3006,36 @@ mod tests {
         assert!(
             is_mcr_ctfs_container(&mut ctfs),
             "expected meta.dat with FlagHasMcrFields to be classified as MCR",
+        );
+    }
+
+    /// MCR native recordings may carry stream names that overlap with
+    /// materialised DB traces. The DAP launch classifier must still send them
+    /// to the native replay-worker path instead of opening them as DB traces,
+    /// where source locations collapse to `<unknown>`.
+    #[test]
+    fn mcr_ctfs_with_steps_dat_is_not_db_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("mcr-with-steps.ct");
+
+        let dat = mcr_meta_dat_bytes();
+        write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", &dat),
+                ("steps.dat", b"native stream placeholder"),
+                ("t00000000000", b""),
+            ],
+        )
+        .unwrap();
+
+        assert!(
+            !is_codetracer_ctfs_file(&ct_path),
+            "MCR traces must not be classified as materialised DB CTFS containers even when steps.dat is present",
+        );
+        assert!(
+            !is_db_trace(dir.path(), Path::new("mcr-with-steps.ct")),
+            "MCR traces must resolve through the replay-worker path, not the DB trace path",
         );
     }
 
