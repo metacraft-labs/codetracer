@@ -2576,13 +2576,17 @@ mod tests {
     // `mcrLoadMemoryRegion`, `mcrSetRegisters`) must run serially —
     // otherwise a sibling test's `mcrInit` can wipe state between our
     // own write and its subsequent read. Cargo runs unit tests in
-    // parallel by default, so we guard the FFI block with a per-process
-    // `Mutex`. Tests that only inspect FFI state from inside a freshly
-    // constructed session (e.g. assertions on `mcrGetPC` right after
-    // `new_from_ctfs_bytes`) also acquire this lock so they don't race
-    // against memory-installing tests.
-    use std::sync::Mutex;
-    static FFI_TEST_LOCK: Mutex<()> = Mutex::new(());
+    // parallel by default, so every FFI-touching unit test must share the
+    // canonical lock exported by `emulator_ffi`.
+    struct FfiTestLock;
+
+    impl FfiTestLock {
+        fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'static, ()>> {
+            crate::emulator_ffi::undo_map_ffi_lock().lock()
+        }
+    }
+
+    static FFI_TEST_LOCK: FfiTestLock = FfiTestLock;
 
     // ── M-Checkpoint-Replay fixtures ────────────────────────────────────
     //
