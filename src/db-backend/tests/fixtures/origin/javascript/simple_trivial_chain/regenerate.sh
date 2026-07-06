@@ -13,5 +13,5 @@ BUILD_DIR="${BUILD_DIR:-$HERE/build}"
 mkdir -p "$OUT_DIR" "$BUILD_DIR"
 RECORDER="${CODETRACER_JS_RECORDER:-codetracer-js-recorder}"
 # TODO(M3): wire `--origin-patterns-include` once project-pattern files land.
-"$RECORDER" instrument --out-dir "$BUILD_DIR" main.js
-exec "$RECORDER" record --out-dir "$OUT_DIR" -- "$BUILD_DIR/main.js"
+"$RECORDER" instrument main.js --out "$BUILD_DIR"
+exec "$RECORDER" record "$BUILD_DIR/main.js" --out-dir "$OUT_DIR"
