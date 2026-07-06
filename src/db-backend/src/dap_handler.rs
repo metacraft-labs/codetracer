@@ -2606,9 +2606,12 @@ impl Handler {
     pub fn origin_chain(
         &mut self,
         req: dap::Request,
-        args: task::CtOriginChainArguments,
+        mut args: task::CtOriginChainArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        if args.step_id < 0 && self.trace_kind != TraceKind::Recreator {
+            args.step_id = self.step_id.0;
+        }
         // Build the per-request budget. Defaults from spec §6.1.7. The
         // recreator (RR) backend caps `max_hops` lower than the
         // materialized backend per M11 spec §6.3 — half (8 vs 16) —

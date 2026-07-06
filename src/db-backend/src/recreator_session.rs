@@ -766,6 +766,9 @@ impl ReplaySession for RecreatorReplaySession {
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
         self.ensure_active_stable()?;
         let _ok = self.stable.dispatch_replay_query(ReplayQuery::RunToEntry)?;
+        if let Err(err) = self.stable.dispatch_replay_query(ReplayQuery::DeleteBreakpoints) {
+            warn!("failed to clear internal run-to-entry breakpoints: {err}");
+        }
         Ok(())
     }
 

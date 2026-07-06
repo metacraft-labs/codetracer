@@ -31,6 +31,146 @@ mod test_harness;
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
+
+use db_backend::dap::DapMessage;
+use db_backend::expr_loader::ExprLoader;
+use db_backend::query::ReplayQuery;
+use db_backend::recreator_session::{RecreatorArgs, RecreatorReplaySession};
+use db_backend::replay::ReplaySession;
+use db_backend::task::{
+    Action, CoreTrace, CtOriginChainArguments, DEFAULT_ORIGIN_MAX_HOPS, Location, OriginBudget, OriginChain,
+    OriginKind, TerminatorKind,
+};
+use origin_classifier::PatternSet;
+use serde::Deserialize;
+
+fn fixture_line_containing(language_subdir: &str, scenario: &str, file_name: &str, needle: &str) -> u32 {
+    let src = fixture_source(language_subdir, scenario, file_name);
+    let contents = std::fs::read_to_string(&src)
+        .unwrap_or_else(|e| panic!("failed to read fixture source {}: {e}", src.display()));
+    contents
+        .lines()
+        .position(|line| line.contains(needle))
+        .map(|index| index as u32 + 1)
+        .unwrap_or_else(|| panic!("fixture {} does not contain `{needle}`", src.display()))
+}
+
+fn record_rr_fixture_with_regenerate(
+    language_subdir: &str,
+    scenario: &str,
+    file_name: &str,
+    ct_native_replay: &std::path::Path,
+) -> test_harness::TestRecording {
+    let source_path = assert_fixture_exists(language_subdir, scenario, file_name);
+    assert!(
+        test_harness::is_rr_available(),
+        "rr binary not on PATH; RR origin DAP tests must run in the dev shell/CI image that provides rr"
+    );
+    assert!(
+        ct_native_replay.exists(),
+        "ct-native-replay path does not exist: {}",
+        ct_native_replay.display()
+    );
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "origin_rr_dap_{}_{}_{}",
+        language_subdir,
+        scenario,
+        std::process::id()
+    ));
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)
+            .unwrap_or_else(|e| panic!("failed to clear temp dir {}: {e}", temp_dir.display()));
+    }
+    std::fs::create_dir_all(&temp_dir)
+        .unwrap_or_else(|e| panic!("failed to create temp dir {}: {e}", temp_dir.display()));
+
+    let trace_dir = temp_dir.join("trace");
+    let build_dir = temp_dir.join("build");
+    let regen = regen_script(language_subdir, scenario);
+    let output = Command::new("bash")
+        .arg(&regen)
+        .env("CT_NATIVE_REPLAY", ct_native_replay)
+        .env("OUT_DIR", &trace_dir)
+        .env("BUILD_DIR", &build_dir)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run {}: {e}", regen.display()));
+    assert!(
+        output.status.success(),
+        "regenerate failed for {language_subdir}/{scenario}\nstatus={}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        trace_dir.exists(),
+        "regenerate did not create trace dir {}",
+        trace_dir.display()
+    );
+
+    test_harness::TestRecording {
+        trace_dir,
+        source_path,
+        binary_path: build_dir.join("main"),
+        temp_dir,
+        language: test_harness::Language::C,
+        version_label: "rr-regenerate".to_string(),
+    }
+}
+
+fn send_rr_origin_chain_request(
+    client: &mut test_harness::DapStdioTestClient,
+    variable_name: &str,
+    step_id: i64,
+    max_hops: u32,
+) -> OriginChain {
+    let args = CtOriginChainArguments {
+        variable_name: variable_name.to_string(),
+        variable_path: Vec::new(),
+        frame_id: -1,
+        step_id,
+        thread_id: 0,
+        max_hops,
+        lazy: false,
+        continuation_token: None,
+        session_id: String::new(),
+        classify_source: true,
+    };
+    let req = client.dap_client_mut().request(
+        "ct/originChain",
+        serde_json::to_value(args).expect("origin args serialize"),
+    );
+    client.send_message(&req).expect("send ct/originChain");
+    let response = client
+        .read_until_response_msg("ct/originChain", Duration::from_secs(60))
+        .expect("read ct/originChain response");
+    match response {
+        DapMessage::Response(response) => {
+            assert!(
+                response.success,
+                "ct/originChain failed: message={:?} body={}",
+                response.message, response.body
+            );
+            serde_json::from_value(response.body).unwrap_or_else(|e| panic!("failed to decode OriginChain: {e}"))
+        }
+        other => panic!("expected ct/originChain response, got {other:?}"),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ProtocolEvaluateAddress {
+    address: u64,
+    size: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtocolReverseContinue {
+    reason: String,
+    #[allow(dead_code)]
+    watchpoint_id: Option<i64>,
+}
 
 /// Narrow probe: is `rr` on PATH AND is `ct-native-replay`
 /// (formerly `ct-rr-support`) discoverable? Returns `Some(ct_path)` on
@@ -233,17 +373,280 @@ fn test_origin_rr_stack_slot_reuse_guard() {
 
 #[test]
 fn test_origin_rr_cross_thread_copy_tagged() {
-    let src = assert_fixture_exists("c", "cross_thread_copy", "main.c");
-    let _ = src;
-    let Some(_ct) = require_rr_and_ct_native_replay("cross_thread_copy_tagged") else {
-        return;
+    let ct_native_replay = require_rr_and_ct_native_replay("cross_thread_copy_tagged")
+        .expect("ct-native-replay must be available in the dev shell/CI image");
+    assert!(
+        require_gcc("cross_thread_copy_tagged"),
+        "gcc must be available in the dev shell/CI image"
+    );
+    let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
+    let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
+
+    let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+    client
+        .initialize_and_launch_rr(&recording, &ct_native_replay)
+        .expect("RR DAP launch should succeed");
+    client
+        .set_breakpoint(&recording.source_path, breakpoint_line)
+        .expect("set breakpoint at cross_thread_copy printf");
+    let location = client
+        .continue_to_breakpoint()
+        .expect("continue to cross_thread_copy printf breakpoint");
+    assert_eq!(
+        location.line, breakpoint_line as i64,
+        "continue stopped at the wrong line before origin query: {location:?}"
+    );
+    assert!(
+        location.rr_ticks.0 > 0,
+        "breakpoint location must carry rr ticks for an RR origin query: {location:?}"
+    );
+
+    let chain = send_rr_origin_chain_request(&mut client, "local", location.rr_ticks.0, DEFAULT_ORIGIN_MAX_HOPS);
+    assert!(
+        !chain.hops.is_empty(),
+        "cross_thread_copy origin chain returned no hops: terminator={:?} expression={:?}",
+        chain.terminator.kind,
+        chain.terminator.expression
+    );
+    assert_ne!(
+        chain.terminator.kind,
+        TerminatorKind::RecordingStart,
+        "cross_thread_copy origin chain hit recording start without finding the write: {:?}",
+        chain.hops
+    );
+    assert_eq!(
+        chain.terminator.kind,
+        TerminatorKind::ReadFromExternal,
+        "cross_thread_copy should terminate at the writer thread boundary: {chain:?}"
+    );
+    let cross_thread_hop = chain
+        .hops
+        .iter()
+        .find(|hop| hop.kind == OriginKind::CrossThreadCopy)
+        .unwrap_or_else(|| panic!("expected a CrossThreadCopy hop, got chain: {chain:?}"));
+    assert!(
+        (cross_thread_hop.confidence - 0.6).abs() < f32::EPSILON,
+        "CrossThreadCopy confidence must be exactly 0.6 per the RR guard: hop={cross_thread_hop:?}"
+    );
+}
+
+#[test]
+fn test_origin_rr_cross_thread_copy_worker_protocol_hits_previous_write() {
+    let ct_native_replay = require_rr_and_ct_native_replay("cross_thread_copy_worker_protocol")
+        .expect("ct-native-replay must be available in the dev shell/CI image");
+    assert!(
+        require_gcc("cross_thread_copy_worker_protocol"),
+        "gcc must be available in the dev shell/CI image"
+    );
+    let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
+    let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
+    let rr_trace_folder = if recording.trace_dir.join("rr").is_dir() {
+        recording.trace_dir.join("rr")
+    } else {
+        recording.trace_dir.clone()
     };
-    if !require_gcc("cross_thread_copy_tagged") {
-        return;
+
+    let mut session = RecreatorReplaySession::new(
+        "origin-protocol",
+        0,
+        RecreatorArgs {
+            worker_exe: ct_native_replay.clone(),
+            rr_trace_folder,
+            name: "origin-protocol".to_string(),
+            ..RecreatorArgs::default()
+        },
+    );
+    session.run_to_entry().expect("worker protocol probe: run_to_entry");
+    session
+        .add_breakpoint(
+            &recording.source_path.display().to_string(),
+            breakpoint_line as i64,
+            None,
+            None,
+        )
+        .expect("worker protocol probe: add breakpoint");
+
+    let mut query_location = None;
+    for attempt in 1..=16 {
+        let hit_breakpoint = session
+            .step(Action::Continue, true)
+            .unwrap_or_else(|e| panic!("worker protocol probe: continue attempt {attempt}: {e}"));
+        let raw_location = session
+            .stable
+            .dispatch_replay_query(ReplayQuery::LoadLocation)
+            .expect("worker protocol probe: LoadLocation while reaching breakpoint");
+        let location: Location =
+            serde_json::from_str(&raw_location).expect("worker protocol probe: parse LoadLocation");
+        if location.line == breakpoint_line as i64 {
+            query_location = Some(location);
+            break;
+        }
+        assert!(
+            hit_breakpoint,
+            "worker protocol probe stopped before printf without a breakpoint: {location:?}"
+        );
     }
-    // End-to-end on a CI runner: assert at least one hop carries
-    // kind=CrossThreadCopy and confidence == 0.6.
-    eprintln!("END-TO-END (RR available): test_origin_rr_cross_thread_copy_tagged would run here");
+    let query_location = query_location.expect("worker protocol probe should reach printf breakpoint");
+    assert!(
+        query_location.rr_ticks.0 > 0,
+        "worker protocol probe breakpoint location must carry rr ticks: {query_location:?}"
+    );
+
+    let load_location_raw = session
+        .stable
+        .dispatch_replay_query(ReplayQuery::LoadLocation)
+        .expect("worker protocol probe: LoadLocation at query");
+    let load_location: Location =
+        serde_json::from_str(&load_location_raw).expect("worker protocol probe: parse LoadLocation at query");
+    assert_eq!(
+        load_location.line, breakpoint_line as i64,
+        "worker protocol probe LoadLocation must remain at printf"
+    );
+
+    let eval_raw = session
+        .stable
+        .dispatch_replay_query(ReplayQuery::EvaluateWithAddress {
+            expression: "local".to_string(),
+        })
+        .expect("worker protocol probe: EvaluateWithAddress(local)");
+    let local: ProtocolEvaluateAddress =
+        serde_json::from_str(&eval_raw).expect("worker protocol probe: parse EvaluateWithAddress");
+    assert!(
+        local.address > 0,
+        "local must resolve to a watchable address: {local:?}"
+    );
+    assert!(local.size > 0, "local must resolve to a non-zero size: {local:?}");
+
+    let current_thread_raw = session
+        .stable
+        .dispatch_replay_query(ReplayQuery::CurrentThread)
+        .expect("worker protocol probe: CurrentThread");
+    let current_thread = serde_json::from_str::<serde_json::Value>(&current_thread_raw)
+        .ok()
+        .and_then(|value| value.get("tid").and_then(|tid| tid.as_u64()))
+        .or_else(|| current_thread_raw.trim().parse::<u64>().ok())
+        .expect("worker protocol probe: parse CurrentThread");
+    assert!(current_thread > 0, "CurrentThread must return a real thread id");
+
+    let wp_raw = session
+        .stable
+        .dispatch_replay_query(ReplayQuery::AddWatchpoint {
+            address: local.address,
+            size: local.size,
+            is_write: true,
+        })
+        .expect("worker protocol probe: AddWatchpoint");
+    let watchpoint_id: i64 = serde_json::from_str(&wp_raw)
+        .or_else(|_| wp_raw.trim().parse::<i64>())
+        .expect("worker protocol probe: parse AddWatchpoint");
+    assert!(watchpoint_id > 0, "AddWatchpoint must return a real id");
+
+    let reverse_raw = session
+        .stable
+        .dispatch_replay_query(ReplayQuery::ReverseContinue)
+        .expect("worker protocol probe: ReverseContinue");
+    let reverse: ProtocolReverseContinue =
+        serde_json::from_str(&reverse_raw).expect("worker protocol probe: parse ReverseContinue");
+    assert_ne!(
+        reverse.reason, "recording-start",
+        "worker protocol probe reproduced recording-start for local @ 0x{:x} ({}B) from tick {}",
+        local.address, local.size, query_location.rr_ticks.0
+    );
+    assert_eq!(
+        reverse.reason, "watchpoint",
+        "worker protocol probe expected watchpoint stop, got raw={reverse_raw}"
+    );
+    drop(session);
+
+    let mut origin_session = RecreatorReplaySession::new(
+        "origin-direct",
+        0,
+        RecreatorArgs {
+            worker_exe: ct_native_replay,
+            rr_trace_folder: if recording.trace_dir.join("rr").is_dir() {
+                recording.trace_dir.join("rr")
+            } else {
+                recording.trace_dir.clone()
+            },
+            name: "origin-direct".to_string(),
+            ..RecreatorArgs::default()
+        },
+    );
+    origin_session
+        .run_to_entry()
+        .expect("direct origin probe: run_to_entry");
+    origin_session
+        .add_breakpoint(
+            &recording.source_path.display().to_string(),
+            breakpoint_line as i64,
+            None,
+            None,
+        )
+        .expect("direct origin probe: add breakpoint");
+    let mut origin_query_location = None;
+    for attempt in 1..=16 {
+        let hit_breakpoint = origin_session
+            .step(Action::Continue, true)
+            .unwrap_or_else(|e| panic!("direct origin probe: continue attempt {attempt}: {e}"));
+        let raw_location = origin_session
+            .stable
+            .dispatch_replay_query(ReplayQuery::LoadLocation)
+            .expect("direct origin probe: LoadLocation while reaching breakpoint");
+        let location: Location = serde_json::from_str(&raw_location).expect("direct origin probe: parse LoadLocation");
+        if location.line == breakpoint_line as i64 {
+            origin_query_location = Some(location);
+            break;
+        }
+        assert!(
+            hit_breakpoint,
+            "direct origin probe stopped before printf without a breakpoint: {location:?}"
+        );
+    }
+    let origin_query_location = origin_query_location.expect("direct origin probe should reach printf breakpoint");
+    let mut expr_loader = ExprLoader::new(CoreTrace::default());
+    let patterns = PatternSet::built_in();
+    let args = CtOriginChainArguments {
+        variable_name: "local".to_string(),
+        variable_path: Vec::new(),
+        frame_id: -1,
+        step_id: origin_query_location.rr_ticks.0,
+        thread_id: 0,
+        max_hops: DEFAULT_ORIGIN_MAX_HOPS,
+        lazy: false,
+        continuation_token: None,
+        session_id: String::new(),
+        classify_source: true,
+    };
+    let budget = OriginBudget {
+        max_hops: DEFAULT_ORIGIN_MAX_HOPS,
+        wall_clock_ms: db_backend::task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
+        max_steps_scanned: db_backend::task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
+    };
+    let chain = db_backend::recreator_origin::run_rr_origin_chain(
+        &mut origin_session,
+        &args,
+        &budget,
+        &mut expr_loader,
+        &patterns,
+        None,
+    )
+    .expect("direct origin probe: run_rr_origin_chain");
+    assert!(
+        !chain.hops.is_empty(),
+        "direct origin probe returned no hops: terminator={:?} expression={:?}",
+        chain.terminator.kind,
+        chain.terminator.expression
+    );
+    assert_ne!(
+        chain.terminator.kind,
+        TerminatorKind::RecordingStart,
+        "direct origin probe hit recording start without finding the write: {chain:?}"
+    );
+    assert_eq!(
+        chain.terminator.kind,
+        TerminatorKind::ReadFromExternal,
+        "direct origin probe should terminate at the writer thread boundary: {chain:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

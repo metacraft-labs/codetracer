@@ -77,6 +77,9 @@ pub enum ReplayQuery {
     SeekToGeid {
         geid: u64,
     },
+    SeekToTicks {
+        ticks: i64,
+    },
     /// Query the process table from the trace.
     ///
     /// For RR traces, the worker shells out to `rr ps` and returns the parsed
@@ -118,6 +121,10 @@ pub enum ReplayQuery {
     DeleteWatchpoint {
         id: i64,
     },
+    /// Remove all active watchpoints. Used by the RR origin loop because
+    /// `ReverseContinue` may internally recreate the watchpoint and return a
+    /// different live id than the one originally installed.
+    DeleteWatchpoints,
     /// Reverse-continue until any breakpoint/watchpoint fires or the
     /// recording start is reached. Worker returns a stop-reason record
     /// `{ "reason": "watchpoint" | "recording-start" | ..., "watchpointId": i64 }`.

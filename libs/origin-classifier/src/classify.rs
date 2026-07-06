@@ -710,7 +710,7 @@ fn match_patterns(
             Some(cont) => {
                 let captured = captures
                     .get(&cont.capture)
-                    .map(|n| source[n.byte_range()].to_string());
+                    .map(|n| normalize_continuation_capture(source[n.byte_range()].trim(), lang));
                 (captured, Vec::new())
             }
             None => {
@@ -733,6 +733,33 @@ fn match_patterns(
         });
     }
     None
+}
+
+fn normalize_continuation_capture(text: &str, lang: Lang) -> String {
+    if matches!(lang, Lang::C | Lang::Cpp) {
+        if let Some(stripped) = text.strip_prefix('&').map(str::trim) {
+            if is_simple_c_identifier_path(stripped) {
+                return stripped.to_string();
+            }
+        }
+    }
+    text.to_string()
+}
+
+fn is_simple_c_identifier_path(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .split("::")
+            .all(|part| !part.is_empty() && is_identifier_text(part))
+}
+
+fn is_identifier_text(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn match_node<'a>(

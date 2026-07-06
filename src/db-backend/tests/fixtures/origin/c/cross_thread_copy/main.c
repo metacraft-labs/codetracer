@@ -25,12 +25,11 @@
 #include <stdatomic.h>
 
 static atomic_int g_shared = 0;
-static atomic_int g_ready = 0;
+__attribute__((noinline)) static void rr_watchpoint_boundary(void);
 
 static void *writer(void *arg) {
     (void)arg;
     atomic_store(&g_shared, 99);
-    atomic_store(&g_ready, 1);
     return NULL;
 }
 
@@ -38,7 +37,19 @@ int main(void) {
     pthread_t tid;
     pthread_create(&tid, NULL, writer, NULL);
     pthread_join(tid, NULL);
-    int local = atomic_load(&g_shared);
+    volatile int local = 0;
+    local = atomic_load(&g_shared);
+    rr_watchpoint_boundary();
     printf("%d\n", local);
     return 0;
+}
+
+__attribute__((noinline)) static void rr_watchpoint_boundary(void) {
+    /*
+     * RR value-origin tests need an observable replay event after the local
+     * stack write and before the later read at printf. sched_yield gives rr a
+     * clean syscall/scheduler boundary without reading or mutating `local`.
+     */
+    extern int sched_yield(void);
+    sched_yield();
 }

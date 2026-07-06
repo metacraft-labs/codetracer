@@ -896,6 +896,13 @@ fn built_in_catalogue() -> Vec<PatternRule> {
         vec![Lang::C, Lang::Cpp],
         "memcpy forwards the source argument",
     );
+    push(
+        "atomic_load($src)",
+        PatternKind::Forwarder,
+        Some("$src"),
+        vec![Lang::C, Lang::Cpp],
+        "C atomic_load forwards the loaded object",
+    );
 
     // Nim forwarder example from spec §7.3 (the user-extension hook).
     push(

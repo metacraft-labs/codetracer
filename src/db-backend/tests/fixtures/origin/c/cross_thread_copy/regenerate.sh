@@ -6,12 +6,10 @@ OUT_DIR="${OUT_DIR:-$HERE/trace}"
 BUILD_DIR="${BUILD_DIR:-$HERE/build}"
 mkdir -p "$OUT_DIR" "$BUILD_DIR"
 
-CC="${CC:-gcc}"
-"$CC" -O0 -g -no-pie -pthread -o "$BUILD_DIR/main" main.c
-
 RECORDER="${CT_NATIVE_REPLAY:-${CODETRACER_NATIVE_RECORDER:-ct-native-replay}}"
 if ! command -v "$RECORDER" >/dev/null 2>&1; then
 	echo "SKIPPED: $RECORDER not on PATH" >&2
 	exit 2
 fi
+"$RECORDER" build main.c "$BUILD_DIR/main"
 exec "$RECORDER" record -o "$OUT_DIR" -- "$BUILD_DIR/main"

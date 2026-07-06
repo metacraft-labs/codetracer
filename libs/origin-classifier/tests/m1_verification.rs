@@ -256,7 +256,22 @@ fn test_classifier_c_per_language_overrides() {
     assert_eq!(c.kind, OriginKind::TrivialCopy);
     assert_eq!(c.source_variable.as_deref(), Some("a"));
 
-    // 3. Pointer deref chain: `int b = *p;` — IndexAccess.
+    // 3. C atomics: `atomic_load` forwards the loaded object. The
+    // cross-thread RR fixture depends on this to continue from
+    // `local` back to `g_shared` without synthesizing trace payloads.
+    let c = classify_full(
+        "volatile int local = atomic_load(&g_shared);",
+        "local",
+        Lang::C,
+        &patterns,
+    );
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("g_shared"));
+    let c = classify_full("local = atomic_load(&g_shared);", "local", Lang::C, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("g_shared"));
+
+    // 4. Pointer deref chain: `int b = *p;` — IndexAccess.
     let c = classify_full("int b = *p;", "b", Lang::C, &patterns);
     assert_eq!(c.kind, OriginKind::IndexAccess);
 }

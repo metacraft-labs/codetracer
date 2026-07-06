@@ -75,6 +75,8 @@ use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, pars
 /// reverse-continue). The dispatcher applies this on top of the
 /// per-request budget.
 pub const RR_PER_HOP_WALL_CLOCK_MS: u32 = 1_500;
+const RR_UI_TEST_PER_HOP_ENV: &str = "CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS";
+const RR_UI_TEST_PER_HOP_MAX_MS: u32 = 10_000;
 
 /// Default `max_hops` for the RR backend (spec §6.3 — half of M2's 16).
 pub const RR_DEFAULT_MAX_HOPS: u32 = 8;
@@ -118,7 +120,7 @@ pub struct ReverseContinueResponse {
     /// `"signal"`, `"out-of-budget"`.
     pub reason: String,
     /// Watchpoint id that fired (None when reason != "watchpoint").
-    #[serde(default)]
+    #[serde(default, alias = "watchpointId")]
     pub watchpoint_id: Option<i64>,
 }
 
@@ -177,13 +179,13 @@ impl<'a> WatchpointGuard<'a> {
 
 impl Drop for WatchpointGuard<'_> {
     fn drop(&mut self) {
-        if let Some(id) = self.id.take() {
+        if self.id.take().is_some() {
             let res = self
                 .session
                 .stable
-                .dispatch_replay_query(ReplayQuery::DeleteWatchpoint { id });
+                .dispatch_replay_query(ReplayQuery::DeleteWatchpoints);
             if let Err(e) = res {
-                warn!("WatchpointGuard: failed to delete watchpoint id={id}: {e}");
+                warn!("WatchpointGuard: failed to delete watchpoints: {e}");
             }
         }
     }
@@ -233,7 +235,14 @@ pub fn run_rr_origin_chain(
     let mut metrics = OriginMetrics::default();
     let mut hops: Vec<OriginHop> = Vec::new();
     let mut source_digests: Vec<SourceDigest> = Vec::new();
-    let initial_query_step = if args.step_id < 0 { 0 } else { args.step_id };
+    let current_worker_step = load_current_location(session, expr_loader)
+        .map(|loc| loc.rr_ticks.0)
+        .ok();
+    let initial_query_step = if args.step_id < 0 {
+        current_worker_step.unwrap_or(0)
+    } else {
+        args.step_id
+    };
     let mut current_var_name = args.variable_name.clone();
     let query_variable = args.variable_name.clone();
 
@@ -256,23 +265,42 @@ pub fn run_rr_origin_chain(
         }
     }
 
-    // Step 1: seek the replay worker to the query step. The worker's
-    // `SeekToGeid` query is the closest analogue (`step_id` carries
-    // the RR tick for recreator traces — see
-    // `recreator_session::current_step_id`).
-    if args.step_id >= 0
-        && let Err(e) = session.stable.dispatch_replay_query(ReplayQuery::SeekToGeid {
-            geid: args.step_id as u64,
-        })
-    {
-        return Err(OriginError::new(
-            OriginErrorCode::InvalidFrameOrStep,
-            format!("origin_chain: SeekToGeid failed: {e}"),
-        ));
-    }
-
-    // Step 2: resolve the variable's address + size at the query tick.
+    // Step 1: resolve the variable's address + size at the query tick.
+    // Locals can lose addressable DWARF storage as soon as we move to the next
+    // RR tick, so capture the real stack slot before positioning the worker for
+    // reverse-watchpoint execution.
     let mut watch = evaluate_with_address(session, &current_var_name)?;
+
+    // Step 2: position the replay worker for reverse-watchpoint execution.
+    //
+    // Write-origin watchpoints are installed as write-only in the native
+    // backend. Starting at the exact query tick preserves addressable stack
+    // storage and still avoids read self-hits on the query line.
+    let watch_start_step = initial_query_step;
+    if watch_start_step >= 0 && current_worker_step != Some(watch_start_step) {
+        match session.stable.dispatch_replay_query(ReplayQuery::SeekToTicks {
+            ticks: watch_start_step,
+        }) {
+            Ok(_) => {}
+            Err(next_err) if args.step_id >= 0 => {
+                session
+                    .stable
+                    .dispatch_replay_query(ReplayQuery::SeekToTicks { ticks: args.step_id })
+                    .map_err(|e| {
+                        OriginError::new(
+                            OriginErrorCode::InvalidFrameOrStep,
+                            format!("origin_chain: SeekToTicks failed: next={next_err}; original={e}"),
+                        )
+                    })?;
+            }
+            Err(e) => {
+                return Err(OriginError::new(
+                    OriginErrorCode::InvalidFrameOrStep,
+                    format!("origin_chain: SeekToTicks failed: {e}"),
+                ));
+            }
+        }
+    }
 
     let mut effective_max_hops = budget.max_hops.max(1);
     if args.max_hops > 0 {
@@ -281,7 +309,7 @@ pub fn run_rr_origin_chain(
 
     // Per-request per-hop wall-clock cap (lower than M2; see
     // [`RR_PER_HOP_WALL_CLOCK_MS`]).
-    let per_hop_cap_ms = RR_PER_HOP_WALL_CLOCK_MS;
+    let per_hop_cap_ms = rr_per_hop_wall_clock_ms();
 
     let mut terminator = Terminator::new(TerminatorKind::UnknownSource);
     let mut truncated = false;
@@ -335,7 +363,14 @@ pub fn run_rr_origin_chain(
                 break ValidatedHop::RecordingStart;
             }
             if !rc.hit_watchpoint() {
-                break ValidatedHop::OutOfBudget;
+                debug!(
+                    "origin_chain: reverse-continue stopped for non-watchpoint reason `{}`; re-issuing until watchpoint, recording start, or cap",
+                    rc.reason
+                );
+                if (hop_started.elapsed().as_millis() as u32) >= per_hop_cap_ms {
+                    break ValidatedHop::OutOfBudget;
+                }
+                continue;
             }
             // Per-hop wall-clock cap.
             if (hop_started.elapsed().as_millis() as u32) >= per_hop_cap_ms {
@@ -398,32 +433,70 @@ pub fn run_rr_origin_chain(
                 }
             };
 
-            let ast = match parse_assignment(&line_text, lang) {
-                Some(a) => a,
+            let mut candidate_location = location.clone();
+            let mut candidate_line_text = line_text;
+            let mut candidate_source_origin = source_origin;
+            let mut candidate_ast = parse_assignment(&candidate_line_text, lang);
+
+            if !candidate_ast
+                .as_ref()
+                .map(|ast| ast.targets_variable(&current_var_name))
+                .unwrap_or(false)
+                && row > 1
+            {
+                // RR/LLDB reports data-watchpoint stops after the write has
+                // executed. For single-line C/C++ assignments this commonly
+                // places the selected PC on the following source line. Accept
+                // the immediately preceding line only when it parses and its
+                // LHS names the watched variable; otherwise preserve the
+                // stack-slot reuse guard's rejection behavior.
+                let previous_row = row - 1;
+                let (previous_line_text, previous_source_origin) =
+                    expr_loader.get_source_line_v2(&probe_path, previous_row, meta_dat_sources_root);
+                if previous_source_origin != SourceOrigin::Unavailable
+                    && !previous_line_text.is_empty()
+                    && let Some(previous_ast) = parse_assignment(&previous_line_text, lang)
+                    && previous_ast.targets_variable(&current_var_name)
+                {
+                    candidate_location.line = previous_row as i64;
+                    candidate_line_text = previous_line_text;
+                    candidate_source_origin = previous_source_origin;
+                    candidate_ast = Some(previous_ast);
+                }
+            }
+
+            let ast = match candidate_ast {
+                Some(a) if a.targets_variable(&current_var_name) => a,
+                Some(_) => {
+                    // Stack-slot reuse: writing instruction targets a
+                    // different variable that aliases our address. Skip.
+                    debug!(
+                        "origin_chain: stack-slot reuse — line `{candidate_line_text}` does not target `{current_var_name}`"
+                    );
+                    continue;
+                }
                 None => {
                     // Address aliasing — different variable in source
                     // happens to share the slot. Skip and continue
                     // reverse-execution (spec §6.3 guard step).
-                    debug!("origin_chain: line `{line_text}` did not parse — re-issuing reverse-continue");
+                    debug!("origin_chain: line `{candidate_line_text}` did not parse — re-issuing reverse-continue");
                     continue;
                 }
             };
 
-            if !ast.targets_variable(&current_var_name) {
-                // Stack-slot reuse: writing instruction targets a
-                // different variable that aliases our address. Skip.
-                debug!("origin_chain: stack-slot reuse — line `{line_text}` does not target `{current_var_name}`");
-                continue;
-            }
-
             // Capture source digest for continuation-token integrity.
-            if !path_str.is_empty() && source_origin != SourceOrigin::Unavailable {
-                track_source_digest(&mut source_digests, &probe_path, source_origin, meta_dat_sources_root);
+            if !path_str.is_empty() && candidate_source_origin != SourceOrigin::Unavailable {
+                track_source_digest(
+                    &mut source_digests,
+                    &probe_path,
+                    candidate_source_origin,
+                    meta_dat_sources_root,
+                );
             }
 
             break ValidatedHop::Validated(Box::new(ValidatedHopPayload {
-                location,
-                line_text,
+                location: candidate_location,
+                line_text: candidate_line_text,
                 ast,
                 lang,
                 cross_thread,
@@ -517,10 +590,7 @@ pub fn run_rr_origin_chain(
                 // ---- 4. Decide whether to continue ---------------------
                 let continue_kinds = matches!(
                     kind,
-                    OriginKind::TrivialCopy
-                        | OriginKind::ParameterPass
-                        | OriginKind::ReturnCapture
-                        | OriginKind::CrossThreadCopy
+                    OriginKind::TrivialCopy | OriginKind::ParameterPass | OriginKind::ReturnCapture
                 );
                 if !continue_kinds {
                     // Computational / Literal / FieldAccess / IndexAccess /
@@ -542,7 +612,12 @@ pub fn run_rr_origin_chain(
                 let wp_id_taken = wp_guard.take();
                 let _ = session
                     .stable
-                    .dispatch_replay_query(ReplayQuery::DeleteWatchpoint { id: wp_id_taken });
+                    .dispatch_replay_query(ReplayQuery::DeleteWatchpoints)
+                    .or_else(|_| {
+                        session
+                            .stable
+                            .dispatch_replay_query(ReplayQuery::DeleteWatchpoint { id: wp_id_taken })
+                    });
 
                 match evaluate_with_address(session, &next_var_name) {
                     Ok(next) => {
@@ -601,6 +676,17 @@ pub fn run_rr_origin_chain(
         cross_process_spans: Vec::new(),
         confidence,
     })
+}
+
+fn rr_per_hop_wall_clock_ms() -> u32 {
+    if std::env::var("CODETRACER_IN_UI_TEST").ok().as_deref() != Some("1") {
+        return RR_PER_HOP_WALL_CLOCK_MS;
+    }
+    std::env::var(RR_UI_TEST_PER_HOP_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .map(|ms| ms.clamp(RR_PER_HOP_WALL_CLOCK_MS, RR_UI_TEST_PER_HOP_MAX_MS))
+        .unwrap_or(RR_PER_HOP_WALL_CLOCK_MS)
 }
 
 /// Per-hop validated payload. Held inside `ValidatedHop::Validated` via
@@ -663,11 +749,11 @@ fn kind_to_terminator(kind: OriginKind) -> TerminatorKind {
         OriginKind::FieldAccess | OriginKind::IndexAccess | OriginKind::FunctionCall | OriginKind::FunctionReturn => {
             TerminatorKind::Computational
         }
+        OriginKind::CrossThreadCopy => TerminatorKind::ReadFromExternal,
         OriginKind::Unknown => TerminatorKind::UnknownSource,
-        OriginKind::TrivialCopy
-        | OriginKind::ParameterPass
-        | OriginKind::ReturnCapture
-        | OriginKind::CrossThreadCopy => TerminatorKind::UnknownSource,
+        OriginKind::TrivialCopy | OriginKind::ParameterPass | OriginKind::ReturnCapture => {
+            TerminatorKind::UnknownSource
+        }
     }
 }
 
