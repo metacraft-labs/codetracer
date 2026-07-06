@@ -4,5 +4,6 @@ fn main() {
     let a: i32 = 10;
     let b: i32 = a;
     let c: i32 = b;
+    std::hint::black_box(&c);
     println!("{}", c);
 }

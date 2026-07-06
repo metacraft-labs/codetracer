@@ -13,4 +13,6 @@ hop 2: target=a   rhs=10     OriginKind=Literal       terminator=Literal(i32, va
 **Termination:** `Literal`. Bare-identifier RHS is `TrivialCopy`.
 
 **Notes:** `i32: Copy` so the bare-name move is a value copy at MIR
-level; no `Clone` call is involved.
+level; no `Clone` call is involved. The `black_box(&c)` line exists only
+to keep `c` backed by a stable stack slot during RR replay; the queried
+value and copy chain remain `a -> b -> c`.

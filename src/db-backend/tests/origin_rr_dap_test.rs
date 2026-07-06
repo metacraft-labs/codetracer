@@ -727,6 +727,87 @@ fn test_origin_rr_rust_simple_trivial_chain() {
 }
 
 #[test]
+fn test_origin_rr_rust_simple_trivial_chain_evaluate_c_address() {
+    let ct_native_replay = require_rr_and_ct_native_replay("rust_simple_trivial_chain_evaluate_c")
+        .expect("ct-native-replay must be available in the dev shell/CI image");
+    assert!(
+        require_rustc("rust_simple_trivial_chain_evaluate_c"),
+        "rustc must be available in the dev shell/CI image"
+    );
+
+    let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+    let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+    let rr_trace_folder = if recording.trace_dir.join("rr").is_dir() {
+        recording.trace_dir.join("rr")
+    } else {
+        recording.trace_dir.clone()
+    };
+
+    let mut session = RecreatorReplaySession::new(
+        "rust-simple-trivial-evaluate-c",
+        0,
+        RecreatorArgs {
+            worker_exe: ct_native_replay,
+            rr_trace_folder,
+            name: "rust-simple-trivial-evaluate-c".to_string(),
+            ..RecreatorArgs::default()
+        },
+    );
+    session
+        .run_to_entry()
+        .expect("rust simple_trivial_chain primitive: run_to_entry");
+    session
+        .add_breakpoint(
+            &recording.source_path.display().to_string(),
+            breakpoint_line as i64,
+            None,
+            None,
+        )
+        .expect("rust simple_trivial_chain primitive: add breakpoint");
+
+    let mut query_location = None;
+    for attempt in 1..=16 {
+        let hit_breakpoint = session
+            .step(Action::Continue, true)
+            .unwrap_or_else(|e| panic!("rust simple_trivial_chain primitive: continue attempt {attempt}: {e}"));
+        let raw_location = session
+            .stable
+            .dispatch_replay_query(ReplayQuery::LoadLocation)
+            .expect("rust simple_trivial_chain primitive: LoadLocation while reaching breakpoint");
+        let location: Location =
+            serde_json::from_str(&raw_location).expect("rust simple_trivial_chain primitive: parse LoadLocation");
+        if location.line == breakpoint_line as i64 {
+            query_location = Some(location);
+            break;
+        }
+        assert!(
+            hit_breakpoint,
+            "rust simple_trivial_chain primitive stopped before println without a breakpoint: {location:?}"
+        );
+    }
+    let query_location = query_location.expect("rust simple_trivial_chain primitive should reach println");
+    assert!(
+        query_location.rr_ticks.0 > 0,
+        "rust simple_trivial_chain primitive location must carry rr ticks: {query_location:?}"
+    );
+
+    let eval_raw = session
+        .stable
+        .dispatch_replay_query(ReplayQuery::EvaluateWithAddress {
+            expression: "c".to_string(),
+        })
+        .expect("rust simple_trivial_chain primitive: EvaluateWithAddress(c)");
+    let c: ProtocolEvaluateAddress =
+        serde_json::from_str(&eval_raw).expect("rust simple_trivial_chain primitive: parse EvaluateWithAddress(c)");
+    assert!(
+        c.address > 0x1000,
+        "Rust fixture variable `c` must resolve to a watchable storage address at tick {}: {c:?}",
+        query_location.rr_ticks.0
+    );
+    assert_eq!(c.size, 4, "Rust fixture variable `c: i32` must be 4 bytes: {c:?}");
+}
+
+#[test]
 fn test_origin_rr_rust_clone_forwarder() {
     let src = assert_fixture_exists("rust", "clone_forwarder", "main.rs");
     let _ = src;
