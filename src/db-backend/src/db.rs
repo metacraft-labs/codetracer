@@ -3458,8 +3458,18 @@ impl MaterializedReplaySession {
                 }
             } else if step.call_key.0 < current_frame.0 {
                 // We've walked past the entry step of `current_frame`;
-                // the variable entered as a parameter.
+                // the variable entered as a parameter. JavaScript top-level
+                // bindings live in a synthetic <module> frame with no caller
+                // argument; for those, the earliest sighting is the write.
                 if let Some(call) = self.reader.call(current_frame) {
+                    if let Some(prev_step) = previous_step
+                        && self.is_javascript_module_frame(call.function_id)
+                    {
+                        return BackwardScanOutcome::FoundInFrame {
+                            step_id: prev_step,
+                            steps_scanned,
+                        };
+                    }
                     return BackwardScanOutcome::FrameEntryReached {
                         call_step: call.step_id,
                         steps_scanned,
@@ -3486,6 +3496,20 @@ impl MaterializedReplaySession {
 
     fn var_name_matches(&self, var_id: VariableId, name: &str) -> bool {
         self.reader.variable_name(var_id).map(|n| n == name).unwrap_or(false)
+    }
+
+    fn is_javascript_module_frame(&self, function_id: FunctionId) -> bool {
+        self.reader
+            .function(function_id)
+            .map(|function| {
+                function.name == "<module>"
+                    && self
+                        .reader
+                        .path(function.path_id)
+                        .map(|path| path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs"))
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false)
     }
 
     /// Spec §6.1 helper `resolve_caller_argument`.
@@ -3524,14 +3548,23 @@ impl MaterializedReplaySession {
             .iter()
             .position(|a| self.var_name_matches(a.variable_id, param_name))?;
         let caller_frame = call.parent_key;
-        let caller_step = StepId(call.step_id.0 - 1);
+        let caller_step = self
+            .nearest_prior_step_in_frame(call.step_id, caller_frame)
+            .unwrap_or(StepId(call.step_id.0 - 1));
 
         // Try to recover the caller's argument expression text by
         // parsing the call site line. This is necessary because the
         // trace doesn't preserve the caller-side expression: it only
         // records the value bound to the callee's parameter.
-        let caller_expr =
-            self.caller_argument_expression(caller_frame, caller_step, arg_index, expr_loader, meta_dat_sources_root);
+        let caller_arg = self.caller_argument_expression_near(
+            caller_frame,
+            call.step_id,
+            arg_index,
+            expr_loader,
+            meta_dat_sources_root,
+        );
+        let caller_expr = caller_arg.as_ref().map(|(expr, _step)| expr.clone());
+        let caller_step = caller_arg.map(|(_expr, step)| step).unwrap_or(caller_step);
 
         Some((
             // Prefer the caller-side textual expression when we found
@@ -3548,6 +3581,18 @@ impl MaterializedReplaySession {
             caller_frame,
             caller_step,
         ))
+    }
+
+    fn nearest_prior_step_in_frame(&self, from_step: StepId, frame: CallKey) -> Option<StepId> {
+        let mut step_id = from_step.0 - 1;
+        while step_id >= 0 {
+            let sid = StepId(step_id);
+            if self.reader.step(sid).is_some_and(|step| step.call_key == frame) {
+                return Some(sid);
+            }
+            step_id -= 1;
+        }
+        None
     }
 
     /// Read the source line for `caller_step` inside `caller_frame`,
@@ -3584,8 +3629,51 @@ impl MaterializedReplaySession {
             return None;
         }
         let lang = classifier_lang_for_path(&path_str)?;
-        let args = parse_call_arguments(&line_text, lang)?;
+        let trimmed_line = line_text.trim();
+        let args = parse_call_arguments(trimmed_line, lang).or_else(|| parse_call_arguments_textual(trimmed_line))?;
         args.get(arg_index).cloned()
+    }
+
+    fn caller_argument_expression_near(
+        &self,
+        caller_frame: CallKey,
+        callee_entry_step: StepId,
+        arg_index: usize,
+        expr_loader: &mut ExprLoader,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Option<(String, StepId)> {
+        let mut step_id = callee_entry_step.0 - 1;
+        while step_id >= 0 {
+            let sid = StepId(step_id);
+            let Some(step) = self.reader.step(sid).copied() else {
+                break;
+            };
+            if step.call_key == caller_frame {
+                let path_str = self.reader.path(step.path_id)?.to_string();
+                let workdir_path = self.reader.workdir().join(&path_str);
+                let probe_path = if workdir_path.exists() {
+                    workdir_path
+                } else {
+                    PathBuf::from(&path_str)
+                };
+                let row = step.line.0.max(0) as usize;
+                let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+                let trimmed = line_text.trim();
+                if origin != SourceOrigin::Unavailable
+                    && !trimmed.starts_with("def ")
+                    && !trimmed.starts_with("function ")
+                    && self
+                        .caller_argument_expression(caller_frame, sid, arg_index, expr_loader, meta_dat_sources_root)
+                        .is_some()
+                {
+                    return self
+                        .caller_argument_expression(caller_frame, sid, arg_index, expr_loader, meta_dat_sources_root)
+                        .map(|expr| (expr, sid));
+                }
+            }
+            step_id -= 1;
+        }
+        None
     }
 
     /// Spec §6.1 helper `resolve_return_capture`.
@@ -3861,6 +3949,57 @@ fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
         "nr" => Some(ClassifierLang::Rust),
         _ => None,
     }
+}
+
+fn parse_call_arguments_textual(line: &str) -> Option<Vec<String>> {
+    let open = line.find('(')?;
+    let close = line.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let args_src = &line[open + 1..close];
+    if args_src.trim().is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut args = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for (idx, ch) in args_src.char_indices() {
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' | '`' => quote = Some(ch),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                let arg = args_src[start..idx].trim();
+                if !arg.is_empty() && !arg.contains('=') {
+                    args.push(arg.to_string());
+                }
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    let arg = args_src[start..].trim();
+    if !arg.is_empty() && !arg.contains('=') {
+        args.push(arg.to_string());
+    }
+    Some(args)
 }
 
 fn track_source_digest(
