@@ -1547,14 +1547,14 @@ when not defined(ctInExtension):
     if activeSessionVM.isNil:
       let dapRef = data.dapApi
       let realBackend = newRealBackendService(
-        sendCommand = proc(command: string, argsJs: JsObject) =
+        sendCommand = proc(command: string, argsJs: JsObject): BackendFuture[JsObject] =
           when defined(js):
             if data.startOptions.inTest:
               recordVmBackendRequest(cstring(command), argsJs)
           # Translate the BackendService string command to a CtEventKind
           # and forward it through the existing DapApi IPC channel.
           let kind = dapCommandToEventKind(cstring(command))
-          dapRef.sendCtRequest(kind, argsJs),
+          dapRef.asyncSendCtRequest(kind, argsJs),
         onBackendEvent = proc(handler: proc(kind: string, raw: JsObject)) =
           # Subscribe to every event kind that has a DAP mapping so the
           # ViewModel store receives the same events as the legacy UI.
