@@ -46,21 +46,37 @@ fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stylus-fund-trace")
 }
 
+fn stylus_source_path() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test-programs/stylus_fund_tracker/src/lib.rs")
+        .canonicalize()
+        .expect("canonicalize stylus source path")
+        .display()
+        .to_string()
+}
+
 #[test]
 #[ignore = "regeneration helper, invoked by tests/fixtures/regenerate-stylus-fixture.sh"]
 fn rebuild_stylus_ctfs_fixture() {
     let dir = fixture_dir();
+    let source_path = stylus_source_path();
 
     // 1. Load the committed recorded event stream.
     let events_json = std::fs::read_to_string(dir.join("trace.events.json")).expect("read committed trace.events.json");
-    let events: Vec<TraceLowLevelEvent> =
-        serde_json::from_str(&events_json).expect("parse trace.events.json as TraceLowLevelEvent array");
+    let mut event_values: Vec<serde_json::Value> =
+        serde_json::from_str(&events_json).expect("parse trace.events.json as JSON array");
+    for event in &mut event_values {
+        if let Some(path) = event.get_mut("Path") {
+            *path = serde_json::Value::String(source_path.clone());
+        }
+    }
+    let events: Vec<TraceLowLevelEvent> = serde_json::from_value(serde_json::Value::Array(event_values))
+        .expect("parse trace.events.json as TraceLowLevelEvent array");
     assert!(!events.is_empty(), "recorded event stream must be non-empty");
 
     // 2. Load the committed recorded metadata (legacy shape).
     #[derive(serde::Deserialize)]
     struct LegacyMeta {
-        workdir: String,
         program: String,
         args: Vec<String>,
     }
@@ -69,10 +85,18 @@ fn rebuild_stylus_ctfs_fixture() {
     let legacy: LegacyMeta = serde_json::from_str(&meta_json).expect("parse trace_metadata.json");
 
     // Load the committed recorded source paths, if present.
-    let paths: Vec<String> = std::fs::read_to_string(dir.join("trace_paths.json"))
+    let mut paths: Vec<String> = std::fs::read_to_string(dir.join("trace_paths.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    for path in &mut paths {
+        if path.ends_with("test-programs/stylus_fund_tracker/src/lib.rs") {
+            *path = source_path.clone();
+        }
+    }
+    if paths.is_empty() {
+        paths.push(source_path);
+    }
 
     // 3. Build the canonical binary `meta.dat`. M-REC-1.5 made `meta.dat`
     //    the only metadata form a `.ct` may carry; it requires a
@@ -84,7 +108,7 @@ fn rebuild_stylus_ctfs_fixture() {
         recording_id: "01949fcc-7d92-7e9c-aaaa-5747591d0001".to_string(),
         program: legacy.program,
         args: legacy.args,
-        workdir: legacy.workdir,
+        workdir: env!("CARGO_MANIFEST_DIR").to_string(),
         recorder_id: "evm".to_string(),
         paths,
         mcr: None,
