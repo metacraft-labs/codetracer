@@ -196,7 +196,10 @@ proc receiveResponse*(dap: DapApi, command: cstring, rawValue: JsObject) =
   dap.receive(commandToCtResponseEventKind(command), rawValue)
 
 proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
-  dap.receive(dapEventToCtEventKind(event), rawValue)
+  if DAP_TO_EVENT_KIND_MAPPING.hasKey(event):
+    dap.receive(dapEventToCtEventKind(event), rawValue)
+  else:
+    console.warn cstring"ignoring unmapped DAP event: ", event
 
 when not defined(ctInExtension):
   import errors

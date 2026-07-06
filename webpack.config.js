@@ -22,7 +22,7 @@ module.exports = {
     globalObject: 'window',
     path: path.resolve(__dirname, 'src/public/dist'),
     filename: "frontend_imports.js",
-    publicPath: path.resolve(__dirname, 'src/public/dist')
+    publicPath: "auto"
   },
   module: {
     rules: [

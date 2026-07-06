@@ -90,7 +90,7 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
   self.data.redraw()
 
 method onUpdatedTable*(self: TraceComponent, response: CtUpdatedTableResponseBody) {.async.} =
-  if response.tableUpdate.isTrace and response.tableUpdate.data.draw == self.drawId and response.tableUpdate.traceId == self.id:
+  if response.tableUpdate.isTrace and response.tableUpdate.data.draw == self.drawId and response.tableUpdate.eventSlot == self.id:
     self.tableCallback(response.tableUpdate.data.toJs)
     self.dataTable.rowsCount = response.tableUpdate.data.recordsTotal
     self.dataTable.updateTableRows()
@@ -380,7 +380,7 @@ proc renderTableResults(
               UpdateTableArgs(
                 tableArgs: mutData,
                 isTrace: true,
-                traceId: self.id,
+                eventSlot: self.id,
               )
             self.api.emit(CtUpdateTable, updateTableArgs),
           columns: columns,

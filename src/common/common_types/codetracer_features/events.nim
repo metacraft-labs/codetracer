@@ -54,7 +54,7 @@ type
     tableArgs*: TableArgs
     selectedKinds*: array[EventLogKind, bool]
     isTrace*: bool
-    traceId*: int
+    eventSlot*: int
 
   TableRow* = object ## TableRow object
     directLocationRRTicks*: int
@@ -76,7 +76,7 @@ type
   TableUpdate* = object ## TableUpdate object
     data*: TableData
     isTrace*: bool
-    traceId*: int
+    eventSlot*: int
 
   ProgramEvent* = object
     kind*: EventLogKind
