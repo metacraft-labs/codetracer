@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::error::Error;
 
 // use log::info;
-use codetracer_trace_types::{CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TypeId, ValueRecord};
+use codetracer_trace_types::{
+    CallKey, EventLogKind, FunctionId, FunctionRecord, PathId, Place, StepId, TraceLowLevelEvent, TypeId, ValueRecord,
+};
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
 use crate::task::NO_INDEX;
@@ -83,6 +85,30 @@ impl<'a> TraceProcessor<'a> {
         // info!("process_event {:?}", event);
         match event {
             TraceLowLevelEvent::Step(step_record) => {
+                if self.current_call_key.0 < 0 {
+                    let function_id = FunctionId(self.db.functions.len());
+                    self.db.functions.push(FunctionRecord {
+                        path_id: step_record.path_id,
+                        line: step_record.line,
+                        name: "<top-level>".to_string(),
+                    });
+
+                    self.current_call_key = CallKey(self.db.calls.len() as i64);
+                    self.last_started_call_key = self.current_call_key;
+                    self.db.calls.push(DbCall {
+                        key: self.current_call_key,
+                        function_id,
+                        args: vec![],
+                        return_value: ValueRecord::None { type_id: TypeId(0) },
+                        step_id: StepId(self.db.steps.len() as i64),
+                        depth: self.depth,
+                        parent_key: CallKey(-1),
+                        children_keys: vec![],
+                    });
+                    self.call_stack.push(self.current_call_key);
+                    self.db.local_variable_cells.push(HashMap::new());
+                    self.depth += 1;
+                }
                 assert!(self.current_call_key.0 >= 0);
                 let db_step = DbStep {
                     step_id: StepId(self.db.steps.len() as i64),

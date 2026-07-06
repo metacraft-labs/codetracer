@@ -491,8 +491,11 @@ fn setup(
             json_path.display()
         );
         let json_bytes = std::fs::read(&json_path)?;
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
+        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
             .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
+        normalize_legacy_trace_json_values(&mut json_value);
+        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
+            .map_err(|e| format!("failed to decode legacy trace.json at {}: {e}", json_path.display()))?;
         // Workdir: prefer `trace_metadata.json` next to `trace.json`,
         // else fall back to the trace folder itself.
         let meta_workdir = json_path
@@ -665,6 +668,27 @@ fn setup(
         Ok(handler)
     } else {
         Err("problem with reading metadata or trace files and no replay-worker trace path was found".into())
+    }
+}
+
+fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                normalize_legacy_trace_json_values(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(text)) = map.get("i")
+                && let Ok(parsed) = text.parse::<i64>()
+            {
+                map.insert("i".to_string(), serde_json::Value::Number(parsed.into()));
+            }
+            for child in map.values_mut() {
+                normalize_legacy_trace_json_values(child);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1235,8 +1259,11 @@ pub fn setup_from_vfs(
             None => continue,
         };
         info!("setup_from_vfs: detected legacy materialized trace.json at VFS path {candidate:?}");
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
+        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
             .map_err(|e| format!("failed to parse legacy trace.json at {candidate:?}: {e}"))?;
+        normalize_legacy_trace_json_values(&mut json_value);
+        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
+            .map_err(|e| format!("failed to decode legacy trace.json at {candidate:?}: {e}"))?;
         // Workdir: prefer `trace_metadata.json` alongside `trace.json` in
         // the VFS, else fall back to the trace folder.
         let meta_vfs = join_vfs(trace_folder, "trace_metadata.json");
@@ -1398,12 +1425,46 @@ fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
     None
 }
 
+fn legacy_materialized_trace_file_in_dir(dir: &Path) -> Option<PathBuf> {
+    for name in ["trace.json", "trace.bin"] {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn auto_detect_materialized_trace_file(folder: &Path) -> Option<PathBuf> {
+    find_ct_file_in_dir(folder).or_else(|| legacy_materialized_trace_file_in_dir(folder))
+}
+
+fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
+    if folder.is_file() {
+        return folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "trace.json" || name == "trace.bin");
+    }
+
+    let trace_path = folder.join(trace_file);
+    trace_path.is_file()
+        && trace_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "trace.json" || name == "trace.bin")
+}
+
 /// Determine whether the trace in `folder` is a DB-based trace (JavaScript,
 /// Python, Ruby, etc.) that does NOT require an rr replay worker.
 ///
-/// Materialized traces are CTFS-only, so this reduces to detecting whether
-/// the folder (or the resolved trace file) is a CodeTracer DB CTFS
-/// container with materialized contents (`steps.dat` or `events.log`).
+/// Most materialized traces are CTFS containers, but a few checked-in legacy
+/// fixtures still use sidecar `trace.json` / `trace.bin` files. Detect both so
+/// neither path incorrectly starts an rr replay worker.
+///
+/// For CTFS, this reduces to detecting whether the folder (or the resolved
+/// trace file) is a CodeTracer DB CTFS container with materialized contents
+/// (`steps.dat` or `events.log`).
 /// Native MCR traces also use CTFS magic but their stream layout is handled
 /// by ct-native-replay; `is_codetracer_ctfs_file` distinguishes the two by
 /// looking for the DB stream files inside the container.
@@ -1419,7 +1480,7 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
     if trace_path.exists() && is_codetracer_ctfs_file(&trace_path) {
         return true;
     }
-    false
+    is_legacy_materialized_trace(folder, trace_file)
 }
 
 /// Classify a CTFS container as a DB (materialized) trace this backend can
@@ -1990,19 +2051,20 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                     // to resolve.
                     ctx.launch_trace_file = PathBuf::new();
                 } else {
-                    // Auto-detect the trace file. Materialized traces are
-                    // CTFS-only (`<program>.ct` or `trace.ct`); legacy
-                    // sidecars (`trace.bin` / `trace.json` +
-                    // `trace_metadata.json`) are no longer supported.
-                    if let Some(ct_path) = find_ct_file_in_dir(folder) {
-                        let rel_path = ct_path
+                    // Auto-detect the trace file. Prefer CTFS containers, but
+                    // keep legacy materialized `trace.json` / `trace.bin`
+                    // fixtures loadable until the fixture catalogue is fully
+                    // migrated.
+                    if let Some(trace_path) = auto_detect_materialized_trace_file(folder) {
+                        let rel_path = trace_path
                             .strip_prefix(folder)
                             .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|_| ct_path.file_name().map(PathBuf::from).unwrap_or(ct_path));
+                            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path));
                         ctx.launch_trace_file = rel_path;
                     } else {
-                        // No .ct found; default to "trace.ct" so the error
-                        // message in setup() points at the canonical name.
+                        // No materialized trace file found; default to
+                        // "trace.ct" so the error message in setup() points
+                        // at the canonical name.
                         ctx.launch_trace_file = "trace.ct".into();
                     }
                 }
@@ -2461,15 +2523,14 @@ fn task_thread(
                     // there is no per-launch `trace_file` to resolve.
                     PathBuf::new()
                 } else {
-                    // Materialized traces are CTFS-only — pick the first
-                    // `.ct` container in the folder, falling back to the
-                    // canonical name so setup() yields a clear error if
-                    // nothing matches.
-                    if let Some(ct_path) = find_ct_file_in_dir(folder) {
-                        ct_path
+                    // Prefer CTFS containers, but keep legacy materialized
+                    // `trace.json` / `trace.bin` fixtures loadable until the
+                    // fixture catalogue is fully migrated.
+                    if let Some(trace_path) = auto_detect_materialized_trace_file(folder) {
+                        trace_path
                             .strip_prefix(folder)
                             .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|_| ct_path.file_name().map(PathBuf::from).unwrap_or(ct_path))
+                            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path))
                     } else {
                         "trace.ct".into()
                     }

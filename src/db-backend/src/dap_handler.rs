@@ -358,6 +358,48 @@ pub struct PairIndexCounterpart {
 //   receives sender as arg
 //   sender.
 
+fn decode_event_log_marker_payload(
+    event: &ProgramEvent,
+    marker_id: usize,
+) -> Option<crate::correlation_markers::MarkerPayload> {
+    if let Some(payload) = crate::correlation_markers::MarkerPayload::decode(&event.metadata) {
+        return Some(payload);
+    }
+
+    let metadata: serde_json::Value = serde_json::from_str(&event.metadata).ok()?;
+    let direction = metadata
+        .get("direction")
+        .and_then(serde_json::Value::as_str)
+        .and_then(crate::correlation_markers::MarkerDirection::parse)?;
+    let boundary_id = metadata
+        .get("boundary")
+        .or_else(|| metadata.get("boundary_id"))
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+
+    let content: serde_json::Value = serde_json::from_str(&event.content).ok()?;
+    let key_value = content.get("key").map(|value| match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    })?;
+    let show_value = content.get("payload").map(|value| match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    });
+
+    Some(crate::correlation_markers::MarkerPayload {
+        marker_id,
+        boundary_id,
+        direction,
+        key_text: "key".to_string(),
+        key_value,
+        show_text: show_value.as_ref().map(|_| "payload".to_string()),
+        show_value,
+        description: None,
+        format: Some("text".to_string()),
+    })
+}
+
 #[allow(clippy::expect_used)]
 impl Handler {
     fn is_live_recreator_session(&self) -> bool {
@@ -2240,7 +2282,7 @@ impl Handler {
             for (absolute_index, event) in all_events.iter().enumerate() {
                 self.marker_decode_calls
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some(payload) = crate::correlation_markers::MarkerPayload::decode(&event.metadata) else {
+                let Some(payload) = decode_event_log_marker_payload(event, absolute_index) else {
                     continue;
                 };
                 rows.push(MarkerEventRow {

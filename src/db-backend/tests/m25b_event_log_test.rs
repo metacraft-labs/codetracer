@@ -24,6 +24,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 
@@ -37,6 +38,9 @@ use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::recreator_session::RecreatorArgs;
 use db_backend::task::{ProgramEvent, TraceKind};
 use serde_json::Value as JsonValue;
+
+mod test_harness;
+use test_harness::{DapStdioTestClient, Language, TestRecording};
 
 // ---------------------------------------------------------------------------
 // Fixture helpers.
@@ -236,6 +240,73 @@ fn test_dap_event_log_returns_marker_rows_with_metadata() {
         .and_then(JsonValue::as_array)
         .expect("events array on response");
     assert_eq!(events_array.len(), 2);
+}
+
+#[test]
+fn test_dap_launch_legacy_three_trace_fixture_returns_marker_rows() {
+    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("cross_process")
+        .join("account-balance-with-wasm");
+    let trace_dir = fixture_root.join("frontend.ct");
+    assert!(
+        trace_dir.join("trace.json").is_file(),
+        "expected legacy materialized frontend trace at {}",
+        trace_dir.display()
+    );
+
+    let recording = TestRecording {
+        trace_dir: trace_dir.clone(),
+        source_path: fixture_root.join("frontend").join("app.js"),
+        binary_path: PathBuf::new(),
+        temp_dir: PathBuf::new(),
+        language: Language::JavaScript,
+        version_label: "fixture".to_string(),
+    };
+
+    let mut client = DapStdioTestClient::start().expect("spawn replay-server dap-server --stdio");
+    client
+        .initialize_and_launch(&recording)
+        .expect("launch legacy three-trace frontend fixture");
+
+    let event_load = client
+        .dap_client_mut()
+        .request("ct/event-load", serde_json::json!({ "start": 0, "count": 100 }));
+    client.send_message(&event_load).expect("send ct/event-load");
+
+    let response = client
+        .read_until_response_msg("ct/event-load", std::time::Duration::from_secs(10))
+        .expect("ct/event-load response");
+    let DapMessage::Response(response) = response else {
+        panic!("expected ct/event-load response");
+    };
+    assert!(
+        response.success,
+        "ct/event-load failed: message={:?} body={:?}",
+        response.message, response.body
+    );
+
+    let markers = response
+        .body
+        .get("markers")
+        .and_then(JsonValue::as_array)
+        .expect("markers array on ct/event-load response");
+
+    assert!(
+        markers.iter().any(|row| {
+            row.get("boundaryId").and_then(JsonValue::as_str) == Some("account-balance-with-wasm")
+                && row.get("keyValue").and_then(JsonValue::as_str) == Some("620")
+        }),
+        "expected account-balance-with-wasm marker row in {markers:?}"
+    );
+    assert!(
+        markers.iter().any(|row| {
+            row.get("boundaryId").and_then(JsonValue::as_str) == Some("js-wasm-realm")
+                && row.get("keyValue").and_then(JsonValue::as_str) == Some("1")
+        }),
+        "expected js-wasm-realm marker row in {markers:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
