@@ -2701,9 +2701,14 @@ impl Handler {
         // "coming soon" affordance.
         let any_session = self.replay.as_any_mut();
         match any_session.downcast_mut::<MaterializedReplaySession>() {
-            Some(session) => {
-                session.origin_chain_inferred(args, budget, &mut self.expr_loader, patterns, meta_dat_sources_root)
-            }
+            Some(session) => session.origin_chain_inferred_with_metadata(
+                args,
+                budget,
+                &mut self.expr_loader,
+                patterns,
+                meta_dat_sources_root,
+                self.materialized_origin_metadata_decoder.as_ref(),
+            ),
             None => Err(crate::origin_query::OriginError::unsupported_backend(
                 "non-materialized backend (downcast failed)",
             )),

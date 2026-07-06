@@ -94,6 +94,19 @@ fn test_origin_javascript_simple_trivial_chain() {
         &[OriginKind::TrivialCopy, OriginKind::TrivialCopy, OriginKind::Literal],
         "javascript simple_trivial_chain hop kinds",
     );
+    let literal_hop = chain.hops.get(2).expect("third hop must be the Literal assignment");
+    assert_eq!(
+        literal_hop.target_expr, "a",
+        "javascript simple_trivial_chain final hop must target the original variable"
+    );
+    assert_eq!(
+        literal_hop.source_expr, "10",
+        "javascript simple_trivial_chain final hop must preserve the literal RHS"
+    );
+    assert_eq!(
+        chain.terminator.expression, "10",
+        "javascript simple_trivial_chain terminator must be Literal(10)"
+    );
     assert_min_confidence(chain, 0.7, "javascript simple_trivial_chain confidence");
 }
 

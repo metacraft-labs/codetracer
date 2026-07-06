@@ -432,6 +432,9 @@ fn setup(
                     reader,
                     false,
                 );
+                if let Some(decoder) = load_materialized_origin_metadata_decoder_from_path(&ctfs_path) {
+                    handler.install_materialized_origin_metadata_decoder(decoder);
+                }
                 handler.raw_diff_index = raw_diff_index;
                 // Load macro sourcemaps for Nim macro expansion support (S6).
                 handler.load_macro_sourcemaps(trace_folder);
@@ -1177,6 +1180,7 @@ pub fn setup_from_vfs(
                 }
             }
 
+            let origin_metadata_decoder = load_materialized_origin_metadata_decoder_from_bytes(bytes.clone());
             match CTFSTraceReader::from_bytes(bytes) {
                 Ok(ctfs_reader) => {
                     info!(
@@ -1195,6 +1199,9 @@ pub fn setup_from_vfs(
                         reader,
                         false,
                     );
+                    if let Some(decoder) = origin_metadata_decoder {
+                        handler.install_materialized_origin_metadata_decoder(decoder);
+                    }
                     handler.raw_diff_index = raw_diff_index;
                     if for_launch {
                         handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
@@ -1435,6 +1442,50 @@ fn is_codetracer_ctfs_file(path: &Path) -> bool {
         return false;
     };
     reader.has_file("steps.dat") || reader.has_file("events.log")
+}
+
+fn load_materialized_origin_metadata_decoder_from_path(
+    path: &Path,
+) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
+    let mut ctfs = CtfsReader::open(path).ok()?;
+    load_materialized_origin_metadata_decoder(&mut ctfs)
+}
+
+fn load_materialized_origin_metadata_decoder_from_bytes(
+    bytes: Vec<u8>,
+) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
+    let mut ctfs = CtfsReader::from_bytes(bytes).ok()?;
+    load_materialized_origin_metadata_decoder(&mut ctfs)
+}
+
+fn load_materialized_origin_metadata_decoder(
+    ctfs: &mut CtfsReader,
+) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
+    let originmeta_bytes = ctfs
+        .read_file(crate::origin_metadata_indexer::CTFS_ORIGINMETA_FILE)
+        .ok()?;
+    let source_exprs_bytes = match ctfs.read_file(crate::origin_metadata_indexer::CTFS_SOURCE_EXPRS_FILE) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            warn!(
+                "materialized trace has {} but not {}: {e}",
+                crate::origin_metadata_indexer::CTFS_ORIGINMETA_FILE,
+                crate::origin_metadata_indexer::CTFS_SOURCE_EXPRS_FILE
+            );
+            return None;
+        }
+    };
+    match crate::origin_metadata_indexer::OriginMetadataDecoder::load(&originmeta_bytes, &source_exprs_bytes) {
+        Some(decoder) => Some(decoder),
+        None => {
+            warn!(
+                "could not parse materialized {} / {}; falling back to source classifier",
+                crate::origin_metadata_indexer::CTFS_ORIGINMETA_FILE,
+                crate::origin_metadata_indexer::CTFS_SOURCE_EXPRS_FILE
+            );
+            None
+        }
+    }
 }
 
 /// Returns true if the CTFS container contains a `meta.dat` declaring

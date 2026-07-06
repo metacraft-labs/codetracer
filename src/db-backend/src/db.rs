@@ -2724,6 +2724,7 @@ impl ReplaySession for MaterializedReplaySession {
 // ===========================================================================
 
 use crate::expr_loader::SourceOrigin;
+use crate::origin_metadata_indexer::{OriginMetadataDecoder, OriginMetadataKey, OriginMetadataRecord};
 use crate::origin_query::{
     OriginContinuationToken, OriginError, OriginErrorCode, OriginQueryEngine, SourceDigest, SourceOriginKind,
     WallClockDeadline, sha256_hex,
@@ -2735,6 +2736,20 @@ use crate::task::{
 };
 use codetracer_trace_types::Line as TraceLine;
 use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, parse_assignment, parse_call_arguments};
+
+pub struct MaterializedOriginChainContext<'a> {
+    pub extension: Option<crate::cross_process_origin::CrossProcessExtension<'a>>,
+    pub origin_metadata: Option<&'a OriginMetadataDecoder>,
+}
+
+impl MaterializedOriginChainContext<'_> {
+    fn none() -> Self {
+        Self {
+            extension: None,
+            origin_metadata: None,
+        }
+    }
+}
 
 /// Result of the inner backward scan inside one hop.
 #[derive(Debug)]
@@ -2777,7 +2792,36 @@ impl MaterializedReplaySession {
         // unit tests keep working bit-for-bit. The production
         // dispatcher uses the `_with_cross_process` entry directly
         // when the session-wide `PairIndex` is available.
-        self.origin_chain_inferred_with_cross_process(args, budget, expr_loader, patterns, meta_dat_sources_root, None)
+        self.origin_chain_inferred_with_cross_process(
+            args,
+            budget,
+            expr_loader,
+            patterns,
+            meta_dat_sources_root,
+            MaterializedOriginChainContext::none(),
+        )
+    }
+
+    pub fn origin_chain_inferred_with_metadata(
+        &mut self,
+        args: &CtOriginChainArguments,
+        budget: &OriginBudget,
+        expr_loader: &mut ExprLoader,
+        patterns: &PatternSet,
+        meta_dat_sources_root: Option<&Path>,
+        origin_metadata: Option<&OriginMetadataDecoder>,
+    ) -> Result<OriginChain, OriginError> {
+        self.origin_chain_inferred_with_cross_process(
+            args,
+            budget,
+            expr_loader,
+            patterns,
+            meta_dat_sources_root,
+            MaterializedOriginChainContext {
+                extension: None,
+                origin_metadata,
+            },
+        )
     }
 
     /// M29 §5.1 — production wiring entry point for the materialized
@@ -2800,8 +2844,12 @@ impl MaterializedReplaySession {
         expr_loader: &mut ExprLoader,
         patterns: &PatternSet,
         meta_dat_sources_root: Option<&Path>,
-        extension: Option<crate::cross_process_origin::CrossProcessExtension<'_>>,
+        context: MaterializedOriginChainContext<'_>,
     ) -> Result<OriginChain, OriginError> {
+        let MaterializedOriginChainContext {
+            extension,
+            origin_metadata,
+        } = context;
         let deadline = WallClockDeadline::new(budget.wall_clock_ms);
         let mut metrics = OriginMetrics::default();
 
@@ -3138,6 +3186,93 @@ impl MaterializedReplaySession {
                 track_source_digest(&mut source_digests, &probe_path, source_origin, meta_dat_sources_root);
             }
 
+            if let Some(record) =
+                self.lookup_materialized_origin_metadata(origin_metadata, &current_var_name, last_change_step)
+                && let Some(wire_kind) = metadata_wire_kind(record)
+            {
+                let location = self.reader.load_location(last_change_step, current_frame, expr_loader);
+                let source_expr = origin_metadata
+                    .and_then(|decoder| decoder.source_expr_text(record.source_expr_idx))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let source_expr = if source_expr.is_empty() {
+                    line_text.trim().to_string()
+                } else {
+                    source_expr
+                };
+                let next_var_name = self.metadata_source_variable(record, &source_expr);
+                let function_name = self.function_name_for_call(current_frame);
+                terminator_function_hint = Some(function_name);
+                let confidence = OriginMetadataRecord::decode_confidence(record.confidence);
+
+                hops.push(OriginHop {
+                    kind: wire_kind,
+                    target_expr: current_var_name.clone(),
+                    source_expr: source_expr.clone(),
+                    source_variable: next_var_name.clone(),
+                    location,
+                    source_text: line_text.clone(),
+                    step_id: last_change_step.0,
+                    frame_transition: None,
+                    operand_snapshots: Vec::new(),
+                    truncated_operands: false,
+                    confidence,
+                    classification_provenance: Some("trace: originmeta.tc".to_string()),
+                    correlation_transition: None,
+                });
+
+                match wire_kind {
+                    WireOriginKind::Literal => {
+                        terminator = Terminator::new(TerminatorKind::Literal);
+                        terminator.expression = source_expr;
+                        terminator.source_line = Some(line_text);
+                        break;
+                    }
+                    WireOriginKind::Computational | WireOriginKind::FunctionCall => {
+                        terminator = Terminator::new(TerminatorKind::Computational);
+                        terminator.expression = source_expr;
+                        terminator.source_line = Some(line_text);
+                        break;
+                    }
+                    WireOriginKind::Unknown => {
+                        terminator = Terminator::new(TerminatorKind::UnknownSource);
+                        terminator.expression = source_expr;
+                        terminator.source_line = Some(line_text);
+                        break;
+                    }
+                    WireOriginKind::TrivialCopy
+                    | WireOriginKind::FieldAccess
+                    | WireOriginKind::IndexAccess
+                    | WireOriginKind::ParameterPass
+                    | WireOriginKind::CrossThreadCopy => {
+                        if let Some(name) = next_var_name {
+                            current_var_name = name;
+                            current_step = StepId((last_change_step.0 - 1).max(-1));
+                            continue;
+                        }
+                        terminator = Terminator::new(TerminatorKind::UnknownSource);
+                        terminator.expression = source_expr;
+                        terminator.source_line = Some(line_text);
+                        break;
+                    }
+                    WireOriginKind::ReturnCapture | WireOriginKind::FunctionReturn => {
+                        if let Some((ret_var, callee_frame, callee_step)) =
+                            self.resolve_return_capture(last_change_step, &source_expr)
+                        {
+                            current_var_name = ret_var;
+                            current_frame = callee_frame;
+                            current_step = callee_step;
+                            continue;
+                        }
+                        terminator = Terminator::new(TerminatorKind::UnknownSource);
+                        terminator.expression = source_expr;
+                        terminator.source_line = Some(line_text);
+                        break;
+                    }
+                }
+            }
+
             if source_origin == SourceOrigin::Unavailable || line_text.is_empty() {
                 hops.push(OriginHop {
                     kind: WireOriginKind::Unknown,
@@ -3361,6 +3496,32 @@ impl MaterializedReplaySession {
         // `None` (single-trace mode).
         let (chain, _outcome) = crate::cross_process_origin::run(chain, extension);
         Ok(chain)
+    }
+
+    fn lookup_materialized_origin_metadata(
+        &self,
+        decoder: Option<&OriginMetadataDecoder>,
+        var_name: &str,
+        step_id: StepId,
+    ) -> Option<OriginMetadataRecord> {
+        let decoder = decoder?;
+        let variable_id = self.reader.variable_id_for(var_name)?;
+        decoder.origin_metadata_at(OriginMetadataKey::Materialized { variable_id, step_id })
+    }
+
+    fn metadata_source_variable(&self, record: OriginMetadataRecord, source_expr: &str) -> Option<String> {
+        if let Some(id) = record.source_var_id
+            && let Some(name) = self.reader.variable_name(VariableId(id as usize))
+        {
+            return Some(name.to_string());
+        }
+
+        let trimmed = source_expr.trim();
+        if is_plain_origin_identifier(trimmed) && self.reader.variable_id_for(trimmed).is_some() {
+            Some(trimmed.to_string())
+        } else {
+            None
+        }
     }
 
     /// Spec §6.1 helper "scan_backward_for_value_change".
@@ -3949,6 +4110,22 @@ fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
         "nr" => Some(ClassifierLang::Rust),
         _ => None,
     }
+}
+
+fn metadata_wire_kind(record: OriginMetadataRecord) -> Option<WireOriginKind> {
+    let classifier_kind = OriginMetadataRecord::decode_kind(record.kind)?;
+    Some(classifier_kind.into())
+}
+
+fn is_plain_origin_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first == '$' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric())
 }
 
 fn parse_call_arguments_textual(line: &str) -> Option<Vec<String>> {

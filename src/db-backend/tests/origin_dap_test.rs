@@ -41,6 +41,7 @@ use db_backend::db::{Db, DbCall, DbStep, EndOfProgram, MaterializedReplaySession
 use db_backend::expr_loader::ExprLoader;
 use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::lang::Lang;
+use db_backend::origin_metadata_indexer::{MaterializedOriginIndexer, PathAAssignment, ValueChange};
 use db_backend::origin_query::{
     OriginContinuationToken, OriginErrorCode, OriginQueryEngine, SourceDigest, SourceOriginKind,
 };
@@ -276,6 +277,113 @@ fn test_origin_chain_returns_literal_terminator() {
     assert_eq!(chain.hops[2].kind, OriginKind::Literal);
     assert!(!chain.truncated);
     assert!(chain.continuation_token.is_none());
+}
+
+#[test]
+fn test_origin_chain_uses_materialized_metadata_for_javascript_literal_chain() {
+    let recipe = Recipe {
+        source_path: "fixture.js",
+        source: "const a = 10;\nconst b = a;\nconst c = b;\nconsole.log(c);\n",
+        function_name: "main",
+        steps: vec![
+            (1, vec![("a", int_value(10))]),
+            (2, vec![("a", int_value(10)), ("b", int_value(10))]),
+            (
+                3,
+                vec![("a", int_value(10)), ("b", int_value(10)), ("c", int_value(10))],
+            ),
+            (
+                4,
+                vec![("a", int_value(10)), ("b", int_value(10)), ("c", int_value(10))],
+            ),
+        ],
+        extra_calls: Vec::new(),
+    };
+    let (db, tmpdir) = build_trace(recipe);
+    std::fs::remove_file(tmpdir.path().join("fixture.js")).expect("remove source to force metadata path");
+    let changes = vec![
+        ValueChange {
+            variable_id: VariableId(0),
+            step_id: StepId(0),
+            value: int_value(10),
+            assignment: Some(PathAAssignment {
+                kind: origin_classifier::OriginKind::Literal,
+                source_var_id: None,
+                function_idx: 0,
+            }),
+            source_expr_text: "10".to_string(),
+            function_idx: 0,
+        },
+        ValueChange {
+            variable_id: VariableId(1),
+            step_id: StepId(1),
+            value: int_value(10),
+            assignment: Some(PathAAssignment {
+                kind: origin_classifier::OriginKind::TrivialCopy,
+                source_var_id: Some(0),
+                function_idx: 0,
+            }),
+            source_expr_text: "a".to_string(),
+            function_idx: 0,
+        },
+        ValueChange {
+            variable_id: VariableId(2),
+            step_id: StepId(2),
+            value: int_value(10),
+            assignment: Some(PathAAssignment {
+                kind: origin_classifier::OriginKind::TrivialCopy,
+                source_var_id: Some(1),
+                function_idx: 0,
+            }),
+            source_expr_text: "b".to_string(),
+            function_idx: 0,
+        },
+    ];
+    let index_output = MaterializedOriginIndexer::new().run(&changes);
+    let decoder = db_backend::origin_metadata_indexer::OriginMetadataDecoder::from_stream(
+        index_output.originmeta,
+        index_output.source_exprs,
+    );
+    let reader: Arc<dyn db_backend::trace_reader::TraceReader> = Arc::new(InMemoryTraceReader::new(db));
+    let mut session = MaterializedReplaySession::new(reader);
+    let mut expr_loader = ExprLoader::new(CoreTrace::default());
+    let patterns = PatternSet::built_in();
+    let args = CtOriginChainArguments {
+        variable_name: "c".to_string(),
+        variable_path: Vec::new(),
+        frame_id: -1,
+        step_id: 3,
+        thread_id: 0,
+        max_hops: DEFAULT_ORIGIN_MAX_HOPS,
+        lazy: false,
+        continuation_token: None,
+        session_id: String::new(),
+        classify_source: true,
+    };
+    let chain = session
+        .origin_chain_inferred_with_metadata(
+            &args,
+            &OriginBudget::default(),
+            &mut expr_loader,
+            &patterns,
+            None,
+            Some(&decoder),
+        )
+        .expect("metadata-backed origin chain");
+
+    assert_eq!(chain.terminator.kind, TerminatorKind::Literal);
+    assert_eq!(chain.terminator.expression, "10");
+    assert_eq!(chain.hops.len(), 3, "expected c <- b, b <- a, a <- 10");
+    assert_eq!(chain.hops[0].kind, OriginKind::TrivialCopy);
+    assert_eq!(chain.hops[1].kind, OriginKind::TrivialCopy);
+    assert_eq!(chain.hops[2].kind, OriginKind::Literal);
+    assert_eq!(chain.hops[2].target_expr, "a");
+    assert_eq!(chain.hops[2].source_expr, "10");
+    assert_eq!(
+        chain.metrics.classifier_hits, 0,
+        "metadata path should not classify source lines"
+    );
+    let _ = tmpdir;
 }
 
 #[test]
