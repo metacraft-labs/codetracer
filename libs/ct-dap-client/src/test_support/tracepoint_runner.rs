@@ -82,8 +82,9 @@ impl TracepointTestRunner {
         let terminal_events = self.client.load_terminal()?;
         let captured_output = terminal_events_to_string(&terminal_events);
 
-        // Compare real stdout with captured terminal output (non-fatal: RR traces
-        // may not have terminal output available depending on the trace setup)
+        // Compare real stdout with captured terminal output. Tracepoint tests
+        // depend on the recording preserving terminal events; mismatches mean
+        // the recording is not faithful enough for tracepoint assertions.
         let real_trace_output: String = real_stdout
             .lines()
             .filter(|l| l.starts_with("TRACE:"))
@@ -96,11 +97,12 @@ impl TracepointTestRunner {
             .join("\n");
 
         if real_trace_output != captured_trace_output {
-            eprintln!(
-                "WARNING: Terminal output mismatch (non-fatal for RR traces).\n  Real stdout TRACE lines:\n    {}\n  Captured terminal TRACE lines:\n    {}",
+            return Err(format!(
+                "Terminal output mismatch.\n  Real stdout TRACE lines:\n    {}\n  Captured terminal TRACE lines:\n    {}",
                 real_trace_output.replace('\n', "\n    "),
                 if captured_trace_output.is_empty() { "(empty)" } else { &captured_trace_output }.replace('\n', "\n    "),
-            );
+            )
+            .into());
         }
 
         // 2. Build tracepoint session

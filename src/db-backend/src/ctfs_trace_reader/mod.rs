@@ -1964,6 +1964,22 @@ impl CTFSTraceReader {
             }
         }
 
+        if !db.events.iter().any(|event| event.kind == EventLogKind::Write) {
+            match Self::load_native_terminal_events(ctfs) {
+                Ok(native_events) if !native_events.is_empty() => {
+                    info!(
+                        "Nim reader: loaded {} terminal events from native event log fallback",
+                        native_events.len()
+                    );
+                    db.events.extend(native_events);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("native event_log.dat fallback failed: {e}");
+                }
+            }
+        }
+
         info!("Nim reader: {} events loaded", db.events.len());
 
         // ── end_of_program ─────────────────────────────────────────────
@@ -2105,6 +2121,21 @@ impl CTFSTraceReader {
         let mut db = Db::new(&workdir);
         let mut processor = TraceProcessor::new(&mut db);
         processor.postprocess(&events)?;
+        if !db.events.iter().any(|event| event.kind == EventLogKind::Write) {
+            match Self::load_native_terminal_events(ctfs) {
+                Ok(native_events) if !native_events.is_empty() => {
+                    info!(
+                        "old-format reader: loaded {} terminal events from native event log fallback",
+                        native_events.len()
+                    );
+                    db.events.extend(native_events);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("native event log fallback failed: {e}");
+                }
+            }
+        }
 
         // Old-format traces *can* carry the capability bits because
         // meta.dat is the same wire format on both paths — read them
@@ -2230,6 +2261,149 @@ impl CTFSTraceReader {
         // Fallback: legacy CBOR streaming (zeekstd frames, no chunk headers).
         // This path handles older `.ct` files that pre-date the chunked format.
         Self::deserialize_cbor_from_buffer(payload)
+    }
+
+    fn load_native_terminal_events(ctfs: &mut CtfsReader) -> Result<Vec<DbRecordEvent>, Box<dyn Error>> {
+        let dat = match Self::read_native_event_log_file(ctfs, "eventlog.dat", "event_log.dat") {
+            Ok(bytes) => bytes,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let idx = Self::read_native_event_log_file(ctfs, "eventlog.idx", "event_log.idx")
+            .map_err(|e| format!("native event log data is present but index is missing: {e}"))?;
+
+        if idx.len() < 18 {
+            return Err(format!("event_log.idx truncated: {} bytes", idx.len()).into());
+        }
+        if &idx[0..4] != b"EIDX" {
+            return Err("event_log.idx has invalid magic".into());
+        }
+
+        let entry_count = Self::read_u32_le(&idx, 6)? as usize;
+        let chunk_count = Self::read_u32_le(&idx, 14)? as usize;
+        let offsets_start = 18usize;
+        let offsets_end = offsets_start
+            .checked_add(chunk_count.checked_mul(8).ok_or("event_log.idx chunk count overflow")?)
+            .ok_or("event_log.idx offsets overflow")?;
+        if idx.len() < offsets_end {
+            return Err(format!(
+                "event_log.idx truncated: expected at least {offsets_end} bytes, got {}",
+                idx.len()
+            )
+            .into());
+        }
+
+        let mut events = Vec::new();
+        let mut decoded_entries = 0usize;
+        for chunk in 0..chunk_count {
+            let chunk_offset = Self::read_u64_le(&idx, offsets_start + chunk * 8)? as usize;
+            let chunk_raw_size = Self::read_u32_le(&dat, chunk_offset)? as usize;
+            let body_start = chunk_offset
+                .checked_add(4)
+                .ok_or("event_log.dat chunk offset overflow")?;
+            let body_end = body_start
+                .checked_add(chunk_raw_size)
+                .ok_or("event_log.dat chunk size overflow")?;
+            if body_end > dat.len() {
+                return Err(format!("event_log.dat chunk {chunk} extends past end").into());
+            }
+            if chunk_raw_size < 4 {
+                return Err(format!("event_log.dat chunk {chunk} too small").into());
+            }
+
+            let chunk_entries = Self::read_u32_le(&dat, body_start)? as usize;
+            let mut pos = body_start + 4;
+            for entry in 0..chunk_entries {
+                if pos + 35 > body_end {
+                    return Err(format!("event_log.dat chunk {chunk} entry {entry} truncated").into());
+                }
+                let _geid = Self::read_u64_le(&dat, pos)?;
+                pos += 8;
+                let _tick = Self::read_u64_le(&dat, pos)?;
+                pos += 8;
+                let _tid = Self::read_u32_le(&dat, pos)?;
+                pos += 4;
+                let native_kind = dat[pos];
+                pos += 1;
+                let _fd = Self::read_u32_le(&dat, pos)?;
+                pos += 4;
+                let _return_value = Self::read_u64_le(&dat, pos)?;
+                pos += 8;
+
+                let metadata_len = Self::read_u16_le(&dat, pos)? as usize;
+                pos += 2;
+                if pos + metadata_len + 4 > body_end {
+                    return Err(format!("event_log.dat chunk {chunk} entry {entry} metadata truncated").into());
+                }
+                let metadata = String::from_utf8_lossy(&dat[pos..pos + metadata_len]).to_string();
+                pos += metadata_len;
+
+                let content_len = Self::read_u32_le(&dat, pos)? as usize;
+                pos += 4;
+                if pos + content_len > body_end {
+                    return Err(format!("event_log.dat chunk {chunk} entry {entry} content truncated").into());
+                }
+                let content = String::from_utf8_lossy(&dat[pos..pos + content_len]).to_string();
+                pos += content_len;
+
+                decoded_entries += 1;
+                if native_kind == 0 && !content.is_empty() {
+                    events.push(DbRecordEvent {
+                        kind: EventLogKind::Write,
+                        content,
+                        step_id: StepId(crate::task::NO_INDEX),
+                        metadata,
+                    });
+                }
+            }
+        }
+
+        if decoded_entries != entry_count {
+            return Err(format!("event_log.idx says {entry_count} entries, decoded {decoded_entries}").into());
+        }
+
+        Ok(events)
+    }
+
+    pub(crate) fn load_native_terminal_events_from_path(path: &Path) -> Result<Vec<DbRecordEvent>, Box<dyn Error>> {
+        let mut ctfs = CtfsReader::open(path)?;
+        Self::load_native_terminal_events(&mut ctfs)
+    }
+
+    fn read_native_event_log_file(
+        ctfs: &mut CtfsReader,
+        primary: &str,
+        legacy: &str,
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
+        match ctfs.read_file(primary) {
+            Ok(bytes) => Ok(bytes),
+            Err(primary_err) => ctfs.read_file(legacy).map_err(|legacy_err| {
+                format!("failed to read {primary} ({primary_err}) or {legacy} ({legacy_err})").into()
+            }),
+        }
+    }
+
+    fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, Box<dyn Error>> {
+        let end = offset.checked_add(2).ok_or("u16 offset overflow")?;
+        let slice = bytes
+            .get(offset..end)
+            .ok_or_else(|| format!("u16 read at {offset} is out of bounds for {} bytes", bytes.len()))?;
+        Ok(u16::from_le_bytes(slice.try_into()?))
+    }
+
+    fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, Box<dyn Error>> {
+        let end = offset.checked_add(4).ok_or("u32 offset overflow")?;
+        let slice = bytes
+            .get(offset..end)
+            .ok_or_else(|| format!("u32 read at {offset} is out of bounds for {} bytes", bytes.len()))?;
+        Ok(u32::from_le_bytes(slice.try_into()?))
+    }
+
+    fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, Box<dyn Error>> {
+        let end = offset.checked_add(8).ok_or("u64 offset overflow")?;
+        let slice = bytes
+            .get(offset..end)
+            .ok_or_else(|| format!("u64 read at {offset} is out of bounds for {} bytes", bytes.len()))?;
+        Ok(u64::from_le_bytes(slice.try_into()?))
     }
 
     /// Deserialize a sequence of individually-encoded CBOR
@@ -3807,5 +3981,81 @@ mod tests {
             err.contains("failed to parse meta.dat"),
             "expected meta.dat parse error, got: {err}",
         );
+    }
+
+    #[test]
+    fn native_eventlog_fallback_reads_terminal_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("native-eventlog.ct");
+        let dat = native_eventlog_dat(b"TRACE:x=5\n");
+        let idx = native_eventlog_idx(1);
+
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("eventlog.dat", &dat), ("eventlog.idx", &idx)]).unwrap();
+
+        let mut ctfs = CtfsReader::open(&ct_path).unwrap();
+        let events = CTFSTraceReader::load_native_terminal_events(&mut ctfs).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventLogKind::Write);
+        assert_eq!(events[0].content, "TRACE:x=5\n");
+        assert_eq!(events[0].metadata, "stdout");
+    }
+
+    #[test]
+    fn open_old_format_uses_native_eventlog_when_events_log_has_no_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("old-format-native-eventlog.ct");
+        let meta = meta_dat::serialize_meta_dat(&test_meta_dat_v3("/tmp/program", vec![], "/tmp"));
+        let dat = native_eventlog_dat(b"TRACE:x=5\n");
+        let idx = native_eventlog_idx(1);
+
+        ctfs_container::write_minimal_ctfs(
+            &ct_path,
+            &[("meta.dat", &meta), ("eventlog.dat", &dat), ("eventlog.idx", &idx)],
+        )
+        .unwrap();
+
+        let reader = CTFSTraceReader::open(&ct_path).unwrap();
+        let writes: Vec<_> = reader
+            .events()
+            .iter()
+            .filter(|event| event.kind == EventLogKind::Write)
+            .collect();
+
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].content, "TRACE:x=5\n");
+    }
+
+    fn native_eventlog_dat(content: &[u8]) -> Vec<u8> {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&1u64.to_le_bytes()); // geid
+        entry.extend_from_slice(&1u64.to_le_bytes()); // tick
+        entry.extend_from_slice(&0u32.to_le_bytes()); // tid
+        entry.push(0); // EventLogKind::elkWrite
+        entry.extend_from_slice(&1u32.to_le_bytes()); // fd
+        entry.extend_from_slice(&(content.len() as u64).to_le_bytes()); // returnValue
+        entry.extend_from_slice(&6u16.to_le_bytes()); // metadata_len
+        entry.extend_from_slice(b"stdout");
+        entry.extend_from_slice(&(content.len() as u32).to_le_bytes());
+        entry.extend_from_slice(content);
+
+        let raw_size = 4 + entry.len();
+        let mut dat = Vec::new();
+        dat.extend_from_slice(&(raw_size as u32).to_le_bytes());
+        dat.extend_from_slice(&1u32.to_le_bytes()); // entries in chunk
+        dat.extend_from_slice(&entry);
+        dat
+    }
+
+    fn native_eventlog_idx(entry_count: u32) -> Vec<u8> {
+        let mut idx = Vec::new();
+        idx.extend_from_slice(b"EIDX");
+        idx.extend_from_slice(&1u16.to_le_bytes()); // version
+        idx.extend_from_slice(&entry_count.to_le_bytes());
+        idx.extend_from_slice(&256u32.to_le_bytes()); // chunk size
+        idx.extend_from_slice(&1u32.to_le_bytes()); // chunk count
+        idx.extend_from_slice(&0u64.to_le_bytes()); // first chunk offset
+        idx.extend_from_slice(&1u64.to_le_bytes()); // first chunk geid
+        idx
     }
 }

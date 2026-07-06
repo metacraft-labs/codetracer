@@ -612,7 +612,26 @@ fn setup(
     info!("not a CTFS materialized trace; trying replay-worker (MCR / rr / TTD .run) path");
     eprintln!("[db-backend setup] trying rr trace path");
     if let Some(path) = resolve_replay_trace_path(trace_folder, trace_file) {
-        let db = Db::new(&PathBuf::from(""));
+        let mut db = Db::new(&PathBuf::from(""));
+        if path.extension().is_some_and(|ext| ext == std::ffi::OsStr::new("ct")) {
+            match CTFSTraceReader::load_native_terminal_events_from_path(&path) {
+                Ok(events) if !events.is_empty() => {
+                    info!(
+                        "native replay-worker setup: loaded {} terminal events from {}",
+                        events.len(),
+                        path.display()
+                    );
+                    db.events.extend(events);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(
+                        "native replay-worker setup: failed to load terminal events from {}: {e}",
+                        path.display()
+                    );
+                }
+            }
+        }
         let ct_rr_args = RecreatorArgs {
             worker_exe: PathBuf::from(recreator_exe),
             rr_trace_folder: path,
