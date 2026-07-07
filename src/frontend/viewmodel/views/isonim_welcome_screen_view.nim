@@ -269,7 +269,9 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                     let recordingId = traceCopy.recordingId
                     tdiv(class = "recent-trace-container"):
                       tdiv(class = "recent-trace",
-                           onclick = traceClickHandler(vm, callbacks, recordingId)):
+                           onclick = traceClickHandler(vm, callbacks, recordingId),
+                           onmouseover = traceMouseOverHandler(vm, recordingId),
+                           onmouseleave = proc() = vm.clearHoveredTrace()):
                         tdiv(class = "recent-trace-title"):
                           span(class = "recent-trace-title-time"):
                             text formatWelcomeTimeAgo(traceCopy.date)
@@ -277,7 +279,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                             discard
                           span(class = "recent-trace-title-content"):
                             text traceCommandText(traceCopy)
-                        tdiv(class = "recent-trace-tooltip"):
+                        tdiv(class = traceTooltipClass(hoveredRecordingId == recordingId)):
                           text traceTooltipText(traceCopy)
                 else:
                   tdiv(class = "empty-state-message"):
@@ -603,7 +605,9 @@ when defined(js):
                       let recordingId = traceCopy.recordingId
                       tdiv(class = "recent-trace-container"):
                         tdiv(class = "recent-trace",
-                             onclick = traceClickHandler(vm, callbacks, recordingId)):
+                             onclick = traceClickHandler(vm, callbacks, recordingId),
+                             onmouseover = traceMouseOverHandler(vm, recordingId),
+                             onmouseleave = proc() = vm.clearHoveredTrace()):
                           tdiv(class = "recent-trace-title"):
                             span(class = "recent-trace-title-time"):
                               text formatWelcomeTimeAgo(traceCopy.date)
@@ -611,7 +615,7 @@ when defined(js):
                               discard
                             span(class = "recent-trace-title-content"):
                               text traceCommandText(traceCopy)
-                          tdiv(class = "recent-trace-tooltip"):
+                          tdiv(class = traceTooltipClass(hoveredRecordingId == recordingId)):
                             text traceTooltipText(traceCopy)
                   else:
                     tdiv(class = "empty-state-message"):

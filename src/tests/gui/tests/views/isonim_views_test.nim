@@ -9853,6 +9853,22 @@ suite "IsoNim Welcome Screen — welcome mode":
 
       dispose()
 
+  test "test_welcome_screen_loading":
+    # Verifies welcome screen components render without error
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000088")
+      let panel = renderWelcomeScreenPanel(r, vm)
+
+      let overlay = findByClass(panel, "welcome-screen-loading-overlay")
+      check overlay != nil
+      check findByClass(overlay, "welcome-screen-loading-overlay-text").textContent == "Loading trace..."
+
+      dispose()
+
   test "recent folders and start-option buttons render their labels":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -10440,7 +10456,7 @@ suite "IsoNim VCS Panel — structure":
       vm.setBranchState("main", @["main", "feature"], false)
       vm.setCommits(@[
         VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
-      ], selectedIndex = 0)
+      ], selectedIndices = @[0])
       vm.setChangedFiles(@[
         VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
                    additions: 2, deletions: 1),

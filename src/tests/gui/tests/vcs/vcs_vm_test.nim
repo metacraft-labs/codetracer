@@ -17,7 +17,7 @@ suite "VCSVM":
       check vm.currentBranch.val == ""
       check vm.branches.val.len == 0
       check vm.commits.val.len == 0
-      check vm.selectedCommitIndex.val == -1
+      check vm.selectedCommitIndices.val.len == 0
       check vm.fileCount.val == 0
       check not vm.unifiedDiffActive.val
       check vm.selectedHunkCount.val == 0
@@ -31,17 +31,17 @@ suite "VCSVM":
       vm.setCommits(@[
         VCSCommitRow(hash: "abc123", message: "first", relativeTime: "1h"),
         VCSCommitRow(hash: "def456", message: "second", relativeTime: "2h"),
-      ], selectedIndex = 9)
+      ], selectedIndices = @[0, 9])
       vm.setChangedFiles(@[
         VCSFileRow(status: "M", path: "src/a.nim", baseName: "a.nim"),
         VCSFileRow(status: "A", path: "src/b.nim", baseName: "b.nim"),
       ])
 
-      check vm.selectedCommitIndex.val == 1
+      check vm.selectedCommitIndices.val == @[0]
       check vm.fileCount.val == 2
 
-      vm.setCommits(@[], selectedIndex = 0)
-      check vm.selectedCommitIndex.val == -1
+      vm.setCommits(@[], selectedIndices = @[0])
+      check vm.selectedCommitIndices.val.len == 0
 
       dispose()
 
