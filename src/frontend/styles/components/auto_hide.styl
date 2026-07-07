@@ -19,40 +19,55 @@
 
 // ---------------------------------------------------------------------------
 // Side edge strips — flex items that sit beside #ROOT.
-// Width is 0 when empty (no tabs), 28px when populated.
+// Width is 0 when empty (no tabs), 2em when populated.
+// overflow: visible is required so active-tab curves bleed outside the strip.
 // ---------------------------------------------------------------------------
 
 #auto-hide-strip-left,
 #auto-hide-strip-right
   display: flex
   flex-direction: column
-  align-items: center
-  background-color: HEADER_PANEL_BACKGROUND_COLOR
+  align-items: stretch
+  background-color: colors-ui-surface-base-canvas
   flex-shrink: 0
   flex-grow: 0
   flex-basis: 0
   width: 0
   max-width: 0
-  overflow: hidden
+  overflow: visible
+  // box-sizing: border-box so that padding is included in the 2em width,
+  // keeping the strip's outer edge at exactly 2em from the window edge.
+  // This mirrors how lm_header sets the tab HEIGHT via the container:
+  // the tab width is determined entirely by the container (strip padding),
+  // not by the tab's own margins — so no tab property change can shift content.
+  box-sizing: border-box
   transition: width 150ms ease, max-width 150ms ease, padding 150ms ease
-  // Ensure strips sit above GL's absolutely-positioned internal elements
-  // so strip tabs remain clickable.
+  // Strips must sit ABOVE the overlay (z-index 99) so that the active-tab
+  // curves (pseudo-elements) are visible against the overlay background.
   position: relative
-  z-index: 2
+  z-index: 100
 
-  // Expand to 28px when the strip has tabs (class toggled by auto_hide.nim).
+  // Expand to 2em when the strip has tabs (class toggled by auto_hide.nim).
+  // padding-left/right create the 0.25em breathing room on each side —
+  // the tab fills the content area (1.5em) via align-items: stretch.
   &.has-tabs
-    width: 28px
-    min-width: 28px
-    max-width: 28px
-    flex-basis: 28px
-    padding-top: 4px
-
-#auto-hide-strip-left.has-tabs
-  border-right: 1px solid PRIMARY_BASE
+    width: 2em
+    min-width: 2em
+    max-width: 2em
+    flex-basis: 2em
+    padding-left: 0.25em
+    padding-right: 0.25em
 
 #auto-hide-strip-right.has-tabs
-  border-left: 1px solid PRIMARY_BASE
+  border-left: 1px solid colors-ui-border-tertiary
+
+// When the left strip is visible, nullify #ROOT's padding-left so the visual
+// gap on both sides of the strip tabs is a consistent 0.25em:
+//   left:  strip padding-left  (0.25em) from viewport edge to tab left edge
+//   right: strip padding-right (0.25em) from tab right edge to GL content
+// Without this, ROOT's own padding-left adds a second 0.25em on the right.
+#auto-hide-strip-left.has-tabs ~ #ROOT
+  padding-left: 0
 
 // ---------------------------------------------------------------------------
 // Collapsed mode — 1px accent line when maximized on bounded screen edge.
@@ -65,9 +80,12 @@
   max-width: 3px
   flex-basis: 3px
   padding-top: 0
+  padding-left: 0
+  padding-right: 0
   background-color: #3a5070  // Subtle blue accent — distinct from panel bg
   cursor: pointer
   overflow: hidden
+  align-items: center
 
 #auto-hide-strip-left.collapsed-mode
   border-right: none
@@ -104,45 +122,202 @@
 
 // ---------------------------------------------------------------------------
 // Strip tabs — individual clickable tabs within a strip.
+// Styled to match lm_tabs but rotated vertically for the side strips.
+// The tab div itself is NOT rotated so that ::before/::after pseudo-elements
+// work in the normal (unrotated) coordinate space — curves appear correctly
+// above and below the active tab.  Rotation is delegated to the inner
+// .auto-hide-strip-tab-label span only.
 // ---------------------------------------------------------------------------
 
 .auto-hide-strip-tab
-  font-family: "SpaceMono"
-  font-size: 12px
+  font-family: "SpaceGrotesk"
+  font-size: inherit
   font-weight: 600
-  color: HEADER_PANEL_COLOR
-  background-color: HEADER_PANEL_INACTIVE_COLOR
-  border-radius: 0
+  letter-spacing: -0.14px
+  color: colors-ui-text-primary-disabled
+  background-color: colors-ui-surface-panel
+  border-radius: 0.36em
   cursor: pointer
-  padding: 3px 6px
-  margin: 2px
+  // No horizontal padding — the tab is only 2em wide and removing horizontal
+  // padding gives the rotated label enough block-size to render without clipping.
+  // top/bottom 0.5em matches lm_tab left/right rotated; horizontal padding is
+  // handled by the strip container's 0.38em padding on each side.
+  padding: 0.5em 0
+  // No horizontal margins — the 0.38em breathing room on each side comes from
+  // the strip container's padding-left/right (set on .has-tabs).  This means
+  // the tab width is set entirely by the container, exactly like lm_tab height
+  // is set by the lm_header container — so no active-state property can shift content.
+  margin-bottom: 0.24em
+  display: flex
+  flex-direction: column
+  align-items: center
+  justify-content: center
+  position: relative
+  z-index: 0
+  overflow: hidden
+  user-select: none
+  transition: color 150ms ease, background-color 150ms ease
+
+  // Active state: open end faces the main content area (right side).
+  // Curves appear above (::before) and below (::after) the tab, matching
+  // the lm_tabs pattern rotated 90 degrees clockwise.
+  &.active
+    color: colors-ui-text-primary-label
+    border-top-left-radius: 0.36em
+    border-bottom-left-radius: 0.36em
+    border-top-right-radius: 0em
+    border-bottom-right-radius: 0em
+    // Shadow bridges the 0.25em gap to the strip edge and extends slightly into
+    // the overlay area. The overlay (z-index: 101) renders above the strip (100)
+    // and covers the overlap with its own panel-color background — seamless join,
+    // no GL content exposed since the overlay covers ROOT at that position.
+    box-shadow: 0.48em 0em 0em 0em colors-ui-surface-panel
+    overflow: visible
+    z-index: 1
+
+    // TOP curve — above the active tab (same geometry as lm_tabs ::before rotated).
+    &::before
+      content: " "
+      pointer-events: none
+      position: absolute
+      display: block
+      width: 80%
+      height: 1.625em
+      right: 0em
+      top: -1.625em
+      z-index: 1
+      border-radius: 0 0 0.625em 0
+      opacity: 1
+      box-shadow: 0.34em 0.625em 0 -0.25em colors-ui-surface-panel
+      transform: translate(0.25625em, 0em)
+
+    // BOTTOM curve — below the active tab (same geometry as lm_tabs ::after rotated).
+    &::after
+      content: " "
+      pointer-events: none
+      position: absolute
+      display: block
+      width: 80%
+      height: 1.625em
+      right: 0em
+      bottom: -1.625em
+      z-index: 1
+      border-radius: 0 0.625em 0 0
+      opacity: 1
+      box-shadow: 0.34em -0.625em 0 -0.25em colors-ui-surface-panel
+      transform: translate(0.25625em, 0em)
+
+// -------------------------------------------------------------------------
+// Right-strip overrides: curves mirror to the LEFT side of the tab.
+// The open end of the right-strip active tab faces LEFT (toward the overlay).
+// -------------------------------------------------------------------------
+
+#auto-hide-strip-right .auto-hide-strip-tab.active
+  border-top-left-radius: 0em
+  border-bottom-left-radius: 0em
+  border-top-right-radius: 0.36em
+  border-bottom-right-radius: 0.36em
+  // Shadow bridges the 0.25em gap to the strip left edge; overlay (z-index: 101)
+  // renders above and covers the slight overlap with its panel-color background.
+  box-shadow: -0.48em 0em 0em 0em colors-ui-surface-panel
+
+  &::before  // TOP curve — anchored to LEFT side of tab
+    left: 0em
+    right: auto
+    border-radius: 0 0 0 0.625em  // BL rounded
+    box-shadow: -0.34em 0.625em 0 -0.25em colors-ui-surface-panel
+    transform: translate(-0.25625em, 0em)
+
+  &::after  // BOTTOM curve — anchored to LEFT side of tab
+    left: 0em
+    right: auto
+    border-radius: 0.625em 0 0 0  // TL rounded
+    box-shadow: -0.34em -0.625em 0 -0.25em colors-ui-surface-panel
+    transform: translate(-0.25625em, 0em)
+
+// First active tab has no top curve (nothing above it to connect to).
+#auto-hide-strip-left .auto-hide-strip-tab.active:first-child::before,
+#auto-hide-strip-right .auto-hide-strip-tab.active:first-child::before
+  display: none
+
+// ---------------------------------------------------------------------------
+// Tab label span — carries the text rotation so the tab div stays un-rotated.
+// ---------------------------------------------------------------------------
+
+.auto-hide-strip-tab-label
+  display: block
+  // No explicit width — the label takes its natural intrinsic width
+  // (≈ font-size for vertical text) and align-items: center on the parent
+  // tab centers it horizontally, matching how lm_tab centers content.
+  // padding-left/right add 0.38em breathing room between the tab edge and
+  // the text characters; they expand the label's natural width symmetrically.
+  padding-left: 0.38em
+  padding-right: 0.38em
+  max-height: 120px
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
-  user-select: none
-  transition: background-color 150ms ease
 
-  &:hover
-    background-color: HEADER_ACTIVE_PANEL_BACKGROUND_COLOR
-    color: HEADER_ACTIVE_PANEL_TEXT_COLOR
-
-  &.active
-    background-color: HEADER_ACTIVE_PANEL_BACKGROUND_COLOR
-    color: HEADER_ACTIVE_PANEL_TEXT_COLOR
-
-// Side strip tabs: VS Studio uses vertical text (rotated 90deg).
-// Left side: text reads bottom-to-top (vertical-lr + rotate).
-#auto-hide-strip-left .auto-hide-strip-tab
+// Left strip: text reads bottom-to-top.
+#auto-hide-strip-left .auto-hide-strip-tab-label
   writing-mode: vertical-lr
   text-orientation: mixed
   transform: rotate(180deg)
-  max-height: 120px
 
-// Right side: text reads top-to-bottom (vertical-rl).
-#auto-hide-strip-right .auto-hide-strip-tab
+// Right strip: text reads top-to-bottom.
+#auto-hide-strip-right .auto-hide-strip-tab-label
   writing-mode: vertical-rl
   text-orientation: mixed
-  max-height: 120px
+
+// ---------------------------------------------------------------------------
+// Tab button group — close and unpin, always visible at the top of each tab.
+// Both buttons use stopPropagation so clicking on an inactive tab doesn't
+// also activate the panel.
+// ---------------------------------------------------------------------------
+
+.auto-hide-strip-tab-buttons
+  display: flex
+  flex-direction: column
+  align-items: center
+  gap: 0.3em  // matches lm_pin_tab margin-right spacing between lm_tab buttons
+  margin-bottom: 0.5em  // space between unpin button and text label below
+
+// Shared base — icon-only buttons, same appearance as lm_tab buttons.
+.auto-hide-strip-tab-btn
+  display: block
+  background-repeat: no-repeat
+  background-position: center
+  cursor: pointer
+  border: none
+  padding: 0
+  background-color: transparent
+  user-select: none
+  border-radius: 0.375em
+  transition: background-color 150ms ease
+
+  // Hover matches .lm_controls > *:hover — subtle filled rounded rect.
+  &:hover
+    background-color: colors-ui-surface-primary-default-hover
+
+// Close button — same icon and size as .lm_close_tab.
+.auto-hide-strip-tab-close
+  background-image: LAYOUT_TAB_CLOSE_ICON_PATH
+  background-size: 0.6em 0.6em
+  width: 0.6em
+  height: 0.6em
+
+// Unpin button — matches .lm_header .lm_tab .lm_pin_tab exactly:
+// dimmed at 0.7 opacity by default, fully opaque on hover, no background fill.
+.auto-hide-strip-tab-unpin
+  background-image: url('../../public/resources/shared/sidebar_unpin.svg')
+  background-size: 0.85em 0.85em
+  width: 0.85em
+  height: 0.85em
+  opacity: 0.7
+
+  &:hover
+    opacity: 1
+    background-color: transparent  // override .auto-hide-strip-tab-btn:hover
 
 // Bottom tabs in the status bar use ct-button-sm-secondary.
 // Override only the layout properties that differ from button defaults.
@@ -180,8 +355,13 @@
 
 #auto-hide-overlay
   position: fixed
-  z-index: 99
-  background-color: SECONDARY_BASE
+  // z-index: 101 places the overlay ABOVE the strip (100) so the overlay's
+  // panel-color background covers the tab box-shadow that extends slightly
+  // into the overlay area — ensuring no rendering seam at the boundary.
+  z-index: 101
+  // Use surface-panel to match the active strip tab, so the tab's box-shadow
+  // connection blends seamlessly into the overlay.
+  background-color: colors-ui-surface-panel
   border: none
   border-radius: 0
   box-shadow: none
@@ -198,23 +378,25 @@
 // Edge-specific positioning: each overlay is flush with its edge and
 // spans the full available dimension along that edge.
 
-// Left overlay: flush with left edge, full height (menu bar to bottom window edge).
-// Only the right edge gets a border (separator from main content).
+// Left overlay: flush with the strip's right edge (2em from screen left).
+// The strip (z-index 100) sits above the overlay so the active-tab curves
+// are always visible against the strip background.
 #auto-hide-overlay.auto-hide-overlay-left
-  top: 34px
-  left: 0
-  bottom: 0
+  top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
+  left: 2em
+  // #status-base is height: 2em at font-size: 0.75rem = 1.5rem actual height.
+  // Stop above the status bar so the overlay doesn't clip over it.
+  bottom: 1.5rem
   width: 360px
-  border-right: 1px solid PRIMARY_BASE
+  border-right: 1px solid colors-ui-border-tertiary
 
-// Right overlay: flush with right edge, full height (menu bar to bottom window edge).
-// Only the left edge gets a border.
+// Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
-  top: 34px
-  right: 0
-  bottom: 0
+  top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
+  right: 2em
+  bottom: 1.5rem  // stop above the status bar (2em at 0.75rem font-size = 1.5rem)
   width: 360px
-  border-left: 1px solid PRIMARY_BASE
+  border-left: 1px solid colors-ui-border-tertiary
 
 // Bottom overlay: flush with bottom window edge, full width.
 // Only the top edge gets a border.
@@ -226,47 +408,12 @@
   border-top: 1px solid PRIMARY_BASE
 
 // ---------------------------------------------------------------------------
-// Overlay header
+// Overlay header — hidden: the active strip tab acts as the panel header.
+// The close and unpin buttons are embedded in the strip tab itself.
 // ---------------------------------------------------------------------------
 
 #auto-hide-overlay-header
-  display: flex
-  align-items: center
-  justify-content: space-between
-  padding: 4px 8px
-  background-color: HEADER_PANEL_BACKGROUND_COLOR
-  border-bottom: 1px solid PRIMARY_BASE
-  min-height: 32px
-  flex-shrink: 0
-
-#auto-hide-overlay-title
-  font-family: "SpaceMono"
-  font-size: 13px
-  font-weight: 600
-  color: HEADER_PANEL_COLOR
-  overflow: hidden
-  text-overflow: ellipsis
-  white-space: nowrap
-  flex: 1
-
-.auto-hide-overlay-header-buttons
-  display: flex
-  gap: 4px
-  align-items: center
-
-#auto-hide-overlay-unpin-btn,
-#auto-hide-overlay-close-btn
-  cursor: pointer
-  font-size: 12px
-  padding: 2px 8px
-  border-radius: 0
-  color: HEADER_PANEL_COLOR
-  background-color: transparent
-  border: 1px solid PRIMARY_BASE
-  transition: background-color 150ms ease
-
-  &:hover
-    background-color: ACTIVE_ROW
+  display: none !important
 
 // ---------------------------------------------------------------------------
 // Overlay content area

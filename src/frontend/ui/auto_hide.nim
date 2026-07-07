@@ -114,6 +114,11 @@ type
 
 var autoHideState*: AutoHideState = nil
 
+## The GoldenLayout instance, stored so strip-tab callbacks (close/unpin)
+## can call unpinPanel without re-threading layout through every call site.
+## Set by wireOverlayButtons in auto_hide_overlay.nim during layout init.
+var autoHideLayout*: GoldenLayout = nil
+
 proc initAutoHideState*() =
   ## Initialise the auto-hide state. Call once during layout init.
   if autoHideState.isNil:
@@ -399,6 +404,39 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
 
   dispatchLayoutUpdated()
 
+proc closePanelFromStrip*(panel: AutoHidePanel) =
+  ## Remove a panel from the auto-hide strip entirely, discarding it.
+  ## Unlike unpinPanel, the panel is NOT re-added to Golden Layout —
+  ## the user can re-open it via the menu if they want it back.
+  if autoHideState.isNil:
+    return
+
+  # If this panel is currently shown in the overlay, detach its live
+  # element first so the overlay is cleaned up.
+  if autoHideState.activeOverlay == panel:
+    let contentEl = document.getElementById(cstring"auto-hide-overlay-content")
+    if not contentEl.isNil and not panel.liveElement.isNil:
+      if panel.liveElement.parentNode == cast[Node](contentEl):
+        contentEl.removeChild(panel.liveElement)
+    autoHideState.activeOverlay = nil
+    autoHideState.overlayVisible = false
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if not overlayEl.isNil:
+      overlayEl.classList.remove(cstring"visible")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-left")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-right")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
+      overlayEl.classList.remove(cstring"collapsed-overlay")
+
+  autoHideState.panels = autoHideState.panels.filterIt(it != panel)
+
+  cdebug fmt"auto_hide: closed panel '{panel.title}' from strip"
+
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
+  dispatchLayoutUpdated()
+
 # ---------------------------------------------------------------------------
 # Overlay show / hide
 # ---------------------------------------------------------------------------
@@ -615,13 +653,23 @@ when defined(js):
     let model = sideAutoHideTabsModel(edge)
     var records: seq[AutoHideSideStripRecord] = @[]
     for panel in model.panels:
-      records.add(AutoHideSideStripRecord(title: $panel.title))
+      let isActive = not autoHideState.isNil and
+                     not autoHideState.activeOverlay.isNil and
+                     autoHideState.activeOverlay == panel
+      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive))
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
           showOverlay(panels[index]),
+      onClose: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          closePanelFromStrip(panels[index]),
+      onUnpin: proc(index: int) =
+        if not autoHideLayout.isNil and index >= 0 and index < panels.len:
+          hideOverlay()
+          unpinPanel(autoHideLayout, panels[index]),
       onCollapsedSelect: proc() =
         if panels.len > 0:
           let target = if not autoHideState.isNil and

@@ -15,15 +15,24 @@ when defined(js):
 type
   AutoHideSideStripRecord* = object
     title*: string
+    active*: bool
 
   AutoHideSideStripCallbacks* = object
     onSelect*: proc(index: int)
+    onClose*: proc(index: int)
+    onUnpin*: proc(index: int)
     onCollapsedSelect*: proc()
 
 const
   AutoHideSideStripHasTabsClass* = "has-tabs"
   AutoHideSideStripCollapsedClass* = "has-tabs collapsed-mode"
   AutoHideSideStripTabClass* = "auto-hide-strip-tab"
+  AutoHideSideStripTabActiveClass* = "auto-hide-strip-tab active"
+  AutoHideSideStripTabLabelClass* = "auto-hide-strip-tab-label"
+  AutoHideSideStripTabButtonsClass* = "auto-hide-strip-tab-buttons"
+  AutoHideSideStripTabBtnClass* = "auto-hide-strip-tab-btn"
+  AutoHideSideStripTabCloseBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-close"
+  AutoHideSideStripTabUnpinBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-unpin"
   AutoHideCollapsedStripLineClass* = "collapsed-strip-line"
 
 proc sideStripClass*(hasTabs, collapsed: bool): string =
@@ -38,6 +47,14 @@ proc invokeSelect(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onSelect.isNil:
     callbacks.onSelect(index)
 
+proc invokeClose(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onClose.isNil:
+    callbacks.onClose(index)
+
+proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onUnpin.isNil:
+    callbacks.onUnpin(index)
+
 proc invokeCollapsedSelect(callbacks: AutoHideSideStripCallbacks) =
   if not callbacks.onCollapsedSelect.isNil:
     callbacks.onCollapsedSelect()
@@ -47,11 +64,23 @@ proc renderSideStripTab(
     tab: AutoHideSideStripRecord;
     index: int;
     callbacks: AutoHideSideStripCallbacks): MockNode =
+  let cls = if tab.active: AutoHideSideStripTabActiveClass
+            else: AutoHideSideStripTabClass
+  # Buttons are always rendered (CSS controls visibility via :hover / .active).
+  # They sit at the TOP of the tab so they appear above the text label.
   ui(r):
     tdiv(
-        class = AutoHideSideStripTabClass,
+        class = cls,
         onclick = proc() = callbacks.invokeSelect(index)):
-      text tab.title
+      tdiv(class = AutoHideSideStripTabButtonsClass):
+        tdiv(class = AutoHideSideStripTabCloseBtnClass,
+             title = "Close",
+             onclick = proc() = callbacks.invokeClose(index))
+        tdiv(class = AutoHideSideStripTabUnpinBtnClass,
+             title = "Unpin (restore to layout)",
+             onclick = proc() = callbacks.invokeUnpin(index))
+      span(class = AutoHideSideStripTabLabelClass):
+        text tab.title
 
 proc renderCollapsedLine(
     r: MockRenderer;
@@ -62,16 +91,42 @@ proc renderCollapsedLine(
         onclick = proc() = callbacks.invokeCollapsedSelect())
 
 when defined(js):
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+
   proc renderSideStripTab(
       r: WebRenderer;
       tab: AutoHideSideStripRecord;
       index: int;
       callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
-    ui(r):
+    let cls = if tab.active: AutoHideSideStripTabActiveClass
+              else: AutoHideSideStripTabClass
+    # Buttons are always rendered (CSS controls visibility via :hover / .active).
+    # They sit at the TOP of the tab div above the text label.
+    # Both buttons use manual addEventListener with stopPropagation so that
+    # clicking a button on an inactive tab doesn't also trigger showOverlay.
+    var closeBtnEl: isonim_dom.Element
+    var unpinBtnEl: isonim_dom.Element
+    result = ui(r):
       tdiv(
-          class = AutoHideSideStripTabClass,
+          class = cls,
           onclick = proc() = callbacks.invokeSelect(index)):
-        text tab.title
+        tdiv(class = AutoHideSideStripTabButtonsClass):
+          tdiv(ref = closeBtnEl,
+               class = AutoHideSideStripTabCloseBtnClass,
+               title = "Close")
+          tdiv(ref = unpinBtnEl,
+               class = AutoHideSideStripTabUnpinBtnClass,
+               title = "Unpin (restore to layout)")
+        span(class = AutoHideSideStripTabLabelClass):
+          text tab.title
+    isonim_dom.addEventListener(isonim_dom.Node(closeBtnEl), cstring"click",
+      proc(ev: isonim_dom.Event) =
+        ev.stopPropagation()
+        callbacks.invokeClose(index))
+    isonim_dom.addEventListener(isonim_dom.Node(unpinBtnEl), cstring"click",
+      proc(ev: isonim_dom.Event) =
+        ev.stopPropagation()
+        callbacks.invokeUnpin(index))
 
   proc renderCollapsedLine(
       r: WebRenderer;
