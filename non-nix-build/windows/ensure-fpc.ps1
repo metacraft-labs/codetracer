@@ -10,7 +10,8 @@ function Ensure-Fpc {
 
   $version = $Toolchain["FPC_VERSION"]
   $fpcVersionRoot = Join-Path $Root "fpc/$version"
-  $fpcExe = Join-Path $fpcVersionRoot "bin/x86_64-win64/fpc.exe"
+  $fpcBinDir = Join-Path $fpcVersionRoot "bin/i386-win32"
+  $fpcExe = Join-Path $fpcBinDir "fpc.exe"
 
   if (Test-Path -LiteralPath $fpcExe -PathType Leaf) {
     $currentVersion = ""
@@ -26,16 +27,18 @@ function Ensure-Fpc {
   }
 
   New-Item -ItemType Directory -Force -Path $fpcVersionRoot | Out-Null
-  # FreePascal ships its Windows distribution as an Inno Setup installer
-  # .exe — there is no .zip on SourceForge (the old code downloaded a
-  # non-existent .zip; SourceForge's project/files/.../download URL
-  # served an HTML interstitial that then failed Expand-Archive).
-  # Download the installer via the direct mirror host and run it silently.
-  $asset = "fpc-$version.i386-win32.cross.x86_64-win64.exe"
+  
+  $asset = "fpc-$version.win32.and.win64.exe"
   $downloadUrl = "https://downloads.sourceforge.net/project/freepascal/Win32/$version/$asset"
-
-  $tempInstaller = Join-Path $env:TEMP "fpc-$version-x86_64-win64.exe"
-  Download-File -Url $downloadUrl -OutFile $tempInstaller
+  
+  $tempInstaller = Join-Path $env:TEMP $asset
+  Write-Host "Downloading FPC $version..."
+  
+  # Using curl.exe to bypass Cloudflare bot challenge on SourceForge
+  curl.exe -L -o $tempInstaller $downloadUrl
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to download FreePascal compiler from $downloadUrl"
+  }
 
   try {
     Ensure-CleanDirectory -Path $fpcVersionRoot
@@ -43,6 +46,7 @@ function Ensure-Fpc {
     # keep it non-interactive; /DIR sets our deterministic install root.
     $innoArgs = @("/VERYSILENT", "/SP-", "/SUPPRESSMSGBOXES", "/NORESTART",
                   "/NOICONS", "/DIR=$fpcVersionRoot")
+    $env:__compat_layer = 'RunAsInvoker'
     $proc = Start-Process -FilePath $tempInstaller -ArgumentList $innoArgs -Wait -PassThru
     if ($proc.ExitCode -ne 0) {
       throw "FreePascal installer exited with code $($proc.ExitCode)."
@@ -51,15 +55,8 @@ function Ensure-Fpc {
     Remove-Item -LiteralPath $tempInstaller -Force -ErrorAction SilentlyContinue
   }
 
-  # The zip may extract into a nested directory; try to locate fpc.exe.
   if (-not (Test-Path -LiteralPath $fpcExe -PathType Leaf)) {
-    # Search for fpc.exe within the extraction root.
-    $candidates = Get-ChildItem -LiteralPath $fpcVersionRoot -Recurse -Filter "fpc.exe" -ErrorAction SilentlyContinue
-    if ($candidates.Count -gt 0) {
-      Write-Host "FreePascal fpc.exe found at $($candidates[0].FullName) (expected at $fpcExe)."
-    } else {
-      throw "FreePascal extraction did not produce fpc.exe. Expected '$fpcExe'."
-    }
+    throw "FreePascal extraction did not produce fpc.exe. Expected '$fpcExe'."
   }
 
   Write-Host "Installed FreePascal $version to $fpcVersionRoot"

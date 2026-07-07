@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 #
 # Why we use the conda-forge package:
 #   potassco/clingo's GitHub releases do NOT publish prebuilt Windows binary
-#   archives — only source tarballs (requires cmake/ninja/msvc to build).
+#   archives - only source tarballs (requires cmake/ninja/msvc to build).
 #   The PyPI clingo wheel statically links the C library into
 #   `_clingo.cp312-win_amd64.pyd` and does NOT ship a standalone clingo.dll,
 #   so it cannot be re-used by Nim's runtime dlopen. The conda-forge
@@ -27,8 +27,8 @@ $ErrorActionPreference = "Stop"
 # Package format:
 #   conda-forge `.conda` packages are ZIP archives containing two
 #   `.tar.zst` payloads:
-#     * info-<pkg>-<ver>-<build>.tar.zst   — metadata
-#     * pkg-<pkg>-<ver>-<build>.tar.zst    — files
+#     * info-<pkg>-<ver>-<build>.tar.zst   - metadata
+#     * pkg-<pkg>-<ver>-<build>.tar.zst    - files
 #   We unzip with PowerShell's Expand-Archive, decompress the `pkg-`
 #   payload with zstd (provisioned by ensure-zstd.ps1, on PATH by this
 #   point in env.ps1 phase 1), then untar with the Windows-bundled

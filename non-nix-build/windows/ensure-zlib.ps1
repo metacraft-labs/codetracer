@@ -20,7 +20,7 @@ $ErrorActionPreference = "Stop"
 #   $Root/zlib/<version>/lib/libz.a
 #
 # Build prerequisites:
-#   - gcc (from WinLibs MinGW UCRT) — installed earlier in env.ps1 bootstrap by
+#   - gcc (from WinLibs MinGW UCRT) - installed earlier in env.ps1 bootstrap by
 #     Ensure-Gcc. The path `$Root/gcc/<gcc_version>/bin` must already be on PATH
 #     OR `mingw32-make.exe` and `gcc.exe` must be locatable by Get-Command.
 
@@ -63,7 +63,7 @@ function Resolve-MinGWMakeExe {
     return @{ make = $makeFromPath; binDir = (Split-Path -Parent $makeFromPath) }
   }
 
-  # As a last resort fall back to plain `make` — works with MSYS2/Cygwin.
+  # As a last resort fall back to plain `make` - works with MSYS2/Cygwin.
   $plainMake = Get-ZlibBuildTool -Name "make"
   if (-not [string]::IsNullOrWhiteSpace($plainMake)) {
     return @{ make = $plainMake; binDir = (Split-Path -Parent $plainMake) }

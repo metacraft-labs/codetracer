@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Defensive AppX probe — mirrors env.ps1's Invoke-AppxPackageQuery so
+# Defensive AppX probe - mirrors env.ps1's Invoke-AppxPackageQuery so
 # this script can be sourced standalone. The Appx module is only
 # available on the Desktop edition of Windows; on hosted Server 2022
 # GitHub Actions runners any cmdlet from it fails with HRESULT
@@ -93,10 +93,10 @@ function Install-TtdFromAppx {
 }
 
 # Non-AppX install: download the WinDbg .msixbundle from Microsoft's
-# CDN, unzip it (twice — outer msixbundle, then per-architecture
+# CDN, unzip it (twice - outer msixbundle, then per-architecture
 # .msix), and extract TTD.exe + companion DLLs. This is the fallback
 # for environments where AppX is not supported (hosted Windows Server
-# 2022 GHA runners — see
+# 2022 GHA runners - see
 # https://github.com/MicrosoftDocs/WindowsAppSDK/issues/4163). Both
 # layers of the bundle are plain ZIP archives, so no AppX runtime is
 # touched.
@@ -145,7 +145,7 @@ function Install-TtdViaMsixBundle {
       }
       Write-Host "msixbundle SHA256 verified."
     } else {
-      Write-Host "WARNING: TTD_BUNDLE_SHA256 not pinned for $BundleVersion — skipping integrity check."
+      Write-Host "WARNING: TTD_BUNDLE_SHA256 not pinned for $BundleVersion - skipping integrity check."
     }
 
     # Layer 1: msixbundle (a zip of per-architecture .msix files).
@@ -227,7 +227,7 @@ function Ensure-Ttd {
     return
   }
 
-  # Step 2: AppX present but TTD not installed → winget install, then
+  # Step 2: AppX present but TTD not installed -> winget install, then
   # re-probe. The presence of a working WinDbg AppX entry is our proxy
   # for AppX itself being usable.
   $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
@@ -252,7 +252,7 @@ function Ensure-Ttd {
     }
   }
 
-  # Step 3: AppX is unavailable on this SKU — download the msixbundle
+  # Step 3: AppX is unavailable on this SKU - download the msixbundle
   # directly and extract TTD.exe by hand. Pins come from
   # toolchain-versions.env via the $Toolchain hashtable; env vars
   # override (for ad-hoc testing).

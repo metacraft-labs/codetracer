@@ -21,7 +21,7 @@ function Ensure-Llvm {
   $llvmTarget = ConvertTo-LlvmFileArch -Arch $Arch
   # Upstream publishes the Windows toolchain tarball as
   # `clang+llvm-<ver>-<target>.tar.xz` (the `LLVM-<ver>-<target>.tar.xz`
-  # name never existed — only the `LLVM-<ver>-win64.exe` installer uses
+  # name never existed - only the `LLVM-<ver>-win64.exe` installer uses
   # the `LLVM-` prefix). The archive's top-level directory matches the
   # asset stem, so $extractDir must use the same `clang+llvm-` prefix.
   $asset = "clang+llvm-$version-$llvmTarget.tar.xz"

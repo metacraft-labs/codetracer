@@ -132,14 +132,18 @@ const
     ("reprobuild", "CODETRACER_REPROBUILD_REPO_PATH")
   ]
   WindowsZlibRoot = "D:/metacraft-dev-deps/zlib/1.3.1"
+  WindowsZstdRoot = "D:/metacraft-dev-deps/zstd/1.5.6/zstd-v1.5.6-win64"
   WindowsExtraPassC = @[
     "-I" & WindowsZlibRoot & "/include",
+    "-I" & WindowsZstdRoot & "/include",
     "-Wno-implicit-function-declaration",
     "-Wno-error=implicit-function-declaration"
   ]
   WindowsExtraPassL = @[
     "-L" & WindowsZlibRoot & "/lib",
-    "-lz"
+    "-L" & WindowsZstdRoot & "/dll",
+    "-lz",
+    "-lzstd"
   ]
 
 const
@@ -859,10 +863,10 @@ package codeTracer:
       let publicDistStamp = buildDebugPath(".public-dist.stamp")
       let publicDistScript =
         "const fs=require('node:fs'),path=require('node:path');" &
-        "const src='src/public/dist',dst=" & escape(publicDistTarget) & ";" &
+        "const src='src/public/dist',dst='" & publicDistTarget.replace('\\', '/') & "';" &
         "fs.rmSync(dst,{recursive:true,force:true});" &
         "fs.cpSync(src,dst,{recursive:true,dereference:false});" &
-        "fs.closeSync(fs.openSync(" & escape(publicDistStamp) & ",'w'));"
+        "fs.closeSync(fs.openSync('" & publicDistStamp.replace('\\', '/') & "','w'));"
       let publicDist = node(
         args = @["-e", publicDistScript],
         actionId = "frontend-public-dist",

@@ -44,7 +44,7 @@ function Ensure-Dotnet {
     foreach ($line in $sdkLines) {
       if ([string]$line -match "^\s*([0-9]+\.[0-9]+\.[0-9]+)\s") {
         if ($matches[1] -eq $version) {
-          Write-Host "dotnet SDK $version found at system location $candidate — skipping managed install"
+          Write-Host "dotnet SDK $version found at system location $candidate - skipping managed install"
           return
         }
       }

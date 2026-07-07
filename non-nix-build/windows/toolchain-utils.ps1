@@ -342,13 +342,30 @@ function Get-FlakeLockedGithubNode {
     throw "flake.lock is missing node '$NodeName' or its locked entry."
   }
 
-  if ([string]$node.locked.type -ne "github") {
-    throw "flake.lock node '$NodeName' must be github-locked. Found type '$($node.locked.type)'."
+  $type = [string]$node.locked.type
+  if ($type -ne "github" -and $type -ne "git") {
+    throw "flake.lock node '$NodeName' must be github or git locked. Found type '$type'."
   }
 
-  $owner = [string]$node.locked.owner
-  $repo = [string]$node.locked.repo
+  $owner = ""
+  $repo = ""
   $rev = [string]$node.locked.rev
+  $url = ""
+
+  if ($type -eq "github") {
+    $owner = [string]$node.locked.owner
+    $repo = [string]$node.locked.repo
+    $url = "https://github.com/$owner/$repo.git"
+  } else {
+    $url = [string]$node.locked.url
+    if ($url -match "github\.com/([^/]+)/([^/.]+?)(?:\.git)?$") {
+      $owner = $Matches[1]
+      $repo = $Matches[2]
+    } else {
+      throw "flake.lock node '$NodeName' has type 'git' but URL '$url' is not a GitHub URL."
+    }
+  }
+
   if (
     [string]::IsNullOrWhiteSpace($owner) -or
     [string]::IsNullOrWhiteSpace($repo) -or
@@ -361,7 +378,7 @@ function Get-FlakeLockedGithubNode {
     owner = $owner
     repo = $repo
     rev = $rev
-    url = "https://github.com/$owner/$repo.git"
+    url = $url
   }
 }
 

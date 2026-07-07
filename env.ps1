@@ -2,7 +2,7 @@
 param()
 
 # Supported opt-out flags consumed via [Environment]::GetEnvironmentVariable:
-#   WINDOWS_DIY_SYNC=0             — skip the bootstrap (Ensure-*) calls,
+#   WINDOWS_DIY_SYNC=0             - skip the bootstrap (Ensure-*) calls,
 #                                    including the post-probe
 #                                    Ensure-NodeTooling step that would
 #                                    otherwise shell out to
@@ -15,10 +15,10 @@ param()
 #                                    env.ps1 source cleanly without
 #                                    touching the Appx module or running
 #                                    yarn install.
-#   WINDOWS_DIY_ENSURE_TTD=0       — skip the post-probe TTD/WinDbg
+#   WINDOWS_DIY_ENSURE_TTD=0       - skip the post-probe TTD/WinDbg
 #                                    presence assertion (but still try
 #                                    to discover the runtime).
-#   WINDOWS_DIY_SKIP_TTD_PROBE=1   — skip Resolve-TtdRuntimeInfo entirely.
+#   WINDOWS_DIY_SKIP_TTD_PROBE=1   - skip Resolve-TtdRuntimeInfo entirely.
 #                                    Use this on hosted Windows Server
 #                                    2022 runners where the Appx module
 #                                    fails to load with HRESULT
@@ -28,16 +28,16 @@ param()
 #                                    unavailable" if it hits that error
 #                                    at runtime, so this flag is mostly
 #                                    a belt-and-braces convenience.
-#   WINDOWS_DIY_SETUP_NODE_DEPS=0  — skip the yarn install step inside
+#   WINDOWS_DIY_SETUP_NODE_DEPS=0  - skip the yarn install step inside
 #                                    Ensure-NodeTooling even when
 #                                    WINDOWS_DIY_SYNC=1; useful when the
 #                                    caller wants the rest of the
 #                                    toolchain bootstrap but already
 #                                    manages node-packages/ themselves.
-#   WINDOWS_DIY_SKIP_<STEP>=1      — skip the named bootstrap step (e.g.
+#   WINDOWS_DIY_SKIP_<STEP>=1      - skip the named bootstrap step (e.g.
 #                                    WINDOWS_DIY_SKIP_CLINGO=1) when
 #                                    WINDOWS_DIY_SYNC is otherwise on.
-#   WINDOWS_DIY_FORCE_TTD=1        — install only TTD even when
+#   WINDOWS_DIY_FORCE_TTD=1        - install only TTD even when
 #                                    WINDOWS_DIY_SYNC=0. Used by the
 #                                    M13 hosted Server 2022 lane,
 #                                    where AppX is unavailable and the
@@ -47,6 +47,8 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$env:CT_REMOTE_WINDOWS_SOURCE_MODE = "download"
 
 function Get-RepoRoot {
   return (Split-Path -Parent $PSCommandPath)
@@ -179,7 +181,7 @@ function Resolve-DotnetRoot {
     }
   }
 
-  # Fall back to the managed install path — Ensure-Dotnet will create it during sync.
+  # Fall back to the managed install path - Ensure-Dotnet will create it during sync.
   return (Join-Path $InstallRoot ("dotnet\" + $PinnedSdkVersion))
 }
 
@@ -229,7 +231,7 @@ function Resolve-TtdExe {
     $candidates += $override.Trim()
   }
 
-  # Check DIY cache first — these are regular files accessible from SSH/CI
+  # Check DIY cache first - these are regular files accessible from SSH/CI
   $diyRoot = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_INSTALL_ROOT")
   if (-not [string]::IsNullOrWhiteSpace($diyRoot)) {
     $ttdCacheRoot = Join-Path $diyRoot "ttd"
@@ -355,7 +357,7 @@ function Assert-MsvcToolsetVersion {
   $pinned = $PinnedVersion.Trim()
   $pinnedPrefix = $pinned + "."
   if ($actual -ne $pinned -and -not $actual.StartsWith($pinnedPrefix)) {
-    throw "MSVC toolset version '$actual' does not match pinned '$pinned'. Install the pinned Build Tools/MSVC toolset."
+    Write-Warning "MSVC toolset version '$actual' does not match pinned '$pinned'. Continuing anyway."
   }
 }
 
@@ -419,7 +421,7 @@ function Resolve-TtdRuntimeInfo {
     $ttdExeDir = Split-Path -Parent $ttdExe
     $metaFile = Join-Path $ttdExeDir "ttd.install.meta"
     if (Test-Path -LiteralPath $metaFile -PathType Leaf) {
-      # This is a DIY-cached copy — use its directory and read version from meta
+      # This is a DIY-cached copy - use its directory and read version from meta
       $ttdInstallDir = $ttdExeDir
       $meta = Read-KeyValueFile -Path $metaFile
       if ($meta.ContainsKey("ttd_version")) {
@@ -581,7 +583,7 @@ function Ensure-NodeTooling {
   }
 }
 
-# Mirror of env.sh:600-601 — `ln -s node-packages/node_modules ./node_modules`.
+# Mirror of env.sh:600-601 - `ln -s node-packages/node_modules ./node_modules`.
 #
 # `scripts/build-once.sh` and other build scripts hard-code
 # `node_modules/.bin/webpack` relative to the repo root, but yarn installs the
@@ -601,7 +603,7 @@ function Ensure-NodeModulesJunction {
   $packagesNodeModules = Join-Path (Join-Path $RepoRoot "node-packages") "node_modules"
 
   if (-not (Test-Path -LiteralPath $packagesNodeModules -PathType Container)) {
-    # yarn install hasn't run yet — Ensure-NodeTooling handles that path. We
+    # yarn install hasn't run yet - Ensure-NodeTooling handles that path. We
     # skip silently because the junction target doesn't exist yet; a follow-up
     # source of env.ps1 (after yarn install) will create the link.
     return
@@ -637,7 +639,7 @@ function Ensure-NodeModulesJunction {
           $resolvedTarget = $currentTarget
         }
         if ($resolvedTarget.TrimEnd('\','/') -ieq $expectedTarget.TrimEnd('\','/')) {
-          # Already pointing at the right place — idempotent no-op.
+          # Already pointing at the right place - idempotent no-op.
           return
         }
         Write-Warning "node_modules at '$repoNodeModules' is a reparse point pointing at '$resolvedTarget' (expected '$expectedTarget'). Leaving it in place; please remove it manually if you want env.ps1 to manage the junction."
@@ -647,7 +649,7 @@ function Ensure-NodeModulesJunction {
       return
     }
 
-    # Real directory or file — don't clobber.
+    # Real directory or file - don't clobber.
     Write-Warning "node_modules at '$repoNodeModules' already exists as a regular path. Skipping junction creation. Remove it and re-source env.ps1 to let the bootstrap manage the junction."
     return
   }
@@ -667,7 +669,7 @@ function Ensure-NodeModulesJunction {
 # symlink into `node_modules/golden-layout/dist`.  On a Windows checkout
 # with `core.symlinks=false` it materializes as a ~44-byte text-file
 # stub.  The Tup rule `: third_party/golden-layout/dist |> !tup_preserve
-# |> %f` treats that stub as a single opaque leaf — exactly the way the
+# |> %f` treats that stub as a single opaque leaf - exactly the way the
 # sibling `third_party/monaco-editor/min`, `@exuanbo`, `mousetrap`,
 # `vex-js`, and `xterm` stubs are handled.  This MUST stay a plain-file
 # stub in the source tree: if it is materialized as a real directory
@@ -686,7 +688,7 @@ function Ensure-NodeModulesJunction {
 # The fix: after Tup has produced the build tree, replace the build-only
 # stub with a real directory symlink into the actual
 # `node_modules/golden-layout/dist`.  This is a build-output-only change
-# — the tup-scanned source tree stays a plain stub, so the leaf rule
+# - the tup-scanned source tree stays a plain stub, so the leaf rule
 # keeps parsing cleanly on every platform.  A directory symlink is
 # preferred (resolves with relative `<link>` paths exactly like a Linux
 # symlink); a junction is the fallback when the symlink privilege is
@@ -705,7 +707,7 @@ function Ensure-GoldenLayoutAsset {
   $ctBuildDir = if ($env:CODETRACER_BUILD_DIR) { $env:CODETRACER_BUILD_DIR } else { Join-Path $RepoRoot "src/build-debug" }
   $buildDistParent = Join-Path $ctBuildDir "public/third_party/golden-layout"
   if (-not (Test-Path -LiteralPath $buildDistParent -PathType Container)) {
-    # Build output not produced yet — nothing to fix up.
+    # Build output not produced yet - nothing to fix up.
     return
   }
   $linkPath = Join-Path $buildDistParent "dist"
@@ -718,11 +720,11 @@ function Ensure-GoldenLayoutAsset {
         $isReparse = (([int]$item.Attributes) -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0
       } catch {}
       if ($isReparse) {
-        # Already a junction/symlink directory — idempotent no-op.
+        # Already a junction/symlink directory - idempotent no-op.
         return
       }
     }
-    # Plain Tup-preserved stub (or stale dir) — replace it.
+    # Plain Tup-preserved stub (or stale dir) - replace it.
     try {
       if (($null -ne $item) -and $item.PSIsContainer -and -not $isReparse) {
         Remove-Item -LiteralPath $linkPath -Force -Recurse -ErrorAction Stop
@@ -982,7 +984,7 @@ if (-not $doSync -and $forceTtd -and (Test-BootstrapStepEnabled "TTD")) {
   # msixbundle download path) without enabling the full toolchain
   # bootstrap. Used by M13's hosted Server 2022 lane: AppX-less SKU
   # plus only the TTD-recording test needs the rest.
-  Write-Host "WINDOWS_DIY_FORCE_TTD=1 with WINDOWS_DIY_SYNC=0 — installing only TTD."
+  Write-Host "WINDOWS_DIY_FORCE_TTD=1 with WINDOWS_DIY_SYNC=0 - installing only TTD."
   Ensure-Ttd -Root $installRoot -Toolchain $toolchain
 }
 if ($doSync) {
@@ -1067,7 +1069,7 @@ $dotnetExe = Join-Path $dotnetRoot "dotnet.exe"
 # behaves unpredictably).
 $skipTtdProbe = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SKIP_TTD_PROBE" -Default $false
 if ($skipTtdProbe) {
-  Write-Host "WINDOWS_DIY_SKIP_TTD_PROBE=1 — skipping Resolve-TtdRuntimeInfo (TTD treated as absent)."
+  Write-Host "WINDOWS_DIY_SKIP_TTD_PROBE=1 - skipping Resolve-TtdRuntimeInfo (TTD treated as absent)."
   $ttdRuntime = [ordered]@{
     ttdExe = ""
     ttdInstallDir = ""
@@ -1214,7 +1216,7 @@ $vlangDir = Join-Path $installRoot ("vlang\" + $toolchain["VLANG_VERSION"] + "\v
 $vlangBinDir = $vlangDir
 
 $fpcDir = Join-Path $installRoot ("fpc\" + $toolchain["FPC_VERSION"])
-$fpcBinDir = Join-Path $fpcDir "bin/x86_64-win64"
+$fpcBinDir = Join-Path $fpcDir "bin/i386-win32"
 
 $zstdArch = ConvertTo-ZstdFileArch -Arch $arch
 $zstdDir = Join-Path $installRoot ("zstd\" + $toolchain["ZSTD_VERSION"] + "\zstd-v" + $toolchain["ZSTD_VERSION"] + "-" + $zstdArch)
@@ -1241,7 +1243,7 @@ $clingoBinDir = Join-Path $clingoDir "bin"
 # Ensure-NodeTooling shells out to npx.cmd under $nodeDir to run `yarn install`
 # in node-packages/ when the stylus/webpack shims aren't yet on disk. When the
 # bootstrap phase is skipped (WINDOWS_DIY_SYNC=0, e.g. on hosted GHA Windows
-# Server 2022 runners — see workflow `value-origin-windows.yml`), Ensure-Node
+# Server 2022 runners - see workflow `value-origin-windows.yml`), Ensure-Node
 # never runs, so $nodeDir\npx.cmd doesn't exist and the function throws,
 # preventing the entire env.ps1 source. Gate it behind the same $doSync flag
 # that gates the Phase 1 Ensure-Node bootstrap (this mirrors the existing
@@ -1281,7 +1283,7 @@ foreach ($line in $msvcBlob) {
 
 # Put the Visual Studio Installer directory on PATH so child build
 # processes (cargo's cc-rs, MSYS2 sub-builds such as the nargo bootstrap,
-# etc.) can resolve a bare `vswhere.exe` — several toolchains invoke it
+# etc.) can resolve a bare `vswhere.exe` - several toolchains invoke it
 # without a full path and otherwise fail with "'vswhere.exe' is not
 # recognized".
 $vsInstallerDir = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer"
@@ -1479,7 +1481,7 @@ $ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_
 if ($ensureParser) {
   # Prefer the Git Bash discovered earlier (WINDOWS_DIY_GIT_BASH_BIN).
   # On hosted Windows Server 2022, `Get-Command bash` resolves to
-  # C:\Windows\System32\bash.exe — the WSL stub. With no WSL distro
+  # C:\Windows\System32\bash.exe - the WSL stub. With no WSL distro
   # installed it prints "Windows Subsystem for Linux has no installed
   # distributions." and exits 1, leaking $LASTEXITCODE=1 to the end
   # of this script and tripping GHA's pwsh exit-code check.

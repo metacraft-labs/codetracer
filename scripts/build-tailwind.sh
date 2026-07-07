@@ -38,7 +38,7 @@ fi
 # isonim's node_modules provides the tailwindcss CLI the extract shells out
 # to; the generated input CSS resolves `@import "tailwindcss"` against it.
 if [ ! -d "$isonim_root/node_modules" ]; then
-	(cd "$isonim_root" && yarn install --frozen-lockfile)
+	(cd "$isonim_root" && npx yarn install --frozen-lockfile)
 fi
 
 # Pass the two source trees as directory `@source` roots (absolute, so they
