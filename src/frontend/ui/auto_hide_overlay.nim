@@ -34,6 +34,9 @@ proc wireOverlayButtons*(layout: GoldenLayout) =
   ## Attach click handlers to the overlay header buttons.
   ## Call once after DOM is ready and layout is initialised.
 
+  # Store layout globally so strip-tab unpin callbacks can reach it.
+  autoHideLayout = layout
+
   # Unpin button: re-attach the panel to GL.
   let unpinBtn = document.getElementById(cstring"auto-hide-overlay-unpin-btn")
   if not unpinBtn.isNil:
@@ -85,26 +88,43 @@ proc clearOverlayContent*() =
 var mouseLeaveTimeoutId: int = -1
 const MOUSE_LEAVE_DELAY_MS = 300  ## ms before overlay auto-hides on mouse-leave
 
-proc setupMouseLeaveDismissal*() =
-  ## When the mouse leaves the overlay container, start a short timer
-  ## to auto-hide. If the mouse re-enters before the timer fires,
-  ## cancel it. This prevents accidental dismissal from brief mouse
-  ## movements.
-  let overlayEl = document.getElementById(cstring"auto-hide-overlay")
-  if overlayEl.isNil:
+proc cancelDismissal() =
+  if mouseLeaveTimeoutId != -1:
+    windowClearTimeout(mouseLeaveTimeoutId)
+    mouseLeaveTimeoutId = -1
+
+proc startDismissal() =
+  if autoHideState.isNil or not autoHideState.overlayVisible:
     return
+  # Don't stack timers — cancel any running one first.
+  cancelDismissal()
+  mouseLeaveTimeoutId = windowSetTimeout(
+    proc = hideOverlay(),
+    MOUSE_LEAVE_DELAY_MS)
 
-  overlayEl.addEventListener(cstring"mouseleave", proc(ev: Event) =
-    if autoHideState.isNil or not autoHideState.overlayVisible:
-      return
-    mouseLeaveTimeoutId = windowSetTimeout(
-      proc = hideOverlay(),
-      MOUSE_LEAVE_DELAY_MS))
+proc attachHoverZone(el: Element) =
+  ## Register an element as part of the "safe zone": entering it cancels
+  ## the dismiss timer, leaving it starts the timer.  Used for the overlay
+  ## and both side-strip containers so that hovering sidebar tabs while the
+  ## overlay is open does not trigger an accidental close.
+  el.addEventListener(cstring"mouseleave", proc(ev: Event) = startDismissal())
+  el.addEventListener(cstring"mouseenter", proc(ev: Event) = cancelDismissal())
 
-  overlayEl.addEventListener(cstring"mouseenter", proc(ev: Event) =
-    if mouseLeaveTimeoutId != -1:
-      windowClearTimeout(mouseLeaveTimeoutId)
-      mouseLeaveTimeoutId = -1)
+proc setupMouseLeaveDismissal*() =
+  ## Cancel auto-hide whenever the mouse is inside the overlay OR either
+  ## side strip.  Moving between the strip tabs and the overlay content
+  ## must not trigger a close — all three elements form one logical zone.
+  let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+  if not overlayEl.isNil:
+    attachHoverZone(overlayEl)
+
+  let stripLeft = document.getElementById(cstring"auto-hide-strip-left")
+  if not stripLeft.isNil:
+    attachHoverZone(stripLeft)
+
+  let stripRight = document.getElementById(cstring"auto-hide-strip-right")
+  if not stripRight.isNil:
+    attachHoverZone(stripRight)
 
 # ---------------------------------------------------------------------------
 # Full overlay setup
