@@ -96,6 +96,9 @@ proc cancelDismissal() =
 proc startDismissal() =
   if autoHideState.isNil or not autoHideState.overlayVisible:
     return
+  # Don't auto-dismiss if the overlay was pinned open via a click.
+  if autoHideState.pinnedOpen:
+    return
   # Don't stack timers — cancel any running one first.
   cancelDismissal()
   mouseLeaveTimeoutId = windowSetTimeout(
@@ -107,7 +110,11 @@ proc attachHoverZone(el: Element) =
   ## the dismiss timer, leaving it starts the timer.  Used for the overlay
   ## and both side-strip containers so that hovering sidebar tabs while the
   ## overlay is open does not trigger an accidental close.
-  el.addEventListener(cstring"mouseleave", proc(ev: Event) = startDismissal())
+  ## On mouseleave from the strip, the pending hover-open timer is also
+  ## cancelled so a 200ms hover that exits before completing doesn't open.
+  el.addEventListener(cstring"mouseleave", proc(ev: Event) =
+    cancelHoverPreview()
+    startDismissal())
   el.addEventListener(cstring"mouseenter", proc(ev: Event) = cancelDismissal())
 
 proc setupMouseLeaveDismissal*() =
@@ -131,9 +138,10 @@ proc setupMouseLeaveDismissal*() =
 # ---------------------------------------------------------------------------
 
 proc setupAutoHideOverlay*(layout: GoldenLayout) =
-  ## One-time setup for the auto-hide overlay.  Call after layout init
-  ## and after the DOM is ready.
+  ## One-time setup for the auto-hide overlay and docked sidebars.
+  ## Call after layout init and after the DOM is ready.
   wireOverlayButtons(layout)
   setupMouseLeaveDismissal()
   setupOverlayDismissal()
+  setupDockedResizeHandles()
   cdebug "auto_hide_overlay: overlay handlers installed"

@@ -65,9 +65,14 @@
         <div id='deepreview'>
         </div>
         <div id='root-container'>
-          <!-- Auto-hide left strip + GL container + right strip in a flex row -->
+          <!-- Auto-hide left strip + docked panels + GL container + right strip in a flex row -->
           <div id="auto-hide-layout-row">
             <div id="auto-hide-strip-left"></div>
+            <!-- Docked left sidebar: shown when user clicks a left strip tab -->
+            <div id="auto-hide-docked-left">
+              <div id="auto-hide-docked-left-content"></div>
+              <div id="auto-hide-docked-left-resize" class="auto-hide-docked-resize-handle"></div>
+            </div>
             <div id='ROOT'>
               <div id="context-menu-container" style="display: none;"></div>
               <div id='fixed-search'>
@@ -76,6 +81,11 @@
                 <section id="main">
                 </section>
               </div>
+            </div>
+            <!-- Docked right sidebar: shown when user clicks a right strip tab -->
+            <div id="auto-hide-docked-right">
+              <div id="auto-hide-docked-right-resize" class="auto-hide-docked-resize-handle"></div>
+              <div id="auto-hide-docked-right-content"></div>
             </div>
             <div id="auto-hide-strip-right"></div>
           </div>
