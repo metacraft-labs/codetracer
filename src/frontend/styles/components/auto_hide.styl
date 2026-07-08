@@ -4,7 +4,7 @@
 //
 // Layout: side strips tile WITH the GL container in a flex row, so the GL
 // area shrinks to accommodate them (no overlay on top of content).
-// Bottom auto-hide labels render inside #status-base (the footer).
+// Bottom auto-hide tabs render in #status-base (1.75rem tall, tabs only).
 
 // ---------------------------------------------------------------------------
 // Layout row — flex container that holds left strip, GL (#ROOT), right strip.
@@ -59,7 +59,7 @@
     padding-right: 0.25em
 
 #auto-hide-strip-right.has-tabs
-  border-left: 1px solid colors-ui-border-tertiary
+  border-left: 1px solid colors-ui-border-primary
 
 // When the left strip is visible, nullify #ROOT's padding-left so the visual
 // gap on both sides of the strip tabs is a consistent 0.25em:
@@ -83,6 +83,10 @@
   flex-grow: 0
   background-color: colors-ui-surface-panel
   position: relative
+  // z-index: 5 creates a stacking context so GL children with high z-index
+  // are confined within it — the backdrop (z-index: 101) then dims the whole
+  // docked panel including any high-z-index panel content inside it.
+  z-index: 5
   min-width: 150px
   max-width: 800px
   overflow: hidden
@@ -173,22 +177,143 @@
     background-color: #4a6080  // Slightly lighter on hover
 
 // ---------------------------------------------------------------------------
-// Bottom auto-hide tabs — rendered inside #status-base (the footer).
-// Styled as inline status-bar items on the left side.
+// Docked bottom panel — pushes GL up when a bottom strip tab is clicked.
+// Sits between #auto-hide-layout-row and the footer in the flex column.
 // ---------------------------------------------------------------------------
 
-.auto-hide-bottom-tabs
+#auto-hide-docked-bottom
+  display: none
+  flex-direction: column
+  flex-shrink: 0
+  flex-grow: 0
+  background-color: colors-ui-surface-panel
+  position: relative
+  z-index: 5  // same as side docked panels — keeps panel children below backdrop (98)
+  min-height: 100px
+  max-height: 600px
+  overflow: hidden
+  width: 100%
+
+  &.docked-open
+    display: flex
+    height: 280px  // default; overridden by JS resize
+
+#auto-hide-docked-bottom-content
+  flex: 1
+  overflow: auto
+  min-width: 0
+  position: relative
+  padding-top: 4px  // reserve space for the resize handle
+
+// Bottom resize handle — horizontal bar on the TOP edge, drag up to expand.
+// Inherits base styles from .auto-hide-docked-resize-handle; overrides for
+// horizontal orientation.
+.auto-hide-docked-resize-handle-bottom
+  top: 0
+  left: 0
+  right: 0
+  bottom: auto
+  height: 4px
+  width: auto
+  cursor: ns-resize
+
+// ---------------------------------------------------------------------------
+// Bottom auto-hide strip — the sole content of the redesigned #status-base.
+// The bar is 1.75rem tall with 0.25em padding-top for curve visibility.
+// Tabs fill the remaining 1.5em height via align-items: stretch.
+// ---------------------------------------------------------------------------
+
+#auto-hide-bottom-strip
   display: flex
   flex-direction: row
-  align-items: center
-  gap: 0.125em
-  margin-left: 0.5em
-  min-width: 0
-  height: 100%
+  align-items: stretch
+  flex: 1          // fill the full width of #status-base
+  overflow: visible
+  position: relative
+  z-index: 100
 
-  // Hide when empty so it doesn't affect status bar layout.
-  &:empty
-    display: none
+// ---------------------------------------------------------------------------
+// Bottom strip tab overrides — use the same .auto-hide-strip-tab classes
+// as the side strips but re-orient for horizontal bottom layout.
+// Open end faces UP (toward GL content / docked panel above).
+// ---------------------------------------------------------------------------
+
+#auto-hide-bottom-strip .auto-hide-strip-tab
+  // Horizontal layout: tabs stack left-to-right.
+  flex-direction: row
+  align-items: center
+  // Horizontal padding instead of vertical; match the 0.38em breathing room
+  // on each side that the side strip uses as padding-left/right.
+  padding: 0 0.5em
+  margin-bottom: 0
+  margin-right: 0.24em
+  // Tab height is the full status-bar height — no explicit height needed
+  // since the parent is align-items: stretch.
+  // Curves on TOP: the open end faces upward toward the content above.
+  border-top-left-radius: 0em
+  border-top-right-radius: 0em
+  border-bottom-left-radius: 0.36em
+  border-bottom-right-radius: 0.36em
+  overflow: visible  // allow curve pseudo-elements to bleed outside the tab
+
+  &.active
+    color: colors-ui-text-primary-label
+    border-top-left-radius: 0em
+    border-top-right-radius: 0em
+    border-bottom-left-radius: 0.36em
+    border-bottom-right-radius: 0.36em
+    // Shadow bridges the gap between the strip top edge and the docked panel.
+    box-shadow: 0em -0.48em 0em 0em colors-ui-surface-panel
+    overflow: visible
+    z-index: 1
+
+    // LEFT curve — to the left of the active tab.
+    &::before
+      content: " "
+      pointer-events: none
+      position: absolute
+      display: block
+      height: 80%
+      width: 1.625em
+      top: 0em
+      left: -1.625em
+      z-index: 1
+      border-radius: 0 0.625em 0 0
+      opacity: 1
+      box-shadow: 0.625em -0.34em 0 -0.25em colors-ui-surface-panel
+      transform: translate(0em, -0.25625em)
+
+    // RIGHT curve — to the right of the active tab.
+    &::after
+      content: " "
+      pointer-events: none
+      position: absolute
+      display: block
+      height: 80%
+      width: 1.625em
+      top: 0em
+      right: -1.625em
+      z-index: 1
+      border-radius: 0.625em 0 0 0
+      opacity: 1
+      box-shadow: -0.625em -0.34em 0 -0.25em colors-ui-surface-panel
+      transform: translate(0em, -0.25625em)
+
+// Label: no writing-mode rotation for horizontal tabs.
+#auto-hide-bottom-strip .auto-hide-strip-tab-label
+  writing-mode: horizontal-tb
+  text-orientation: mixed
+  transform: none
+  padding-left: 0
+  padding-right: 0.38em
+  max-height: none
+
+// Buttons sit inline (to the right of the label) instead of above it.
+#auto-hide-bottom-strip .auto-hide-strip-tab-buttons
+  flex-direction: row
+  margin-bottom: 0
+  margin-left: 0.2em
+  gap: 0.2em
 
 // ---------------------------------------------------------------------------
 // Strip tabs — individual clickable tabs within a strip.
@@ -323,10 +448,7 @@
   // the text characters; they expand the label's natural width symmetrically.
   padding-left: 0.38em
   padding-right: 0.38em
-  max-height: 120px
   white-space: nowrap
-  overflow: hidden
-  text-overflow: ellipsis
 
 // Left strip: text reads bottom-to-top.
 #auto-hide-strip-left .auto-hide-strip-tab-label
@@ -402,7 +524,10 @@
   text-overflow: ellipsis
 
 // ---------------------------------------------------------------------------
-// Backdrop — semi-transparent overlay behind the slide-in panel.
+// Backdrop — invisible click-to-dismiss layer behind the slide-in panel.
+// No background color: the overlay appears without dimming any content.
+// z-index: 98 — below the strips (100) so the backdrop never intercepts
+// mouseenter/mouseleave on strip tabs (prevents hover-preview flicker).
 // ---------------------------------------------------------------------------
 
 #auto-hide-backdrop
@@ -412,7 +537,7 @@
   left: 0
   right: 0
   bottom: 0
-  background-color: rgba(0, 0, 0, 0.25)
+  background-color: transparent
   z-index: 98
 
 #auto-hide-overlay.visible ~ #auto-hide-backdrop
@@ -425,9 +550,7 @@
 
 #auto-hide-overlay
   position: fixed
-  // z-index: 101 places the overlay ABOVE the strip (100) so the overlay's
-  // panel-color background covers the tab box-shadow that extends slightly
-  // into the overlay area — ensuring no rendering seam at the boundary.
+  // z-index: 101 — above the backdrop (98) and the strips (100).
   z-index: 101
   // Use surface-panel to match the active strip tab, so the tab's box-shadow
   // connection blends seamlessly into the overlay.
@@ -454,28 +577,29 @@
 #auto-hide-overlay.auto-hide-overlay-left
   top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
   left: 2em
-  // #status-base is height: 2em at font-size: 0.75rem = 1.5rem actual height.
-  // Stop above the status bar so the overlay doesn't clip over it.
-  bottom: 1.5rem
+  // Bottom tab strip is 1.75rem tall. Stop above it so the overlay doesn't overlap.
+  bottom: 1.75rem
   width: 360px
-  border-right: 1px solid colors-ui-border-tertiary
+  // 4px right separator matches the docked panel's resize-handle divider style.
+  // No top border so it looks integrated, not like a floating popup.
+  border-right: 4px solid colors-ui-surface-primary-default
 
 // Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
   top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
   right: 2em
-  bottom: 1.5rem  // stop above the status bar (2em at 0.75rem font-size = 1.5rem)
+  bottom: 1.75rem  // stop above the bottom tab strip (1.75rem)
   width: 360px
-  border-left: 1px solid colors-ui-border-tertiary
+  border-left: 4px solid colors-ui-surface-primary-default
 
-// Bottom overlay: flush with bottom window edge, full width.
-// Only the top edge gets a border.
+// Bottom overlay: sits above the tab strip, full width.
+// 4px top separator matches the docked bottom panel's resize-handle style.
 #auto-hide-overlay.auto-hide-overlay-bottom
   left: 0
   right: 0
-  bottom: 0
+  bottom: 1.75rem  // stop above the bottom tab strip
   height: 280px
-  border-top: 1px solid PRIMARY_BASE
+  border-top: 4px solid colors-ui-surface-primary-default
 
 // ---------------------------------------------------------------------------
 // Overlay header — hidden: the active strip tab acts as the panel header.

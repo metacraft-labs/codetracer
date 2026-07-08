@@ -258,7 +258,7 @@ when defined(js):
       renderStatusInto(r, container, model, self.statusShellCallbacks())
       discard windowSetTimeout(proc() =
         requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
-        requestBottomAutoHideTabsRender(cstring"auto-hide-bottom-tabs")
+        requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
       , 0)
     except CatchableError as e:
       cerror "status: render failed: " & e.msg

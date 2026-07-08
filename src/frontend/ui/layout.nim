@@ -1042,11 +1042,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     requestAutoHideSideStripRender(
       cstring"auto-hide-strip-right",
       AutoHideEdge.Right)
-    # Bottom tabs are rendered inside the status bar; refresh the direct
-    # IsoNim status shell so its nested auto-hide hosts are recreated before
-    # the bottom-tab view is mounted into them.
+    # Bottom strip lives in #status-base. Re-render status first so the
+    # #auto-hide-bottom-strip host exists, then mount the strip into it.
     if not data.ui.status.isNil:
       data.ui.status.requestStatusRender()
+    requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
 
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-left",
@@ -1054,6 +1054,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-right",
     AutoHideEdge.Right)
+  requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
 
   # Wire overlay header buttons and dismissal handlers.
   setupAutoHideOverlay(layout)
