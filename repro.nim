@@ -2,6 +2,9 @@ import std/[os, strutils]
 
 import repro_dsl_stdlib
 
+
+
+
 const
   PublicResourceRoot = "src/public"
 
@@ -1145,32 +1148,32 @@ package codeTracer:
           afterValue = codetracerActions & frontendActions & styleActions)
         target("macos-app", macosApp)
 
-        let macosDmg = ctShell(
-          "macos-dmg",
-          "set -eu\n" &
-          "cd non-nix-build\n" &
-          "rm -f CodeTracer.dmg\n" &
-          "DMG_STAGING=$(mktemp -d)\n" &
-          "trap 'rm -rf \"$DMG_STAGING\"' EXIT\n" &
-          "cp -R CodeTracer.app \"$DMG_STAGING/\"\n" &
-          "create-dmg " &
-            "--volname CodeTracer " &
-            "--background dmg_background.png " &
-            "--window-pos 200 120 " &
-            "--window-size 600 400 " &
-            "--icon-size 100 " &
-            "--icon CodeTracer.app 150 200 " &
-            "--app-drop-link 450 200 " &
-            "--sandbox-safe " &
-            "CodeTracer.dmg \"$DMG_STAGING\"",
-          extraInputsValue = @[
-            "non-nix-build/CodeTracer.app",
+        let stagingApp = fs.preserveTree(
+          sourceRoot = "non-nix-build/CodeTracer.app",
+          outputRoot = "non-nix-build/dmg-staging/CodeTracer.app",
+          actionId = "stage-app-for-dmg",
+          after = @[macosApp]
+        )
+
+        let macosDmg = create_dmg(
+          volname = "CodeTracer",
+          background = "non-nix-build/dmg_background.png",
+          windowPos = @["200", "120"],
+          windowSize = @["600", "400"],
+          iconSize = "100",
+          icon = @["CodeTracer.app", "150", "200"],
+          appDropLink = @["450", "200"],
+          sandboxSafe = true,
+          dmg = "non-nix-build/CodeTracer.dmg",
+          src = "non-nix-build/dmg-staging",
+          actionId = "macos-dmg",
+          extraInputs = @[
             "non-nix-build/dmg_background.png"
           ],
-          extraOutputsValue = @["non-nix-build/CodeTracer.dmg"],
-          afterValue = @[macosApp],
-          cacheableValue = false)
+          after = @[stagingApp]
+        )
         target("dmg", macosDmg)
+
 
       when defined(windows):
         # Windows app staging — assembles the prebuilt CodeTracer tree
