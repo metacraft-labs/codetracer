@@ -343,7 +343,7 @@ package codeTracer:
     "capnp >=0"
     "cargo >=1"
     "emcc >=0"
-    "gcc >=1"
+    "gcc >=10"
     "git >=2"
     "just >=1"
     "mdbook >=0"
@@ -644,6 +644,7 @@ package codeTracer:
           passC = WindowsExtraPassC,
           passL = WindowsExtraPassL,
           nimcache = nimcachePath,
+          paths = CodeTracerNimPaths,
           output = outputPath & ".exe",
           source = sourcePath)
       else:
@@ -664,6 +665,7 @@ package codeTracer:
           dynlibOverrides = NativeDynlibOverrides,
           passL = NativePassL,
           nimcache = nimcachePath,
+          paths = CodeTracerNimPaths,
           output = outputPath,
           source = sourcePath)
 
@@ -1245,10 +1247,10 @@ package codeTracer:
           "const ver=fs.readFileSync('src/ct/version.nim','utf8');" &
           "const match=(r)=>{const m=ver.match(r);if(!m)" &
             "throw new Error('version field missing: '+r);return m[1].trim();};" &
-          "const Y=match(/CodeTracerYear\\*\\s*=\\s*(\\d+)/);" &
-          "const M=String(parseInt(match(/CodeTracerMonth\\*\\s*=\\s*(\\d+)/),10))" &
+          "const Y=match(/CodeTracerYear[*][ ]*=[ ]*([0-9]+)/);" &
+          "const M=String(parseInt(match(/CodeTracerMonth[*][ ]*=[ ]*([0-9]+)/),10))" &
             ".padStart(2,'0');" &
-          "const B=match(/CodeTracerBuild\\*\\s*=\\s*(\\d+)/);" &
+          "const B=match(/CodeTracerBuild[*][ ]*=[ ]*([0-9]+)/);" &
           "const VERSION=Y+'.'+M+'.'+B;" &
           "const REPO_ROOT=process.cwd();" &
           "const STAGING=path.join(REPO_ROOT,'non-nix-build','CodeTracer-win');" &
