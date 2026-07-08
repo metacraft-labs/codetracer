@@ -43,9 +43,9 @@ import
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_auto_hide_bottom_tabs_view import
-    AutoHideBottomTabRecord, AutoHideBottomTabsCallbacks,
-    renderAutoHideBottomTabsInto
+  from ../viewmodel/views/isonim_auto_hide_bottom_strip_view import
+    AutoHideBottomStripRecord, AutoHideBottomStripCallbacks,
+    renderAutoHideBottomStripInto
   from ../viewmodel/views/isonim_auto_hide_side_strip_view import
     AutoHideSideStripRecord, AutoHideSideStripCallbacks,
     renderAutoHideSideStripInto
@@ -132,7 +132,7 @@ var hoverPreviewTimerId: int = -1
 ## Delay before a hover opens the overlay as a preview (ms).
 const HOVER_PREVIEW_DELAY_MS* = 200
 
-## Resize-drag state for docked sidebars.
+## Resize-drag state for docked sidebars (left/right — horizontal drag).
 var dockedResizing: bool = false
 var dockedResizeStartX: int = 0
 var dockedResizeStartWidth: int = 0
@@ -140,6 +140,11 @@ var dockedResizeContainerId: cstring = cstring""
 ## True when dragging the left-panel handle (drag right = expand).
 ## False for the right-panel handle (drag left = expand).
 var dockedResizeIsLeft: bool = true
+
+## Resize-drag state for the bottom docked panel (vertical drag).
+var dockedBottomResizing: bool = false
+var dockedBottomResizeStartY: int = 0
+var dockedBottomResizeStartHeight: int = 0
 
 proc initAutoHideState*() =
   ## Initialise the auto-hide state. Call once during layout init.
@@ -197,6 +202,7 @@ proc hideDockedPanel*()
 proc cancelHoverPreview*()
 proc hideOverlay*()
 proc deferredUpdateGLSize()
+
 
 # ---------------------------------------------------------------------------
 # Pin / Unpin
@@ -453,15 +459,16 @@ proc dockedContainerId(edge: AutoHideEdge): cstring =
   case edge
   of Left:   cstring"auto-hide-docked-left"
   of Right:  cstring"auto-hide-docked-right"
-  of Bottom: cstring"auto-hide-docked-left"  # Bottom panels fall back to left
+  of Bottom: cstring"auto-hide-docked-bottom"
 
 proc dockedContentId(edge: AutoHideEdge): cstring =
   case edge
   of Left:   cstring"auto-hide-docked-left-content"
   of Right:  cstring"auto-hide-docked-right-content"
-  of Bottom: cstring"auto-hide-docked-left-content"
+  of Bottom: cstring"auto-hide-docked-bottom-content"
 
 proc getElementOffsetWidth(el: Element): int {.importjs: "#.offsetWidth".}
+proc getElementOffsetHeight(el: Element): int {.importjs: "#.offsetHeight".}
 
 proc updateGLSize() =
   ## Tell GoldenLayout to recompute its size after the docked sidebar
@@ -570,10 +577,10 @@ proc showDockedPanel*(panel: AutoHidePanel) =
   dispatchLayoutUpdated()
 
 proc setupDockedResizeHandles*() =
-  ## Wire drag-to-resize on both docked panel grips.
+  ## Wire drag-to-resize for left, right, and bottom docked panels.
   ## Must be called once after the DOM is ready.
 
-  # Single document-level handlers update whichever panel is being dragged.
+  # Left / right side panels — horizontal drag (ew-resize).
   document.addEventListener(cstring"mousemove", proc(ev: Event) =
     if not dockedResizing:
       return
@@ -590,7 +597,6 @@ proc setupDockedResizeHandles*() =
   document.addEventListener(cstring"mouseup", proc(ev: Event) =
     if dockedResizing:
       dockedResizing = false
-      # Remove .resizing highlight from all handles.
       let lh = document.getElementById(cstring"auto-hide-docked-left-resize")
       let rh = document.getElementById(cstring"auto-hide-docked-right-resize")
       if not lh.isNil: lh.classList.remove(cstring"resizing")
@@ -618,6 +624,35 @@ proc setupDockedResizeHandles*() =
     cstring"auto-hide-docked-right-resize",
     cstring"auto-hide-docked-right",
     false)
+
+  # Bottom panel — vertical drag (ns-resize). Dragging UP increases height.
+  document.addEventListener(cstring"mousemove", proc(ev: Event) =
+    if not dockedBottomResizing:
+      return
+    let mouseEv = cast[JsObject](ev)
+    let clientY = mouseEv.clientY.to(int)
+    let dy = dockedBottomResizeStartY - clientY  # drag up = positive delta
+    let newHeight = max(100, min(600, dockedBottomResizeStartHeight + dy))
+    let containerEl = document.getElementById(cstring"auto-hide-docked-bottom")
+    if not containerEl.isNil:
+      containerEl.style.height = cstring($newHeight & "px")
+    updateGLSize())
+
+  document.addEventListener(cstring"mouseup", proc(ev: Event) =
+    if dockedBottomResizing:
+      dockedBottomResizing = false
+      let bh = document.getElementById(cstring"auto-hide-docked-bottom-resize")
+      if not bh.isNil: bh.classList.remove(cstring"resizing"))
+
+  let bottomHandle = document.getElementById(cstring"auto-hide-docked-bottom-resize")
+  let bottomContainer = document.getElementById(cstring"auto-hide-docked-bottom")
+  if not bottomHandle.isNil and not bottomContainer.isNil:
+    bottomHandle.addEventListener(cstring"mousedown", proc(ev: Event) =
+      let mouseEv = cast[JsObject](ev)
+      dockedBottomResizing = true
+      dockedBottomResizeStartY = mouseEv.clientY.to(int)
+      dockedBottomResizeStartHeight = getElementOffsetHeight(bottomContainer)
+      bottomHandle.classList.add(cstring"resizing"))
 
 proc closePanelFromStrip*(panel: AutoHidePanel) =
   ## Remove a panel from the auto-hide strip entirely, discarding it.
@@ -960,33 +995,58 @@ else:
   proc requestAutoHideSideStripRender*(containerId: cstring, edge: AutoHideEdge) =
     discard
 
-proc bottomAutoHideTabsModel*(): seq[AutoHidePanel] =
-  ## Derive bottom-pinned panels for the status-bar bottom tab host.
+proc bottomStripModel*(): seq[AutoHidePanel] =
+  ## Derive bottom-pinned panels for the status-bar bottom strip.
   if autoHideState.isNil:
     return @[]
   autoHideState.panelsForEdge(AutoHideEdge.Bottom)
 
 when defined(js):
-  proc requestBottomAutoHideTabsRender*(containerId: cstring) =
-    ## Refresh bottom auto-hide tabs through IsoNim direct DOM.
+  proc requestAutoHideBottomStripRender*(containerId: cstring) =
+    ## Refresh the bottom auto-hide strip through IsoNim direct DOM.
     let container = dom_api.getElementById(dom_api.document, containerId)
     if dom_api.isNodeNil(dom_api.Node(container)):
       return
 
-    let panels = bottomAutoHideTabsModel()
-    var records: seq[AutoHideBottomTabRecord] = @[]
+    let panels = bottomStripModel()
+    var records: seq[AutoHideBottomStripRecord] = @[]
     for panel in panels:
-      records.add(AutoHideBottomTabRecord(title: $panel.title))
+      let isActive = not autoHideState.isNil and (
+        (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
+        (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
+      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive))
 
-    let callbacks = AutoHideBottomTabsCallbacks(
+    let callbacks = AutoHideBottomStripCallbacks(
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
-          showOverlay(panels[index]))
+          showDockedPanel(panels[index]),
+      onClose: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          closePanelFromStrip(panels[index]),
+      onUnpin: proc(index: int) =
+        if not autoHideLayout.isNil and index >= 0 and index < panels.len:
+          hideOverlay()
+          hideDockedPanel()
+          unpinPanel(autoHideLayout, panels[index]),
+      onHoverEnter: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
+            return
+          cancelHoverPreview()
+          let capturedPanel = panels[index]
+          hoverPreviewTimerId = windowSetTimeout(proc() =
+            hoverPreviewTimerId = -1
+            showOverlayPreview(capturedPanel)
+          , HOVER_PREVIEW_DELAY_MS))
     let r = WebRenderer()
-    renderAutoHideBottomTabsInto(r, container, records, callbacks)
+    renderAutoHideBottomStripInto(r, container, records, callbacks)
 else:
-  proc requestBottomAutoHideTabsRender*(containerId: cstring) =
+  proc requestAutoHideBottomStripRender*(containerId: cstring) =
     discard
+
+## Keep old name as an alias so any lingering call sites don't break.
+proc requestBottomAutoHideTabsRender*(containerId: cstring) =
+  requestAutoHideBottomStripRender(containerId)
 
 proc collapsedIconZoneModel*(): seq[AutoHidePanel] =
   ## Derive side-pinned panels that should appear in the collapsed status-bar
