@@ -22,6 +22,8 @@ type
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
     onCollapsedSelect*: proc()
+    ## Called when mouse enters a tab. Used to trigger the 200ms hover preview.
+    onHoverEnter*: proc(index: int)
 
 const
   AutoHideSideStripHasTabsClass* = "has-tabs"
@@ -58,6 +60,10 @@ proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
 proc invokeCollapsedSelect(callbacks: AutoHideSideStripCallbacks) =
   if not callbacks.onCollapsedSelect.isNil:
     callbacks.onCollapsedSelect()
+
+proc invokeHoverEnter(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onHoverEnter.isNil:
+    callbacks.onHoverEnter(index)
 
 proc renderSideStripTab(
     r: MockRenderer;
@@ -104,12 +110,14 @@ when defined(js):
     # They sit at the TOP of the tab div above the text label.
     # Both buttons use manual addEventListener with stopPropagation so that
     # clicking a button on an inactive tab doesn't also trigger showOverlay.
+    # mouseenter on the tab itself triggers the 200ms hover-preview timer.
+    var tabEl: isonim_dom.Element
     var closeBtnEl: isonim_dom.Element
     var unpinBtnEl: isonim_dom.Element
     result = ui(r):
-      tdiv(
-          class = cls,
-          onclick = proc() = callbacks.invokeSelect(index)):
+      tdiv(ref = tabEl,
+           class = cls,
+           onclick = proc() = callbacks.invokeSelect(index)):
         tdiv(class = AutoHideSideStripTabButtonsClass):
           tdiv(ref = closeBtnEl,
                class = AutoHideSideStripTabCloseBtnClass,
@@ -119,6 +127,9 @@ when defined(js):
                title = "Unpin (restore to layout)")
         span(class = AutoHideSideStripTabLabelClass):
           text tab.title
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
+      proc(ev: isonim_dom.Event) =
+        callbacks.invokeHoverEnter(index))
     isonim_dom.addEventListener(isonim_dom.Node(closeBtnEl), cstring"click",
       proc(ev: isonim_dom.Event) =
         ev.stopPropagation()
