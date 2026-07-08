@@ -194,29 +194,36 @@ const
     "XCannotRaiseY]:off"
   ]
   DisabledCaseTransitionWarning = @["CaseTransition]:off"]
+  projectRootPath = parentDir(currentSourcePath())
+  workspaceRootPath = parentDir(projectRootPath)
   CodeTracerNimPaths = @[
-    "libs/NimYAML",
-    "libs/asynctools",
-    "libs/karax/karax",
-    "libs/nim",
-    "libs/nim-chronicles/",
-    "libs/nim-faststreams",
-    "libs/nim-json-serialization",
-    "libs/nim-prompt",
-    "libs/nim-serialization",
-    "libs/nim-stew",
-    "libs/nim-unicodedb/src",
-    "libs/poly",
-    "libs/quicktest",
-    "libs/asynctools",
-    "libs/chronos",
-    "libs/parsetoml/src",
-    "libs/nim-result",
-    "libs/nim-confutils",
-    "libs/nimcrypto",
-    "libs/zip",
-    "libs/jsony/src",
-    "libs/nim-uuid4/src"
+    projectRootPath / "src/frontend",
+    workspaceRootPath / "isonim" / "src",
+    workspaceRootPath / "nim-everywhere" / "src",
+    workspaceRootPath / "nim-agent-harbor" / "src",
+    workspaceRootPath / "nim-agents" / "src",
+    workspaceRootPath / "nim-acp" / "src",
+    projectRootPath / "libs/NimYAML",
+    projectRootPath / "libs/asynctools",
+    projectRootPath / "libs/karax/karax",
+    projectRootPath / "libs/nim",
+    projectRootPath / "libs/nim-chronicles",
+    projectRootPath / "libs/nim-faststreams",
+    projectRootPath / "libs/nim-json-serialization",
+    projectRootPath / "libs/nim-prompt",
+    projectRootPath / "libs/nim-serialization",
+    projectRootPath / "libs/nim-stew",
+    projectRootPath / "libs/nim-unicodedb/src",
+    projectRootPath / "libs/poly",
+    projectRootPath / "libs/quicktest",
+    projectRootPath / "libs/chronos",
+    projectRootPath / "libs/parsetoml/src",
+    projectRootPath / "libs/nim-result",
+    projectRootPath / "libs/nim-confutils",
+    projectRootPath / "libs/nimcrypto",
+    projectRootPath / "libs/zip",
+    projectRootPath / "libs/jsony/src",
+    projectRootPath / "libs/nim-uuid4/src"
   ]
   StylusCssEntryPoints = @[
     "default_white_theme",
