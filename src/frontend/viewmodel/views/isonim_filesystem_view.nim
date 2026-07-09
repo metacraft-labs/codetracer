@@ -251,16 +251,20 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
   ## rebuilds the dynamic content whenever any source signal changes.
   var treeContainer: MockNode
   var emptyContainer: MockNode
+  var loadingContainer: MockNode
+  var filesystemContainer: MockNode
   var diffContainer: MockNode
   var deepReviewContainer: MockNode
 
   let panel = ui(r):
     tdiv(class = FilesystemContainerClass):
-      tdiv(class = "filesystem"):
+      tdiv(ref = filesystemContainer, class = "filesystem"):
         tdiv(ref = treeContainer, class = FilesystemTreeContainerClass):
           discard
         tdiv(ref = emptyContainer, class = "filesystem-empty-overlay"):
           text FilesystemEmptyStateText
+        tdiv(ref = loadingContainer, class = "filesystem-loading-overlay"):
+          text "Loading..."
       tdiv(ref = diffContainer, class = "diff-files-list"):
         discard
       tdiv(ref = deepReviewContainer, class = "deepreview-file-list"):
@@ -268,8 +272,9 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
 
   createRenderEffect proc() =
     # -- Tree --
+    let isLoading = vm.loadingState.val == lsLoading
     let root = vm.rootEntry.val
-    let showEmpty = root.text.len == 0 and root.children.len == 0 and
+    let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
       vm.diffEntries.val.len == 0 and vm.deepReviewFiles.val.len == 0
     r.clearChildren(treeContainer)
     if root.text.len > 0 and root.text != "/":
@@ -291,6 +296,16 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     else:
       r.setAttribute(emptyContainer, "class",
                      "filesystem-empty-overlay hidden")
+
+    # -- Loading-state overlay --
+    if isLoading:
+      r.setAttribute(loadingContainer, "class", "filesystem-loading-overlay")
+    else:
+      r.setAttribute(loadingContainer, "class",
+                     "filesystem-loading-overlay hidden")
+
+    let busyVal = if isLoading: "true" else: "false"
+    r.setAttribute(filesystemContainer, "aria-busy", busyVal)
 
     # -- Diff list --
     let diffs = vm.diffEntries.val
@@ -481,12 +496,15 @@ when defined(js):
     ## the empty-state placeholder.
     var treeContainer: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
+    var loadingContainer: isonim_dom.Element
+    var filesystemContainer: isonim_dom.Element
     var diffContainer: isonim_dom.Element
     var deepReviewContainer: isonim_dom.Element
 
     let panel = ui(r):
       tdiv(id = "filesystemComponent", class = FilesystemContainerClass):
-        tdiv(class = "filesystem jstree jstree-1 jstree-default",
+        tdiv(ref = filesystemContainer,
+             class = "filesystem jstree jstree-1 jstree-default",
              role = "tree", `aria-multiselectable` = "true",
              tabindex = "0", `aria-activedescendant` = "j1_1",
              `aria-busy` = "false"):
@@ -495,9 +513,11 @@ when defined(js):
                      "jstree-wholerow-ul jstree-no-dots " &
                      FilesystemTreeContainerClass,
              role = "group"):
-            discard
+             discard
           tdiv(ref = emptyContainer, class = "filesystem-empty-overlay"):
             text FilesystemEmptyStateText
+          tdiv(ref = loadingContainer, class = "filesystem-loading-overlay"):
+            text "Loading..."
         tdiv(ref = diffContainer, class = "diff-files-list"):
           discard
         tdiv(ref = deepReviewContainer, class = "deepreview-file-list"):
@@ -505,8 +525,9 @@ when defined(js):
 
     createRenderEffect proc() =
       # -- Tree --
+      let isLoading = vm.loadingState.val == lsLoading
       let root = vm.rootEntry.val
-      let showEmpty = root.text.len == 0 and root.children.len == 0 and
+      let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
         vm.diffEntries.val.len == 0 and vm.deepReviewFiles.val.len == 0
       clearWebChildren(treeContainer)
       if root.text.len > 0 and root.text != "/":
@@ -531,6 +552,17 @@ when defined(js):
       else:
         isonim_dom.setAttribute(emptyContainer, cstring"class",
                                 cstring"filesystem-empty-overlay hidden")
+
+      # -- Loading-state overlay --
+      if isLoading:
+        isonim_dom.setAttribute(loadingContainer, cstring"class",
+                                cstring"filesystem-loading-overlay")
+      else:
+        isonim_dom.setAttribute(loadingContainer, cstring"class",
+                                cstring"filesystem-loading-overlay hidden")
+
+      let busyVal = if isLoading: cstring"true" else: cstring"false"
+      isonim_dom.setAttribute(filesystemContainer, cstring"aria-busy", busyVal)
 
       # -- Diff list --
       let diffs = vm.diffEntries.val

@@ -8240,6 +8240,7 @@ suite "IsoNim Filesystem Panel — structure":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
+      vm.loadingState.val = lsIdle
       let r = MockRenderer()
 
       let panel = renderFilesystemPanel(r, vm)
@@ -8270,6 +8271,47 @@ suite "IsoNim Filesystem Panel — structure":
       let deepReview = findByClass(panel, "deepreview-file-list")
       check deepReview != nil
       check "hidden" in deepReview.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Loading state
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Filesystem Panel — loading state":
+
+  test "loading state overlay visibility and aria-busy attribute":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      let loadingOverlay = findByClass(panel, "filesystem-loading-overlay")
+      let emptyOverlay = findByClass(panel, "filesystem-empty-overlay")
+      let filesystemDiv = findByClass(panel, "filesystem")
+
+      # Initial state: should be loading
+      check vm.loadingState.val == lsLoading
+      check loadingOverlay != nil
+      check "hidden" notin loadingOverlay.attributes["class"]
+      check emptyOverlay != nil
+      check "hidden" in emptyOverlay.attributes["class"]
+      check filesystemDiv.attributes["aria-busy"] == "true"
+
+      # When root is loaded, it transitions to idle
+      vm.setRoot(makeFsRoot(@[makeFsEntry("a.nim")]))
+      check vm.loadingState.val == lsIdle
+      check "hidden" in loadingOverlay.attributes["class"]
+      check "hidden" in emptyOverlay.attributes["class"]
+      check filesystemDiv.attributes["aria-busy"] == "false"
+
+      # When cleared, it transitions back to loading
+      vm.clearRoot()
+      check vm.loadingState.val == lsLoading
+      check "hidden" notin loadingOverlay.attributes["class"]
+      check "hidden" in emptyOverlay.attributes["class"]
+      check filesystemDiv.attributes["aria-busy"] == "true"
 
       dispose()
 

@@ -113,6 +113,7 @@ type
 
     # -- Mutable state --
     rootEntry*: Signal[FilesystemEntryNode]
+    loadingState*: Signal[LoadingState]
     expandedPaths*: Signal[HashSet[string]]
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
     deepReviewActive*: Signal[bool]
@@ -181,11 +182,13 @@ proc setRoot*(vm: FilesystemVM; root: FilesystemEntryNode) =
   ## ``data.services.editor.filesystem``.  The view re-renders the
   ## tree as a side effect.
   vm.rootEntry.val = root
+  vm.loadingState.val = lsIdle
 
 proc clearRoot*(vm: FilesystemVM) =
   ## Drop the entire tree — used during session resets.  After this
   ## call ``isEmpty`` is true so the empty-state placeholder shows.
   vm.rootEntry.val = emptyEntry()
+  vm.loadingState.val = lsLoading
 
 proc toggleExpanded*(vm: FilesystemVM; path: string) =
   ## Toggle ``path``'s expanded state.  Folders not yet in the
@@ -265,6 +268,7 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     # override above).  Without those, the signal write path would not
     # compile under Nim's side-effect inference for compound types.
     let rootEntry = createSignal(emptyEntry())
+    let loadingState = createSignal(lsLoading)
     let expandedPaths = createSignal(initHashSet[string]())
     let diffEntries = createSignal(newSeq[FilesystemDiffEntry]())
     let deepReviewActive = createSignal(false)
@@ -285,6 +289,7 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     FilesystemVM(
       store: store,
       rootEntry: rootEntry,
+      loadingState: loadingState,
       expandedPaths: expandedPaths,
       diffEntries: diffEntries,
       deepReviewActive: deepReviewActive,

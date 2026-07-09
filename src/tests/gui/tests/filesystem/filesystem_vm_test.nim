@@ -207,6 +207,22 @@ suite "FilesystemVM setRoot / clearRoot":
 
       dispose()
 
+  test "setRoot / clearRoot update loadingState":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      # Initial state is loading
+      check vm.loadingState.val == lsLoading
+
+      vm.setRoot(makeRoot(@[makeEntry("a.nim")]))
+      check vm.loadingState.val == lsIdle
+
+      vm.clearRoot()
+      check vm.loadingState.val == lsLoading
+
+      dispose()
+
   test "openFile invokes the installed editor bridge":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
