@@ -272,6 +272,37 @@ suite "FilesystemVM setRoot / clearRoot":
 
       dispose()
 
+  test "setRoot automatically performs smart expansion on single-child directories":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      # Build a tree:
+      # /
+      # └── src
+      #     └── db-backend
+      #         ├── file1.rs
+      #         └── file2.rs
+      let tree = makeRoot(@[
+        makeEntry("src", path = "src", isFolder = true, children = @[
+          makeEntry("db-backend", path = "src/db-backend", isFolder = true, children = @[
+            makeEntry("file1.rs", path = "src/db-backend/file1.rs"),
+            makeEntry("file2.rs", path = "src/db-backend/file2.rs")
+          ])
+        ])
+      ])
+
+      vm.setRoot(tree)
+
+      # "/" should be expanded (only 1 child "src")
+      check vm.isExpanded("/")
+      # "src" should be expanded (only 1 child "db-backend")
+      check vm.isExpanded("src")
+      # "src/db-backend" should NOT be expanded (2 children)
+      check not vm.isExpanded("src/db-backend")
+
+      dispose()
+
 # ---------------------------------------------------------------------------
 # expand / collapse / toggle
 # ---------------------------------------------------------------------------

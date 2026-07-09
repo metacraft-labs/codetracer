@@ -172,6 +172,15 @@ proc emptyEntry*(): FilesystemEntryNode =
     children: @[],
   )
 
+proc collectSmartExpansionPaths(node: FilesystemEntryNode; paths: var HashSet[string]) =
+  ## Recursively collect folder paths where node has exactly one child and that
+  ## child is also a folder.
+  if node.isFolder:
+    if node.children.len == 1 and node.children[0].isFolder:
+      paths.incl(node.path)
+    for child in node.children:
+      collectSmartExpansionPaths(child, paths)
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
@@ -183,6 +192,11 @@ proc setRoot*(vm: FilesystemVM; root: FilesystemEntryNode) =
   ## tree as a side effect.
   vm.rootEntry.val = root
   vm.loadingState.val = lsIdle
+
+  # Perform smart auto-expansion for single-child folders on load
+  var paths = vm.expandedPaths.val
+  collectSmartExpansionPaths(root, paths)
+  vm.expandedPaths.val = paths
 
 proc clearRoot*(vm: FilesystemVM) =
   ## Drop the entire tree — used during session resets.  After this
@@ -221,7 +235,11 @@ proc collapsePath*(vm: FilesystemVM; path: string) =
 proc setExpandedPaths*(vm: FilesystemVM; paths: HashSet[string]) =
   ## Bulk-replace the expansion set. Used by the legacy bridge to preserve
   ## jstree's ``state.opened`` flags when mirroring a loaded filesystem.
-  vm.expandedPaths.val = paths
+  # Merge with existing paths so smart-expanded paths are preserved
+  var current = vm.expandedPaths.val
+  for p in paths:
+    current.incl(p)
+  vm.expandedPaths.val = current
 
 proc isExpanded*(vm: FilesystemVM; path: string): bool =
   ## Predicate the view uses to decide whether to render a folder's
