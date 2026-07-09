@@ -671,7 +671,10 @@ proc addRecentFolder*(path: string, test: bool) =
   var lastOpenedStr: string = ""
   lastOpenedStr.formatValue(currentDate, "yyyy/MM/dd HH:mm:ss")
 
-  let folderName = extractFilename(path)
+  var cleanPath = path
+  while cleanPath.len > 1 and (cleanPath[^1] == '/' or cleanPath[^1] == '\\'):
+    cleanPath.setLen(cleanPath.len - 1)
+  let folderName = extractFilename(cleanPath)
   let db = ensureDB(test)
 
   # Use INSERT OR REPLACE to handle both new and existing entries

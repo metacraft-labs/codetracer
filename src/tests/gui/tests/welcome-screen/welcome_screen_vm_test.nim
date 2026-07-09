@@ -37,6 +37,7 @@ import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/welcome_screen_vm
+import ../../../../common/trace_index
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -785,3 +786,22 @@ suite "WelcomeScreenVM — new_record_form":
         check cmd.get.args["startsLive"].getBool == false
       check store.session.val.debugSessionMode == completedReplay
       dispose()
+
+suite "trace_index recent folders":
+
+  test "addRecentFolder handles paths with trailing slashes/backslashes":
+    # Call addRecentFolder with different trailing slash styles
+    addRecentFolder("/tmp/test_dir1/", test = true)
+    addRecentFolder("C:\\tmp\\test_dir2\\", test = true)
+    addRecentFolder("/tmp/test_dir3", test = true)
+
+    let folders = findRecentFolders(limit = 10, test = true)
+    # Check that names are correctly extracted (not empty)
+    var names: seq[string] = @[]
+    for f in folders:
+      if f.path == "/tmp/test_dir1/" or f.path == "C:\\tmp\\test_dir2\\" or f.path == "/tmp/test_dir3":
+        names.add(f.name)
+
+    check "test_dir1" in names
+    check "test_dir2" in names
+    check "test_dir3" in names
