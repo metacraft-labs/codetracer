@@ -125,6 +125,7 @@ proc findById*(node: MockNode; id: string): MockNode =
       return found
   return nil
 
+
 suite "IsoNim Editor Panel - structure":
 
   test "top-level editor keeps legacy editorComponent host id":
@@ -8512,6 +8513,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
+      vm.loadingState.val = lsIdle
       let r = MockRenderer()
 
       let panel = renderFilesystemPanel(r, vm)
@@ -8522,7 +8524,8 @@ suite "IsoNim Filesystem Panel — tree rendering":
       check "hidden" in overlay.attributes["class"]
 
       vm.clearRoot()
-      check "hidden" notin overlay.attributes["class"]
+      # When cleared, loadingState transitions to lsLoading, so empty overlay is hidden
+      check "hidden" in overlay.attributes["class"]
 
       dispose()
 
@@ -10468,6 +10471,7 @@ suite "IsoNim VCS Panel — structure":
       let panel = renderVCSPanel(r, vm)
 
       vm.setGitRepoState(false, "Not a git repository")
+      drain()
 
       check panel.attributes["class"] == VCSContainerClass
       let noRepo = findByClass(panel, VCSNoRepoClass)
@@ -10485,7 +10489,8 @@ suite "IsoNim VCS Panel — structure":
       var selectedFile = ""
       var toggled = false
       let callbacks = VCSCallbacks(
-        onSelectCommit: proc(index: int) = (selectedCommit = index),
+        onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
+          (selectedCommit = index),
         onSelectFile: proc(index: int; path: string) =
           (discard index; selectedFile = path),
         onToggleUnifiedDiff: proc() =
@@ -10503,20 +10508,25 @@ suite "IsoNim VCS Panel — structure":
         VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
                    additions: 2, deletions: 1),
       ])
+      vm.syncCommitFilesMap(@[
+        (0, @[VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
+                         additions: 2, deletions: 1)]),
+      ])
+      drain()
 
       check findByClass(panel, "vcs-branch-name").textContent == "main"
-      check findByClass(panel, "vcs-commit-hash").textContent == "abc123"
-      check findByClass(panel, "vcs-file-name").textContent == "main.nim"
+      check findByClass(panel, "vcs-commit-msg").textContent == "initial"
+      check findByClass(panel, "vcs-accordion-file-name").textContent == "main.nim"
 
-      findByClass(panel, "vcs-commit-item").fireEvent("click")
-      findByClass(panel, "vcs-file-item").fireEvent("click")
-      findByClass(panel, "vcs-toggle-button").fireEvent("click")
+      findByClass(panel, "vcs-commit-header").fireEvent("click")
+      findByClass(panel, "vcs-accordion-file").fireEvent("click")
+      findByClass(panel, "vcs-commit-diff-btn").fireEvent("click")
 
       check selectedCommit == 0
       check selectedFile == "src/main.nim"
       check toggled
-      check findByClass(panel, "deepreview-unified-diff") == nil
-      check findByClass(panel, "vcs-changed-files") != nil
+      check findByClass(panel, "deepreview-unified-diff") != nil
+      check findByClass(panel, "vcs-changed-files") == nil
 
       dispose()
 
@@ -10537,6 +10547,7 @@ suite "IsoNim VCS Panel — structure":
         VCSFileRow(status: "A", path: "src/new.nim", baseName: "new.nim",
                    additions: 4, coverageText: "3/4", selected: true),
       ])
+      drain()
 
       check findByClass(panel, "vcs-branch-name").textContent ==
         "Review session"
@@ -10563,16 +10574,22 @@ suite "IsoNim VCS Panel — structure":
       vm.setGitRepoState(true)
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
-      vm.setChangedFiles(@[
-        VCSFileRow(status: "M", path: "src/foo.nim", baseName: "foo.nim",
-                   additions: 5, deletions: 2),
+      drain()
+
+      check findByClass(panel, "deepreview-unified-diff") != nil
+
+      # Now toggle unified diff off, set commits and files, and test file click
+      vm.setUnifiedDiff(false, @[])
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[0])
+      vm.syncCommitFilesMap(@[
+        (0, @[VCSFileRow(status: "M", path: "src/foo.nim", baseName: "foo.nim",
+                         additions: 5, deletions: 2)]),
       ])
+      drain()
 
-      # Panel maintains commit history and file list even when unified diff is active
-      check findByClass(panel, "vcs-changed-files") != nil
-      check findByClass(panel, "deepreview-unified-diff") == nil
-
-      findByClass(panel, "vcs-file-item").fireEvent("click")
+      findByClass(panel, "vcs-accordion-file").fireEvent("click")
       check openedFile == "src/foo.nim"
 
       dispose()

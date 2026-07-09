@@ -91,6 +91,8 @@ when defined(js):
     # so we keep it concatenated.
     if not onClick.isNil:
       let handler = proc(ev: Event) =
+        ev.preventDefault()
+        ev.stopPropagation()
         let tok =
           if summary.isPlaceholder: tokenForSummary(summary)
           else: ""

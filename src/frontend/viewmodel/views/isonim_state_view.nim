@@ -46,6 +46,11 @@ import ../store/types as store_types
 # without an extra import line (same convenience the scratchpad view uses).
 export origin_chain_types
 
+when defined(js):
+  type StateBadgeClickEvent* = isonim_dom.Event
+else:
+  type StateBadgeClickEvent* = MockEvent
+
 # ---------------------------------------------------------------------------
 # Static label / class helpers
 # ---------------------------------------------------------------------------
@@ -206,7 +211,7 @@ proc badgeDisplay(vm: StateVM; item: VariableViewState): string =
   ## DOM (lets reactive updates pick it back up).
   if vm.rowHasBadge(item): "inline-flex" else: "none"
 
-proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc() =
+proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc(ev: StateBadgeClickEvent) =
   ## Per-row click handler. For eager summaries this just toggles the
   ## in-row expansion (spec §3.2.1); for placeholder summaries it ALSO
   ## enqueues the placeholder token for the next batched
@@ -214,7 +219,10 @@ proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc() =
   ## bridge. The bridge is installed by ``state.nim`` once the
   ## ``OriginChainVM`` is available — without it the click just toggles
   ## expansion, which is the desired fallback when running headless.
-  result = proc() =
+  result = proc(ev: StateBadgeClickEvent) =
+    if not ev.isNil:
+      ev.preventDefault()
+      ev.stopPropagation()
     let row = item()
     let id = badgeRowId(row)
     vm.toggleOriginExpansion(id)
