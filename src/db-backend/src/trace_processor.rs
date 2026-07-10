@@ -184,12 +184,32 @@ impl<'a> TraceProcessor<'a> {
             }
             TraceLowLevelEvent::Type(type_record) => self.db.types.push(type_record.clone()),
             TraceLowLevelEvent::Value(full_value_record) => {
-                // We need this loop if any of the variables are registered before the first step
-                // Using while for safe measures instead of a condition statement
+                // Keep the existing Value recording so JS/Beam traces still have their values in self.db.variables
                 while (self.db.variables.len() as i64) < self.current_step_id.0 + 1 {
                     self.db.variables.push(vec![]);
                 }
-                self.db.variables[self.current_step_id].push(full_value_record.clone())
+                self.db.variables[self.current_step_id].push(full_value_record.clone());
+
+                // Treat it as a VariableCell + CellValue registration!
+                let place = Place(full_value_record.variable_id.0 as i64);
+                if self.depth > 0 {
+                    let current_call_variable_cells = &mut self.db.local_variable_cells[self.depth - 1];
+                    current_call_variable_cells.insert(full_value_record.variable_id, place);
+                }
+                if (self.db.variable_cells.len() as i64) < self.current_step_id.0 + 1 {
+                    while (self.db.variable_cells.len() as i64) < self.current_step_id.0 + 1 {
+                        self.db.variable_cells.push(HashMap::new());
+                    }
+                }
+                self.db.variable_cells[self.current_step_id].insert(full_value_record.variable_id, place);
+
+                if (self.db.cells.len() as i64) < self.current_step_id.0 + 1 {
+                    while (self.db.cells.len() as i64) < self.current_step_id.0 + 1 {
+                        self.db.cells.push(HashMap::new());
+                    }
+                }
+                self.db.cells[self.current_step_id].insert(place, full_value_record.value.clone());
+                self.register_simple_cell_change(place);
             }
             TraceLowLevelEvent::Function(function_record) => {
                 // info!("function {:?}", function_record);

@@ -138,6 +138,12 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
             object_files.push(obj);
         }
     }
+    for extra_src in &private_build.extra_sources {
+        println!("cargo:rerun-if-changed={}", extra_src.display());
+        if extra_src.exists() {
+            object_files.push(compile_c_to_obj_windows(extra_src, &obj_dir, &nim_lib, private_build));
+        }
+    }
     assert!(
         !object_files.is_empty(),
         "no .c files found in {} — did Nim regeneration succeed?",
@@ -681,8 +687,13 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
     println!("cargo:rerun-if-changed={}", env_script.display());
 
     if env_script.exists() {
+        #[cfg(target_os = "windows")]
+        let env_script_arg = to_bash_posix_path(&env_script);
+        #[cfg(not(target_os = "windows"))]
+        let env_script_arg = env_script.to_string_lossy().into_owned();
+
         let output = Command::new("bash")
-            .arg(&env_script)
+            .arg(&env_script_arg)
             .arg("print-env")
             .output()
             .unwrap_or_else(|e| panic!("failed to run {} print-env: {e}", env_script.display()));
@@ -700,18 +711,46 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    let to_platform_path = |val: &str| -> PathBuf {
+        let trimmed = val.replace('\\', "/");
+        if trimmed.starts_with('/') && trimmed.len() >= 3 && trimmed.chars().nth(2) == Some('/') {
+            let drive = trimmed.chars().nth(1).unwrap().to_ascii_uppercase();
+            let rest = &trimmed[2..];
+            return PathBuf::from(format!("{}:{}", drive, rest).replace('/', "\\"));
+        }
+        PathBuf::from(trimmed.replace('/', "\\"))
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let to_platform_path = |val: &str| -> PathBuf {
+        PathBuf::from(val)
+    };
+
     let path = |key: &str, default: PathBuf| {
         env_map
             .get(key)
             .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
+            .map(|s| to_platform_path(s))
             .unwrap_or(default)
     };
     let path_list = |key: &str, default: Vec<PathBuf>| {
         env_map
             .get(key)
             .filter(|v| !v.is_empty())
-            .map(|v| env::split_paths(v).collect())
+            .map(|v| {
+                let paths: Vec<PathBuf> = if cfg!(target_os = "windows") && v.starts_with('/') {
+                    v.split(':').map(|s| to_platform_path(s)).collect()
+                } else {
+                    env::split_paths(v).map(|p| {
+                        #[cfg(target_os = "windows")]
+                        return to_platform_path(&p.to_string_lossy());
+                        #[cfg(not(target_os = "windows"))]
+                        return p;
+                    }).collect()
+                };
+                paths
+            })
             .unwrap_or(default)
     };
     let flags = |key: &str, default: &[&str]| {

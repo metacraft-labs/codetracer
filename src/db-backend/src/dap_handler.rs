@@ -5903,10 +5903,12 @@ mod tests {
     use codetracer_trace_types::{
         CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NONE_VALUE, StepId, StepRecord, TraceLowLevelEvent,
         TraceMetadata, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
+        FullValueRecord, VariableId,
     };
     use codetracer_trace_writer::non_streaming_trace_writer::NonStreamingTraceWriter;
     use codetracer_trace_writer::trace_writer::TraceWriter;
     use lang::Lang;
+    use crate::value::ValueRecordWithType;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
 
@@ -6529,6 +6531,73 @@ mod tests {
             },
             stop_after: 0,
         }
+    }
+
+    #[test]
+    fn test_js_variables_available_on_subsequent_steps() {
+        let trace: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/test/workdir")),
+            TraceLowLevelEvent::VariableName("x".to_string()),
+            TraceLowLevelEvent::Type(TypeRecord {
+                kind: TypeKind::Int,
+                lang_type: "number".to_string(),
+                specific_info: TypeSpecificInfo::None,
+            }),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+            // Register variable 'x' on step 0
+            TraceLowLevelEvent::Value(FullValueRecord {
+                variable_id: VariableId(0),
+                value: ValueRecord::Int { i: 42, type_id: TypeId(0) },
+            }),
+            // Another step (e.g. console.log / next line) with no Value event
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(2),
+            }),
+        ];
+
+        let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
+            workdir: PathBuf::from("/test/workdir"),
+            program: "test".to_string(),
+            args: vec![],
+        };
+
+        let mut db = Db::new(&trace_metadata.workdir);
+        let mut trace_processor = TraceProcessor::new(&mut db);
+        trace_processor.postprocess(&trace).unwrap();
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db));
+        let mut handler = Handler::construct_with_reader(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            reader,
+            false,
+        );
+
+        // Step 1: At step 0, variable 'x' should have value 42
+        handler.step_id = StepId(0);
+        let locals_step0 = handler.replay.load_locals(task::CtLoadLocalsArguments::default()).unwrap();
+        let x_step0 = locals_step0.iter().find(|l| l.expression == "x").expect("x should be in locals at step 0");
+        assert!(matches!(x_step0.value, ValueRecordWithType::Int { i: 42, .. }));
+
+        // Step 2: At step 1 (subsequent step), variable 'x' should STILL be in scope and have value 42!
+        handler.step_id = StepId(1);
+        let locals_step1 = handler.replay.load_locals(task::CtLoadLocalsArguments::default()).unwrap();
+        let x_step1 = locals_step1.iter().find(|l| l.expression == "x").expect("x should be in locals at step 1");
+        assert!(matches!(x_step1.value, ValueRecordWithType::Int { i: 42, .. }));
     }
 }
 
