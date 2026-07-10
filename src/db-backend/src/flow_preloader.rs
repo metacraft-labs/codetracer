@@ -267,7 +267,7 @@ impl<'a> CallFlowPreloader<'a> {
             if self.trace_kind == TraceKind::Materialized
                 && self.lang != Lang::Elixir
                 && self.lang != Lang::Erlang
-                && should_seek_materialized_call_body_from_line_only_location(&self.location)
+                && (should_seek_materialized_call_body_from_line_only_location(&self.location) || self.location.rr_ticks.0 > 0)
                 && let Ok(call_loc) = replay.jump_to_call(&self.location)
             {
                 // jump_to_call lands on the call entry step (the Call

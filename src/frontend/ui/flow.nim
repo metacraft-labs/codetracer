@@ -17,7 +17,7 @@ import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/flow_vm import
-  FlowVM, createFlowVM
+  FlowVM, createFlowVM, FlowStepEntry, setSteps
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_flow_view import
   mountIsoNimFlow
@@ -3258,6 +3258,8 @@ proc redrawLinkedLoops*(self:FlowComponent) = # TODO: make it work on more than 
 proc setLoopStatesActiveIteration(self: FlowComponent, debuggerLocationRRTicks: int) =
   for index, loopState in self.loopStates:
     let rrTicksForIterations = self.flow.loops[index].rrTicksForIterations
+    if rrTicksForIterations.len == 0:
+      continue
     let firstLoopIterationRRTicks = rrTicksForIterations[0]
     let lastLoopIterationRRTicks = rrTicksForIterations[rrTicksForIterations.len - 1]
 
@@ -3266,9 +3268,10 @@ proc setLoopStatesActiveIteration(self: FlowComponent, debuggerLocationRRTicks: 
     elif debuggerLocationRRTicks >= lastLoopIterationRRTicks:
       loopState.activeIteration = rrTicksForIterations.len - 1
     else:
-      for index, iteration in rrTicksForIterations:
-        if iteration == debuggerLocationRRTicks:
-          loopState.activeIteration = index
+      for idx in 0 ..< rrTicksForIterations.len - 1:
+        if debuggerLocationRRTicks >= rrTicksForIterations[idx] and debuggerLocationRRTicks < rrTicksForIterations[idx + 1]:
+          loopState.activeIteration = idx
+          break
 
 proc calclulateFlowLineTotalWidth*(self: FlowComponent, position: int): int =
   var totalWidth = 0
@@ -3897,6 +3900,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     self.recalculateAndRedrawFlow()
 
     self.redrawFlow()
+    self.updateFlowOnMove(self.location.rrTicks, self.location.line)
 
     self.recalculate = true
     self.redraw()
@@ -4507,7 +4511,52 @@ proc redrawFlow*(self: FlowComponent) =
     if not zone.flowZones.isNil:
       zone.flowZones.dom.style.toJs.left = self.leftPos
 
+proc syncFlowVM(self: FlowComponent) =
+  if flowVMInstance.isNil or self.flow.isNil:
+    return
+
+  var activeLoop = -1
+  var activeIteration = 0
+  var totalIterations = 1
+
+  if self.flowLines.hasKey(self.location.line):
+    let flowLine = self.flowLines[self.location.line]
+    activeLoop = flowLine.activeLoopIteration.loopIndex
+    activeIteration = flowLine.activeLoopIteration.iteration
+    if activeLoop >= 0 and activeLoop < self.flow.loops.len:
+      totalIterations = self.flow.loops[activeLoop].iteration + 1
+
+  flowVMInstance.iterationCount.val = totalIterations
+  flowVMInstance.selectedIteration.val = activeIteration
+
+  var entries: seq[FlowStepEntry] = @[]
+  for step in self.flow.steps:
+    if activeLoop >= 0:
+      if step.loop == activeLoop and step.iteration != activeIteration:
+        continue
+      if step.loop != activeLoop and step.loop >= 0 and self.loopStates.hasKey(step.loop):
+        if step.iteration != self.loopStates[step.loop].activeIteration:
+          continue
+
+    let locationStr = if self.tab.isNil: "" else: $self.tab.name & ":" & $step.position
+    
+    for expr in step.exprOrder:
+      let beforeVal = if step.beforeValues.hasKey(expr): $step.beforeValues[expr].textRepr(compact=true) else: ""
+      let afterVal = if step.afterValues.hasKey(expr): $step.afterValues[expr].textRepr(compact=true) else: ""
+      
+      entries.add(FlowStepEntry(
+        step: step.stepCount,
+        location: locationStr,
+        expression: $expr,
+        beforeValue: beforeVal,
+        afterValue: afterVal
+      ))
+
+  flowVMInstance.steps.val = entries
+
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
+  if self.flow.isNil:
+    return
   let debuggerLocationRRTicks = rrTicks
   let debuggerLocationLine = line
 
@@ -4610,10 +4659,12 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
     if not self.flowLines[activeLoopFirstLine].sliderDom.isNil and not self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.isNil:
       self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
 
+  self.syncFlowVM()
+
 
 method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
   self.location = response.location
-  # self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+  self.updateFlowOnMove(self.location.rrTicks, self.location.line)
   self.redrawFlow()
   self.scheduleActiveLoopIterationValueRender()
 
