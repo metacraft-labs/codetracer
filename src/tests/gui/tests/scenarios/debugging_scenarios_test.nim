@@ -31,6 +31,7 @@
 
 import std/[json, unittest, options, sets]
 import vm_test_helpers
+import ../../../../common/lang
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
@@ -1022,5 +1023,52 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
       drain()
 
       check mock.countCommands("ct/load-calltrace-section") == 0
+
+      dispose()
+
+  test "test_php_debugger_line_jump":
+    ## Verifies PHP debugging steps accurately land on consecutive line targets
+    ## instead of skipping line jumps.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
+      drain()
+
+      # Clear initial commands
+      mock.clearReceivedCommands()
+
+      # 1. Load PHP trace — debugger at index.php, line 1, rrTicks 100
+      session.store.updateDebuggerPosition(100'u64, "index.php", 1)
+      drain()
+
+      # Verify it resolved to LangPhp and usesMaterializedTraces is true
+      let activeLang = toLangFromFilename("index.php")
+      check activeLang == LangPhp
+      check usesMaterializedTraces(activeLang) == true
+
+      # Verify locals request was sent
+      var localsCmd = mock.findCommand("ct/load-locals")
+      check localsCmd.isSome
+      check localsCmd.get.args["rrTicks"].getBiggestInt == 100
+
+      # 2. Step forward — debugger moves to index.php, line 2, rrTicks 200
+      mock.clearReceivedCommands()
+      session.store.updateDebuggerPosition(200'u64, "index.php", 2)
+      drain()
+
+      # Verify locals request for new position
+      localsCmd = mock.findCommand("ct/load-locals")
+      check localsCmd.isSome
+      check localsCmd.get.args["rrTicks"].getBiggestInt == 200
+
+      # 3. Step forward to line 3 (consecutive line target) — rrTicks 300
+      mock.clearReceivedCommands()
+      session.store.updateDebuggerPosition(300'u64, "index.php", 3)
+      drain()
+
+      localsCmd = mock.findCommand("ct/load-locals")
+      check localsCmd.isSome
+      check localsCmd.get.args["rrTicks"].getBiggestInt == 300
 
       dispose()

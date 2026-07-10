@@ -602,6 +602,8 @@ impl ExprLoader {
                 Lang::Elixir
             } else if extension == "erl" || extension == "hrl" {
                 Lang::Erlang
+            } else if extension == "php" {
+                Lang::Php
             } else {
                 Lang::Unknown
             }
