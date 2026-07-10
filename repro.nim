@@ -198,11 +198,6 @@ const
   workspaceRootPath = parentDir(projectRootPath)
   CodeTracerNimPaths = @[
     projectRootPath / "src/frontend",
-    workspaceRootPath / "isonim" / "src",
-    workspaceRootPath / "nim-everywhere" / "src",
-    workspaceRootPath / "nim-agent-harbor" / "src",
-    workspaceRootPath / "nim-agents" / "src",
-    workspaceRootPath / "nim-acp" / "src",
     projectRootPath / "libs/NimYAML",
     projectRootPath / "libs/asynctools",
     projectRootPath / "libs/karax/karax",
@@ -366,6 +361,13 @@ package codeTracer:
     "rustup >=1"
     "sh >=1"
     "wasm-opt >=0"
+
+    # Sibling library dependencies (SC-11 develop-mode from-source consumption)
+    "isonim >=0"
+    "nim-everywhere >=0"
+    "nim-agent-harbor >=0"
+    "nim-agents >=0"
+    "nim-acp >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``
@@ -600,6 +602,8 @@ package codeTracer:
     diagnostic "CodeTracer dev environment definition loaded"
 
   build:
+    nim.nimRepropathsConfig()
+
     template ctNimJs(definesValue: seq[string];
                      outputPath, sourcePath: string;
                      extraInputsValue: openArray[string] = [];

@@ -343,3 +343,8 @@ tsc-ui-tests/
 # build outputs are not.
 src/codetracer-bench/fixtures/gui-ops/*/main
 src/codetracer-bench/fixtures/gui-ops/*/main.ct-build-sources.json
+
+# Reprobuild paths file
+/reprobuild.paths
+
+repro.paths
