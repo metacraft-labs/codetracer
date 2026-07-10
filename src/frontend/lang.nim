@@ -45,6 +45,7 @@ proc toLang*(lang: cstring): Lang =
     erl: LangErlang,
     hrl: LangErlang,
     erlang: LangErlang,
+    php: LangPhp,
   }
   if langs.hasKey(lang):
     result = langs[lang]
@@ -90,7 +91,8 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"cadence",
     cstring"solana",
     cstring"elixir",
-    cstring"erlang"
+    cstring"erlang",
+    cstring"php"
   ]
   result = langs[lang]
 
@@ -153,7 +155,8 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[]),  # LangCadence
   toSet(@[]),  # LangSolana
   toSet(@[]),  # LangElixir
-  toSet(@[])   # LangErlang
+  toSet(@[]),  # LangErlang
+  toSet(@[])   # LangPhp
 ]
 
 proc getExtension*(lang: Lang): cstring =
@@ -196,7 +199,8 @@ proc getExtension*(lang: Lang): cstring =
     "cdc",    # LangCadence
     "",       # LangSolana (folder-based)
     "ex",     # LangElixir
-    "erl"     # LangErlang
+    "erl",    # LangErlang
+    "php"     # LangPhp
   ]
   result = cstring(extensions[lang])
 
@@ -243,6 +247,7 @@ proc fromPath*(path: cstring): Lang =
     "exs": LangElixir,
     "erl": LangErlang,
     "hrl": LangErlang,
+    "php": LangPhp,
   };
   if not extensions.hasKey(ext):
     LangUnknown

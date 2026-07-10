@@ -45,11 +45,13 @@ import ../store/types as store_types
 # views/isonim_state_view`` can read ``OriginSummary`` / ``placeholderSummary``
 # without an extra import line (same convenience the scratchpad view uses).
 export origin_chain_types
-
 when defined(js):
-  type StateBadgeClickEvent* = isonim_dom.Event
+  template RendererEvent(R: typedesc[WebRenderer]): typedesc = isonim_dom.Event
+  template RendererEvent(R: typedesc[MockRenderer]): typedesc = MockEvent
+  proc preventDefault*(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation*(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
 else:
-  type StateBadgeClickEvent* = MockEvent
+  template RendererEvent(R: typedesc[MockRenderer]): typedesc = MockEvent
 
 # ---------------------------------------------------------------------------
 # Static label / class helpers
@@ -211,7 +213,7 @@ proc badgeDisplay(vm: StateVM; item: VariableViewState): string =
   ## DOM (lets reactive updates pick it back up).
   if vm.rowHasBadge(item): "inline-flex" else: "none"
 
-proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc(ev: StateBadgeClickEvent) =
+proc onToggleOriginBadge[R](r: R; vm: StateVM; item: proc(): VariableViewState): proc(ev: RendererEvent(type(r))) =
   ## Per-row click handler. For eager summaries this just toggles the
   ## in-row expansion (spec §3.2.1); for placeholder summaries it ALSO
   ## enqueues the placeholder token for the next batched
@@ -219,7 +221,7 @@ proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc(ev:
   ## bridge. The bridge is installed by ``state.nim`` once the
   ## ``OriginChainVM`` is available — without it the click just toggles
   ## expansion, which is the desired fallback when running headless.
-  result = proc(ev: StateBadgeClickEvent) =
+  result = proc(ev: RendererEvent(type(r))) =
     if not ev.isNil:
       ev.preventDefault()
       ev.stopPropagation()
@@ -449,7 +451,7 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
   ## reactive via the DSL macro — the row is rebuilt incrementally as
   ## the underlying VariableViewState signal updates.
   let onToggle = onToggleExpand(vm, item)
-  let onBadgeClick = onToggleOriginBadge(vm, item)
+  let onBadgeClick = onToggleOriginBadge(r, vm, item)
   let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
   ui(r):
     tdiv(class = rowClass(item),
@@ -619,8 +621,6 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
 #   wired imperatively after capturing the input via `ref = var`.
 
 when defined(js):
-  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
-  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
 
