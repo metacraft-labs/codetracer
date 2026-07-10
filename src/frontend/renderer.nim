@@ -1137,7 +1137,6 @@ proc moveTab*(path: cstring) =
   # redraw()
 
 proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
-  let y = yPos - 30
   let container = dom.document.getElementById("context-menu-container")
   container.style.display = "flex"
   container.innerHTML = ""
@@ -1167,26 +1166,21 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     container.append(cast[dom.Element](itemContainer))
 
   let contextWidth = cast[dom.Element](container).clientWidth
-  let clientWidth = cast[int](jq("#ROOT").toJs.clientWidth)
+  let clientWidth = cast[int](dom.window.toJs.innerWidth)
   let contextHeight = cast[dom.Element](container).clientHeight
-  let clientHeight = cast[int](jq("#ROOT").toJs.clientHeight)
-  let leftPos =
-    if x + contextWidth > clientWidth:
-      x - ((x + contextWidth + 10) - clientWidth)
-    else:
-      x
-
-  var heightOffset =
+  let clientHeight = cast[int](dom.window.toJs.innerHeight)
+  let heightOffset =
     if inExtension:
       40
     else:
       0
-
-  let topPos =
-    if y + contextHeight > clientHeight:
-      y - ((y + contextHeight + 10) - clientHeight)
-    else:
-      y
+  # Anchor the menu corner closest to the cursor:
+  # default is top-left at cursor; flip horizontally if too far right,
+  # flip vertically if too far down.
+  let tooFarRight = x + contextWidth > clientWidth
+  let tooFarDown  = yPos + contextHeight > clientHeight
+  let leftPos = max(0, if tooFarRight: x - contextWidth else: x)
+  let topPos  = max(0, if tooFarDown:  yPos - contextHeight else: yPos)
   container.style.top = cstring(fmt"{topPos + heightOffset}px")
   container.style.left = cstring(fmt"{leftPos}px")
 
