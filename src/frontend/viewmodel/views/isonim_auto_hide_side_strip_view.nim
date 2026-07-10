@@ -24,6 +24,8 @@ type
     onCollapsedSelect*: proc()
     ## Called when mouse enters a tab. Used to trigger the 200ms hover preview.
     onHoverEnter*: proc(index: int)
+    ## Called on right-click with the tab index and mouse viewport coordinates.
+    onContextMenu*: proc(index: int; x: int; y: int)
 
 const
   AutoHideSideStripHasTabsClass* = "has-tabs"
@@ -65,6 +67,10 @@ proc invokeHoverEnter(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onHoverEnter.isNil:
     callbacks.onHoverEnter(index)
 
+proc invokeContextMenu(callbacks: AutoHideSideStripCallbacks; index: int; x: int; y: int) =
+  if not callbacks.onContextMenu.isNil:
+    callbacks.onContextMenu(index, x, y)
+
 proc renderSideStripTab(
     r: MockRenderer;
     tab: AutoHideSideStripRecord;
@@ -98,6 +104,9 @@ proc renderCollapsedLine(
 
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
 
   proc renderSideStripTab(
       r: WebRenderer;
@@ -130,6 +139,11 @@ when defined(js):
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
       proc(ev: isonim_dom.Event) =
         callbacks.invokeHoverEnter(index))
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.preventDefault()
+        ev.stopPropagation()
+        callbacks.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
     isonim_dom.addEventListener(isonim_dom.Node(closeBtnEl), cstring"click",
       proc(ev: isonim_dom.Event) =
         ev.stopPropagation()

@@ -55,6 +55,7 @@ when defined(js):
   from ../viewmodel/views/isonim_auto_hide_overlay_tabs_view import
     AutoHideOverlayTabRecord, AutoHideOverlayTabsCallbacks,
     renderAutoHideOverlayTabsInto
+  from ../viewmodel/views/context_menu_bridge import showContextMenu
 
 # JS array helpers (not exported from any shared module).
 proc newJsArray(): JsObject {.importjs: "(new Array())".}
@@ -987,7 +988,25 @@ when defined(js):
           hoverPreviewTimerId = windowSetTimeout(proc() =
             hoverPreviewTimerId = -1
             showOverlayPreview(capturedPanel)
-          , HOVER_PREVIEW_DELAY_MS))
+          , HOVER_PREVIEW_DELAY_MS),
+      onContextMenu: proc(index: int; x: int; y: int) =
+        if index >= 0 and index < panels.len:
+          let capturedPanel = panels[index]
+          showContextMenu(@[
+            ContextMenuItem(
+              name: cstring"Unpin",
+              hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                if not autoHideLayout.isNil:
+                  hideOverlay()
+                  hideDockedPanel()
+                  unpinPanel(autoHideLayout, capturedPanel)),
+            ContextMenuItem(
+              name: cstring"Close",
+              hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                closePanelFromStrip(capturedPanel))
+          ], x, y))
     let r = WebRenderer()
     renderAutoHideSideStripInto(
       r, container, records, model.collapsed, callbacks)
@@ -1037,7 +1056,25 @@ when defined(js):
           hoverPreviewTimerId = windowSetTimeout(proc() =
             hoverPreviewTimerId = -1
             showOverlayPreview(capturedPanel)
-          , HOVER_PREVIEW_DELAY_MS))
+          , HOVER_PREVIEW_DELAY_MS),
+      onContextMenu: proc(index: int; x: int; y: int) =
+        if index >= 0 and index < panels.len:
+          let capturedPanel = panels[index]
+          showContextMenu(@[
+            ContextMenuItem(
+              name: cstring"Unpin",
+              hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                if not autoHideLayout.isNil:
+                  hideOverlay()
+                  hideDockedPanel()
+                  unpinPanel(autoHideLayout, capturedPanel)),
+            ContextMenuItem(
+              name: cstring"Close",
+              hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                closePanelFromStrip(capturedPanel))
+          ], x, y))
     let r = WebRenderer()
     renderAutoHideBottomStripInto(r, container, records, callbacks)
 else:

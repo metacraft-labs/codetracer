@@ -29,6 +29,8 @@ type
     onUnpin*: proc(index: int)
     ## Called when mouse enters a tab — starts the 200ms hover-preview timer.
     onHoverEnter*: proc(index: int)
+    ## Called on right-click with the tab index and mouse viewport coordinates.
+    onContextMenu*: proc(index: int; x: int; y: int)
 
 const
   ## Class applied to #auto-hide-bottom-strip when it contains at least one tab.
@@ -52,6 +54,9 @@ proc invokeUnpin(cb: AutoHideBottomStripCallbacks; i: int) =
 
 proc invokeHoverEnter(cb: AutoHideBottomStripCallbacks; i: int) =
   if not cb.onHoverEnter.isNil: cb.onHoverEnter(i)
+
+proc invokeContextMenu(cb: AutoHideBottomStripCallbacks; i: int; x: int; y: int) =
+  if not cb.onContextMenu.isNil: cb.onContextMenu(i, x, y)
 
 # ---------------------------------------------------------------------------
 # MockRenderer path (for tests)
@@ -88,6 +93,9 @@ proc renderAutoHideBottomStripPanel*(
 
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
 
   proc renderBottomStripTab(
       r: WebRenderer;
@@ -118,6 +126,11 @@ when defined(js):
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
       proc(ev: isonim_dom.Event) =
         cb.invokeHoverEnter(index))
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.preventDefault()
+        ev.stopPropagation()
+        cb.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
     isonim_dom.addEventListener(isonim_dom.Node(closeBtnEl), cstring"click",
       proc(ev: isonim_dom.Event) =
         ev.stopPropagation()

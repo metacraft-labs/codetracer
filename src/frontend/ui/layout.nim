@@ -144,28 +144,39 @@ type
 
 proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem) =
   ## Attach a right-click context menu to a GL tab element that offers
-  ## "Send to Window" for cross-window panel transfer (M21/M22).
+  ## pin (left/bottom/right), close, and maximise actions.
   let tabElement = tab.element
   if tabElement.isNil or tabElement.isUndefined:
     return
 
   tabElement.addEventListener(cstring"contextmenu", proc(event: JsObject) =
     event.preventDefault()
-    let sessionId = if data.sessions.len > 0:
-        int(data.activeSessionIndex)
-      else:
-        0
     let x = event.clientX.to(int)
     let y = event.clientY.to(int)
-
-    # Use an async wrapper so we can await the window list without relying on
-    # Future.then, which is only available on Nim >= 1.5.1.
-    proc showWindowMenu() {.async.} =
-      let response = await requestWindowList()
-      let items = buildSendToWindowMenuItems(contentItem, sessionId, response)
-      showContextMenu(items, x, y)
-
-    discard showWindowMenu())
+    let capturedItem = contentItem
+    let stack = cast[js](capturedItem.parent)
+    let maxLabel =
+      if cast[bool](stack.isMaximised): cstring"Minimise container"
+      else: cstring"Maximise container"
+    showContextMenu(@[
+      ContextMenuItem(name: cstring"Pin to Left", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Left)),
+      ContextMenuItem(name: cstring"Pin to Bottom", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Bottom)),
+      ContextMenuItem(name: cstring"Pin to Right", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Right)),
+      ContextMenuItem(name: cstring"Close", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          capturedItem.parent.removeChild(capturedItem)),
+      ContextMenuItem(name: maxLabel, hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          let s = cast[js](capturedItem.parent)
+          if cast[bool](s.isMaximised): s.minimise()
+          else: s.maximise())
+    ], x, y))
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
