@@ -452,6 +452,20 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   deferredUpdateGLSize()
   dispatchLayoutUpdated()
 
+proc repinPanelToEdge*(panel: AutoHidePanel, newEdge: AutoHideEdge) =
+  ## Move an already-pinned panel to a different auto-hide strip without
+  ## restoring it to the GL layout.  Hides the panel if currently visible,
+  ## then updates its edge and triggers a strip re-render.
+  if autoHideState.isNil or panel.isNil:
+    return
+  if autoHideState.dockedPanel == panel and autoHideState.dockedVisible:
+    hideDockedPanel()
+  if autoHideState.activeOverlay == panel:
+    hideOverlay()
+  panel.edge = newEdge
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
 # ---------------------------------------------------------------------------
 # Docked sidebar — inline panel that pushes GL content sideways (click open).
 # ---------------------------------------------------------------------------
@@ -992,21 +1006,34 @@ when defined(js):
       onContextMenu: proc(index: int; x: int; y: int) =
         if index >= 0 and index < panels.len:
           let capturedPanel = panels[index]
-          showContextMenu(@[
-            ContextMenuItem(
-              name: cstring"Unpin",
-              hint: cstring"",
+          var items: seq[ContextMenuItem]
+          if edge != AutoHideEdge.Left:
+            items.add(ContextMenuItem(
+              name: cstring"Pin to Left", hint: cstring"",
               handler: proc(ev: kdom.Event) =
-                if not autoHideLayout.isNil:
-                  hideOverlay()
-                  hideDockedPanel()
-                  unpinPanel(autoHideLayout, capturedPanel)),
-            ContextMenuItem(
-              name: cstring"Close",
-              hint: cstring"",
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Left)))
+          if edge != AutoHideEdge.Bottom:
+            items.add(ContextMenuItem(
+              name: cstring"Pin to Bottom", hint: cstring"",
               handler: proc(ev: kdom.Event) =
-                closePanelFromStrip(capturedPanel))
-          ], x, y))
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Bottom)))
+          if edge != AutoHideEdge.Right:
+            items.add(ContextMenuItem(
+              name: cstring"Pin to Right", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Right)))
+          items.add(ContextMenuItem(
+            name: cstring"Unpin", hint: cstring"",
+            handler: proc(ev: kdom.Event) =
+              if not autoHideLayout.isNil:
+                hideOverlay()
+                hideDockedPanel()
+                unpinPanel(autoHideLayout, capturedPanel)))
+          items.add(ContextMenuItem(
+            name: cstring"Close", hint: cstring"",
+            handler: proc(ev: kdom.Event) =
+              closePanelFromStrip(capturedPanel)))
+          showContextMenu(items, x, y))
     let r = WebRenderer()
     renderAutoHideSideStripInto(
       r, container, records, model.collapsed, callbacks)
@@ -1062,16 +1089,22 @@ when defined(js):
           let capturedPanel = panels[index]
           showContextMenu(@[
             ContextMenuItem(
-              name: cstring"Unpin",
-              hint: cstring"",
+              name: cstring"Pin to Left", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Left)),
+            ContextMenuItem(
+              name: cstring"Pin to Right", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Right)),
+            ContextMenuItem(
+              name: cstring"Unpin", hint: cstring"",
               handler: proc(ev: kdom.Event) =
                 if not autoHideLayout.isNil:
                   hideOverlay()
                   hideDockedPanel()
                   unpinPanel(autoHideLayout, capturedPanel)),
             ContextMenuItem(
-              name: cstring"Close",
-              hint: cstring"",
+              name: cstring"Close", hint: cstring"",
               handler: proc(ev: kdom.Event) =
                 closePanelFromStrip(capturedPanel))
           ], x, y))

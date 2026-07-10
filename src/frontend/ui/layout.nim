@@ -946,62 +946,33 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # and overlay event handlers.
   initAutoHideState()
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
-    let content = panel.content
     let isEditor = panel.config.componentState.isEditor.to(bool)
-    var parent: GoldenContentItem = nil
+    let edge = panel.edge
+    # Place the panel in its own new standalone group at the correct edge.
+    # We call addItem(config, index) directly on the main row/column —
+    # GL2 wraps the component in a fresh stack automatically.
+    #
+    # AutoHideEdge ordinals: Bottom=0, Left=1, Right=2
+    let ground = layout.groundItem
+    if ground.isNil or ground.contentItems.len == 0:
+      discard ground.addItem(panel.config)
+      return
 
-    let similarComponents = data.ui.componentMapping[content]
-    let openSimilarComponentsTabs = data.ui.openComponentIds[content]
+    let main = ground.contentItems[0]
 
-    cerror "[UNPIN] content=" & $content & " isEditor=" & $isEditor & " similarComponents.len=" & $similarComponents.len & " openSimilarComponentsTabs.len=" & $openSimilarComponentsTabs.len
-
-    var similarParent: GoldenContentItem = nil
-    if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
-      for i in countdown(openSimilarComponentsTabs.len - 1, 0):
-        let similarId = openSimilarComponentsTabs[i]
-        if similarComponents.hasKey(similarId):
-          let comp = similarComponents[similarId]
-          if not comp.isNil and not comp.layoutItem.isNil and isAttachedToLayout(comp.layoutItem, layout):
-            similarParent = cast[GoldenContentItem](comp.layoutItem.parent)
-            break
-
-    if not similarParent.isNil:
-      parent = similarParent
-      cerror "[UNPIN] selected parent from similarComponents"
-    else:
-      let hasOpenEditors = data.hasActiveOpenEditors()
-      cerror "[UNPIN] hasOpenEditors=" & $hasOpenEditors & " data.ui.editorPanels[ViewSource] isNil=" & $(data.ui.editorPanels[EditorView.ViewSource].isNil)
-      if isEditor and not data.ui.editorPanels[EditorView.ViewSource].isNil and hasOpenEditors:
-        let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
-        if isAttachedToLayout(activeEditorPanel, layout):
-          parent = activeEditorPanel
-          cerror "[UNPIN] selected parent from editorPanels"
-        else:
-          cerror "[UNPIN] opening new layout container stack"
-          parent = data.openNewLayoutContainer(cstring"stack", isEditor)
-          if isEditor:
-            data.ui.editorPanels[EditorView.ViewSource] = parent
-            cerror "[UNPIN] set editorPanels[ViewSource] to new parent"
-      else:
-        cerror "[UNPIN] opening new layout container stack"
-        parent = data.openNewLayoutContainer(cstring"stack", isEditor)
-        if isEditor:
-          data.ui.editorPanels[EditorView.ViewSource] = parent
-          cerror "[UNPIN] set editorPanels[ViewSource] to new parent"
-
-    cerror "[UNPIN] final parent isNil=" & $(parent.isNil)
-    if not parent.isNil:
-      cerror "[UNPIN] parent.addItem called"
-      discard parent.addItem(panel.config)
-    else:
-      let ground = layout.groundItem
-      cerror "[UNPIN] adding to ground, ground isNil=" & $(ground.isNil)
-      if not ground.isNil and ground.contentItems.len > 0:
-        cerror "[UNPIN] adding to ground.contentItems[0]"
-        discard ground.contentItems[0].addItem(panel.config)
-      else:
-        cerror "[UNPIN] adding to ground directly"
-        discard ground.addItem(panel.config)
+    case edge:
+    of AutoHideEdge.Left:
+      # Prepend: insert at position 0 of the main row.
+      discard main.addItem(panel.config, 0)
+    of AutoHideEdge.Right:
+      # Append: insert after all existing children.
+      discard main.addItem(panel.config, main.contentItems.len)
+    of AutoHideEdge.Bottom:
+      # If the main container is already a column, append the panel as a new
+      # standalone stack at the very bottom.  For a flat row (the common case)
+      # append it at the end of the row — it still gets its own group and GL
+      # avoids the restructuring that causes the component to disappear.
+      discard main.addItem(panel.config, main.contentItems.len)
   # When an auto-hide panel's overlay is shown, refresh that panel's mounted
   # surface so it displays current content after reparenting.
   autoHideState.onPanelShown = proc(panel: AutoHidePanel) =

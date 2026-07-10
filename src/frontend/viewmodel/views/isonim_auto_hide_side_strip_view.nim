@@ -78,19 +78,10 @@ proc renderSideStripTab(
     callbacks: AutoHideSideStripCallbacks): MockNode =
   let cls = if tab.active: AutoHideSideStripTabActiveClass
             else: AutoHideSideStripTabClass
-  # Buttons are always rendered (CSS controls visibility via :hover / .active).
-  # They sit at the TOP of the tab so they appear above the text label.
   ui(r):
     tdiv(
         class = cls,
         onclick = proc() = callbacks.invokeSelect(index)):
-      tdiv(class = AutoHideSideStripTabButtonsClass):
-        tdiv(class = AutoHideSideStripTabCloseBtnClass,
-             title = "Close",
-             onclick = proc() = callbacks.invokeClose(index))
-        tdiv(class = AutoHideSideStripTabUnpinBtnClass,
-             title = "Unpin (restore to layout)",
-             onclick = proc() = callbacks.invokeUnpin(index))
       span(class = AutoHideSideStripTabLabelClass):
         text tab.title
 
@@ -115,25 +106,12 @@ when defined(js):
       callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
     let cls = if tab.active: AutoHideSideStripTabActiveClass
               else: AutoHideSideStripTabClass
-    # Buttons are always rendered (CSS controls visibility via :hover / .active).
-    # They sit at the TOP of the tab div above the text label.
-    # Both buttons use manual addEventListener with stopPropagation so that
-    # clicking a button on an inactive tab doesn't also trigger showOverlay.
-    # mouseenter on the tab itself triggers the 200ms hover-preview timer.
+    # mouseenter on the tab triggers the 200ms hover-preview timer.
     var tabEl: isonim_dom.Element
-    var closeBtnEl: isonim_dom.Element
-    var unpinBtnEl: isonim_dom.Element
     result = ui(r):
       tdiv(ref = tabEl,
            class = cls,
            onclick = proc() = callbacks.invokeSelect(index)):
-        tdiv(class = AutoHideSideStripTabButtonsClass):
-          tdiv(ref = closeBtnEl,
-               class = AutoHideSideStripTabCloseBtnClass,
-               title = "Close")
-          tdiv(ref = unpinBtnEl,
-               class = AutoHideSideStripTabUnpinBtnClass,
-               title = "Unpin (restore to layout)")
         span(class = AutoHideSideStripTabLabelClass):
           text tab.title
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
@@ -144,14 +122,6 @@ when defined(js):
         ev.preventDefault()
         ev.stopPropagation()
         callbacks.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
-    isonim_dom.addEventListener(isonim_dom.Node(closeBtnEl), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        ev.stopPropagation()
-        callbacks.invokeClose(index))
-    isonim_dom.addEventListener(isonim_dom.Node(unpinBtnEl), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        ev.stopPropagation()
-        callbacks.invokeUnpin(index))
 
   proc renderCollapsedLine(
       r: WebRenderer;

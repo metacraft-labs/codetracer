@@ -73,10 +73,6 @@ proc renderBottomStripTab(
     tdiv(class = cls, onclick = proc() = cb.invokeSelect(index)):
       span(class = AutoHideBottomStripTabLabelClass):
         text tab.title
-      tdiv(class = AutoHideBottomStripTabButtonsClass):
-        tdiv(class = AutoHideBottomStripTabUnpinBtnClass,
-             title = "Unpin (restore to layout)")
-        tdiv(class = AutoHideBottomStripTabCloseBtnClass, title = "Close")
 
 proc renderAutoHideBottomStripPanel*(
     r: MockRenderer;
@@ -104,25 +100,14 @@ when defined(js):
       cb: AutoHideBottomStripCallbacks): isonim_dom.Element =
     let cls = if tab.active: AutoHideBottomStripTabActiveClass
               else: AutoHideBottomStripTabClass
-    # Buttons use addEventListener with stopPropagation so clicking a button
-    # on an inactive tab doesn't also trigger the select handler.
     # mouseenter on the tab triggers the 200ms hover-preview timer.
     var tabEl: isonim_dom.Element
-    var closeBtnEl: isonim_dom.Element
-    var unpinBtnEl: isonim_dom.Element
     result = ui(r):
       tdiv(ref = tabEl,
            class = cls,
            onclick = proc() = cb.invokeSelect(index)):
         span(class = AutoHideBottomStripTabLabelClass):
           text tab.title
-        tdiv(class = AutoHideBottomStripTabButtonsClass):
-          tdiv(ref = unpinBtnEl,
-               class = AutoHideBottomStripTabUnpinBtnClass,
-               title = "Unpin (restore to layout)")
-          tdiv(ref = closeBtnEl,
-               class = AutoHideBottomStripTabCloseBtnClass,
-               title = "Close")
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
       proc(ev: isonim_dom.Event) =
         cb.invokeHoverEnter(index))
@@ -131,14 +116,6 @@ when defined(js):
         ev.preventDefault()
         ev.stopPropagation()
         cb.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
-    isonim_dom.addEventListener(isonim_dom.Node(closeBtnEl), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        ev.stopPropagation()
-        cb.invokeClose(index))
-    isonim_dom.addEventListener(isonim_dom.Node(unpinBtnEl), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        ev.stopPropagation()
-        cb.invokeUnpin(index))
 
   proc renderAutoHideBottomStripPanel*(
       r: WebRenderer;
