@@ -58,9 +58,6 @@
     padding-left: 0.25em
     padding-right: 0.25em
 
-#auto-hide-strip-right.has-tabs
-  border-left: 1px solid colors-ui-border-primary
-
 // When the left strip is visible, nullify #ROOT's padding-left so the visual
 // gap on both sides of the strip tabs is a consistent 0.25em:
 //   left:  strip padding-left  (0.25em) from viewport edge to tab left edge
@@ -68,6 +65,13 @@
 // Without this, ROOT's own padding-left adds a second 0.25em on the right.
 #auto-hide-strip-left.has-tabs ~ #ROOT
   padding-left: 0
+
+// Mirror for the right strip: #ROOT appears before #auto-hide-strip-right in
+// the flex row so ~ cannot be used.  Use :has() (Chromium 105+ / current
+// Electron) to select #ROOT when its sibling right strip has tabs, removing
+// ROOT's own padding-right to avoid a double gap between GL and the strip.
+#auto-hide-layout-row:has(#auto-hide-strip-right.has-tabs) #ROOT
+  padding-right: 0
 
 // ---------------------------------------------------------------------------
 // Docked sidebars — shown on click, pushes GL content sideways.
@@ -84,8 +88,9 @@
   background-color: colors-ui-surface-panel
   position: relative
   // z-index: 5 creates a stacking context so GL children with high z-index
-  // are confined within it — the backdrop (z-index: 101) then dims the whole
-  // docked panel including any high-z-index panel content inside it.
+  // are confined within it — the backdrop (z-index: 98, transparent) is below
+  // both the docked panels and the overlay and serves only as a click-to-dismiss
+  // target.
   z-index: 5
   min-width: 150px
   max-width: 800px
@@ -94,6 +99,10 @@
   &.docked-open
     display: flex
     width: 360px  // default; overridden by JS resize
+    // Raise above the side strip (z-index: 100) so the docked GL content covers
+    // the active-tab box-shadow that extends horizontally into this area.
+    // Matches the hover overlay z-index (101) for identical visual behaviour.
+    z-index: 101
 
 // No border on docked panels — the resize handle acts as the divider,
 // matching GL's .lm_splitter which is a solid-background 4px wide element.
@@ -197,6 +206,12 @@
   &.docked-open
     display: flex
     height: 280px  // default; overridden by JS resize
+    // Raise above the tab strip (z-index: 100) so the docked GL content covers
+    // the active-tab box-shadow and curves that extend upward into this area.
+    // Without this, the shadow paints ON TOP of the GL content as a visible
+    // artifact — especially when the panel has a scrollbar.
+    // Matches the hover overlay z-index (101) for identical visual behaviour.
+    z-index: 101
 
 #auto-hide-docked-bottom-content
   flex: 1
