@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   rr-backend-tests:
-    runs-on: [self-hosted, nixos]
+    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
 
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -181,7 +181,7 @@ jobs:
           if-no-files-found: ignore
 
   shell-recorder-tests:
-    runs-on: [self-hosted, nixos]
+    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
 
     steps:
       - name: Mint installation token for cross-repo sibling access

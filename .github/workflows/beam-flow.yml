@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   beam-flow-dap:
-    runs-on: [self-hosted, nixos]
+    runs-on: incus  # CIP-5: nix job → incus
 
     steps:
       - name: Checkout codetracer

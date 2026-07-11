@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   redirect-notice:
-    runs-on: [self-hosted, nixos]
+    runs-on: incus  # CIP-5: nix job → incus
     steps:
       - name: Notify and redirect
         run: |
