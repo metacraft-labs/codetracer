@@ -816,12 +816,16 @@ package codeTracer:
       output = buildDebugPath("src/helpers.js"))
     target("frontend-src-helpers-js", frontendHelpersJs)
 
-    var styleActions: seq[BuildActionDef] = @[]
+    let defaultDarkThemeExtensionCss =
+      ctStylus("default_dark_theme_extension")
+    var styleActions: seq[BuildActionDef] = @[defaultDarkThemeExtensionCss]
     for name in StylusCssEntryPoints:
-      styleActions.add(ctStylus(name))
+      if name != "default_dark_theme_extension":
+        styleActions.add(ctStylus(name))
     let defaultDarkThemeCss = fs.copyFile(
       source = buildDebugPath("frontend/styles/default_dark_theme_extension.css"),
-      output = buildDebugPath("frontend/styles/default_dark_theme.css"))
+      output = buildDebugPath("frontend/styles/default_dark_theme.css"),
+      after = @[defaultDarkThemeExtensionCss])
     styleActions.add(defaultDarkThemeCss)
     let frontendStyles = aggregate("frontend-styles", actions = styleActions)
 
