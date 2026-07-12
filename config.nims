@@ -23,6 +23,8 @@ addPathIfDir(getEnv("CODETRACER_TRACE_FORMAT_NIM_SRC"))
 addPathIfDir(workspaceRoot / "codetracer-trace-format-nim" / "src")
 addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "io-mon" / "src")
+addPathIfDir(getEnv("SHM_QUEUE_SRC"))
+addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
 addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
 
