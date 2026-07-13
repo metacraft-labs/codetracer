@@ -10,6 +10,7 @@ NIM_COMMON_FLAGS=\
 -d:ssl\
 --mm:refc\
 -d:nimNoLentIterators\
+-d:nimOldCaseObjects\
 --hints:off\
 --warnings:off\
 --hint[Processing]:off\
