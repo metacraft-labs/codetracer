@@ -86,6 +86,8 @@ type
     domTab*: Element          ## The strip tab DOM element (for removal)
     liveElement*: Element     ## The preserved live DOM element from the GL container
     containerElement*: Element ## The GL container element (parent of liveElement)
+    overlayWidth*: int   ## Remembered overlay pixel width for left/right panels (0 = CSS default)
+    overlayHeight*: int  ## Remembered overlay pixel height for bottom panels (0 = CSS default)
 
   AutoHideState* = ref object
     ## Central state for all auto-hidden panels.
@@ -146,6 +148,15 @@ var dockedResizeIsLeft: bool = true
 var dockedBottomResizing: bool = false
 var dockedBottomResizeStartY: int = 0
 var dockedBottomResizeStartHeight: int = 0
+
+## Resize-drag state for the overlay (hover) panel.
+## Works for both horizontal (left/right) and vertical (bottom) drags.
+var overlayResizing: bool = false
+var overlayResizeIsHorizontal: bool = true  ## true = left/right panel, false = bottom panel
+var overlayResizeIsLeft: bool = true        ## true = left (drag right to expand), false = right
+var overlayResizeStartX: int = 0
+var overlayResizeStartY: int = 0
+var overlayResizeStartSize: int = 0
 
 proc initAutoHideState*() =
   ## Initialise the auto-hide state. Call once during layout init.
@@ -573,6 +584,16 @@ proc showDockedPanel*(panel: AutoHidePanel) =
 
   containerEl.classList.add(cstring"docked-open")
 
+  # Restore the remembered size so docked and overlay share the same dimensions.
+  # Without this the CSS default (360px/280px) always wins on first dock.
+  case panel.edge:
+  of Left, Right:
+    if panel.overlayWidth > 0:
+      containerEl.style.width = cstring($panel.overlayWidth & "px")
+  of Bottom:
+    if panel.overlayHeight > 0:
+      containerEl.style.height = cstring($panel.overlayHeight & "px")
+
   autoHideState.dockedPanel = panel
   autoHideState.dockedVisible = true
 
@@ -607,11 +628,16 @@ proc setupDockedResizeHandles*() =
     let containerEl = document.getElementById(dockedResizeContainerId)
     if not containerEl.isNil:
       containerEl.style.width = cstring($newWidth & "px")
+    # Save back so overlay and docked share the same remembered size.
+    if not autoHideState.isNil and not autoHideState.dockedPanel.isNil:
+      autoHideState.dockedPanel.overlayWidth = newWidth
     updateGLSize())
 
   document.addEventListener(cstring"mouseup", proc(ev: Event) =
     if dockedResizing:
       dockedResizing = false
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring""
       let lh = document.getElementById(cstring"auto-hide-docked-left-resize")
       let rh = document.getElementById(cstring"auto-hide-docked-right-resize")
       if not lh.isNil: lh.classList.remove(cstring"resizing")
@@ -629,6 +655,8 @@ proc setupDockedResizeHandles*() =
       dockedResizeStartX = mouseEv.clientX.to(int)
       dockedResizeStartWidth = getElementOffsetWidth(container)
       dockedResizeContainerId = containerId
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring"none"
       handle.classList.add(cstring"resizing"))
 
   attachResizeHandle(
@@ -651,11 +679,16 @@ proc setupDockedResizeHandles*() =
     let containerEl = document.getElementById(cstring"auto-hide-docked-bottom")
     if not containerEl.isNil:
       containerEl.style.height = cstring($newHeight & "px")
+    # Save back so overlay and docked share the same remembered size.
+    if not autoHideState.isNil and not autoHideState.dockedPanel.isNil:
+      autoHideState.dockedPanel.overlayHeight = newHeight
     updateGLSize())
 
   document.addEventListener(cstring"mouseup", proc(ev: Event) =
     if dockedBottomResizing:
       dockedBottomResizing = false
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring""
       let bh = document.getElementById(cstring"auto-hide-docked-bottom-resize")
       if not bh.isNil: bh.classList.remove(cstring"resizing"))
 
@@ -667,7 +700,79 @@ proc setupDockedResizeHandles*() =
       dockedBottomResizing = true
       dockedBottomResizeStartY = mouseEv.clientY.to(int)
       dockedBottomResizeStartHeight = getElementOffsetHeight(bottomContainer)
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring"none"
       bottomHandle.classList.add(cstring"resizing"))
+
+proc setupOverlayResizeHandle*() =
+  ## Wire drag-to-resize for the hover overlay panel.
+  ## Size changes are stored per-panel so each tab independently remembers
+  ## the width (left/right) or height (bottom) the user last set.
+  ## Must be called once after the DOM is ready.
+
+  document.addEventListener(cstring"mousemove", proc(ev: Event) =
+    if not overlayResizing:
+      return
+    let mouseEv = cast[JsObject](ev)
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if overlayEl.isNil:
+      return
+    let panel = if not autoHideState.isNil: autoHideState.activeOverlay else: nil
+    if overlayResizeIsHorizontal:
+      let clientX = mouseEv.clientX.to(int)
+      let dx = if overlayResizeIsLeft: clientX - overlayResizeStartX
+               else: overlayResizeStartX - clientX
+      let newWidth = max(150, min(800, overlayResizeStartSize + dx))
+      overlayEl.style.width = cstring($newWidth & "px")
+      if not panel.isNil:
+        panel.overlayWidth = newWidth
+    else:
+      let clientY = mouseEv.clientY.to(int)
+      let dy = overlayResizeStartY - clientY  # drag up = positive delta = taller
+      let newHeight = max(100, min(600, overlayResizeStartSize + dy))
+      overlayEl.style.height = cstring($newHeight & "px")
+      if not panel.isNil:
+        panel.overlayHeight = newHeight)
+
+  document.addEventListener(cstring"mouseup", proc(ev: Event) =
+    if overlayResizing:
+      overlayResizing = false
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring""
+      let handle = document.getElementById(cstring"auto-hide-overlay-resize")
+      if not handle.isNil:
+        handle.classList.remove(cstring"resizing"))
+
+  let handle = document.getElementById(cstring"auto-hide-overlay-resize")
+  if handle.isNil:
+    return
+  handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+    let mouseEv = cast[JsObject](ev)
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if overlayEl.isNil:
+      return
+    let panel = if not autoHideState.isNil: autoHideState.activeOverlay else: nil
+    if panel.isNil:
+      return
+    case panel.edge:
+    of Left:
+      overlayResizeIsHorizontal = true
+      overlayResizeIsLeft = true
+      overlayResizeStartX = mouseEv.clientX.to(int)
+      overlayResizeStartSize = getElementOffsetWidth(overlayEl)
+    of Right:
+      overlayResizeIsHorizontal = true
+      overlayResizeIsLeft = false
+      overlayResizeStartX = mouseEv.clientX.to(int)
+      overlayResizeStartSize = getElementOffsetWidth(overlayEl)
+    of Bottom:
+      overlayResizeIsHorizontal = false
+      overlayResizeStartY = mouseEv.clientY.to(int)
+      overlayResizeStartSize = getElementOffsetHeight(overlayEl)
+    overlayResizing = true
+    let bodyEl = cast[JsObject](document.body)
+    bodyEl.style.userSelect = cstring"none"
+    handle.classList.add(cstring"resizing"))
 
 proc closePanelFromStrip*(panel: AutoHidePanel) =
   ## Remove a panel from the auto-hide strip entirely, discarding it.
@@ -791,6 +896,24 @@ proc doShowOverlayImpl(panel: AutoHidePanel) =
   overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
   overlayEl.classList.add(edgeOverlayCssClass(panel.edge))
   overlayEl.classList.add(cstring"visible")
+
+  # Restore per-panel stored size so each tab remembers what the user set.
+  # Always clear BOTH dimensions first: a stale inline width from a previous
+  # left/right overlay would shrink a bottom overlay (whose CSS uses left:0/right:0
+  # to span the full window), and vice versa.
+  case panel.edge:
+  of Left, Right:
+    overlayEl.style.height = cstring""  # clear any stale height from a bottom panel
+    if panel.overlayWidth > 0:
+      overlayEl.style.width = cstring($panel.overlayWidth & "px")
+    else:
+      overlayEl.style.width = cstring""  # let CSS default (360px) take effect
+  of Bottom:
+    overlayEl.style.width = cstring""   # clear any stale width from a left/right panel
+    if panel.overlayHeight > 0:
+      overlayEl.style.height = cstring($panel.overlayHeight & "px")
+    else:
+      overlayEl.style.height = cstring""  # let CSS default (280px) take effect
 
   # In collapsed mode, add "collapsed-overlay" class to hide the header
   # row and show the floating pin button instead.
