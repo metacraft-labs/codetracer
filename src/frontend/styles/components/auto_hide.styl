@@ -136,11 +136,9 @@
   opacity: unset
   transition: background 150ms ease
 
-  &:hover
-    background: colors-ui-border-interactive-default
-
+  &:hover,
   &.resizing
-    background: #444444
+    background: colors-ui-border-interactive-default
 
 // Left docked panel: grip is on its RIGHT edge
 #auto-hide-docked-left .auto-hide-docked-resize-handle
@@ -589,15 +587,15 @@
 // Left overlay: flush with the strip's right edge (2em from screen left).
 // The strip (z-index 100) sits above the overlay so the active-tab curves
 // are always visible against the strip background.
+// No border — the absolutely-positioned resize handle (4px, same background
+// color as GL splitters) serves as the visual separator, identical to the
+// docked panel divider.
 #auto-hide-overlay.auto-hide-overlay-left
   top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
   left: 2em
   // Bottom tab strip is 1.75rem tall. Stop above it so the overlay doesn't overlap.
   bottom: 1.75rem
   width: 360px
-  // 4px right separator matches the docked panel's resize-handle divider style.
-  // No top border so it looks integrated, not like a floating popup.
-  border-right: 4px solid colors-ui-surface-primary-default
 
 // Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
@@ -605,16 +603,67 @@
   right: 2em
   bottom: 1.75rem  // stop above the bottom tab strip (1.75rem)
   width: 360px
-  border-left: 4px solid colors-ui-surface-primary-default
 
 // Bottom overlay: sits above the tab strip, full width.
-// 4px top separator matches the docked bottom panel's resize-handle style.
 #auto-hide-overlay.auto-hide-overlay-bottom
   left: 0
   right: 0
   bottom: 1.75rem  // stop above the bottom tab strip
   height: 280px
-  border-top: 4px solid colors-ui-surface-primary-default
+
+// ---------------------------------------------------------------------------
+// Overlay resize handle — sits on the inner edge of the overlay (the edge
+// closest to the GL content).  Drag to resize; size is stored per-panel.
+// Styled identically to the docked-panel resize handles.
+// ---------------------------------------------------------------------------
+
+.auto-hide-overlay-resize-handle
+  position: absolute
+  z-index: 200  // above overlay GL content
+  background: colors-ui-surface-primary-default
+  opacity: unset
+  transition: background 150ms ease
+
+  &:hover,
+  &.resizing
+    background: colors-ui-border-interactive-default
+
+// Left overlay: drag the RIGHT edge to widen.
+.auto-hide-overlay-left .auto-hide-overlay-resize-handle
+  right: 0
+  top: 0
+  bottom: 0
+  width: 4px
+  cursor: col-resize
+
+// Right overlay: drag the LEFT edge to widen.
+.auto-hide-overlay-right .auto-hide-overlay-resize-handle
+  left: 0
+  top: 0
+  bottom: 0
+  width: 4px
+  cursor: col-resize
+
+// Bottom overlay: drag the TOP edge upward to increase height.
+.auto-hide-overlay-bottom .auto-hide-overlay-resize-handle
+  top: 0
+  left: 0
+  right: 0
+  height: 4px
+  cursor: ns-resize
+
+// Push the overlay body away from the position:absolute resize handle so
+// the handle does not overdraw the edge of the content.
+// Mirrors the docked panels' #auto-hide-docked-{left,right}-content
+// padding-{right,left}: 4px and #auto-hide-docked-bottom-content padding-top: 4px.
+.auto-hide-overlay-right #auto-hide-overlay-body
+  padding-left: 4px
+
+.auto-hide-overlay-left #auto-hide-overlay-body
+  padding-right: 4px
+
+.auto-hide-overlay-bottom #auto-hide-overlay-body
+  padding-top: 4px
 
 // ---------------------------------------------------------------------------
 // Overlay header — hidden: the active strip tab acts as the panel header.

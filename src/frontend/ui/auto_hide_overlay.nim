@@ -144,4 +144,5 @@ proc setupAutoHideOverlay*(layout: GoldenLayout) =
   setupMouseLeaveDismissal()
   setupOverlayDismissal()
   setupDockedResizeHandles()
+  setupOverlayResizeHandle()
   cdebug "auto_hide_overlay: overlay handlers installed"
