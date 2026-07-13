@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   rr-backend-tests:
-    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
 
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -181,7 +181,7 @@ jobs:
           if-no-files-found: ignore
 
   shell-recorder-tests:
-    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
 
     steps:
       - name: Mint installation token for cross-repo sibling access

@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   CLAAssistant:
-    runs-on: incus  # CIP-5: nix job → incus
+    runs-on: eph-linux-x64  # CIP-5: nix job → eph-linux-x64
     steps:
       - name: "CLA Assistant"
         if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'

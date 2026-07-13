@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   beam-flow-dap:
-    runs-on: incus  # CIP-5: nix job → incus
+    runs-on: eph-linux-x64  # CIP-5: nix job → eph-linux-x64
 
     steps:
       - name: Checkout codetracer

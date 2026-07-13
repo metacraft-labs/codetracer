@@ -14,14 +14,14 @@ permissions:
 jobs:
   # NOTE (CIP-5 Wave 4): the whole Windows platform was migrated as a single
   # unit (honoring the prior "move the whole platform or none of it" rule) from
-  # the GitHub-hosted `windows-latest` onto the self-hosted `win-ephemeral`
+  # the GitHub-hosted `windows-latest` onto the self-hosted `eph-win-x64`
   # class, now that it is provisioned. These jobs keep their DIY env.ps1
   # (`windows-diy`) toolchain path unchanged — only the runner label moved;
-  # `win-ephemeral` is the DIY-Windows runner. `win-arm` is intentionally NOT
+  # `eph-win-x64` is the DIY-Windows runner. `eph-win-arm64` is intentionally NOT
   # added here (env.ps1 ARM support is unverified in CI and that class still
-  # queues); revisit once win-arm is live.
+  # queues); revisit once eph-win-arm64 is live.
   windows-bootstrap-smoke:
-    runs-on: win-ephemeral  # CIP-5: DIY-Windows (env.ps1) -> win-ephemeral
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -228,7 +228,7 @@ jobs:
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org §M13.
   origin-dap-windows:
-    runs-on: win-ephemeral  # CIP-5: DIY-Windows (env.ps1) -> win-ephemeral
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (per-PR subset, Windows)
     steps:
       - name: Generate CI token
@@ -300,7 +300,7 @@ jobs:
   # Gated on schedule / workflow_dispatch events because TTD runs are slow.
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: win-ephemeral  # CIP-5: DIY-Windows (env.ps1) -> win-ephemeral
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly full matrix, Windows)
     steps:
       - name: Generate CI token
@@ -369,7 +369,7 @@ jobs:
         run: just test-origin-dap
 
   windows-named-pipe-tests:
-    runs-on: win-ephemeral  # CIP-5: DIY-Windows (env.ps1) -> win-ephemeral
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -383,7 +383,7 @@ jobs:
         run: cargo test --bin simple-tui windows_named_pipe -- --nocapture
 
   windows-rust-components:
-    runs-on: win-ephemeral  # CIP-5: DIY-Windows (env.ps1) -> win-ephemeral
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
       - name: Generate CI token
         id: app-token
@@ -538,7 +538,7 @@ jobs:
   # Installs all dependencies via env.ps1, builds ct-mcr from the
   # codetracer-native-recorder sibling, then runs the Rust DAP integration tests.
   windows-headless-test:
-    runs-on: win-ephemeral  # CIP-5: DIY-Windows (env.ps1) -> win-ephemeral
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: test (headless DAP, Windows)
     needs:
       - windows-rust-components
@@ -639,7 +639,7 @@ jobs:
             -E 'test(~dap) and not test(~bash_flow) and not test(~zsh_flow) and not test(~javascript_flow)'
 
   lint-bash:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -670,7 +670,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh"
 
   lint-nim:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -701,7 +701,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
 
   lint-nix:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -732,7 +732,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
 
   lint-rust:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -824,7 +824,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
 
   reprobuild-macos-smoke:
-    runs-on: macos-tart  # CIP-5: nix macOS job -> macos-tart
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -855,7 +855,7 @@ jobs:
         run: nix develop . --command just test-reprobuild-macos-smoke
 
   reprobuild-linux-smoke:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -894,7 +894,7 @@ jobs:
   # §M12. The CT_TEST_LANGS env var is read by the just test-origin-dap
   # target as a comma-separated allowlist (default 'all').
   origin-dap-macos:
-    runs-on: macos-tart  # CIP-5: nix macOS job -> macos-tart
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -946,7 +946,7 @@ jobs:
   # via the cron job at the top of this workflow (or manually via workflow_dispatch).
   origin-dap-macos-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-tart  # CIP-5: nix macOS job -> macos-tart
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1004,7 +1004,7 @@ jobs:
   # materialised; the envelope invokes `regenerate.sh` first and tolerates
   # its honest-skip (exit code 75).
   cross-process-linux:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     name: cross-process value-origin (Linux)
     steps:
       - name: Generate CI token
@@ -1039,7 +1039,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process
 
   viewmodel-tests:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -1106,7 +1106,7 @@ jobs:
           retention-days: 30
 
   push-gpg-public-key:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1143,7 +1143,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.pub.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc
 
   push-install-script:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1170,7 +1170,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp install-on-distributions.sh s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/install.sh
 
   dev-build:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
       - lint-bash
       - lint-nim
@@ -1225,7 +1225,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
 
   nix-build:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
       - lint-bash
       - lint-nim
@@ -1519,7 +1519,7 @@ jobs:
           if-no-files-found: error
 
   appimage-build:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
       - lint-bash
       - lint-nim
@@ -1770,7 +1770,7 @@ jobs:
       matrix:
         include:
           - platform: nixos
-            runner: incus  # CIP-5: nix leg -> incus
+            runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
           # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
           # once the macOS-only steps in this job (`brew install just`,
           # `actions/setup-python`, `brew install awscli`) are replaced with nix
@@ -2005,7 +2005,7 @@ jobs:
       matrix:
         include:
           - platform: nixos
-            runner: incus  # CIP-5: nix leg -> incus
+            runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
           # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
           # once the macOS-only steps (`brew install just`, `actions/setup-python`)
           # are replaced with nix equivalents (Homebrew is not installed on the
@@ -2267,7 +2267,7 @@ jobs:
           CODETRACER_DB_TESTS_ONLY: "1"
 
   test-ui-tests-rr:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     timeout-minutes: 120
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -2365,7 +2365,7 @@ jobs:
     # services/github-runners/common.nix).
     # EXEMPTION (CIP-5): GPU runner -> kept persistent [self-hosted, gpu]; the HW
     # rasterisation vs lavapipe visual gate needs a real GPU (2x RTX 3090), which
-    # the ephemeral incus class has no access to. 5-platform matrix N/A.
+    # the ephemeral eph-linux-x64 class has no access to. 5-platform matrix N/A.
     runs-on: [self-hosted, gpu]
     timeout-minutes: 180
     steps:
@@ -2468,7 +2468,7 @@ jobs:
       - test-ui-tests
       - create-release
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     steps:
       - name: Download built distributions
         uses: actions/download-artifact@v6
@@ -2488,7 +2488,7 @@ jobs:
           packages_dir: dist
 
   push-to-attic:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
       - test-non-gui
       - test-ui-tests
@@ -2529,7 +2529,7 @@ jobs:
           ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
 
   build-and-deploy-docs:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs: [push-to-attic]
     if: ${{ github.ref == 'refs/heads/main' && !github.event['codetracer-ci'] }}
     permissions:
@@ -2571,7 +2571,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
 
   push-tag:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs: [ dev-build, nix-build, appimage-build, dmg-build ]
     permissions:
       contents: "write"
@@ -2628,7 +2628,7 @@ jobs:
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
   create-release:
-    runs-on: incus  # CIP-5: nix job (self-hosted nixos) -> incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs: [ push-tag ]
     if: ${{ ((startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || needs.push-tag.outputs.tag != '') && !github.event['codetracer-ci'] }}
     permissions:
