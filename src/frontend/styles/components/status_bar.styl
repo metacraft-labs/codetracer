@@ -154,15 +154,16 @@
     // only #auto-hide-bottom-strip (the horizontal tab row) is shown.
     bottom: 0
     background-color: colors-ui-surface-primary-default
-    height: 1.75em
-    font-size: 1rem    // reset from 0.75rem so 1.75em == 1.75rem exactly
+    height: 2em
+    font-size: 1rem    // reset from 0.75rem so 2em == 2rem exactly
     position: fixed
     width: 100%
     z-index: 100 !important
     display: flex
     align-items: stretch
     overflow: visible   // allow tab curve pseudo-elements to bleed above the bar
-    padding-top: 0.25em  // breathing room so curves are visible above the tabs
+    padding-top: 0.25em    // breathing room so curves are visible above the tabs
+    padding-bottom: 0.25em // mirrors side-strip padding-left/right: 0.25em
 
     // Hide all legacy status content — only the auto-hide tab strip is shown.
     > *:not(#auto-hide-bottom-strip)

@@ -4,7 +4,7 @@
 //
 // Layout: side strips tile WITH the GL container in a flex row, so the GL
 // area shrinks to accommodate them (no overlay on top of content).
-// Bottom auto-hide tabs render in #status-base (1.75rem tall, tabs only).
+// Bottom auto-hide tabs render in #status-base (2rem tall, tabs only).
 
 // ---------------------------------------------------------------------------
 // Layout row — flex container that holds left strip, GL (#ROOT), right strip.
@@ -199,7 +199,11 @@
   min-height: 100px
   max-height: 600px
   overflow: hidden
-  width: 100%
+  // Inset left/right to match #ROOT's padding-left/right (0.25em) so the panel
+  // content aligns with the GL content area rather than being edge-to-edge.
+  // margin instead of width: 100% so the flex container controls the width.
+  margin-left: 0.25em
+  margin-right: 0.25em
 
   &.docked-open
     display: flex
@@ -232,8 +236,9 @@
 
 // ---------------------------------------------------------------------------
 // Bottom auto-hide strip — the sole content of the redesigned #status-base.
-// The bar is 1.75rem tall with 0.25em padding-top for curve visibility.
-// Tabs fill the remaining 1.5em height via align-items: stretch.
+// The bar is 2rem tall with 0.25em padding-top/bottom (matching side-strip
+// padding-left/right) for curve visibility and consistent breathing room.
+// Tabs fill the inner 1.5em height via align-items: stretch.
 // ---------------------------------------------------------------------------
 
 #auto-hide-bottom-strip
@@ -244,6 +249,10 @@
   overflow: visible
   position: relative
   z-index: 100
+  // Left/right padding matches #ROOT's padding-left/right (0.25em) so the tabs
+  // are inset by the same amount as the GL content area on both sides.
+  padding-left: 0.25em
+  padding-right: 0.25em
 
 // ---------------------------------------------------------------------------
 // Bottom strip tab overrides — use the same .auto-hide-strip-tab classes
@@ -262,19 +271,13 @@
   margin-right: 0.24em
   // Tab height is the full status-bar height — no explicit height needed
   // since the parent is align-items: stretch.
-  // Curves on TOP: the open end faces upward toward the content above.
-  border-top-left-radius: 0em
-  border-top-right-radius: 0em
-  border-bottom-left-radius: 0.36em
-  border-bottom-right-radius: 0.36em
+  // All corners 0.36em — matches the side-strip tab border-radius exactly.
+  border-radius: 0.36em
   overflow: visible  // allow curve pseudo-elements to bleed outside the tab
 
   &.active
     color: colors-ui-text-primary-label
-    border-top-left-radius: 0em
-    border-top-right-radius: 0em
-    border-bottom-left-radius: 0.36em
-    border-bottom-right-radius: 0.36em
+    border-radius: 0.36em
     // Shadow bridges the gap between the strip top edge and the docked panel.
     box-shadow: 0em -0.48em 0em 0em colors-ui-surface-panel
     overflow: visible
@@ -313,6 +316,11 @@
       transform: translate(0em, -0.25625em)
 
 // Label: no writing-mode rotation for horizontal tabs.
+// align-self: stretch + internal display: flex + align-items: center ensure
+// the label fills the full tab height and the text is truly centered, rather
+// than relying on the parent's align-items: center to center the line box
+// (which shifts capital letters slightly high due to descender space in the
+// line box not being used by all-caps text).
 #auto-hide-bottom-strip .auto-hide-strip-tab-label
   writing-mode: horizontal-tb
   text-orientation: mixed
@@ -320,6 +328,12 @@
   padding-left: 0
   padding-right: 0.38em
   max-height: none
+  align-self: stretch  // fill full tab height instead of centering the line box
+  display: flex        // flex container so text node becomes a flex item
+  align-items: center  // vertically center the text within the stretched label
+  line-height: 1       // collapse descender space so the line box ≈ cap height;
+                       // without this, line-height ~1.2 leaves unused space below
+                       // caps that shifts their visual center above the line box center
 
 // Buttons sit inline (to the right of the label) instead of above it.
 #auto-hide-bottom-strip .auto-hide-strip-tab-buttons
@@ -446,6 +460,10 @@
 // First active tab has no top curve (nothing above it to connect to).
 #auto-hide-strip-left .auto-hide-strip-tab.active:first-child::before,
 #auto-hide-strip-right .auto-hide-strip-tab.active:first-child::before
+  display: none
+
+// Bottom strip: first active tab has no LEFT curve (nothing to its left).
+#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child::before
   display: none
 
 // ---------------------------------------------------------------------------
@@ -593,22 +611,22 @@
 #auto-hide-overlay.auto-hide-overlay-left
   top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
   left: 2em
-  // Bottom tab strip is 1.75rem tall. Stop above it so the overlay doesn't overlap.
-  bottom: 1.75rem
+  // Bottom tab strip is 2rem tall. Stop above it so the overlay doesn't overlap.
+  bottom: 2rem
   width: 360px
 
 // Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
   top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
   right: 2em
-  bottom: 1.75rem  // stop above the bottom tab strip (1.75rem)
+  bottom: 2rem  // stop above the bottom tab strip (2rem)
   width: 360px
 
-// Bottom overlay: sits above the tab strip, full width.
+// Bottom overlay: sits above the tab strip, inset to match #ROOT left/right padding.
 #auto-hide-overlay.auto-hide-overlay-bottom
-  left: 0
-  right: 0
-  bottom: 1.75rem  // stop above the bottom tab strip
+  left: 0.25em   // matches #ROOT padding-left so content aligns with GL content
+  right: 0.25em  // matches #ROOT padding-right
+  bottom: 2rem  // stop above the bottom tab strip
   height: 280px
 
 // ---------------------------------------------------------------------------
