@@ -6,8 +6,8 @@
   min-height: 0
   box-sizing: border-box
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
-  background: BACKGROUND_COLOR
+  color: colors-ui-text-primary-body
+  background: colors-ui-surface-base-panel
   font-family: "FiraCode"
   font-size: 13px
   line-height: 20px
@@ -19,14 +19,14 @@
     gap: 10px
     padding: 7px 10px
     flex: 0 0 auto
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-    background: HEADER_PANEL_BACKGROUND_COLOR
+    border-bottom: 1px solid colors-ui-surface-input-default
+    background: colors-ui-surface-primary-tertiary
 
   .shader-debug-title
     font-weight: 600
 
   .shader-debug-context
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     min-width: 0
     overflow: hidden
     text-overflow: ellipsis
@@ -36,13 +36,13 @@
   .shader-debug-error,
   .shader-debug-empty
     padding: 10px
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
     &[display="none"]
       display: none
 
   .shader-debug-error
-    color: NOTIFICATION_ERROR_COLOR
+    color: colors-ui-text-error-primary
 
   .shader-debug-toolbar
     display: flex
@@ -50,24 +50,24 @@
     gap: 8px
     padding: 7px 10px
     flex: 0 0 auto
-    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-bottom: 1px solid colors-ui-border-secondary
 
     button
       min-width: 46px
       height: 24px
-      border: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+      border: 1px solid colors-ui-border-secondary
       border-radius: 4px
-      background: HEADER_PANEL_BACKGROUND_COLOR
-      color: TEXT_CONTENT_COLOR
+      background: colors-ui-surface-primary-tertiary
+      color: colors-ui-text-primary-body
       font: inherit
       cursor: pointer
 
       &:hover
-        background: ACTIVE_ROW
+        background: colors-ui-surface-primary-secondary-hover
 
   .shader-debug-stage,
   .shader-debug-step-label
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     white-space: nowrap
 
   .shader-debug-body
@@ -79,7 +79,7 @@
   .shader-debug-source
     min-height: 0
     overflow: auto
-    border-right: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-right: 1px solid colors-ui-border-secondary
 
   .shader-debug-source-line
     display: grid
@@ -88,12 +88,12 @@
     align-items: baseline
 
     &.current
-      background: ACTIVE_ROW
-      color: TEXT_CONTENT_COLOR
+      background: colors-ui-surface-primary-secondary-hover
+      color: colors-ui-text-primary-body
 
   .shader-debug-line-number
     padding: 0 8px
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     text-align: right
     user-select: none
 
@@ -116,7 +116,7 @@
 
   .shader-debug-instruction-label,
   .shader-debug-values-title
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     font-weight: 600
 
   .shader-debug-instruction-value
@@ -132,7 +132,7 @@
     display: grid
     grid-template-columns: minmax(70px, auto) minmax(55px, auto) minmax(0, 1fr)
     gap: 0
-    border-top: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-top: 1px solid colors-ui-border-secondary
 
   .shader-debug-value-row
     display: contents
@@ -145,11 +145,11 @@
     text-overflow: ellipsis
     white-space: nowrap
     padding: 4px 6px
-    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-bottom: 1px solid colors-ui-border-secondary
 
   .shader-debug-value-type
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .shader-debug-values-empty
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     padding: 4px 0

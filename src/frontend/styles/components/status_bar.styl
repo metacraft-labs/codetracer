@@ -3,7 +3,7 @@
   height: 100%
   display: flex
   flex-direction: column
-  background-color: BACKGROUND_COLOR
+  background-color: colors-ui-surface-base-panel
 
   .build-header
     padding: 4px 8px
@@ -79,14 +79,14 @@
       white-space: pre-wrap
 
 #build, #build-errors
-  background-color: BACKGROUND_COLOR
+  background-color: colors-ui-surface-base-panel
   font-family: "FiraCode" !important
   font-size: 14px
   line-height: 24px
   white-space: pre-wrap
 
   .build-stdout, .build-error
-    color: COLOR
+    color: colors-ui-text-primary-body
 
   .build-stdout, .build-stderr, .build-error, .build-output-line
     min-height: 24px
@@ -115,18 +115,18 @@
     color: #d29922
 
   .build-line-info
-    color: COLOR
+    color: colors-ui-text-primary-body
 
   .build-error
-    border: COLOR solid 1px
+    border: colors-ui-text-primary-body solid 1px
 
   overflow: auto
 
   height: 100%
 
 #errors
-  background-color: BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
 
 #active-notifications
   width: fit-content
@@ -187,7 +187,7 @@
       float: left
       width: max-content
       margin-left: 20px
-      background-color: BUTTON_BACKGROUND_COLOR
+      background-color: colors-ui-surface-base-panel
       text-align: center
       padding-left: 20px
       padding-right: 20px
@@ -200,8 +200,8 @@
       user-select: none
 
     .status-button-clicked
-      background-color: HOVERED_BUTTON_BACKGROUND_COLOR
-      color: HOVERED_BUTTON_COLOR
+      background-color: colors-ui-surface-primary-secondary-hover
+      color: colors-ui-border-primary
       float: left
       width: max-content
       margin-left: 20px
@@ -248,16 +248,16 @@
       align-items: center
       padding: 0 8px
       margin-right: 12px
-      border: 1px solid NOTIFICATION_WARNING_COLOR
+      border: 1px solid colors-ui-text-warning-primary
       border-radius: 6px
-      color: NOTIFICATION_WARNING_COLOR
+      color: colors-ui-text-warning-primary
       font-weight: 600
 
     .whitespace-set
       width: 10px
       float: left
       font-size: 7px
-      color: WHITESPACE_STATUS_BUTTON_COLOR
+      color: colors-ui-border-secondary
       margin-top: 4px
       margin-bottom: 2px
 
@@ -267,7 +267,7 @@
       cursor: pointer
 
       :hover
-        color: WHITESPACE_STATUS_BUTTON_HOVER_COLOR
+        color: colors-ui-text-primary-body
 
       i
         display: block !important
@@ -298,7 +298,7 @@
       width: 200px
       // margin-left: 2vw
       white-space: nowrap
-      color: OPERATION_STATUS_COLOR
+      color: colors-ui-text-success-primary
       font-family: "SpaceMono"
 
     #version-control-status
@@ -323,7 +323,7 @@
         top: -85px
         color: white
         text-align: left
-        background-color: BUTTON_BACKGROUND_COLOR
+        background-color: colors-ui-surface-base-panel
         border-radius: 5px
         padding: 10px
         display: none
@@ -333,7 +333,7 @@
           top: -85px
           color: white
           text-align: left
-          background-color: BUTTON_BACKGROUND_COLOR
+          background-color: colors-ui-surface-base-panel
           border-radius: 5px
           padding: 10px
           display: block
@@ -351,13 +351,13 @@
     width: 100%
     max-height: 50vh
     overflow-y: scroll
-    background-color: BACKGROUND_COLOR
-    border-top: 5px solid STATUS_BACKGROUND_COLOR
-    border-left: 5px solid STATUS_BACKGROUND_COLOR
-    border-right: 5px solid STATUS_BACKGROUND_COLOR
+    background-color: colors-ui-surface-base-panel
+    border-top: 5px solid colors-ui-surface-primary-tertiary
+    border-left: 5px solid colors-ui-surface-primary-tertiary
+    border-right: 5px solid colors-ui-surface-primary-tertiary
     border-top-left-radius: 5px
     border-top-right-radius: 5px
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     position: absolute
     z-index: 100
 
@@ -371,13 +371,13 @@
     width: 50%
     max-height: 50vh
     overflow-y: scroll
-    background-color: BACKGROUND_COLOR
-    border-top: 5px solid STATUS_BACKGROUND_COLOR
-    border-left: 5px solid STATUS_BACKGROUND_COLOR
-    border-right: 5px solid STATUS_BACKGROUND_COLOR
+    background-color: colors-ui-surface-base-panel
+    border-top: 5px solid colors-ui-surface-primary-tertiary
+    border-left: 5px solid colors-ui-surface-primary-tertiary
+    border-right: 5px solid colors-ui-surface-primary-tertiary
     border-top-left-radius: 5px
     border-top-right-radius: 5px
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     position: absolute
     z-index: 100
     transform: translate(50%, 0)
@@ -402,13 +402,13 @@
       margin-left: 10% !important
 
     textarea
-      color: TEXT_CONTENT_COLOR
+      color: colors-ui-text-primary-body
       height: 100px
       min-height: 100px
       max-height: 300px
       font-size: 17px !important
       border: 0
-      background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+      background-color: colors-ui-surface-primary-tertiary
       width: 80%
       margin-left: 10% !important
       margin-bottom: 5px !important
@@ -502,7 +502,7 @@
     background-color: transparent
 
   .notification-message
-    color: DEBUG_NOTIFICATIONS_TEXT
+    color: colors-ui-text-primary-label
 
 .viewer-search
   background-color: QUERY_COMPLETION_BG

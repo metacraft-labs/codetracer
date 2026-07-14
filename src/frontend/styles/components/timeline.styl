@@ -6,7 +6,7 @@
   min-height: 0
   box-sizing: border-box
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   font-family: "FiraCode"
   font-size: 13px
   line-height: 20px
@@ -17,12 +17,12 @@
     gap: 12px
     padding: 6px 10px
     flex: 0 0 auto
-    color: VALUE_TYPE_COLOR
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-    background: HEADER_PANEL_BACKGROUND_COLOR
+    color: colors-ui-text-primary-body
+    border-bottom: 1px solid colors-ui-surface-input-default
+    background: colors-ui-surface-primary-tertiary
 
   .position-ticks
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .timeline-zoom-controls
     display: flex
@@ -36,25 +36,25 @@
       height: 24px
       border: 0
       border-radius: 4px
-      background: HEADER_ELEMENT_BACKGROUND_COLOR
-      color: TEXT_CONTENT_COLOR
+      background: colors-ui-surface-primary-tertiary
+      color: colors-ui-text-primary-body
       cursor: pointer
       font: inherit
 
   .zoom-level
     min-width: 42px
     text-align: center
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .timeline-track
     position: relative
     height: 42px
     margin: 0 10px
-    border-top: 1px solid ACTIVE_MENU_BACKGROUND
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    border-top: 1px solid colors-ui-surface-input-default
+    border-bottom: 1px solid colors-ui-surface-input-default
     background:
-      linear-gradient(90deg, EVENT_LOG_ROWS_BORDERS_COLOR 1px, transparent 1px),
-      linear-gradient(to bottom, transparent 19px, ACTIVE_ROW 20px, transparent 21px)
+      linear-gradient(90deg, colors-ui-border-secondary 1px, transparent 1px),
+      linear-gradient(to bottom, transparent 19px, colors-ui-surface-primary-secondary-hover 20px, transparent 21px)
     background-size: 40px 100%, 100% 100%
     flex: 0 0 auto
     cursor: pointer
@@ -72,6 +72,6 @@
     margin: 8px
     padding: 2px 6px
     border-radius: 4px
-    background: HEADER_ELEMENT_BACKGROUND_COLOR
-    color: TEXT_CONTENT_COLOR
+    background: colors-ui-surface-primary-tertiary
+    color: colors-ui-text-primary-body
     font-size: 12px

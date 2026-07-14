@@ -163,7 +163,7 @@ button
 
   &.open
     // background-image: ct-images-layout-tab-active !important
-    background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+    background-color: colors-ui-surface-input-default
     box-shadow: inset 0 0 0 0.0625em colors-ui-border-action !important
 
 #close-element
@@ -217,7 +217,7 @@ button
       top: 20%
       border-width: 0.5em
       border-style: solid
-      border-color: transparent TOOLTIP_BACKGROUND transparent transparent
+      border-color: transparent colors-ui-surface-canvas transparent transparent
 
 .ct-button-no-border
   border: none !important
@@ -227,8 +227,8 @@ button
   position: absolute
   font-family: "SpaceGrotesk"
   top: 100%
-  background-color: TOOLTIP_BACKGROUND
-  color: PRIMARY_TEXT_COLOR
+  background-color: colors-ui-surface-canvas
+  color: colors-ui-text-primary-body
   padding: 0.3125em 0.625em
   font-size: 0.75em
   border-radius: 0.25em
@@ -256,7 +256,7 @@ button
       right: 0.25em
       border-width: 0.5em
       border-style: solid
-      border-color: TOOLTIP_BACKGROUND transparent transparent transparent
+      border-color: colors-ui-surface-canvas transparent transparent transparent
 
   &:after
     content: ''
@@ -265,7 +265,7 @@ button
     left: calc(50% - 0.5em)
     border-width: 0.5em
     border-style: solid
-    border-color: transparent transparent TOOLTIP_BACKGROUND transparent
+    border-color: transparent transparent colors-ui-surface-canvas transparent
 
 [class*="ct-button-image-"]:hover > .custom-tooltip
   opacity: 1

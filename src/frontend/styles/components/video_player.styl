@@ -28,14 +28,14 @@
   // ``var(--video-player-*)``; the override block at the bottom of
   // this file swaps the values when ``<body>`` carries
   // ``theme-light``.
-  --video-player-fg: TEXT_CONTENT_COLOR
-  --video-player-bg: BACKGROUND_COLOR
-  --video-player-chrome-bg: HEADER_PANEL_BACKGROUND_COLOR
-  --video-player-chrome-border: ACTIVE_MENU_BACKGROUND
-  --video-player-button-hover-bg: ACTIVE_MENU_BACKGROUND
-  --video-player-button-active-bg: ACTIVE_MENU_BACKGROUND
-  --video-player-divider: ACTIVE_MENU_BACKGROUND
-  --video-player-scrub-labels-fg: VALUE_TYPE_COLOR
+  --video-player-fg: colors-ui-text-primary-body
+  --video-player-bg: colors-ui-surface-base-panel
+  --video-player-chrome-bg: colors-ui-surface-primary-tertiary
+  --video-player-chrome-border: colors-ui-surface-input-default
+  --video-player-button-hover-bg: colors-ui-surface-input-default
+  --video-player-button-active-bg: colors-ui-surface-input-default
+  --video-player-divider: colors-ui-surface-input-default
+  --video-player-scrub-labels-fg: colors-ui-text-primary-body
 
   display: flex
   flex-direction: column
@@ -357,9 +357,9 @@
 //
 // Colour values mirror ``default_white_theme.styl`` for the
 // corresponding global tokens so the panel reads visually consistent
-// with the hypothetical light-themed shell.  ``PRIMARY_TEXT_COLOR``
-// is undefined in that file, so ``VALUE_TYPE_COLOR`` falls back to
-// ``TEXT_CONTENT_COLOR`` here (the closest meaningful approximation
+// with the hypothetical light-themed shell.  ``colors-ui-text-primary-body``
+// is undefined in that file, so ``colors-ui-text-primary-body`` falls back to
+// ``colors-ui-text-primary-body`` here (the closest meaningful approximation
 // for "secondary text on a light background").
 body.theme-light .video-player-component
   --video-player-fg: #464646

@@ -6,8 +6,8 @@
   min-height: 0
   box-sizing: border-box
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
-  background: BACKGROUND_COLOR
+  color: colors-ui-text-primary-body
+  background: colors-ui-surface-base-panel
   font-family: "FiraCode"
   font-size: 13px
   line-height: 20px
@@ -19,14 +19,14 @@
     gap: 10px
     padding: 7px 10px
     flex: 0 0 auto
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-    background: HEADER_PANEL_BACKGROUND_COLOR
+    border-bottom: 1px solid colors-ui-surface-input-default
+    background: colors-ui-surface-primary-tertiary
 
   .pixel-history-title
     font-weight: 600
 
   .pixel-history-pixel
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     min-width: 0
     overflow: hidden
     text-overflow: ellipsis
@@ -36,13 +36,13 @@
   .pixel-history-error,
   .pixel-history-empty
     padding: 10px
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
     &[display="none"]
       display: none
 
   .pixel-history-error
-    color: NOTIFICATION_ERROR_COLOR
+    color: colors-ui-text-error-primary
 
   .pixel-history-list
     min-height: 0
@@ -57,16 +57,16 @@
     min-height: 84px
     padding: 8px 10px
     border: 0
-    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-bottom: 1px solid colors-ui-border-secondary
     background: transparent
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     font: inherit
     text-align: left
     cursor: pointer
 
     &:hover,
     &.selected
-      background: ACTIVE_ROW
+      background: colors-ui-surface-primary-secondary-hover
 
   .pixel-history-entry-main
     display: grid
@@ -77,14 +77,14 @@
 
   .pixel-history-draw,
   .pixel-history-geid
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .pixel-history-pass
     min-width: 0
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .pixel-history-colors
     display: grid
@@ -102,7 +102,7 @@
     flex: 0 0 auto
     width: 14px
     height: 14px
-    border: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border: 1px solid colors-ui-border-secondary
     border-radius: 3px
 
   .pixel-history-color-label,
@@ -111,5 +111,5 @@
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     font-size: 12px

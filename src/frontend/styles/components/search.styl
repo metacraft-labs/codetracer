@@ -3,8 +3,8 @@
   display: flex
   flex-direction: column
   overflow: hidden
-  background: BACKGROUND_COLOR
-  color: TEXT_CONTENT_COLOR
+  background: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   font-family: "SpaceGrotesk", sans-serif
   font-size: 13px
 
@@ -13,29 +13,29 @@
   display: flex
   gap: 0.375em
   padding: 0.5em
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-  background: HEADER_PANEL_BACKGROUND_COLOR
+  border-bottom: 1px solid colors-ui-surface-input-default
+  background: colors-ui-surface-primary-tertiary
 
   button
     height: 24px
     padding: 0 0.75em
     border: 1px solid transparent
     border-radius: 0.25em
-    background: ACTIVE_MENU_BACKGROUND
-    color: DROPDOWN_TEXT_COLOR
+    background: colors-ui-surface-input-default
+    color: colors-ui-text-primary-body
     font: inherit
     cursor: pointer
 
     &:hover,
     &.active
-      background: HOVERED_BUTTON_BACKGROUND_COLOR
-      color: TEXT_CONTENT_COLOR
-      border-color: BORDERS_COLOR
+      background: colors-ui-surface-primary-secondary-hover
+      color: colors-ui-text-primary-body
+      border-color: colors-ui-border-secondary
 
 .search-input-row
   flex: 0 0 auto
   padding: 0.5em
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+  border-bottom: 1px solid colors-ui-surface-input-default
 
 .search-query-input
   width: 100%
@@ -44,7 +44,7 @@
   border: 1px solid #4f4f4f
   border-radius: 0.25em
   background: #151515
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   padding: 0 0.75em
   font: inherit
   outline: 0
@@ -53,7 +53,7 @@
   flex: 1 1 auto
   min-height: 0
   overflow: auto
-  background: BACKGROUND_COLOR
+  background: colors-ui-surface-base-panel
 
   &[display="none"]
     display: none
@@ -65,12 +65,12 @@
   column-gap: 1em
   min-height: 28px
   padding: 0 0.75em
-  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+  border-bottom: 1px solid colors-ui-border-secondary
   cursor: pointer
 
   &:hover,
   &.selected
-    background: ACTIVE_ROW
+    background: colors-ui-surface-primary-secondary-hover
 
 .search-result-label,
 .search-result-detail
@@ -82,7 +82,7 @@
 .search-result-detail,
 .search-result-shortcut,
 .search-selected-indicator
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
 
 .search-selected-indicator
   display: block
@@ -91,4 +91,4 @@
   font-size: 12px
 
   &.active
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body

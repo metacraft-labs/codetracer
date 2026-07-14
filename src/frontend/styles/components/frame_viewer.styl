@@ -6,8 +6,8 @@
   min-height: 0
   box-sizing: border-box
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
-  background: BACKGROUND_COLOR
+  color: colors-ui-text-primary-body
+  background: colors-ui-surface-base-panel
   font-family: "FiraCode"
   font-size: 13px
   line-height: 20px
@@ -19,15 +19,15 @@
     gap: 12px
     padding: 6px 10px
     flex: 0 0 auto
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-    background: HEADER_PANEL_BACKGROUND_COLOR
+    border-bottom: 1px solid colors-ui-surface-input-default
+    background: colors-ui-surface-primary-tertiary
 
   .frame-viewer-player-url
     min-width: 0
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .frame-viewer-connection-status
     border-radius: 4px
@@ -57,20 +57,20 @@
       height: 24px
       border: 0
       border-radius: 4px
-      background: HEADER_ELEMENT_BACKGROUND_COLOR
-      color: TEXT_CONTENT_COLOR
+      background: colors-ui-surface-primary-tertiary
+      color: colors-ui-text-primary-body
       cursor: pointer
       font: inherit
 
   .frame-viewer-frame-label
     min-width: 8em
     text-align: center
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .frame-viewer-scrubber
     padding: 6px 10px
     flex: 0 0 auto
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    border-bottom: 1px solid colors-ui-surface-input-default
 
   .frame-viewer-frame-range
     width: 100%
@@ -96,7 +96,7 @@
     max-width: 100%
     max-height: 100%
     image-rendering: pixelated
-    border: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border: 1px solid colors-ui-border-secondary
     background: #000
     cursor: crosshair
 
@@ -106,28 +106,28 @@
   .frame-viewer-empty,
   .frame-viewer-loading,
   .frame-viewer-error
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     padding: 12px
 
     &[display="none"]
       display: none
 
   .frame-viewer-error
-    color: NOTIFICATION_ERROR_COLOR
+    color: colors-ui-text-error-primary
 
   .frame-viewer-side-panel
     display: flex
     flex-direction: column
     min-width: 0
     min-height: 0
-    border-left: 1px solid ACTIVE_MENU_BACKGROUND
-    background: HEADER_PANEL_BACKGROUND_COLOR
+    border-left: 1px solid colors-ui-surface-input-default
+    background: colors-ui-surface-primary-tertiary
 
   .frame-viewer-selected-pixel
     padding: 8px 10px
     flex: 0 0 auto
-    color: VALUE_TYPE_COLOR
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    color: colors-ui-text-primary-body
+    border-bottom: 1px solid colors-ui-surface-input-default
 
   .frame-viewer-draw-calls
     min-height: 0
@@ -139,13 +139,13 @@
     top: 0
     z-index: 1
     padding: 6px 10px
-    color: VALUE_TYPE_COLOR
-    background: HEADER_PANEL_BACKGROUND_COLOR
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    color: colors-ui-text-primary-body
+    background: colors-ui-surface-primary-tertiary
+    border-bottom: 1px solid colors-ui-surface-input-default
 
   .frame-viewer-draw-calls-empty
     padding: 8px 10px
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .frame-viewer-draw-call
     display: grid
@@ -155,16 +155,16 @@
     min-height: 42px
     padding: 6px 10px
     border: 0
-    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-bottom: 1px solid colors-ui-border-secondary
     background: transparent
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     font: inherit
     text-align: left
     cursor: pointer
 
     &:hover,
     &.selected
-      background: ACTIVE_ROW
+      background: colors-ui-surface-primary-secondary-hover
 
   .frame-viewer-draw-call-name,
   .frame-viewer-draw-call-pipeline
@@ -174,5 +174,5 @@
     white-space: nowrap
 
   .frame-viewer-draw-call-pipeline
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     font-size: 12px

@@ -9,7 +9,7 @@
   padding-bottom: 4px
   transform: translate(0, 50%)
   border-radius: 6px
-  background: DROPDOWN_BASE
+  background: colors-ui-surface-input-default
 
   .history-list-item-wrapper
     padding-left: 2px
@@ -21,7 +21,7 @@
       padding-right: 8px
       cursor: pointer
       font-family: "SpaceMono"
-      color: PRIMARY_TEXT_COLOR
+      color: colors-ui-text-primary-body
       border-radius: 6px
       font-size: 14px
       line-height: 24px
@@ -30,7 +30,7 @@
 
 
       &:hover
-        background: ACTIVE_ROW
+        background: colors-ui-surface-primary-secondary-hover
 
       &:focus
         outline: none
@@ -38,7 +38,7 @@
 .full-history-list
   display: flex
   position: absolute
-  background: DROPDOWN_BASE
+  background: colors-ui-surface-input-default
   flex-direction: column
   padding: 2px
   padding-top: 4px
@@ -51,7 +51,7 @@
   border-radius: 6px
 
   &::-webkit-scrollbar-thumb
-    border-color: DROPDOWN_BASE
+    border-color: colors-ui-surface-input-default
 
 .menu-expand
   width: MENU_EXPAND_WIDTH
@@ -84,7 +84,7 @@
 //   align-items: center
 
 .history-list-item.active
-  background-color: ACTIVE_ROW
+  background-color: colors-ui-surface-primary-secondary-hover
   color: red
 
 #history
@@ -102,10 +102,10 @@
   margin-left: 90px
 
 .history-expandable
-  color: COLOR
+  color: colors-ui-text-primary-body
 
 .history-even
-  background-color: BACKGROUND_COLOR
+  background-color: colors-ui-surface-base-panel
 
 .history-odd
   background-color: BACKGROUND_NEIGHBOUR_COLOR
@@ -130,10 +130,10 @@
   padding: 2px
   border-radius: 100px
   cursor: pointer
-  outline: 1px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+  outline: 1px solid colors-ui-border-primary-hover
 
   &.active
-    outline: 2px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+    outline: 2px solid colors-ui-border-primary-hover
 
   &:hover > .custom-tooltip
     opacity: 1
@@ -151,7 +151,7 @@
       top: 20%
       border-width: 8px
       border-style: solid
-      border-color: transparent TOOLTIP_BACKGROUND transparent transparent
+      border-color: transparent colors-ui-surface-canvas transparent transparent
 
 .history-text
   display: flex
@@ -165,7 +165,7 @@
     display: flex
     justify-content: flex-start
     width: inherit
-    // border: 1px COLOR solid
+    // border: 1px colors-ui-text-primary-body solid
 
     .history-location-element
       margin-right: 8px
@@ -179,18 +179,18 @@
     .history-location
       // flex-basis: 25%
       width: fit-content
-      color: VALUE_TYPE_COLOR
+      color: colors-ui-text-primary-body
 
 
     .history-value
       flex-basis: 25%
       white-space: nowrap
-      color: VALUE_RESULT_COLOR
+      color: colors-ui-text-warning-primary
       margin-right: 25px
       padding-left: 4px
 
       &:hover
-        background: ACTIVE_MENU_BACKGROUND !important
+        background: colors-ui-surface-input-default !important
         border-radius: 4px !important
 
 .history-header
@@ -211,7 +211,7 @@
   background-color: transparent
 
   &:hover
-    background-color: TOOLTIP_BACKGROUND
+    background-color: colors-ui-surface-canvas
 
 .history-container
   display: flex
@@ -219,8 +219,8 @@
   margin-left: 12px
 
 .inline-history, .history
-  background-color: DROPDOWN_BASE
-  color: TEXT_CONTENT_COLOR
+  background-color: colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
   font-size: 14px
   cursor: pointer
   max-height: 100px !important
@@ -233,20 +233,20 @@
   width: -webkit-fill-available
 
   // &::-webkit-scrollbar-thumb
-  //   border-color: DROPDOWN_BASE
+  //   border-color: colors-ui-surface-input-default
 
   &::-webkit-scrollbar-corner
-    background-color: DROPDOWN_BASE !important
+    background-color: colors-ui-surface-input-default !important
 
   .inline-history-event
     display: flex
     border-style: solid
     border-width: 1px
-    border-color: COLOR
+    border-color: colors-ui-text-primary-body
     padding: 1px
 
     .inline-history-event-codeID
-      border-right: solid 1px COLOR
+      border-right: solid 1px colors-ui-text-primary-body
       flex-basis: 50%
 
     .inline-history-event-value

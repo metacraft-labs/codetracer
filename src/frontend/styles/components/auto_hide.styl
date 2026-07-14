@@ -724,14 +724,14 @@
   align-items: center
   justify-content: center
   border-radius: 3px
-  color: HEADER_PANEL_COLOR
+  color: colors-ui-text-primary-label
   background-color: rgba(40, 40, 40, 0.7)
-  border: 1px solid PRIMARY_BASE
+  border: 1px solid colors-ui-surface-primary-tertiary
   transition: background-color 150ms ease
   opacity: 0.6
 
   &:hover
-    background-color: ACTIVE_ROW
+    background-color: colors-ui-surface-primary-secondary-hover
     opacity: 1.0
 
 // ---------------------------------------------------------------------------
@@ -778,7 +778,7 @@
   display: flex
   flex-direction: column
   flex-shrink: 0
-  background-color: HEADER_PANEL_BACKGROUND_COLOR
+  background-color: colors-ui-surface-primary-tertiary
   padding-top: 4px
   gap: 2px
   overflow: hidden
@@ -791,17 +791,17 @@
 .overlay-side-tabs.side-tabs-left
   width: 28px
   min-width: 28px
-  border-right: 1px solid PRIMARY_BASE
+  border-right: 1px solid colors-ui-surface-primary-tertiary
   order: -1  // Place before overlay content in flex row
-  background-color: SECONDARY_BASE  // Match overlay background
+  background-color: colors-ui-surface-base-panel  // Match overlay background
 
 // Right-edge tabs: between overlay content and screen right edge.
 .overlay-side-tabs.side-tabs-right
   width: 28px
   min-width: 28px
-  border-left: 1px solid PRIMARY_BASE
+  border-left: 1px solid colors-ui-surface-primary-tertiary
   order: 1  // Place after overlay content in flex row
-  background-color: SECONDARY_BASE
+  background-color: colors-ui-surface-base-panel
 
 .overlay-side-tab
   writing-mode: vertical-lr
@@ -810,8 +810,8 @@
   font-family: "SpaceMono"
   font-size: 12px
   font-weight: 600
-  color: HEADER_PANEL_COLOR
-  background-color: HEADER_PANEL_INACTIVE_COLOR
+  color: colors-ui-text-primary-label
+  background-color: colors-ui-surface-primary-secondary
   cursor: pointer
   padding: 3px 6px
   margin: 2px
@@ -823,12 +823,12 @@
   transition: background-color 150ms ease
 
   &:hover
-    background-color: HEADER_ACTIVE_PANEL_BACKGROUND_COLOR
-    color: HEADER_ACTIVE_PANEL_TEXT_COLOR
+    background-color: colors-ui-surface-base-panel
+    color: colors-ui-text-primary-body
 
   &.active
-    background-color: HEADER_ACTIVE_PANEL_BACKGROUND_COLOR
-    color: HEADER_ACTIVE_PANEL_TEXT_COLOR
+    background-color: colors-ui-surface-base-panel
+    color: colors-ui-text-primary-body
 
 // Right-edge tabs read top-to-bottom (no rotation).
 .side-tabs-right .overlay-side-tab
