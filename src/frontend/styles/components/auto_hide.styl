@@ -214,6 +214,11 @@
     // artifact — especially when the panel has a scrollbar.
     // Matches the hover overlay z-index (101) for identical visual behaviour.
     z-index: 101
+    // Match the hover-overlay gap: #root-container bottom is at 1.75rem from
+    // the viewport bottom (aligned with the tab labels), while the overlay uses
+    // bottom: 2rem (the full status-bar height). The 0.25em margin recreates
+    // the same status-bar padding-top breathing room between content and tabs.
+    margin-bottom: 0.25em
 
 #auto-hide-docked-bottom-content
   flex: 1
