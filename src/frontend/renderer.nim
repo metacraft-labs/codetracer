@@ -334,6 +334,7 @@ proc createUIComponents*(data: Data) =
   discard data.makeStatusComponent(
     data.buildComponent(0), data.errorsComponent(0), data.ui.searchResults)
   discard data.makeSearchResultsComponent()
+  discard data.makeRequestPanelComponent(0)
   discard data.makeCommandPaletteComponent()
 
   # create components defined in layout

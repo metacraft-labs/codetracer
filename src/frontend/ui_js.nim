@@ -1614,6 +1614,7 @@ when not defined(ctInExtension):
         terminal_output.initTerminalOutputVMWithStore(activeSessionVM.store)
       initPanelVM("initBuildVMWithStore"):
         build.initBuildVMWithStore(activeSessionVM.store)
+        build.buildVMInstance.runBuild = proc() = data.update(build=true)
       initPanelVM("initErrorsVMWithStore"):
         errors.initErrorsVMWithStore(activeSessionVM.store)
       initPanelVM("initSearchResultsVMWithStore"):

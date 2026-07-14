@@ -1103,6 +1103,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       of Content.Build:         cstring"buildComponent-0"
       of Content.BuildErrors:   cstring"errorsComponent-0"
       of Content.SearchResults: cstring"searchResultsComponent-0"
+      of Content.RequestPanel:  cstring"requestPanelComponent-0"
       else:
         # For panels pinned from GL, try the standard label format.
         convertComponentLabel(panel.content, panel.componentId)
@@ -1129,6 +1130,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
       search_results.isoNimSearchResultsMounted = false
       search_results.tryMountIsoNimSearchResultsPanel()
+      return
+    if panel.content == Content.RequestPanel:
+      let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
+      if not reqComp.isNil:
+        request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
+      request_panel.tryMountIsoNimRequestPanel()
       return
     # Pinned GoldenLayout panels already carry a liveElement that showOverlay()
     # reparents into the overlay. Remaining legacy-backed GL panels (currently
@@ -1198,6 +1205,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       (content: Content.Build,         title: cstring"BUILD",          label: cstring"buildComponent-0"),
       (content: Content.BuildErrors,   title: cstring"PROBLEMS",       label: cstring"errorsComponent-0"),
       (content: Content.SearchResults, title: cstring"SEARCH RESULTS", label: cstring"searchResultsComponent-0"),
+      (content: Content.RequestPanel,  title: cstring"REQUESTS",       label: cstring"requestPanelComponent-0"),
     ]
 
     let host = kdom.document.getElementById(cstring"auto-hide-standalone-host")
@@ -1276,6 +1284,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           search_results.tryMountIsoNimSearchResultsPanel()
         except:
           cerror "auto_hide: tryMountIsoNimSearchResultsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      elif panelDef.content == Content.RequestPanel:
+        try:
+          let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
+          if not reqComp.isNil:
+            request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
+          request_panel.tryMountIsoNimRequestPanel()
+        except:
+          cerror "auto_hide: tryMountIsoNimRequestPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
       addStandaloneAutoHidePanel(
         panelDef.title,
         panelDef.content,
