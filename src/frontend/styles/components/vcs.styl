@@ -8,7 +8,7 @@
   flex-direction: column
   overflow: hidden
   background: colors-ui-surface-base-panel
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   font-family: "SpaceMono", monospace
   line-height: 1.25em
 
@@ -29,7 +29,7 @@
   align-items: center
   justify-content: center
   height: 100%
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   gap: 0.75em
 
 .vcs-no-repo-icon
@@ -129,7 +129,7 @@
   font-weight: 600
   text-transform: uppercase
   letter-spacing: 0.03125em
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
   border-bottom: 1px solid colors-ui-border-secondary
   flex-shrink: 0
@@ -141,7 +141,7 @@
   font-weight: 400
   text-transform: none
   letter-spacing: 0
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
 
 // ---------------------------------------------------------------------------
 // Unified diff mode toggle
@@ -163,18 +163,18 @@
   padding: 0 0.625em
   border-radius: 0.25em
   cursor: pointer
-  color: DROPDOWN_TEXT_COLOR
+  color: colors-ui-text-primary-body
   background: colors-ui-surface-primary-secondary
   user-select: none
   font-size: 0.75em
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   &.vcs-toggle-active
     background: colors-ui-surface-primary-secondary-hover
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
 // ---------------------------------------------------------------------------
 // Commit graph + accordion history
@@ -212,7 +212,7 @@
   user-select: none
 
   &:hover
-    background: ACTIVE_ROW
+    background: colors-ui-surface-primary-secondary-hover
 
   // On the selected (active) row, hover uses the darker action-primary shade
   // so it reads as a pressed / deepened state rather than flipping to grey.
@@ -485,11 +485,11 @@
   gap: 0.5em
   margin-top: 0.375em
   line-height: 1em
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   word-break: break-all
 
 .vcs-tip-label
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   text-transform: uppercase
   flex-shrink: 0
 
@@ -547,7 +547,7 @@
   overflow: hidden
   text-overflow: ellipsis
   white-space: nowrap
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
 
 // Status letter (M / A / D / …) shown right of the stats.
 .vcs-accordion-file-status
@@ -574,9 +574,9 @@
 .vcs-accordion-status-added    { color: colors-ui-text-success-primary }
 .vcs-accordion-status-deleted  { color: colors-ui-text-error-primary }
 .vcs-accordion-status-modified { color: colors-ui-text-warning-primary }
-.vcs-accordion-status-copied   { color: CT_SECONDARY_BLUE }
+.vcs-accordion-status-copied   { color: colors-ui-text-primary-active }
 .vcs-accordion-status-renamed  { color: #A78BFA }
-.vcs-accordion-status-other    { color: VALUE_TYPE_COLOR }
+.vcs-accordion-status-other    { color: colors-ui-text-primary-body }
 
 // "Loading more commits…" row at the bottom during a background page fetch.
 // The IntersectionObserver sentinel element is an empty sibling; this row is
@@ -584,7 +584,7 @@
 .vcs-load-more-sentinel
   padding: 0.5em 0.75em
   font-size: 0.6875em
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   text-align: center
   font-family: "SpaceMono", monospace
 
@@ -595,14 +595,14 @@
   flex-direction: column
   padding: 0.25em 0.5em
   cursor: pointer
-  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+  border-bottom: 1px solid colors-ui-border-secondary
   gap: 0.0625em
 
   &:hover
-    background: ACTIVE_ROW
+    background: colors-ui-surface-primary-secondary-hover
 
 .vcs-commit-selected
-  background: ACTIVE_ROW !important
+  background: colors-ui-surface-primary-secondary-hover !important
 
 .vcs-commit-hash
   font-family: "SpaceMono", monospace
@@ -615,11 +615,11 @@
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
 
 .vcs-commit-time
   font-size: 0.625em
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
 
 
 // ---------------------------------------------------------------------------
@@ -639,7 +639,7 @@
 
 .vcs-no-files
   padding: 0.5em
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   font-style: italic
   text-align: center
 
@@ -651,10 +651,10 @@
   gap: 0.375em
 
   &:hover
-    background: ACTIVE_ROW
+    background: colors-ui-surface-primary-secondary-hover
 
 .vcs-file-selected
-  background: ACTIVE_ROW
+  background: colors-ui-surface-primary-secondary-hover
 
 .vcs-file-status
   font-family: "SpaceMono", monospace
@@ -706,14 +706,14 @@
   text-align: center
   cursor: pointer
   font-size: 0.6875em
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
   border-top: 1px solid colors-ui-border-secondary
   user-select: none
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
 // ---------------------------------------------------------------------------
 // Hunk editor: selection, toolbar, and visual indicators
@@ -758,7 +758,7 @@
   font-size: 0.75em
 
 .hunk-toolbar-count
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   white-space: nowrap
 
 .hunk-toolbar-actions
@@ -780,12 +780,12 @@
 
 .hunk-toolbar-button-subtle
   background: transparent
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
   border: 1px solid colors-ui-border-secondary
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
 // File hover diff button styling
 .vcs-file-diff-btn

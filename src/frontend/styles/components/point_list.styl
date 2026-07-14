@@ -3,8 +3,8 @@
   display: flex
   flex-direction: column
   overflow: hidden
-  background: BACKGROUND_COLOR
-  color: TEXT_CONTENT_COLOR
+  background: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   font-family: "FiraCode", monospace
   font-size: 13px
   line-height: 20px
@@ -14,9 +14,9 @@
   display: flex
   align-items: center
   padding: 0 0.75em
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-  background: HEADER_PANEL_BACKGROUND_COLOR
-  color: VALUE_TYPE_COLOR
+  border-bottom: 1px solid colors-ui-surface-input-default
+  background: colors-ui-surface-primary-tertiary
+  color: colors-ui-text-primary-body
 
 .point-list-title
   text-transform: uppercase
@@ -36,12 +36,12 @@
   column-gap: 1em
   min-height: 26px
   padding: 0 0.75em
-  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+  border-bottom: 1px solid colors-ui-border-secondary
   cursor: pointer
 
   &:hover,
   &.selected
-    background: ACTIVE_ROW
+    background: colors-ui-surface-primary-secondary-hover
 
   &.disabled
     opacity: 0.48
@@ -59,11 +59,11 @@
   white-space: nowrap
 
 .point-list-location
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
 
 .point-list-empty
   padding: 0.75em
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
 
 .point-list-footer
   flex: 0 0 24px
@@ -71,9 +71,9 @@
   align-items: center
   gap: 1em
   padding: 0 0.75em
-  border-top: 1px solid ACTIVE_MENU_BACKGROUND
-  color: VALUE_TYPE_COLOR
+  border-top: 1px solid colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
   font-size: 12px
 
 .point-selected-indicator.active
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body

@@ -8,8 +8,8 @@
 .low-level
   display: flex
   flex-direction: column
-  background-color: BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   overflow: scroll
   flex-basis: 25%
   height: 100vh
@@ -83,7 +83,7 @@
     height: calc(100% + 20px)
     top: -8px
     left: 57px
-    background-color: TRACEPOINT_SPLITTER_COLOR
+    background-color: colors-ui-border-primary
     z-index:2 !important
 
     &.splitter
@@ -97,7 +97,7 @@
         position: absolute
         width: 20px
         height: 1px
-        background-color: TRACEPOINT_BACKGROUND_COLOR
+        background-color: colors-ui-surface-input-default
         z-index: 4
         left: calc(50% - 10px)
 
@@ -109,28 +109,28 @@
     position: relative
     // height: 40%
     width: 100%
-    background-color: TRACEPOINT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     border-radius: 6px
     // border-right: 3px solid #5a595c
 
     // .line-numbers
     //   margin-left: 0px !important
     //   padding-right: 8px !important
-    //   background-color: TRACEPOINT_BACKGROUND_COLOR
-    //   border-right: 3px solid LINE_NUMBERS_BORDER_COLOR
+    //   background-color: colors-ui-surface-input-default
+    //   border-right: 3px solid colors-ui-border-primary
     //   text-align: right !important
 
     .active-line-number
       color: #c6c6c6 !important
 
     .view-lines
-      background-color: TRACEPOINT_BACKGROUND_COLOR
+      background-color: colors-ui-surface-input-default
 
       .view-line
-        background-color: TRACEPOINT_BACKGROUND_COLOR
+        background-color: colors-ui-surface-input-default
 
     .margin-view-overlays
-      background-color: TRACEPOINT_BACKGROUND_COLOR
+      background-color: colors-ui-surface-input-default
 
   .editor-textarea-empty-header
     // border-left: 3px solid #5a595c
@@ -138,7 +138,7 @@
     left:57px
     width: calc(100% - 57px)
     height: 8px
-    background-color: TRACEPOINT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     border-radius: 6px
 
   .editor-traces
@@ -146,7 +146,7 @@
     width: 100%
     // height: 60%
     overflow: visible
-    background-color: TRACEPOINT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     position: relative
     display: flex
     flex-direction: column
@@ -154,7 +154,7 @@
     min-height: 0
 
     .dt-scroll-body::-webkit-scrollbar-thumb
-      border-color: TRACEPOINT_BACKGROUND_COLOR
+      border-color: colors-ui-surface-input-default
 
     .editor-trace
       display: flex
@@ -178,7 +178,7 @@
             flex-basis: 50%
 
   .chart-table
-    background-color: TRACEPOINT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     height: 100%
     display: flex
     flex-direction: column
@@ -215,8 +215,8 @@
   height: 100%
 
 .low-level-code
-  background-color: BACKGROUND_COLOR
-  color: TEXT_CONTENT_COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   display: flex
   flex-direction: column
   overflow: auto
@@ -227,7 +227,7 @@
 .low-level-code-header
   flex: 0 0 auto
   padding: 0.35em 0.5em
-  border-bottom: 1px solid HEADER_PANEL_BACKGROUND_COLOR
+  border-bottom: 1px solid colors-ui-surface-primary-tertiary
   opacity: 0.85
 
 .low-level-code-instructions
@@ -241,20 +241,20 @@
   line-height: 1.55em
   padding: 0 0.5em
   white-space: nowrap
-  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+  border-bottom: 1px solid colors-ui-border-secondary
 
   &:hover
-    background-color: HOVERED_BUTTON_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-secondary-hover
 
   &.active-instruction
-    background-color: ACTIVE_ROW
-    color: TEXT_CONTENT_COLOR
+    background-color: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body
 
 .low-level-code-instruction-offset
   opacity: 0.65
 
 .low-level-code-instruction-name
-  color: VALUE_TYPE_COLOR
+  color: colors-ui-text-primary-body
 
 .low-level-code-instruction-source
   opacity: 0.65

@@ -2,8 +2,8 @@
 
 .search-results
   font-size: 13px
-  background-color: BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   overflow: hidden
   display: flex
   flex-direction: column
@@ -14,9 +14,9 @@
   align-items: center
   padding: 4px 8px
   font-size: 12px
-  color: COLOR
+  color: colors-ui-text-primary-body
   opacity: 0.8
-  border-bottom: 1px solid HEADER_PANEL_BACKGROUND_COLOR
+  border-bottom: 1px solid colors-ui-surface-primary-tertiary
   flex-shrink: 0
 
   .search-results-count
@@ -40,14 +40,14 @@
     box-sizing: border-box
     padding: 3px 6px
     font-size: 12px
-    background-color: HEADER_PANEL_BACKGROUND_COLOR
-    color: COLOR
-    border: 1px solid HEADER_PANEL_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-tertiary
+    color: colors-ui-text-primary-body
+    border: 1px solid colors-ui-surface-primary-tertiary
     border-radius: 3px
     outline: none
 
     &:focus
-      border-color: HOVERED_BUTTON_BACKGROUND_COLOR
+      border-color: colors-ui-surface-primary-secondary-hover
 
 .search-results-body
   overflow-y: auto
@@ -62,8 +62,8 @@
   padding: 3px 8px
   font-size: 12px
   font-weight: 600
-  background-color: HEADER_PANEL_BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-primary-tertiary
+  color: colors-ui-text-primary-body
   position: sticky
   top: 0
   z-index: 1
@@ -89,7 +89,7 @@
   line-height: 1.6
 
   &:hover
-    background-color: HOVERED_BUTTON_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-secondary-hover
 
   .search-results-line-number
     min-width: 40px

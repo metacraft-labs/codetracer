@@ -62,10 +62,10 @@
   transform: translateX(0.18em) !important
 
 .monaco-editor .lines-content .core-guide.core-guide-indent.vertical
-  box-shadow: 0.0625em 0 0 0 LINE_NUMBERS_BORDER_COLOR inset !important
+  box-shadow: 0.0625em 0 0 0 colors-ui-border-primary inset !important
 
 .monaco-editor .lines-content .core-guide.core-guide-indent.vertical.indent-active
-  box-shadow: 0.0625em 0 0 0 PRIMARY_BASE inset !important
+  box-shadow: 0.0625em 0 0 0 colors-ui-surface-primary-tertiary inset !important
 
 .sticky-widget
   width: 100% !important
@@ -74,48 +74,48 @@
   width: -webkit-fill-available !important
 
   .monaco-editor-background
-    background-color: DIFF_BACKGROUND !important
+    background-color: colors-ui-surface-canvas !important
 
   .margin
-    background-color: DIFF_BACKGROUND !important
+    background-color: colors-ui-surface-canvas !important
 
   .margin-view-overlays
     div
-      background-color: DIFF_BACKGROUND !important
+      background-color: colors-ui-surface-canvas !important
 
   [class^="mtk"]
-    color: BREAKPOINT_COLOR !important
+    color: colors-ui-text-error-primary !important
 
   .line-numbers
-    border-right: 0.0625em solid BREAKPOINT_COLOR !important
+    border-right: 0.0625em solid colors-ui-text-error-primary !important
 
   .diff-deleted-gutter
-    color: BREAKPOINT_COLOR !important
+    color: colors-ui-text-error-primary !important
 
   .current-line
     background-color: transparent !important
 
 .diff-added-gutter
-  color: STATUS_SUCCESS
+  color: colors-ui-text-success-primary
 
 .line-numbers
   &:has(.diff-added-gutter)
-    border-right: 0.0625em solid STATUS_SUCCESS !important
+    border-right: 0.0625em solid colors-ui-text-success-primary !important
 
 // .monaco-editor
 //   .slider
 //     border-radius: 6.25em !important
-//     background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR !important
+//     background-color: colors-ui-surface-primary-secondary !important
 
 //     &:active
-//       background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR !important
+//       background-color: colors-ui-surface-primary-secondary !important
 
   .minimap
     right: 0.5em !important
     left: unset !important
 
   .decorationsOverviewRuler
-    // background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR !important
+    // background-color: colors-ui-surface-primary-secondary !important
     z-index: 10 !important
     pointer-events: none
     // width: 0.5em !important
@@ -163,14 +163,14 @@
   .sticky-line-content
     font-family "SpaceMono" !important
     font-weight: 400
-    color: TEXT_CONTENT_COLOR !important
-    background-color: SECONDARY_BASE !important
+    color: colors-ui-text-primary-body !important
+    background-color: colors-ui-surface-base-panel !important
 
 .view-zones
   .value-expanded
     position: relative
     z-index: 1
-    background-color: BACKGROUND_COLOR;
+    background-color: colors-ui-surface-base-panel;
     // border-radius: 1rem
     border: 0.0625em solid gray
     // width: fit-content !important
@@ -193,7 +193,7 @@
   flex-direction: column
   // border: 0.0625em solid grey
   position: fixed
-  background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+  background-color: colors-ui-surface-input-default
   border-radius: 0.375em
   padding-top: 0.25em
   padding-bottom: 0.25em
@@ -202,12 +202,12 @@
   z-index: 1000
 
 .context-menu-item-container
-  background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+  background-color: colors-ui-surface-input-default
   line-height: 1.75em
 
 .context-menu-item
   cursor: pointer
-  color: NAVIGATION_MENU_COLOR
+  color: colors-ui-text-primary-body
   display: flex
   flex-direction: row
   // border: 0.0625em solid white
@@ -223,17 +223,17 @@
   white-space: nowrap
 
   &:hover
-    background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-tertiary
 
 .context-menu-hint
-  color: MENU_NODE_SHORTCUT_TEXT_COLOR
+  color: colors-ui-text-primary-body
   text-align: right
   font-size: 0.625em
   padding: 0.25em
   line-height: 0.625em
   // margin-right: 0.5em
   margin-left: 0.5em
-  background-color: MENU_NODE_SHORTCUT_BACKGROUND
+  background-color: colors-ui-surface-primary-secondary-hover
   border-radius: 0.375em
   line-height: 0.625em
 
@@ -253,7 +253,7 @@
   border-radius: 1.5625em
 
 .code-editor
-  // background-color: BACKGROUND_COLOR
+  // background-color: colors-ui-surface-base-panel
   height: 100% //100vh
   overflow: scroll
   flex-basis: 100%
@@ -351,9 +351,9 @@
     align-items: center
 
   // button
-  //   background-color: PRIMARY_BASE
+  //   background-color: colors-ui-surface-primary-tertiary
   //   padding-left: 0.625em
-  //   color: PRIMARY_TEXT_COLOR
+  //   color: colors-ui-text-primary-body
   //   padding-right: 0.625em
   //   // height: 100%
   //   // font-size: 0.8125em
@@ -369,14 +369,14 @@
   //   background-size: 1ch
 
   //   &:hover
-  //     background-color: ACTIVE_MENU_BACKGROUND
+  //     background-color: colors-ui-surface-input-default
 
   //   &:disabled
   //     opacity: 0.5 !important
   //     cursor: default !important
 
   //     &:hover
-  //       background-color: PRIMARY_BASE
+  //       background-color: colors-ui-surface-primary-tertiary
 
   .flow-parallel-value
     display: inline-flex
@@ -387,9 +387,9 @@
   .flow-parallel-value-name
     // font-size: 0.8125em
     font-family: "SpaceMono"
-    background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
-    // box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
-    color: FLOW_PARALLEL_NAME_COLOR
+    background: colors-ui-surface-primary-secondary-hover
+    // box-shadow: 0.0625em 0.0625em 0.0625em colors-ui-surface-input-default
+    color: colors-ui-text-primary-body
     padding-left: 0.3125em
     padding-right: 0.3125em
     padding-top: 0
@@ -416,9 +416,9 @@
   .flow-loop-value-name
     // font-size: 0.8125em
     font-family: "SpaceMono"
-    background: PRIMARY_BASE
-    box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
-    color: PRIMARY_TEXT_COLOR
+    background: colors-ui-surface-primary-tertiary
+    box-shadow: 0.0625em 0.0625em 0.0625em colors-ui-surface-input-default
+    color: colors-ui-text-primary-body
     padding-left: 0.3125em
     padding-right: 0.3125em
     padding-top: 0
@@ -433,14 +433,14 @@
 
   .flow-loop-textarea
     height: 100%
-    background-color: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-secondary-hover
     font-family: monospace
     border: 0
     padding: 0
     padding-right: 0.1875em
     overflow: hidden
     resize: none
-    color: FLOW_PARALLEL_NAME_COLOR
+    color: colors-ui-text-primary-body
     outline: none
     cursor: text
     opacity: 0.7
@@ -449,15 +449,15 @@
       opacity: 1
 
     &::placeholder
-      color: FLOW_PARALLEL_NAME_COLOR
+      color: colors-ui-text-primary-body
 
   .flow-parallel-loop-iteration-end
     padding-left: 0.1875em
-    // border-left: 0.0625em solid SECONDARY_BASE
+    // border-left: 0.0625em solid colors-ui-surface-base-panel
 
   .flow-parallel-loop-iteration-start
     padding-right: 0.3125em
-    // border-right: 0.0625em solid SECONDARY_BASE
+    // border-right: 0.0625em solid colors-ui-surface-base-panel
 
   .flow-multiline-value-pointer
     width: 0.0625em
@@ -557,7 +557,7 @@
         color: black
 
     &.shrinked
-      background-color: FLOW_MULTILINE_BACKGROUND_COLOR
+      background-color: colors-ui-surface-base-panel
       border-radius: 0.15625em
 
       &.active
@@ -574,7 +574,7 @@
     .flow-multiline-value-before-only
       // border: 0.0625em FLOW_PARALLEL_BEFORE_VALUE_BORDER_COLOR solid
       background-color: FLOW_MULTILINE_LOOP_VALUE_BACKGROUND_COLOR
-      color: FLOW_MULTILINE_LOOP_VALUE_COLOR
+      color: colors-ui-text-primary-label
       box-shadow: 0.0625em 0.0625em 0.0625em FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
     // box-shadow: -0.0625em -0.0625em FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
 
@@ -654,7 +654,7 @@
       opacity: 0.7
 
 .high-level-line
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
 
 .jump-back-button
   white-space: nowrap
@@ -697,9 +697,9 @@
     background-color: BACKGROUND_NEIGHBOUR_COLOR
 
   .even
-    background-color: BACKGROUND_COLOR
+    background-color: colors-ui-surface-base-panel
 
-  color: COLOR
+  color: colors-ui-text-primary-body
 
   .dataTables_length
     display: none
@@ -714,21 +714,21 @@
   position: fixed
   z-index: 10000
   width: fit-content
-  background-color: BACKGROUND_COLOR
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.3125em
   display: none
 
   &:focus
     outline: 0 !important
-    border: 0.0625em solid DROPDOWN_TEXT_COLOR !important
+    border: 0.0625em solid colors-ui-text-primary-body !important
 
   &.visible
     display: block
 
 .context-menu-option
   height: 1.5625em
-  color: DROPDOWN_TEXT_COLOR
-  background-color: DROPDOWN_LIST_BACKGROUND_COLOR
+  color: colors-ui-text-primary-body
+  background-color: colors-ui-surface-primary-tertiary
   border-radius: 0.3125em
   padding-right: 0.625em
   padding-left: 0.625em
@@ -737,8 +737,8 @@
   align-items: center
 
   &:hover
-    background-color: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
-    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    background-color: colors-ui-surface-input-default
+    color: colors-ui-text-primary-body
 
 .context-menu-option-text
   width: 100%
@@ -755,7 +755,7 @@
   // TODO relative to font size margin top/width/height
   .gutter-trace
     width: var(--ct-gutter-trace-size)
-    background: TRACEPOINT_COLOR
+    background: colors-ui-border-action
     height: var(--ct-gutter-trace-size)
     border-radius: 50%
     top: 0
@@ -767,7 +767,7 @@
 
   .gutter-disabled-trace
     width: var(--ct-gutter-trace-size) !important
-    background: PRIMARY_BASE
+    background: colors-ui-surface-primary-tertiary
     height: var(--ct-gutter-trace-size)
     border-radius: 50%
     top: 0
@@ -779,7 +779,7 @@
 
   .gutter-breakpoint-enabled
     width: var(--ct-gutter-breakpoint-size)
-    background: BREAKPOINT_COLOR
+    background: colors-ui-text-error-primary
     height: var(--ct-gutter-breakpoint-size)
     border-radius: 50%
     top: 0
@@ -800,7 +800,7 @@
 
   .gutter-breakpoint-disabled
     width: var(--ct-gutter-breakpoint-size)
-    background: PRIMARY_BASE
+    background: colors-ui-surface-primary-tertiary
     height: var(--ct-gutter-breakpoint-size)
     border-radius: 50%
     top: 0
@@ -830,7 +830,7 @@
     z-index: 9
 
   &:hover > .gutter-no-breakpoint
-    background: BREAKPOINT_COLOR
+    background: colors-ui-text-error-primary
     border-radius: 50%
     margin-top: 0.63ch
     opacity: 0.3
@@ -855,7 +855,7 @@
 //font-weight: bold
 
 .line-numbers
-  // border-right: 0.0625em solid LINE_NUMBERS_BORDER_COLOR
+  // border-right: 0.0625em solid colors-ui-border-primary
   width: 100% !important
   display: block !important
   box-sizing: border-box
@@ -905,7 +905,7 @@
 // dot anchors visually to the bound column and tracks editor
 // scroll / resize automatically.
 .ct-column-breakpoint-marker
-  border-bottom: 0.125em solid BREAKPOINT_COLOR
+  border-bottom: 0.125em solid colors-ui-text-error-primary
   background-color: rgba(255, 0, 0, 0.18)
   border-radius: 0.1em
   cursor: pointer
@@ -1024,9 +1024,9 @@ else
   align-items: center
 
 // button
-//   background-color: PRIMARY_BASE
+//   background-color: colors-ui-surface-primary-tertiary
 //   padding-left: 0.625em
-//   color: PRIMARY_TEXT_COLOR
+//   color: colors-ui-text-primary-body
 //   padding-right: 0.625em
 //   // height: 100%
 //   // font-size: 0.8125em
@@ -1045,14 +1045,14 @@ else
 //     background-size: 1ch
 
 //   &:hover
-//     background-color: ACTIVE_MENU_BACKGROUND
+//     background-color: colors-ui-surface-input-default
 
 //   &:disabled
 //     opacity: 0.5 !important
 //     cursor: default !important
 
 //     &:hover
-//       background-color: PRIMARY_BASE
+//       background-color: colors-ui-surface-primary-tertiary
 
 //   &.backward
 //     background-image: url('../../public/resources/shared/omniscience_backward_dark.svg')
@@ -1069,9 +1069,9 @@ else
 .flow-parallel-value-name
   // font-size: 0.8125em
   font-family: "SpaceMono"
-  background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
-  // box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
-  color: FLOW_PARALLEL_NAME_COLOR
+  background: colors-ui-surface-primary-secondary-hover
+  // box-shadow: 0.0625em 0.0625em 0.0625em colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
   padding-left: 0.3125em
   padding-right: 0.3125em
   padding-top: 0
@@ -1092,9 +1092,9 @@ else
 .flow-loop-value-name
   // font-size: 0.8125em
   font-family: "SpaceMono"
-  background: PRIMARY_BASE
-  box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
-  color: PRIMARY_TEXT_COLOR
+  background: colors-ui-surface-primary-tertiary
+  box-shadow: 0.0625em 0.0625em 0.0625em colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
   padding-left: 0.3125em
   padding-right: 0.3125em
   padding-top: 0
@@ -1109,14 +1109,14 @@ else
 
 .flow-loop-textarea
   height: 100%
-  background-color: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+  background-color: colors-ui-surface-primary-secondary-hover
   font-family: monospace
   border: 0
   padding: 0
   padding-right: 0.1875em
   overflow: hidden
   resize: none
-  color: FLOW_PARALLEL_NAME_COLOR
+  color: colors-ui-text-primary-body
   outline: none
   cursor: text
   opacity: 0.7
@@ -1125,4 +1125,4 @@ else
     opacity: 1
 
   &::placeholder
-    color: FLOW_PARALLEL_NAME_COLOR
+    color: colors-ui-text-primary-body

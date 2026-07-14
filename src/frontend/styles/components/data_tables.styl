@@ -10,7 +10,7 @@
   flex: 1 1 auto
   overflow: hidden
   min-height: 0
-  color: COLOR
+  color: colors-ui-text-primary-body
 
   .rr-ticks-line-container
     position: relative
@@ -18,7 +18,7 @@
 
     .rr-ticks-line
       display: inline-block
-      background: CT_SECONDARY_BLUE
+      background: colors-ui-text-primary-active
       height: 0.1875em !important
 
   .rr-ticks-empty-remaining
@@ -78,8 +78,8 @@
     display: flex
     // margin-left: 8px
     // margin-right: 8px
-    border-top: 0.0625em solid EVENT_LOG_ROWS_BORDERS_COLOR
-    color: COLOR
+    border-top: 0.0625em solid colors-ui-border-secondary
+    color: colors-ui-text-primary-body
     align-items: start
     // padding-right: 8px
 
@@ -96,24 +96,24 @@
       opacity: 1
 
     &.odd.past:hover
-      background-color: ACTIVE_ROW
+      background-color: colors-ui-surface-primary-secondary-hover
       opacity: 1
 
     &.even.past:hover
-      background-color: ACTIVE_ROW
+      background-color: colors-ui-surface-primary-secondary-hover
       opacity: 1
 
     &.odd.future:hover
-      background-color: ACTIVE_ROW
+      background-color: colors-ui-surface-primary-secondary-hover
       opacity: 1
 
     &.even.future:hover
-      background-color: ACTIVE_ROW
+      background-color: colors-ui-surface-primary-secondary-hover
       opacity: 1
 
     td
       display: grid
-      color: EVENT_LOG_CONTENT_COLOR
+      color: colors-ui-text-primary-body
       font-weight: 400
   td
     text-overflow: clip
@@ -152,7 +152,7 @@
   line-height: 1.5em
   // font-style: italic
   font-family: "SpaceMono"
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   display: flex
 
   .data-tables-footer-info

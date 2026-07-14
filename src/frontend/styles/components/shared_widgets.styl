@@ -18,7 +18,7 @@ if !IS_EXTENSION
   // TODO: Ask Niky for a constant in mapped for the color
   ::-webkit-scrollbar-thumb:vertical:active,
   ::-webkit-scrollbar-thumb:horizontal:active
-    background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-secondary
 
 if IS_EXTENSION
   .component-container-html
@@ -57,13 +57,13 @@ if IS_EXTENSION
       border-bottom: 1px solid var(--vscode-editorWidget-border)
 
 input::-webkit-input-placeholder
-  color: INPUT_PLACEHOLDER_COLOR;
+  color: colors-ui-text-primary-label;
 
 input:-moz-placeholder
-  color: INPUT_PLACEHOLDER_COLOR
+  color: colors-ui-text-primary-label
 
 input::-moz-placeholder
-  color: INPUT_PLACEHOLDER_COLOR
+  color: colors-ui-text-primary-label
 
 TRACE_LOG_EDITOR_Z_INDEX = 50
 
@@ -163,11 +163,11 @@ body
 //   font-size: 14px !important
 //   font-style: normal !important
 //   font-weight: 400 !important
-//   color: TEXT_CONTENT_COLOR
+//   color: colors-ui-text-primary-body
 //   height: 28px
 //   // font-size: 17px !important
 //   border: 0
-//   background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+//   background-color: colors-ui-surface-primary-tertiary
 //   if IS_EXTENSION
 //     width: -webkit-fill-available
 //   else
@@ -182,15 +182,15 @@ body
 //   overflow: hidden !important
 //   text-overflow: ellipsis !important
 //   white-space: nowrap !important
-//   border: 1px solid INPUT_BORDER_COLOR !important
+//   border: 1px solid colors-ui-border-primary !important
 //   background-image: INPUT_DEFAULT_SEARCH_ICON !important
 //   background-repeat: no-repeat !important
 //   background-position: 8px center !important
 //   background-size: 12px 12px !important
 
 //   &:focus
-//     outline: 0px solid BORDERS_COLOR !important
-//     border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
+//     outline: 0px solid colors-ui-border-secondary !important
+//     border: 1px solid colors-ui-border-primary-hover !important
 //     overflow: hidden !important
 //     text-overflow: ellipsis !important
 //     white-space: nowrap !important
@@ -213,7 +213,7 @@ body
   // A fixed viewport width here collapses the height chain and only tab
   // headers remain visible after layout restore.
   background-color: colors-ui-surface-primary-default !important
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   height: 100%
   flex: 1
   min-width: 0
@@ -235,7 +235,7 @@ body
   height: 80%
 
 .highlight
-  background-color: HIGHLIGHT_COLOR !important
+  background-color: colors-ui-surface-primary-secondary !important
 
 .value-expanded-compound::before
   content: ''
@@ -244,7 +244,7 @@ body
   top: 1.25em
   bottom: 0
   width: 0.0625em
-  background-color: VALUE_TYPE_COLOR
+  background-color: colors-ui-text-primary-body
   opacity: 0.2
 
 .value-load-more-button
@@ -259,7 +259,7 @@ body
   width: 100%
   height: 100%
   // if !IS_EXTENSION
-  //   box-shadow: inset 2px 0px 0px 0px LAYOUT_SPLITTER_COLOR
+  //   box-shadow: inset 2px 0px 0px 0px colors-ui-border-primary
 
   &:focus
     outline: 0px
@@ -269,7 +269,7 @@ body
 
 .panel
   font-size: 18px
-  border-color: COLOR
+  border-color: colors-ui-text-primary-body
   border-width: 1px
   border-style: solid
   overflow: hidden
@@ -310,7 +310,7 @@ body
   background-color: SEARCHED_TOKEN_COLOR
 
 .indeterminate-checkmark
-  border: 1px solid BORDERS_COLOR
+  border: 1px solid colors-ui-border-secondary
   border-radius: 2.5px
   display: flex
   position: absolute
@@ -318,7 +318,7 @@ body
   left: 0
   width: 15px
   height: 15px
-  background-color: DROPDOWN_LIST_BACKGROUND_COLOR
+  background-color: colors-ui-surface-primary-tertiary
 
 .indeterminate-checkmark::after
   content: "-"
@@ -357,7 +357,7 @@ input:checked ~ .checkmark:after
   overflow-wrap: normal
   max-width: calc(100% - 8px)
   position: absolute
-  background-color: PRIMARY_BASE
+  background-color: colors-ui-surface-primary-tertiary
   z-index: 3
   font-family: "SpaceMono"
   margin-bottom: 0
@@ -371,8 +371,8 @@ input:checked ~ .checkmark:after
 
   .active-line
     .excerpt-code
-      color: ACTIVE_COLOR_FG !important
-    background: ACTIVE_COLOR_BG
+      color: colors-ui-text-primary-body !important
+    background: colors-ui-surface-canvas
     border-radius: 4px
     width: fit-content
     padding-right: 4px
@@ -381,7 +381,7 @@ input:checked ~ .checkmark:after
     padding-left: 4px
 
 .checkmark
-  border: 0.5px solid CHECKMARK_BORDERS_COLOR
+  border: 0.5px solid colors-ui-border-primary
   border-radius: 2.5px
   display:block
   position: absolute
@@ -389,7 +389,7 @@ input:checked ~ .checkmark:after
   left: 0
   width: 14px
   height: 14px
-  background-color: DROPDOWN_LIST_BACKGROUND_COLOR
+  background-color: colors-ui-surface-primary-tertiary
 
   &::after
     left: 3.6px;
@@ -399,7 +399,7 @@ input:checked ~ .checkmark:after
       top: 1.6px;
     width: 6px;
     height: 8px;
-    border: solid DROPDOWN_CHECKMARK_COLOR;
+    border: solid colors-ui-text-success-primary;
     border-width: 0 2px 2px 0;
     border-radius: 2px
     -webkit-transform: rotate(45deg);
@@ -409,10 +409,10 @@ input:checked ~ .checkmark:after
 .dropdown-list
   border-radius: 0.325em
   background: colors-ui-surface-base-raised
-  color: DROPDOWN_TEXT_BACKGROUND_COLOR
+  color: colors-ui-surface-input-default
   display: flex
   flex-direction: column
-  // border: 1px solid BORDERS_COLOR
+  // border: 1px solid colors-ui-border-secondary
   // padding-top: 5px
   // padding-left: 10px
   // padding-bottom: 5px
@@ -426,7 +426,7 @@ input:checked ~ .checkmark:after
 
   &-item
     position: relative
-    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    color: colors-ui-text-primary-body
     user-select: none
     list-style-type: none
     width: 100%
@@ -445,7 +445,7 @@ input:checked ~ .checkmark:after
   width: fit-content
 
 // .layout-buttons-container-wrapper
-//   outline: 4px solid PRIMARY_BASE
+//   outline: 4px solid colors-ui-surface-primary-tertiary
 
 .layout-buttons-container
   // Always render last in the .lm_tabs flex container, pinned to the right.
@@ -456,14 +456,14 @@ input:checked ~ .checkmark:after
   margin-left: auto
   width: 1.7em !important
   height: 1.7em !important
-  background-color: SECONDARY_BASE
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
   background-image: ct-images-layout-tab
   background-size:  1em
   background-repeat: no-repeat
   background-position: center
   cursor: pointer
-  border: 0.0625em solid SECONDARY_BASE
+  border: 0.0625em solid colors-ui-surface-base-panel
 
   &:focus
     outline: none !important
@@ -474,11 +474,11 @@ input:checked ~ .checkmark:after
     box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
   &:hover
-    background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+    background-color: colors-ui-surface-input-default
 
   &.active
     // background-image: ct-images-layout-tab-active
-    background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+    background-color: colors-ui-surface-input-default
     border: 0.0625em solid colors-ui-surface-action-primary !important
 
   .layout-dropdown

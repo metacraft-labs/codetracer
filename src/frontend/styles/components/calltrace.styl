@@ -78,7 +78,7 @@
     height: 1.625em
 
   .call-offset-icon
-    background-color: BACKGROUND_COLOR
+    background-color: colors-ui-surface-base-panel
     width: 0.625em
     height: 1.625em
     position: relative
@@ -145,7 +145,7 @@
 
   .calltrace-filter
     margin-bottom: 0.625em
-    color: COLOR
+    color: colors-ui-text-primary-body
 
   .calltrace-row
     padding-left: 0.3125em
@@ -158,9 +158,9 @@
     display: inline-flex
     //padding: 0.125em
     // font-size: 1em
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     float: left
-    // background-color: BACKGROUND_COLOR
+    // background-color: colors-ui-surface-base-panel
 
     &:hover
       background-color: #2e2e2e
@@ -174,10 +174,10 @@
     color: CALLTRACE_END_OF_PROGRAM_TEXT
 
   .end-of-program-error
-    color: CALLTRACE_END_OF_PROGRAM_ERROR
+    color: colors-ui-text-error-primary
 
   .call-current
-    color: COLOR
+    color: colors-ui-text-primary-body
     font-weight: BOLD_WEIGHT
     // font-size: 1em
 
@@ -186,7 +186,7 @@
     display: flex
     overflow: visible
     position: relative
-    background-color: INPUT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     border-radius: 0.625em
     padding-left: 0.9375em
     padding-bottom: 0.15625em
@@ -201,10 +201,10 @@
       position: relative
 
       .value-expanded-text
-        background-color: BACKGROUND_COLOR !important
+        background-color: colors-ui-surface-base-panel !important
 
       .value-expanded-default
-        background-color: BACKGROUND_COLOR !important
+        background-color: colors-ui-surface-base-panel !important
 
     &.return-value .value-expanded-name-text
       color: #e48e59
@@ -213,30 +213,30 @@
     color: CALLTRACE_ARGS_COLOR
 
   .value-expanded-view
-    background-color: INPUT_BACKGROUND_COLOR !important
+    background-color: colors-ui-surface-input-default !important
     font-size: 1em
 
   .value-expanded-text
-    background-color: INPUT_BACKGROUND_COLOR !important
+    background-color: colors-ui-surface-input-default !important
 
   // .value-expanded-default
-  //   background-color: INPUT_BACKGROUND_COLOR !important
+  //   background-color: colors-ui-surface-input-default !important
 
   .remove-expanded-value
     padding-right: 0.3125em
     font-size: 1em
     font-weight: bold
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     cursor: pointer
 
   .call-previous
-    color: COLOR // CALLTRACE_COLOR_PREVIOUS
+    color: colors-ui-text-primary-body // CALLTRACE_COLOR_PREVIOUS
   // background-color: #fff
 
   .call-next
-    color: COLOR // CALLTRACE_COLOR_NEXT
+    color: colors-ui-text-primary-body // CALLTRACE_COLOR_NEXT
   // background-color: #fff
-  // border: 0.0625em solid COLOR
+  // border: 0.0625em solid colors-ui-text-primary-body
 
   .macro-expansion
     color: green
@@ -249,7 +249,7 @@
     padding-bottom: 0.3125em
     width: fit-content
     border-radius: 0.375em
-    background-color: CALLTRACE_TOOLTIP_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     position: fixed
     z-index: 3
     font-weight: 400
@@ -288,7 +288,7 @@
     &-tooltip-value
       word-wrap: break-word
       white-space: break-spaces
-      color: TEXT_CONTENT_COLOR
+      color: colors-ui-text-primary-body
 
 
   .call-arg-text
@@ -310,7 +310,7 @@
     color: CALLTRACE_RETURN_COLOR
 
   .hidden-calls-button
-    background-color: INPUT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     border-radius: 0.625em
     padding-left: 0.625em
     padding-right: 0.625em
@@ -323,14 +323,14 @@
 
 
   .expand-callstack, .expand-summary
-    color: COLOR
+    color: colors-ui-text-primary-body
     font-size: 0.75em
     text-decoration: underline
     margin-left: 1.25em
 
 
   .collapse-callstack
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .call-child-box
     display: flex
@@ -424,7 +424,7 @@
     cursor: pointer
 
   .speed-very-fast
-    color: COLOR
+    color: colors-ui-text-primary-body
     // background: linear-gradient(to right, #fff, SPEED_VERY_FAST_BG)
     background-color: SPEED_VERY_FAST_BG
   //box-shadow: 0.625em 0.3125em 0.3125em SPEED_VERY_FAST_BG
@@ -462,10 +462,10 @@
 .calltrace-view
   // font-size: 0.875em
   height: 100%
-  color: COLOR
+  color: colors-ui-text-primary-body
   // if !IS_EXTENSION
   //   padding-left: 0.25em
-  // background-color: BACKGROUND_COLOR
+  // background-color: colors-ui-surface-base-panel
 
 .full-calltrace
   background-color: FULL_CALLTRACE_BG_COLOR
@@ -477,8 +477,8 @@
   width: 31.25em
 
 // .local-calltrace
-//   background-color: BACKGROUND_COLOR
-//   color: COLOR
+//   background-color: colors-ui-surface-base-panel
+//   color: colors-ui-text-primary-body
 //   margin-left: 0.25em
 //   padding-right: 0.5em
 //   overflow: visible
@@ -486,8 +486,8 @@
 //   min-width: fit-content
 
 .step-list
-  background-color: BACKGROUND_COLOR
-  color: TEXT_CONTENT_COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   font-family: "FiraCode", monospace
   font-size: 13px
   line-height: 1.5em
@@ -507,11 +507,11 @@
 
   .active-step-line-pre
     background-color: transparent
-    color: TEXT_CONTENT_COLOR !important
+    color: colors-ui-text-primary-body !important
 
   .inactive-step-line-pre
     background-color: transparent
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .step-line
     display: grid
@@ -522,16 +522,16 @@
     min-height: 1.625em
     width: 100%
     box-sizing: border-box
-    border-top: 0.0625em solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-top: 0.0625em solid colors-ui-border-secondary
     padding: 0 0.75em
     cursor: pointer
 
     &:hover
-      background-color: ACTIVE_ROW
+      background-color: colors-ui-surface-primary-secondary-hover
 
   .active-step-line
-    background-color: ACTIVE_ROW
-    color: TEXT_CONTENT_COLOR !important
+    background-color: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body !important
 
   .step-line-column
     display: block
@@ -541,7 +541,7 @@
 
   .step-line-delta
     width: auto
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .step-line-location
     width: auto
@@ -553,12 +553,12 @@
   .step-line-call
     grid-template-columns: minmax(0, 1fr) minmax(14em, 24em)
     background-color: rgba(210, 153, 34, 0.12)
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .step-line-return
     grid-template-columns: minmax(0, 1fr) minmax(14em, 24em)
     background-color: rgba(251, 146, 60, 0.16)
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .step-line-description
     display: block
@@ -573,7 +573,7 @@
     text-overflow: ellipsis
     white-space: nowrap
     width: auto
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .step-line-flow-values
     width: auto
@@ -590,11 +590,11 @@
 
     .step-line-flow-value-repr
       margin-left: 0.3125em
-      color: VALUE_RESULT_COLOR
+      color: colors-ui-text-warning-primary
       background-color: transparent
 
 .excerpt-code
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
 
 .code-state-line
   font-family: "SpaceMono", monospace
@@ -613,8 +613,8 @@
   display: block
   height: 100%
   width: 100%
-  background-color: ACTIVE_COLOR_BG
-  color: ACTIVE_COLOR_FG
+  background-color: colors-ui-surface-canvas
+  color: colors-ui-text-primary-body
   overflow-y: scroll
 
 .inactive-trace, .inactive-dialog
@@ -645,7 +645,7 @@
   margin-left: 0.625em
 
 .border-value-0
-  border: 0 // 0 COLOR solid
+  border: 0 // 0 colors-ui-text-primary-body solid
 // margin-left: 0.625em
 
 .expanded
@@ -702,15 +702,15 @@
 /*  visibility: visible */
 
 .atom-even
-  // background-color: BACKGROUND_COLOR
-  color: COLOR
+  // background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
 
 .atom-odd
-  // background-color: BACKGROUND_COLOR
-  color: COLOR
+  // background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
 
 .chevron
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   cursor: pointer
   position: absolute
 
@@ -754,7 +754,7 @@
     height: 12.5em
 
 .value-expanded-text, .value-expand
-  color: VALUE_RESULT_COLOR
+  color: colors-ui-text-warning-primary
   cursor: pointer
   display: contents
   position: absolute
@@ -768,9 +768,9 @@
   float: left
 
 .calltrace-editor-call
-  border: 0.0625em solid COLOR
+  border: 0.0625em solid colors-ui-text-primary-body
   height: 7.5em
-  color: COLOR
+  color: colors-ui-text-primary-body
 
   .code-editor
     height: 6.25em
@@ -784,19 +784,19 @@
   background: #3E3E3B !important
 
 .code-state-line
-  color:TEXT_CONTENT_COLOR
+  color:colors-ui-text-primary-body
   // margin-left: 1.5em
   margin-bottom: .5em
 
 .call-search-results
   max-height: 5.5em
   overflow: scroll
-  background-color: TRACEPOINT_BACKGROUND_COLOR
+  background-color: colors-ui-surface-input-default
   margin-left: 0
   margin-bottom: 0.25em
 
 .call-search-results, .search-result
-  color: COLOR !important
+  color: colors-ui-text-primary-body !important
   cursor: pointer
   text-decoration: none
   padding-left: 0.5em

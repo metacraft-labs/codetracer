@@ -4,7 +4,7 @@
   width: max-content
   display: inline-block
   background-color: colors-editor-surface-primary
-  color: FLOW_PARALLEL_NAME_COLOR
+  color: colors-ui-text-primary-body
   font-size: 15px
   padding-left: 2px
   padding-right: 2px
@@ -17,7 +17,7 @@
   min-height: 0
   box-sizing: border-box
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   font-family: "FiraCode"
   font-size: 13px
   line-height: 20px
@@ -35,18 +35,18 @@
       padding: 0 10px
       border: 0
       border-radius: 4px
-      background: HEADER_ELEMENT_BACKGROUND_COLOR
-      color: DROPDOWN_TEXT_COLOR
+      background: colors-ui-surface-primary-tertiary
+      color: colors-ui-text-primary-body
       cursor: pointer
       font: inherit
 
       &.active
-        background: ACTIVE_MENU_BACKGROUND
-        color: TEXT_CONTENT_COLOR
+        background: colors-ui-surface-input-default
+        color: colors-ui-text-primary-body
 
   .flow-loading
     padding: 0 8px 6px
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
     &[display="none"]
       display: none
@@ -65,7 +65,7 @@
   .flow-steps
     flex: 1 1 auto
     min-height: 0
-    border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    border-top: 1px solid colors-ui-surface-input-default
     overflow: auto
     background: colors-editor-surface-primary
 
@@ -77,32 +77,32 @@
     column-gap: 1em
     padding: 0 0.75em
     min-height: 24px
-    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-bottom: 1px solid colors-ui-border-secondary
 
   .flow-steps-header
     position: sticky
     top: 0
     z-index: 1
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     background: colors-editor-surface-primary
     font-size: 12px
 
   .flow-step-row
     cursor: pointer
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
     &:hover,
     &.hovered
-      background: ACTIVE_ROW
+      background: colors-ui-surface-primary-secondary-hover
 
   .flow-step-index
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .flow-step-location
     color: #9cdcfe
 
   .flow-step-expression
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
@@ -115,7 +115,7 @@
 
   .flow-steps-empty
     padding: 0.75em
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
 
   .flow-value-display
     display: flex
@@ -123,7 +123,7 @@
     justify-content: space-between
     gap: 8px
     padding: 4px 8px
-    border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    border-top: 1px solid colors-ui-surface-input-default
     flex: 0 0 auto
 
   .raw-value-toggle
@@ -131,14 +131,14 @@
     padding: 0 8px
     border: 0
     border-radius: 4px
-    background: HEADER_ELEMENT_BACKGROUND_COLOR
-    color: DROPDOWN_TEXT_COLOR
+    background: colors-ui-surface-primary-tertiary
+    color: colors-ui-text-primary-body
     cursor: pointer
     font: inherit
 
     &.active
-      background: ACTIVE_MENU_BACKGROUND
-      color: TEXT_CONTENT_COLOR
+      background: colors-ui-surface-input-default
+      color: colors-ui-text-primary-body
 
 .flow-loop-legend
   position: absolute
@@ -161,7 +161,7 @@
 .flow-parallel-value-name
   // font-size: 15px
   background: colors-editor-surface-primary
-  color: FLOW_PARALLEL_NAME_COLOR
+  color: colors-ui-text-primary-body
   padding-left: 10px
   padding-right: 10px
   padding-top: 0
@@ -208,7 +208,7 @@
 
 .flow-parallel-value-after
   background-color: colors-editor-surface-primary
-  color: FLOW_PARALLEL_AFTER_VALUE_COLOR
+  color: colors-ui-text-primary-body
 
 // .flow-parallel-value-box
 //   width: fit-content
@@ -237,18 +237,18 @@
   background-color: colors-editor-surface-primary !important
 
 // .flow-parallel-value-before-only
-//   background-color: FLOW_PARALLEL_BEFORE_ONLY_VALUE_BACKGROUND_COLOR
-//   color: FLOW_PARALLEL_BEFORE_ONLY_VALUE_COLOR
-//   // box-shadow: 1px 1px 1px FLOW_LOOP_VALUE_BOX_SHADOW_COLOR
+//   background-color: colors-ui-surface-input-default
+//   color: colors-ui-text-primary-body
+//   // box-shadow: 1px 1px 1px colors-ui-surface-input-default
 
 // .flow-parallel-value-after-only
-//   background-color: FLOW_PARALLEL_AFTER_VALUE_BACKGROUND_COLOR
-//   color: FLOW_PARALLEL_AFTER_VALUE_COLOR
+//   background-color: colors-ui-surface-input-default
+//   color: colors-ui-text-primary-body
 //   // box-shadow: -1px -1px FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
 
 // .flow-parallel-value-dual
-//   background-color: FLOW_PARALLEL_DUAL_VALUE_BACKGROUND_COLOR
-//   color: FLOW_PARALLEL_DUAL_VALUE_COLOR
+//   background-color: colors-ui-surface-input-default
+//   color: colors-ui-text-primary-body
 
 .flow-inline-value-box
   height: 17px
@@ -273,7 +273,7 @@
 .flow-inline-value-before-only
   background-color: colors-editor-surface-primary
   color: FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR
-  box-shadow: 1px 1px 1px FLOW_LOOP_VALUE_BOX_SHADOW_COLOR
+  box-shadow: 1px 1px 1px colors-ui-surface-input-default
 
 .flow-inline-value-after-only
   background-color: colors-editor-surface-primary
@@ -363,7 +363,7 @@
     else
       width: 100%
     height: 2px !important
-    background-color: NOUI_SLIDER_BACKGROUND_COLOR
+    background-color: colors-ui-surface-primary-tertiary
 
   .noUi-touch-area
     height: calc(100% + 1em) !important
@@ -395,7 +395,7 @@
   .noUi-handle:after
     display: none
   .noUi-active
-    background-color: NOUI_SLIDER_ACTIVE_HANDLER_BACKGROUND
+    background-color: colors-ui-text-primary-body-subtle
     background-image: NOUI_SLIDER_ACTIVE_HANDLER_IMAGE
     .noUi-tooltip
       display: block !important
@@ -407,7 +407,7 @@
     margin-right: 64px !important
     border: 0px !important
     box-shadow: none !important
-    background: NOUI_SLIDER_BACKGROUND_COLOR !important
+    background: colors-ui-surface-primary-tertiary !important
 
   #slider-slow.noUi-state-tap .noUi-connect
   #slider-slow.noUi-state-tap .noUi-origin
@@ -512,9 +512,9 @@
   text-overflow: ellipsis
   font-family: monospace
   background: colors-editor-surface-primary
-  box-shadow: 1px 1px 1px FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR//#9A9DA7
+  box-shadow: 1px 1px 1px colors-ui-surface-input-default//#9A9DA7
   margin-top: 1.5px
-  color: FLOW_PARALLEL_NAME_COLOR
+  color: colors-ui-text-primary-body
 
 .flow-loop-value-single
   display: flex
@@ -525,7 +525,7 @@
   border-top-right-radius: 0
   border-bottom-left-radius: 0.375em
   border-bottom-right-radius: 0.375em
-  color: PRIMARY_TEXT_COLOR
+  color: colors-ui-text-primary-body
   display: inline-flex
   flex-direction: column
   font-size: inherit
@@ -571,7 +571,7 @@
 
   .flow-tooltip-step-info
     font-style: italic
-    color: FLOW_VALUE_NAME_BACKGROUND
+    color: colors-ui-surface-primary-secondary-hover
 
   .add-to-scratchpad-button
     width: 1em
@@ -583,10 +583,10 @@
     cursor: pointer
     transform: translateX(-0.25em)
     border-radius: 6.25em
-    outline: 0.0625em solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+    outline: 0.0625em solid colors-ui-border-primary-hover
 
     &:hover
-      outline: 0.125em solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+      outline: 0.125em solid colors-ui-border-primary-hover
 
     &:active
       opacity: 0.5
@@ -596,7 +596,7 @@
       top: -0.375em
 
       &:after
-        border-color: transparent transparent transparent TOOLTIP_BACKGROUND
+        border-color: transparent transparent transparent colors-ui-surface-canvas
         left: 98%
         bottom: 0%
         border-width: 0.75em
@@ -664,7 +664,7 @@
 
 .flow-inline-value-before:after
   content: attr(data-content)
-  border: 1px solid COLOR
+  border: 1px solid colors-ui-text-primary-body
   height: 18px
   background-color: #0ff
   display: inline-block
