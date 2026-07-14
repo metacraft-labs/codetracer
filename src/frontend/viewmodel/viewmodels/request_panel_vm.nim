@@ -120,13 +120,12 @@ proc statusClass*(code: int): string =
   "request-status-" & statusBucket(code)
 
 proc formatDuration*(ms: int): string =
-  ## Mirrors the legacy ``formatDuration`` helper:
-  ## ``< 1000`` ms renders as ``"NNNms"``, otherwise as
-  ## ``"N.Ns"`` (one decimal place, truncated like the legacy code).
+  ## Formats a millisecond duration for display in the request panel.
+  ## ``< 1000`` ms → ``"NNN ms"``; otherwise ``"N.N s"`` (one decimal place).
   if ms < 1000:
-    $ms & "ms"
+    $ms & " ms"
   else:
-    $(ms div 1000) & "." & $((ms mod 1000) div 100) & "s"
+    $(ms div 1000) & "." & $((ms mod 1000) div 100) & " s"
 
 proc formatSize*(bytes: int): string =
   ## Mirrors the legacy ``formatSize`` helper: ``B`` for < 1024,

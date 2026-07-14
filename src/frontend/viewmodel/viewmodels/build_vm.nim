@@ -101,6 +101,9 @@ type
     isRunning*: Memo[bool]
     hasOutput*: Memo[bool]
 
+    # -- Callbacks wired by the host (ui_js.nim) after VM creation --
+    runBuild*: proc() ## Trigger a build-only (no re-record) action.
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@
 ##     div.build-header[.build-failed | .build-succeeded]
 ##       div.build-command-label                              text reactive
 ##       div.build-header-controls
+##         div.build-ctrl-btn.build-run-btn                   click→runBuild
 ##         div.build-ctrl-btn.build-stop-btn[.disabled]       click→cancelBuild
 ##         div.build-ctrl-btn.build-clear-btn                 click→clearOutput
 ##         div.build-ctrl-btn.build-scroll-btn[.active]       click→toggleAutoScroll
@@ -136,6 +137,11 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
         tdiv(class = "build-command-label"):
           text headerLabel(vm)
         tdiv(class = "build-header-controls"):
+          tdiv(class = "build-ctrl-btn build-run-btn",
+               title = "Run build (no re-record)",
+               onclick = proc() =
+                 if not vm.runBuild.isNil: vm.runBuild()):
+            text "▶"
           tdiv(class = stopButtonClass(vm),
                title = "Stop build",
                onclick = proc() =
@@ -191,6 +197,11 @@ when defined(js):
           tdiv(class = "build-command-label"):
             text headerLabel(vm)
           tdiv(class = "build-header-controls"):
+            tdiv(class = "build-ctrl-btn build-run-btn",
+                 title = "Run build (no re-record)",
+                 onclick = proc() =
+                   if not vm.runBuild.isNil: vm.runBuild()):
+              text "▶"
             tdiv(class = stopButtonClass(vm),
                  title = "Stop build",
                  onclick = proc() =
