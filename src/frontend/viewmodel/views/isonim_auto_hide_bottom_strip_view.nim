@@ -27,8 +27,10 @@ type
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
-    ## Called when mouse enters a tab — starts the 200ms hover-preview timer.
+    ## Called when mouse enters a tab — starts the hover-preview timer.
     onHoverEnter*: proc(index: int)
+    ## Called when mouse leaves a tab — cancels the pending hover-preview timer.
+    onHoverLeave*: proc(index: int)
     ## Called on right-click with the tab index and mouse viewport coordinates.
     onContextMenu*: proc(index: int; x: int; y: int)
 
@@ -54,6 +56,9 @@ proc invokeUnpin(cb: AutoHideBottomStripCallbacks; i: int) =
 
 proc invokeHoverEnter(cb: AutoHideBottomStripCallbacks; i: int) =
   if not cb.onHoverEnter.isNil: cb.onHoverEnter(i)
+
+proc invokeHoverLeave(cb: AutoHideBottomStripCallbacks; i: int) =
+  if not cb.onHoverLeave.isNil: cb.onHoverLeave(i)
 
 proc invokeContextMenu(cb: AutoHideBottomStripCallbacks; i: int; x: int; y: int) =
   if not cb.onContextMenu.isNil: cb.onContextMenu(i, x, y)
@@ -111,6 +116,9 @@ when defined(js):
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
       proc(ev: isonim_dom.Event) =
         cb.invokeHoverEnter(index))
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
+      proc(ev: isonim_dom.Event) =
+        cb.invokeHoverLeave(index))
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
       proc(ev: isonim_dom.Event) =
         ev.preventDefault()

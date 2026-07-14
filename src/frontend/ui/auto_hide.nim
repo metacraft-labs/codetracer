@@ -134,7 +134,7 @@ var autoHideLayout*: GoldenLayout = nil
 var hoverPreviewTimerId: int = -1
 
 ## Delay before a hover opens the overlay as a preview (ms).
-const HOVER_PREVIEW_DELAY_MS* = 200
+const HOVER_PREVIEW_DELAY_MS* = 300
 
 ## Resize-drag state for docked sidebars (left/right — horizontal drag).
 var dockedResizing: bool = false
@@ -1128,6 +1128,8 @@ when defined(js):
             hoverPreviewTimerId = -1
             showOverlayPreview(capturedPanel)
           , HOVER_PREVIEW_DELAY_MS),
+      onHoverLeave: proc(index: int) =
+        cancelHoverPreview(),
       onContextMenu: proc(index: int; x: int; y: int) =
         if index >= 0 and index < panels.len:
           let capturedPanel = panels[index]
@@ -1209,6 +1211,8 @@ when defined(js):
             hoverPreviewTimerId = -1
             showOverlayPreview(capturedPanel)
           , HOVER_PREVIEW_DELAY_MS),
+      onHoverLeave: proc(index: int) =
+        cancelHoverPreview(),
       onContextMenu: proc(index: int; x: int; y: int) =
         if index >= 0 and index < panels.len:
           let capturedPanel = panels[index]
