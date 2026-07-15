@@ -78,6 +78,8 @@ pub enum Lang {
     Elixir,
     /// Erlang/BEAM materialized traces
     Erlang,
+    /// PHP materialized traces
+    Php,
 }
 
 pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
@@ -119,6 +121,7 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "cdc" => Lang::Cadence,
         "ex" | "exs" => Lang::Elixir,
         "erl" | "hrl" => Lang::Erlang,
+        "php" => Lang::Php,
         _ => Lang::Unknown,
     }
 }

@@ -45,6 +45,7 @@ proc toLang*(lang: cstring): Lang =
     erl: LangErlang,
     hrl: LangErlang,
     erlang: LangErlang,
+    php: LangPhp,
   }
   if langs.hasKey(lang):
     result = langs[lang]
@@ -90,7 +91,8 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"cadence",
     cstring"solana",
     cstring"elixir",
-    cstring"erlang"
+    cstring"erlang",
+    cstring"php"
   ]
   result = langs[lang]
 

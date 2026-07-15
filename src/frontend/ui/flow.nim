@@ -608,7 +608,8 @@ let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
   emptyKeywords,  # LangCadence
   emptyKeywords,  # LangSolana
   emptyKeywords,  # LangElixir
-  emptyKeywords   # LangErlang
+  emptyKeywords,  # LangErlang
+  emptyKeywords   # LangPhp
 ]
 
 func isSymbol(c: char, lang: Lang): bool =
