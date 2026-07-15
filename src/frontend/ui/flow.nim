@@ -3898,6 +3898,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     self.recalculateAndRedrawFlow()
 
     self.redrawFlow()
+    self.updateFlowOnMove(self.location.rrTicks, self.location.line)
 
     self.recalculate = true
     self.redraw()
@@ -4614,7 +4615,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
 
 method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
   self.location = response.location
-  # self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+  self.updateFlowOnMove(self.location.rrTicks, self.location.line)
   self.redrawFlow()
   self.scheduleActiveLoopIterationValueRender()
 

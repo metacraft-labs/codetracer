@@ -452,8 +452,8 @@ suite "IsoNim Status Shell — structure":
     check panel.attributes["class"] == StatusRootClass
     check findByClass(panel, CollapsedIconZoneClass).attributes["id"] ==
       CollapsedIconZoneHostId
-    check findByClass(panel, BottomTabsClass).attributes["id"] ==
-      BottomTabsHostId
+    check findByClass(panel, BottomStripClass).attributes["id"] ==
+      BottomStripHostId
     check findByClass(panel, "file-info-status-language").textContent == "Nim"
     check findByClass(panel, "file-info-status-encoding").textContent == "UTF-8"
     check findByClass(panel, "test-movement").textContent == "7"
@@ -2766,6 +2766,34 @@ suite "IsoNim Flow Panel — loading":
 
       vm.loadingState.val = lsIdle
       check indicator.styles["display"] == "none"
+
+      dispose()
+
+suite "IsoNim Flow Panel — active line sync":
+
+  test "test_js_flow_active_line_sync":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      drain()
+
+      # Simulate active line change by updating store's debugger position
+      store.updateDebuggerPosition(100'u64, "test.js", 12)
+      drain()
+
+      # Verify that store's debugger location is synchronized
+      check store.debugger.val.location.file == "test.js"
+      check store.debugger.val.location.line == 12
+      check store.debugger.val.rrTicks == 100'u64
+
+      # Verify that auto-load effect was triggered (sends ct/load-flow)
+      var foundLoadFlow = false
+      for cmd in mock.receivedCommands:
+        if cmd.command == "ct/load-flow":
+          check cmd.args["rrTicks"].getBiggestInt == 100
+          foundLoadFlow = true
+          break
+      check foundLoadFlow
 
       dispose()
 
