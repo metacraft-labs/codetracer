@@ -754,6 +754,9 @@ type
     valueText*: string
     isError*: bool
     isLiteral*: bool
+    typeName*: string
+    hasChildren*: bool
+    children*: seq[Variable]
 
   LaunchConfigState* = object
     ## Reactive launch-config state.

@@ -35,6 +35,7 @@
 
 import
   ui_imports,
+  state,
   ../[ types, communication ],
   ../../common/ct_event
 
@@ -143,11 +144,15 @@ proc legacyValueToVm(expression: cstring; value: Value): ScratchpadValueEntry =
   let isError = (not value.isNil) and value.kind == types.Error
   let isLiteral = (not value.isNil) and value.isLiteral and
     value.kind == types.String
+  let hasChild = (if value.isNil: false else: value.elements.len > 0 or value.kind in {types.TypeKind.Pointer, types.TypeKind.Ref} or value.kind in {types.TypeKind.Instance, types.TypeKind.Union, types.TypeKind.Tuple, types.TypeKind.TableKind, types.TypeKind.Variant})
   ScratchpadValueEntry(
     expression: safeStr(expression),
     valueText: valueTextRepr(value),
     isError: isError,
     isLiteral: isLiteral,
+    typeName: valueDisplayType(value),
+    hasChildren: hasChild,
+    children: toVariableChildren(value),
   )
 
 proc legacyVariableToVm(variable: Variable): ScratchpadValueEntry =

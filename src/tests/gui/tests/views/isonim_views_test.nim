@@ -3277,13 +3277,19 @@ suite "IsoNim Point List Panel — interactions":
 proc makeScratchpadEntry(expression: string = "i";
                          valueText: string = "42";
                          isError: bool = false;
-                         isLiteral: bool = false): ScratchpadValueEntry =
+                         isLiteral: bool = false;
+                         typeName: string = "";
+                         hasChildren: bool = false;
+                         children: seq[Variable] = @[]): ScratchpadValueEntry =
   ## Test fixture builder for ``ScratchpadValueEntry`` rows.
   ScratchpadValueEntry(
     expression: expression,
     valueText: valueText,
     isError: isError,
     isLiteral: isLiteral,
+    typeName: typeName,
+    hasChildren: hasChildren,
+    children: children,
   )
 
 # ---------------------------------------------------------------------------
@@ -3665,6 +3671,54 @@ suite "IsoNim Scratchpad Panel — vm":
     check cellText(makeScratchpadEntry("crash", "boom",
                                        isError = true)) ==
       "<error: boom>"
+
+  test "test_value_component_layout_and_scratchpad":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      # Create a compound value with children
+      let entry = makeScratchpadEntry(
+        expression = "myArray",
+        valueText = "[...]",
+        typeName = "seq[int]",
+        hasChildren = true,
+        children = @[
+          Variable(name: "[0]", value: "100", typeName: "int", hasChildren: false, children: @[]),
+          Variable(name: "[1]", value: "200", typeName: "int", hasChildren: false, children: @[])
+        ]
+      )
+      vm.addValue(entry)
+
+      let r = MockRenderer()
+      let panel = renderScratchpadPanel(r, vm)
+      drain()
+
+      # Initially, only the top-level element is in the row views
+      let rowsBefore = getScratchpadRowViews(vm)
+      check rowsBefore.len == 1
+      check rowsBefore[0].expression == "myArray"
+      check rowsBefore[0].depth == 0
+      check rowsBefore[0].hasChildren == true
+      check rowsBefore[0].isExpanded == false
+
+      # Expand the array value (path is "0" for the first entry)
+      vm.toggleExpand("0")
+      drain()
+
+      # Verify that children are now visible in the flattened list
+      let rowsAfter = getScratchpadRowViews(vm)
+      check rowsAfter.len == 3
+      check rowsAfter[0].expression == "myArray"
+      check rowsAfter[0].isExpanded == true
+      check rowsAfter[1].expression == "[0]"
+      check rowsAfter[1].valueText == "100"
+      check rowsAfter[1].depth == 1
+      check rowsAfter[2].expression == "[1]"
+      check rowsAfter[2].valueText == "200"
+      check rowsAfter[2].depth == 1
+
+      dispose()
 
 # ===========================================================================
 # Shell panel tests

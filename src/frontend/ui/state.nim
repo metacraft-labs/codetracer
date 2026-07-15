@@ -382,7 +382,7 @@ proc initStateVM() =
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()
 
-proc valueDisplayText(v: Value): string =
+proc valueDisplayText*(v: Value): string =
   ## Rendered text representation matching what the legacy value row emitted
   ## for atom values.
   ##
@@ -402,7 +402,7 @@ proc valueDisplayText(v: Value): string =
     return ""
   $v
 
-proc valueDisplayType(v: Value): string =
+proc valueDisplayType*(v: Value): string =
   ## Original-language type name (``i32``, ``int``, ``string`` …)
   ## matching the legacy ``span.value-type`` text. The legacy value
   ## renderer used ``value.typ.langType`` directly for atom rows;
@@ -413,6 +413,62 @@ proc valueDisplayType(v: Value): string =
   if not v.typ.isNil and v.typ.langType.len > 0:
     return $v.typ.langType
   $v.kind
+
+proc toVariableChildren*(val: Value): seq[store_types.Variable] =
+  result = @[]
+  if val.isNil:
+    return
+
+  var value = val
+  if value.kind in {TypeKind.Pointer, TypeKind.Ref} and not value.refValue.isNil:
+    value = value.refValue
+
+  case value.kind:
+  of Seq, Set, HashSet, OrderedSet, Array, Varargs:
+    for i, element in value.elements:
+      let childName = "[" & $i & "]"
+      let hasChild = (if element.isNil: false else: element.elements.len > 0 or element.kind in {TypeKind.Pointer, TypeKind.Ref} or element.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+      result.add(makeVariable(
+        name = childName,
+        value = valueDisplayText(element),
+        typeName = valueDisplayType(element),
+        hasChildren = hasChild,
+        children = toVariableChildren(element)
+      ))
+  of Variant:
+    if not value.activeVariantValue.isNil:
+      result = toVariableChildren(value.activeVariantValue)
+  of TableKind:
+    for items in value.items:
+      let childName = $items[0]
+      let element = items[1]
+      let hasChild = (if element.isNil: false else: element.elements.len > 0 or element.kind in {TypeKind.Pointer, TypeKind.Ref} or element.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+      result.add(makeVariable(
+        name = childName,
+        value = valueDisplayText(element),
+        typeName = valueDisplayType(element),
+        hasChildren = hasChild,
+        children = toVariableChildren(element)
+      ))
+  of Instance, Union, Tuple:
+    if value.kind == Union:
+      if not value.activeVariantValue.isNil:
+        result = toVariableChildren(value.activeVariantValue)
+    else:
+      for i, label in value.typ.labels:
+        if i < value.elements.len:
+          let element = value.elements[i]
+          let childName = $label
+          let hasChild = (if element.isNil: false else: element.elements.len > 0 or element.kind in {TypeKind.Pointer, TypeKind.Ref} or element.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+          result.add(makeVariable(
+            name = childName,
+            value = valueDisplayText(element),
+            typeName = valueDisplayType(element),
+            hasChildren = hasChild,
+            children = toVariableChildren(element)
+          ))
+  else:
+    discard
 
 proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the
@@ -431,11 +487,13 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
     return
   var vmLocals = newVariableSeq()
   for v in legacyLocals:
+    let hasChild = (if v.value.isNil: false else: v.value.elements.len > 0 or v.value.kind in {TypeKind.Pointer, TypeKind.Ref} or v.value.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
     vmLocals.add(makeVariable(
       name = $v.expression,
       value = valueDisplayText(v.value),
       typeName = valueDisplayType(v.value),
-      hasChildren = (if v.value.isNil: false else: v.value.elements.len > 0),
+      hasChildren = hasChild,
+      children = toVariableChildren(v.value),
     ))
   stateVMStore.updateLocals(vmLocals)
   cerror fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
