@@ -15,6 +15,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/viewmodels/state_vm
 import ../viewmodel/viewmodels/origin_chain_vm
 import ../viewmodel/viewmodels/origin_chain_types

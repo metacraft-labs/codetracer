@@ -8594,6 +8594,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
+      vm.loadingState.val = lsIdle
       let r = MockRenderer()
 
       let panel = renderFilesystemPanel(r, vm)
@@ -8604,6 +8605,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       check "hidden" in overlay.attributes["class"]
 
       vm.clearRoot()
+      vm.loadingState.val = lsIdle
       check "hidden" notin overlay.attributes["class"]
 
       dispose()
@@ -8769,6 +8771,25 @@ suite "IsoNim Filesystem Panel — vm":
       vm.collapsePath("a")
       vm.collapsePath("a")
       check vm.expandedPaths.val.len == 0
+
+      dispose()
+
+  test "onFolderExpanded callback is invoked when expanding a folder path":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      var expandedPath = ""
+      vm.onFolderExpanded = proc(path: string) =
+        expandedPath = path
+
+      check expandedPath == ""
+      vm.toggleExpanded("src")
+      check expandedPath == "src"
+
+      expandedPath = ""
+      vm.expandPath("src/components")
+      check expandedPath == "src/components"
 
       dispose()
 

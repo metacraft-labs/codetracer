@@ -263,7 +263,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 		# puts its bin dir on PATH so the Win32 loader resolves it.
 		native_lib_roots="$(nix build --no-link --print-out-paths \
 			nixpkgs#openssl.out nixpkgs#sqlite.out nixpkgs#pcre.out nixpkgs#libzip.out \
-			nixpkgs#clingo \
+			nixpkgs#zstd.dev nixpkgs#zstd.out nixpkgs#clingo \
 			2>/dev/null || true)"
 		if [ -n "$native_lib_roots" ]; then
 			while IFS= read -r root; do
@@ -277,6 +277,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 				fi
 				if [ -d "$root/include" ]; then
 					export C_INCLUDE_PATH="$root/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
+					export NIX_CFLAGS_COMPILE="-isystem $root/include${NIX_CFLAGS_COMPILE:+ $NIX_CFLAGS_COMPILE}"
 				fi
 			done <<<"$native_lib_roots"
 		fi

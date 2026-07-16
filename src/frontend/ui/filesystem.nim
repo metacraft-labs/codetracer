@@ -225,11 +225,41 @@ var isoNimFilesystemMountedIds {.used.}: JsAssoc[cstring, bool] =
 
 proc tryMountIsoNimFilesystemPanel*()
 
+proc findFileByPath(file: CodetracerFile; path: string): CodetracerFile =
+  if file.isNil:
+    return nil
+  if not file.original.path.isNil and $file.original.path == path:
+    return file
+  for child in file.children:
+    let found = findFileByPath(child, path)
+    if not found.isNil:
+      return found
+  return nil
+
+proc loadFolderContentIfNeeded*(path: string) =
+  if data.isNil or data.services.editor.filesystem.isNil:
+    return
+  let file = findFileByPath(data.services.editor.filesystem, path)
+  if file.isNil:
+    return
+  if file.children.len > 0 and $file.children[0].text == "Loading...":
+    let nodeId = "j1_" & $file.index
+    let nodeIndex = file.index
+    let nodeParentIndices = file.parentIndices
+    data.ipc.send "CODETRACER::load-path-content", js{
+      path: cstring(path),
+      nodeId: cstring(nodeId),
+      nodeIndex: nodeIndex,
+      nodeParentIndices: nodeParentIndices
+    }
+
 proc wireFilesystemOpenBridge() =
   if filesystemVMInstance.isNil:
     return
   filesystemVMInstance.onOpenFile = proc(path: string) =
     openTab(cstring(path))
+  filesystemVMInstance.onFolderExpanded = proc(path: string) =
+    loadFolderContentIfNeeded(path)
 
 # ---------------------------------------------------------------------------
 # Component extension (ctInExtension boiler-plate).

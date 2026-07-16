@@ -122,6 +122,9 @@ type
       ## Called by file-row click handlers. The legacy component wires this to
       ## ``data.openTab(path, ViewSource)`` so CTFS-imported traces resolve
       ## through the normal editor source-loading path.
+    onFolderExpanded*: proc(path: string)
+      ## Called when a folder is expanded. Used by the legacy bridge to
+      ## load subdirectory content partially from the index process.
 
     # -- Derived state --
     isEmpty*: Memo[bool]
@@ -214,6 +217,8 @@ proc toggleExpanded*(vm: FilesystemVM; path: string) =
     current.excl(path)
   else:
     current.incl(path)
+    if not vm.onFolderExpanded.isNil:
+      vm.onFolderExpanded(path)
   vm.expandedPaths.val = current
 
 proc expandPath*(vm: FilesystemVM; path: string) =
@@ -222,6 +227,8 @@ proc expandPath*(vm: FilesystemVM; path: string) =
   if path in current:
     return
   current.incl(path)
+  if not vm.onFolderExpanded.isNil:
+    vm.onFolderExpanded(path)
   vm.expandedPaths.val = current
 
 proc collapsePath*(vm: FilesystemVM; path: string) =
