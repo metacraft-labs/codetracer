@@ -51,6 +51,7 @@ import viewmodels/welcome_screen_vm
 import viewmodels/editor_vm
 import app/isonim_app_shell
 import views/isonim_state_view
+import views/state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
 import views/isonim_event_log_view
@@ -1158,6 +1159,62 @@ suite "IsoNim State Panel — variables":
       check "obj" in rows2[0].textContent
       check "field1" in rows2[1].textContent
       check "field2" in rows2[2].textContent
+
+      dispose()
+
+  test "test_origin_badge_interaction":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      store.updateLocals(@[
+        makeVariable("x", "42", "int"),
+      ])
+      vm.updateOriginSummaries(@[
+        ("x", OriginSummary(terminatorKind: tkwLiteral,
+                            terminatorExpr: "42", hopCount: 1)),
+      ])
+      # Wire a chain lookup
+      let chain = OriginChain(
+        queryVariable: "x",
+        queryStepId: 1,
+        hops: @[
+          OriginHop(kind: okTrivialCopy, targetExpr: "x",
+                    sourceExpr: "y", stepId: 1,
+                    location: OriginLocation(path: "fixture.py", line: 1)),
+        ],
+        terminator: Terminator(kind: tkwLiteral, expression: "42"),
+      )
+      vm.originChainLookup = proc(name: string): Option[OriginChain] =
+        if name == "x": some(chain) else: none(OriginChain)
+
+      let panel = renderStatePanel(r, vm)
+      let badge = findByClass(panel, "ct-origin-badge")
+      check badge != nil
+      check "ct-origin-icon-quotation" in badge.attributes["class"]
+      check badge.textContent == "42"
+
+      # Install parent click listener to detect propagation
+      var parentClicked = false
+      let row = findByClass(panel, "value-name-container")
+      check row != nil
+      row.eventHandlers["click"] = @[
+        proc(ev: MockEvent) = parentClicked = true
+      ]
+
+      # Click the badge
+      let ev = MockEvent(`type`: "click", target: badge, currentTarget: badge)
+      fireEventWith(badge, "click", ev)
+
+      # 1. Verify propagation was prevented/stopped
+      check not parentClicked
+      check ev.propagationStopped
+
+      # 2. Verify VM expanded state was updated
+      let viewState = getStateViewState(vm)
+      let rowId = VariableId(name: viewState.variables[0].name, scopePath: viewState.variables[0].path)
+      check vm.isOriginExpanded(rowId) == true
 
       dispose()
 

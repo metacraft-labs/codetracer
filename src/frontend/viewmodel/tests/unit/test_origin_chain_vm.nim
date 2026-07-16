@@ -724,6 +724,61 @@ suite "M4 — State Pane renders inline origin badge per row":
       check afterCollapse[0].styles.getOrDefault("display", "") == "none"
       dispose()
 
+  test "test_state_pane_badge_click_does_not_propagate_to_parent":
+    createRoot proc(dispose: proc()) =
+      let (originVM, stateVM, store, _) = makeOriginVM()
+      discard originVM
+      let r = MockRenderer()
+      store.updateLocals(@[
+        makeVariable("x", "42", "int"),
+      ])
+      stateVM.updateOriginSummaries(@[
+        ("x", OriginSummary(terminatorKind: tkwLiteral,
+                            terminatorExpr: "42", hopCount: 1)),
+      ])
+      # Wire a chain lookup
+      let chain = OriginChain(
+        queryVariable: "x",
+        queryStepId: 1,
+        hops: @[
+          OriginHop(kind: okTrivialCopy, targetExpr: "x",
+                    sourceExpr: "y", stepId: 1,
+                    location: OriginLocation(path: "fixture.py", line: 1)),
+        ],
+        terminator: Terminator(kind: tkwLiteral, expression: "42"),
+      )
+      stateVM.originChainLookup = proc(name: string): Option[OriginChain] =
+        if name == "x": some(chain) else: none(OriginChain)
+
+      let panel = renderStatePanel(r, stateVM)
+      let badge = findBadgeForRow(panel, "x")
+      check badge != nil
+
+      let row = findByClass(panel, "value-name-container")
+      check row != nil
+
+      # Install parent click listener to detect propagation
+      var parentClicked = false
+      row.eventHandlers["click"] = @[
+        proc(ev: MockEvent) = parentClicked = true
+      ]
+
+      let ev = MockEvent(`type`: "click", target: badge, currentTarget: badge)
+      fireEventWith(badge, "click", ev)
+
+      # 1. Inline chain expanded in VM and DOM
+      let id = badgeRowId(getStateViewState(stateVM).variables[0])
+      check stateVM.isOriginExpanded(id) == true
+      let chainBlocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check chainBlocks.len == 1
+      check chainBlocks[0].styles.getOrDefault("display", "") == "block"
+
+      # 2. Propagation was stopped
+      check not parentClicked
+      check ev.propagationStopped
+
+      dispose()
+
   test "test_state_pane_placeholder_click_resolves_via_ct_origin_summary":
     createRoot proc(dispose: proc()) =
       let (originVM, stateVM, store, mock) = makeOriginVM()
