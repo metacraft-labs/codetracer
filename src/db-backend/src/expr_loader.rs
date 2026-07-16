@@ -588,7 +588,7 @@ impl ExprLoader {
                 Lang::Nim
             } else if extension == "go" {
                 Lang::Go
-            } else if extension == "js" || extension == "mjs" || extension == "cjs" {
+            } else if extension == "js" || extension == "mjs" || extension == "cjs" || extension == "ts" || extension == "tsx" {
                 Lang::Javascript
             } else if extension == "sh" || extension == "bash" {
                 Lang::Bash
@@ -2265,6 +2265,20 @@ impl ExprLoader {
                     updated_location.function_last = end.0;
                 }
             }
+            if updated_location.function_name.is_empty() {
+                let lang = self.get_current_language(path_buf);
+                if lang == Lang::Javascript || lang == Lang::PythonDb || lang == Lang::Ruby {
+                    updated_location.function_name = "<module>".to_string();
+                    updated_location.high_level_function_name = "<module>".to_string();
+                    updated_location.function_first = 1;
+                    updated_location.high_level_line = 1;
+                    updated_location.function_last = if file_info.file_lines.len() > 1 {
+                        (file_info.file_lines.len() - 1) as i64
+                    } else {
+                        1
+                    };
+                }
+            }
         }
         let real_path = self.find_real_path(path_buf);
         updated_location.missing_path = !real_path.exists();
@@ -2341,6 +2355,30 @@ mod tests {
         let shape = &info.loop_shapes[1];
         assert_eq!(shape.first, Position(3));
         assert_eq!(shape.last, Position(4));
+
+        fs::remove_file(&file_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_js_flow_main_function() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("main_func_test.js");
+        fs::write(&file_path, "const x = 10;\nconsole.log(x);")?;
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path)?;
+
+        let loc = Location {
+            path: file_path.to_string_lossy().to_string(),
+            line: 1,
+            ..Location::default()
+        };
+
+        let resolved = loader.find_function_location(&loc, &Line(1));
+        assert_eq!(resolved.function_name, "<module>");
+        assert_eq!(resolved.function_first, 1);
+        assert_eq!(resolved.function_last, 2);
 
         fs::remove_file(&file_path)?;
         Ok(())

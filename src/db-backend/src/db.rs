@@ -3667,7 +3667,13 @@ impl MaterializedReplaySession {
                     && self
                         .reader
                         .path(function.path_id)
-                        .map(|path| path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs"))
+                        .map(|path| {
+                            path.ends_with(".js")
+                                || path.ends_with(".mjs")
+                                || path.ends_with(".cjs")
+                                || path.ends_with(".ts")
+                                || path.ends_with(".tsx")
+                        })
                         .unwrap_or(false)
             })
             .unwrap_or(false)
