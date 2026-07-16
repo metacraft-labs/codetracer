@@ -381,7 +381,12 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
     newDecorations.add(DeltaDecoration(
       `range`: newMonacoRange(line.line, startIndex, line.line, endIndex),
       options: js{
-        isWholeLine: line.class.isNil or ui_imports.jslib.startsWith(line.class, "on") or line.class == "diff-added" or ui_imports.jslib.startsWith(line.class, "line-diff-"),
+        isWholeLine: line.class.isNil or
+                     ui_imports.jslib.startsWith(line.class, "on") or
+                     line.class == "diff-added" or
+                     ui_imports.jslib.startsWith(line.class, "line-diff-") or
+                     line.class == "flow-taken" or
+                     line.class == "flow-not-taken",
         className: line.class,
         inlineClassName: line.inlineClass}))
 
@@ -630,27 +635,32 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   var lines: seq[MonacoLineStyle] = @[]
   var flow = self.flow
 
-  for position, typ in flow.flow.branchesTaken[loopId][loopIteration].table:
-    if (position >= flow.flow.location.functionFirst and position <= flow.flow.location.functionLast) or
-      (flow.flow.location.functionFirst == -1 and flow.flow.location.functionLast == -1):
-      case typ:
-      of Taken:
-        lines.add(MonacoLineStyle(line: position, class: cstring"flow-taken"))
-        if position in flow.flow.relevantStepCount:
-          lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))
-        else:
-          lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
+  if not flow.isNil and not flow.flow.isNil and
+     loopId >= 0 and loopId < flow.flow.branchesTaken.len and
+     loopIteration >= 0 and loopIteration < flow.flow.branchesTaken[loopId].len:
+    let branchTable = flow.flow.branchesTaken[loopId][loopIteration].table
+    if not branchTable.isNil:
+      for position, typ in branchTable:
+        if (position >= flow.flow.location.functionFirst and position <= flow.flow.location.functionLast) or
+          (flow.flow.location.functionFirst == -1 and flow.flow.location.functionLast == -1):
+          case typ:
+          of Taken:
+            lines.add(MonacoLineStyle(line: position, class: cstring"flow-taken"))
+            if position in flow.flow.relevantStepCount:
+              lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))
+            else:
+              lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
 
-      of NotTaken:
-        lines.add(MonacoLineStyle(line: position, class: cstring"flow-not-taken"))
-        if position notin flow.flow.relevantStepCount:
-          lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
-        else:
-          lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))
+          of NotTaken:
+            lines.add(MonacoLineStyle(line: position, class: cstring"flow-not-taken"))
+            if position notin flow.flow.relevantStepCount:
+              lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
+            else:
+              lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))
 
-      of Unknown:
-        lines.add(MonacoLineStyle(line: position, class: cstring"flow-not-taken"))
-        lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
+          of Unknown:
+            lines.add(MonacoLineStyle(line: position, class: cstring"flow-not-taken"))
+            lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
 
   lines
 
@@ -660,7 +670,10 @@ proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   let flow = self.flow
   var lines: seq[MonacoLineStyle] = @[]
 
-  if not flow.isNil and not flow.flow.isNil and not flow.flow.branchesTaken[0][0].table.isNil:
+  if not flow.isNil and not flow.flow.isNil and
+     flow.flow.branchesTaken.len > 0 and
+     flow.flow.branchesTaken[0].len > 0 and
+     not flow.flow.branchesTaken[0][0].table.isNil:
     # conditions outside of loops:
     lines.add(self.conditionToLine(0, 0))
     var currentStepCount = self.flow.getCurrentStepCount(currentPosition)
@@ -669,11 +682,12 @@ proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
     if currentStepCount != NO_STEP_COUNT:
       for flowLoop in flow.flowLoops:
         var currentLoopStep = flowLoop.loopStep
-        var loop = flow.flow.loops[currentLoopStep.loop]
-        var closestStep = self.flow.getClosestIterationStepCount(loop, currentLoopStep.stepCount)
-        var step = flow.flow.steps[closestStep]
-
-        lines.add(self.conditionToLine(step.loop, step.iteration))
+        if currentLoopStep.loop >= 0 and currentLoopStep.loop < flow.flow.loops.len:
+          var loop = flow.flow.loops[currentLoopStep.loop]
+          var closestStep = self.flow.getClosestIterationStepCount(loop, currentLoopStep.stepCount)
+          if closestStep >= 0 and closestStep < flow.flow.steps.len:
+            var step = flow.flow.steps[closestStep]
+            lines.add(self.conditionToLine(step.loop, step.iteration))
 
   lines
 

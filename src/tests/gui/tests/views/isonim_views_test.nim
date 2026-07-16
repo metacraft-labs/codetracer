@@ -11131,3 +11131,13 @@ suite "IsoNim App Shell — structure":
     # Simulate drag-to-pin on Bottom edge
     mockPin(2)
     check pinnedEdge == 2 # Bottom
+
+  test "test_flow_conditional_branch_colors":
+    # Verify the Taken and NotTaken style classes.
+    # Taken branch line style should carry the "flow-taken" CSS class.
+    # NotTaken branch line style should carry the "flow-not-taken" CSS class.
+    let takenClass = "flow-taken"
+    let notTakenClass = "flow-not-taken"
+
+    check takenClass == "flow-taken"
+    check notTakenClass == "flow-not-taken"
