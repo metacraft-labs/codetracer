@@ -385,7 +385,10 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
     var openedPaths = initHashSet[string]()
     collectLegacyOpenedPaths(self.service.filesystem, openedPaths)
     filesystemVMInstance.setRoot(legacyFileToVm(self.service.filesystem))
-    filesystemVMInstance.setExpandedPaths(openedPaths)
+    var mergedPaths = filesystemVMInstance.expandedPaths.val
+    for path in openedPaths:
+      mergedPaths.incl(path)
+    filesystemVMInstance.setExpandedPaths(mergedPaths)
   else:
     filesystemVMInstance.clearRoot()
   filesystemVMInstance.setDiffEntries(legacyDiffEntries())

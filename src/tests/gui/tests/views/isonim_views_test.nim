@@ -115,6 +115,8 @@ proc findByClass*(node: MockNode; cls: string): MockNode =
       return found
   return nil
 
+
+
 proc findById*(node: MockNode; id: string): MockNode =
   ## Find the first descendant (or self) with the given id.
   if node.kind == mnkElement and node.attributes.getOrDefault("id", "") == id:
@@ -8793,6 +8795,51 @@ suite "IsoNim Filesystem Panel — vm":
 
       dispose()
 
+  test "smart file tree auto-expansion logic is preserved in view":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      let tree = FilesystemEntryNode(
+        id: "0",
+        text: "/",
+        path: "/",
+        isFolder: true,
+        children: @[
+          FilesystemEntryNode(
+            id: "1",
+            text: "src",
+            path: "src",
+            isFolder: true,
+            children: @[
+              FilesystemEntryNode(
+                id: "2",
+                text: "db-backend",
+                path: "src/db-backend",
+                isFolder: true,
+                children: @[
+                  FilesystemEntryNode(
+                    id: "3",
+                    text: "main.rs",
+                    path: "src/db-backend/main.rs",
+                    isFolder: false,
+                    children: @[]
+                  )
+                ]
+              )
+            ]
+          )
+        ]
+      )
+
+      vm.setRoot(tree)
+
+      check vm.isExpanded("/")
+      check vm.isExpanded("src")
+      check not vm.isExpanded("src/db-backend")
+
+      dispose()
+
   test "diffClassToCss maps the enum to the legacy CSS modifier strings":
     check diffClassToCss(fdcNone) == ""
     check diffClassToCss(fdcAdded) == "diff-file-added"
@@ -10584,11 +10631,12 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var selectedCommit = -1
+      var toggledCommit = -1
       var selectedFile = ""
       var toggled = false
       let callbacks = VCSCallbacks(
-        onSelectCommit: proc(index: int) = (selectedCommit = index),
+        onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
+          (toggledCommit = index),
         onSelectFile: proc(index: int; path: string) =
           (discard index; selectedFile = path),
         onToggleUnifiedDiff: proc() =
@@ -10602,24 +10650,23 @@ suite "IsoNim VCS Panel — structure":
       vm.setCommits(@[
         VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
       ], selectedIndices = @[0])
-      vm.setChangedFiles(@[
+      vm.setCommitFiles(0, @[
         VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
                    additions: 2, deletions: 1),
       ])
 
       check findByClass(panel, "vcs-branch-name").textContent == "main"
-      check findByClass(panel, "vcs-commit-hash").textContent == "abc123"
-      check findByClass(panel, "vcs-file-name").textContent == "main.nim"
+      check findByClass(panel, "vcs-commit-msg").textContent == "initial"
+      check findByClass(panel, "vcs-accordion-file-name").textContent == "main.nim"
 
-      findByClass(panel, "vcs-commit-item").fireEvent("click")
-      findByClass(panel, "vcs-file-item").fireEvent("click")
-      findByClass(panel, "vcs-toggle-button").fireEvent("click")
+      findByClass(panel, "vcs-commit-header").fireEvent("click")
+      findByClass(panel, "vcs-accordion-file").fireEvent("click")
+      findByClass(panel, "vcs-commit-diff-btn").fireEvent("click")
 
-      check selectedCommit == 0
+      check toggledCommit == 0
       check selectedFile == "src/main.nim"
       check toggled
-      check findByClass(panel, "deepreview-unified-diff") == nil
-      check findByClass(panel, "vcs-changed-files") != nil
+      check findByClass(panel, "deepreview-unified-diff") != nil
 
       dispose()
 
@@ -10666,17 +10713,10 @@ suite "IsoNim VCS Panel — structure":
       vm.setGitRepoState(true)
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
-      vm.setChangedFiles(@[
-        VCSFileRow(status: "M", path: "src/foo.nim", baseName: "foo.nim",
-                   additions: 5, deletions: 2),
-      ])
 
-      # Panel maintains commit history and file list even when unified diff is active
-      check findByClass(panel, "vcs-changed-files") != nil
-      check findByClass(panel, "deepreview-unified-diff") == nil
-
-      findByClass(panel, "vcs-file-item").fireEvent("click")
-      check openedFile == "src/foo.nim"
+      # Redesigned panel renders unified diff instead of commit history/files list
+      check findByClass(panel, "vcs-changed-files") == nil
+      check findByClass(panel, "deepreview-unified-diff") != nil
 
       dispose()
 
