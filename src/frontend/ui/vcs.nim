@@ -1101,6 +1101,10 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
         component.syncLegacyVCSIntoVM(),
       onCheckoutBranch: proc(branch: string) =
         component.branchDropdownOpen = false
+        component.commitOffset = 0
+        component.selectedCommitIndices = @[]
+        component.lastClickedCommitIndex = -1
+        component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
         discard gitExec(@[cstring"checkout", cstring(branch)],
                         component.getWorkingDirectory())
         component.refreshVCSData()

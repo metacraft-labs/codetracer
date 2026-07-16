@@ -10727,6 +10727,36 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
+  test "test_vcs_branch_selection":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var checkedOutBranch = ""
+      let callbacks = VCSCallbacks(
+        onCheckoutBranch: proc(branch: string) =
+          checkedOutBranch = branch
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setBranchState("main", @["main", "feature-1", "feature-2"], true)
+
+      let dropdown = findByClass(panel, "vcs-branch-dropdown")
+      check dropdown != nil
+
+      let options = findAllByClass(dropdown, "vcs-branch-option")
+      check options.len == 3
+      check options[0].textContent.contains("main")
+      check options[1].textContent.contains("feature-1")
+      check options[2].textContent.contains("feature-2")
+
+      # Click the second option
+      options[1].fireEvent("click")
+      check checkedOutBranch == "feature-1"
+
+      dispose()
+
   test "DeepReview changed files mode renders selected file and coverage":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
