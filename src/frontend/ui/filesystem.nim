@@ -39,7 +39,8 @@ import
   ui_imports,
   ../[ types, communication ],
   tables,
-  sets
+  sets,
+  isonim/core/signals
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture

@@ -2689,6 +2689,7 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     editor.contentItem.setTitle(cstring(label))
     editor.contentItem.config.componentState.label = response.name
     editor.contentItem.config.componentState.fullPath = response.name
+  checkPendingReRecord(data)
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =

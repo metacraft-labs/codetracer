@@ -47,9 +47,12 @@ import ../store/types as store_types
 export origin_chain_types
 
 when defined(js):
-  type StateBadgeClickEvent* = isonim_dom.Event
+  proc preventDefault*(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation*(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  template BadgeEvent*(r: MockRenderer): typedesc = MockEvent
+  template BadgeEvent*(r: WebRenderer): typedesc = isonim_dom.Event
 else:
-  type StateBadgeClickEvent* = MockEvent
+  template BadgeEvent*(r: MockRenderer): typedesc = MockEvent
 
 # ---------------------------------------------------------------------------
 # Static label / class helpers
@@ -211,7 +214,7 @@ proc badgeDisplay(vm: StateVM; item: VariableViewState): string =
   ## DOM (lets reactive updates pick it back up).
   if vm.rowHasBadge(item): "inline-flex" else: "none"
 
-proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc(ev: StateBadgeClickEvent) =
+template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evType: typedesc): untyped =
   ## Per-row click handler. For eager summaries this just toggles the
   ## in-row expansion (spec §3.2.1); for placeholder summaries it ALSO
   ## enqueues the placeholder token for the next batched
@@ -219,7 +222,7 @@ proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc(ev:
   ## bridge. The bridge is installed by ``state.nim`` once the
   ## ``OriginChainVM`` is available — without it the click just toggles
   ## expansion, which is the desired fallback when running headless.
-  result = proc(ev: StateBadgeClickEvent) =
+  (proc(ev: evType) =
     if not ev.isNil:
       ev.preventDefault()
       ev.stopPropagation()
@@ -233,7 +236,7 @@ proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc(ev:
       # click both expands the row AND resolves the placeholder.
       if not vm.onShowOriginProc.isNil and not vm.store.isNil:
         let loc = vm.store.debugger.val.location
-        vm.onShowOriginProc(row.name, loc)
+        vm.onShowOriginProc(row.name, loc))
 
 # ---------------------------------------------------------------------------
 # Value Origin Tracking (M4 deliverable §3.1) — right-click context-menu
@@ -449,7 +452,7 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
   ## reactive via the DSL macro — the row is rebuilt incrementally as
   ## the underlying VariableViewState signal updates.
   let onToggle = onToggleExpand(vm, item)
-  let onBadgeClick = onToggleOriginBadge(vm, item)
+  let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
   let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
   ui(r):
     tdiv(class = rowClass(item),
@@ -619,8 +622,6 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
 #   wired imperatively after capturing the input via `ref = var`.
 
 when defined(js):
-  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
-  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
 

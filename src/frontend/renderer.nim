@@ -1326,6 +1326,9 @@ proc reloadOpenFileFromDisk(data: Data, targetPath: cstring) {.async.} =
     except:
       cerror fmt"reload-file: failed to refresh {name}: {getCurrentExceptionMsg()}"
 
+proc checkPendingReRecord*(data: Data)
+proc reRecordCurrent*(data: Data, projectOnly: bool)
+
 proc updateDialog(data: Data, path: cstring) {.async.} =
   let tab =
     if data.services.editor.open.hasKey(path):
@@ -1369,6 +1372,7 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
         tab.changed = false
         discard data.reloadOpenFileFromDisk(path)
         ipc.send "CODETRACER::no-reload-file", js{path: path}
+        data.checkPendingReRecord()
       elif action == cstring"save":
         data.saveFiles(path)
         ipc.send "CODETRACER::no-reload-file", js{path: path}
@@ -1384,8 +1388,10 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
           else:
             tab.source
         data.openThreeWayMergeTab(path, base, ours, diskSource)
+        data.pendingReRecord = nil
         ipc.send "CODETRACER::no-reload-file", js{path: path}
       else:
+        data.pendingReRecord = nil
         ipc.send "CODETRACER::no-reload-file", js{path: path}
     except:
       cerror fmt"external-change: failed to handle {action} for {path}: {getCurrentExceptionMsg()}"
@@ -1463,6 +1469,18 @@ proc runTests*(data: Data, options: RunTestOptions) =
     data.resetBeforeRestart()
   data.ipc.send("CODETRACER::run-test", options)
 
+proc checkPendingReRecord*(data: Data) =
+  if not data.pendingReRecord.isNil:
+    var hasDirty = false
+    for name, tab in data.services.editor.open:
+      if tab.changed:
+        hasDirty = true
+        break
+    if not hasDirty:
+      let projectOnly = data.pendingReRecord["projectOnly"].to(bool)
+      data.pendingReRecord = nil
+      data.reRecordCurrent(projectOnly)
+
 proc reRecordCurrent*(data: Data, projectOnly: bool) =
   ## Save edits and restart the recorder for the current file or project
   ##   base args on current trace for now, but we might start a different target
@@ -1477,7 +1495,16 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
   #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
   #   return
 
-  data.saveFiles()
+  var hasDirty = false
+  for name, tab in data.services.editor.open:
+    if tab.changed:
+      hasDirty = true
+      break
+
+  if hasDirty:
+    data.pendingReRecord = js{projectOnly: projectOnly}
+    data.saveFiles()
+    return
 
   if data.trace.program.len == 0:
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
