@@ -28,6 +28,8 @@ var contextHandlers*: JsAssoc[cstring, JsAssoc[cstring, ContextHandler]] = JsAss
 
 const RESULT_LIMIT = 20
 
+var activeDraggedItem: GoldenContentItem
+
 # FIND
 
 proc historyFind*(tab: js, args: seq[string]) =
@@ -237,6 +239,82 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
       e.stopPropagation();
       _onPin();
     });
+  """.}
+
+
+proc setupDragToPinListeners(layout: GoldenLayout) =
+  ## Wire drag-to-pin listener.
+  ## Coordinates mousemove/mouseup events when a tab is dragged to check
+  ## if it intersects with the Left, Right, or Bottom auto-hide drop zones.
+  {.emit: """
+    (function() {
+      var isActuallyDragging = false;
+      window.addEventListener('mousemove', function(e) {
+        if (!`activeDraggedItem`) return;
+        if (document.querySelector('.lm_dragProxy') !== null) {
+          isActuallyDragging = true;
+        }
+        if (!isActuallyDragging) return;
+
+        var x = e.clientX;
+        var y = e.clientY;
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+
+        var leftStrip = document.getElementById('auto-hide-strip-left');
+        var rightStrip = document.getElementById('auto-hide-strip-right');
+        var bottomStrip = document.getElementById('auto-hide-bottom-strip');
+
+        if (leftStrip) leftStrip.classList.remove('drag-over');
+        if (rightStrip) rightStrip.classList.remove('drag-over');
+        if (bottomStrip) bottomStrip.classList.remove('drag-over');
+
+        if (x >= 0 && x <= 40) {
+          if (leftStrip) leftStrip.classList.add('drag-over');
+        } else if (x >= width - 40 && x <= width) {
+          if (rightStrip) rightStrip.classList.add('drag-over');
+        } else if (y >= height - 40 && y <= height) {
+          if (bottomStrip) bottomStrip.classList.add('drag-over');
+        }
+      });
+
+      window.addEventListener('mouseup', function(e) {
+        var wasDragging = isActuallyDragging;
+        isActuallyDragging = false;
+
+        if (!`activeDraggedItem`) return;
+
+        var x = e.clientX;
+        var y = e.clientY;
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+
+        var leftStrip = document.getElementById('auto-hide-strip-left');
+        var rightStrip = document.getElementById('auto-hide-strip-right');
+        var bottomStrip = document.getElementById('auto-hide-bottom-strip');
+
+        if (leftStrip) leftStrip.classList.remove('drag-over');
+        if (rightStrip) rightStrip.classList.remove('drag-over');
+        if (bottomStrip) bottomStrip.classList.remove('drag-over');
+
+        if (wasDragging) {
+          var edge = -1;
+          if (x >= 0 && x <= 40) {
+            edge = 0; // Left
+          } else if (x >= width - 40 && x <= width) {
+            edge = 1; // Right
+          } else if (y >= height - 40 && y <= height) {
+            edge = 2; // Bottom
+          }
+
+          if (edge !== -1) {
+            `pinPanel`(`layout`, `activeDraggedItem`, edge);
+          }
+        }
+
+        `activeDraggedItem` = null;
+      });
+    })();
   """.}
 
 
@@ -657,6 +735,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       injectPinButton(tab.element, proc() =
         pinPanel(cast[GoldenLayout](layout), genericContentItem, AutoHideEdge.Left))
 
+      let tabEl = cast[Element](tab.element)
+      if not tabEl.isNil:
+        tabEl.addEventListener(cstring"mousedown", proc(ev: Event) =
+          activeDraggedItem = genericContentItem
+        )
+
     # Components that still enter the generic GoldenLayout route mount
     # directly into the GoldenLayout container. Editor tabs use the separate
     # editorComponent route above.
@@ -952,6 +1036,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.
   initAutoHideState()
+  setupDragToPinListeners(layout)
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
     let isEditor = panel.config.componentState.isEditor.to(bool)
     let edge = panel.edge
