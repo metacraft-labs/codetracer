@@ -6152,6 +6152,70 @@ mod tests {
     }
 
     #[test]
+    fn test_js_load_locals_function_scope() -> Result<(), Box<dyn Error>> {
+
+        let mut tracer = NonStreamingTraceWriter::new("example.js", &[]);
+        let path = &PathBuf::from("/test/workdir/example.js");
+        tracer.start(path, Line(1));
+
+        let a_arg = tracer.arg("a", NONE_VALUE);
+        let b_arg = tracer.arg("b", NONE_VALUE);
+
+        let function_id = tracer.ensure_function_id("test", path, Line(1));
+        tracer.register_call(function_id, vec![a_arg, b_arg]);
+
+        tracer.register_step(path, Line(2));
+        tracer.register_variable_with_full_value("x", NONE_VALUE);
+
+        tracer.register_step(path, Line(3));
+        tracer.register_variable_with_full_value("y", NONE_VALUE);
+
+        let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
+            workdir: PathBuf::from("/test/workdir"),
+            program: "example.js".to_string(),
+            args: vec![],
+        };
+
+        let mut db = Db::new(&trace_metadata.workdir);
+        let mut trace_processor = TraceProcessor::new(&mut db);
+        trace_processor.postprocess(&tracer.events).unwrap();
+
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        
+        // Seek to step 1 (where y is not yet assigned)
+        handler.step_in(true)?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        handler.load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), tx.clone())?;
+        if let Ok(DapMessage::Response(resp)) = rx.recv() {
+            let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
+            let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
+            assert!(names.contains(&"a".to_string()));
+            assert!(names.contains(&"b".to_string()));
+            assert!(names.contains(&"x".to_string()));
+            assert!(!names.contains(&"y".to_string()));
+        } else {
+            panic!("Expected CtLoadLocalsResponseBody");
+        }
+
+        // Seek to step 2 (where both x and y are assigned)
+        handler.step_in(true)?;
+        handler.load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), tx)?;
+        if let Ok(DapMessage::Response(resp)) = rx.recv() {
+            let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
+            let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
+            assert!(names.contains(&"a".to_string()));
+            assert!(names.contains(&"b".to_string()));
+            assert!(names.contains(&"x".to_string()));
+            assert!(names.contains(&"y".to_string()));
+        } else {
+            panic!("Expected CtLoadLocalsResponseBody");
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn test_valid_trace() {
         // can be called from just test-valid-trace <my-trace-dir>
         // calling inside db-backend

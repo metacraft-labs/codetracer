@@ -2296,43 +2296,99 @@ impl ReplaySession for MaterializedReplaySession {
     }
 
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
-        // M22 — prefer the SEEKABLE `values.dat` stream when the trace ships one
-        // (`variables_at_owned` reads the step's values on-demand, decompressing
-        // only the needed chunk); fall back to the materialized `db.variables`
-        // for legacy (flag-off) traces.
-        let variables_for_step = self.reader.variables_at_owned(self.step_id).unwrap_or_default();
-        let full_value_locals: Vec<VariableWithRecord> = variables_for_step
-            .iter()
-            .map(|v| VariableWithRecord {
-                expression: self
-                    .reader
-                    .variable_name(v.variable_id)
-                    .unwrap_or("<unknown>")
-                    .to_string(),
-                value: self.to_value_record_with_type(&v.value),
-                address: NO_ADDRESS,
-            })
-            .collect();
+        let current_step = self.reader.step(self.step_id).ok_or("step not found")?;
+        let current_call_key = current_step.call_key;
 
-        // TODO: fix random order here as well: ensure order(or in final locals?)
-        let variable_cells_for_step = self.reader.variable_cells_at(self.step_id).cloned().unwrap_or_default();
-        let value_tracking_locals: Vec<VariableWithRecord> = variable_cells_for_step
-            .iter()
-            .map(|(variable_id, place)| {
-                let name = self.reader.variable_name(*variable_id).unwrap_or("<unknown>");
-                info!("log local {variable_id:?} {name} place: {place:?}");
-                let value = self.reader.load_value_for_place(*place, self.step_id);
-                VariableWithRecord {
+        let is_js = if let Some(call) = self.reader.call(current_call_key) {
+            self.is_javascript_frame(call.function_id)
+        } else {
+            false
+        };
+
+        let (full_value_locals, value_tracking_locals) = if is_js {
+            let call = self.reader.call(current_call_key).expect("call must exist");
+            let mut active_vars: HashMap<VariableId, FullValueRecord> = HashMap::new();
+            for arg in &call.args {
+                active_vars.insert(arg.variable_id, arg.clone());
+            }
+
+            let start_step_val = call.step_id.0;
+            let end_step_val = self.step_id.0;
+            for s_val in start_step_val..=end_step_val {
+                let s_id = StepId(s_val);
+                if let Some(step) = self.reader.step(s_id) {
+                    if step.call_key == current_call_key {
+                        if let Some(variables) = self.reader.variables_at_owned(s_id) {
+                            for v in variables {
+                                active_vars.insert(v.variable_id, v);
+                            }
+                        }
+                        if let Some(variable_cells) = self.reader.variable_cells_at(s_id) {
+                            for (var_id, place) in variable_cells {
+                                let value = self.reader.load_value_for_place(*place, s_id);
+                                active_vars.insert(*var_id, FullValueRecord {
+                                    variable_id: *var_id,
+                                    value,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            let f_locals: Vec<VariableWithRecord> = active_vars
+                .into_iter()
+                .map(|(_, v)| VariableWithRecord {
                     expression: self
                         .reader
-                        .variable_name(*variable_id)
+                        .variable_name(v.variable_id)
                         .unwrap_or("<unknown>")
                         .to_string(),
-                    value: self.to_value_record_with_type(&value),
+                    value: self.to_value_record_with_type(&v.value),
                     address: NO_ADDRESS,
-                }
-            })
-            .collect();
+                })
+                .collect();
+            (f_locals, vec![])
+        } else {
+            // M22 — prefer the SEEKABLE `values.dat` stream when the trace ships one
+            // (`variables_at_owned` reads the step's values on-demand, decompressing
+            // only the needed chunk); fall back to the materialized `db.variables`
+            // for legacy (flag-off) traces.
+            let variables_for_step = self.reader.variables_at_owned(self.step_id).unwrap_or_default();
+            let full_value_locals: Vec<VariableWithRecord> = variables_for_step
+                .iter()
+                .map(|v| VariableWithRecord {
+                    expression: self
+                        .reader
+                        .variable_name(v.variable_id)
+                        .unwrap_or("<unknown>")
+                        .to_string(),
+                    value: self.to_value_record_with_type(&v.value),
+                    address: NO_ADDRESS,
+                })
+                .collect();
+
+            // TODO: fix random order here as well: ensure order(or in final locals?)
+            let variable_cells_for_step = self.reader.variable_cells_at(self.step_id).cloned().unwrap_or_default();
+            let value_tracking_locals: Vec<VariableWithRecord> = variable_cells_for_step
+                .iter()
+                .map(|(variable_id, place)| {
+                    let name = self.reader.variable_name(*variable_id).unwrap_or("<unknown>");
+                    info!("log local {variable_id:?} {name} place: {place:?}");
+                    let value = self.reader.load_value_for_place(*place, self.step_id);
+                    VariableWithRecord {
+                        expression: self
+                            .reader
+                            .variable_name(*variable_id)
+                            .unwrap_or("<unknown>")
+                            .to_string(),
+                        value: self.to_value_record_with_type(&value),
+                        address: NO_ADDRESS,
+                    }
+                })
+                .collect();
+            (full_value_locals, value_tracking_locals)
+        };
 
         // TODO: watches require tracepoint-like evaluate_expression or would duplicate locals
         // for now don't evaluate/support them for db traces: just ignoring
@@ -3675,6 +3731,24 @@ impl MaterializedReplaySession {
                                 || path.ends_with(".tsx")
                         })
                         .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    }
+
+    fn is_javascript_frame(&self, function_id: FunctionId) -> bool {
+        self.reader
+            .function(function_id)
+            .map(|function| {
+                self.reader
+                    .path(function.path_id)
+                    .map(|path| {
+                        path.ends_with(".js")
+                            || path.ends_with(".mjs")
+                            || path.ends_with(".cjs")
+                            || path.ends_with(".ts")
+                            || path.ends_with(".tsx")
+                    })
+                    .unwrap_or(false)
             })
             .unwrap_or(false)
     }
