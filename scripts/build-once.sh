@@ -296,7 +296,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 	*) ct_tool_provisioning_default="nix" ;;
 	esac
 
-	"$repro_bin" build "${CODETRACER_REPROBUILD_TARGET:-.}" \
+	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "${CODETRACER_REPROBUILD_TARGET:-.}" \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
 		--diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
