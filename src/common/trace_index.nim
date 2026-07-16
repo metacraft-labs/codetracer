@@ -674,7 +674,13 @@ proc addRecentFolder*(path: string, test: bool) =
   var cleanPath = path
   while cleanPath.len > 1 and (cleanPath[^1] == '/' or cleanPath[^1] == '\\'):
     cleanPath.setLen(cleanPath.len - 1)
-  let folderName = extractFilename(cleanPath)
+
+  var lastSep = -1
+  for i in 0 ..< cleanPath.len:
+    if cleanPath[i] == '/' or cleanPath[i] == '\\':
+      lastSep = i
+  let folderName = if lastSep == -1: cleanPath else: cleanPath[(lastSep + 1) .. ^1]
+
   let db = ensureDB(test)
 
   # Use INSERT OR REPLACE to handle both new and existing entries
@@ -682,7 +688,7 @@ proc addRecentFolder*(path: string, test: bool) =
     db.exec(
       sql"""INSERT OR REPLACE INTO recent_folders (path, name, last_opened)
             VALUES (?, ?, ?)""",
-      path, folderName, lastOpenedStr)
+      cleanPath, folderName, lastOpenedStr)
   except DbError:
     echo "error: addRecentFolder: ", getCurrentExceptionMsg()
 
@@ -720,12 +726,16 @@ proc updateRecentFolder*(path: string, test: bool) =
   var lastOpenedStr: string = ""
   lastOpenedStr.formatValue(currentDate, "yyyy/MM/dd HH:mm:ss")
 
+  var cleanPath = path
+  while cleanPath.len > 1 and (cleanPath[^1] == '/' or cleanPath[^1] == '\\'):
+    cleanPath.setLen(cleanPath.len - 1)
+
   let db = ensureDB(test)
 
   try:
     db.exec(
       sql"UPDATE recent_folders SET last_opened = ? WHERE path = ?",
-      lastOpenedStr, path)
+      lastOpenedStr, cleanPath)
   except DbError:
     echo "error: updateRecentFolder: ", getCurrentExceptionMsg()
 
@@ -733,12 +743,16 @@ proc updateRecentFolder*(path: string, test: bool) =
 
 proc removeRecentFolder*(path: string, test: bool) =
   ## Remove a folder from recent folders
+  var cleanPath = path
+  while cleanPath.len > 1 and (cleanPath[^1] == '/' or cleanPath[^1] == '\\'):
+    cleanPath.setLen(cleanPath.len - 1)
+
   let db = ensureDB(test)
 
   try:
     db.exec(
       sql"DELETE FROM recent_folders WHERE path = ?",
-      path)
+      cleanPath)
   except DbError:
     echo "error: removeRecentFolder: ", getCurrentExceptionMsg()
 
