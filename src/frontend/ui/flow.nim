@@ -3331,11 +3331,11 @@ proc flowLoopValue*(
   allIterations: int,
   style: VStyle
 ): Node =
-  # let flowMode =
-  #   ($self.data.config.flow.realFlowUI)
-  #     .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
-  #     .toLowerAscii()
-  var iteration = step.iteration
+  var iteration =
+    if self.loopStates.hasKey(step.loop):
+      self.loopStates[step.loop].activeIteration
+    else:
+      step.iteration
   var width = len(intToStr(allIterations))
 
   proc onEnter(self: FlowComponent) =
@@ -3473,7 +3473,11 @@ proc makeLoopLine(
 proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   let expression = &"for-{step.position}"
   # render variable lines in the viewZone
-  let allIterations = self.flow.loops[step.loop].rrTicksForIterations.len - 1
+  let allIterations =
+    if step.loop >= 0 and step.loop < self.flow.loopIterationSteps.len:
+      self.flow.loopIterationSteps[step.loop].len - 1
+    else:
+      self.flow.loops[step.loop].rrTicksForIterations.len - 1
   let dom = self.makeLoopLine(step, allIterations)
   cast[Node](self.flowLoops[step.position].flowZones.dom).appendChild(dom)
 
