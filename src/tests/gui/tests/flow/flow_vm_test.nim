@@ -418,3 +418,26 @@ suite "FlowVM auto-load effect":
       check vm.selectedIteration.val == 9
 
       dispose()
+
+  test "test_loop_controls_arrow_navigation":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+
+      # Set initial total iterations
+      vm.iterationCount.val = 5
+      vm.selectIteration(0)
+      check vm.selectedIteration.val == 0
+
+      # Simulate step forward iteration selections
+      vm.selectIteration(vm.selectedIteration.val + 1)
+      check vm.selectedIteration.val == 1
+
+      vm.selectIteration(vm.selectedIteration.val + 1)
+      check vm.selectedIteration.val == 2
+
+      # Simulate step backward iteration selections
+      vm.selectIteration(vm.selectedIteration.val - 1)
+      check vm.selectedIteration.val == 1
+
+      dispose()

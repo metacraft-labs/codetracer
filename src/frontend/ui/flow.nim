@@ -3395,7 +3395,11 @@ proc flowLoopValue*(
   result.appendChild(loopSpan)
 
 proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration = step.iteration
+  let iteration =
+    if self.loopStates.hasKey(step.loop):
+      self.loopStates[step.loop].activeIteration
+    else:
+      step.iteration
   let previousIteration = max(iteration - 1, 0)
 
   result = document.createElement(cstring"button")
@@ -3411,7 +3415,11 @@ proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): 
   )
 
 proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration = step.iteration
+  let iteration =
+    if self.loopStates.hasKey(step.loop):
+      self.loopStates[step.loop].activeIteration
+    else:
+      step.iteration
   let maxIterations =
     if step.loop >= 0 and step.loop < self.flow.loopIterationSteps.len:
       self.flow.loopIterationSteps[step.loop].len - 1
