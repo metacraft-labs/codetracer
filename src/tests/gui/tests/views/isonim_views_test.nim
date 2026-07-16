@@ -85,6 +85,7 @@ import views/isonim_debug_shell_view
 import views/isonim_auto_hide_overlay_tabs_view
 import views/isonim_auto_hide_collapsed_icons_view
 import views/isonim_auto_hide_bottom_tabs_view
+import views/isonim_auto_hide_bottom_strip_view
 import views/isonim_auto_hide_side_strip_view
 import views/isonim_status_view
 import views/isonim_menu_shell_view
@@ -376,6 +377,29 @@ suite "IsoNim Auto-hide Bottom Tabs — structure":
 
     panel.children[1].fireEvent("click")
     check selected == 1
+
+  test "test_autohide_bottom_panels":
+    let r = MockRenderer()
+    var unpinnedIndex = -1
+    let callbacks = AutoHideBottomStripCallbacks(
+      onUnpin: proc(index: int) =
+        unpinnedIndex = index
+    )
+
+    let tabs = @[
+      AutoHideBottomStripRecord(title: "BUILD", active: true),
+      AutoHideBottomStripRecord(title: "PROBLEMS", active: false)
+    ]
+
+    # Render bottom strip panel
+    let panel = renderAutoHideBottomStripPanel(r, tabs, callbacks)
+    check panel != nil
+    check panel.children.len == 2
+    check panel.children[0].textContent == "BUILD"
+
+    # Simulate triggering unpin on the first tab
+    callbacks.onUnpin(0)
+    check unpinnedIndex == 0
 
 suite "IsoNim Auto-hide Side Strips — structure":
 

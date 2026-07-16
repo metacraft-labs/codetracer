@@ -88,6 +88,7 @@ type
     containerElement*: Element ## The GL container element (parent of liveElement)
     overlayWidth*: int   ## Remembered overlay pixel width for left/right panels (0 = CSS default)
     overlayHeight*: int  ## Remembered overlay pixel height for bottom panels (0 = CSS default)
+    isUnpinning*: bool
 
   AutoHideState* = ref object
     ## Central state for all auto-hidden panels.
@@ -174,7 +175,7 @@ proc initAutoHideState*() =
 
 proc panelsForEdge*(state: AutoHideState, edge: AutoHideEdge): seq[AutoHidePanel] =
   ## Return all panels pinned to a given edge.
-  state.panels.filterIt(it.edge == edge)
+  state.panels.filterIt(it.edge == edge and not it.isUnpinning)
 
 proc findPanelByContent*(state: AutoHideState, content: Content): AutoHidePanel =
   ## Return the first auto-hidden panel matching the given Content type,
@@ -334,7 +335,8 @@ proc pinPanel*(
     config: config,
     domTab: nil,  # will be set when strip is rendered
     liveElement: liveEl,
-    containerElement: containerEl
+    containerElement: containerEl,
+    isUnpinning: false
   )
   autoHideState.panels.add(panel)
 
@@ -382,7 +384,8 @@ proc addStandaloneAutoHidePanel*(
     config: js{},  # No GL config — standalone panel
     domTab: nil,
     liveElement: liveElement,
-    containerElement: nil
+    containerElement: nil,
+    isUnpinning: false
   )
   autoHideState.panels.add(panel)
 
@@ -402,6 +405,10 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   ## the newly created GL container, preserving all component state.
   if autoHideState.isNil or layout.isNil:
     return
+
+  panel.isUnpinning = true
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
 
   # Detach the live element from the docked sidebar if it's currently there.
   if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
@@ -443,19 +450,14 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
         discard ground.addItem(panel.config)
   except:
     cerror "auto_hide: failed to re-add panel to GL: " & getCurrentExceptionMsg()
+    panel.isUnpinning = false
+    if not autoHideState.onChanged.isNil:
+      autoHideState.onChanged()
   finally:
     if not data.ui.isNil:
       data.ui.isReparenting = false
 
-  # Remove from state regardless of whether re-add succeeded, so the
-  # strip tab is cleaned up and the user can retry by re-opening
-  # the component from the menu.
-  autoHideState.panels = autoHideState.panels.filterIt(it != panel)
-
   cdebug fmt"auto_hide: unpinned panel '{panel.title}'"
-
-  if not autoHideState.onChanged.isNil:
-    autoHideState.onChanged()
 
   # When the last panel is unpinned from a side edge, the strip collapses
   # back to 0, widening #ROOT.  GL must recompute its size; defer so the
@@ -1382,7 +1384,8 @@ proc restoreAutoHideState*(saved: JsObject) =
       config: obj["config"],
       domTab: nil,
       liveElement: nil,      # No live element for restored panels — will use config fallback
-      containerElement: nil
+      containerElement: nil,
+      isUnpinning: false
     )
     autoHideState.panels.add(panel)
 

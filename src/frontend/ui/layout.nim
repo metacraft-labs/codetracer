@@ -615,6 +615,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
       cerror "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+
+      # Clean up the panel from autoHideState.panels list now that it is reparented
+      if not autoHideState.isNil:
+        autoHideState.panels = autoHideState.panels.filterIt(it != panel)
+        if not autoHideState.onChanged.isNil:
+          autoHideState.onChanged()
+
       dispatchLayoutUpdated()
     else:
       cerror "[GENERIC_REG] Regular mount (non-reparenting)"
