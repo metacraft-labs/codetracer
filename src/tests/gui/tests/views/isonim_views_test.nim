@@ -1756,6 +1756,28 @@ suite "IsoNim Calltrace Panel — call lines":
 
       dispose()
 
+  test "test_calltrace_jump_highlighting":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      vm.setViewportHeight(10)
+
+      # Initially no selection
+      check vm.selectedEntry.val.isNone
+
+      # Select entry
+      vm.selectEntry(some(1'i64))
+      check vm.selectedEntry.val.isSome
+      check vm.selectedEntry.val.get == 1
+
+      # Clear selection
+      vm.selectEntry(none(int64))
+      check vm.selectedEntry.val.isNone
+
+      dispose()
+
   test "test_calltrace_collapse_dots":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
