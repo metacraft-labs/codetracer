@@ -3987,3 +3987,4 @@ if inElectron:
   once:
     configureIPC(data)
     configure(data)
+    cast[JsObject](dom.window)["__CODETRACER_DATA__"] = data.toJs
