@@ -1,13 +1,6 @@
 {
   description = "Code Tracer";
 
-  nixConfig = {
-    extra-substituters = [ "https://metacraft-labs-codetracer.cachix.org" ];
-    extra-trusted-public-keys = [
-      "metacraft-labs-codetracer.cachix.org-1:6p7pd81m6sIh59yr88yGPU9TFYJZkIrFZoFBWj/y4aE="
-    ];
-  };
-
   inputs = {
     # Multi-language toolchain management.
     # All CodeTracer repos share the same nixpkgs pin via this flake to ensure
