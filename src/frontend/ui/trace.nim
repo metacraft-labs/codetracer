@@ -86,6 +86,38 @@ proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int;
     sourceDigest = $sourceDigest)
   clog fmt"TimelineVM: synced debugger rrTicks={ticks}"
 
+proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
+
+type
+  TimelineMountData = ref object
+    key: cstring
+    retryCount: int
+
+proc doMountTimelinePanel(data: TimelineMountData) {.cdecl.} =
+  if isoNimTimelineMounted:
+    return
+  data.retryCount += 1
+  let container = dom_api.getElementById(dom_api.document, data.key)
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    if data.retryCount > 200:
+      clog "IsoNim timeline panel: not ready after 200 retries, giving up"
+      return
+    setTimeoutWithArg(doMountTimelinePanel, 10, data)
+    return
+
+  let containerNode = dom_api.Node(container)
+  while not dom_api.isNodeNil(containerNode.firstChild):
+    discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+  isoNimTimelineMounted = true
+
+  let timelineDiv = dom_api.createElement(dom_api.document, cstring"div")
+  dom_api.setAttribute(timelineDiv, cstring"id", cstring"timeline")
+  dom_api.appendChild(containerNode, dom_api.Node(timelineDiv))
+
+  mountIsoNimTimeline(timelineDiv, timelineVMInstance)
+  clog "IsoNim timeline panel: mounted as primary renderer in #timelineComponent-0"
+
 proc tryMountIsoNimTimelinePanel() =
   ## Mount the IsoNim timeline panel view into the GoldenLayout-managed
   ## timeline component container. The container is created by
@@ -99,36 +131,11 @@ proc tryMountIsoNimTimelinePanel() =
   if isoNimTimelineMounted or timelineVMInstance.isNil:
     return
 
-  # Wait for the DOM container to exist. GoldenLayout creates it when
-  # the component is registered. IsoNim mounts directly into it.
-  let key = cstring"timelineComponent-0"
-  var timelineRetryCount = 0
-  proc doMount() =
-    if isoNimTimelineMounted:
-      return
-    timelineRetryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if timelineRetryCount > 200:
-        clog "IsoNim timeline panel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimTimelineMounted = true
-
-    let timelineDiv = dom_api.createElement(dom_api.document, cstring"div")
-    dom_api.setAttribute(timelineDiv, cstring"id", cstring"timeline")
-    dom_api.appendChild(containerNode, dom_api.Node(timelineDiv))
-
-    mountIsoNimTimeline(timelineDiv, timelineVMInstance)
-    clog "IsoNim timeline panel: mounted as primary renderer in #timelineComponent-0"
-
-  doMount()
+  let mountData = TimelineMountData(
+    key: cstring"timelineComponent-0",
+    retryCount: 0
+  )
+  doMountTimelinePanel(mountData)
 
 let
   MIN_EDITOR_WIDTH: float = 20 #%
@@ -156,6 +163,30 @@ proc renderTraceForExtension(self: TraceComponent)
 proc ensureMonacoEditor(self: TraceComponent)
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig
 proc traceBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
+
+proc removeMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
+  #.changeViewZones(function(accessor) {
+    accessor.removeZone(#);
+  })
+""".}
+
+proc addMonacoViewZone(editor: MonacoEditor, zone: js): int {.importjs: """
+  (function() {
+    let zoneId = 0;
+    #.changeViewZones(function(accessor) {
+      zoneId = accessor.addZone(#);
+    });
+    return zoneId;
+  })()
+""".}
+
+proc layoutMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
+  #.changeViewZones(function(accessor) {
+    accessor.layoutZone(#);
+  })
+""".}
+
+
 
 when defined(ctInExtension):
   var tracepointComponentMapping* {.exportc.}: JsAssoc[cstring, JsAssoc[int, TraceComponent]] = JsAssoc[cstring, JsAssoc[int, TraceComponent]]{}
@@ -254,17 +285,21 @@ proc focusTraceEditor(self: TraceComponent) =
   if self.monacoEditor.isNil:
     return
 
-  discard setTimeout(proc() =
-    self.monacoEditor.focus()
-    self.monacoEditor.toJs.getDomNode().querySelector("textarea").focus(),
-    1
-  )
+  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
+    if not self.monacoEditor.isNil:
+      self.monacoEditor.focus()
+      let domNode = self.monacoEditor.toJs.getDomNode()
+      if not domNode.isNil:
+        let textarea = domNode.querySelector("textarea")
+        if not textarea.isNil:
+          textarea.focus()
+  , 1, self)
 
 proc focusTraceEditorAfterLayout(self: TraceComponent, delay: int = 0) =
-  discard setTimeout(proc() =
+  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     self.data.ui.activeFocus = self
     self.focusTraceEditor()
-  , delay)
+  , delay, self)
 
 proc shouldRestoreTraceEditorFocus(self: TraceComponent): bool =
   if self.monacoEditor.isNil:
@@ -335,6 +370,14 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
   self.modalValueComponent = value
   redrawModalValue(value)
 
+type
+  TraceLayoutData = ref object
+    self: TraceComponent
+
+proc doRefreshTraceTableLayout(data: TraceLayoutData) {.cdecl.} =
+  if not data.self.isNil:
+    data.self.refreshTraceTableLayout()
+
 method onUpdatedTable*(self: TraceComponent, response: CtUpdatedTableResponseBody) {.async.} =
   if response.tableUpdate.isTrace and response.tableUpdate.data.draw == self.drawId and response.tableUpdate.eventSlot == self.id:
     self.tableCallback(response.tableUpdate.data.toJs)
@@ -387,13 +430,11 @@ proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
 
   let shouldRestoreFocus = self.shouldRestoreTraceEditorFocus()
 
-  self.editorUI.monacoEditor.changeViewZones do (view: js):
-    view.removeZone(self.zoneId)
+  removeMonacoViewZone(self.editorUI.monacoEditor, self.zoneId)
 
   self.viewZone.heightInPx = newHeight
 
-  self.editorUI.monacoEditor.changeViewZones do (view: js):
-    self.zoneId = cast[int](view.addZone(self.viewZone))
+  self.zoneId = addMonacoViewZone(self.editorUI.monacoEditor, self.viewZone)
   self.applyTraceDomLayout()
   if shouldRestoreFocus:
     self.focusTraceEditorAfterLayout()
@@ -438,7 +479,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
   var unchangedList: seq[ProgramEvent] = data.services.trace.unchanged
   var unchangedTracepointLocations = JsAssoc[cstring, bool]{}
 
-  for component in data.ui.componentMapping[Content.Trace]:
+  for _, component in data.ui.componentMapping[Content.Trace]:
     let trace = TraceComponent(component)
     if not trace.isChanged and not trace.isDisabled and not trace.forceReload:
       unchangedTracepointLocations[&"{trace.tracepoint.name}_{trace.tracepoint.line}"] = true
@@ -487,7 +528,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
   else:
     let lastSession = data.services.trace.traceSessions[^1]
     unchangedList = unchangedList.filterIt(unchangedTracepointLocations[&"{it.highLevelPath}_{it.highLevelLine}"])
-    for sessionResults in lastSession.results:
+    for _, sessionResults in lastSession.results:
       for traceResult in sessionResults:
         if unchangedTracepointLocations[&"{traceResult.path}_{traceResult.line}"]:
           let programEvent = convertTracepointEventToProgramEvent(traceResult)
@@ -537,14 +578,16 @@ method onUpdatedTrace*(traceComponent: TraceComponent, response: TraceUpdate) {.
         let tracepointError = response.tracepointErrors[tracepoint.tracepointId]
         traceComponent.tracepoint.tracepointError = tracepointError
       traceComponent.refreshTrace()
-      traceComponent.dataTable.context.ajax.reload(nil, false)
+      if not traceComponent.dataTable.context.isNil and traceComponent.dataTable.context != jsUndefined:
+        traceComponent.dataTable.context.ajax.reload(nil, false)
     else:
       traceComponent.dataTable.rowsCount = response.count
       traceComponent.dataTable.updateTableFooter()
 
-      if cast[int](traceComponent.dataTable.context.scroller.page()["end"]) == traceComponent.dataTable.endRow - 1 and
-          traceComponent.dataTable.endRow != traceComponent.dataTable.rowsCount:
-        traceComponent.dataTable.context.ajax.reload(nil, false)
+      if not traceComponent.dataTable.context.isNil and traceComponent.dataTable.context != jsUndefined:
+        if cast[int](traceComponent.dataTable.context.scroller.page()["end"]) == traceComponent.dataTable.endRow - 1 and
+            traceComponent.dataTable.endRow != traceComponent.dataTable.rowsCount:
+          traceComponent.dataTable.context.ajax.reload(nil, false)
 
     # let duration = timeInMs - tracepointStart
 
@@ -606,7 +649,70 @@ proc createContextMenuItems(self: TraceComponent, ev: js): seq[ContextMenuItem] 
 
   # contextMenu &= expandTraceValue
 
-  return contextMenu
+proc toProgramEvent*(self: TraceComponent, datatableRow: js): ProgramEvent =
+  ProgramEvent(
+    kind: TraceLogEvent,
+    semanticKind: cstring"",
+    highLevelPath: self.name,
+    highLevelLine: self.line,
+    directLocationRRTicks: cast[int](datatableRow.directLocationRRTicks),
+    content: cstring"",
+    metadata: cstring"",
+    maxRRTicks: self.data.maxRRTicks,
+    sourceDigest: cstring"",
+  )
+
+proc handleTraceTableClick*(self: TraceComponent, event: js, trNode: js) {.exportc.} =
+  let datatable = self.dataTable.context
+  if datatable.isNil:
+    cerror "handleTraceTableClick: datatable is nil"
+    return
+  let datatableRow = datatable.row(trNode)
+  let rowData = datatableRow.data()
+
+  if not rowData.isNil:
+    cerror "handleTraceTableClick: rowData content: " & cast[cstring](rowData.content)
+    cerror "handleTraceTableClick: rowData directLocationRRTicks: " & $cast[int](rowData.directLocationRRTicks)
+    let traceValue = self.toProgramEvent(rowData)
+    let ctrlKey = if not event.ctrlKey.isNil: cast[bool](event.ctrlKey)
+                  elif not event.originalEvent.isNil: cast[bool](event.originalEvent.ctrlKey)
+                  else: false
+    if ctrlKey:
+      self.data.redraw()
+    else:
+      cerror "handleTraceTableClick: emitting CtTraceJump with ticks " & $traceValue.directLocationRRTicks
+      self.api.emit(CtTraceJump, traceValue)
+      self.api.emit(InternalNewOperation, NewOperation(name: "trace jump", stableBusy: true))
+  else:
+    cerror "handleTraceTableClick: rowData is nil"
+
+proc handleTraceTableContextMenu*(self: TraceComponent, event: js) {.exportc.} =
+  let contextMenu = createContextMenuItems(self, event)
+
+  if contextMenu != @[]:
+    showContextMenu(contextMenu, cast[int](event.clientX), cast[int](event.clientY))
+
+proc registerTraceTableEvents(self: TraceComponent) {.importjs: """
+  (function(self) {
+    let table = jQuery(String.fromCharCode(35) + "trace-table-" + self.id + " tbody");
+    table.off("click", "tr");
+    table.on("click", "tr", function(event) {
+      let target = event.target;
+      let trNode = target;
+      while (trNode && trNode.nodeName !== "TR") {
+        trNode = trNode.parentNode;
+      }
+      if (trNode) {
+        handleTraceTableClick(self, event, trNode);
+      }
+    });
+
+    table.off("contextmenu", "tr");
+    table.on("contextmenu", "tr", function(event) {
+      handleTraceTableContextMenu(self, event);
+    });
+  })(#);
+""".}
 
 proc renderTableResults(
   self: TraceComponent,
@@ -680,9 +786,8 @@ proc renderTableResults(
 
       # resize data table to fit container
       self.refreshTraceTableLayout()
-      discard setTimeout(proc() =
-        self.refreshTraceTableLayout()
-      , 0)
+      let layoutData = TraceLayoutData(self: self)
+      setTimeoutWithArg(doRefreshTraceTableLayout, 0, layoutData)
 
       # add event listener for scrolling to update table footer
       let scrollBodyDom = jq(cstring(fmt"#chart-table-{self.id} .dt-scroll-body"))
@@ -698,42 +803,7 @@ proc renderTableResults(
         self.dataTable.updateTableRows(redraw = false)
         self.dataTable.updateTableFooter()
       )
-
-      proc toProgramEvent(self: TraceComponent, datatableRow: js): ProgramEvent =
-        ProgramEvent(
-          kind: TraceLogEvent,
-          highLevelPath: self.name,
-          highLevelLine: self.line,
-          # rrEventId: cast[int](datatableRow.rrEventId),
-          directLocationRRTicks: cast[int](datatableRow.directLocationRRTicks),
-          content: cstring"",
-          metadata: cstring"",
-          maxRRTicks: data.maxRRTicks,
-        )
-
-      jqFind(cstring(fmt"#trace-table-{self.id} tbody")).on(cstring"click", cstring"tr") do (event: js):
-        let target = event.target
-        let parentNode = target.parentNode
-        let datatable = self.dataTable.context
-        let datatableRow = datatable.row(parentNode)
-        let traceValue = self.toProgramEvent(datatableRow.data())
-
-        if cast[bool](event.originalEvent.ctrlKey):
-          self.data.redraw()
-        else:
-          self.api.emit(CtTraceJump, traceValue)
-          self.api.emit(InternalNewOperation, NewOperation(name: "trace jump", stableBusy: true))
-
-      jqFind(cstring(fmt"#trace-table-{self.id} tbody")).on(cstring"contextmenu", cstring"tr") do (event: js):
-        # let target = event.target
-        # let parentNode = target.parentNode
-        # let datatable = self.dataTable.context
-        # let datatableRow = datatable.row(parentNode)
-        # let traceValue = self.toProgramEvent(datatableRow.data())
-        let contextMenu = createContextMenuItems(self, event)
-
-        if contextMenu != @[]:
-          showContextMenu(contextMenu, cast[int](event.clientX), cast[int](event.clientY))
+      self.registerTraceTableEvents()
     else:
       return
 
@@ -879,9 +949,8 @@ proc ensureChart(self: TraceComponent) =
     self.chart.expression = cstring"trace"
 
 proc refreshLine(self: TraceComponent) =
-  self.monacoEditor.changeViewZones do (view: js):
-    self.viewZone.heightInLines = self.viewZone.heightInLines
-    view.layoutZone(self.zoneId)
+  self.viewZone.heightInLines = self.viewZone.heightInLines
+  layoutMonacoViewZone(self.monacoEditor, self.zoneId)
 
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
   let realLine =
@@ -1405,15 +1474,26 @@ proc mountMonacoEditor(self: TraceComponent): bool =
       if not self.inExtension:
         self.expandWithEnter(self.traceEditorContentHeight())
 
-    discard setTimeout(proc() =
+    setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
       if not self.monacoEditor.isNil and not self.monacoEditor.hasTextFocus():
         self.focusTraceEditor()
-    , 0)
+    , 0, self)
   )
 
   self.monacoMountScheduled = false
   self.monacoMountAttempts = 0
   true
+
+proc retryMountTraceMonacoEditor(self: TraceComponent) {.cdecl.} =
+  if self.mountMonacoEditor():
+    return
+
+  inc self.monacoMountAttempts
+  if self.monacoMountAttempts <= TraceMonacoMountMaxAttempts:
+    setTimeoutWithArg(retryMountTraceMonacoEditor, TraceMonacoMountRetryMs, self)
+  else:
+    self.monacoMountScheduled = false
+    cerror cstring("trace: failed to mount monaco editor for " & $self.selectorId)
 
 proc ensureMonacoEditor(self: TraceComponent) =
   # check if trace has a monaco editor
@@ -1426,18 +1506,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
   self.monacoMountScheduled = true
   self.monacoMountAttempts = 0
 
-  proc retryMount() =
-    if self.mountMonacoEditor():
-      return
-
-    inc self.monacoMountAttempts
-    if self.monacoMountAttempts <= TraceMonacoMountMaxAttempts:
-      discard setTimeout(proc() = retryMount(), TraceMonacoMountRetryMs)
-    else:
-      self.monacoMountScheduled = false
-      cerror cstring("trace: failed to mount monaco editor for " & $self.selectorId)
-
-  discard setTimeout(proc() = retryMount(), TraceMonacoMountRetryMs)
+  setTimeoutWithArg(retryMountTraceMonacoEditor, TraceMonacoMountRetryMs, self)
 
 proc resizeEditorHandler(self: TraceComponent) =
   # get new monaco editor config
@@ -1461,8 +1530,9 @@ proc setEditorResizeObserver(self: TraceComponent) =
     return
   let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
     for entry in entries:
-      # let timeout =
-      discard setTimeout(proc = resizeEditorHandler(self), 100)
+      setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
+        resizeEditorHandler(self)
+      , 100, self)
   )
 
   resizeObserver.observe(cast[Node](editorDom))
@@ -1630,10 +1700,10 @@ proc bindTraceDomRefs(self: TraceComponent) =
 proc finishTraceDomMount(self: TraceComponent) =
   self.bindTraceDomRefs()
 
-  discard setTimeout(proc =
+  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     self.refreshTraceComponentLayout()
     self.focusTraceEditorAfterLayout()
-  , 0)
+  , 0, self)
 
   if self.resizeObserver.isNil:
     self.setEditorResizeObserver()
@@ -1661,11 +1731,11 @@ proc renderTraceForExtension(self: TraceComponent) =
   host.appendChild(traceNode)
   self.bindTraceDomRefs()
 
-  discard setTimeout(proc =
+  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     self.ensureMonacoEditor()
     self.refreshTraceComponentLayout()
     self.focusTraceEditorAfterLayout()
-  , 0)
+  , 0, self)
 
 method redrawForExtension*(self: TraceComponent) =
   self.renderTraceForExtension()
@@ -1689,12 +1759,12 @@ proc refreshTraceComponentLayout*(self: TraceComponent) =
     self.applyTraceDomLayout()
 
   self.refreshTraceTableLayout()
-  discard setTimeout(proc() =
+  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     self.refreshTraceTableLayout()
-  , 0)
-  discard setTimeout(proc() =
+  , 0, self)
+  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     self.refreshTraceTableLayout()
-  , 50)
+  , 50, self)
 
 proc refreshTraceTableLayout*(self: TraceComponent) =
   if self.dataTable.isNil or self.dataTable.context.isNil:
@@ -1776,9 +1846,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
       domNode: traceNode
     }
 
-    # add configured zone
-    tabInfo.monacoEditor.changeViewZones do (view: js):
-      trace.zoneId = cast[int](view.addZone(trace.viewZone))
+    trace.zoneId = addMonacoViewZone(tabInfo.monacoEditor, trace.viewZone)
 
     # add tracepoint to points register
     data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
@@ -1796,13 +1864,12 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
     trace.syncTraceResultsHeight()
     trace.viewZone.heightInPx = trace.traceViewZoneHeight()
 
-    tabInfo.monacoEditor.changeViewZones do (view: js):
-      trace.zoneId = cast[int](view.addZone(trace.viewZone))
+    trace.zoneId = addMonacoViewZone(tabInfo.monacoEditor, trace.viewZone)
 
-    discard setTimeout(proc =
-      resizeEditorHandler(editorUI.traces[line])
+    setTimeoutWithArg(proc(trace: TraceComponent) {.cdecl.} =
+      resizeEditorHandler(trace)
       trace.focusTraceEditorAfterLayout()
-    , 100)
+    , 100, trace)
   else:
     # shrink the trace and sace its source
     trace.expanded = false
@@ -1810,8 +1877,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
     trace.saveSource()
 
     # remove trace view zone from monaco editor
-    tabInfo.monacoEditor.changeViewZones do (view: js):
-      view.removeZone(trace.zoneId)
+    removeMonacoViewZone(tabInfo.monacoEditor, trace.zoneId)
 
   editorUI.data.redraw()
   data.ui.activeFocus = trace
@@ -1864,8 +1930,7 @@ proc closeTrace*(self: TraceComponent) =
     return
 
   # remove editor view zone
-  self.editorUI.tabInfo.monacoEditor.changeViewZones do (view: js):
-    view.removeZone(self.zoneId)
+  removeMonacoViewZone(self.editorUI.tabInfo.monacoEditor, self.zoneId)
 
   # remove tracepoint from pointList
   if self.data.pointList.tracepoints.hasKey(self.tracepoint.tracepointId):

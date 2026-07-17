@@ -786,3 +786,38 @@
   &:hover
     background: colors-ui-surface-primary-secondary-hover
     color: TEXT_CONTENT_COLOR
+
+// File hover diff button styling
+.vcs-file-diff-btn
+  display: none
+  flex-shrink: 0
+  position: relative
+  cursor: pointer
+  width: 0.6875em
+  height: 0.8125em
+  margin: 0 0.25em
+  background-image: url("../../public/resources/shared/vc-open-diff.svg")
+  background-repeat: no-repeat
+  background-size: contain
+  background-position: center
+
+  .custom-tooltip
+    right: 0
+    left: unset
+    z-index: 200
+
+    &:after
+      left: unset
+      right: 0.25em
+
+.vcs-file-item:hover .vcs-file-diff-btn
+  display: block
+
+.vcs-accordion-file:hover .vcs-file-diff-btn
+  display: block
+
+.vcs-file-diff-btn:hover > .custom-tooltip
+  opacity: 1
+  visibility: visible
+  top: calc(100% + 0.3125em)
+  transition-delay: TOOLTIP_DELAY_TIMER

@@ -610,10 +610,40 @@ proc parseGitDiffHunks(diffOutput: string): seq[DeepReviewFileData] =
     result.add(currentFile)
 
 proc loadGitDiffForUnifiedView(self: VCSComponent) =
-  ## Run ``git diff HEAD`` and parse the output into ``self.gitDiffData``
-  ## so the DeepReview unified diff renderer can display it.
+  ## Run the appropriate git diff command based on ``self.diffTarget`` and parse
+  ## the output into ``self.gitDiffData`` so the unified diff renderer can display it.
   let cwd = self.getWorkingDirectory()
-  let raw = gitExec(@[cstring"diff", cstring"HEAD"], cwd)
+  var args: seq[cstring] = @[]
+  var sessionTitle = cstring"Working Tree Changes"
+
+  let target = if not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:"):
+    ($self.diffTarget)[5 .. ^1]
+  else:
+    ""
+
+  if target.len == 0 or target == "Working Tree":
+    args = @[cstring"diff", cstring"HEAD"]
+    sessionTitle = cstring"Working Tree Changes"
+  elif target.startsWith("file:"):
+    let filepath = target[5 .. ^1]
+    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(filepath)]
+    sessionTitle = cstring("Diff: " & filepath)
+  elif target.startsWith("commit:"):
+    let commitPart = target[7 .. ^1]
+    let colonIdx = commitPart.find(':')
+    if colonIdx >= 0:
+      let hash = commitPart[0 ..< colonIdx]
+      let filepath = commitPart[colonIdx + 1 .. ^1]
+      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id", cstring"--root", cstring(hash), cstring"--", cstring(filepath)]
+      sessionTitle = cstring("Diff: " & filepath & " (" & hash[0 ..< min(12, hash.len)] & ")")
+    else:
+      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id", cstring"--root", cstring(commitPart)]
+      sessionTitle = cstring("Commit Diff: " & commitPart[0 ..< min(12, commitPart.len)])
+  else:
+    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(target)]
+    sessionTitle = cstring("Diff: " & target)
+
+  let raw = gitExec(args, cwd)
   let files = parseGitDiffHunks($raw)
 
   self.gitDiffData = DeepReviewData(
@@ -621,7 +651,7 @@ proc loadGitDiffForUnifiedView(self: VCSComponent) =
     baseCommitSha: cstring"",
     collectionTimeMs: 0,
     recordingCount: 0,
-    sessionTitle: cstring"Working Tree Changes",
+    sessionTitle: sessionTitle,
     files: files)
 
   # Clear hunk selection when diff data is refreshed to avoid stale
@@ -877,9 +907,13 @@ proc safeStr(s: cstring): string =
 proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
-    self.refreshVCSData()
-    if self.isGitRepo:
-      self.startFileWatching()
+    if not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:"):
+      self.unifiedDiffActive = true
+      self.loadGitDiffForUnifiedView()
+    else:
+      self.refreshVCSData()
+      if self.isGitRepo:
+        self.startFileWatching()
 
 proc currentReviewTitle(self: VCSComponent): string =
   let drData = self.data.deepReviewData
@@ -1118,15 +1152,19 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
       onSelectFile: proc(index: int; path: string) =
         component.handleVCSFileSelection(index, path),
       onToggleUnifiedDiff: proc() =
-        component.unifiedDiffActive = not component.unifiedDiffActive
-        if component.unifiedDiffActive:
-          component.loadGitDiffForUnifiedView()
-        component.syncLegacyVCSIntoVM(),
+        discard,
       onRefresh: proc() =
-        component.refreshVCSData()
-        if component.unifiedDiffActive:
+        if not component.diffTarget.isNil and ($component.diffTarget).startsWith("diff:"):
           component.loadGitDiffForUnifiedView()
+        else:
+          component.refreshVCSData()
+          if component.unifiedDiffActive:
+            component.loadGitDiffForUnifiedView()
         component.syncLegacyVCSIntoVM(),
+      onOpenFileDiff: proc(target: string) =
+        let newId = component.data.generateId(Content.VCS)
+        let tabPath = "diff:" & target
+        component.data.openLayoutTab(Content.VCS, newId, isEditor = true, path = cstring(tabPath)),
       onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
         component.handleHunkSelection(fileIdx, hunkIdx, shiftKey, ctrlKey),
       onCopySelectedHunks: proc() =

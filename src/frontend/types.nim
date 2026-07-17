@@ -769,6 +769,7 @@ type
     deletions*: int
 
   VCSComponent* = ref object of Component
+    diffTarget*: cstring
     currentBranch*: cstring
     branches*: seq[cstring]
     commits*: seq[VCSCommit]

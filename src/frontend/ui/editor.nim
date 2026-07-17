@@ -1051,7 +1051,12 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
   var line = cast[int](ev.target.position.lineNumber)
   let path = tabInfo.name
 
-  if ev.target.detail.isNil or ev.target.detail.afterLineNumber.isNil:
+  var isDetailNil = ev.target.detail.isNil or ev.target.detail.isUndefined
+  var isAfterLineNil = true
+  if not isDetailNil:
+    isAfterLineNil = ev.target.detail.afterLineNumber.isNil
+
+  if isDetailNil or isAfterLineNil:
     # Source Line Jump Menu Item
     let sourceLine = ContextMenuItem(
       name: "Jump to line",

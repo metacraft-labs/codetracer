@@ -85,12 +85,12 @@ suite "State component value history toggle":
       let historyResults = @[
         HistoryResult(
           location: types.Location(rrTicks: 100),
-          value: types.Value(text: "10"),
+          value: toLiteral("10"),
           time: 100,
         ),
         HistoryResult(
           location: types.Location(rrTicks: 110),
-          value: types.Value(text: "42"),
+          value: toLiteral("42"),
           time: 110,
         )
       ]
@@ -107,8 +107,35 @@ suite "State component value history toggle":
       check "110" in historyRows[1].textContent
       check "42" in historyRows[1].textContent
 
-      # 4. Click toggle again to hide
-      button.fireEvent("click")
+      # 3.5. Verify context menu contains "Toggle value history"
+      var row: MockNode
+      proc findRow(node: MockNode) =
+        if row != nil:
+          return
+        if node.kind == mnkElement and
+            node.attributes.getOrDefault("data-variable-name", "") == "x":
+          row = node
+          return
+        for child in node.children:
+          findRow(child)
+      findRow(panel2)
+      check row != nil
+      check "contextmenu" in row.eventListeners or "contextmenu" in row.eventHandlers
+
+      row.fireEvent("contextmenu")
+      let menu = vm.lastContextMenu.val
+      check menu.len >= 1
+      var toggleHistoryEntry: OriginContextMenuEntry
+      var foundToggle = false
+      for entry in menu:
+        if entry.label == "Toggle value history":
+          toggleHistoryEntry = entry
+          foundToggle = true
+      check foundToggle
+      check not toggleHistoryEntry.action.isNil
+
+      # Triggering context menu action toggles history off
+      toggleHistoryEntry.action()
       check "x" notin vm.expandedHistories.val
 
       let panel3 = renderStatePanel(r, vm)

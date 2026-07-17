@@ -74,6 +74,7 @@ type
     onCopySelectedHunks*: proc()
     onStageSelectedHunks*: proc()
     onClearSelectedHunks*: proc()
+    onOpenFileDiff*: proc(target: string)
 
 # ---------------------------------------------------------------------------
 # CSS class helpers
@@ -226,6 +227,10 @@ proc invokeRefresh(callbacks: VCSCallbacks) =
   if callbacks.onRefresh != nil:
     callbacks.onRefresh()
 
+proc invokeOpenFileDiff(callbacks: VCSCallbacks; target: string) =
+  if callbacks.onOpenFileDiff != nil:
+    callbacks.onOpenFileDiff(target)
+
 proc invokeSelectHunk(callbacks: VCSCallbacks; fileIdx, hunkIdx: int;
                       shiftKey, ctrlKey: bool) =
   if callbacks.onSelectHunk != nil:
@@ -290,6 +295,18 @@ when defined(js):
     isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
       proc(ev: isonim_dom.Event) =
         callbacks.invokeSelectHunk(fileIdx, hunkIdx, ev.shiftKey(), ev.ctrlOrMetaKey())
+        ev.preventDefault())
+
+proc attachFileDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
+  r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
+
+when defined(js):
+  proc attachFileDiffClick(r: WebRenderer; btn: isonim_dom.Element; callbacks: VCSCallbacks; target: string) =
+    let t = target
+    isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
+      proc(ev: isonim_dom.Event) =
+        callbacks.invokeOpenFileDiff(t)
+        ev.stopPropagation()
         ev.preventDefault())
 
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
@@ -633,6 +650,7 @@ proc renderLaneSpacer[R](r: R; cells: seq[VCSGraphCell]): auto =
 
 proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
                                index: int; file: VCSFileRow;
+                               commitHash: string;
                                continuationCells: seq[VCSGraphCell]): auto =
   ## One file row inside an expanded accordion entry.
   ## Layout: [lane-spacer] [status] [filename] [+N -N].
@@ -648,6 +666,7 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
 
   r.appendRenderedChild(rowNode, renderLaneSpacer(r, continuationCells))
 
+  var diffBtn: typeof(r.createElement("span"))
   let content = ui(r):
     tdiv(class = "vcs-accordion-file-body"):
       span(class = accordionFileStatusClass(file.status)):
@@ -660,7 +679,11 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
       if file.deletions > 0:
         span(class = "vcs-accordion-file-dels"):
           text "-" & $file.deletions
+      span(ref = diffBtn, class = "vcs-file-diff-btn"):
+        tdiv(class = "custom-tooltip"):
+          text "View Diff"
   r.appendRenderedChild(rowNode, content)
+  r.attachFileDiffClick(diffBtn, callbacks, "commit:" & commitHash & ":" & rowPath)
 
   row
 
@@ -707,7 +730,7 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
       span(class = "vcs-commit-time-col"):
         text abbreviateRelTime(commit.relativeTime)
       span(class = "vcs-commit-diff-btn",
-           onclick = proc() = vm.invokeToggleUnifiedDiff(callbacks)):
+           onclick = proc() = callbacks.invokeOpenFileDiff("commit:" & commit.hash)):
         tdiv(class = "custom-tooltip"):
           text "Open unified diff"
   r.appendRenderedChild(headerNode, body)
@@ -749,7 +772,7 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
         tdiv(ref = filesNode, class = "vcs-accordion-files")
       for j, file in commitFiles:
         r.appendRenderedChild(filesNode,
-          renderAccordionFileRow(r, callbacks, j, file, continuationCells))
+          renderAccordionFileRow(r, callbacks, j, file, commit.hash, continuationCells))
       r.appendRenderedChild(entryNode, filesContainer)
 
   entry
@@ -821,7 +844,8 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   ## proc parameters — a guaranteed-fresh binding per call.
   let rowIndex = index
   let rowPath = file.path
-  ui(r):
+  var diffBtn: typeof(r.createElement("span"))
+  let row = ui(r):
     tdiv(class = fileRowClass(file.selected),
          onclick = proc() =
            callbacks.invokeSelectFile(rowIndex, rowPath)):
@@ -840,6 +864,11 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
       if file.coverageText.len > 0:
         span(class = "vcs-file-coverage"):
           text file.coverageText
+      span(ref = diffBtn, class = "vcs-file-diff-btn"):
+        tdiv(class = "custom-tooltip"):
+          text "View Diff"
+  r.attachFileDiffClick(diffBtn, callbacks, "file:" & rowPath)
+  row
 
 proc renderChangedFiles[R](r: R; vm: VCSVM;
                            callbacks: VCSCallbacks): auto =

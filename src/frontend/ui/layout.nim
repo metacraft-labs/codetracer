@@ -727,7 +727,37 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # container.tab.contentItem reference to golden layout item
         lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-      tab.setTitle(cstring(convertTabTitle($state.content)))
+      if state.content == Content.VCS:
+        let component = data.ui.componentMapping[state.content][state.id]
+        if not component.isNil:
+          let vcsComp = VCSComponent(component)
+          if not vcsComp.diffTarget.isNil and ($vcsComp.diffTarget).startsWith("diff:"):
+            let target = ($vcsComp.diffTarget)[5 .. ^1]
+            if target == "Working Tree":
+              tab.setTitle("Diff: Working Tree")
+            elif target.startsWith("file:"):
+              let filepath = target[5 .. ^1]
+              let slashIdx = filepath.rfind('/')
+              let baseName = if slashIdx >= 0: filepath[slashIdx + 1 .. ^1] else: filepath
+              tab.setTitle(cstring("Diff: " & baseName))
+            elif target.startsWith("commit:"):
+              let commitPart = target[7 .. ^1]
+              let colonIdx = commitPart.find(':')
+              if colonIdx >= 0:
+                let filepath = commitPart[colonIdx + 1 .. ^1]
+                let slashIdx = filepath.rfind('/')
+                let baseName = if slashIdx >= 0: filepath[slashIdx + 1 .. ^1] else: filepath
+                tab.setTitle(cstring("Diff: " & baseName & " (" & commitPart[0 ..< min(6, colonIdx)] & ")"))
+              else:
+                tab.setTitle(cstring("Diff: " & commitPart[0 ..< min(6, commitPart.len)]))
+            else:
+              tab.setTitle(cstring("Diff: " & target))
+          else:
+            tab.setTitle(cstring(convertTabTitle($state.content)))
+        else:
+          tab.setTitle(cstring(convertTabTitle($state.content)))
+      else:
+        tab.setTitle(cstring(convertTabTitle($state.content)))
 
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))

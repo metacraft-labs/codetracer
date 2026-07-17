@@ -59,30 +59,30 @@ proc text(value: Value, depth: int): string = #{.exportc: "textValue".}=
   of Bool:
     $value.b
   of String:
-    "\"$1\"" % $value.text
+    "\"" & $value.text & "\""
   of Char:
-    "'$1'" % $value.c
+    "'" & $value.c & "'"
   of CString:
-    "\"$1\"" % $value.cText
+    "\"" & $value.cText & "\""
   of Ref:
-    "Ref:\n$1" % text(value.refValue, depth + 1)
+    "Ref:\n" & text(value.refValue, depth + 1)
   of Enum, Enum16, Enum32:
-    "Enum($1)" % $value.enumInt
+    "Enum(" & $value.enumInt & ")"
     # TODO
     #"Enum($1 $2)" % [$value.enumInt, $value.typ.enumNames[value.enumInt]]
   of TypeKind.TableKind:
-    var items = value.items.mapIt("$1: $2" % [text(it[0], 0), text(it[1], 0)])
-    "Table($1):\n$2" % [$value.typ.langType, items.join("\n")]
+    var items = value.items.mapIt(text(it[0], 0) & ": " & text(it[1], 0))
+    "Table(" & $value.typ.langType & "):\n" & items.join("\n")
   of Union:
-    "Union($1)" % $value.typ.langType
+    "Union(" & $value.typ.langType & ")"
   of Pointer:
     let address = formatPointerAddress(value.address)
-    var res = "Pointer($1)" % address
+    var res = "Pointer(" & address & ")"
     if not value.refValue.isNil:
-      res.add(":\n$1" % text(value.refValue, depth + 1))
+      res.add(":\n" & text(value.refValue, depth + 1))
     res
   of Raw:
-    "Raw($1)" % $value.r
+    "Raw(" & $value.r & ")"
   of Variant:
     let fieldsText = if value.elements.len == 0: "" else: value.elements.mapIt(text(it, 0)).join(",")
     "$1::$2($3)" % [$value.typ.langType, $value.activeVariant, fieldsText]
@@ -128,7 +128,7 @@ proc toLangType*(typ: Type, lang: Lang): string =
       of Instance:
         $typ.langType
       of Ref:
-        "ref $1" % toLangType(typ.elementType, lang)
+        "ref " & toLangType(typ.elementType, lang)
       of TableKind:
         $typ.langType
       of Variant:
@@ -269,15 +269,15 @@ func textReprDefault(value: Value, depth: int = 10): string =
   of Int:
     $value.i
   of String:
-    "\"$1\"" % $value.text
+    "\"" & $value.text & "\""
   of Bool:
     $value.b
   of Float:
     $value.f
   of Char:
-    "'$1'" % $value.c
+    "'" & $value.c & "'"
   of CString:
-    "\"$1\"" % $value.cText
+    "\"" & $value.cText & "\""
   of Enum:
     if value.enumInt < value.typ.enumNames.len:
       $value.typ.enumNames[value.enumInt]
@@ -388,7 +388,7 @@ func textReprRust(value: Value, depth: int = 10, compact: bool = false): string 
     else:
       fmt"{value.i}{value.typ.cType}"
   of String:
-    "\"$1\"" % $value.text
+    "\"" & $value.text & "\""
   of Float:
     if compact:
       fmt"{value.f}"

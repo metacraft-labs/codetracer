@@ -3306,10 +3306,21 @@ impl Handler {
         lines.sort();
         let mut closest_line: Option<usize> = None;
 
-        for &line in lines.iter() {
-            if line >= &loc.line {
+        // Search for the closest preceding line first.
+        for &line in lines.iter().rev() {
+            if line <= &loc.line {
                 closest_line = Some(*line);
                 break;
+            }
+        }
+
+        // If no preceding line has a step, fall back to the closest succeeding line.
+        if closest_line.is_none() {
+            for &line in lines.iter() {
+                if line >= &loc.line {
+                    closest_line = Some(*line);
+                    break;
+                }
             }
         }
 
@@ -4191,6 +4202,8 @@ impl Handler {
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        info!("trace_jump: received request with event direct_location_rr_ticks = {}", event.direct_location_rr_ticks);
+        eprintln!("[RUST_DIAG] trace_jump: event.direct_location_rr_ticks = {}", event.direct_location_rr_ticks);
         self.replay.tracepoint_jump(&event)?;
         // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         _ = self.replay.load_location(&mut self.expr_loader)?;
@@ -6075,6 +6088,21 @@ mod tests {
             sender.clone(),
         )?;
         assert_eq!(handler.step_id, StepId(1));
+
+        // Test fallback: line 5 has no step, should fall back to closest preceding (line 3 -> StepId(2))
+        handler.source_line_jump(
+            dap::Request::default(),
+            SourceLocation {
+                path: path.to_string(),
+                line: 5,
+                column: None,
+                condition: None,
+                log_message: None,
+            },
+            sender.clone(),
+        )?;
+        assert_eq!(handler.step_id, StepId(2));
+
         handler.source_call_jump(
             dap::Request::default(),
             SourceCallJumpTarget {

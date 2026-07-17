@@ -276,8 +276,15 @@ proc buildVariableRowContextMenu*(vm: StateVM;
   ## debugger location so the menu can outlive a subsequent ``indexEach``
   ## row reuse without the click resolving to the wrong variable.
   let name = item.name
+  let path = item.path
   let loc = rowLocation(vm)
   let stateVM = vm
+  result.add OriginContextMenuEntry(
+    label: "Toggle value history",
+    hint: "",
+    action: proc() =
+      stateVM.toggleHistory(path),
+  )
   result.add OriginContextMenuEntry(
     label: "Show value origin",
     hint: "Ctrl+Shift+O",
