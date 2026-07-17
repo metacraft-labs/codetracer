@@ -27,13 +27,13 @@ function Ensure-Fpc {
   }
 
   New-Item -ItemType Directory -Force -Path $fpcVersionRoot | Out-Null
-  
+
   $asset = "fpc-$version.win32.and.win64.exe"
   $downloadUrl = "https://downloads.sourceforge.net/project/freepascal/Win32/$version/$asset"
-  
+
   $tempInstaller = Join-Path $env:TEMP $asset
   Write-Host "Downloading FPC $version..."
-  
+
   # Using curl.exe to bypass Cloudflare bot challenge on SourceForge
   curl.exe -L -o $tempInstaller $downloadUrl
   if ($LASTEXITCODE -ne 0) {

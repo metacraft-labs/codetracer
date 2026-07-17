@@ -2299,14 +2299,17 @@ impl ReplaySession for MaterializedReplaySession {
         let current_step = self.reader.step(self.step_id).ok_or("step not found")?;
         let current_call_key = current_step.call_key;
 
-        let is_js = if let Some(call) = self.reader.call(current_call_key) {
+        let current_call = self.reader.call(current_call_key);
+        let is_js = if let Some(call) = current_call {
             self.is_javascript_frame(call.function_id)
         } else {
             false
         };
 
         let (full_value_locals, value_tracking_locals) = if is_js {
-            let call = self.reader.call(current_call_key).expect("call must exist");
+            let Some(call) = current_call else {
+                return Ok(vec![]);
+            };
             let mut active_vars: HashMap<VariableId, FullValueRecord> = HashMap::new();
             for arg in &call.args {
                 active_vars.insert(arg.variable_id, arg.clone());
@@ -2316,29 +2319,32 @@ impl ReplaySession for MaterializedReplaySession {
             let end_step_val = self.step_id.0;
             for s_val in start_step_val..=end_step_val {
                 let s_id = StepId(s_val);
-                if let Some(step) = self.reader.step(s_id) {
-                    if step.call_key == current_call_key {
-                        if let Some(variables) = self.reader.variables_at_owned(s_id) {
-                            for v in variables {
-                                active_vars.insert(v.variable_id, v);
-                            }
+                if let Some(step) = self.reader.step(s_id)
+                    && step.call_key == current_call_key
+                {
+                    if let Some(variables) = self.reader.variables_at_owned(s_id) {
+                        for v in variables {
+                            active_vars.insert(v.variable_id, v);
                         }
-                        if let Some(variable_cells) = self.reader.variable_cells_at(s_id) {
-                            for (var_id, place) in variable_cells {
-                                let value = self.reader.load_value_for_place(*place, s_id);
-                                active_vars.insert(*var_id, FullValueRecord {
+                    }
+                    if let Some(variable_cells) = self.reader.variable_cells_at(s_id) {
+                        for (var_id, place) in variable_cells {
+                            let value = self.reader.load_value_for_place(*place, s_id);
+                            active_vars.insert(
+                                *var_id,
+                                FullValueRecord {
                                     variable_id: *var_id,
                                     value,
-                                });
-                            }
+                                },
+                            );
                         }
                     }
                 }
             }
 
             let f_locals: Vec<VariableWithRecord> = active_vars
-                .into_iter()
-                .map(|(_, v)| VariableWithRecord {
+                .into_values()
+                .map(|v| VariableWithRecord {
                     expression: self
                         .reader
                         .variable_name(v.variable_id)

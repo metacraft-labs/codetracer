@@ -588,7 +588,12 @@ impl ExprLoader {
                 Lang::Nim
             } else if extension == "go" {
                 Lang::Go
-            } else if extension == "js" || extension == "mjs" || extension == "cjs" || extension == "ts" || extension == "tsx" {
+            } else if extension == "js"
+                || extension == "mjs"
+                || extension == "cjs"
+                || extension == "ts"
+                || extension == "tsx"
+            {
                 Lang::Javascript
             } else if extension == "sh" || extension == "bash" {
                 Lang::Bash

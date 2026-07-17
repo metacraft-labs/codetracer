@@ -6153,7 +6153,6 @@ mod tests {
 
     #[test]
     fn test_js_load_locals_function_scope() -> Result<(), Box<dyn Error>> {
-
         let mut tracer = NonStreamingTraceWriter::new("example.js", &[]);
         let path = &PathBuf::from("/test/workdir/example.js");
         tracer.start(path, Line(1));
@@ -6182,11 +6181,15 @@ mod tests {
         trace_processor.postprocess(&tracer.events).unwrap();
 
         let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
-        
+
         // Seek to step 1 (where y is not yet assigned)
         handler.step_in(true)?;
         let (tx, rx) = std::sync::mpsc::channel();
-        handler.load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), tx.clone())?;
+        handler.load_locals(
+            dap::Request::default(),
+            task::CtLoadLocalsArguments::default(),
+            tx.clone(),
+        )?;
         if let Ok(DapMessage::Response(resp)) = rx.recv() {
             let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
             let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
