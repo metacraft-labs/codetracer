@@ -162,6 +162,15 @@
       flake = false;
     };
 
+    # codetracer_trace_writer_nim imports both `results` and `stew/*` while
+    # building the locked Python recorder. The main source input does not
+    # include Git submodules, so pin the exact nim-stew revision recorded by
+    # this repository's libs/nim-stew gitlink for sandboxed recorder builds.
+    nim-stew = {
+      url = "github:status-im/nim-stew/9c3596d9de809a5933fd777cec1183c2cdf521ec";
+      flake = false;
+    };
+
     # Non-flake inputs: ct_test's incremental runner imports the
     # io-mon capture model and stackable-hooks propagation helpers at
     # compile time.  Workspace dev shells resolve these as sibling repos;

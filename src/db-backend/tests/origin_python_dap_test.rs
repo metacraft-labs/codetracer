@@ -13,8 +13,9 @@
 //!    expression, per-hop confidence, frame-transition presence where
 //!    applicable, operand-snapshot presence/names).
 //!
-//! Tests SKIP cleanly when the recorder isn't available; SKIPPED is the
-//! only acceptable failure-to-run mode per the milestones spec.
+//! Developer runs SKIP cleanly when the recorder isn't available. The macOS
+//! per-PR gate sets `CT_ORIGIN_DAP_REQUIRED=1`, which converts every such
+//! prerequisite or query skip into a test failure.
 //!
 //! The shared per-DAP helper lives in `tests/common/origin_dap.rs`.
 
@@ -23,25 +24,36 @@ mod test_harness;
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use db_backend::task::{FrameTransitionKind, OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_has_frame_transition, assert_hop_count, assert_hop_kinds,
     assert_min_confidence, assert_operand_names_include, assert_terminator_kind, fixture_source,
     load_fixture_and_query_or_skip,
 };
+use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
 
 /// Skip reason emitted when the Python recorder / interpreter is
 /// unavailable. Mirrored from `python_flow_dap_test.rs`.
 fn require_python_recorder() -> Option<String> {
     if test_harness::find_python_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Python recorder not found (install codetracer-python-recorder or set CODETRACER_PYTHON_RECORDER_PATH)"
+        return unavailable(
+            required_mode(),
+            "Python recorder prerequisite",
+            "Rust-backed codetracer_python_recorder module not found (install codetracer-python-recorder or set CODETRACER_PYTHON_RECORDER_PATH)",
         );
-        return None;
     }
-    let (_python_cmd, version) = test_harness::find_suitable_python()?;
-    Some(version)
+    match test_harness::find_suitable_python() {
+        Some((_python_cmd, version)) => Some(version),
+        None => unavailable(
+            required_mode(),
+            "Python interpreter prerequisite",
+            "CODETRACER_PYTHON_CMD did not resolve to Python 3.10 or newer",
+        ),
+    }
 }
 
 /// Helper: build a `OriginQueryConfig` for a Python fixture with the
@@ -63,10 +75,7 @@ fn python_config(scenario: &str, version: &str, line: u32, variable: &str) -> Or
 fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
     match load_fixture_and_query_or_skip(config) {
         QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: python/{}: {}", scenario, reason);
-            None
-        }
+        QueryOutcome::Skipped(reason) => unavailable(required_mode(), &format!("python/{scenario}"), &reason),
     }
 }
 

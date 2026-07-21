@@ -221,15 +221,15 @@ jobs:
               "Falling back to pinned download"
             )
 
-  # M13: Windows TTD origin-DAP per-PR subset (python + rust + MCP/CLI smoke).
-  # Per the M13 scope-control text, TTD test runs are 5–10x slower than RR on
-  # equivalent hardware, so per-PR full-matrix is not practical. Full matrix
-  # runs nightly via origin-dap-windows-nightly below.
+  # M13: Windows materialized origin-DAP verification. The per-PR job runs the
+  # seven substantive Python scenarios against the locked Rust-backed Python
+  # recorder. Rust TTD and MCP/CLI coverage remain follow-up work and are not
+  # exercised or claimed by this job.
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org §M13.
   origin-dap-windows:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
-    name: origin-DAP (per-PR subset, Windows)
+    name: origin-DAP (materialized Python, Windows)
     steps:
       - name: Generate CI token
         id: app-token
@@ -257,6 +257,47 @@ jobs:
         shell: pwsh
         run: choco install capnproto -y
 
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read locked Python recorder revision
+        id: python-recorder-lock
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw flake.lock | ConvertFrom-Json
+          $revision = $lock.nodes.'codetracer-python-recorder'.locked.rev
+          if ($revision -notmatch '^[0-9a-f]{40}$') {
+            throw "flake.lock does not contain a valid codetracer-python-recorder revision"
+          }
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout locked Python recorder adjacent to CodeTracer
+        shell: pwsh
+        env:
+          RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
+          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
+          $credentials = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:SIBLING_TOKEN")
+          )
+          if (Test-Path $destination) {
+            Remove-Item -Recurse -Force $destination
+          }
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          git -C $destination init
+          git -C $destination remote add origin `
+            https://github.com/metacraft-labs/codetracer-python-recorder.git
+          git -C $destination `
+            -c "http.extraHeader=AUTHORIZATION: basic $credentials" `
+            fetch --depth=1 origin $env:RECORDER_REVISION
+          git -C $destination checkout --detach FETCH_HEAD
+          if ((git -C $destination rev-parse HEAD).Trim() -ne $env:RECORDER_REVISION) {
+            throw "the adjacent Python recorder checkout does not match flake.lock"
+          }
+
       - name: Install Nim toolchain
         shell: pwsh
         run: |
@@ -264,6 +305,31 @@ jobs:
           $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
           if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+
+      - name: Install and verify locked Rust-backed Python recorder
+        shell: pwsh
+        run: |
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $recorder = Join-Path $env:GITHUB_WORKSPACE `
+            "..\codetracer-python-recorder\codetracer-python-recorder"
+          $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $nimPathConfig = @(
+            "--path:`"$stewRoot/stew`""
+            "--path:`"$stewRoot`""
+          )
+          foreach ($nimConfigDir in @(
+            (Join-Path $env:APPDATA "nim"),
+            (Join-Path $env:USERPROFILE ".config\nim")
+          )) {
+            New-Item -ItemType Directory -Force -Path $nimConfigDir | Out-Null
+            $nimPathConfig | Add-Content -Path (Join-Path $nimConfigDir "nim.cfg")
+          }
+          $env:CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1"
+          & $python -m pip install --disable-pip-version-check $recorder
+          if ($LASTEXITCODE -ne 0) { throw "failed to install the locked Python recorder" }
+          & $python -c "import codetracer_python_recorder"
+          if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
+          "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
       - name: Prefer Git Bash over WSL bash stub
         shell: pwsh
@@ -289,19 +355,24 @@ jobs:
           choco install just -y
           just --version
 
-      - name: Run origin-DAP per-PR subset (python + rust)
+      - name: Run required materialized Python origin-DAP gate
         shell: bash
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CT_TEST_LANGS: python,rust
+          CT_ORIGIN_DAP_REQUIRED: "1"
+          CT_TEST_LANGS: python
         run: just test-origin-dap
 
-  # M13: Windows nightly full matrix — runs every supported language.
-  # Gated on schedule / workflow_dispatch events because TTD runs are slow.
+  # M13: Definition of the eventual Windows nightly routed matrix. In this
+  # target, `all` means only Python, Ruby and JavaScript, matching
+  # test-origin-dap's strict router. It does not include or claim Rust TTD,
+  # other languages, or MCP/CLI. This workflow currently has only push and PR
+  # triggers, so the guarded job remains inactive until a scheduled or manual
+  # trigger is added deliberately.
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
-    name: origin-DAP (nightly full matrix, Windows)
+    name: origin-DAP (nightly routed materialized matrix, Windows)
     steps:
       - name: Generate CI token
         id: app-token
@@ -329,6 +400,47 @@ jobs:
         shell: pwsh
         run: choco install capnproto -y
 
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read locked Python recorder revision
+        id: python-recorder-lock
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw flake.lock | ConvertFrom-Json
+          $revision = $lock.nodes.'codetracer-python-recorder'.locked.rev
+          if ($revision -notmatch '^[0-9a-f]{40}$') {
+            throw "flake.lock does not contain a valid codetracer-python-recorder revision"
+          }
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout locked Python recorder adjacent to CodeTracer
+        shell: pwsh
+        env:
+          RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
+          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
+          $credentials = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:SIBLING_TOKEN")
+          )
+          if (Test-Path $destination) {
+            Remove-Item -Recurse -Force $destination
+          }
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          git -C $destination init
+          git -C $destination remote add origin `
+            https://github.com/metacraft-labs/codetracer-python-recorder.git
+          git -C $destination `
+            -c "http.extraHeader=AUTHORIZATION: basic $credentials" `
+            fetch --depth=1 origin $env:RECORDER_REVISION
+          git -C $destination checkout --detach FETCH_HEAD
+          if ((git -C $destination rev-parse HEAD).Trim() -ne $env:RECORDER_REVISION) {
+            throw "the adjacent Python recorder checkout does not match flake.lock"
+          }
+
       - name: Install Nim toolchain
         shell: pwsh
         run: |
@@ -336,6 +448,31 @@ jobs:
           $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
           if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+
+      - name: Install and verify locked Rust-backed Python recorder
+        shell: pwsh
+        run: |
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $recorder = Join-Path $env:GITHUB_WORKSPACE `
+            "..\codetracer-python-recorder\codetracer-python-recorder"
+          $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $nimPathConfig = @(
+            "--path:`"$stewRoot/stew`""
+            "--path:`"$stewRoot`""
+          )
+          foreach ($nimConfigDir in @(
+            (Join-Path $env:APPDATA "nim"),
+            (Join-Path $env:USERPROFILE ".config\nim")
+          )) {
+            New-Item -ItemType Directory -Force -Path $nimConfigDir | Out-Null
+            $nimPathConfig | Add-Content -Path (Join-Path $nimConfigDir "nim.cfg")
+          }
+          $env:CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1"
+          & $python -m pip install --disable-pip-version-check $recorder
+          if ($LASTEXITCODE -ne 0) { throw "failed to install the locked Python recorder" }
+          & $python -c "import codetracer_python_recorder"
+          if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
+          "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
       - name: Prefer Git Bash over WSL bash stub
         shell: pwsh
@@ -361,7 +498,7 @@ jobs:
           choco install just -y
           just --version
 
-      - name: Run origin-DAP full matrix (all languages)
+      - name: Run routed materialized origin-DAP matrix
         shell: bash
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
@@ -886,14 +1023,15 @@ jobs:
         run: nix develop . --command just test-reprobuild-linux-smoke
 
   # M12: macOS verification pass for Value Origin Tracking.
-  # Per-PR subset: Python materialized + Rust RR + MCP/CLI smoke. The full
-  # per-language matrix (Ruby, JS, C, C++, Nim, Go, smart-contract languages)
-  # runs nightly via origin-dap-macos-nightly below.
+  # The per-PR gate runs the seven materialized Python origin-DAP scenarios.
+  # Ruby and JavaScript join Python in the routed nightly job below; other
+  # language families remain follow-up work and are not claimed by these jobs.
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org
   # §M12. The CT_TEST_LANGS env var is read by the just test-origin-dap
   # target as a comma-separated allowlist (default 'all').
   origin-dap-macos:
+    name: origin-DAP (materialized Python, macOS)
     runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -935,15 +1073,18 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
-      - name: Run origin-DAP per-PR subset (python + rust)
+      - name: Run required materialized Python origin-DAP gate
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CT_TEST_LANGS: python,rust
+          CT_ORIGIN_DAP_REQUIRED: "1"
+          CT_TEST_LANGS: python
         run: nix develop . --command just test-origin-dap
 
-  # M12: macOS nightly full matrix — runs every supported language. Scheduled
-  # via the cron job at the top of this workflow (or manually via workflow_dispatch).
+  # M12: Definition of the eventual macOS nightly routed matrix — currently
+  # Python, Ruby and JavaScript. This workflow has only push and PR triggers,
+  # so the guarded job remains inactive until a scheduled or manual trigger
+  # is added deliberately.
   origin-dap-macos-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
@@ -987,7 +1128,7 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
-      - name: Run origin-DAP full matrix (all languages)
+      - name: Run routed materialized origin-DAP matrix
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
