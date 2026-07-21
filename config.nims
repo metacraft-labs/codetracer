@@ -39,6 +39,10 @@ addPathIfDir(repoRoot / "libs/zip")
 addPathIfDir(repoRoot / "libs/jsony/src")
 addPathIfDir(repoRoot / "libs/nim-uuid4/src")
 addPathIfDir(workspaceRoot / "isonim/src")
+# Nim resolves later --path entries first. Prefer an explicit IsoNim source
+# when validating a pinned dependency or an isolated worktree; normal
+# workspace development still falls back to the sibling checkout above.
+addPathIfDir(getEnv("ISONIM_SRC"))
 addPathIfDir(workspaceRoot / "isonim-tui/src")
 addPathIfDir(workspaceRoot / "isonim-gpui/src")
 addPathIfDir(workspaceRoot / "nim-termctl/src")
