@@ -11,7 +11,9 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_isonim_views.nim
 
-import std/[unittest, strutils, tables, options, sets, json]
+import std/[unittest, strutils, tables, options, sets, json, os]
+when not defined(js):
+  import std/algorithm
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/testing/mock_dom
@@ -1185,6 +1187,56 @@ suite "IsoNim State Panel — variables":
       check "field2" in rows2[2].textContent
 
       dispose()
+
+  test "origin badge public resources contain the complete icon set":
+    # The badge stylesheet and public-resource Tupfile both resolve these
+    # names from this directory. Keeping this assertion beside the badge DOM
+    # test makes a misplaced or partially added icon fail the regular native
+    # and JavaScript ViewModel lanes before the frontend build reaches Tup.
+    const repoRoot = currentSourcePath()
+      .parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
+    const iconDir = repoRoot & "/src/public/resources/origin-icons/"
+    const expectedIconFiles = [
+      "clock-rewind.svg",
+      "door.svg",
+      "globe.svg",
+      "hourglass.svg",
+      "pin.svg",
+      "question.svg",
+      "quotation.svg",
+      "sigma.svg",
+    ]
+    const iconContents = [
+      staticRead(iconDir & expectedIconFiles[0]),
+      staticRead(iconDir & expectedIconFiles[1]),
+      staticRead(iconDir & expectedIconFiles[2]),
+      staticRead(iconDir & expectedIconFiles[3]),
+      staticRead(iconDir & expectedIconFiles[4]),
+      staticRead(iconDir & expectedIconFiles[5]),
+      staticRead(iconDir & expectedIconFiles[6]),
+      staticRead(iconDir & expectedIconFiles[7]),
+    ]
+    const resourceTupfile =
+      staticRead(repoRoot & "/src/public/resources/Tupfile")
+    const expectedTupRule =
+      ": foreach origin-icons/*.svg |> !tup_preserve |> %f"
+
+    for iconContent in iconContents:
+      check iconContent.len > 0
+
+    var originIconRules: seq[string] = @[]
+    for line in resourceTupfile.splitLines:
+      if "origin-icons" in line:
+        originIconRules.add(line)
+    check originIconRules == @[expectedTupRule]
+
+    when not defined(js):
+      var actualIconFiles: seq[string] = @[]
+      for kind, path in walkDir(iconDir):
+        if kind == pcFile and path.endsWith(".svg"):
+          actualIconFiles.add(path.extractFilename)
+      actualIconFiles.sort()
+      check actualIconFiles == @expectedIconFiles
 
   test "test_origin_badge_interaction":
     createRoot proc(dispose: proc()) =

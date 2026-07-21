@@ -688,7 +688,7 @@ proc badgeTextForSummary*(summary: OriginSummary;
 
 proc iconClassForTerminator*(k: TerminatorKindWire): string =
   ## Return the SVG icon class corresponding to the terminator. The
-  ## seven 14×14 SVGs ship under `src/frontend/assets/origin-icons/`
+  ## terminator SVGs ship under `src/public/resources/origin-icons/`
   ## (created by M4); CSS in the IsoNim view applies the matching
   ## class as a background-image url so the badge can be rendered with
   ## zero JS-side `<svg>` markup.
