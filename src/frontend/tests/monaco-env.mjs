@@ -6,7 +6,7 @@
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { JSDOM } = require('../../../node-packages/node_modules/jsdom');
+const { JSDOM } = require('../../../node_modules/jsdom');
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
   url: 'http://localhost',

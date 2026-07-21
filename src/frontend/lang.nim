@@ -107,7 +107,7 @@ let SUPPORTED_LANGS* = @[
   LangRubyDb, LangNoir, LangRustWasm, LangCppWasm,
   LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
   LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
-  LangSolana, LangElixir, LangErlang
+  LangSolana, LangElixir, LangErlang, LangPhp
 ]
 
 let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [

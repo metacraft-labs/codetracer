@@ -538,6 +538,12 @@ test-rust:
   popd
   pushd src/backend-manager
   cargo nextest run --release
+  cargo nextest run --release --run-ignored ignored-only || \
+    if [ "$?" = "4" ]; then \
+      echo "  (no ignored tests in backend-manager; treating as no-op)"; \
+    else \
+      exit "$?"; \
+    fi
   popd
 
 # Run all non-GUI tests.
@@ -955,6 +961,13 @@ ls-trace-folder-for-id trace_id:
 test-frontend-js:
   #!/usr/bin/env bash
   set -e
+  frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test"' EXIT
+  echo "Running frontend language mapping tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
+  node "$frontend_lang_test"
+  echo ""
   echo "Running Nim language definition tests..."
   node src/frontend/tests/nimLanguage.test.mjs
   echo ""

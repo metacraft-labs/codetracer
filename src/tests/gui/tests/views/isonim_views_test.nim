@@ -8695,21 +8695,25 @@ suite "IsoNim Filesystem Panel — tree rendering":
 
       dispose()
 
-  test "empty-overlay hides once a tree is loaded":
+  test "empty-overlay follows the idle empty state":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
-      vm.loadingState.val = lsIdle
       let r = MockRenderer()
 
       let panel = renderFilesystemPanel(r, vm)
       let overlay = findByClass(panel, "filesystem-empty-overlay")
+      check "hidden" in overlay.attributes["class"]
+
+      vm.setRoot(emptyEntry())
       check "hidden" notin overlay.attributes["class"]
 
       vm.setRoot(makeFsRoot(@[makeFsEntry("a.nim")]))
       check "hidden" in overlay.attributes["class"]
 
       vm.clearRoot()
+      check "hidden" in overlay.attributes["class"]
+
       vm.loadingState.val = lsIdle
       check "hidden" notin overlay.attributes["class"]
 
@@ -10730,20 +10734,21 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
-  test "normal git mode renders branch commits changed files and callbacks":
+  test "normal git mode renders commit accordion files and callbacks":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var toggledCommit = -1
+      var expandedCommit = -1
+      var expandModifiers = (false, false)
       var selectedFile = ""
-      var toggled = false
+      var openedDiff = ""
       let callbacks = VCSCallbacks(
         onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
-          (toggledCommit = index),
+          (expandedCommit = index; expandModifiers = (ctrl, shift)),
         onSelectFile: proc(index: int; path: string) =
           (discard index; selectedFile = path),
-        onToggleUnifiedDiff: proc() =
-          (toggled = true; vm.setUnifiedDiff(true, @[makeVcsDiffFile()])),
+        onOpenFileDiff: proc(target: string) =
+          openedDiff = target,
       )
       let panel = renderVCSPanel(r, vm, callbacks)
 
@@ -10758,18 +10763,24 @@ suite "IsoNim VCS Panel — structure":
                    additions: 2, deletions: 1),
       ])
 
-      check findByClass(panel, "vcs-branch-name").textContent == "main"
-      check findByClass(panel, "vcs-commit-msg").textContent == "initial"
-      check findByClass(panel, "vcs-accordion-file-name").textContent == "main.nim"
+      let branchName = findByClass(panel, "vcs-branch-name")
+      let commitMessage = findByClass(panel, "vcs-commit-msg")
+      let fileName = findByClass(panel, "vcs-accordion-file-name")
+      check branchName != nil
+      check branchName.textContent == "main"
+      check commitMessage != nil
+      check commitMessage.textContent == "initial"
+      check fileName != nil
+      check fileName.textContent == "main.nim"
 
       findByClass(panel, "vcs-commit-header").fireEvent("click")
       findByClass(panel, "vcs-accordion-file").fireEvent("click")
       findByClass(panel, "vcs-commit-diff-btn").fireEvent("click")
 
-      check toggledCommit == 0
+      check expandedCommit == 0
+      check expandModifiers == (false, false)
       check selectedFile == "src/main.nim"
-      check toggled
-      check findByClass(panel, "deepreview-unified-diff") != nil
+      check openedDiff == "commit:abc123"
 
       dispose()
 
@@ -10832,24 +10843,24 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
-  test "test_vcs_unified_diff_tab":
+  test "test_vcs_unified_diff_inline":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var openedFile = ""
-      let callbacks = VCSCallbacks(
-        onSelectFile: proc(index: int; path: string) =
-          (discard index; openedFile = path),
-      )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel(r, vm)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
 
-      # Redesigned panel renders unified diff instead of commit history/files list
+      let diff = findByClass(panel, "deepreview-unified-diff")
+      let filePath = findByClass(panel, "deepreview-unified-file-path")
       check findByClass(panel, "vcs-changed-files") == nil
-      check findByClass(panel, "deepreview-unified-diff") != nil
+      check diff != nil
+      check filePath != nil
+      check filePath.textContent == "src/main.nim"
+      check findAllByClass(diff, "deepreview-unified-line").len == 2
+      check findByClass(panel, "vcs-commit-history") == nil
 
       dispose()
 
