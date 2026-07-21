@@ -2073,6 +2073,7 @@ jobs:
             codetracer-trace-format
             codetracer-trace-format-nim
             codetracer-native-recorder
+            nim-stackable-hooks
             codetracer-visual-replay
             codetracer-native-backend
 
@@ -2126,7 +2127,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
-      # codetracer-native-recorder, codetracer-visual-replay and
+      # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
       # codetracer-native-backend are now cloned adjacent to this checkout
       # (``../<name>``) at workspace-lock-pinned revisions by the
       # ``Setup dev env`` step above. The macOS cargo path deps
