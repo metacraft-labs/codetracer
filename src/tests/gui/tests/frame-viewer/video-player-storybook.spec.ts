@@ -91,9 +91,9 @@ async function activateVideoPlayerTab(ctPage: any): Promise<void> {
   // entire transport bar so the snapshots capture the production
   // chrome (rate badge, buffering dot) instead of a narrow strip.
   // Test-only tweak; the production placement is unaffected.
-  await ctPage.evaluate(() => {
-    const panel = document.querySelector(".video-player-component") as HTMLElement | null;
-    if (!panel) return;
+  const panel = ctPage.locator(".video-player-component");
+  await expect(panel).toBeVisible();
+  await panel.evaluate((panel: HTMLElement) => {
     panel.style.position = "fixed";
     panel.style.top = "60px";
     panel.style.left = "20px";
@@ -105,11 +105,17 @@ async function activateVideoPlayerTab(ctPage: any): Promise<void> {
     // 1200 px width.  Without these explicit ``minWidth`` hints the
     // transport bar honours its original 254 px host stack and the
     // rate badge / buffering dot stay clipped.
-    const stage = panel.querySelector(".video-player-stage") as HTMLElement | null;
+    const stage = panel.querySelector(
+      ".video-player-stage",
+    ) as HTMLElement | null;
     if (stage) stage.style.minWidth = "1180px";
-    const transport = panel.querySelector(".video-player-transport") as HTMLElement | null;
+    const transport = panel.querySelector(
+      ".video-player-transport",
+    ) as HTMLElement | null;
     if (transport) transport.style.minWidth = "1180px";
-    const scrubber = panel.querySelector(".video-player-scrubber") as HTMLElement | null;
+    const scrubber = panel.querySelector(
+      ".video-player-scrubber",
+    ) as HTMLElement | null;
     if (scrubber) scrubber.style.minWidth = "1180px";
   });
   await ctPage.waitForTimeout(150);
@@ -148,15 +154,34 @@ async function withScenario(
     )
     .toBe("function");
 
-  await ctPage.evaluate(
-    (s: VideoPlayerScenario) =>
-      (window as any).__CODETRACER_TEST__.videoPlayerSetState(s),
-    scenario,
-  );
+  const applyScenario = () =>
+    ctPage.evaluate(
+      (s: VideoPlayerScenario) =>
+        (window as any).__CODETRACER_TEST__.videoPlayerSetState(s),
+      scenario,
+    );
 
-  // Let the reactive effects settle so the snapshot captures the
-  // post-update DOM rather than the intermediate frame.
+  await applyScenario();
+
+  // Let the initial fake-player request settle, then re-apply the story.
+  // The Video Player starts one frame request as it mounts; without this
+  // second application that in-flight response can replace ``imageSrc``
+  // after the test hook has installed the deterministic story frame.
   await ctPage.waitForTimeout(150);
+  await applyScenario();
+  await ctPage.waitForTimeout(50);
+  await ctPage.locator(".video-player-component").dispatchEvent("mouseleave");
+  await expect(ctPage.locator(".video-player-loupe")).toBeHidden();
+
+  if (scenario.imageSrc !== undefined) {
+    const image = ctPage.locator(".video-player-image");
+    await expect(image).toHaveAttribute("src", scenario.imageSrc);
+    if (scenario.imageSrc.length > 0) {
+      await expect(image).toBeVisible();
+    } else {
+      await expect(image).toBeHidden();
+    }
+  }
 }
 
 async function snapshot(
@@ -250,8 +275,7 @@ const SCENARIOS: ReadonlyArray<{
   },
   {
     name: "video-player-picker-active",
-    description:
-      "picker active draws the blue ring and pressed picker button",
+    description: "picker active draws the blue ring and pressed picker button",
     state: {
       playState: "paused",
       rate: 1,
@@ -271,6 +295,16 @@ const SCENARIOS: ReadonlyArray<{
       await expect(
         ctPage.locator(".video-player-picker.pressed"),
       ).toBeVisible();
+
+      const imageBounds = await ctPage
+        .locator(".video-player-image")
+        .boundingBox();
+      expect(imageBounds).not.toBeNull();
+      await ctPage.mouse.move(
+        imageBounds!.x + imageBounds!.width / 2,
+        imageBounds!.y + imageBounds!.height * 0.75,
+      );
+      await expect(ctPage.locator(".video-player-loupe.visible")).toBeVisible();
     },
   },
   {
@@ -282,6 +316,7 @@ const SCENARIOS: ReadonlyArray<{
       currentFrame: 0,
       frameCount: 0,
       error: "ct_gfx_player exited with status 1",
+      imageSrc: "",
       visualReplayAvailable: true,
       playerUrl: "http://stub/",
     },
@@ -294,8 +329,7 @@ const SCENARIOS: ReadonlyArray<{
   },
   {
     name: "video-player-buffering",
-    description:
-      "buffering active shows the yellow dot next to the rate badge",
+    description: "buffering active shows the yellow dot next to the rate badge",
     state: {
       playState: "playing",
       rate: 2,

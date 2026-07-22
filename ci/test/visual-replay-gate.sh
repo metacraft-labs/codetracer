@@ -28,20 +28,37 @@ REQUIRED_SOURCE_FILES=(
 	"src/tests/gui/${PLAYWRIGHT_TESTS[1]}"
 	"src/tests/gui/${PLAYWRIGHT_TESTS[2]}"
 	"src/tests/gui/${PLAYWRIGHT_REAL_RECORDING_TEST}"
+	"storybook/package-lock.json"
 )
 
 cd "$REPO_ROOT"
 
 echo "###############################################################################"
-echo "Checking required visual replay tests are present and runnable"
+echo "Checking required visual replay tests and build siblings"
 echo "###############################################################################"
 
 for required_file in "${REQUIRED_SOURCE_FILES[@]}"; do
 	if [[ ! -f $required_file ]]; then
-		echo "Missing required visual replay test: $required_file" >&2
+		echo "Missing required visual replay gate source: $required_file" >&2
 		exit 1
 	fi
 done
+
+bash ci/test/visual-replay-build-sibling-preflight.sh "$REPO_ROOT/.."
+
+# The Nix dev shell provides the flake-locked Rust-backed recorder via
+# CODETRACER_PYTHON_CMD. CodeTracer's recording CLI consumes the more specific
+# interpreter variable, so bind the two contracts explicitly and fail before
+# the GUI tests if the recorder package is unavailable.
+if [[ -z ${CODETRACER_PYTHON_INTERPRETER:-} ]]; then
+	CODETRACER_PYTHON_INTERPRETER="${CODETRACER_PYTHON_CMD:-}"
+	export CODETRACER_PYTHON_INTERPRETER
+fi
+if [[ -z $CODETRACER_PYTHON_INTERPRETER ]] ||
+	! "$CODETRACER_PYTHON_INTERPRETER" -c 'import codetracer_python_recorder'; then
+	echo "Missing required flake-locked Python recorder interpreter." >&2
+	exit 1
+fi
 
 # Playwright's forbidOnly is enabled through CI=1 below. This explicit source
 # check makes the required visual-replay slice fail before execution if it is
@@ -66,6 +83,7 @@ echo "Running CodeTracer visual replay build prerequisites"
 echo "###############################################################################"
 just build-once
 just build-storybook-components
+npm ci --prefix storybook --ignore-scripts --no-audit --no-fund
 just storybook-build
 
 echo "###############################################################################"
@@ -89,7 +107,7 @@ rm -f "$PLAYWRIGHT_GATE_JSON"
 CI=1 \
 	CODETRACER_VISUAL_REPLAY_GATE_JSON="$PLAYWRIGHT_GATE_JSON" \
 	PLAYWRIGHT_RETRIES="${PLAYWRIGHT_RETRIES:-0}" \
-	just test-gui "${PLAYWRIGHT_TESTS[@]}"
+	just test-gui-prebuilt "${PLAYWRIGHT_TESTS[@]}"
 
 node - "$PLAYWRIGHT_GATE_JSON" <<'NODE'
 const fs = require("node:fs");
@@ -257,7 +275,7 @@ CI=1 \
 	CODETRACER_CT_GFX_PLAYER_CMD="${VISUAL_REPLAY_REPO}/ct_gfx_player" \
 	CODETRACER_CT_GFX_PLAYER_BACKEND="${CODETRACER_CT_GFX_PLAYER_BACKEND:-software}" \
 	PLAYWRIGHT_RETRIES="${PLAYWRIGHT_RETRIES:-0}" \
-	just test-gui "$PLAYWRIGHT_REAL_RECORDING_TEST"
+	just test-gui-prebuilt "$PLAYWRIGHT_REAL_RECORDING_TEST"
 
 node - "$REAL_PLAYWRIGHT_GATE_JSON" <<'NODE'
 const fs = require("node:fs");

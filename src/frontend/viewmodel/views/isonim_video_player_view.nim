@@ -135,8 +135,10 @@ proc scrubDisabledAttr(vm: VideoPlayerVM): string =
   ## Disable the scrub slider when the player has errored.
   if vm.frameVm.error.val.len > 0: "disabled" else: ""
 
-proc magnifierDisplay(vm: VideoPlayerVM): string =
-  displayIf(vm.pickerState.val == PickerActive and vm.magnifier.val.isSome)
+proc magnifierClass(vm: VideoPlayerVM): string =
+  result = "video-player-loupe"
+  if vm.pickerState.val == PickerActive and vm.magnifier.val.isSome:
+    result &= " visible"
 
 proc rootClassFor(vm: VideoPlayerVM; baseClass: string): string =
   if vm.pickerState.val == PickerActive:
@@ -276,8 +278,7 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
         ## magnifier signal). The pixel grid inside the loupe is rendered by
         ## a JS routine bound at mount time onto the .video-player-loupe-canvas
         ## element below.
-        tdiv(class = "video-player-loupe",
-             display = magnifierDisplay(vm),
+        tdiv(class = magnifierClass(vm),
              style = magnifierStyle(vm)):
           canvas(class = "video-player-loupe-canvas",
                  width = "120",
