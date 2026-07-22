@@ -1194,111 +1194,14 @@ test-origin-dap:
 # `cross-tracer-three-recording.spec.ts` +
 # `event-log-correlation-markers-three-trace.spec.ts` when present.
 #
-# The recipe runs the fixture's `regenerate.sh` first so the three `.ct`
-# containers + `session.toml` are materialised. `regenerate.sh` honest-skips
-# with exit 75 when its prereqs (wasm-pack, rustup wasm32 target, codetracer
-# CLI, codetracer_python_recorder, browser_stream_receiver, Playwright) are
-# missing — in that case the cargo tests themselves skip cleanly via
-# `first_missing_trace_container` (see `cross_process_origin_test.rs`). Any
-# other regenerator failure is logged as a warning and does not abort the
-# envelope, mirroring the per-language origin-DAP skip discipline.
+# The three-trace fixture is committed test data. The required gate fails
+# closed when any fixture payload, the executable recovery regenerator, either
+# Playwright spec, the built frontend, or a display provider is absent. It
+# validates exact Rust and Playwright manifests/counts and rejects every skip
+# sentinel; missing coverage can never produce a successful CI result.
 test-cross-process:
   #!/usr/bin/env bash
-  set -euo pipefail
-  echo "=== M29 cross-process value-origin envelope ==="
-
-  fixture_dir="src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm"
-  regenerate_script="$fixture_dir/regenerate.sh"
-  fixture_ready=1
-  for ct in frontend.ct frontend-wasm.ct backend.ct session.toml; do
-    if [ ! -e "$fixture_dir/$ct" ]; then
-      fixture_ready=0
-      break
-    fi
-  done
-
-  if [ "$fixture_ready" -eq 0 ]; then
-    if [ -x "$regenerate_script" ]; then
-      echo "[cross-process] Three-trace fixture not materialised; running regenerate.sh"
-      set +e
-      bash "$regenerate_script"
-      rc=$?
-      set -e
-      if [ "$rc" -eq 0 ]; then
-        echo "[cross-process] regenerate.sh completed."
-      elif [ "$rc" -eq 75 ]; then
-        echo "[cross-process] WARNING: regenerate.sh honest-skipped (prereqs absent, exit 75)."
-        echo "[cross-process] 3-trace cargo tests will self-skip via the missing-container guard."
-      else
-        echo "[cross-process] WARNING: regenerate.sh exited with $rc; continuing anyway."
-        echo "[cross-process] 3-trace cargo tests will self-skip via the missing-container guard."
-      fi
-    else
-      echo "[cross-process] WARNING: regenerate script not executable at $regenerate_script; skipping fixture refresh."
-    fi
-  else
-    echo "[cross-process] Three-trace fixture already materialised; skipping regenerate.sh."
-  fi
-
-  pushd src/db-backend >/dev/null
-
-  echo
-  echo "[cross-process] Stage 1/3 — 2-trace cross-process DAP suite"
-  cargo test --test cross_process_origin_test -- --nocapture \
-    test_origin_cross_process_fixture_a_python_aiohttp_mode1 \
-    test_origin_cross_process_fixture_a_python_aiohttp_mode3 \
-    test_parity_origin_cross_process_fixture_a_python_aiohttp \
-    test_origin_cross_process_serialisation_aware_json_collapses_to_trivial_copy \
-    test_origin_cross_process_ambiguous_correlation_terminates_cleanly \
-    test_origin_cross_process_missing_correlation_terminates_cleanly
-
-  echo
-  echo "[cross-process] Stage 2/3 — 3-trace JS ↔ WASM ↔ backend DAP chain"
-  cargo test --test cross_process_origin_test -- --nocapture \
-    test_origin_three_trace_chain_balance_to_frontend_expression
-  cargo test --test dap_server_list_processes_event_test -- --nocapture \
-    dap_server_emits_list_processes_for_three_trace_wasm_fixture
-
-  popd >/dev/null
-
-  echo
-  echo "[cross-process] Stage 3/3 — Playwright specs (gated, TCT-M5)"
-  # The specs skip cleanly via `threeTraceFixtureSkipReason()` when the
-  # .ct containers are absent (mirror of the cargo-side
-  # `first_missing_trace_container` guard); they still need a display.
-  selected_specs=()
-  for spec in \
-    src/tests/gui/tests/value-origin/cross-tracer-three-recording.spec.ts \
-    src/tests/gui/tests/value-origin/event-log-correlation-markers-three-trace.spec.ts; do
-    if [ -f "$spec" ]; then
-      selected_specs+=("$spec")
-    else
-      echo "[cross-process] gated spec not present, skipping: $spec"
-    fi
-  done
-  if [ "${#selected_specs[@]}" -eq 0 ]; then
-    echo "[cross-process] No 3-trace Playwright specs present yet (TCT-M5 pending)."
-  else
-    # `test-gui-prebuilt` auto-spawns Xvfb on Linux + uses the native
-    # display on macOS/Windows. It assumes the frontend is already
-    # built — CI jobs that drive this envelope ensure `build-once` ran.
-    case "$(uname -s)" in
-      MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
-        just test-e2e "${selected_specs[@]}" ;;
-      *)
-        if [ -n "${DISPLAY:-}" ]; then
-          just test-e2e "${selected_specs[@]}"
-        elif command -v Xvfb >/dev/null 2>&1; then
-          just test-gui-prebuilt "${selected_specs[@]}"
-        else
-          echo "[cross-process] WARNING: no DISPLAY and no Xvfb; skipping Playwright stage."
-        fi
-        ;;
-    esac
-  fi
-
-  echo
-  echo "=== M29 cross-process value-origin envelope passed ==="
+  exec ./scripts/test-cross-process.sh
 
 # M29 — one-command demo launcher for the three-trace
 # `account-balance-with-wasm` cross-tracer fixture.
