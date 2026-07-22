@@ -126,38 +126,68 @@ git_bootstrap_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - na
 checkout_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Checkout' | cut -d: -f1)"
 [ -n "$token_line" ] && [ -n "$git_bootstrap_line" ] && [ -n "$checkout_line" ] ||
 	fail "Windows per-PR job is missing token, Git bootstrap, or checkout"
-[ "$token_line" -lt "$git_bootstrap_line" ] && [ "$git_bootstrap_line" -lt "$checkout_line" ] ||
-	fail "Windows Git bootstrap must run after token generation and before checkout"
+[ "$git_bootstrap_line" -lt "$token_line" ] && [ "$token_line" -lt "$checkout_line" ] ||
+	fail "Windows Git bootstrap must run before credentials are minted and checkout begins"
 
 git_bootstrap="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Ensure Git supports recursive checkout')"
 checkout_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Checkout')"
+bootstrap_contract_step="$(
+	printf '%s\n' "$windows_per_pr" |
+		workflow_step 'Verify Windows bootstrap and private recorder authentication contracts'
+)"
 required_gate_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Run required materialized Python origin-DAP gate')"
 
-printf '%s\n' "$git_bootstrap" | grep -Fq 'Get-Command git.exe' ||
-	fail "Windows Git bootstrap must discover Git on PATH"
-printf '%s\n' "$git_bootstrap" | grep -Fq 'C:\Program Files\Git\cmd\git.exe' ||
-	fail "Windows Git bootstrap must discover the common Git for Windows installation"
-[ "$(printf '%s\n' "$git_bootstrap" | grep -c 'Find-UsableGit')" -ge 3 ] ||
-	fail "Windows Git bootstrap must retry discovery after package provisioning"
+# The repository is unavailable before checkout, so retrieve the reviewed
+# helper from the exact immutable workflow revision. The helper itself owns
+# discovery, pinned provisioning, version verification and PATH propagation;
+# the workflow must call that same file, not retain an untested inline clone.
+# shellcheck disable=SC2016 # Match the literal GitHub Actions expression.
+printf '%s\n' "$git_bootstrap" |
+	grep -Fq 'CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}' ||
+	fail "Windows Git bootstrap must be tied to the immutable workflow revision"
+printf '%s\n' "$git_bootstrap" | grep -Fq "'^[0-9a-f]{40}$'" ||
+	fail "Windows Git bootstrap must validate the immutable revision"
+printf '%s\n' "$git_bootstrap" |
+	grep -Fq 'https://raw.githubusercontent.com/metacraft-labs/codetracer/' ||
+	fail "Windows Git bootstrap must retrieve only the CodeTracer helper"
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" | grep -Fq '$minimumGitVersion = [Version]"2.18.0"' ||
-	fail "Windows Git bootstrap must enforce actions/checkout's Git 2.18 minimum"
+printf '%s\n' "$git_bootstrap" |
+	grep -Fq '"$revision/ci/ensure-git-for-checkout.ps1"' ||
+	fail "Windows Git bootstrap helper URL must contain the validated revision"
+printf '%s\n' "$git_bootstrap" | grep -Fq '/ci/ensure-git-for-checkout.ps1' ||
+	fail "Windows Git bootstrap must retrieve the tested helper path"
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" | grep -Fq '[Version]$matches.version -lt $minimumGitVersion' ||
-	fail "Windows Git bootstrap must verify the selected Git after PATH propagation"
-printf '%s\n' "$git_bootstrap" | grep -Fq 'Get-Command choco.exe' ||
-	fail "Windows Git bootstrap must discover the runner package manager"
-printf '%s\n' "$git_bootstrap" | grep -Fq 'upgrade git -y --no-progress' ||
-	fail "Windows Git bootstrap must install or upgrade Git when discovery fails"
+printf '%s\n' "$git_bootstrap" | grep -Fq '& $bootstrapScript' ||
+	fail "Windows Git bootstrap must invoke the downloaded tested helper"
+printf '%s\n' "$git_bootstrap" | grep -Fq 'Invoke-WebRequest' ||
+	fail "Windows Git bootstrap must retrieve the helper before checkout"
+# The app token is reserved for authenticated checkout and later private
+# recorder fetches. The public immutable helper fetch must not receive it.
+if printf '%s\n' "$git_bootstrap" |
+	grep -Eq 'app-token\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
+	fail "Windows Git bootstrap must not receive or transmit repository credentials"
+fi
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" | grep -Fq '$LASTEXITCODE -notin @(0, 1641, 3010)' ||
-	fail "Windows Git bootstrap must reject package provisioning failures"
-# shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" | grep -Fq '$env:PATH = "$gitDirectory;$env:PATH"' ||
-	fail "Windows Git bootstrap must update PATH for its own verification"
-# shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" | grep -Fq 'Add-Content -LiteralPath $env:GITHUB_PATH -Value $gitDirectory' ||
-	fail "Windows Git bootstrap must propagate Git to checkout through GITHUB_PATH"
+printf '%s\n' "$git_bootstrap" |
+	grep -Fq 'Remove-Item -LiteralPath $bootstrapScript' ||
+	fail "Windows Git bootstrap must clean the downloaded helper"
+if printf '%s\n' "$git_bootstrap" | grep -Fq 'choco.exe'; then
+	fail "Windows Git bootstrap must not require an absent package manager"
+fi
+
+[ -f "$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ] ||
+	fail "Windows Git bootstrap helper is missing"
+[ -f "$REPO_ROOT/ci/test/ensure-git-for-checkout.ps1" ] ||
+	fail "Windows Git bootstrap behavioral test is missing"
+grep -Fq 'v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe' \
+	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
+	fail "Windows Git bootstrap must pin the reviewed official PortableGit asset"
+grep -Fq 'ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d' \
+	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
+	fail "Windows Git bootstrap must pin the reviewed PortableGit SHA256"
+printf '%s\n' "$bootstrap_contract_step" |
+	grep -Fq './ci/test/ensure-git-for-checkout.ps1' ||
+	fail "Windows job must run the Git bootstrap behavioral contract"
 
 [ "$(printf '%s\n' "$checkout_step" | grep -c 'submodules: recursive$')" -eq 1 ] ||
 	fail "Windows checkout must retain recursive submodules"

@@ -231,6 +231,35 @@ jobs:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (materialized Python, Windows)
     steps:
+      - name: Ensure Git supports recursive checkout
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -238,84 +267,6 @@ jobs:
           app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
-
-      - name: Ensure Git supports recursive checkout
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $minimumGitVersion = [Version]"2.18.0"
-
-          function Find-UsableGit {
-            $candidates = @()
-            $pathGit = Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($pathGit) {
-              $candidates += $pathGit.Source
-            }
-            $candidates += @(
-              "C:\Program Files\Git\cmd\git.exe",
-              "C:\Program Files\Git\bin\git.exe",
-              "C:\Program Files (x86)\Git\cmd\git.exe",
-              "C:\Program Files (x86)\Git\bin\git.exe"
-            )
-
-            foreach ($candidate in ($candidates | Select-Object -Unique)) {
-              if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-                continue
-              }
-              $versionText = (& $candidate --version 2>&1 | Out-String).Trim()
-              if ($LASTEXITCODE -ne 0 -or
-                  $versionText -notmatch '^git version (?<version>[0-9]+\.[0-9]+\.[0-9]+)') {
-                continue
-              }
-              $version = [Version]$matches.version
-              if ($version -ge $minimumGitVersion) {
-                return [PSCustomObject]@{ Path = $candidate; Version = $version }
-              }
-            }
-            return $null
-          }
-
-          $git = Find-UsableGit
-          if (-not $git) {
-            $choco = Get-Command choco.exe -CommandType Application -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            $chocoPath = if ($choco) { $choco.Source } else { $null }
-            if (-not $chocoPath) {
-              $commonChocoPath = "C:\ProgramData\chocolatey\bin\choco.exe"
-              if (Test-Path -LiteralPath $commonChocoPath -PathType Leaf) {
-                $chocoPath = $commonChocoPath
-              }
-            }
-            if (-not $chocoPath) {
-              throw "Git $minimumGitVersion or newer is required, and Chocolatey is unavailable."
-            }
-
-            # Chocolatey upgrade installs an absent package and upgrades an old one.
-            & $chocoPath upgrade git -y --no-progress
-            if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
-              throw "Chocolatey failed to install or upgrade Git (exit $LASTEXITCODE)."
-            }
-            $git = Find-UsableGit
-          }
-
-          if (-not $git) {
-            throw "Git $minimumGitVersion or newer is unavailable after provisioning."
-          }
-
-          $gitDirectory = Split-Path -Parent $git.Path
-          $env:PATH = "$gitDirectory;$env:PATH"
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value $gitDirectory
-
-          $resolvedGit = Get-Command git.exe -CommandType Application -ErrorAction Stop |
-            Select-Object -First 1
-          $verifiedVersionText = (& $resolvedGit.Source --version 2>&1 | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or
-              $verifiedVersionText -notmatch '^git version (?<version>[0-9]+\.[0-9]+\.[0-9]+)' -or
-              [Version]$matches.version -lt $minimumGitVersion) {
-            throw "Provisioned Git does not satisfy the required minimum $minimumGitVersion."
-          }
-          Write-Host "Using $verifiedVersionText from $($resolvedGit.Source) for checkout."
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -351,9 +302,11 @@ jobs:
           }
           "revision=$revision" >> $env:GITHUB_OUTPUT
 
-      - name: Verify private recorder checkout authentication contract
+      - name: Verify Windows bootstrap and private recorder authentication contracts
         shell: powershell
-        run: ./ci/test/checkout-locked-python-recorder.ps1
+        run: |
+          ./ci/test/ensure-git-for-checkout.ps1
+          ./ci/test/checkout-locked-python-recorder.ps1
 
       - name: Checkout locked Python recorder adjacent to CodeTracer
         shell: powershell
@@ -399,16 +352,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
           "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
-      - name: Prefer Git Bash over WSL bash stub
+      - name: Verify Git Bash for the strict gate
         shell: powershell
         run: |
-          $wslStub = "$env:SystemRoot\System32\bash.exe"
-          if (Test-Path $wslStub) {
-            takeown /f $wslStub | Out-Null
-            icacls $wslStub /grant "Administrators:(F)" | Out-Null
-            Remove-Item -Force $wslStub
+          $git = Get-Command git.exe -CommandType Application -ErrorAction Stop |
+            Select-Object -First 1
+          $gitDirectory = Split-Path -Parent $git.Source
+          $gitRoot = Split-Path -Parent $gitDirectory
+          $gitBash = Join-Path (Join-Path $gitRoot "bin") "bash.exe"
+          if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) {
+            throw "The verified Git installation does not include Git Bash."
           }
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+          $bashDirectory = Split-Path -Parent $gitBash
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $bashDirectory
+          Write-Host "Using Git Bash from $gitBash for the strict gate."
 
       - name: Generate tree-sitter-nim parser
         shell: powershell
