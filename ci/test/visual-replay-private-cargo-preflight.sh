@@ -20,7 +20,8 @@ redact_cargo_fetch_output() {
 }
 
 fail_auth_contract() {
-	echo "Visual replay CI private Cargo authentication is incomplete or unsafe." >&2
+	local invariant="${1:-unknown}"
+	echo "Visual replay CI private Cargo authentication invariant failed: ${invariant}." >&2
 	exit 1
 }
 
@@ -30,21 +31,65 @@ if [[ ${CARGO_NET_GIT_FETCH_WITH_CLI:-} != "true" ]]; then
 fi
 
 if [[ ${GIT_TERMINAL_PROMPT:-} != "0" || ${GIT_ASKPASS:-} != "/bin/false" ||
-	${SSH_ASKPASS:-} != "/bin/false" || ${GIT_CONFIG_GLOBAL:-} != "/dev/null" ||
-	${GIT_CONFIG_SYSTEM:-} != "/dev/null" || ${GIT_CONFIG_COUNT:-} != "2" ]]; then
-	fail_auth_contract
+	${SSH_ASKPASS:-} != "/bin/false" ]]; then
+	fail_auth_contract "interactive-credential-blocking"
+fi
+if [[ ${GIT_CONFIG_GLOBAL:-} != "/dev/null" ||
+	${GIT_CONFIG_SYSTEM:-} != "/dev/null" ]]; then
+	fail_auth_contract "config-file-isolation"
+fi
+if [[ -n ${GIT_CONFIG_PARAMETERS:-} || -n ${GIT_CONFIG_NOSYSTEM:-} ||
+	-n ${GIT_ALLOW_PROTOCOL:-} ]]; then
+	fail_auth_contract "ambient-git-config-channel"
+fi
+if [[ ${GIT_CONFIG_COUNT:-} != "6" ]]; then
+	fail_auth_contract "inline-config-count"
 fi
 
 cargo_auth_key="${GIT_CONFIG_KEY_0:-}"
 cargo_auth_header="${GIT_CONFIG_VALUE_0:-}"
 cargo_auth_prefix="AUTHORIZATION: basic "
-if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ||
-	$cargo_auth_header != "$cargo_auth_prefix"* ||
-	$cargo_auth_header == "$cargo_auth_prefix" ||
-	${cargo_auth_header#"$cargo_auth_prefix"} =~ [^A-Za-z0-9+/=] ||
-	${GIT_CONFIG_KEY_1:-} != "credential.helper" || -n ${GIT_CONFIG_VALUE_1:-} ]]; then
-	fail_auth_contract
+if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ]]; then
+	fail_auth_contract "auth-header-url-scope"
 fi
+if [[ $cargo_auth_header != "$cargo_auth_prefix"* ||
+	$cargo_auth_header == "$cargo_auth_prefix" ||
+	${cargo_auth_header#"$cargo_auth_prefix"} =~ [^A-Za-z0-9+/=] ]]; then
+	fail_auth_contract "auth-header-shape"
+fi
+if [[ ${GIT_CONFIG_KEY_1:-} != "credential.helper" ||
+	-n ${GIT_CONFIG_VALUE_1:-} ]]; then
+	fail_auth_contract "credential-helper-blocking"
+fi
+if [[ ${GIT_CONFIG_KEY_2:-} != "http.followRedirects" ||
+	${GIT_CONFIG_VALUE_2:-} != "false" ]]; then
+	fail_auth_contract "redirect-blocking"
+fi
+if [[ ${GIT_CONFIG_KEY_3:-} != "protocol.allow" ||
+	${GIT_CONFIG_VALUE_3:-} != "never" ||
+	${GIT_CONFIG_KEY_4:-} != "protocol.https.allow" ||
+	${GIT_CONFIG_VALUE_4:-} != "always" ]]; then
+	fail_auth_contract "transport-allowlist"
+fi
+if [[ ${GIT_CONFIG_KEY_5:-} != "http.sslVerify" ||
+	${GIT_CONFIG_VALUE_5:-} != "true" ]]; then
+	fail_auth_contract "tls-verification"
+fi
+
+for git_env_name in "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"; do
+	if [[ $git_env_name =~ ^GIT_CONFIG_(KEY|VALUE)_[0-9]+$ ]]; then
+		case "$git_env_name" in
+		GIT_CONFIG_KEY_0 | GIT_CONFIG_VALUE_0 | \
+			GIT_CONFIG_KEY_1 | GIT_CONFIG_VALUE_1 | \
+			GIT_CONFIG_KEY_2 | GIT_CONFIG_VALUE_2 | \
+			GIT_CONFIG_KEY_3 | GIT_CONFIG_VALUE_3 | \
+			GIT_CONFIG_KEY_4 | GIT_CONFIG_VALUE_4 | \
+			GIT_CONFIG_KEY_5 | GIT_CONFIG_VALUE_5) ;;
+		*) fail_auth_contract "unexpected-inline-config-slot" ;;
+		esac
+	fi
+done
+unset git_env_name
 
 if [[ -n ${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN:-} ]]; then
 	echo "Raw visual replay CI token must not enter the gate environment." >&2
@@ -55,17 +100,26 @@ fi
 # the config key without printing the credential. The sibling and lookalike
 # URLs must not inherit lldb-sys authentication.
 if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
-	fail_auth_contract
+	fail_auth_contract "effective-auth-header"
 fi
 for unauthenticated_url in \
 	"https://github.com/metacraft-labs/" \
 	"https://github.com/metacraft-labs/codetracer.git" \
 	"https://github.com/metacraft-labs/lldb-sys.rs.git-lookalike"; do
 	if git config --get-urlmatch http.extraHeader "$unauthenticated_url" >/dev/null 2>&1; then
-		fail_auth_contract
+		fail_auth_contract "auth-header-url-boundary"
 	fi
 done
 unset unauthenticated_url
+
+# Git's URL matching intentionally applies a URL-specific header to request
+# paths below that URL (for example /info/refs). Redirects are disabled above;
+# this check documents and enforces the suffix needed by smart HTTP without
+# pretending that the setting applies to one literal request URI only.
+if [[ $(git config --get-urlmatch http.extraHeader \
+	"${LLDB_SYS_URL}/info/refs") != "$cargo_auth_header" ]]; then
+	fail_auth_contract "smart-http-path-scope"
+fi
 
 # Exercise the transport boundary with a fresh sentinel credential and a fake
 # remote helper. GIT_TRACE records Git's child command, while the helper records
@@ -107,11 +161,19 @@ PROBE_REMOTE
 		SSH_ASKPASS=/bin/false \
 		GIT_CONFIG_GLOBAL=/dev/null \
 		GIT_CONFIG_SYSTEM=/dev/null \
-		GIT_CONFIG_COUNT=2 \
+		GIT_CONFIG_COUNT=6 \
 		GIT_CONFIG_KEY_0="http.${LLDB_SYS_URL}.extraHeader" \
 		GIT_CONFIG_VALUE_0="$probe_header" \
 		GIT_CONFIG_KEY_1="credential.helper" \
 		GIT_CONFIG_VALUE_1="" \
+		GIT_CONFIG_KEY_2="http.followRedirects" \
+		GIT_CONFIG_VALUE_2="false" \
+		GIT_CONFIG_KEY_3="protocol.allow" \
+		GIT_CONFIG_VALUE_3="never" \
+		GIT_CONFIG_KEY_4="protocol.https.allow" \
+		GIT_CONFIG_VALUE_4="always" \
+		GIT_CONFIG_KEY_5="http.sslVerify" \
+		GIT_CONFIG_VALUE_5="true" \
 		VISUAL_REPLAY_AUTH_PROBE_ARGV="$probe_argv" \
 		git ls-remote "$LLDB_SYS_URL" HEAD >"$probe_stdout" 2>"$probe_trace"
 	probe_status=$?
@@ -120,11 +182,11 @@ PROBE_REMOTE
 	if ((probe_status == 0)) || [[ ! -s $probe_argv ]] ||
 		! grep -aFq "$LLDB_SYS_URL" "$probe_argv" ||
 		grep -aFq "global-rewrite-must-not-apply.invalid" "$probe_argv"; then
-		fail_auth_contract
+		fail_auth_contract "credential-free-remote-argv"
 	fi
 	if grep -R -aFq -- "$sentinel" "$probe_dir" ||
 		grep -R -aFq -- "$sentinel_basic" "$probe_dir"; then
-		fail_auth_contract
+		fail_auth_contract "credential-artifact-leak"
 	fi
 
 	redacted_probe="$(
@@ -133,7 +195,7 @@ PROBE_REMOTE
 	)"
 	if [[ $redacted_probe == *"$sentinel"* || $redacted_probe == *"$sentinel_basic"* ||
 		$redacted_probe != *"[REDACTED]"* ]]; then
-		fail_auth_contract
+		fail_auth_contract "failure-output-redaction"
 	fi
 )
 
@@ -142,6 +204,21 @@ if [[ ! -f $native_backend_repo/Cargo.lock || ! -f $native_backend_repo/Cargo.to
 	echo "Visual replay CI cannot find the native-backend Cargo workspace." >&2
 	exit 1
 fi
+
+locked_lldb_source="$(
+	sed -n 's|^source = "git+\(https://github\.com/metacraft-labs/lldb-sys\.rs\.git#[0-9a-f]\{40\}\)"$|\1|p' \
+		"$native_backend_repo/Cargo.lock"
+)"
+locked_git_source_count="$(grep -c '^source = "git+' "$native_backend_repo/Cargo.lock" || true)"
+manifest_lldb_source_count="$(
+	grep -Ec '^[[:space:]]*lldb-sys[[:space:]]*=[[:space:]]*\{[[:space:]]*git[[:space:]]*=[[:space:]]*"https://github\.com/metacraft-labs/lldb-sys\.rs\.git"[[:space:]]*\}[[:space:]]*$' \
+		"$native_backend_repo/Cargo.toml" || true
+)"
+if [[ $locked_git_source_count != "1" || $manifest_lldb_source_count != "1" ||
+	-z $locked_lldb_source || $locked_lldb_source == *$'\n'* ]]; then
+	fail_auth_contract "locked-git-source-boundary"
+fi
+unset locked_git_source_count locked_lldb_source manifest_lldb_source_count
 
 if [[ ${CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME:-} != "true" ||
 	-z ${CARGO_HOME:-} || ! -d $CARGO_HOME ]]; then
