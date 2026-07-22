@@ -11,12 +11,14 @@ $requiredKeys = @(
   "RUSTUP_VERSION",
   "RUST_TOOLCHAIN_VERSION",
   "JUST_VERSION",
+  "JUST_WIN_X64_SHA256",
   "CARGO_NEXTEST_VERSION",
   "NODE_VERSION",
   "UV_VERSION",
   "DOTNET_SDK_VERSION",
   "NIM_VERSION",
   "NIM_WIN_X64_SHA256",
+  "NIMBLE_VERSION",
   "NIM_SOURCE_REPO",
   "NIM_SOURCE_REF",
   "NIM_CSOURCES_REPO",
@@ -43,12 +45,14 @@ $valuePatterns = @{
   "RUSTUP_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "RUST_TOOLCHAIN_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "JUST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
+  "JUST_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "CARGO_NEXTEST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "NODE_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "UV_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "DOTNET_SDK_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "NIM_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "NIM_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
+  "NIMBLE_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "NIM_SOURCE_REPO" = '^https?://\S+$'
   "NIM_SOURCE_REF" = '^[0-9A-Za-z._/\-]+$'
   "NIM_CSOURCES_REPO" = '^https?://\S+$'

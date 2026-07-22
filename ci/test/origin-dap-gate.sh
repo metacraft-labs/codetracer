@@ -103,8 +103,8 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 if printf '%s\n' "$windows_per_pr" | grep -Fq 'shell: pwsh'; then
 	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
 fi
-[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 10 ] ||
-	fail "Windows per-PR origin-DAP job must run all ten PowerShell steps with Windows PowerShell"
+[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 8 ] ||
+	fail "Windows per-PR origin-DAP job must run all eight PowerShell steps with Windows PowerShell"
 
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_TEST_LANGS: python$')" -eq 1 ] ||
 	fail "Windows per-PR origin-DAP job must select Python exactly once"
@@ -117,6 +117,9 @@ if printf '%s\n%s\n' "$windows_per_pr" "$windows_nightly" |
 	grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke'; then
 	fail "Windows origin-DAP jobs retain a rejected selector or a false coverage claim"
 fi
+if printf '%s\n' "$windows_per_pr" | grep -Eiq 'choco(latey)?([.]exe)?([[:space:]]|$)'; then
+	fail "Windows per-PR origin-DAP job must not depend on Chocolatey"
+fi
 
 # actions/checkout cannot honor recursive submodules through its REST fallback.
 # Keep the self-hosted Windows job's discovery-first Git bootstrap ahead of
@@ -124,13 +127,25 @@ fi
 token_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Generate CI token' | cut -d: -f1)"
 git_bootstrap_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Ensure Git supports recursive checkout' | cut -d: -f1)"
 checkout_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Checkout' | cut -d: -f1)"
-[ -n "$token_line" ] && [ -n "$git_bootstrap_line" ] && [ -n "$checkout_line" ] ||
-	fail "Windows per-PR job is missing token, Git bootstrap, or checkout"
+toolchain_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Provision verified origin-DAP toolchain' | cut -d: -f1)"
+recorder_install_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Install and verify locked Rust-backed Python recorder' | cut -d: -f1)"
+required_gate_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Run required materialized Python origin-DAP gate' | cut -d: -f1)"
+[ -n "$token_line" ] && [ -n "$git_bootstrap_line" ] && [ -n "$checkout_line" ] &&
+	[ -n "$toolchain_line" ] && [ -n "$recorder_install_line" ] && [ -n "$required_gate_line" ] ||
+	fail "Windows per-PR job is missing bootstrap, checkout, toolchain, recorder, or gate steps"
 [ "$git_bootstrap_line" -lt "$token_line" ] && [ "$token_line" -lt "$checkout_line" ] ||
 	fail "Windows Git bootstrap must run before credentials are minted and checkout begins"
+[ "$checkout_line" -lt "$toolchain_line" ] &&
+	[ "$toolchain_line" -lt "$recorder_install_line" ] &&
+	[ "$recorder_install_line" -lt "$required_gate_line" ] ||
+	fail "Windows verified toolchain must precede recorder installation and the strict gate"
 
 git_bootstrap="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Ensure Git supports recursive checkout')"
 checkout_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Checkout')"
+toolchain_step="$(
+	printf '%s\n' "$windows_per_pr" |
+		workflow_step 'Provision verified origin-DAP toolchain'
+)"
 bootstrap_contract_step="$(
 	printf '%s\n' "$windows_per_pr" |
 		workflow_step 'Verify Windows bootstrap and private recorder authentication contracts'
@@ -188,6 +203,40 @@ grep -Fq 'ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d' \
 printf '%s\n' "$bootstrap_contract_step" |
 	grep -Fq './ci/test/ensure-git-for-checkout.ps1' ||
 	fail "Windows job must run the Git bootstrap behavioral contract"
+
+# Post-checkout compiler/build-tool provisioning uses only reviewed official
+# immutable assets. The helper owns exact digest, layout and version checks,
+# transactional activation, PATH propagation and rollback; the workflow calls
+# it once and runs its hermetic behavioral contract before the real gate.
+[ -f "$REPO_ROOT/ci/ensure-origin-dap-windows-toolchain.ps1" ] ||
+	fail "Windows origin-DAP toolchain helper is missing"
+[ -f "$REPO_ROOT/ci/test/ensure-origin-dap-windows-toolchain.ps1" ] ||
+	fail "Windows origin-DAP toolchain behavioral test is missing"
+[ "$(printf '%s\n' "$toolchain_step" | grep -c 'run: ./ci/ensure-origin-dap-windows-toolchain.ps1$')" -eq 1 ] ||
+	fail "Windows job must invoke the reviewed origin-DAP toolchain helper exactly once"
+[ "$(printf '%s\n' "$toolchain_step" | grep -c 'shell: powershell$')" -eq 1 ] ||
+	fail "Windows toolchain provisioning must remain Windows PowerShell 5.1 compatible"
+printf '%s\n' "$bootstrap_contract_step" |
+	grep -Fq './ci/test/ensure-origin-dap-windows-toolchain.ps1' ||
+	fail "Windows job must run the origin-DAP toolchain behavioral contract"
+grep -Fq 'JUST_WIN_X64_SHA256=f0acf3f8ccbcf360b481baae9cae4c921774c89d5d932012481d3e0bda78ab39' \
+	"$REPO_ROOT/non-nix-build/windows/toolchain-versions.env" ||
+	fail "Windows pins must contain the reviewed official Just SHA256"
+grep -Fq 'NIMBLE_VERSION=0.20.1' \
+	"$REPO_ROOT/non-nix-build/windows/toolchain-versions.env" ||
+	fail "Windows pins must contain the nimble version bundled with Nim 2.2.8"
+for reviewed_digest in \
+	2c503361f8bf26fa9e7caccb6db04d6b271d5f0ad3da0616cf40e9a51335c89c \
+	11fe2415a64a791b899cc78e2eeacdde93b5f122f2fabc447db36d38002bfb8c \
+	f0acf3f8ccbcf360b481baae9cae4c921774c89d5d932012481d3e0bda78ab39; do
+	grep -Fq "$reviewed_digest" "$REPO_ROOT/non-nix-build/windows/toolchain-versions.env" ||
+		fail "Windows pins omitted reviewed digest $reviewed_digest"
+done
+for required_companion in capnpc-c++.exe capnpc-capnp.exe nimble.exe; do
+	grep -Fq "Name = \"$required_companion\"" \
+		"$REPO_ROOT/ci/ensure-origin-dap-windows-toolchain.ps1" ||
+		fail "Windows origin-DAP toolchain omitted $required_companion"
+done
 
 [ "$(printf '%s\n' "$checkout_step" | grep -c 'submodules: recursive$')" -eq 1 ] ||
 	fail "Windows checkout must retain recursive submodules"
