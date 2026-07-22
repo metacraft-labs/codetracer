@@ -84,6 +84,15 @@ workflow_job() {
   ' "$REPO_ROOT/.github/workflows/codetracer.yml"
 }
 
+workflow_step() {
+	local step="$1"
+	awk -v step="$step" '
+    $0 == "      - name: " step { active = 1; print; next }
+    active && $0 ~ /^      - name: / { exit }
+    active { print }
+  '
+}
+
 windows_per_pr="$(workflow_job origin-dap-windows)"
 windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 
@@ -97,6 +106,57 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 if printf '%s\n%s\n' "$windows_per_pr" "$windows_nightly" |
 	grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke'; then
 	fail "Windows origin-DAP jobs retain a rejected selector or a false coverage claim"
+fi
+
+# actions/checkout cannot honor recursive submodules through its REST fallback.
+# Keep the self-hosted Windows job's discovery-first Git bootstrap ahead of
+# checkout, while preserving the authenticated recursive checkout contract.
+token_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Generate CI token' | cut -d: -f1)"
+git_bootstrap_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Ensure Git supports recursive checkout' | cut -d: -f1)"
+checkout_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Checkout' | cut -d: -f1)"
+[ -n "$token_line" ] && [ -n "$git_bootstrap_line" ] && [ -n "$checkout_line" ] ||
+	fail "Windows per-PR job is missing token, Git bootstrap, or checkout"
+[ "$token_line" -lt "$git_bootstrap_line" ] && [ "$git_bootstrap_line" -lt "$checkout_line" ] ||
+	fail "Windows Git bootstrap must run after token generation and before checkout"
+
+git_bootstrap="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Ensure Git supports recursive checkout')"
+checkout_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Checkout')"
+required_gate_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Run required materialized Python origin-DAP gate')"
+
+printf '%s\n' "$git_bootstrap" | grep -Fq 'Get-Command git.exe' ||
+	fail "Windows Git bootstrap must discover Git on PATH"
+printf '%s\n' "$git_bootstrap" | grep -Fq 'C:\Program Files\Git\cmd\git.exe' ||
+	fail "Windows Git bootstrap must discover the common Git for Windows installation"
+[ "$(printf '%s\n' "$git_bootstrap" | grep -c 'Find-UsableGit')" -ge 3 ] ||
+	fail "Windows Git bootstrap must retry discovery after package provisioning"
+# shellcheck disable=SC2016 # Match literal inline PowerShell.
+printf '%s\n' "$git_bootstrap" | grep -Fq '$minimumGitVersion = [Version]"2.18.0"' ||
+	fail "Windows Git bootstrap must enforce actions/checkout's Git 2.18 minimum"
+# shellcheck disable=SC2016 # Match literal inline PowerShell.
+printf '%s\n' "$git_bootstrap" | grep -Fq '[Version]$matches.version -lt $minimumGitVersion' ||
+	fail "Windows Git bootstrap must verify the selected Git after PATH propagation"
+printf '%s\n' "$git_bootstrap" | grep -Fq 'Get-Command choco.exe' ||
+	fail "Windows Git bootstrap must discover the runner package manager"
+printf '%s\n' "$git_bootstrap" | grep -Fq 'upgrade git -y --no-progress' ||
+	fail "Windows Git bootstrap must install or upgrade Git when discovery fails"
+# shellcheck disable=SC2016 # Match literal inline PowerShell.
+printf '%s\n' "$git_bootstrap" | grep -Fq '$LASTEXITCODE -notin @(0, 1641, 3010)' ||
+	fail "Windows Git bootstrap must reject package provisioning failures"
+# shellcheck disable=SC2016 # Match literal inline PowerShell.
+printf '%s\n' "$git_bootstrap" | grep -Fq '$env:PATH = "$gitDirectory;$env:PATH"' ||
+	fail "Windows Git bootstrap must update PATH for its own verification"
+# shellcheck disable=SC2016 # Match literal inline PowerShell.
+printf '%s\n' "$git_bootstrap" | grep -Fq 'Add-Content -LiteralPath $env:GITHUB_PATH -Value $gitDirectory' ||
+	fail "Windows Git bootstrap must propagate Git to checkout through GITHUB_PATH"
+
+[ "$(printf '%s\n' "$checkout_step" | grep -c 'submodules: recursive$')" -eq 1 ] ||
+	fail "Windows checkout must retain recursive submodules"
+[ "$(printf '%s\n' "$checkout_step" | grep -c "token: \${{ steps.app-token.outputs.token }}$")" -eq 1 ] ||
+	fail "Windows checkout must retain the generated CI token"
+printf '%s\n' "$required_gate_step" | grep -Fq 'run: just test-origin-dap' ||
+	fail "Windows required gate must still run the strict origin-DAP router"
+if printf '%s\n' "$required_gate_step" | grep -Eq 'continue-on-error:|CT_ORIGIN_DAP_REQUIRED: "0"'; then
+	fail "Windows required origin-DAP gate must not tolerate failure or skips"
 fi
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/codetracer-origin-dap-self-test.XXXXXX")"

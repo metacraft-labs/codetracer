@@ -239,6 +239,84 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Ensure Git supports recursive checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $minimumGitVersion = [Version]"2.18.0"
+
+          function Find-UsableGit {
+            $candidates = @()
+            $pathGit = Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($pathGit) {
+              $candidates += $pathGit.Source
+            }
+            $candidates += @(
+              "C:\Program Files\Git\cmd\git.exe",
+              "C:\Program Files\Git\bin\git.exe",
+              "C:\Program Files (x86)\Git\cmd\git.exe",
+              "C:\Program Files (x86)\Git\bin\git.exe"
+            )
+
+            foreach ($candidate in ($candidates | Select-Object -Unique)) {
+              if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                continue
+              }
+              $versionText = (& $candidate --version 2>&1 | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or
+                  $versionText -notmatch '^git version (?<version>[0-9]+\.[0-9]+\.[0-9]+)') {
+                continue
+              }
+              $version = [Version]$matches.version
+              if ($version -ge $minimumGitVersion) {
+                return [PSCustomObject]@{ Path = $candidate; Version = $version }
+              }
+            }
+            return $null
+          }
+
+          $git = Find-UsableGit
+          if (-not $git) {
+            $choco = Get-Command choco.exe -CommandType Application -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            $chocoPath = if ($choco) { $choco.Source } else { $null }
+            if (-not $chocoPath) {
+              $commonChocoPath = "C:\ProgramData\chocolatey\bin\choco.exe"
+              if (Test-Path -LiteralPath $commonChocoPath -PathType Leaf) {
+                $chocoPath = $commonChocoPath
+              }
+            }
+            if (-not $chocoPath) {
+              throw "Git $minimumGitVersion or newer is required, and Chocolatey is unavailable."
+            }
+
+            # Chocolatey upgrade installs an absent package and upgrades an old one.
+            & $chocoPath upgrade git -y --no-progress
+            if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
+              throw "Chocolatey failed to install or upgrade Git (exit $LASTEXITCODE)."
+            }
+            $git = Find-UsableGit
+          }
+
+          if (-not $git) {
+            throw "Git $minimumGitVersion or newer is unavailable after provisioning."
+          }
+
+          $gitDirectory = Split-Path -Parent $git.Path
+          $env:PATH = "$gitDirectory;$env:PATH"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $gitDirectory
+
+          $resolvedGit = Get-Command git.exe -CommandType Application -ErrorAction Stop |
+            Select-Object -First 1
+          $verifiedVersionText = (& $resolvedGit.Source --version 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or
+              $verifiedVersionText -notmatch '^git version (?<version>[0-9]+\.[0-9]+\.[0-9]+)' -or
+              [Version]$matches.version -lt $minimumGitVersion) {
+            throw "Provisioned Git does not satisfy the required minimum $minimumGitVersion."
+          }
+          Write-Host "Using $verifiedVersionText from $($resolvedGit.Source) for checkout."
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
