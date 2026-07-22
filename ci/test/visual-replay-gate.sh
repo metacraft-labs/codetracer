@@ -37,6 +37,9 @@ echo "##########################################################################
 echo "Checking required visual replay tests and build siblings"
 echo "###############################################################################"
 
+# shellcheck disable=SC1091
+source ci/test/visual-replay-private-cargo-env.sh
+
 for required_file in "${REQUIRED_SOURCE_FILES[@]}"; do
 	if [[ ! -f $required_file ]]; then
 		echo "Missing required visual replay gate source: $required_file" >&2
@@ -45,6 +48,7 @@ for required_file in "${REQUIRED_SOURCE_FILES[@]}"; do
 done
 
 bash ci/test/visual-replay-build-sibling-preflight.sh "$REPO_ROOT/.."
+bash ci/test/visual-replay-private-cargo-preflight-test.sh
 bash ci/test/visual-replay-private-cargo-preflight.sh "$NATIVE_BACKEND_REPO"
 
 # The Nix dev shell provides the flake-locked Rust-backed recorder via

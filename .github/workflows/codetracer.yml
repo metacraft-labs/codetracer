@@ -2658,6 +2658,22 @@ jobs:
           export SSH_ASKPASS=/bin/false
           export GIT_CONFIG_GLOBAL=/dev/null
           export GIT_CONFIG_SYSTEM=/dev/null
+
+          # A self-hosted runner may carry process-scoped Git configuration
+          # from its launcher. Remove every numbered entry before installing
+          # the closed configuration below; entries above GIT_CONFIG_COUNT are
+          # ignored by Git today, but must not become active if this list is
+          # extended later. GIT_CONFIG_PARAMETERS is a separate inline channel.
+          for git_env_name in "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"; do
+            if [[ "${git_env_name}" =~ ^GIT_CONFIG_(KEY|VALUE)_[0-9]+$ ]]; then
+              unset "${git_env_name}"
+            fi
+          done
+          unset GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_ALLOW_PROTOCOL
+
+          # Carry only the header and helper block through Nix shell startup.
+          # The gate re-establishes all non-secret policy values after the
+          # git-hooks shell hook has finished and before invoking Git/Cargo.
           export GIT_CONFIG_COUNT=2
           export GIT_CONFIG_KEY_0="http.${lldb_sys_url}.extraHeader"
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${cargo_auth_basic}"
@@ -2671,9 +2687,10 @@ jobs:
             unset CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME
             unset GIT_TERMINAL_PROMPT GIT_ASKPASS SSH_ASKPASS
             unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+            unset GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_ALLOW_PROTOCOL
             unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
             unset GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1
-            unset lldb_sys_url cargo_home
+            unset git_env_name lldb_sys_url cargo_home
           }
           trap cleanup_private_cargo_auth EXIT
 
