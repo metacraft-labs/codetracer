@@ -2579,22 +2579,43 @@ jobs:
 
           # Cargo's default libgit2 transport does not honor the Git URL
           # authentication installed by setup-dev-env. Force the Git CLI and
-          # give it a process-scoped rewrite for the one private dependency
-          # used by codetracer-native-backend. No credential file is written;
-          # the App token is revoked by its action's post-job hook.
+          # give it a process-scoped HTTP header for the one private dependency
+          # used by codetracer-native-backend. Keep the repository URL free of
+          # credentials so the token cannot enter git-remote-https argv. No
+          # credential file is written; the App token is revoked by its
+          # action's post-job hook.
           lldb_sys_url="https://github.com/metacraft-labs/lldb-sys.rs.git"
-          authenticated_lldb_sys_url="https://x-access-token:${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN}@github.com/metacraft-labs/lldb-sys.rs.git"
+          cargo_auth_basic="$(
+            printf 'x-access-token:%s' "${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN}" |
+              base64 | tr -d '\r\n'
+          )"
+          cargo_home="${RUNNER_TEMP}/visual-replay-cargo-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "${cargo_home}"
+          mkdir -p "${cargo_home}"
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          export CARGO_HOME="${cargo_home}"
+          export CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME=true
           export GIT_TERMINAL_PROMPT=0
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0="url.${authenticated_lldb_sys_url}.insteadOf"
-          export GIT_CONFIG_VALUE_0="${lldb_sys_url}"
-          unset CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN authenticated_lldb_sys_url
+          export GIT_ASKPASS=/bin/false
+          export SSH_ASKPASS=/bin/false
+          export GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_SYSTEM=/dev/null
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0="http.${lldb_sys_url}.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${cargo_auth_basic}"
+          export GIT_CONFIG_KEY_1="credential.helper"
+          export GIT_CONFIG_VALUE_1=""
+          unset CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN cargo_auth_basic
 
           cleanup_private_cargo_auth() {
-            unset CARGO_NET_GIT_FETCH_WITH_CLI GIT_TERMINAL_PROMPT
+            rm -rf "${cargo_home}"
+            unset CARGO_NET_GIT_FETCH_WITH_CLI CARGO_HOME
+            unset CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME
+            unset GIT_TERMINAL_PROMPT GIT_ASKPASS SSH_ASKPASS
+            unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
             unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-            unset lldb_sys_url
+            unset GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1
+            unset lldb_sys_url cargo_home
           }
           trap cleanup_private_cargo_auth EXIT
 
