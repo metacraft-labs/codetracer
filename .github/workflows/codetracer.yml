@@ -1198,10 +1198,9 @@ jobs:
   # `just test-cross-process` entrypoint canonicalised in
   # `Cross-Process-Origin-E2E-Test-Design.md` §6.
   #
-  # Both 3-trace cargo tests skip cleanly when the
-  # `account-balance-with-wasm/` fixture's `.ct` containers aren't
-  # materialised; the envelope invokes `regenerate.sh` first and tolerates
-  # its honest-skip (exit code 75).
+  # The committed three-trace fixture and both GUI specs are required. The
+  # envelope rejects missing prerequisites, ignored/skipped tests, count
+  # drift, and any Playwright skip result.
   cross-process-linux:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     name: cross-process value-origin (Linux)
@@ -1225,6 +1224,11 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      - name: Setup isonim siblings
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Build frontend (needed by gated Playwright stage)
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
@@ -1235,6 +1239,7 @@ jobs:
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CT_CROSS_PROCESS_REQUIRED: "1"
         run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process
 
   viewmodel-tests:
