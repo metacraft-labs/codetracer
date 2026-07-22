@@ -2523,6 +2523,7 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+          skip-token-revoke: false
 
       - name: Checkout CodeTracer
         uses: actions/checkout@v5
@@ -2571,8 +2572,32 @@ jobs:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CODETRACER_VISUAL_REPLAY_REPO_PATH: ${{ github.workspace }}/../codetracer-visual-replay
+          CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN: ${{ steps.ci_token.outputs.token }}
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: |
+          set -euo pipefail
+
+          # Cargo's default libgit2 transport does not honor the Git URL
+          # authentication installed by setup-dev-env. Force the Git CLI and
+          # give it a process-scoped rewrite for the one private dependency
+          # used by codetracer-native-backend. No credential file is written;
+          # the App token is revoked by its action's post-job hook.
+          lldb_sys_url="https://github.com/metacraft-labs/lldb-sys.rs.git"
+          authenticated_lldb_sys_url="https://x-access-token:${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN}@github.com/metacraft-labs/lldb-sys.rs.git"
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.${authenticated_lldb_sys_url}.insteadOf"
+          export GIT_CONFIG_VALUE_0="${lldb_sys_url}"
+          unset CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN authenticated_lldb_sys_url
+
+          cleanup_private_cargo_auth() {
+            unset CARGO_NET_GIT_FETCH_WITH_CLI GIT_TERMINAL_PROMPT
+            unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+            unset lldb_sys_url
+          }
+          trap cleanup_private_cargo_auth EXIT
+
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
 
       - name: Stage sibling artifacts into workspace

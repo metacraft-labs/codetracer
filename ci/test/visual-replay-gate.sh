@@ -45,6 +45,7 @@ for required_file in "${REQUIRED_SOURCE_FILES[@]}"; do
 done
 
 bash ci/test/visual-replay-build-sibling-preflight.sh "$REPO_ROOT/.."
+bash ci/test/visual-replay-private-cargo-preflight.sh "$NATIVE_BACKEND_REPO"
 
 # The Nix dev shell provides the flake-locked Rust-backed recorder via
 # CODETRACER_PYTHON_CMD. CodeTracer's recording CLI consumes the more specific
