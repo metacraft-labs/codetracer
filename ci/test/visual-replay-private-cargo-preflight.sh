@@ -2,32 +2,48 @@
 set -euo pipefail
 
 # setup-dev-env authenticates ordinary Git and Nix fetches, but Cargo's
-# default libgit2 transport does not consume that URL-rewrite credential.
-# The visual replay workflow therefore installs a process-only, exact-repo
-# rewrite and selects Cargo's Git CLI transport before it enters the gate.
-# Validate that contract before any build or test starts.
+# default libgit2 transport does not consume that credential. The visual replay
+# workflow therefore selects Cargo's Git CLI transport and installs a
+# process-only HTTP Authorization header scoped to the exact lldb-sys URL.
+# Validate both the security contract and a real locked fetch before any build
+# or test starts.
 if [[ ${GITHUB_ACTIONS:-} != "true" ]]; then
 	exit 0
 fi
+
+LLDB_SYS_URL="https://github.com/metacraft-labs/lldb-sys.rs.git"
+
+redact_cargo_fetch_output() {
+	sed -E \
+		-e 's#(https://x-access-token:)[^@[:space:]]+(@github\.com)#\1[REDACTED]\2#g' \
+		-e 's#([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*[Bb][Aa][Ss][Ii][Cc][[:space:]]+)[A-Za-z0-9+/=]+#\1[REDACTED]#g'
+}
+
+fail_auth_contract() {
+	echo "Visual replay CI private Cargo authentication is incomplete or unsafe." >&2
+	exit 1
+}
 
 if [[ ${CARGO_NET_GIT_FETCH_WITH_CLI:-} != "true" ]]; then
 	echo "Visual replay CI requires Cargo git-fetch-with-cli." >&2
 	exit 1
 fi
 
-if [[ ${GIT_TERMINAL_PROMPT:-} != "0" || ${GIT_CONFIG_COUNT:-} != "1" ]]; then
-	echo "Visual replay CI private Cargo authentication is incomplete." >&2
-	exit 1
+if [[ ${GIT_TERMINAL_PROMPT:-} != "0" || ${GIT_ASKPASS:-} != "/bin/false" ||
+	${SSH_ASKPASS:-} != "/bin/false" || ${GIT_CONFIG_GLOBAL:-} != "/dev/null" ||
+	${GIT_CONFIG_SYSTEM:-} != "/dev/null" || ${GIT_CONFIG_COUNT:-} != "2" ]]; then
+	fail_auth_contract
 fi
 
 cargo_auth_key="${GIT_CONFIG_KEY_0:-}"
-cargo_auth_prefix="url.https://x-access-token:"
-cargo_auth_suffix="@github.com/metacraft-labs/lldb-sys.rs.git.insteadOf"
-if [[ $cargo_auth_key != "$cargo_auth_prefix"*"$cargo_auth_suffix" ||
-	$cargo_auth_key == "$cargo_auth_prefix$cargo_auth_suffix" ||
-	${GIT_CONFIG_VALUE_0:-} != "https://github.com/metacraft-labs/lldb-sys.rs.git" ]]; then
-	echo "Visual replay CI Cargo authentication is not scoped to lldb-sys." >&2
-	exit 1
+cargo_auth_header="${GIT_CONFIG_VALUE_0:-}"
+cargo_auth_prefix="AUTHORIZATION: basic "
+if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ||
+	$cargo_auth_header != "$cargo_auth_prefix"* ||
+	$cargo_auth_header == "$cargo_auth_prefix" ||
+	${cargo_auth_header#"$cargo_auth_prefix"} =~ [^A-Za-z0-9+/=] ||
+	${GIT_CONFIG_KEY_1:-} != "credential.helper" || -n ${GIT_CONFIG_VALUE_1:-} ]]; then
+	fail_auth_contract
 fi
 
 if [[ -n ${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN:-} ]]; then
@@ -35,9 +51,106 @@ if [[ -n ${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN:-} ]]; then
 	exit 1
 fi
 
+# Ask Git itself which URL receives the header. This catches subtle widening of
+# the config key without printing the credential. The sibling and lookalike
+# URLs must not inherit lldb-sys authentication.
+if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
+	fail_auth_contract
+fi
+for unauthenticated_url in \
+	"https://github.com/metacraft-labs/" \
+	"https://github.com/metacraft-labs/codetracer.git" \
+	"https://github.com/metacraft-labs/lldb-sys.rs.git-lookalike"; do
+	if git config --get-urlmatch http.extraHeader "$unauthenticated_url" >/dev/null 2>&1; then
+		fail_auth_contract
+	fi
+done
+unset unauthenticated_url
+
+# Exercise the transport boundary with a fresh sentinel credential and a fake
+# remote helper. GIT_TRACE records Git's child command, while the helper records
+# its actual argv. Neither the raw nor encoded sentinel may be persisted. This
+# directly guards against returning to a token-bearing URL rewrite.
+(
+	probe_dir="$(mktemp -d)"
+	trap 'rm -rf "$probe_dir"' EXIT
+	mkdir -p "$probe_dir/home" "$probe_dir/config"
+	cat >"$probe_dir/home/.gitconfig" <<'HOSTILE_GLOBAL_CONFIG'
+[url "https://global-rewrite-must-not-apply.invalid/"]
+	insteadOf = https://github.com/
+HOSTILE_GLOBAL_CONFIG
+
+	probe_remote="$probe_dir/git-remote-https"
+	cat >"$probe_remote" <<'PROBE_REMOTE'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${VISUAL_REPLAY_AUTH_PROBE_ARGV:?}"
+printf '%s\0' "$0" "$@" >"$VISUAL_REPLAY_AUTH_PROBE_ARGV"
+exit 97
+PROBE_REMOTE
+	chmod +x "$probe_remote"
+
+	sentinel="ct-cargo-auth-$RANDOM-$RANDOM-$$"
+	sentinel_basic="$(printf 'x-access-token:%s' "$sentinel" | base64 | tr -d '\r\n')"
+	probe_header="AUTHORIZATION: basic ${sentinel_basic}"
+	probe_trace="$probe_dir/git.trace"
+	probe_stdout="$probe_dir/git.stdout"
+	probe_argv="$probe_dir/git-remote-https.argv"
+
+	set +e
+	HOME="$probe_dir/home" \
+		XDG_CONFIG_HOME="$probe_dir/config" \
+		GIT_EXEC_PATH="$probe_dir" \
+		GIT_TRACE=1 \
+		GIT_TERMINAL_PROMPT=0 \
+		GIT_ASKPASS=/bin/false \
+		SSH_ASKPASS=/bin/false \
+		GIT_CONFIG_GLOBAL=/dev/null \
+		GIT_CONFIG_SYSTEM=/dev/null \
+		GIT_CONFIG_COUNT=2 \
+		GIT_CONFIG_KEY_0="http.${LLDB_SYS_URL}.extraHeader" \
+		GIT_CONFIG_VALUE_0="$probe_header" \
+		GIT_CONFIG_KEY_1="credential.helper" \
+		GIT_CONFIG_VALUE_1="" \
+		VISUAL_REPLAY_AUTH_PROBE_ARGV="$probe_argv" \
+		git ls-remote "$LLDB_SYS_URL" HEAD >"$probe_stdout" 2>"$probe_trace"
+	probe_status=$?
+	set -e
+
+	if ((probe_status == 0)) || [[ ! -s $probe_argv ]] ||
+		! grep -aFq "$LLDB_SYS_URL" "$probe_argv" ||
+		grep -aFq "global-rewrite-must-not-apply.invalid" "$probe_argv"; then
+		fail_auth_contract
+	fi
+	if grep -R -aFq -- "$sentinel" "$probe_dir" ||
+		grep -R -aFq -- "$sentinel_basic" "$probe_dir"; then
+		fail_auth_contract
+	fi
+
+	redacted_probe="$(
+		printf 'fatal: AUTHORIZATION: basic %s\n' "$sentinel_basic" |
+			redact_cargo_fetch_output
+	)"
+	if [[ $redacted_probe == *"$sentinel"* || $redacted_probe == *"$sentinel_basic"* ||
+		$redacted_probe != *"[REDACTED]"* ]]; then
+		fail_auth_contract
+	fi
+)
+
 native_backend_repo="${1:-}"
 if [[ ! -f $native_backend_repo/Cargo.lock || ! -f $native_backend_repo/Cargo.toml ]]; then
 	echo "Visual replay CI cannot find the native-backend Cargo workspace." >&2
+	exit 1
+fi
+
+if [[ ${CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME:-} != "true" ||
+	-z ${CARGO_HOME:-} || ! -d $CARGO_HOME ]]; then
+	echo "Visual replay CI requires an isolated Cargo home." >&2
+	exit 1
+fi
+if [[ -d $CARGO_HOME/git/db ]] &&
+	find "$CARGO_HOME/git/db" -mindepth 1 -print -quit | grep -q .; then
+	echo "Visual replay CI Cargo home already contains a Git dependency cache." >&2
 	exit 1
 fi
 
@@ -50,8 +163,9 @@ if ! cargo_fetch_output="$(
 	cargo fetch --locked --manifest-path "$native_backend_repo/Cargo.toml" 2>&1
 )"; then
 	printf '%s\n' "$cargo_fetch_output" |
-		sed -E 's#https://x-access-token:[^@[:space:]]*@github.com#https://x-access-token:[REDACTED]@github.com#g' >&2
+		redact_cargo_fetch_output >&2
 	echo "Visual replay CI could not prefetch the native-backend Cargo graph." >&2
 	exit 1
 fi
-unset cargo_fetch_output cargo_auth_key cargo_auth_prefix cargo_auth_suffix native_backend_repo
+unset cargo_fetch_output cargo_auth_header cargo_auth_key cargo_auth_prefix native_backend_repo
+unset LLDB_SYS_URL
