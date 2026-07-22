@@ -351,6 +351,10 @@ jobs:
           }
           "revision=$revision" >> $env:GITHUB_OUTPUT
 
+      - name: Verify private recorder checkout authentication contract
+        shell: pwsh
+        run: ./ci/test/checkout-locked-python-recorder.ps1
+
       - name: Checkout locked Python recorder adjacent to CodeTracer
         shell: pwsh
         env:
@@ -358,23 +362,9 @@ jobs:
           SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
-          $credentials = [Convert]::ToBase64String(
-            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:SIBLING_TOKEN")
-          )
-          if (Test-Path $destination) {
-            Remove-Item -Recurse -Force $destination
-          }
-          New-Item -ItemType Directory -Force -Path $destination | Out-Null
-          git -C $destination init
-          git -C $destination remote add origin `
-            https://github.com/metacraft-labs/codetracer-python-recorder.git
-          git -C $destination `
-            -c "http.extraHeader=AUTHORIZATION: basic $credentials" `
-            fetch --depth=1 origin $env:RECORDER_REVISION
-          git -C $destination checkout --detach FETCH_HEAD
-          if ((git -C $destination rev-parse HEAD).Trim() -ne $env:RECORDER_REVISION) {
-            throw "the adjacent Python recorder checkout does not match flake.lock"
-          }
+          ./ci/checkout-locked-python-recorder.ps1 `
+            -Revision $env:RECORDER_REVISION `
+            -Destination $destination
 
       - name: Install Nim toolchain
         shell: pwsh
@@ -494,6 +484,10 @@ jobs:
           }
           "revision=$revision" >> $env:GITHUB_OUTPUT
 
+      - name: Verify private recorder checkout authentication contract
+        shell: pwsh
+        run: ./ci/test/checkout-locked-python-recorder.ps1
+
       - name: Checkout locked Python recorder adjacent to CodeTracer
         shell: pwsh
         env:
@@ -501,23 +495,9 @@ jobs:
           SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
-          $credentials = [Convert]::ToBase64String(
-            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:SIBLING_TOKEN")
-          )
-          if (Test-Path $destination) {
-            Remove-Item -Recurse -Force $destination
-          }
-          New-Item -ItemType Directory -Force -Path $destination | Out-Null
-          git -C $destination init
-          git -C $destination remote add origin `
-            https://github.com/metacraft-labs/codetracer-python-recorder.git
-          git -C $destination `
-            -c "http.extraHeader=AUTHORIZATION: basic $credentials" `
-            fetch --depth=1 origin $env:RECORDER_REVISION
-          git -C $destination checkout --detach FETCH_HEAD
-          if ((git -C $destination rev-parse HEAD).Trim() -ne $env:RECORDER_REVISION) {
-            throw "the adjacent Python recorder checkout does not match flake.lock"
-          }
+          ./ci/checkout-locked-python-recorder.ps1 `
+            -Revision $env:RECORDER_REVISION `
+            -Destination $destination
 
       - name: Install Nim toolchain
         shell: pwsh
