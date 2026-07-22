@@ -240,7 +240,7 @@ jobs:
           owner: metacraft-labs
 
       - name: Ensure Git supports recursive checkout
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           $minimumGitVersion = [Version]"2.18.0"
@@ -332,7 +332,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install capnproto
-        shell: pwsh
+        shell: powershell
         run: choco install capnproto -y
 
       - name: Install Python 3.12
@@ -342,7 +342,7 @@ jobs:
 
       - name: Read locked Python recorder revision
         id: python-recorder-lock
-        shell: pwsh
+        shell: powershell
         run: |
           $lock = Get-Content -Raw flake.lock | ConvertFrom-Json
           $revision = $lock.nodes.'codetracer-python-recorder'.locked.rev
@@ -352,11 +352,11 @@ jobs:
           "revision=$revision" >> $env:GITHUB_OUTPUT
 
       - name: Verify private recorder checkout authentication contract
-        shell: pwsh
+        shell: powershell
         run: ./ci/test/checkout-locked-python-recorder.ps1
 
       - name: Checkout locked Python recorder adjacent to CodeTracer
-        shell: pwsh
+        shell: powershell
         env:
           RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
           SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -367,7 +367,7 @@ jobs:
             -Destination $destination
 
       - name: Install Nim toolchain
-        shell: pwsh
+        shell: powershell
         run: |
           choco install nim -y
           $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
@@ -375,7 +375,7 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
 
       - name: Install and verify locked Rust-backed Python recorder
-        shell: pwsh
+        shell: powershell
         run: |
           $python = (Get-Command python -ErrorAction Stop).Source
           $recorder = Join-Path $env:GITHUB_WORKSPACE `
@@ -400,7 +400,7 @@ jobs:
           "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
       - name: Prefer Git Bash over WSL bash stub
-        shell: pwsh
+        shell: powershell
         run: |
           $wslStub = "$env:SystemRoot\System32\bash.exe"
           if (Test-Path $wslStub) {
@@ -411,14 +411,14 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
 
       - name: Generate tree-sitter-nim parser
-        shell: pwsh
+        shell: powershell
         run: |
           npm install -g tree-sitter-cli
           cd libs/tree-sitter-nim
           tree-sitter generate
 
       - name: Install just
-        shell: pwsh
+        shell: powershell
         run: |
           choco install just -y
           just --version

@@ -15,8 +15,14 @@ function Get-StringSha256 {
   param([string]$Value)
 
   $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
-  $hash = [Security.Cryptography.SHA256]::HashData($bytes)
-  return [Convert]::ToHexString($hash).ToLowerInvariant()
+  $sha256 = [Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $sha256.ComputeHash($bytes)
+  }
+  finally {
+    $sha256.Dispose()
+  }
+  return ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
 }
 
 function Read-FakeGitLog {
@@ -79,6 +85,8 @@ function Assert-EnvironmentClean {
 
 $helper = Join-Path $PSScriptRoot "..\checkout-locked-python-recorder.ps1"
 . $helper
+$runningOnWindows =
+  [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) `
   "codetracer-recorder-auth-$([Guid]::NewGuid().ToString('N'))"
@@ -111,8 +119,14 @@ $entry = [ordered]@{
   )
   HeaderSha256 = if ($header) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($header)
-    $hash = [Security.Cryptography.SHA256]::HashData($bytes)
-    [Convert]::ToHexString($hash).ToLowerInvariant()
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+      $hash = $sha256.ComputeHash($bytes)
+    }
+    finally {
+      $sha256.Dispose()
+    }
+    ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
   } else { "" }
   HeaderHasBasicPrefix = [bool]($header -cmatch '^AUTHORIZATION: basic [A-Za-z0-9+/=]+$')
   RawTokenPresent = [bool]$env:SIBLING_TOKEN
@@ -145,10 +159,10 @@ if ($operation -eq "rev-parse") {
 exit 0
 '@ | Set-Content -LiteralPath $fakeGitImplementation
 
-  if ($IsWindows) {
+  if ($runningOnWindows) {
     $fakeGit = Join-Path $testRoot "fake-git.cmd"
     @'
-@pwsh -NoLogo -NoProfile -File "%~dp0fake-git-impl.ps1" %*
+@powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0fake-git-impl.ps1" %*
 @exit /b %ERRORLEVEL%
 '@ | Set-Content -LiteralPath $fakeGit
   }
@@ -238,7 +252,7 @@ exec pwsh -NoLogo -NoProfile -File "$(dirname "$0")/fake-git-impl.ps1" "$@"
     Assert-True ($entries[$index].GitTerminalPrompt -ceq "0") "Git prompting was not disabled."
     Assert-True ($entries[$index].GcmInteractive -ceq "Never") "Git Credential Manager was not disabled."
     Assert-True ($entries[$index].GitConfigNoSystem -ceq "1") "System Git config was not blocked."
-    $nullDevice = if ($IsWindows) { "NUL" } else { "/dev/null" }
+    $nullDevice = if ($runningOnWindows) { "NUL" } else { "/dev/null" }
     Assert-True ($entries[$index].GitConfigGlobal -ceq $nullDevice) `
       "Global Git config was not blocked."
     Assert-True ($entries[$index].GitConfigSystem -ceq $nullDevice) `

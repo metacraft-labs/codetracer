@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 
 $script:PythonRecorderUrl =
   "https://github.com/metacraft-labs/codetracer-python-recorder.git"
+$script:IsWindowsPlatform =
+  [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $script:ProtectedGitEnvironment = @(
   "GIT_TERMINAL_PROMPT",
   "GIT_ASKPASS",
@@ -148,8 +150,8 @@ function Invoke-LockedPythonRecorderCheckout {
     $env:GIT_ASKPASS = ""
     $env:SSH_ASKPASS = ""
     $env:GCM_INTERACTIVE = "Never"
-    $env:GIT_CONFIG_GLOBAL = if ($IsWindows) { "NUL" } else { "/dev/null" }
-    $env:GIT_CONFIG_SYSTEM = if ($IsWindows) { "NUL" } else { "/dev/null" }
+    $env:GIT_CONFIG_GLOBAL = if ($script:IsWindowsPlatform) { "NUL" } else { "/dev/null" }
+    $env:GIT_CONFIG_SYSTEM = if ($script:IsWindowsPlatform) { "NUL" } else { "/dev/null" }
     $env:GIT_CONFIG_NOSYSTEM = "1"
     $env:GIT_ALLOW_PROTOCOL = "https"
     $env:GIT_PROTOCOL_FROM_USER = "0"

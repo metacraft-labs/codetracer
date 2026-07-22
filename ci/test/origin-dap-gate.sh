@@ -96,6 +96,16 @@ workflow_step() {
 windows_per_pr="$(workflow_job origin-dap-windows)"
 windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 
+# The eph-win-x64 image provides Windows PowerShell but not PowerShell Core.
+# Every PowerShell step in the required job must therefore use the compatible
+# GitHub Actions shell name; retaining even one `pwsh` step only moves the same
+# command-not-found failure later in the job.
+if printf '%s\n' "$windows_per_pr" | grep -Fq 'shell: pwsh'; then
+	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
+fi
+[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 10 ] ||
+	fail "Windows per-PR origin-DAP job must run all ten PowerShell steps with Windows PowerShell"
+
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_TEST_LANGS: python$')" -eq 1 ] ||
 	fail "Windows per-PR origin-DAP job must select Python exactly once"
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_ORIGIN_DAP_REQUIRED: "1"$')" -eq 1 ] ||
@@ -155,6 +165,8 @@ printf '%s\n' "$git_bootstrap" | grep -Fq 'Add-Content -LiteralPath $env:GITHUB_
 	fail "Windows checkout must retain the generated CI token"
 printf '%s\n' "$required_gate_step" | grep -Fq 'run: just test-origin-dap' ||
 	fail "Windows required gate must still run the strict origin-DAP router"
+[ "$(printf '%s\n' "$required_gate_step" | grep -c 'shell: bash$')" -eq 1 ] ||
+	fail "Windows required gate must still run under Git Bash"
 if printf '%s\n' "$required_gate_step" | grep -Eq 'continue-on-error:|CT_ORIGIN_DAP_REQUIRED: "0"'; then
 	fail "Windows required origin-DAP gate must not tolerate failure or skips"
 fi
