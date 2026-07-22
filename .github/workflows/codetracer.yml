@@ -2532,13 +2532,11 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones isonim, codetracer-visual-replay, plus VR's own native siblings
-        # (native-backend, native-recorder, native-test-programs,
-        # visual-replay-fixtures) adjacent to this checkout at the
-        # workspace-lock-pinned revisions, replacing the former Install Nix /
-        # Checkout-manifests / Resolve-lock / clone-repo / restore-pins-loop
-        # steps. All six are codetracer-workspace members so their pinned
-        # SHAs come from the single workspace lock; a missing lock fails loudly.
+        # clones every source dependency used by the visual gate adjacent to
+        # this checkout at workspace-lock-pinned revisions. That includes the
+        # frontend's IsoNim/agent libraries, the incremental runner's trace and
+        # I/O libraries, and visual replay's own native siblings. A missing
+        # lock entry fails loudly before the build starts.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -2547,6 +2545,15 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
             isonim
+            nim-everywhere
+            nim-acp
+            nim-agent-harbor
+            nim-agents
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            io-mon
+            nim-shm-queue
+            nim-stackable-hooks
             codetracer-visual-replay
             codetracer-native-backend
             codetracer-native-recorder
@@ -2555,6 +2562,14 @@ jobs:
 
       - name: Run visual replay regression gate
         env:
+          # The CodeTracer dev shell already supplies Nim/Nimble. Build the
+          # recorder emulator directly instead of re-entering its freshly
+          # cloned, unapproved direnv environment; provide the vendored
+          # results/stew paths that build_native_api.sh imports.
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CODETRACER_VISUAL_REPLAY_REPO_PATH: ${{ github.workspace }}/../codetracer-visual-replay
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: |

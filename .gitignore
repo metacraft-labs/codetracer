@@ -242,6 +242,7 @@ tup-generate.vardict
 
 # npm (project uses yarn; package-lock.json is generated accidentally by npm install)
 package-lock.json
+!storybook/package-lock.json
 
 # yarn
 .pnp.*

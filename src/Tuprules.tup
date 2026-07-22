@@ -398,6 +398,14 @@ export LIBRARY_PATH
 export C_INCLUDE_PATH
 export NIX_CFLAGS_COMPILE
 
+# db-backend's Cargo build scripts may generate the native-recorder emulator
+# and trace-format Nim bridge. Keep their explicitly configured, hermetic
+# build mode and vendored Nim import paths when Tup sanitizes the environment.
+export CODETRACER_DB_BACKEND_SKIP_DIRENV
+export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL
+export CT_EMULATOR_EXTRA_NIM_PATHS
+export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
+
 # Keep linker selection in Cargo config/env instead of inline --config args.
 # This avoids shell-quoting differences between Windows environments.
 RUST_WINDOWS_LINKER_CONFIG =

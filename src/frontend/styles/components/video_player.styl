@@ -181,11 +181,15 @@
 
   // --- Magnifier loupe --------------------------------------------------
   .video-player-loupe
+    display: none
     position: absolute
     width: 120px
     pointer-events: none
     z-index: 10
     transform-origin: top left
+
+    &.visible
+      display: block
 
   .video-player-loupe-canvas
     width: 120px

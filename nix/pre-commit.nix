@@ -108,7 +108,10 @@
     trim-trailing-whitespace.enable = true;
     end-of-file-fixer.enable = true;
     check-yaml.enable = true;
-    check-added-large-files.enable = true;
+    check-added-large-files = {
+      enable = true;
+      excludes = [ "^storybook/package-lock\\.json$" ];
+    };
 
     check-merge-conflict = {
       enable = true;
