@@ -282,9 +282,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install capnproto
+      - name: Provision verified origin-DAP toolchain
         shell: powershell
-        run: choco install capnproto -y
+        run: ./ci/ensure-origin-dap-windows-toolchain.ps1
 
       - name: Install Python 3.12
         uses: actions/setup-python@v5
@@ -306,6 +306,7 @@ jobs:
         shell: powershell
         run: |
           ./ci/test/ensure-git-for-checkout.ps1
+          ./ci/test/ensure-origin-dap-windows-toolchain.ps1
           ./ci/test/checkout-locked-python-recorder.ps1
 
       - name: Checkout locked Python recorder adjacent to CodeTracer
@@ -318,14 +319,6 @@ jobs:
           ./ci/checkout-locked-python-recorder.ps1 `
             -Revision $env:RECORDER_REVISION `
             -Destination $destination
-
-      - name: Install Nim toolchain
-        shell: powershell
-        run: |
-          choco install nim -y
-          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
-          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
-          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
 
       - name: Install and verify locked Rust-backed Python recorder
         shell: powershell
@@ -373,12 +366,6 @@ jobs:
           npm install -g tree-sitter-cli
           cd libs/tree-sitter-nim
           tree-sitter generate
-
-      - name: Install just
-        shell: powershell
-        run: |
-          choco install just -y
-          just --version
 
       - name: Run required materialized Python origin-DAP gate
         shell: bash
