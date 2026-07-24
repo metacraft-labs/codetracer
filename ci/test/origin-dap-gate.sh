@@ -200,6 +200,12 @@ grep -Fq 'v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe' \
 grep -Fq 'ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d' \
 	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
 	fail "Windows Git bootstrap must pin the reviewed PortableGit SHA256"
+grep -Fq '"GIT_CONFIG_KEY_0=core.longpaths"' \
+	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
+	fail "Windows Git bootstrap must propagate long-path support to recursive checkout"
+grep -Fq '"GIT_CONFIG_PARAMETERS="' \
+	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
+	fail "Windows Git bootstrap must neutralize inherited inline Git configuration"
 printf '%s\n' "$bootstrap_contract_step" |
 	grep -Fq './ci/test/ensure-git-for-checkout.ps1' ||
 	fail "Windows job must run the Git bootstrap behavioral contract"

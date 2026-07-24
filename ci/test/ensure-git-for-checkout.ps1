@@ -92,6 +92,11 @@ $script:TestRoot = Join-Path ([IO.Path]::GetTempPath()) `
 New-Item -ItemType Directory -Path $script:TestRoot | Out-Null
 $script:Passed = 0
 $savedPath = $env:PATH
+$savedGitConfigParameters = $env:GIT_CONFIG_PARAMETERS
+$savedGitConfigCount = $env:GIT_CONFIG_COUNT
+$savedGitConfigKey0 = $env:GIT_CONFIG_KEY_0
+$savedGitConfigValue0 = $env:GIT_CONFIG_VALUE_0
+$hostGit = (Get-Command git -ErrorAction Stop).Source
 
 try {
   Invoke-Test "pins the official PortableGit asset and rejects Chocolatey fallback" {
@@ -119,12 +124,15 @@ try {
     New-FakePortableGitLayout $gitRoot
     $git = Join-Path (Join-Path $gitRoot "cmd") "git.exe"
     $githubPath = Join-Path $caseRoot "github-path.txt"
+    $githubEnv = Join-Path $caseRoot "github-env.txt"
     [IO.File]::WriteAllText($githubPath, "")
+    [IO.File]::WriteAllText($githubEnv, "")
     $env:PATH = "original-path"
     $state = [PSCustomObject]@{ Provisioned = $false }
     $result = Ensure-CodeTracerGitForCheckout `
       -Destination (Join-Path $caseRoot "must-not-install") `
       -GitHubPathFile $githubPath `
+      -GitHubEnvFile $githubEnv `
       -CandidateProvider { @($git) } `
       -VersionReader { param($path) [Version]"2.51.2" } `
       -ProvisionGit {
@@ -150,13 +158,32 @@ try {
     $persisted = @(Get-Content -LiteralPath $githubPath | Where-Object { $_ })
     Assert-True (($persisted -join "`0") -ceq ($expectedEntries -join "`0")) `
       "GITHUB_PATH does not contain the exact Git and Git Bash directories."
+    $persistedEnv = @(Get-Content -LiteralPath $githubEnv)
+    $expectedEnv = @(
+      "GIT_CONFIG_PARAMETERS=",
+      "GIT_CONFIG_COUNT=1",
+      "GIT_CONFIG_KEY_0=core.longpaths",
+      "GIT_CONFIG_VALUE_0=true"
+    )
+    Assert-True (($persistedEnv -join "`0") -ceq ($expectedEnv -join "`0")) `
+      "GITHUB_ENV does not contain the exact job-scoped long-path configuration."
+    Assert-True ([string]::IsNullOrEmpty($env:GIT_CONFIG_PARAMETERS)) `
+      "The current process retained an inline Git configuration override."
+    Assert-True ($env:GIT_CONFIG_COUNT -ceq "1") `
+      "The current process did not receive the bounded Git configuration count."
+    Assert-True ($env:GIT_CONFIG_KEY_0 -ceq "core.longpaths") `
+      "The current process did not receive the long-path configuration key."
+    Assert-True ($env:GIT_CONFIG_VALUE_0 -ceq "true") `
+      "The current process did not enable Windows long-path handling."
   }
 
   Invoke-Test "provisions verified PortableGit when Git and Chocolatey are absent" {
     $caseRoot = New-TestDirectory "provision-success"
     $destination = Join-Path $caseRoot "portable"
     $githubPath = Join-Path $caseRoot "github-path.txt"
+    $githubEnv = Join-Path $caseRoot "github-env.txt"
     [IO.File]::WriteAllText($githubPath, "")
+    [IO.File]::WriteAllText($githubEnv, "")
     $assetBytes = [Text.Encoding]::UTF8.GetBytes("reviewed portable git fixture")
     $assetSha = Get-BytesSha256 $assetBytes
     $state = [PSCustomObject]@{ Downloads = 0; Extractions = 0 }
@@ -165,6 +192,7 @@ try {
     $result = Ensure-CodeTracerGitForCheckout `
       -Destination $destination `
       -GitHubPathFile $githubPath `
+      -GitHubEnvFile $githubEnv `
       -CandidateProvider { @() } `
       -VersionReader { param($path) [Version]"2.55.0" } `
       -ProvisionGit {
@@ -398,13 +426,98 @@ try {
         -GitHubPathFile $directoryInsteadOfFile | Out-Null
     }
   }
+
+  Invoke-Test "fails closed when GITHUB_ENV cannot propagate long-path support" {
+    $env:GIT_CONFIG_PARAMETERS = "'core.longpaths=false'"
+    Assert-Throws -ExpectedMessage "GITHUB_ENV is unavailable" -Action {
+      Add-CodeTracerGitLongPathEnvironment -GitHubEnvFile ""
+    }
+    Assert-True ($env:GIT_CONFIG_PARAMETERS -ceq "'core.longpaths=false'") `
+      "A failed propagation attempt changed the current process environment."
+  }
+
+  Invoke-Test "propagates a GITHUB_ENV write failure" {
+    $caseRoot = New-TestDirectory "unwritable-github-env"
+    $directoryInsteadOfFile = Join-Path $caseRoot "github-env-directory"
+    New-Item -ItemType Directory -Path $directoryInsteadOfFile | Out-Null
+    $env:GIT_CONFIG_PARAMETERS = "'core.longpaths=false'"
+    Assert-ThrowsAny -Action {
+      Add-CodeTracerGitLongPathEnvironment `
+        -GitHubEnvFile $directoryInsteadOfFile
+    }
+    Assert-True ($env:GIT_CONFIG_PARAMETERS -ceq "'core.longpaths=false'") `
+      "A failed GITHUB_ENV write changed the current process environment."
+  }
+
+  Invoke-Test "neutralizes hostile inherited GIT_CONFIG_PARAMETERS" {
+    $caseRoot = New-TestDirectory "hostile-git-config-parameters"
+    $githubEnv = Join-Path $caseRoot "github-env.txt"
+    [IO.File]::WriteAllText($githubEnv, "")
+    $env:GIT_CONFIG_PARAMETERS = "'core.longpaths=false'"
+    $env:GIT_CONFIG_COUNT = "1"
+    $env:GIT_CONFIG_KEY_0 = "core.longpaths"
+    $env:GIT_CONFIG_VALUE_0 = "true"
+    $before = (& $hostGit config --bool --get core.longpaths)
+    Assert-True ($LASTEXITCODE -eq 0 -and $before -ceq "false") `
+      "The hostile inline configuration fixture did not override core.longpaths."
+
+    Add-CodeTracerGitLongPathEnvironment -GitHubEnvFile $githubEnv
+
+    $after = (& $hostGit config --bool --get core.longpaths)
+    Assert-True ($LASTEXITCODE -eq 0 -and $after -ceq "true") `
+      "Hostile GIT_CONFIG_PARAMETERS still overrode the job-scoped setting."
+    Assert-True ([string]::IsNullOrEmpty($env:GIT_CONFIG_PARAMETERS)) `
+      "The hostile inline configuration was not cleared."
+    Assert-True (
+      (@(Get-Content -LiteralPath $githubEnv) -join "`0") -ceq
+      (@(
+        "GIT_CONFIG_PARAMETERS=",
+        "GIT_CONFIG_COUNT=1",
+        "GIT_CONFIG_KEY_0=core.longpaths",
+        "GIT_CONFIG_VALUE_0=true"
+      ) -join "`0")
+    ) "The hardened environment was not propagated exactly."
+  }
+
+  Invoke-Test "bounds hostile inherited numbered Git configuration" {
+    $caseRoot = New-TestDirectory "hostile-numbered-git-config"
+    $githubEnv = Join-Path $caseRoot "github-env.txt"
+    [IO.File]::WriteAllText($githubEnv, "")
+    $env:GIT_CONFIG_PARAMETERS = ""
+    $env:GIT_CONFIG_COUNT = "2"
+    $env:GIT_CONFIG_KEY_0 = "core.longpaths"
+    $env:GIT_CONFIG_VALUE_0 = "true"
+    $env:GIT_CONFIG_KEY_1 = "core.longpaths"
+    $env:GIT_CONFIG_VALUE_1 = "false"
+    try {
+      $before = (& $hostGit config --bool --get core.longpaths)
+      Assert-True ($LASTEXITCODE -eq 0 -and $before -ceq "false") `
+        "The hostile numbered configuration fixture did not override core.longpaths."
+
+      Add-CodeTracerGitLongPathEnvironment -GitHubEnvFile $githubEnv
+
+      $after = (& $hostGit config --bool --get core.longpaths)
+      Assert-True ($LASTEXITCODE -eq 0 -and $after -ceq "true") `
+        "An inherited numbered entry remained active above the bounded count."
+      Assert-True ($env:GIT_CONFIG_COUNT -ceq "1") `
+        "The numbered Git configuration was not bounded to one entry."
+    }
+    finally {
+      Remove-Item -LiteralPath Env:GIT_CONFIG_KEY_1 -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath Env:GIT_CONFIG_VALUE_1 -ErrorAction SilentlyContinue
+    }
+  }
 }
 finally {
   $env:PATH = $savedPath
+  $env:GIT_CONFIG_PARAMETERS = $savedGitConfigParameters
+  $env:GIT_CONFIG_COUNT = $savedGitConfigCount
+  $env:GIT_CONFIG_KEY_0 = $savedGitConfigKey0
+  $env:GIT_CONFIG_VALUE_0 = $savedGitConfigValue0
   Remove-Item -LiteralPath $script:TestRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($script:Passed -ne 12) {
-  throw "Expected 12 Git bootstrap tests, but $($script:Passed) passed."
+if ($script:Passed -ne 16) {
+  throw "Expected 16 Git bootstrap tests, but $($script:Passed) passed."
 }
-Write-Host "Git bootstrap contract tests passed: 12/12"
+Write-Host "Git bootstrap contract tests passed: 16/16"
