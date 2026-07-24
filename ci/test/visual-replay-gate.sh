@@ -4,6 +4,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VISUAL_REPLAY_REPO="${CODETRACER_VISUAL_REPLAY_REPO_PATH:-${REPO_ROOT}/../codetracer-visual-replay}"
 NATIVE_BACKEND_REPO="${CODETRACER_NATIVE_BACKEND_REPO_PATH:-${VISUAL_REPLAY_REPO}/../codetracer-native-backend}"
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/ci/test/visual-replay-gate-lib.sh"
 
 NIM_TESTS=(
 	"src/tests/gui/tests/frame-viewer/frame_viewer_vm_test.nim"
@@ -12,6 +14,16 @@ NIM_TESTS=(
 	"src/tests/gui/tests/frame-viewer/video_player_vm_test.nim"
 	"src/tests/gui/tests/frame-viewer/video_player_polish_test.nim"
 	"src/tests/gui/tests/debug-controls/live_mcr_debug_controls_test.nim"
+)
+
+VISUAL_REPLAY_NIM_TESTS=(
+	"tests/test_player_context.nim"
+	"tests/test_gl_executor.nim"
+	"tests/test_golden_compare.nim"
+	"tests/test_rpc_server.nim"
+	"tests/test_server_timing.nim"
+	"tests/test_mcr_recording.nim"
+	"tests/test_gl_extraction.nim"
 )
 
 PLAYWRIGHT_TESTS=(
@@ -33,6 +45,8 @@ REQUIRED_SOURCE_FILES=(
 
 cd "$REPO_ROOT"
 
+bash ci/test/visual-replay-gate-test.sh
+
 echo "###############################################################################"
 echo "Checking required visual replay tests and build siblings"
 echo "###############################################################################"
@@ -43,6 +57,17 @@ source ci/test/visual-replay-private-cargo-env.sh
 for required_file in "${REQUIRED_SOURCE_FILES[@]}"; do
 	if [[ ! -f $required_file ]]; then
 		echo "Missing required visual replay gate source: $required_file" >&2
+		exit 1
+	fi
+done
+
+if [[ ! -d $VISUAL_REPLAY_REPO ]]; then
+	echo "Missing codetracer-visual-replay sibling at $VISUAL_REPLAY_REPO" >&2
+	exit 1
+fi
+for required_file in "${VISUAL_REPLAY_NIM_TESTS[@]}"; do
+	if [[ ! -f $VISUAL_REPLAY_REPO/$required_file ]]; then
+		echo "Missing required visual replay sibling test: $required_file" >&2
 		exit 1
 	fi
 done
@@ -94,10 +119,12 @@ just storybook-build
 echo "###############################################################################"
 echo "Running required headless CodeTracer visual replay ViewModel tests"
 echo "###############################################################################"
-for test_file in "${NIM_TESTS[@]}"; do
+for test_index in "${!NIM_TESTS[@]}"; do
+	test_file="${NIM_TESTS[$test_index]}"
 	test_name="$(basename "$test_file" .nim)"
 	cache="/tmp/ct-nim-cache/visual-replay-gate-${test_name}"
-	nim c -r --hints:off \
+	visual_replay_run_nim_suite "$test_file" \
+		nim c -r --hints:off \
 		--path:src/frontend/viewmodel \
 		--nimcache:"$cache" \
 		-o:"$cache/$test_name" \
@@ -108,71 +135,12 @@ echo "##########################################################################
 echo "Running required fake-player and StoryBook Playwright visual replay tests"
 echo "###############################################################################"
 PLAYWRIGHT_GATE_JSON="${REPO_ROOT}/src/tests/gui/test-results/visual-replay-gate-results.json"
-rm -f "$PLAYWRIGHT_GATE_JSON"
-CI=1 \
-	CODETRACER_VISUAL_REPLAY_GATE_JSON="$PLAYWRIGHT_GATE_JSON" \
-	PLAYWRIGHT_RETRIES="${PLAYWRIGHT_RETRIES:-0}" \
+visual_replay_run_playwright_stage fake "$PLAYWRIGHT_GATE_JSON" \
 	just test-gui-prebuilt "${PLAYWRIGHT_TESTS[@]}"
-
-node - "$PLAYWRIGHT_GATE_JSON" <<'NODE'
-const fs = require("node:fs");
-const reportPath = process.argv[2];
-const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
-const skipped = [];
-let total = 0;
-
-function visitSuite(suite) {
-  for (const spec of suite.specs || []) {
-    for (const testCase of spec.tests || []) {
-      total += 1;
-      const titlePath = spec.titlePath || [];
-      const title = [
-        ...(testCase.projectName ? [testCase.projectName] : []),
-        ...titlePath,
-        spec.title,
-        testCase.title,
-      ].filter(Boolean).join(" > ");
-      if (testCase.outcome === "skipped") {
-        skipped.push(title);
-      }
-      for (const result of testCase.results || []) {
-        if (result.status === "skipped") {
-          skipped.push(title);
-        }
-      }
-    }
-  }
-  for (const child of suite.suites || []) {
-    visitSuite(child);
-  }
-}
-
-for (const suite of report.suites || []) {
-  visitSuite(suite);
-}
-
-if (total === 0) {
-  console.error("No Playwright tests ran in the visual replay gate.");
-  process.exit(1);
-}
-
-if (skipped.length > 0 || (report.stats && report.stats.skipped > 0)) {
-  console.error("Required visual replay Playwright tests were skipped:");
-  for (const title of [...new Set(skipped)]) {
-    console.error(`  ${title}`);
-  }
-  process.exit(1);
-}
-NODE
 
 echo "###############################################################################"
 echo "Running codetracer-visual-replay headless player and golden tests"
 echo "###############################################################################"
-if [[ ! -d $VISUAL_REPLAY_REPO ]]; then
-	echo "Missing codetracer-visual-replay sibling at $VISUAL_REPLAY_REPO" >&2
-	exit 1
-fi
-
 if [[ -z ${CODETRACER_NATIVE_REPLAY:-} ]]; then
 	native_replay_bin="$NATIVE_BACKEND_REPO/target/debug/ct-native-replay"
 	if [[ ! -x $native_replay_bin ]]; then
@@ -209,15 +177,27 @@ nimble build
 ./scripts/install-native-replay-companion.sh
 just gl-test-programs
 just build-ct-mcr
-nim c -r tests/test_player_context.nim
-nim c -r tests/test_gl_executor.nim
-nim c -r tests/test_golden_compare.nim
-nim c -r tests/test_rpc_server.nim
-nim c -r tests/test_server_timing.nim
-nim c -r tests/test_mcr_recording.nim
-nim c -r tests/test_gl_extraction.nim
+source "$CODETRACER_VISUAL_REPLAY_GATE_LIB"
+run_visual_replay_nim_test() {
+	local test_file="$1" test_name cache
+	test_name="$(basename "$test_file" .nim)"
+	cache="${TMPDIR:-/tmp}/ct-nim-cache/visual-replay-sibling-gate-${test_name}"
+	visual_replay_run_nim_suite "$test_file" \
+		nim c -r --hints:off \
+		--nimcache:"$cache" \
+		-o:"$cache/$test_name" \
+		"$test_file"
+}
+run_visual_replay_nim_test tests/test_player_context.nim
+run_visual_replay_nim_test tests/test_gl_executor.nim
+run_visual_replay_nim_test tests/test_golden_compare.nim
+run_visual_replay_nim_test tests/test_rpc_server.nim
+run_visual_replay_nim_test tests/test_server_timing.nim
+run_visual_replay_nim_test tests/test_mcr_recording.nim
+run_visual_replay_nim_test tests/test_gl_extraction.nim
 VISUAL_REPLAY_COMMAND
 
+	export CODETRACER_VISUAL_REPLAY_GATE_LIB="${REPO_ROOT}/ci/test/visual-replay-gate-lib.sh"
 	if [[ ${CODETRACER_VISUAL_REPLAY_USE_NIX:-1} == "1" ]] && command -v nix >/dev/null 2>&1; then
 		LP_NUM_THREADS="${LP_NUM_THREADS:-1}" nix develop '.?submodules=1' --command bash -lc "$visual_replay_command"
 	else
@@ -272,63 +252,9 @@ echo "##########################################################################
 echo "Running real-recording CodeTracer visual replay GUI integration test"
 echo "###############################################################################"
 REAL_PLAYWRIGHT_GATE_JSON="${REPO_ROOT}/src/tests/gui/test-results/visual-replay-real-gate-results.json"
-rm -f "$REAL_PLAYWRIGHT_GATE_JSON"
-CI=1 \
-	CODETRACER_VISUAL_REPLAY_GATE_JSON="$REAL_PLAYWRIGHT_GATE_JSON" \
-	CODETRACER_REAL_VISUAL_TRACE="$REAL_VISUAL_TRACE" \
+CODETRACER_REAL_VISUAL_TRACE="$REAL_VISUAL_TRACE" \
 	CODETRACER_CT_MCR_CMD="${VISUAL_REPLAY_REPO}/../codetracer-native-recorder/ct_cli/ct_cli" \
 	CODETRACER_CT_GFX_PLAYER_CMD="${VISUAL_REPLAY_REPO}/ct_gfx_player" \
 	CODETRACER_CT_GFX_PLAYER_BACKEND="${CODETRACER_CT_GFX_PLAYER_BACKEND:-software}" \
-	PLAYWRIGHT_RETRIES="${PLAYWRIGHT_RETRIES:-0}" \
+	visual_replay_run_playwright_stage real "$REAL_PLAYWRIGHT_GATE_JSON" \
 	just test-gui-prebuilt "$PLAYWRIGHT_REAL_RECORDING_TEST"
-
-node - "$REAL_PLAYWRIGHT_GATE_JSON" <<'NODE'
-const fs = require("node:fs");
-const reportPath = process.argv[2];
-const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
-const skipped = [];
-let total = 0;
-
-function visitSuite(suite) {
-  for (const spec of suite.specs || []) {
-    for (const testCase of spec.tests || []) {
-      total += 1;
-      const titlePath = spec.titlePath || [];
-      const title = [
-        ...(testCase.projectName ? [testCase.projectName] : []),
-        ...titlePath,
-        spec.title,
-        testCase.title,
-      ].filter(Boolean).join(" > ");
-      if (testCase.outcome === "skipped") {
-        skipped.push(title);
-      }
-      for (const result of testCase.results || []) {
-        if (result.status === "skipped") {
-          skipped.push(title);
-        }
-      }
-    }
-  }
-  for (const child of suite.suites || []) {
-    visitSuite(child);
-  }
-}
-
-for (const suite of report.suites || []) {
-  visitSuite(suite);
-}
-
-if (total === 0) {
-  console.error("No real-recording Playwright tests ran in the visual replay gate.");
-  process.exit(1);
-}
-
-if (skipped.length > 0 || (report.stats && report.stats.skipped > 0)) {
-  console.error("Required real-recording visual replay Playwright tests were skipped:");
-  for (const title of [...new Set(skipped)]) {
-    console.error(`  ${title}`);
-  }
-  process.exit(1);
-}
-NODE

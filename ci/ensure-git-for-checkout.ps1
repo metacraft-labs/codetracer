@@ -8,7 +8,8 @@ param(
       Join-Path ([IO.Path]::GetTempPath()) "codetracer-portable-git"
     }
   ),
-  [string]$GitHubPath = $env:GITHUB_PATH
+  [string]$GitHubPath = $env:GITHUB_PATH,
+  [string]$GitHubEnv = $env:GITHUB_ENV
 )
 
 Set-StrictMode -Version Latest
@@ -314,11 +315,42 @@ function Add-CodeTracerGitToPath {
   return $entries
 }
 
+function Add-CodeTracerGitLongPathEnvironment {
+  param(
+    [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$GitHubEnvFile
+  )
+
+  if ([string]::IsNullOrWhiteSpace($GitHubEnvFile)) {
+    throw "GITHUB_ENV is unavailable; Windows long-path support cannot be propagated to checkout."
+  }
+
+  # actions/checkout runs in a later step, so a process-local `git -c` is not
+  # sufficient. Git's documented process environment is job-scoped here and
+  # avoids changing persistent runner configuration. Resetting COUNT to one
+  # prevents inherited numbered entries from becoming active. The older
+  # GIT_CONFIG_PARAMETERS channel has later command-scope precedence, so it
+  # must be cleared explicitly or an inherited `core.longpaths=false` can
+  # override the bounded entry below.
+  # https://git-scm.com/docs/git#Documentation/git.txt-codeGITCONFIGCOUNTcode
+  $settings = @(
+    "GIT_CONFIG_PARAMETERS=",
+    "GIT_CONFIG_COUNT=1",
+    "GIT_CONFIG_KEY_0=core.longpaths",
+    "GIT_CONFIG_VALUE_0=true"
+  )
+  Add-Content -LiteralPath $GitHubEnvFile -Value $settings
+  $env:GIT_CONFIG_PARAMETERS = ""
+  $env:GIT_CONFIG_COUNT = "1"
+  $env:GIT_CONFIG_KEY_0 = "core.longpaths"
+  $env:GIT_CONFIG_VALUE_0 = "true"
+}
+
 function Ensure-CodeTracerGitForCheckout {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory)][string]$Destination,
     [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$GitHubPathFile,
+    [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$GitHubEnvFile,
     [Version]$MinimumVersion = $script:MinimumGitVersion,
     [scriptblock]$CandidateProvider = { Get-CodeTracerGitCandidates },
     [scriptblock]$VersionReader = { param($path) Get-CodeTracerGitVersion $path },
@@ -349,6 +381,7 @@ function Ensure-CodeTracerGitForCheckout {
   $entries = @(Add-CodeTracerGitToPath `
     -GitPath $git.Path `
     -GitHubPathFile $GitHubPathFile)
+  Add-CodeTracerGitLongPathEnvironment -GitHubEnvFile $GitHubEnvFile
   Write-Host "Using git version $verifiedVersion from $($git.Path) for checkout."
   return [PSCustomObject]@{
     Path = $git.Path
@@ -360,5 +393,6 @@ function Ensure-CodeTracerGitForCheckout {
 if ($MyInvocation.InvocationName -ne '.') {
   Ensure-CodeTracerGitForCheckout `
     -Destination $InstallRoot `
-    -GitHubPathFile $GitHubPath | Out-Null
+    -GitHubPathFile $GitHubPath `
+    -GitHubEnvFile $GitHubEnv | Out-Null
 }
