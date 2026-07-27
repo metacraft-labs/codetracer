@@ -1,0 +1,26 @@
+## codetracer/docs/book-isonim -- this site's own `DocsConfig`.
+##
+## The CodeTracer mdBook ported onto isonim-docs, themed with the shared
+## Metacraft docs theme (`theme_tokens.nim` + `assets/style.css`, copied
+## verbatim from `isonim/docs/users` for M1 -- a shared theme package is a
+## future cleanup). Branding here is CodeTracer's: the site title, the
+## `docs.codetracer.com` canonical origin the sitemap/robots are built
+## against, and the vendored CodeTracer logo + footer chrome.
+
+import core/config
+
+proc bookDocsConfig*(): DocsConfig =
+  DocsConfig(
+    siteTitle: "CodeTracer",
+    siteDescription: "Documentation for CodeTracer -- the time-travelling debugger.",
+    defaultRoute: "/",
+    stylesheetHref: "/assets/style.css",
+    baseUrl: "https://docs.codetracer.com",
+    # The CodeTracer look is delivered by the token layer + `assets/style.css`
+    # (prepended via `buildSite(docsTokensCss = ...)`), not by pointing
+    # `stylesheetHref` elsewhere, so the SSG hash/purge/non-dangling
+    # guarantee is untouched.
+    siteLogo: "/assets/img/logo-black-horizontal.svg",
+    logoHref: "/",
+    footerHtml: "Built by <a href=\"https://github.com/metacraft-labs\">metacraft-labs</a> — 2026",
+  )

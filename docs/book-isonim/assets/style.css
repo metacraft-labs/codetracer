@@ -1,0 +1,1043 @@
+/* CodeTracer docs theme -- the RULES half of the Metacraft docs theme
+ * (metacraft-theme M2 deliverable 2).
+ *
+ * A faithful port of the WebFlow CodeTracer docs design onto the
+ * isonim-docs framework's stable semantic `docs-*` class contract. The
+ * token VALUES (colours, fonts, radii, the warm canvas, the blue accent)
+ * come from the Metacraft docs token layer (`src/theme_tokens.nim`), whose
+ * emitted `:root{ --docs-*: ... }` / `[data-theme="dark"]` blocks are
+ * PREPENDED onto this file at build time (see `src/build.nim` ->
+ * `buildSite(docsTokensCss = ...)`). This file therefore defines NO
+ * `--docs-*` values itself; it only consumes them.
+ *
+ * Vendored theme binaries (Geist woff2, the CodeTracer logo, the search
+ * glyph) live in `static/` and are copied verbatim into `public/assets/`
+ * by `src/build.nim` AFTER the SSG hash/purge pass, so the `url(/assets/...)`
+ * references below resolve to real, non-hashed files (the framework's
+ * hash pipeline renames+removes files under `assets/` and does not rewrite
+ * CSS `url()` refs -- see DESIGN-DIVERGENCES.md).
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+img,
+svg {
+  max-width: 100%;
+  display: block;
+}
+
+/* --- base typography ---------------------------------------------- */
+
+body {
+  font-family: var(--docs-font-sans);
+  font-size: var(--docs-font-size-base);
+  line-height: var(--docs-line-height);
+  letter-spacing: -0.01em; /* --ls-body */
+  color: var(--docs-fg);
+  background: var(--docs-bg);
+}
+
+a {
+  color: var(--docs-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 3px solid var(--docs-focus-ring);
+  outline-offset: 2px;
+}
+
+/* --- a11y: skip-to-content link ---------------------------------- */
+
+.docs-skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateY(-120%);
+  z-index: 100;
+  padding: var(--docs-space-2) var(--docs-space-4);
+  background: var(--docs-accent);
+  color: var(--docs-accent-fg);
+  font-weight: 700;
+  border-radius: 0 0 var(--docs-radius-sm) 0;
+}
+
+.docs-skip-link:focus {
+  transform: translateY(0);
+}
+
+/* --- M0 minimal shell -------------------------------------------- */
+
+.docs-shell {
+  max-width: var(--docs-max-content-width);
+  margin: 0 auto;
+  padding: var(--docs-space-6) var(--docs-space-5);
+}
+
+.docs-body {
+  max-width: var(--docs-max-content-width);
+}
+
+/* --- three-column site frame ------------------------------------- */
+
+.docs-frame {
+  display: grid;
+  grid-template-columns: minmax(0, var(--docs-sidebar-width)) minmax(0, 1fr) minmax(0, 15rem);
+  column-gap: var(--docs-space-6);
+  max-width: 90rem;
+  margin: 0 auto;
+  padding: 0 var(--docs-space-5);
+}
+
+/* Header: brand (with CodeTracer logo) | centered search | theme toggle. */
+.docs-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: var(--docs-space-4) 0;
+  border-bottom: 1px solid var(--docs-border);
+  position: sticky;
+  top: 0;
+  background: var(--docs-bg);
+  z-index: 30;
+}
+
+/* Gap A (logo): now the framework's optional `siteLogo` hook (M3) renders a
+ * real `<img class="docs-logo">` in `.docs-header`, linked home via the
+ * `.docs-logo-link` wrapper -- replacing M2's `.docs-title::before`
+ * background-image stopgap. The monochrome mark inverts in dark mode (see the
+ * dark-chrome block) so only the logo recolours, never the title text. */
+.docs-logo-link {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.docs-logo {
+  display: inline-block;
+  height: 1.6rem;
+  width: auto;
+}
+
+.docs-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--docs-space-3);
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--docs-fg);
+}
+
+.docs-nav,
+.docs-navigation {
+  display: contents;
+}
+
+.docs-nav-breadcrumbs {
+  grid-column: 2;
+  padding-top: var(--docs-space-4);
+  font-size: var(--docs-font-size-sm);
+  color: var(--docs-fg-muted);
+}
+
+/* Sidebar: warm right-divider column, sticky under the header. */
+.docs-nav-sidebar {
+  grid-column: 1;
+  max-width: var(--docs-sidebar-width);
+  padding: var(--docs-space-8) var(--docs-space-6) var(--docs-space-8) 0;
+  border-right: 1px solid var(--docs-border);
+  position: sticky;
+  top: 6vh;
+  align-self: start;
+  max-height: calc(100vh - 6vh);
+  overflow-y: auto;
+  font-size: var(--docs-font-size-sm);
+}
+
+.docs-nav-toc {
+  grid-column: 3;
+  padding-top: var(--docs-space-8);
+  position: sticky;
+  top: 6vh;
+  align-self: start;
+  font-size: var(--docs-font-size-sm);
+}
+
+.docs-nav-adjacent {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--docs-space-4);
+  padding: var(--docs-space-5) 0;
+  margin-top: var(--docs-space-6);
+  border-top: 1px solid var(--docs-border);
+}
+
+/* Content column: max 50rem, generous padding. */
+.docs-main {
+  grid-column: 2;
+  min-width: 0;
+  max-width: var(--docs-max-content-width);
+  padding: var(--docs-space-8) 0;
+}
+
+/* Gap F (M3): the framework's optional `footerHtml` hook now fills this
+ * footer with the WebFlow attribution line (previously an empty element). */
+.docs-footer {
+  grid-column: 1 / -1;
+  padding: var(--docs-space-5) 0;
+  border-top: 1px solid var(--docs-border);
+  color: var(--docs-fg-muted);
+  font-size: var(--docs-font-size-sm);
+}
+
+.docs-footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 960px) {
+  .docs-frame {
+    grid-template-columns: 1fr;
+  }
+
+  .docs-nav-breadcrumbs,
+  .docs-nav-sidebar,
+  .docs-nav-toc,
+  .docs-nav-adjacent,
+  .docs-main {
+    grid-column: 1;
+    position: static;
+    max-height: none;
+    max-width: none;
+    border-right: none;
+  }
+}
+
+/* --- <768px hamburger drawer ------------------------------------- */
+
+.docs-nav-drawer-toggle {
+  display: none;
+}
+
+.docs-nav-drawer-body {
+  display: contents;
+}
+
+@media (max-width: 768px) {
+  .docs-nav-drawer-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--docs-space-2);
+    grid-column: 1 / -1;
+    margin: var(--docs-space-3) 0;
+    padding: var(--docs-space-2) var(--docs-space-3);
+    border: 1px solid var(--docs-border);
+    border-radius: var(--docs-radius-md);
+    background: var(--docs-bg-raised);
+    color: var(--docs-fg);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .docs-nav-drawer-body {
+    display: block;
+    grid-column: 1 / -1;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    overflow-y: auto;
+    background: var(--docs-bg);
+    padding: var(--docs-space-5);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+
+  .docs-nav-drawer-body[data-open="true"] {
+    transform: translateX(0);
+  }
+}
+
+/* --- breadcrumbs -------------------------------------------------- */
+
+.docs-nav-breadcrumb-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--docs-space-1);
+  margin: 0 0 var(--docs-space-2);
+  padding: 0;
+}
+
+.docs-nav-breadcrumb:not(:last-child)::after {
+  content: "/";
+  margin-left: var(--docs-space-1);
+  color: var(--docs-border);
+}
+
+.docs-nav-breadcrumb-current {
+  color: var(--docs-fg);
+  font-weight: 600;
+}
+
+/* --- sidebar navigation ------------------------------------------- */
+
+.docs-nav-section {
+  margin-bottom: var(--docs-space-4);
+}
+
+/* UPPERCASE muted section headers (WebFlow `.display-xs-nav-header`). */
+.docs-nav-section-title {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--docs-space-2);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.813rem;
+  color: var(--docs-fg-muted);
+}
+
+.docs-nav-section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-1);
+}
+
+.docs-nav-section-children {
+  margin-left: var(--docs-space-3);
+  padding-left: var(--docs-space-2);
+  border-left: 1px solid var(--docs-border);
+}
+
+.docs-nav-section:not(.docs-nav-section-expanded) > .docs-nav-section-list,
+.docs-nav-section:not(.docs-nav-section-expanded) > .docs-nav-section-children {
+  display: none;
+}
+
+.docs-nav-item a {
+  display: block;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--docs-radius-sm);
+  font-size: var(--docs-font-size-sm);
+  font-weight: 500;
+  color: var(--docs-fg);
+}
+
+/* Warm hover AND active surface (`#E7E5E1`) -- the WebFlow sidebar never
+ * paints the accent behind an item, so the active state is overridden off
+ * the framework default's accent fill onto the warm raised surface. */
+.docs-nav-item a:hover {
+  background: var(--docs-bg-raised);
+  color: var(--docs-fg);
+  text-decoration: none;
+}
+
+.docs-nav-item-active a {
+  background: var(--docs-bg-raised);
+  color: var(--docs-fg);
+  font-weight: 600;
+}
+
+.docs-nav-external-icon {
+  margin-left: 2px;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+/* --- table of contents -------------------------------------------- */
+
+.docs-nav-toc-list,
+.docs-nav-toc-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.docs-nav-toc-list ul {
+  padding-left: var(--docs-space-3);
+}
+
+.docs-nav-toc-item a {
+  display: block;
+  padding: 2px 0;
+  color: var(--docs-fg-muted);
+}
+
+.docs-nav-toc-item a:hover {
+  color: var(--docs-link);
+}
+
+/* --- prev/next pagination ----------------------------------------- */
+
+.docs-nav-prev,
+.docs-nav-next {
+  flex: 1;
+  padding: var(--docs-space-3) var(--docs-space-4);
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-md);
+  color: var(--docs-fg);
+}
+
+.docs-nav-next {
+  text-align: right;
+}
+
+/* --- search ------------------------------------------------------- */
+
+/* Centered search field (max 560px) with an inset glyph. */
+.docs-search {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.docs-search::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  background: url(/assets/img/ct-search-icon.svg) center / contain no-repeat;
+  pointer-events: none;
+}
+
+.docs-search-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 16px 0 42px;
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-lg);
+  background: var(--docs-input-bg);
+  color: var(--docs-code-fg);
+  font-size: 0.9375rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.docs-search-input::placeholder {
+  color: var(--docs-fg-muted);
+}
+
+.docs-search-input:focus {
+  border-color: var(--docs-focus-ring);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.docs-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 8px);
+  background: var(--docs-input-bg);
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-lg);
+  box-shadow: var(--docs-shadow);
+  max-height: 60vh;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.docs-search-results:empty {
+  display: none;
+}
+
+.docs-search-result {
+  border-radius: 7px;
+}
+
+.docs-search-result-link {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 7px;
+  color: var(--docs-code-fg);
+}
+
+.docs-search-result:hover .docs-search-result-link,
+.docs-search-result-active,
+.docs-search-result-active .docs-search-result-link {
+  background: var(--docs-code-inline-bg);
+  color: var(--docs-code-fg);
+}
+
+.docs-search-result-section {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--docs-fg-muted);
+  padding: 0 12px 6px;
+}
+
+.docs-search-empty {
+  padding: 14px 12px;
+  color: var(--docs-fg-muted);
+  font-size: var(--docs-font-size-sm);
+}
+
+/* --- theme toggle ------------------------------------------------- */
+
+.docs-theme-toggle {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-pill);
+  background: var(--docs-input-bg);
+  color: var(--docs-fg);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.docs-theme-toggle:hover {
+  background: var(--docs-bg-raised);
+}
+
+/* --- markdown content --------------------------------------------- */
+
+.docs-md-body {
+  max-width: var(--docs-max-content-width);
+}
+
+/* UNDERLINED content headings: every heading carries a hairline bottom
+ * rule + `.25em` of padding, the CodeTracer docs' signature treatment. */
+.docs-md-heading {
+  scroll-margin-top: var(--docs-space-6);
+  font-weight: 600;
+  line-height: 1.25em;
+  letter-spacing: -0.02em;
+  border-bottom: 1px solid var(--docs-border);
+  padding-bottom: 0.25em;
+}
+
+h1.docs-md-heading {
+  font-size: 1.75rem;
+  margin: 0 0 0.75em;
+}
+
+h2.docs-md-heading {
+  font-size: 1.4rem;
+  margin: var(--docs-space-6) 0 0.75em;
+}
+
+h3.docs-md-heading {
+  font-size: 1.25rem;
+  margin: var(--docs-space-5) 0 0.75em;
+}
+
+h4.docs-md-heading {
+  font-size: 1.1rem;
+  margin: var(--docs-space-4) 0 0.7em;
+}
+
+h5.docs-md-heading {
+  font-size: 1rem;
+  margin: var(--docs-space-4) 0 0.75em;
+}
+
+h6.docs-md-heading {
+  font-size: 0.85rem;
+  margin: var(--docs-space-4) 0 0.75em;
+}
+
+/* Paragraph rhythm: 2.5rem between blocks (WebFlow `--rich-text-space`). */
+.docs-md-paragraph {
+  margin: 0 0 2.5rem;
+}
+
+.docs-md-list {
+  margin: 0 0 2.5rem;
+  padding-left: var(--docs-space-5);
+}
+
+.docs-md-list li {
+  margin-bottom: var(--docs-space-1);
+}
+
+/* Inline code: `#f1f5f9` tint, 4px radius, `#282A2D` text. */
+.docs-md-body code {
+  font-family: var(--docs-font-mono);
+  font-size: 0.875rem;
+  background: var(--docs-code-inline-bg);
+  color: var(--docs-code-fg);
+  border: 1px solid var(--docs-border);
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--docs-radius-sm);
+}
+
+.docs-md-code-block {
+  position: relative;
+  margin: 0 0 2.5rem;
+}
+
+.docs-md-code-block .docs-md-code-fence {
+  margin: 0;
+}
+
+.docs-md-code-copy {
+  position: absolute;
+  top: var(--docs-space-2);
+  right: var(--docs-space-2);
+  font-family: var(--docs-font-sans);
+  font-size: var(--docs-font-size-sm);
+  line-height: 1;
+  padding: 0.35em 0.7em;
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-sm);
+  background: var(--docs-bg-raised);
+  color: var(--docs-fg-muted);
+  cursor: pointer;
+}
+
+.docs-md-code-copy:hover {
+  color: var(--docs-fg);
+  border-color: var(--docs-accent);
+}
+
+.docs-md-code-copy[data-copied="true"] {
+  color: var(--docs-tok-string);
+  border-color: var(--docs-tok-string);
+}
+
+/* Code fence: `#f6f8fa` surface, 6px radius. */
+.docs-md-code-fence {
+  font-family: var(--docs-font-mono);
+  font-size: 0.875rem;
+  color: var(--docs-code-fg);
+  background: var(--docs-code-bg);
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-code);
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  margin: 0 0 2.5rem;
+}
+
+.docs-md-code-fence code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-weight: 400;
+}
+
+.tok-keyword {
+  color: var(--docs-tok-keyword);
+}
+
+.tok-string {
+  color: var(--docs-tok-string);
+}
+
+.tok-comment {
+  color: var(--docs-tok-comment);
+  font-style: italic;
+}
+
+.tok-number {
+  color: var(--docs-tok-number);
+}
+
+/* Admonitions: 4px left border + tinted background. */
+.docs-md-admonition {
+  border-left: 4px solid var(--docs-border);
+  border-radius: var(--docs-radius-code);
+  padding: 12px 16px;
+  margin: 0 0 2.5rem;
+  background: var(--docs-bg-raised);
+}
+
+.docs-md-admonition strong {
+  display: block;
+  margin-bottom: 6px;
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+.docs-md-admonition p:last-child {
+  margin-bottom: 0;
+}
+
+.docs-md-admonition-note {
+  border-color: var(--docs-admonition-note-border);
+  background: var(--docs-admonition-note-bg);
+}
+
+.docs-md-admonition-tip {
+  border-color: var(--docs-admonition-tip-border);
+  background: var(--docs-admonition-tip-bg);
+}
+
+/* Gap D (M3): the book's `important` (violet) + `caution` (red) severities,
+ * now first-class framework admonition kinds. */
+.docs-md-admonition-important {
+  border-color: var(--docs-admonition-important-border);
+  background: var(--docs-admonition-important-bg);
+}
+
+.docs-md-admonition-caution {
+  border-color: var(--docs-admonition-caution-border);
+  background: var(--docs-admonition-caution-bg);
+}
+
+.docs-md-admonition-warning {
+  border-color: var(--docs-admonition-warning-border);
+  background: var(--docs-admonition-warning-bg);
+}
+
+.docs-md-admonition-danger {
+  border-color: var(--docs-admonition-danger-border);
+  background: var(--docs-admonition-danger-bg);
+}
+
+.docs-md-tabs {
+  margin: 0 0 2.5rem;
+}
+
+.docs-md-tablist {
+  display: flex;
+  gap: var(--docs-space-2);
+  border-bottom: 1px solid var(--docs-border);
+}
+
+.docs-md-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--docs-fg-muted);
+  font: inherit;
+  padding: var(--docs-space-2) var(--docs-space-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.docs-md-tab:hover {
+  color: var(--docs-fg);
+}
+
+.docs-md-tab[aria-selected="true"] {
+  color: var(--docs-fg);
+  border-bottom-color: var(--docs-link);
+  font-weight: 600;
+}
+
+.docs-md-tabpanel {
+  padding: var(--docs-space-4) 0 0;
+}
+
+.docs-md-tabpanel[hidden] {
+  display: none;
+}
+
+/* Tables: `#e5e7eb` borders, 8px/12px cell padding. */
+.docs-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 2.5rem;
+  font-size: var(--docs-font-size-sm);
+}
+
+.docs-md-table th,
+.docs-md-table td {
+  border: 1px solid var(--docs-border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.docs-md-table th {
+  background: var(--docs-bg-raised);
+  font-weight: 600;
+}
+
+/* --- not-found / redirect pages ----------------------------------- */
+
+.docs-not-found,
+.docs-redirect {
+  padding: var(--docs-space-6) 0;
+  color: var(--docs-fg-muted);
+}
+
+.docs-redirect-link {
+  color: var(--docs-link);
+  font-weight: 600;
+}
+
+/* --- loading indicator -------------------------------------------- */
+
+.docs-route-loading {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--docs-accent);
+  transform-origin: left;
+  transform: scaleX(0);
+  opacity: 0;
+  transition: opacity 0s linear 200ms, transform 0.3s ease 200ms;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.docs-route-loading[data-visible="true"] {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .docs-route-loading {
+    transition-duration: 0s;
+  }
+}
+
+/* --- dark-mode chrome inversion ----------------------------------- */
+/* Monochrome logo + search glyph invert to read on the dark canvas; the
+ * page-title text and all content imagery are left untouched. */
+[data-theme="dark"] .docs-logo,
+[data-theme="dark"] .docs-search::before {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .docs-logo,
+  :root:not([data-theme="light"]) .docs-search::before {
+    filter: invert(1);
+  }
+}
+
+/* --- OpenAPI three-column API reference (pkApiReference) ----------- */
+
+.docs-api-layout {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr) minmax(0, 26rem);
+  gap: var(--docs-space-6);
+  align-items: start;
+}
+
+.docs-api-nav {
+  position: sticky;
+  top: var(--docs-space-4);
+  align-self: start;
+  max-height: calc(100vh - 2 * var(--docs-space-4));
+  overflow-y: auto;
+}
+
+.docs-api-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-1);
+}
+
+.docs-api-nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--docs-space-2);
+  padding: var(--docs-space-1) var(--docs-space-2);
+  border-radius: var(--docs-radius-sm);
+  text-decoration: none;
+  color: var(--docs-fg);
+  font-size: var(--docs-font-size-sm);
+  border-left: 2px solid transparent;
+}
+
+.docs-api-nav-link:hover {
+  background: var(--docs-bg-raised);
+}
+
+.docs-api-nav-link[data-active="true"],
+.docs-api-nav-link[aria-current="true"] {
+  background: var(--docs-bg-raised);
+  border-left-color: var(--docs-accent);
+  font-weight: 600;
+}
+
+.docs-api-nav-path {
+  font-family: var(--docs-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.docs-api-method {
+  display: inline-block;
+  font-family: var(--docs-font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--docs-radius-sm);
+  color: var(--docs-accent-fg);
+  background: var(--docs-api-other);
+}
+
+.docs-api-method-get { background: var(--docs-api-get); }
+.docs-api-method-post { background: var(--docs-api-post); }
+.docs-api-method-put { background: var(--docs-api-put); }
+.docs-api-method-patch { background: var(--docs-api-patch); }
+.docs-api-method-delete { background: var(--docs-api-delete); }
+
+.docs-api-content {
+  min-width: 0;
+}
+
+.docs-api-operation {
+  padding-bottom: var(--docs-space-8);
+  scroll-margin-top: var(--docs-space-4);
+}
+
+.docs-api-operation-title {
+  display: flex;
+  align-items: center;
+  gap: var(--docs-space-3);
+}
+
+.docs-api-operation-path {
+  font-family: var(--docs-font-mono);
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
+.docs-api-summary {
+  font-weight: 600;
+}
+
+.docs-api-description {
+  color: var(--docs-fg-muted);
+}
+
+.docs-api-param-table,
+.docs-api-response-table,
+.docs-api-schema-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--docs-space-4) 0;
+  font-size: var(--docs-font-size-sm);
+}
+
+.docs-api-param-table th,
+.docs-api-param-table td,
+.docs-api-response-table th,
+.docs-api-response-table td,
+.docs-api-schema-table th,
+.docs-api-schema-table td {
+  border: 1px solid var(--docs-border);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-api-param-table th,
+.docs-api-response-table th,
+.docs-api-schema-table th {
+  background: var(--docs-bg-raised);
+}
+
+.docs-api-schema-details {
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-md);
+  padding: var(--docs-space-2) var(--docs-space-3);
+  margin: var(--docs-space-4) 0;
+}
+
+.docs-api-schema-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-family: var(--docs-font-mono);
+}
+
+.docs-api-schema-nested > td {
+  background: var(--docs-bg-raised);
+}
+
+.docs-api-samples {
+  position: sticky;
+  top: var(--docs-space-4);
+  align-self: start;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-8);
+}
+
+.docs-api-sample {
+  margin-bottom: var(--docs-space-4);
+}
+
+.docs-api-sample-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--docs-fg-muted);
+  margin-bottom: var(--docs-space-1);
+}
+
+.docs-api-sample-code {
+  margin: 0;
+  padding: var(--docs-space-3);
+  background: var(--docs-code-bg);
+  border-radius: var(--docs-radius-code);
+  overflow-x: auto;
+  font-family: var(--docs-font-mono);
+  font-size: var(--docs-font-size-sm);
+  white-space: pre;
+}
+
+.docs-api-errors {
+  grid-column: 1 / -1;
+  border: 1px solid var(--docs-admonition-danger-border);
+  background: var(--docs-admonition-danger-bg);
+  border-radius: var(--docs-radius-md);
+  padding: var(--docs-space-3) var(--docs-space-4);
+  color: var(--docs-fg);
+}
+
+@media (max-width: 900px) {
+  .docs-api-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .docs-api-nav,
+  .docs-api-samples {
+    position: static;
+    max-height: none;
+  }
+}

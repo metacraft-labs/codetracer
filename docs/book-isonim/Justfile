@@ -1,0 +1,13 @@
+# codetracer/docs/book-isonim -- task entry points.
+#
+# Every recipe assumes the IsoNim dev shell is active. From a clean checkout:
+#   nix develop ../../../isonim -c just --justfile docs/book-isonim/Justfile --working-directory docs/book-isonim build
+
+test:
+    nim c -r tests/test_nav_order_matches_summary.nim
+
+build:
+    nim c -r --hints:off -o:build/build src/build.nim
+
+serve:
+    nim c -r --hints:off src/ssr.nim
