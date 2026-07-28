@@ -22,6 +22,11 @@ import build_site
 import core/docs_tokens
 import ./docs_config
 import ./theme_tokens
+import ./redirects
+
+const legacySummaryPath = "../book/src/SUMMARY.md"
+  ## The old mdBook's SUMMARY (relative to this consumer's build CWD): the
+  ## authoritative list of legacy published pages the redirects preserve.
 
 when isMainModule:
   let tokensCss = emitTokensCss(metacraftDocsTokenLayer(), designSystemTokens())
@@ -29,4 +34,11 @@ when isMainModule:
                     docsTokensCss = tokensCss)
   if dirExists("static"):
     copyDir("static", "public" / "assets")
+  # Post-build: emit legacy-URL redirect artifacts (meta-refresh *.html
+  # stubs + a _redirects manifest) so every old mdBook deep link still
+  # resolves. Runs AFTER buildSite (which wipes+rebuilds public/) so the
+  # stubs survive, and after the static copy so the collision guard sees
+  # every real page already in place.
+  let stubs = generateRedirects("public", legacySummaryPath)
   echo "SSG: rendered ", n, " static pages into ./public/"
+  echo "SSG: emitted ", stubs, " legacy-URL redirect stubs + _redirects into ./public/"
