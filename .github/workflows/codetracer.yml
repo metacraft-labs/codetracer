@@ -2530,7 +2530,15 @@ jobs:
 
   build-and-deploy-docs:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
-    needs: [push-to-attic]
+    # The docs site is INDEPENDENT content: it is built by its own isonim-docs
+    # SSG consumer (docs/book-isonim via ci/deploy/docs.sh) and consumes NO
+    # artifact from the app build or the attic-cache push. It must therefore not
+    # be chained behind push-to-attic (which needs the full build/test matrix:
+    # test-non-gui, test-ui-tests, appimage/dmg-lib-check) — otherwise any
+    # unrelated app-CI failure silently blocks the docs deploy. Decoupled so the
+    # docs publish on every main push regardless of build/test status. The attic
+    # substituter set up in "Install Nix" is a read-through cache that works
+    # whether or not this run's push-to-attic populated it.
     if: ${{ github.ref == 'refs/heads/main' && !github.event['codetracer-ci'] }}
     permissions:
       contents: "write"
