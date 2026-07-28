@@ -2588,7 +2588,7 @@ jobs:
           SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
         run: |
           set -euo pipefail
-          for repo in isonim isonim-docs nim-everywhere nim-faststreams nim-stew; do
+          for repo in isonim isonim-docs nim-everywhere nim-faststreams nim-stew codetracer-design-system; do
             dest="${GITHUB_WORKSPACE}/../${repo}"
             rm -rf "$dest"
             git clone --depth 1 \
