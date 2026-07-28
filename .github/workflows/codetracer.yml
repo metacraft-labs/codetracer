@@ -2596,7 +2596,13 @@ jobs:
               "$dest"
           done
 
-      - run: |
+      - env:
+          # docs.sh pushes gh-pages with this (the job's GITHUB_TOKEN + the
+          # contents:write permission below) -- the same reliable mechanism the
+          # isonim/isonim-docs docs deploys use. The old origin+CODETRACER_PUSH_
+          # GITHUB_TOKEN path failed auth ("Authentication failed for .../codetracer").
+          DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main

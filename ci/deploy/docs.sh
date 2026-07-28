@@ -77,6 +77,13 @@ git commit -q -m 'deploy docs (new book at /, old mdBook at /old)' --no-gpg-sign
 if [ "$DRY_RUN" = "1" ]; then
 	echo "docs.sh: DRY RUN -- skipping push; staged $(git ls-files | wc -l) files (root=$([ "$NEW_OK" = 1 ] && echo new-isonim-book || echo old-mdbook-fallback), plus /old)"
 else
-	ORIGIN_URL="$(git -C "$REPO_ROOT" remote get-url origin)"
-	git push --force "$ORIGIN_URL" HEAD:gh-pages
+	# Prefer the workflow-provided DEPLOY_TOKEN (the job's GITHUB_TOKEN with
+	# contents:write) -- the same reliable push mechanism the isonim/isonim-docs
+	# docs deploys use. Fall back to the pre-configured `origin` remote otherwise.
+	if [ -n "${DEPLOY_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+		REMOTE="https://x-access-token:${DEPLOY_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+	else
+		REMOTE="$(git -C "$REPO_ROOT" remote get-url origin)"
+	fi
+	git push --force "$REMOTE" HEAD:gh-pages
 fi
