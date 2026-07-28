@@ -147,5 +147,6 @@ The JS recorder exposes a CLI flag `--no-autoformat` that disables the recorder-
 * [Source Map V3 spec](https://sourcemaps.info/spec.html) — the format the §P3 translation consumes.
 * [Value-Origin Tracking](./value-origin-tracking.md) — the parallel pipeline that recovers value provenance independently of binding names.
 
-<a id="sourcemap-translation-pipeline"></a>
+## Sourcemap translation pipeline
+
 *§P3 (sourcemap translation), §P4 (replay-side auto-format fallback), §P5 (this document), and §P6.2 (recorder-side auto-format hook) are milestones of the **Column-Aware Tracing & Source Deminification** campaign; the milestones spec lives at `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org`.*
