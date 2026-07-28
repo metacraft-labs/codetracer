@@ -5,9 +5,20 @@
 
 test:
     nim c -r tests/test_nav_order_matches_summary.nim
+    nim c -r tests/test_dev.nim
 
 build:
     nim c -r --hints:off -o:build/build src/build.nim
 
+# Live-reloading dev server: serves content/ + themed assets and hot-reloads
+# every open tab on any content edit. Run this, then `just open` in another shell.
+dev port='8000':
+    nim c -r --hints:off src/dev.nim {{port}}
+
+# Open the running dev server in a browser (Linux xdg-open / macOS open).
+open port='8000':
+    @xdg-open http://localhost:{{port}}/ 2>/dev/null || open http://localhost:{{port}}/ 2>/dev/null || echo "open http://localhost:{{port}}/ manually"
+
+# One-shot SSR preview (no live reload).
 serve:
     nim c -r --hints:off src/ssr.nim
