@@ -9,6 +9,7 @@ public/
 # `nim c -r` writes an extensionless native binary next to the source.
 tests/test_nav_order_matches_summary
 tests/test_legacy_url_redirects
+tests/test_publish_output_shape
 tests/test_site_builds
 tests/test_completeness
 tests/test_content_loader

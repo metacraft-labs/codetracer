@@ -2561,6 +2561,33 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Check out sibling repos for the isonim-docs SSG build
+        # The docs are now built by the isonim-docs SSG consumer at
+        # docs/book-isonim/ (see ci/deploy/docs.sh), whose config.nims
+        # `--path`-switches to sibling checkouts laid out one level above this
+        # repo (book-isonim/../../../<repo>): isonim, isonim-docs,
+        # nim-everywhere, nim-faststreams, nim-stew. actions/checkout can only
+        # write inside the workspace, so clone each sibling next to the
+        # codetracer checkout with the cross-repo installation token minted
+        # above. This mirrors isonim-docs/.github/workflows/ci.yml's
+        # sibling-checkout layout (adjusted for book-isonim's extra depth).
+        #
+        # Sibling revisions default to each repo's default branch, matching
+        # the isonim-docs CI convention; if/when isonim-docs joins the
+        # workspace-lock cross-repo CI, these should move to pinned-lock
+        # resolution instead.
+        env:
+          SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          for repo in isonim isonim-docs nim-everywhere nim-faststreams nim-stew; do
+            dest="${GITHUB_WORKSPACE}/../${repo}"
+            rm -rf "$dest"
+            git clone --depth 1 \
+              "https://x-access-token:${SIBLING_TOKEN}@github.com/metacraft-labs/${repo}.git" \
+              "$dest"
+          done
+
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
