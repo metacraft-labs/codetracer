@@ -45,6 +45,25 @@ echo "docs.sh: sibling layout as seen from docs/book-isonim:"
 	ls -1 ../../../ 2>&1 | sed 's/^/    /'
 )
 
+# book-isonim/config.nims resolves its sibling `--path`s via
+# `currentSourcePath()/../../..`, which is correct locally but fails in CI with
+# "cannot open file: build_site" even though the file is present (the checkout's
+# parent dir resolves differently under nix/symlinks). Pin the sibling search
+# paths ABSOLUTELY via a generated nim.cfg (nim reads it alongside config.nims;
+# extra --paths are harmless), computed from the known clone location
+# (${REPO_ROOT}/../<repo>). Removed after the build so the tree stays clean.
+SIBLINGS_ABS="$(cd "$REPO_ROOT/.." && pwd)"
+cat >docs/book-isonim/nim.cfg <<NIMCFG
+--path:"$SIBLINGS_ABS/isonim-docs/src"
+--path:"$SIBLINGS_ABS/isonim/src"
+--path:"$SIBLINGS_ABS/nim-everywhere/src"
+--path:"$SIBLINGS_ABS/nim-faststreams"
+--path:"$SIBLINGS_ABS/nim-stew"
+--path:"$SIBLINGS_ABS/isonim/vendor/chronicles"
+--path:"$SIBLINGS_ABS/isonim/vendor/serialization"
+--path:"$SIBLINGS_ABS/isonim/vendor/json_serialization"
+NIMCFG
+
 NEW_OK=1
 if (cd docs/book-isonim && nix develop ../../../isonim -c just build); then
 	echo "docs.sh: new isonim book built OK."
@@ -52,6 +71,7 @@ else
 	NEW_OK=0
 	echo "docs.sh: WARNING -- new isonim book build FAILED; serving the old mdBook at root as a fallback (new book absent from /). See the diagnostic above."
 fi
+rm -f docs/book-isonim/nim.cfg
 
 # --- Assemble the publish tree ---------------------------------------------
 PUBLISH="$(mktemp -d)"
