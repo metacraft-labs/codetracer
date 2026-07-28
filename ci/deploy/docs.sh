@@ -31,48 +31,34 @@ pushd docs/book-isonim/
 nix develop ../../../isonim -c just build # build output is in ./public
 popd
 
-# --- Publish public/ to the gh-pages orphan branch (mechanics unchanged) ----
+# --- Publish public/ to the gh-pages branch (force-push, no history kept) ---
+#
+# Uses a throwaway repo + force-push rather than `git worktree add --orphan`,
+# which needs git 2.42+; the CI runner's git is older (a live run failed with
+# "unknown option `orphan'", exit 129). Push to the token-authenticated `origin`
+# the workflow already configured (git remote set-url origin
+# https://x-access-token:${CODETRACER_PUSH_GITHUB_TOKEN}@github.com/...), so no
+# secret needs to be threaded into this script.
+ORIGIN_URL="$(git remote get-url origin)"
 
-# Prune any stale worktrees that no longer exist on disk
-git worktree prune
+PUBLISH="$(mktemp -d)"
+cp -a docs/book-isonim/public/. "$PUBLISH/"
 
-# If the worktree directory still exists, remove it.
-# This handles the case where a previous run failed after creating the worktree.
-if [ -d "gh-pages" ]; then
-	git worktree remove --force gh-pages
-fi
+# Required by github pages to keep the custom domain on the orphan branch.
+echo "docs.codetracer.com" >"$PUBLISH/CNAME"
+# Serve the SSG output verbatim (no Jekyll mangling of _-prefixed paths).
+touch "$PUBLISH/.nojekyll"
 
-# If the gh-pages branch already exists, delete it first
-if git show-ref --verify --quiet refs/heads/gh-pages; then
-	git branch -D gh-pages
-fi
-
-# Create a new orphan branch (this will overwrite any existing remote branch)
-# so that the history is not kept, which can be very expensive.
-git worktree add --orphan -B gh-pages gh-pages
-cp -a docs/book-isonim/public/. gh-pages
-
-# Required by github pages to set up a custom domain
-echo "docs.codetracer.com" >gh-pages/CNAME
-
+cd "$PUBLISH"
+git init -q
 git config user.name "Deploy from CI"
 git config user.email ""
-cd gh-pages
 git add -A
-git commit -m 'deploy new book' --no-gpg-sign
+git commit -q -m 'deploy new book' --no-gpg-sign
 
 if [ "$DRY_RUN" = "1" ]; then
-	echo "docs.sh: DRY RUN -- skipping 'git push origin +gh-pages'"
+	echo "docs.sh: DRY RUN -- skipping 'git push --force ... HEAD:gh-pages'"
 	echo "docs.sh: staged $(git ls-files | wc -l) files for gh-pages (CNAME=docs.codetracer.com)"
 else
-	git push origin +gh-pages
-fi
-cd ..
-
-# Clean the environment
-git worktree remove --force gh-pages
-# Drop the local gh-pages branch too, so a dry run leaves no lingering ref
-# that could later be pushed by accident (real runs already published it).
-if git show-ref --verify --quiet refs/heads/gh-pages; then
-	git branch -D gh-pages
+	git push --force "$ORIGIN_URL" HEAD:gh-pages
 fi
