@@ -542,7 +542,8 @@ a:hover {
   scroll-margin-top: var(--docs-space-6);
   font-weight: 600;
   line-height: 1.25em;
-  letter-spacing: -0.02em;
+  /* WebFlow tracks only the big display H1; smaller headings are normal. */
+  letter-spacing: normal;
   border-bottom: 1px solid var(--docs-border);
   padding-bottom: 0.25em;
 }
