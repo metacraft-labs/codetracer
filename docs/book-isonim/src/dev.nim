@@ -22,9 +22,11 @@ proc newDocsDevServer*(contentDir = "content";
                        assetsDirs = @["assets", "static"]): DevServer =
   ## This book's themed live-reload dev server. Exposed so a test drives the
   ## exact `just dev-docs` wiring without binding a socket.
-  let tokensCss = emitTokensCss(metacraftDocsTokenLayer(), designSystemTokens())
   newDevServer(contentDir = contentDir, cfg = bookDocsConfig(),
-               assetsDirs = assetsDirs, docsTokensCss = tokensCss)
+               assetsDirs = assetsDirs,
+               docsTokensCss = docsTokensCssLive(),
+               tokensCssProvider = (proc(): string = docsTokensCssLive()),
+               watchPaths = @[docsDesignSystemPath])
 
 when isMainModule:
   let port = if paramCount() >= 1: parseInt(paramStr(1)) else: 8000
