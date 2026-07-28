@@ -1,6 +1,6 @@
 ---
 title: Move (Sui / Aptos)
-order: 14
+order: 114
 ---
 ## Move (Sui / Aptos)
 

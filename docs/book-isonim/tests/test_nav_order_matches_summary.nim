@@ -1,116 +1,66 @@
-## codetracer/docs/book-isonim -- nav-order fidelity test (C-target).
+## codetracer/docs/book-isonim -- nav-structure test (C-target).
 ##
-## Proves the `order:` front matter added to every ported page reproduces
-## the ORIGINAL mdBook `SUMMARY.md` sequence, per section -- the book's
-## nav order is deliberately NON-alphabetical (python before ruby before
-## javascript; cli before gui; ct_cli before mcp-tools), so a plain
-## slug-alphabetical sort would NOT reproduce it. The framework sorts
-## content entries by (section, order, slug); this test asserts the
-## resulting per-section route order equals the SUMMARY order exactly.
-##
-## `recording-a-browser-app` is present in the source tree but NOT in
-## SUMMARY.md, so it is excluded from the comparison (it is ordered last
-## in its section via a high `order:`), while still being required to
-## exist so the page count stays complete.
+## The new book DELIBERATELY diverges from the old mdBook SUMMARY.md to match
+## the WebFlow docs organization: THREE top-level sections in a fixed order
+## (Getting Started, Usage Guide, Reference), with `building_and_packaging` +
+## `misc` folded into `reference` and the root `installation` page moved under
+## `getting_started`. This test proves that reorganization:
+##   1. every page is still present (nothing dropped in the fold);
+##   2. the content collapses to exactly the three WebFlow sections;
+##   3. the WebFlow-listed pages lead each section in WebFlow order; and
+##   4. the sidebar renders the three sections in the WebFlow order (via
+##      `DocsConfig.sectionOrder`, not the framework's default alphabetical).
 
-import std/[unittest, os, tables]
-import core/content
-
-const expectedSummaryOrder: seq[tuple[section: string, routes: seq[string]]] = @[
-  ("", @["/", "/installation"]),
-  ("getting_started", @[
-    "/getting_started",
-    "/getting_started/python",
-    "/getting_started/ruby",
-    "/getting_started/javascript",
-    "/getting_started/wasm",
-    "/getting_started/noir",
-    "/getting_started/circom",
-    "/getting_started/miden",
-    "/getting_started/leo",
-    "/getting_started/solidity",
-    "/getting_started/stylus",
-    "/getting_started/cairo",
-    "/getting_started/aiken",
-    "/getting_started/cadence",
-    "/getting_started/move",
-    "/getting_started/solana",
-    "/getting_started/sway",
-    "/getting_started/polkavm",
-    "/getting_started/tolk",
-  ]),
-  ("usage_guide", @[
-    "/usage_guide",
-    "/usage_guide/cli",
-    "/usage_guide/gui",
-    "/usage_guide/visual_recordings",
-    "/usage_guide/tracepoints",
-    "/usage_guide/incremental-testing",
-    "/usage_guide/value-origin-tracking",
-    "/usage_guide/cross-tracer-demo",
-    "/usage_guide/variable-rename-list",
-    "/usage_guide/codetracer_shell",
-    "/usage_guide/omniscient-db-size-bench",
-    "/usage_guide/native-omniscient-timing-bench",
-    "/usage_guide/slice-prep-speed-bench",
-    "/usage_guide/gui-ops-latency-bench",
-  ]),
-  ("reference", @[
-    "/reference/ct_cli",
-    "/reference/mcp-tools",
-    "/reference/origin-kinds",
-    "/reference/recorders",
-  ]),
-  ("building_and_packaging", @[
-    "/building_and_packaging/build_systems",
-  ]),
-  ("misc", @[
-    "/misc/contributing",
-    "/misc/logs",
-    "/misc/troubleshooting",
-    "/misc/environment_variables",
-    "/misc/building_docs",
-  ]),
-]
+import std/[unittest, os, tables, sequtils, sets]
+import core/[content, routes, navigation_vm]
+import ../src/docs_config
 
 proc contentDir(): string =
   currentSourcePath().parentDir().parentDir() / "content"
 
-suite "nav order reproduces the original SUMMARY.md sequence":
-  let entries = loadContentEntries(contentDir())
+suite "book nav matches the WebFlow 3-section organization":
+  let dir = contentDir()
+  let entries = loadContentEntries(dir)
 
-  test "every SUMMARY page was ported and no content is dropped":
-    # 46 source pages -> 46 content entries (nothing lost, nothing duplicated).
+  test "every page survives the fold (nothing dropped)":
     check entries.len == 46
-    var summaryCount = 0
-    for sec in expectedSummaryOrder:
-      summaryCount += sec.routes.len
-    # 45 of the 46 pages are listed in SUMMARY; recording-a-browser-app is not.
-    check summaryCount == 45
 
-  test "per-section route order matches SUMMARY (non-alphabetical) order":
-    # Group the framework-sorted entries by section, preserving the
-    # (section, order, slug) order loadContentEntries produced.
-    var bySection = initOrderedTable[string, seq[string]]()
+  test "content collapses to exactly the three WebFlow sections":
+    var sections: seq[string] = @[]
     for e in entries:
+      if e.section.len > 0 and e.section notin sections:
+        sections.add e.section
+    check sections.toHashSet == ["getting_started", "usage_guide", "reference"].toHashSet
+    # the old sections are gone
+    check "misc" notin sections
+    check "building_and_packaging" notin sections
+    # the folded/moved pages live in their new homes
+    let routes = entries.mapIt(it.routePath)
+    check "/reference/contributing" in routes
+    check "/reference/build_systems" in routes
+    check "/getting_started/installation" in routes
+
+  test "WebFlow-listed pages lead each section in WebFlow order":
+    var bySection = initTable[string, seq[string]]()
+    for e in entries:                 # entries are (section, order, slug)-sorted
       bySection.mgetOrPut(e.section, @[]).add e.routePath
+    proc leads(section: string; expected: seq[string]) =
+      let actual = bySection[section]
+      check actual[0 ..< expected.len] == expected
+    leads("getting_started", @["/getting_started", "/getting_started/installation",
+      "/getting_started/noir", "/getting_started/stylus", "/getting_started/wasm",
+      "/getting_started/ruby", "/getting_started/python"])
+    leads("usage_guide", @["/usage_guide", "/usage_guide/cli", "/usage_guide/gui",
+      "/usage_guide/tracepoints", "/usage_guide/codetracer_shell"])
+    leads("reference", @["/reference/build_systems", "/reference/contributing",
+      "/reference/troubleshooting", "/reference/environment_variables",
+      "/reference/building_docs"])
 
-    for expected in expectedSummaryOrder:
-      check bySection.hasKey(expected.section)
-      let actualAll = bySection[expected.section]
-      let summarySet = expected.routes
-      # Filter the section's derived order down to the routes SUMMARY lists,
-      # preserving derived order, then require an exact sequence match.
-      var actualFiltered: seq[string] = @[]
-      for r in actualAll:
-        if r in summarySet:
-          actualFiltered.add r
-      check actualFiltered == expected.routes
-
-  test "the non-SUMMARY page exists but sorts last in its section":
-    var usage: seq[string] = @[]
-    for e in entries:
-      if e.section == "usage_guide":
-        usage.add e.routePath
-    check "/usage_guide/recording-a-browser-app" in usage
-    check usage[^1] == "/usage_guide/recording-a-browser-app"
+  test "the sidebar renders the three sections in WebFlow order":
+    let manifest = buildManifestFromContent(dir)
+    let navPages = buildNavPages(manifest,
+      proc(p: string): ContentEntry = loadContentEntry(dir, p))
+    let sidebar = buildSidebar(navPages, "", bookDocsConfig().sectionOrder)
+    # top-level section keys, in the order the sidebar lays them out
+    let keys = sidebar.sections.mapIt(it.key).filterIt(it.len > 0)
+    check keys == @["getting_started", "usage_guide", "reference"]

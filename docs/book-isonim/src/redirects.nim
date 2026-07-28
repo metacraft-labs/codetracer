@@ -39,14 +39,26 @@ proc mapNewRoute*(relNoExt: string): string =
   ##   <section>/overview   -> /<section>              (section overview -> section index)
   ##   <section>/<page>     -> /<section>/<page>
   ##   <page>               -> /<page>
-  if relNoExt == "introduction":
-    "/"
-  elif relNoExt == "CONTRIBUTING":
-    "/misc/contributing"
-  elif relNoExt.endsWith("/overview"):
-    "/" & relNoExt[0 ..< relNoExt.len - "/overview".len]
-  else:
-    "/" & relNoExt
+  var route =
+    if relNoExt == "introduction":
+      "/"
+    elif relNoExt == "CONTRIBUTING":
+      "/reference/contributing"
+    elif relNoExt.endsWith("/overview"):
+      "/" & relNoExt[0 ..< relNoExt.len - "/overview".len]
+    else:
+      "/" & relNoExt
+  # Reorg to the WebFlow 3-section organization: fold `building_and_packaging`
+  # and `misc` into `reference`, and move the root `installation` page under
+  # `getting_started`. Keeps legacy mdBook URLs redirecting to where the content
+  # actually lives now.
+  for (frm, dst) in [("/misc/", "/reference/"),
+                     ("/building_and_packaging/", "/reference/")]:
+    if route.startsWith(frm):
+      route = dst & route[frm.len .. ^1]
+  if route == "/installation":
+    route = "/getting_started/installation"
+  route
 
 proc parseSummaryPaths*(summaryText: string): seq[string] =
   ## Extract every `](./PATH.md)` link target from an mdBook SUMMARY.md,

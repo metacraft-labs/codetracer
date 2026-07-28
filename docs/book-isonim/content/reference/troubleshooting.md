@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-order: 3
+order: 2
 ---
 ## Troubleshooting
 

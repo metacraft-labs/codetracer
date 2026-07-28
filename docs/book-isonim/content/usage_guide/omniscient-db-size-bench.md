@@ -1,6 +1,6 @@
 ---
 title: Omniscient-DB size benchmark
-order: 10
+order: 110
 ---
 # Omniscient-DB on-disk size benchmark (P2)
 

@@ -1,6 +1,6 @@
 ---
 title: Tracepoints
-order: 4
+order: 3
 ---
 ## What are tracepoints?
 

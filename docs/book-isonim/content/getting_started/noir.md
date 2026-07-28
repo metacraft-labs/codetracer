@@ -1,6 +1,6 @@
 ---
 title: Noir
-order: 5
+order: 2
 ---
 ## Noir
 

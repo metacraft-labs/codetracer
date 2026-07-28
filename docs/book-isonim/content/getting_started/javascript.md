@@ -1,6 +1,6 @@
 ---
 title: JavaScript / TypeScript
-order: 3
+order: 103
 ---
 ## JavaScript / TypeScript
 

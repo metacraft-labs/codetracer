@@ -1,6 +1,6 @@
 ---
 title: GUI-ops latency matrix benchmark
-order: 13
+order: 113
 ---
 # GUI-feature latency matrix benchmark (P4)
 

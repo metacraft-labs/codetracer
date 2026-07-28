@@ -1,6 +1,6 @@
 ---
 title: Sway (FuelVM)
-order: 16
+order: 116
 ---
 ## Sway (FuelVM)
 

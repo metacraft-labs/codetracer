@@ -16,6 +16,11 @@ proc bookDocsConfig*(): DocsConfig =
     defaultRoute: "/",
     stylesheetHref: "/assets/style.css",
     baseUrl: "https://docs.codetracer.com",
+    # Match the WebFlow docs organization: the sidebar's three top-level
+    # sections in this order (the framework otherwise sorts sections
+    # alphabetically). Content was folded to these three -- building_and_packaging
+    # + misc into reference, installation into getting_started.
+    sectionOrder: @["getting_started", "usage_guide", "reference"],
     # The CodeTracer look is delivered by the token layer + `assets/style.css`
     # (prepended via `buildSite(docsTokensCss = ...)`), not by pointing
     # `stylesheetHref` elsewhere, so the SSG hash/purge/non-dangling

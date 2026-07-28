@@ -1,6 +1,6 @@
 ---
 title: Cross-Tracer Demo
-order: 7
+order: 107
 ---
 # Cross-Tracer Demo (`account-balance-with-wasm`)
 

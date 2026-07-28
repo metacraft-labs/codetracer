@@ -1,6 +1,6 @@
 ---
 title: Stylus
-order: 10
+order: 3
 ---
 ## Getting Started with Stylus
 

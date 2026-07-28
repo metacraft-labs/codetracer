@@ -1,6 +1,6 @@
 ---
 title: Python
-order: 1
+order: 6
 ---
 ## Python
 

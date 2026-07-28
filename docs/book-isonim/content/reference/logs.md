@@ -1,6 +1,6 @@
 ---
 title: Logs and Diagnostics
-order: 2
+order: 102
 ---
 # Logs and Diagnostics
 

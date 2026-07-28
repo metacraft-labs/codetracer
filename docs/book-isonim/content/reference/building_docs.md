@@ -1,6 +1,6 @@
 ---
 title: Building the documentation
-order: 5
+order: 4
 ---
 ## Building the documentation
 
