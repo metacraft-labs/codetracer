@@ -1,4 +1,4 @@
-## Protects the `just dev` live-reload wiring for the CodeTracer book: themed
+## Protects the `just dev-docs` live-reload wiring for the CodeTracer book: themed
 ## stylesheet (token CSS prepended) + branded, reload-injected pages over its
 ## content/assets/static, and a content edit firing a reload broadcast.
 

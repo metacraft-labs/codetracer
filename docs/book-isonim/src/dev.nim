@@ -7,7 +7,7 @@
 ## `dev_server` WebSocket live-reload channel.
 ##
 ## The book is root-hosted (docs.codetracer.com, no basePath), so dev URLs match
-## production directly. Driven by `just dev` (server) + `just open` (browser);
+## production directly. Driven by `just dev-docs` (server) + `just open-docs` (browser);
 ## optional first arg is the port (default 8000).
 
 import std/[os, strutils, asyncdispatch]
@@ -21,7 +21,7 @@ export dev_server
 proc newDocsDevServer*(contentDir = "content";
                        assetsDirs = @["assets", "static"]): DevServer =
   ## This book's themed live-reload dev server. Exposed so a test drives the
-  ## exact `just dev` wiring without binding a socket.
+  ## exact `just dev-docs` wiring without binding a socket.
   let tokensCss = emitTokensCss(metacraftDocsTokenLayer(), designSystemTokens())
   newDevServer(contentDir = contentDir, cfg = bookDocsConfig(),
                assetsDirs = assetsDirs, docsTokensCss = tokensCss)

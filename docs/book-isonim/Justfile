@@ -10,15 +10,17 @@ test:
 build:
     nim c -r --hints:off -o:build/build src/build.nim
 
-# Live-reloading dev server: serves content/ + themed assets and hot-reloads
-# every open tab on any content edit. Run this, then `just open` in another shell.
-dev port='8000':
+# Live-reloading docs server: serves content/ + themed assets and hot-reloads
+# every open tab on any content edit. (`dev` is reserved for an app dev server;
+# docs commands are namespaced `-docs` -- see metacraft-dev-guidelines
+# repo-requirements.) Run this, then `just open-docs` in another shell.
+dev-docs port='8000':
     nim c -r --hints:off src/dev.nim {{port}}
 
-# Open the running dev server in a browser (Linux xdg-open / macOS open).
-open port='8000':
+# Open the running docs server in a browser (Linux xdg-open / macOS open).
+open-docs port='8000':
     @xdg-open http://localhost:{{port}}/ 2>/dev/null || open http://localhost:{{port}}/ 2>/dev/null || echo "open http://localhost:{{port}}/ manually"
 
-# One-shot SSR preview (no live reload).
-serve:
+# One-shot SSR docs preview (no live reload).
+serve-docs:
     nim c -r --hints:off src/ssr.nim
