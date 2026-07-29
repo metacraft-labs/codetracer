@@ -123,6 +123,10 @@ pub enum BrowserEvent {
     Assignment {
         #[serde(rename = "siteId")]
         site_id: u32,
+        /// The assigned value. Optional so a runtime that predates
+        /// value capture still parses.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<EncodedValue>,
     },
     /// Full value snapshot for a named binding.
     Value { name: String, value: EncodedValue },
@@ -136,6 +140,12 @@ pub enum BrowserEvent {
         key: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload: Option<serde_json::Value>,
+        /// Name of the binding the value came from on this side of the
+        /// boundary. A cross-process origin chain resumes its walk on
+        /// this name in the sending recording, so a marker without one
+        /// leaves the boundary visible but its history unreachable.
+        #[serde(rename = "showText", default, skip_serializing_if = "Option::is_none")]
+        show_text: Option<String>,
     },
     /// Session lifecycle teardown: emitted on `pagehide` / explicit
     /// `__ct.stop()`.
@@ -424,7 +434,7 @@ mod tests {
         let line = r#"{"kind":"Assignment","siteId":42}"#;
         let event = parse_event_line(line).expect("valid JSON");
         match event {
-            BrowserEvent::Assignment { site_id } => assert_eq!(site_id, 42),
+            BrowserEvent::Assignment { site_id, .. } => assert_eq!(site_id, 42),
             other => panic!("unexpected variant: {other:?}"),
         }
     }

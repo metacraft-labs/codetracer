@@ -344,6 +344,72 @@ pub struct JsonFileCtfsWriter {
     /// The path the writer chose for the events file — captured for
     /// logging and for the smoke test.
     pub last_output_path: Option<PathBuf>,
+    /// Variable-name interning table.  The on-disk format identifies a
+    /// variable by its index in `VariableName` registration order, so a
+    /// writer that emits the name but always writes id 0 attributes
+    /// every value in the recording to whichever name happened to be
+    /// registered first — the trace looks populated but every lookup
+    /// returns the wrong variable.
+    var_index: indexmap_compat::OrderedSet<String>,
+    /// Instrumentation manifest forwarded by the page runtime, decoded
+    /// into the site / function lookup tables below.  `None` until a
+    /// `Manifest` event arrives (or forever, for a runtime that does not
+    /// bundle one) — in that case the writer falls back to the
+    /// `<browser>` placeholder path and site-id-as-line encoding.
+    manifest: Option<InstrumentationManifest>,
+}
+
+/// Decoded form of the instrumenter's trace manifest.
+///
+/// The page-side runtime ships this verbatim as the `Manifest` browser
+/// event; it is the merge of every per-module `ManifestSlice` the SWC
+/// instrumenter produced (see
+/// `codetracer-js-recorder/packages/instrumenter/src/index.ts`).
+///
+/// Without it a browser recording cannot carry real source locations:
+/// the runtime's `Step` events reference a flat numeric `siteId`, and
+/// only the manifest knows which `(path, line)` that id stands for.
+/// Everything downstream that reasons about source — the origin
+/// classifier, correlation-marker locations, the editor pane — needs
+/// that resolution, so forwarding the manifest is what makes a browser
+/// trace a first-class recording rather than an opaque event log.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct InstrumentationManifest {
+    /// Source paths, indexed by `pathIndex` in the tables below.
+    #[serde(default)]
+    paths: Vec<String>,
+    #[serde(default)]
+    functions: Vec<ManifestFunction>,
+    #[serde(default)]
+    sites: Vec<ManifestSite>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestFunction {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    path_index: usize,
+    #[serde(default)]
+    line: i64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestSite {
+    #[serde(default)]
+    path_index: usize,
+    #[serde(default)]
+    line: i64,
+    /// For write sites, the name of the binding being assigned.
+    ///
+    /// Turning an assignment event into a named variable needs this:
+    /// the runtime reports only the site id and the value, because the
+    /// name is static and belongs in the manifest rather than on every
+    /// event.
+    #[serde(default)]
+    target: Option<String>,
 }
 
 impl JsonFileCtfsWriter {
@@ -358,7 +424,60 @@ impl JsonFileCtfsWriter {
             fn_table: indexmap_compat::OrderedMap::new(),
             session_ended: false,
             last_output_path: None,
+            var_index: indexmap_compat::OrderedSet::new(),
+            manifest: None,
         }
+    }
+
+    /// Resolve a variable name to its on-disk id, registering it on
+    /// first sight.
+    fn intern_variable(&mut self, name: &str) -> u32 {
+        let (idx, inserted) = self.var_index.insert_full(name.to_string());
+        if inserted {
+            self.events
+                .push(TraceLowLevelEvent::VariableName(name.to_string()));
+        }
+        idx as u32
+    }
+
+    /// Resolve a manifest site id to its `(path_id, line)` pair,
+    /// interning the source path on first sight.
+    ///
+    /// Returns `None` when no manifest was forwarded or the id is out of
+    /// range, in which case callers fall back to the `<browser>`
+    /// placeholder so a manifest-less runtime still produces a readable
+    /// (if source-less) trace rather than failing the recording.
+    fn resolve_site(&mut self, site_id: u32) -> Option<(u32, i64)> {
+        let (path, line) = {
+            let manifest = self.manifest.as_ref()?;
+            let site = manifest.sites.get(site_id as usize)?;
+            let path = manifest.paths.get(site.path_index)?.clone();
+            (path, site.line)
+        };
+        Some((self.intern_path(&path), line))
+    }
+
+    /// The name of the binding a write site assigns, when the manifest
+    /// records one.
+    fn site_target(&self, site_id: u32) -> Option<String> {
+        self.manifest
+            .as_ref()?
+            .sites
+            .get(site_id as usize)?
+            .target
+            .clone()
+    }
+
+    /// Resolve a manifest function id to its `(name, path_id, line)`
+    /// triple. Same fallback contract as [`Self::resolve_site`].
+    fn resolve_function(&mut self, fn_id: u32) -> Option<(String, u32, i64)> {
+        let (name, path, line) = {
+            let manifest = self.manifest.as_ref()?;
+            let function = manifest.functions.get(fn_id as usize)?;
+            let path = manifest.paths.get(function.path_index)?.clone();
+            (function.name.clone(), path, function.line)
+        };
+        Some((name, self.intern_path(&path), line))
     }
 
     /// Resolve a runtime-side path string to a canonical `path_id`,
@@ -389,29 +508,41 @@ impl JsonFileCtfsWriter {
                 self.intern_path(path);
             }
             BrowserEvent::Step { site_id } => {
-                // Browser site IDs are flat — the manifest carries the
-                // (path, line) tuple per site, but the manifest is not
-                // bundled into M26 V1 on the daemon side (it ships
-                // alongside the bundle on the page).  Until that lands,
-                // emit a placeholder Step with a sentinel path_id of 0
-                // and the site_id smuggled as the line number — the
-                // db-backend test harness reads this back as an opaque
-                // `(path_id, line)` and the M26 verification tests
-                // already assert at this granularity.
-                let path_id = self.ensure_default_path();
-                self.events.push(TraceLowLevelEvent::Step(StepRecord {
-                    path_id,
-                    line: i64::from(*site_id),
-                }));
+                // Browser site IDs are flat; the forwarded manifest
+                // carries the `(path, line)` tuple per site.  When the
+                // runtime bundled a manifest we resolve to the real
+                // source location — that is what lets the origin
+                // classifier read the source line behind each hop.
+                // Without one we fall back to the historical placeholder
+                // (`<browser>` path, site id smuggled as the line) so
+                // manifest-less runtimes still record.
+                let (path_id, line) = self
+                    .resolve_site(*site_id)
+                    .unwrap_or_else(|| (self.ensure_default_path(), i64::from(*site_id)));
+                self.events
+                    .push(TraceLowLevelEvent::Step(StepRecord { path_id, line }));
             }
-            BrowserEvent::Assignment { site_id } => {
-                // Same approach as Step — re-use the placeholder path
-                // until the manifest forwarding lands.
-                let path_id = self.ensure_default_path();
-                self.events.push(TraceLowLevelEvent::Step(StepRecord {
-                    path_id,
-                    line: i64::from(*site_id),
-                }));
+            BrowserEvent::Assignment { site_id, value } => {
+                // Same position resolution as Step — an assignment site is
+                // a step site with write metadata attached.
+                let (path_id, line) = self
+                    .resolve_site(*site_id)
+                    .unwrap_or_else(|| (self.ensure_default_path(), i64::from(*site_id)));
+                self.events
+                    .push(TraceLowLevelEvent::Step(StepRecord { path_id, line }));
+                // Bind the value to its name so the recording carries
+                // variables, not just positions. A trace that records
+                // where execution went but not what it produced cannot
+                // answer any question about a value — including where it
+                // came from.
+                if let (Some(target), Some(value)) = (self.site_target(*site_id), value.as_ref()) {
+                    let variable_id = self.intern_variable(&target);
+                    self.events
+                        .push(TraceLowLevelEvent::Value(FullValueRecordOnDisk {
+                            variable_id,
+                            value: translate_value(value),
+                        }));
+                }
             }
             BrowserEvent::Call { fn_id, args } => {
                 let function_id = self.ensure_function_id(*fn_id);
@@ -437,11 +568,10 @@ impl JsonFileCtfsWriter {
                 }));
             }
             BrowserEvent::Value { name, value } => {
-                self.events
-                    .push(TraceLowLevelEvent::VariableName(name.clone()));
+                let variable_id = self.intern_variable(name);
                 self.events
                     .push(TraceLowLevelEvent::Value(FullValueRecordOnDisk {
-                        variable_id: 0,
+                        variable_id,
                         value: translate_value(value),
                     }));
             }
@@ -457,17 +587,50 @@ impl JsonFileCtfsWriter {
                 boundary,
                 key,
                 payload,
+                show_text,
             } => {
-                // Correlation markers land as Event records with a JSON
-                // payload carrying the M25 marker shape.  The db-backend
-                // correlation index decodes them via the same JSON shape
-                // the M25 receiver uses; see
-                // `codetracer/src/db-backend/src/correlation_markers.rs`.
-                let metadata = format!(
-                    "{{\"direction\":{},\"boundary\":{}}}",
-                    serde_json::to_string(direction).unwrap_or_else(|_| "\"send\"".to_string()),
-                    serde_json::to_string(boundary).unwrap_or_else(|_| "\"unknown\"".to_string()),
-                );
+                // Correlation markers land as Event records whose
+                // `metadata` slot carries a **complete** M25
+                // `MarkerPayload` JSON document.  This shape is
+                // load-bearing, not cosmetic: the db-backend's
+                // `SessionHandler::pair_index` calls
+                // `MarkerPayload::decode(&event.metadata)` and silently
+                // drops any firing that does not deserialise into the
+                // full struct.  An abbreviated `{direction, boundary}`
+                // object decodes to `None`, which means the marker never
+                // enters the pair index and no cross-process chain can
+                // ever cross this boundary.  Field names and the
+                // `key_value`-is-a-string convention therefore mirror
+                // `codetracer/src/db-backend/src/correlation_markers.rs`
+                // exactly.
+                //
+                // `key_value` is stringified because the pair index
+                // matches sends to receives by string equality on
+                // `(boundary_id, key_value)`; JSON numbers and strings
+                // that render identically must therefore collapse to the
+                // same key.
+                let key_value = match key {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                let show_value = payload.as_ref().map(|p| match p {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                });
+                let metadata = serde_json::json!({
+                    "marker_id": 0,
+                    "boundary_id": boundary,
+                    "direction": direction,
+                    "key_text": "key",
+                    "key_value": key_value,
+                    // `show_text` names the binding the walk resumes on
+                    // after crossing this boundary.
+                    "show_text": show_text,
+                    "show_value": show_value,
+                    "description": serde_json::Value::Null,
+                    "format": serde_json::Value::Null,
+                })
+                .to_string();
                 let content = serde_json::json!({
                     "key": key,
                     "payload": payload,
@@ -493,9 +656,14 @@ impl JsonFileCtfsWriter {
     /// the real values in V1+ and the synthesised record is overwritten
     /// at trace open time.
     fn ensure_function_id(&mut self, fn_id: u32) -> u32 {
-        let path_id = self.ensure_default_path();
+        // Prefer the manifest's real `(name, path, line)`; fall back to
+        // a synthesised record when no manifest was forwarded.
+        let (name, path_id, line) = self
+            .resolve_function(fn_id)
+            .unwrap_or_else(|| (format!("fn_{fn_id}"), self.ensure_default_path(), 0));
         let next_id = self.fn_table.len() as u32;
         let mut newly_inserted = false;
+        let record_name = name.clone();
         let assigned = self
             .fn_table
             .entry(fn_id)
@@ -503,9 +671,9 @@ impl JsonFileCtfsWriter {
                 newly_inserted = true;
                 FunctionRecordOnDisk {
                     function_id: next_id,
-                    name: format!("fn_{fn_id}"),
+                    name: record_name,
                     path_id,
-                    line: 0,
+                    line,
                 }
             })
             .function_id;
@@ -515,9 +683,9 @@ impl JsonFileCtfsWriter {
             // caller `translate` pushes the Call afterwards.
             self.events
                 .push(TraceLowLevelEvent::Function(FunctionRecord {
-                    name: format!("fn_{fn_id}"),
+                    name,
                     path_id,
-                    line: 0,
+                    line,
                 }));
         }
         assigned
@@ -601,12 +769,29 @@ impl CtfsWriter for JsonFileCtfsWriter {
         Ok(())
     }
 
-    fn manifest(&mut self, _manifest: &serde_json::Value) -> io::Result<()> {
-        // V1: the manifest is informational on the receiver side — its
-        // contents (path table, site table, function table) get bundled
-        // alongside the page-side bundle and never reach the receiver
-        // today.  Stashing the manifest in a sidecar file is the next
-        // step but is not load-bearing for the round-trip smoke.
+    fn manifest(&mut self, manifest: &serde_json::Value) -> io::Result<()> {
+        // Decode the instrumenter manifest so subsequent `Step` /
+        // `Call` events resolve to real source locations.  A manifest
+        // that fails to decode is logged and ignored rather than
+        // failing the recording — a partially-understood manifest must
+        // not cost the user their trace.
+        match serde_json::from_value::<InstrumentationManifest>(manifest.clone()) {
+            Ok(decoded) => {
+                log::info!(
+                    "browser-stream writer: manifest accepted ({} path(s), {} function(s), {} site(s))",
+                    decoded.paths.len(),
+                    decoded.functions.len(),
+                    decoded.sites.len(),
+                );
+                self.manifest = Some(decoded);
+            }
+            Err(err) => {
+                log::warn!(
+                    "browser-stream writer: ignoring undecodable manifest ({err}); \
+                     steps will fall back to the <browser> placeholder path"
+                );
+            }
+        }
         Ok(())
     }
 

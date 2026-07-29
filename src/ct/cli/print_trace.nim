@@ -1,17 +1,27 @@
-## ct print -- Print trace events in human-readable format.
+## ct print -- Inspect a recording.
 ##
-## Auto-detects the trace type:
-## - `.ct` containers: materialized DB traces and MCR replay traces alike are
-##   stored in CTFS containers; `ct print` shows summary info and delegates
-##   detailed event analysis to `ct-mcr` / `ct-print` companion tools.
-## - JSONL span manifests: parses and pretty-prints HTTP requests
-## - Trace directories: scans for trace files within
+## Auto-detects the trace shape and reads it:
+## - `.ct` CTFS containers (server-side recorders, MCR): full decode via the
+##   shared `codetracer_ct_print_lib` reader.
+## - Three-file JSON trace directories (the browser recorder's output).
+## - JSONL span manifests: parses and pretty-prints HTTP requests.
+## - Directories containing any of the above.
 ##
-## Legacy sidecar bundles are no longer accepted (M-REC-1.5): all
-## metadata lives in the CTFS container's ``meta.dat``.
+## One command covering every shape is deliberate. A cross-process session
+## routinely mixes a browser recording with a server recording, and the
+## question that matters — do their correlation markers actually pair? —
+## can only be answered by looking at both in the same terms.
+##
+## Useful invocations:
+##   ct print <trace>                     summary
+##   ct print --filter markers <trace>    boundary crossings this trace declares
+##   ct print --format json <trace>       complete decoded document
 
 import
-  std/[os, json, strutils, strformat, options]
+  std/[os, json, strutils, strformat, options, tables]
+import results
+import codetracer_trace_writer/new_trace_reader
+import codetracer_ct_print_lib
 
 type
   TraceType* = enum
@@ -23,7 +33,7 @@ type
 
   PrintOptions* = object
     path*: string
-    filter*: string        ## "calls", "steps", "http", "errors", ""
+    filter*: string        ## "calls", "steps", "http", "errors", "markers", ""
     function*: string      ## filter by function name
     limit*: int            ## max events to print (0 = unlimited)
     format*: string        ## "text", "json", "csv"
@@ -135,7 +145,7 @@ proc printSpanManifest(path: string, opts: PrintOptions) =
     echo ""
     echo fmt"Total: {count} requests"
 
-proc printMaterializedTrace(path: string, opts: PrintOptions) =
+proc printMaterializedTraceStub(path: string, opts: PrintOptions) =
   ## Stub: legacy materialized traces are no longer supported (M-REC-1.5).
   ## Materialized traces now live in `.ct` CTFS containers and are printed
   ## via `printMcrTrace`. This stub stays around so detection of legacy
@@ -147,14 +157,161 @@ proc printMaterializedTrace(path: string, opts: PrintOptions) =
   echo "  regenerated as a CTFS `.ct` container (see"
   echo "  codetracer-specs/Trace-Files/CTFS-Migration-Guide.md)."
 
-proc printMcrTrace(path: string, opts: PrintOptions) =
-  ## Print info about an MCR .ct trace file.
-  echo fmt"MCR trace: {path}"
-  let size = getFileSize(path)
-  echo fmt"  Size: {size} bytes ({size div 1024} KB)"
+proc collectMarkerEvents(events: JsonNode): seq[JsonNode] =
+  ## Pick the correlation markers out of a `buildFullDocument` event list.
+  if events == nil or events.kind != JArray:
+    return @[]
+  for ev in events.elems:
+    if isCorrelationMarker(ev):
+      result.add(ev)
+
+proc renderMarkerTable(program: string, markers: seq[JsonNode]) =
+  ## Human-readable rendering shared by the CTFS and JSON trace shapes.
+  ##
+  ## Correlation markers are what let a value's history cross a process
+  ## boundary: each records that a value left or entered this recording,
+  ## tagged with a key that pairs it with the matching marker elsewhere.
+  ## When a cross-process origin chain stops early, the reason is nearly
+  ## always visible here — a missing marker, a key that does not match its
+  ## counterpart, or a direction recorded the wrong way round.
+  if program.len > 0:
+    echo fmt"program: {program}"
+  echo fmt"correlation markers: {markers.len}"
+  if markers.len == 0:
+    echo ""
+    echo "  (none — this recording declares no boundary crossings, so a"
+    echo "   cross-process origin chain cannot enter or leave it)"
+    return
   echo ""
-  echo "(Use 'ct-mcr trace info " & path & "' for detailed event analysis)"
-  echo "(Use 'ct-mcr trace events " & path & "' to dump individual events)"
+  echo "  #  direction  boundary                  key                  step  shown"
+  echo "-".repeat(88)
+  for i, m in markers:
+    let payload = m{"correlation_marker"}
+    let direction = payload{"direction"}.getStr("?")
+    let boundary = payload{"boundary_id"}.getStr("?")
+    let key = payload{"key_value"}.getStr("?")
+    let stepId = m{"step_id"}.getInt(-1)
+    let shown =
+      if payload{"show_value"} != nil and payload{"show_value"}.kind == JString:
+        payload{"show_value"}.getStr()
+      else:
+        ""
+    echo align($(i + 1), 3) & "  " & alignLeft(direction, 9) & "  " &
+      alignLeft(boundary, 24) & "  " & alignLeft(key, 19) & "  " &
+      align($stepId, 4) & "  " & shown
+
+proc printCtfsTrace(path: string, opts: PrintOptions) =
+  ## Decode a CTFS `.ct` container and print it.
+  ##
+  ## This used to stop at "here is the file size, go run ct-mcr". Reading
+  ## the container here means one command answers questions about every
+  ## trace shape CodeTracer produces, which matters most when comparing
+  ## recordings that are *supposed* to correlate with each other: having
+  ## to switch tools between a browser recording and a server recording is
+  ## exactly when a mismatch goes unnoticed.
+  let readerRes = openNewTrace(path)
+  if readerRes.isErr:
+    echo fmt"Error: cannot read CTFS container {path}: {readerRes.error}"
+    quit(1)
+  var reader = readerRes.get()
+  let doc = buildFullDocument(reader, FullOpts())
+
+  if opts.filter == "markers":
+    let markers = collectMarkerEvents(doc{"events"})
+    if opts.format == "json":
+      var arr = newJArray()
+      for m in markers:
+        arr.add(m)
+      echo pretty(arr, indent = 2)
+    else:
+      renderMarkerTable(doc{"metadata"}{"program"}.getStr(""), markers)
+    return
+
+  if opts.format == "json":
+    echo pretty(doc, indent = 2)
+    return
+
+  echo fmt"CTFS trace: {path}"
+  let meta = doc{"metadata"}
+  if meta != nil:
+    echo "  Program:  " & meta{"program"}.getStr("-")
+    echo "  Workdir:  " & meta{"workdir"}.getStr("-")
+    echo "  Recorder: " & meta{"recorder"}.getStr("-")
+  let counts = doc{"counts"}
+  if counts != nil:
+    for k, v in counts.pairs:
+      echo fmt"  {k}: {v}"
+  let markers = collectMarkerEvents(doc{"events"})
+  echo fmt"  Correlation markers: {markers.len}"
+  echo ""
+  echo "  Use --markers for the boundary-crossing detail,"
+  echo "      --format json for the complete decoded document."
+
+proc printJsonTrace(path: string, opts: PrintOptions) =
+  ## Print a legacy three-file JSON trace directory.
+  ##
+  ## This is the shape the browser recorder writes (`record-web`), so it
+  ## has to be first-class here rather than a migration message: a
+  ## cross-process session routinely mixes one of these with a CTFS
+  ## container from a server recorder.
+  let eventsPath = path / "trace.json"
+  if not fileExists(eventsPath):
+    echo fmt"Error: {eventsPath} not found"
+    quit(1)
+  let events = parseFile(eventsPath)
+  var program = ""
+  if fileExists(path / "trace_metadata.json"):
+    program = parseFile(path / "trace_metadata.json"){"program"}.getStr("")
+
+  # Re-shape the on-disk events into the same `{kind, ...}` view
+  # `buildFullDocument` produces, so the marker rendering below is shared
+  # with the CTFS path rather than duplicated per format.
+  var markers: seq[JsonNode] = @[]
+  var stepIndex = 0
+  var counts = initTable[string, int]()
+  if events.kind == JArray:
+    for raw in events.elems:
+      if raw.kind != JObject:
+        continue
+      for tag, body in raw.pairs:
+        counts.mgetOrPut(tag, 0) += 1
+        if tag == "Step":
+          inc stepIndex
+        elif tag == "Event":
+          var ev = newJObject()
+          ev["kind"] = newJString("io")
+          ev["step_id"] = newJInt(stepIndex)
+          let metadata = body{"metadata"}.getStr("")
+          var bytes: seq[byte] = @[]
+          for c in metadata:
+            bytes.add(byte(c))
+          addEventMetadata(ev, bytes)
+          if isCorrelationMarker(ev):
+            markers.add(ev)
+
+  if opts.filter == "markers":
+    if opts.format == "json":
+      var arr = newJArray()
+      for m in markers:
+        arr.add(m)
+      echo pretty(arr, indent = 2)
+    else:
+      renderMarkerTable(program, markers)
+    return
+
+  if opts.format == "json":
+    echo pretty(events, indent = 2)
+    return
+
+  echo fmt"JSON trace: {path}"
+  echo fmt"  Program: {program}"
+  for tag, n in counts.pairs:
+    echo fmt"  {tag}: {n}"
+  echo fmt"  Correlation markers: {markers.len}"
+
+proc printMcrTrace(path: string, opts: PrintOptions) =
+  ## Print a `.ct` container (materialized DB traces and MCR traces alike).
+  printCtfsTrace(path, opts)
 
 proc printTraceDirectory(path: string, opts: PrintOptions) =
   ## Scan a directory for traces and print a summary.
@@ -344,7 +501,7 @@ proc runPrint*(opts: PrintOptions) =
   of ttSpanManifest:
     printSpanManifest(opts.path, opts)
   of ttMaterialized:
-    printMaterializedTrace(opts.path, opts)
+    printJsonTrace(opts.path, opts)
   of ttMcrTrace:
     printMcrTrace(opts.path, opts)
   of ttTraceDirectory:

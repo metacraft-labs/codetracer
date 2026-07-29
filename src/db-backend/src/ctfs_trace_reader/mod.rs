@@ -1984,12 +1984,22 @@ impl CTFSTraceReader {
 
                     let step_id = StepId(step_id_raw as i64);
                     let content = String::from_utf8_lossy(&data).to_string();
+                    // The metadata slot carries correlation markers. It
+                    // used to be dropped here, which meant a recording
+                    // could contain a perfectly good marker that nothing
+                    // downstream could see: cross-process origin chains
+                    // stopped at the boundary and the recording looked
+                    // like it simply had no markers at all.
+                    let metadata = reader
+                        .event_metadata(idx)
+                        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                        .unwrap_or_default();
 
                     db.events.push(DbRecordEvent {
                         kind,
                         content,
                         step_id,
-                        metadata: String::new(),
+                        metadata,
                     });
                 }
                 Err(e) => {
