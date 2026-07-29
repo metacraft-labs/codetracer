@@ -404,12 +404,15 @@ fn setup(
     // differently:
     //   - `trace_folder` itself may be a .ct file (ct-dap-client test runner)
     //   - `trace_path` (trace_folder / trace_file) may be the .ct file
+    //   - `trace_folder` may be a *directory* holding the container, which
+    //     is what recorders emitting a trace bundle produce (the JS
+    //     recorder writes `<program>.ct` next to a `files/` source tree)
     let ctfs_candidate = if trace_folder.is_file() && is_codetracer_ctfs_file(trace_folder) {
         Some(trace_folder.to_path_buf())
     } else if trace_path.exists() && is_codetracer_ctfs_file(&trace_path) {
         Some(trace_path.clone())
     } else {
-        None
+        find_ctfs_container_in_dir(trace_folder)
     };
 
     if let Some(ctfs_path) = ctfs_candidate {
@@ -1021,10 +1024,217 @@ fn handle_request_via_session(
         )
         .into());
     }
+    // M29 §14.3 — `ct/originChain` is the one *per-trace* request the
+    // session layer must post-process: after the owning trace's
+    // single-trace walk finishes, the chain may end on a receive marker
+    // whose matching send lives in a sibling recording. Only the session
+    // layer can see the sibling handlers, so the composer runs here.
+    //
+    // Sessions with a single trace fall through to the plain per-trace
+    // path so the single-recording behaviour stays bit-identical.
+    if req.command == "ct/originChain" && session.trace_count() > 1 {
+        return handle_origin_chain_via_session(session, slot, req, sender);
+    }
     let handler = session
         .handler_for_thread_id_mut(thread_id)
         .ok_or_else(|| -> Box<dyn Error> { "session router: handler lookup failed".into() })?;
     handle_request(handler, req, sender)
+}
+
+/// Session-scoped `ct/originChain` dispatch — the production wiring of
+/// the M29 cross-process composer (spec §14.3).
+///
+/// Flow:
+///
+/// 1. Run the owning trace's ordinary single-trace origin walk through
+///    [`Handler::compute_origin_chain`] — the exact same code path a
+///    single-recording session takes.
+/// 2. Snapshot the session-wide [`PairIndex`] from every loaded trace's
+///    marker firings ([`SessionHandler::pair_index`]).
+/// 3. Hand both to [`cross_process_origin::apply_cross_process_clause`]
+///    along with a resolver that runs step 1 again on whichever sibling
+///    trace the matched send marker names. The composer recurses, so a
+///    three-recording chain (backend → frontend-js → frontend-wasm)
+///    resolves in one request.
+/// 4. Respond with the (possibly extended) chain through the owning
+///    trace's handler so the wire shape — including the companion
+///    `ct/updated-origin-chain` event — is unchanged.
+///
+/// The resolver deliberately reuses `compute_origin_chain`: a sibling
+/// hop sequence is then *by construction* identical to what a direct
+/// query against that sibling would return, which is what makes the
+/// per-hop assertions in the cross-process tests meaningful.
+fn handle_origin_chain_via_session(
+    session: &mut SessionHandler,
+    slot: TraceSlot,
+    req: dap::Request,
+    sender: Sender<DapMessage>,
+) -> Result<(), Box<dyn Error>> {
+    use crate::cross_process_origin::{
+        CrossProcessExtension, CrossProcessOutcome, SiblingContinuation, TraceIdentity, apply_cross_process_clause,
+    };
+
+    let args = req.load_args::<crate::task::CtOriginChainArguments>()?;
+
+    // The identity of the trace the query targets. Both fields come
+    // from the manifest so the spans the composer emits carry exactly
+    // the recording ids and roles `ct/listProcesses` advertises.
+    let current_identity = {
+        let loaded = session
+            .trace(slot)
+            .ok_or_else(|| -> Box<dyn Error> { "origin-chain router: unknown trace slot".into() })?;
+        TraceIdentity::new(loaded.entry.recording_id.0.clone(), loaded.entry.role.clone())
+    };
+
+    // Step 1 — the owning trace's single-trace chain.
+    let base_result = {
+        let handler = session
+            .handler_for_slot_mut(slot)
+            .ok_or_else(|| -> Box<dyn Error> { "origin-chain router: handler lookup failed".into() })?;
+        handler.compute_origin_chain(&args)
+    };
+
+    // Step 2 — owned snapshot of the session-wide pair index. Owning it
+    // (rather than borrowing through `session`) is what frees the
+    // resolver closure below to take `&mut session`.
+    let pair_index = session.pair_index();
+
+    // Step 3 — compose. The closure borrows `session` mutably for the
+    // duration of the walk, so it lives in its own scope; the borrow
+    // must end before we can re-borrow a handler to answer the request.
+    let composed = {
+        let session_ref = &mut *session;
+        let mut resolver =
+            |sibling_recording_id: &str, step_id: i64, display_variable: &str| -> Option<SiblingContinuation> {
+                let recording = crate::session_manifest::RecordingId(sibling_recording_id.to_string());
+                let sibling_slot = session_ref.slot_for_recording_id(&recording)?;
+                let sibling_identity = {
+                    let loaded = session_ref.trace(sibling_slot)?;
+                    TraceIdentity::new(loaded.entry.recording_id.0.clone(), loaded.entry.role.clone())
+                };
+                // Continue on the send-side display variable at the marker's
+                // step. `display_variable` is the marker's `show=` text (or
+                // its `key=` text when `show` was omitted) — i.e. the name
+                // of the sibling-side binding that carried the value across
+                // the boundary.
+                let sibling_args = crate::task::CtOriginChainArguments {
+                    variable_name: display_variable.to_string(),
+                    step_id,
+                    // A fresh query on the sibling: no frame pin, no
+                    // continuation cursor, and the caller's hop budget.
+                    frame_id: -1,
+                    continuation_token: None,
+                    ..args.clone()
+                };
+                let sibling_handler = session_ref.handler_for_slot_mut(sibling_slot)?;
+                match sibling_handler.compute_origin_chain(&sibling_args) {
+                    Ok(sibling_chain) => {
+                        if sibling_chain.hops.is_empty() {
+                            // The boundary matched but the sibling had nothing
+                            // to say. Almost always this means the marker named
+                            // a binding that does not exist at that step in the
+                            // sending recording — a mismatch between the
+                            // marker's `show` name and the program's actual
+                            // variable. Worth saying out loud: the resulting
+                            // chain still renders a boundary hop, so from the
+                            // UI it looks like the feature half-worked.
+                            eprintln!(
+                                "[cross-process origin] sibling `{sibling_recording_id}` returned no hops \
+                             for `{display_variable}` @step {step_id} — does that binding exist there?"
+                            );
+                        }
+                        Some(SiblingContinuation {
+                            sibling_identity,
+                            sibling_hops: sibling_chain.hops,
+                            sibling_terminator: sibling_chain.terminator,
+                            sibling_truncated: sibling_chain.truncated,
+                        })
+                    }
+                    // A sibling-side failure is not a request-level failure:
+                    // the composer treats `None` as "missing correlation" and
+                    // terminates the chain cleanly at the boundary, which is
+                    // the spec §14.3 behaviour for an unresolvable sibling.
+                    Err(err) => {
+                        warn!(
+                            "cross-process origin: sibling `{}` chain for `{}` @ step {} failed: {:?}",
+                            sibling_recording_id, display_variable, step_id, err
+                        );
+                        None
+                    }
+                }
+            };
+        match base_result {
+            Ok(chain) => {
+                let extension = CrossProcessExtension {
+                    current_identity: current_identity.clone(),
+                    pair_index: &pair_index,
+                    resolver: &mut resolver,
+                };
+                let (chain, outcome) = apply_cross_process_clause(
+                    chain,
+                    &extension.current_identity,
+                    extension.pair_index,
+                    extension.resolver,
+                );
+                match outcome {
+                    CrossProcessOutcome::NoBoundaryFound => {
+                        // The chain stayed inside one recording. That is
+                        // normal for a value with no cross-process history,
+                        // but it is also what a *misconfigured* boundary
+                        // looks like, and the two are indistinguishable
+                        // from the outside. Log enough to tell them apart:
+                        // where the walk ended, and which receive markers
+                        // were available to match against.
+                        let tail = chain
+                            .hops
+                            .last()
+                            .map(|h| format!("{}:{} @step {}", h.location.path, h.location.line, h.step_id))
+                            .unwrap_or_else(|| "<no hops>".to_string());
+                        let recv_markers: Vec<String> = pair_index
+                            .buckets()
+                            .filter(|((_, direction), _)| {
+                                *direction == crate::correlation_markers::MarkerDirection::Recv
+                            })
+                            .flat_map(|((boundary, _), events)| {
+                                events.iter().map(move |e| {
+                                    format!(
+                                        "{boundary}@{}:{} step {} in {}",
+                                        e.source_path, e.source_line, e.step_id, e.recording_id
+                                    )
+                                })
+                            })
+                            .collect();
+                        // Deliberately on stderr, not just the log file:
+                        // this is the diagnostic an operator needs when a
+                        // cross-process chain mysteriously stops, and the
+                        // log file lives under a per-run temp dir that is
+                        // awkward to find after the fact. Only reachable
+                        // for multi-recording sessions, so it does not
+                        // add noise to ordinary single-trace debugging.
+                        eprintln!(
+                            "[cross-process origin] no boundary crossed. chain tail {tail}; \
+                             receive markers visible: [{}]",
+                            recv_markers.join(", ")
+                        );
+                    }
+                    other => {
+                        debug!(
+                            "cross-process origin: outcome {other:?} across {} span(s)",
+                            chain.cross_process_spans.len()
+                        );
+                    }
+                }
+                Ok(chain)
+            }
+            Err(err) => Err(err),
+        }
+    };
+
+    // Step 4 — respond through the owning trace's handler.
+    let handler = session
+        .handler_for_slot_mut(slot)
+        .ok_or_else(|| -> Box<dyn Error> { "origin-chain router: handler lookup failed".into() })?;
+    handler.respond_origin_chain(req, composed, sender)
 }
 
 fn default_live_recording_dir(program: &Path, thread_name: &str) -> PathBuf {
@@ -1506,6 +1716,40 @@ fn is_codetracer_ctfs_file(path: &Path) -> bool {
         return false;
     }
     reader.has_file("steps.dat") || reader.has_file("events.log")
+}
+
+/// Find the single CTFS container inside a trace *directory*.
+///
+/// Several recorders emit a bundle rather than a bare file: a directory
+/// holding `<program>.ct` alongside a `files/` copy of the recorded
+/// sources. Users — and `session.toml` manifests — naturally name the
+/// directory, so the loader has to look inside it.
+///
+/// Only an unambiguous match counts. A directory containing several
+/// containers is a multi-thread native bundle, which belongs to the
+/// replay-worker path further down; picking one arbitrarily would load a
+/// fragment of a recording and present it as the whole thing.
+fn find_ctfs_container_in_dir(dir: &Path) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+    let mut found: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()? {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "ct") {
+            continue;
+        }
+        if !is_codetracer_ctfs_file(&path) {
+            continue;
+        }
+        if found.is_some() {
+            // Ambiguous — leave it to the replay-worker path.
+            return None;
+        }
+        found = Some(path);
+    }
+    found
 }
 
 fn load_materialized_origin_metadata_decoder_from_path(

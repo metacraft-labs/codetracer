@@ -109,6 +109,81 @@ fn dump_scenario(scenario: &str, line: u32, variable: &str) -> Result<(), String
     }
 }
 
+/// Dump the cross-process origin chain from the three-recording demo.
+///
+/// Unlike the Python scenarios above this needs no recorder at run
+/// time: the demo's three `.ct` containers are committed, so the dump
+/// only has to load them as a session and issue one `ct/originChain`.
+/// The ViewModel test consumes the result to drive `SessionVM` and
+/// `OriginChainVM` against a chain that genuinely spans three
+/// recordings — the state those view models exist to represent, and
+/// which no single-trace fixture can produce.
+fn dump_cross_process_scenario() -> Result<(), String> {
+    let Some(out_dir) = dump_out_dir() else {
+        return Ok(());
+    };
+    fs::create_dir_all(&out_dir).map_err(|e| format!("create out dir: {}", e))?;
+
+    let scenario = "cross_process_three_trace";
+    let fixture_root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cross_process/account-balance-with-wasm");
+    let manifest = fixture_root.join("session.toml");
+    let server_source = fixture_root.join("backend/server.js");
+
+    if !manifest.is_file() {
+        let reason = format!(
+            "{} is missing — run {}/regenerate.sh (see that directory's README.md)",
+            manifest.display(),
+            fixture_root.display()
+        );
+        fs::write(out_dir.join(format!("{scenario}.skipped")), &reason)
+            .map_err(|e| format!("write skipped marker: {}", e))?;
+        eprintln!("SKIPPED: {scenario}: {reason}");
+        return Ok(());
+    }
+
+    let source = fs::read_to_string(&server_source).map_err(|e| format!("read server source: {}", e))?;
+    let line = source
+        .lines()
+        .position(|l| l.contains("const balance = payload.balance"))
+        .map(|idx| idx as u32 + 1)
+        .ok_or_else(|| "the demo server must bind `balance` from the request payload".to_string())?;
+
+    let mut client = test_harness::DapStdioTestClient::start().map_err(|e| format!("start db-backend: {}", e))?;
+    client
+        .initialize_and_launch_session(&manifest)
+        .map_err(|e| format!("launch session: {}", e))?;
+    let backend_thread = origin_dap::thread_id_for_role(&mut client, "backend")
+        .map_err(|e| format!("resolve the backend thread: {}", e))?;
+    client
+        .set_breakpoint_on_thread(&server_source, line, backend_thread)
+        .map_err(|e| format!("set breakpoint: {}", e))?;
+    let location = client
+        .continue_to_breakpoint_on_thread(backend_thread)
+        .map_err(|e| format!("continue to breakpoint: {}", e))?;
+
+    let chain = origin_dap::send_origin_chain_request_on_thread(
+        &mut client,
+        "balance",
+        location.rr_ticks.0,
+        backend_thread,
+        Some(32),
+    )
+    .map_err(|e| format!("ct/originChain: {}", e))?;
+
+    let json = serde_json::to_string_pretty(&chain).map_err(|e| format!("serialise chain: {}", e))?;
+    let path = out_dir.join(format!("{scenario}.json"));
+    fs::write(&path, json).map_err(|e| format!("write chain dump: {}", e))?;
+    eprintln!("DUMPED: {scenario} -> {}", path.display());
+    Ok(())
+}
+
+/// Dump the three-recording cross-process chain for the ViewModel test.
+#[test]
+fn dump_cross_process_three_trace() {
+    dump_cross_process_scenario().expect("dump cross_process_three_trace");
+}
+
 /// Dump the chain JSON for `python/simple_trivial_chain` (query: `c`
 /// at line 12).
 #[test]

@@ -45,7 +45,7 @@
 use std::collections::HashMap;
 
 use crate::correlation_index::{MarkerEventView, PairIndex};
-use crate::correlation_markers::MarkerPayload;
+
 use crate::dap_handler::Handler;
 use crate::session_manifest::{RecordingId, SessionManifest, TraceEntry};
 
@@ -230,27 +230,14 @@ impl SessionHandler {
     /// here the pair index would only ever cover intra-trace markers
     /// and the M29 cross-process origin chain would lose its
     /// substrate.
-    pub fn pair_index(&self) -> PairIndex {
+    /// Takes `&mut self` because each trace's event log is loaded
+    /// lazily — see [`Handler::correlation_markers`], which owns the
+    /// per-trace collection and the reason both marker sources matter.
+    pub fn pair_index(&mut self) -> PairIndex {
         let mut events: Vec<MarkerEventView> = Vec::new();
-        for loaded in &self.traces {
-            let recording_id = loaded.entry.recording_id.0.as_str();
-            for (_, firings) in loaded.handler.event_db.firings_by_source_location.iter() {
-                for firing in firings {
-                    let Some(event) = loaded.handler.event_db.program_event_at(firing) else {
-                        continue;
-                    };
-                    let Some(payload) = MarkerPayload::decode(&event.metadata) else {
-                        continue;
-                    };
-                    events.push(MarkerEventView::new(
-                        recording_id,
-                        firing.step_id.0,
-                        event.high_level_path.clone(),
-                        event.high_level_line.max(0) as usize,
-                        payload,
-                    ));
-                }
-            }
+        for loaded in &mut self.traces {
+            let recording_id = loaded.entry.recording_id.0.clone();
+            events.extend(loaded.handler.correlation_markers(&recording_id));
         }
         PairIndex::build(&events)
     }

@@ -963,6 +963,55 @@ impl DapStdioTestClient {
         Ok(())
     }
 
+    /// Initialize the DAP session and launch a **multi-recording session**
+    /// from a `session.toml` manifest.
+    ///
+    /// The manifest path goes in `trace_folder`: `dap_server` recognises a
+    /// path whose file name is `session.toml` and routes it through the
+    /// session loader instead of the single-trace one. That is the same
+    /// path the CLI takes for `ct replay <session.toml>`, so a test using
+    /// this helper exercises the production loader rather than assembling
+    /// a `SessionHandler` by hand.
+    pub fn initialize_and_launch_session(&mut self, manifest_path: &Path) -> Result<(), String> {
+        let init = self.client.request("initialize", json!({}));
+        self.send(&init)?;
+        self.read_until_response("initialize", Duration::from_secs(5))?;
+        self.read_until_event("initialized", Duration::from_secs(5))?;
+
+        let conf_done = self.client.request("configurationDone", json!({}));
+        self.send(&conf_done)?;
+
+        let launch_args = LaunchRequestArguments {
+            program: None,
+            args: None,
+            trace_folder: Some(manifest_path.to_path_buf()),
+            live_recording: None,
+            live_recording_dir: None,
+            trace_file: None,
+            raw_diff_index: None,
+            pid: None,
+            cwd: None,
+            no_debug: None,
+            restart: None,
+            name: None,
+            request: None,
+            typ: None,
+            session_id: None,
+            recreator_exe: None,
+            restore_location: None,
+            rename_list: None,
+        };
+        let launch = self
+            .client
+            .launch(launch_args)
+            .map_err(|e| format!("failed to build launch: {}", e))?;
+        self.send(&launch)?;
+
+        self.read_until_event("stopped", Duration::from_secs(30))?;
+        self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+        Ok(())
+    }
+
     /// Initialize the DAP session and launch with a recording (DB-trace variant).
     pub fn initialize_and_launch(&mut self, recording: &TestRecording) -> Result<(), String> {
         // Send initialize
@@ -1032,6 +1081,42 @@ impl DapStdioTestClient {
     }
 
     /// Continue execution and wait for stopped event
+    /// Set a breakpoint at the given line **in a specific recording**.
+    ///
+    /// Multi-recording sessions route every request to the trace named by
+    /// the request's `threadId`; without one the router falls back to
+    /// slot 0. For a breakpoint that means a path belonging to the third
+    /// recording gets installed on the first recording's handler, where
+    /// it can never hit — the request succeeds, the continue runs to the
+    /// end, and the eventual empty result looks like a missing feature
+    /// rather than a misrouted request.
+    pub fn set_breakpoint_on_thread(&mut self, source_path: &Path, line: u32, thread_id: i64) -> Result<(), String> {
+        let set_bp = self.client.request(
+            "setBreakpoints",
+            json!({
+                "threadId": thread_id,
+                "source": { "path": source_path.to_str().unwrap_or_default() },
+                "breakpoints": [ { "line": line } ],
+            }),
+        );
+        self.send(&set_bp)?;
+        self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        Ok(())
+    }
+
+    /// Continue a specific recording to its next breakpoint.
+    pub fn continue_to_breakpoint_on_thread(&mut self, thread_id: i64) -> Result<Location, String> {
+        let continue_req = self.client.request("continue", json!({ "threadId": thread_id }));
+        self.send(&continue_req)?;
+        self.read_until_event("stopped", Duration::from_secs(30))?;
+        let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(10))?;
+        match complete_move {
+            DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())
+                .map_err(|e| format!("failed to parse location: {}", e)),
+            _ => Err("expected event".to_string()),
+        }
+    }
+
     pub fn continue_to_breakpoint(&mut self) -> Result<Location, String> {
         let continue_req = self.client.request("continue", json!({ "threadId": 1 }));
         self.send(&continue_req)?;

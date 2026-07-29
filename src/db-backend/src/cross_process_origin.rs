@@ -536,15 +536,30 @@ fn extend_chain_with_send(
 
     // Step 4: append sibling hops + update span ranges.
     let sibling_start = chain.hops.len() as u32;
+    let sibling_hop_count = continuation.sibling_hops.len();
     chain.hops.extend(continuation.sibling_hops);
-    let sibling_end = if chain.hops.is_empty() {
-        0
+
+    // A sibling that contributed no hops still gets a span — the
+    // boundary was genuinely crossed and the user should see that the
+    // value came from that recording, even when the sending side has
+    // nothing further to say about it (a recording without value
+    // capture, for instance).
+    //
+    // Its range is collapsed to `first == last == first_hop_index`
+    // rather than left as `first > last`. An inverted range is not a
+    // harmless quirk: any renderer that slices `hops[first..=last]` to
+    // draw the span would either panic or silently show the wrong
+    // hops. The placeholder convention is documented on
+    // `CrossProcessSpan::last_hop_index`.
+    let sibling_end = if sibling_hop_count == 0 {
+        sibling_start
     } else {
         (chain.hops.len() - 1) as u32
     };
 
     // Sibling span. Index 0 of `cross_process_spans` is the receive-
-    // side trace; index 1 is the send-side sibling.
+    // side trace; each subsequent entry is a trace the walk crossed
+    // into, in the order it was reached.
     chain.cross_process_spans.push(CrossProcessSpan {
         recording_id: continuation.sibling_identity.recording_id.clone(),
         role: continuation.sibling_identity.role.clone(),
