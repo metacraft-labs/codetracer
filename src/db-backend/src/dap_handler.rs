@@ -278,6 +278,17 @@ pub struct Handler {
     /// every individual step request — the runner consults
     /// the active path at dispatch time.
     pub active_source_view_path: Option<String>,
+
+    /// RS-M2 — the recording's directory, recorded at trace-open time by
+    /// [`Handler::set_trace_folder`] so `ct/load-request-spans` can find the
+    /// `.ct` container (and, for a pre-cutover session, the legacy sidecar next
+    /// to it).
+    ///
+    /// A path and nothing more: opening a trace deliberately does NOT touch the
+    /// span stream. See `set_trace_folder` for why. `None` when the session was
+    /// opened without a filesystem path (WASM / VFS replay), in which case
+    /// `ct/load-request-spans` reports the absence rather than guessing.
+    pub trace_folder: Option<std::path::PathBuf>,
 }
 
 /// M25b — Event-Log marker row returned by `ct/event-load`. The
@@ -510,6 +521,7 @@ impl Handler {
             marker_decode_calls: std::sync::atomic::AtomicUsize::new(0),
             cached_marker_rows: None,
             active_source_view_path: None,
+            trace_folder: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -2146,6 +2158,56 @@ impl Handler {
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender.clone())?;
         self.respond_dap(request, restored, sender)
+    }
+
+    /// Record the recording's directory so the request-span surface can find
+    /// the container (and any legacy sidecar next to it) later.
+    ///
+    /// Called at trace-open time alongside the other per-trace loaders. It
+    /// stores a path and nothing else: unlike `load_sourcemaps` /
+    /// `load_source_views`, opening a trace must NOT read the span stream. RS-M1
+    /// shipped a reader that decoded every chunk at open and it cost 20–210 ms
+    /// on realistic streams; the `spans.idx` v2 cumulative column exists so the
+    /// stream can be opened index-only, and RS-M3's live panel re-opens a
+    /// growing container on every poll. Deferring all of it to the first
+    /// `ct/load-request-spans` keeps trace-open free for the overwhelming
+    /// majority of recordings, which have no spans at all.
+    pub fn set_trace_folder(&mut self, trace_dir: &Path) {
+        self.trace_folder = Some(trace_dir.to_path_buf());
+    }
+
+    /// RS-M2 — dispatch handler for `ct/load-request-spans`.
+    ///
+    /// Returns a page of the recording's HTTP requests, shaped for the
+    /// frontend's `RequestRecord`, from the container's span stream when it has
+    /// one and from a legacy sidecar otherwise. See
+    /// [`crate::request_spans`] for the source-selection rules and
+    /// [`crate::request_spans::RequestSpans::page`] for why filtering happens
+    /// before paging.
+    ///
+    /// A recording with neither source is not an error: it answers with an
+    /// empty list, because "this program served no HTTP requests" is the
+    /// ordinary case for almost every recording.
+    pub fn load_request_spans(
+        &mut self,
+        request: dap::Request,
+        args: crate::request_spans::LoadRequestSpansArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let Some(trace_folder) = self.trace_folder.clone() else {
+            return Err("ct/load-request-spans: the session has no trace folder".into());
+        };
+        let response = match crate::request_spans::load_request_spans(&trace_folder)? {
+            Some(spans) => spans.page(&args),
+            None => crate::request_spans::LoadRequestSpansResponse {
+                requests: Vec::new(),
+                total: 0,
+                next_span_id: None,
+                source: "none".to_string(),
+                skipped_lines: 0,
+            },
+        };
+        self.respond_dap(request, response, sender)
     }
 
     /// Ensure program events are loaded and cached.

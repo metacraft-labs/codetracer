@@ -197,6 +197,23 @@ tree-sitter-tolk = { path = "../../libs/tree-sitter-tolk", optional = true }
 tree-sitter-masm = { path = "../../libs/tree-sitter-masm/bindings/rust", optional = true }
 tree-sitter-cadence = { path = "../../libs/tree-sitter-cadence/bindings/rust", optional = true }
 
+# RS-M2 — the CTFS span stream (`spans.dat`) is a §9c chunked-compressed
+# table, so the reader in `ctfs_trace_reader::span_stream` must decompress a
+# single Zstd frame on demand and (per
+# `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`) derive the last
+# indexed chunk's frame length rather than trusting the file size.  We mirror
+# the split the sibling `codetracer_trace_reader` crate already uses: the C
+# `zstd` bindings natively, the pure-Rust `ruzstd` decoder for
+# wasm32-unknown-unknown (where the C grammar cannot be cross-compiled).  Both
+# versions are already in the transitive graph via `codetracer_ctfs` /
+# `codetracer_trace_reader`, so this adds no new crate version to the lock.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+zstd = "0.13"
+zstd-safe = "7.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ruzstd = "0.8.1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59.0", features = [
   "Win32_Foundation",

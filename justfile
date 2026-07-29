@@ -546,6 +546,20 @@ test-rust:
     fi
   popd
 
+# Exercise `ct print` end to end against the built `ct` binary.
+#
+# Covers the JSONL span-manifest path and, since RS-M2, the CTFS span-stream
+# path: `ct print` reads a recording's HTTP requests out of the container's
+# `spans.dat` and only falls back to a `session_manifest.jsonl` /
+# `codetracer_spans.jsonl` sidecar when the container has no stream.  The
+# script skips (exit 0) when `src/build-debug/bin/ct` has not been built, so it
+# is safe to run in a bare dev shell; run `just build-once` first for real
+# coverage.
+test-ct-print:
+  #!/usr/bin/env bash
+  set -e
+  ./tests/test_ct_print.sh
+
 # Run all non-GUI tests.
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.

@@ -31,7 +31,8 @@
 //!           bit 10      — FLAG_HAS_VALUE_STREAM (M23b — dedicated values.dat)
 //!           bit 11      — FLAG_HAS_IO_EVENT_STREAM (M23c — dedicated events.dat)
 //!           bit 12      — FLAG_HAS_INTERNING_TABLES (M23d — binary varint interning tables)
-//!           bits 13..=15 — reserved (must be 0; readers reject if set)
+//!           bit 13      — FLAG_HAS_SPAN_STREAM (RS-M1 — spans.dat/spans.idx/spantype.ns)
+//!           bits 14..=15 — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -242,6 +243,31 @@ pub const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
 /// canonical Nim writer's `meta_dat.nim` bit 12.
 pub const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
 
+/// Flag bit 13 — `FLAG_HAS_SPAN_STREAM` (RS-M1).  When set the container ships
+/// the request/interval **span stream**: `spans.dat` (chunked-compressed span
+/// records), its companion index `spans.idx` (v2 layout — 8-byte header then
+/// fixed 16-byte `[offset u64][cumulative_records u64]` entries) and the
+/// `spantype.ns` namespace mapping an interned `span_type` id to the span ids
+/// of that type.  A span is a bounded, labeled interval of execution named by
+/// the coordinate *(process_ord, thread_id, step range)* — an HTTP request, a
+/// process, a test — and the stream replaces the `session_manifest.jsonl` /
+/// `codetracer_spans.jsonl` sidecars so a recording stays ONE artifact.
+///
+/// **This bit is deliberately NOT backwards compatible.**  Unlike bits 8..12,
+/// which readers may recognise-and-ignore, a container that sets bit 13 is
+/// refused outright by any reader whose [`KNOWN_FLAGS_MASK`] predates it — that
+/// is the whole point of the mask.  The spec's rollout rule is therefore
+/// "readers before writers" (see
+/// `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`
+/// §"`meta.dat` feature bit"), and RS-M2 is the milestone that lands the reader
+/// side.  Recognising the bit here is what makes a span-bearing container
+/// openable at all; the span records themselves are decoded by
+/// [`crate::ctfs_trace_reader::span_stream`].
+///
+/// Must match `codetracer_trace_writer::meta_dat::FLAG_HAS_SPAN_STREAM`
+/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 13.
+pub const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -258,7 +284,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_STEP_STREAM
     | FLAG_HAS_VALUE_STREAM
     | FLAG_HAS_IO_EVENT_STREAM
-    | FLAG_HAS_INTERNING_TABLES;
+    | FLAG_HAS_INTERNING_TABLES
+    | FLAG_HAS_SPAN_STREAM;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -1187,28 +1214,45 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 13 is the lowest still-reserved flag after M17a/M17b allocated
+        // Bit 14 is the lowest still-reserved flag after M17a/M17b allocated
         // bit 8 (FLAG_HAS_CALL_STREAM), M23a allocated bit 9
         // (FLAG_HAS_STEP_STREAM), M23b allocated bit 10
         // (FLAG_HAS_VALUE_STREAM), M23c allocated bit 11
-        // (FLAG_HAS_IO_EVENT_STREAM), and M23d allocated bit 12
-        // (FLAG_HAS_INTERNING_TABLES).  Bits 0..=12 are FLAG_HAS_MCR_FIELDS /
+        // (FLAG_HAS_IO_EVENT_STREAM), M23d allocated bit 12
+        // (FLAG_HAS_INTERNING_TABLES) and RS-M1 allocated bit 13
+        // (FLAG_HAS_SPAN_STREAM).  Bits 0..=13 are FLAG_HAS_MCR_FIELDS /
         // FLAG_HAS_REPLAY_LAUNCH_FIELDS / FLAG_HAS_LAYOUT_SNAPSHOT /
         // FLAG_HAS_TRACE_FILTER_PROVENANCE / FLAG_HAS_COLUMN_AWARE_STEPS /
         // FLAG_HAS_ALTERNATE_SOURCE_VIEWS / FLAG_SUPPORTS_COLUMN_BREAKPOINTS /
         // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM /
         // FLAG_HAS_STEP_STREAM / FLAG_HAS_VALUE_STREAM / FLAG_HAS_IO_EVENT_STREAM /
-        // FLAG_HAS_INTERNING_TABLES.
+        // FLAG_HAS_INTERNING_TABLES / FLAG_HAS_SPAN_STREAM.
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0;
-        buf[7] = 0b0010_0000; // = bit 13, lowest reserved
+        buf[7] = 0b0100_0000; // = bit 14, lowest reserved
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0010_0000_0000_0000);
-                assert_eq!(unknown_bits, 0b0010_0000_0000_0000);
+                assert_eq!(flags, 0b0100_0000_0000_0000);
+                assert_eq!(unknown_bits, 0b0100_0000_0000_0000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
+    }
+
+    /// RS-M2 — the `has_span_stream` flag (bit 13) parses cleanly.
+    ///
+    /// This is the "readers before writers" guarantee in
+    /// `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`: bit 13 is a
+    /// REJECTING bit, so before this constant existed the db-backend refused
+    /// every span-bearing container outright.  Adding it to
+    /// [`KNOWN_FLAGS_MASK`] is what makes such a container openable at all.
+    #[test]
+    fn accepts_has_span_stream_flag() {
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6] = (FLAG_HAS_SPAN_STREAM & 0xFF) as u8;
+        buf[7] = ((FLAG_HAS_SPAN_STREAM >> 8) & 0xFF) as u8;
+        let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected has_span_stream to parse, got {e:?}"));
+        assert_eq!(parsed.flags & FLAG_HAS_SPAN_STREAM, FLAG_HAS_SPAN_STREAM);
     }
 
     /// M17b — the `has_call_stream` flag (bit 8) parses cleanly (it is a KNOWN

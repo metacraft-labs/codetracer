@@ -1607,6 +1607,7 @@ dependencies = [
  "once_cell",
  "origin-classifier",
  "regex",
+ "ruzstd",
  "schemars 0.8.22",
  "schemars-zod",
  "serde",
@@ -1650,6 +1651,8 @@ dependencies = [
  "wasm-logger",
  "web-sys",
  "windows-sys 0.59.0",
+ "zstd",
+ "zstd-safe",
 ]
 
 [[package]]

@@ -109,6 +109,11 @@ mod sourcemap_cache;
 // copy because `dap_handler::Handler::load_source_views` reaches for
 // the module via the `crate::source_views` path.
 mod source_views;
+// RS-M2 — request/interval spans (`ct/load-request-spans` + the read-only
+// legacy JSONL shim).  Mirror of the lib.rs declaration; the bin needs its own
+// copy because `dap_handler::Handler::load_request_spans` reaches for the
+// module via the `crate::request_spans` path.
+mod request_spans;
 // Column-Aware-Tracing-And-Deminification §P4 — auto-format fallback.
 // Mirrors the lib.rs declaration; the bin needs its own copy because
 // the sourcemap_cache integration reaches for the module via

@@ -131,6 +131,13 @@ pub mod sourcemap_cache;
 // `sourcemap_cache` because `Handler::load_source_views` feeds parsed
 // records straight into that cache.
 pub mod source_views;
+// RS-M2 — request/interval spans: `ct/load-request-spans` plus the read-only
+// shim that keeps pre-cutover `session_manifest.jsonl` /
+// `codetracer_spans.jsonl` sessions opening.  Sits above
+// `ctfs_trace_reader::span_stream` (which decodes `spans.dat`) and below the
+// DAP surface in `dap_handler`.  Spec:
+// `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`.
+pub mod request_spans;
 // Column-Aware-Tracing-And-Deminification §P4 — auto-format fallback
 // for minified sources that ship without a sourcemap.  Self-contained
 // module that wraps `prettier` / `black` as subprocesses; the

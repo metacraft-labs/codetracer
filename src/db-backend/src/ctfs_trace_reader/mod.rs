@@ -27,6 +27,7 @@ pub mod materialization_cache;
 pub mod memwrites_namespace;
 pub mod meta_dat;
 pub mod server_prep_encoding;
+pub mod span_stream;
 pub mod step_map_namespace;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod step_value_stream_source;

@@ -437,6 +437,11 @@ fn setup(
                 }
                 handler.raw_diff_index = raw_diff_index;
                 // Load macro sourcemaps for Nim macro expansion support (S6).
+                // RS-M2 — remember the recording directory so
+                // `ct/load-request-spans` can find the container (and any
+                // pre-cutover sidecar beside it).  Stores a path only: the
+                // span stream is deliberately not read at trace-open time.
+                handler.set_trace_folder(trace_folder);
                 handler.load_macro_sourcemaps(trace_folder);
                 // Load Source Map V3 indexes for every recorded source
                 // path that has one (P3 — Column-Aware-Tracing-And-
@@ -529,6 +534,11 @@ fn setup(
             false,
         );
         handler.raw_diff_index = raw_diff_index;
+        // RS-M2 — remember the recording directory so
+        // `ct/load-request-spans` can find the container (and any
+        // pre-cutover sidecar beside it).  Stores a path only: the
+        // span stream is deliberately not read at trace-open time.
+        handler.set_trace_folder(trace_folder);
         handler.load_macro_sourcemaps(trace_folder);
         // P3 — load Source Map V3 indexes for every recorded source.
         handler.load_sourcemaps(trace_folder);
@@ -603,6 +613,11 @@ fn setup(
             false,
         );
         handler.raw_diff_index = raw_diff_index;
+        // RS-M2 — remember the recording directory so
+        // `ct/load-request-spans` can find the container (and any
+        // pre-cutover sidecar beside it).  Stores a path only: the
+        // span stream is deliberately not read at trace-open time.
+        handler.set_trace_folder(trace_folder);
         handler.load_macro_sourcemaps(trace_folder);
         // P3 — load Source Map V3 indexes for every recorded source.
         handler.load_sourcemaps(trace_folder);
@@ -654,6 +669,11 @@ fn setup(
         let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
         handler.raw_diff_index = raw_diff_index;
         // Load macro sourcemaps for Nim macro expansion support (S6).
+        // RS-M2 — remember the recording directory so
+        // `ct/load-request-spans` can find the container (and any
+        // pre-cutover sidecar beside it).  Stores a path only: the
+        // span stream is deliberately not read at trace-open time.
+        handler.set_trace_folder(trace_folder);
         handler.load_macro_sourcemaps(trace_folder);
         // P3 — load Source Map V3 indexes for every recorded source.
         handler.load_sourcemaps(trace_folder);
@@ -1078,6 +1098,11 @@ fn setup_live_program(
     };
     info!("live ct_rr_args {:?}", ct_rr_args);
     let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
+    // RS-M2 — remember the recording directory so
+    // `ct/load-request-spans` can find the container (and any
+    // pre-cutover sidecar beside it).  Stores a path only: the
+    // span stream is deliberately not read at trace-open time.
+    handler.set_trace_folder(&live_recording_dir);
     handler.load_macro_sourcemaps(&live_recording_dir);
     // P3 — load Source Map V3 indexes for every recorded source.
     handler.load_sourcemaps(&live_recording_dir);
@@ -1743,6 +1768,22 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/mcr-restore-at" | "ct/live-restore-at" => handler.mcr_restore_at(
             req.clone(),
             req.load_args::<crate::dap_handler::McrRestoreAtArguments>()?,
+            sender.clone(),
+        )?,
+        // RS-M2 — HTTP Request Panel: page through the recording's request
+        // spans, with method / status-class / URL-substring filters.  Served
+        // from the container's `spans.dat` stream when it has one and from a
+        // legacy `session_manifest.jsonl` / `codetracer_spans.jsonl` sidecar
+        // otherwise, so pre-cutover sessions keep working.  Spec:
+        // codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md
+        // §"Reader and Frontend Surface".
+        "ct/load-request-spans" => handler.load_request_spans(
+            req.clone(),
+            // The three arguments are all optional (no filters, no paging is a
+            // valid "give me everything" request), so a request with no
+            // `arguments` at all must not be an error.
+            req.load_args::<crate::request_spans::LoadRequestSpansArguments>()
+                .unwrap_or_default(),
             sender.clone(),
         )?,
         "ct/seek-to-geid" => handler.seek_to_geid(
