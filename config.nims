@@ -70,6 +70,15 @@ addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "io-mon" / "src")
 addPathIfDir(getEnv("SHM_QUEUE_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
+# io-mon's PRIMARY Linux dependency channel is the grow-only-set transport in
+# nim-shm-gset (``io_mon/writer.nim`` imports ``shm_gset/transport``); the
+# ``shm_queue/ring`` above is now only the legacy ring path.  io-mon's own
+# config.nims declares both, but that config does not apply when the module is
+# compiled as part of a codetracer target, so the path has to be declared here
+# too — otherwise every binary that links io-mon (``src/ct/codetracer.nim``
+# among them) fails with "cannot open file: shm_gset/transport".
+addPathIfDir(getEnv("SHM_GSET_SRC"))
+addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
 addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
 
