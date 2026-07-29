@@ -752,6 +752,12 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
             "CT_MCR_EMULATOR_INCLUDE_DIRS",
             vec![emulator_dir.join("src/ct_emulator")],
         ),
+        // The authoritative extra-source list is provided by
+        // `export_build_env.sh` (`CT_MCR_EMULATOR_EXTRA_SOURCES`), which lists
+        // the hand-written `{.compile.}` shims (xxh64.c, fma_shim.c, and
+        // x87_shim.c on x86). This fallback is only used when that script is
+        // absent (public repo without the private recorder), where the emulator
+        // is not built anyway.
         extra_sources: path_list(
             "CT_MCR_EMULATOR_EXTRA_SOURCES",
             vec![recorder_root.join("ct_interpose/src/ct_interpose/xxh64.c")],
