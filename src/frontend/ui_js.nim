@@ -169,6 +169,14 @@ from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
 var activeSessionVM: SessionViewModel
+# Backend-reported `supportsStepBack` capability from the DAP `initialize`
+# response. The response can arrive (synchronously, via the in-process DAP
+# transport) before `activeSessionVM` exists, in which case the handler cannot
+# apply it to the session store yet — it stashes it here so the value is
+# re-applied once the session VM is created. Without this, reverse-step /
+# reverse-continue toolbar buttons stay wrongly disabled on completed DB
+# replays even though the backend supports backward stepping.
+var pendingSupportsStepBack: bool = false
 var activeCollabFrontEndAdapter: FrontEndAdapter
 var activeIsoNimApp: IsoNimApp
 var pendingCollabJoinBootstrapRaw: cstring = cstring""
@@ -1530,6 +1538,10 @@ when not defined(ctInExtension):
       if not response.isNil and not jsMissing(response["supportsStepBack"]):
         supportsStepBack = response["supportsStepBack"].to(bool)
       cerror "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
+      # Remember the capability so it survives even when the response beats the
+      # `activeSessionVM` creation below; apply immediately when the VM already
+      # exists (e.g. a per-trace re-initialize after load).
+      pendingSupportsStepBack = supportsStepBack
       if not activeSessionVM.isNil:
         activeSessionVM.store.setSupportsStepBack(supportsStepBack)
     )
@@ -1564,6 +1576,10 @@ when not defined(ctInExtension):
                 handler($kind, raw)),
       )
       activeSessionVM = createSessionVM(realBackend)
+      # Apply any `supportsStepBack` capability that arrived before this VM
+      # existed (its DAP `initialize` response can beat this assignment), so the
+      # reverse-step toolbar buttons reflect the backend's real capability.
+      activeSessionVM.store.setSupportsStepBack(pendingSupportsStepBack)
       activeCollabFrontEndAdapter = initWebUiCollabAdapter(
         activeSessionVM.collabCore.localPrincipalId,
         activeSessionVM.collabCore.localActorId
