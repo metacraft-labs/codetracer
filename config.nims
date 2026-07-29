@@ -70,6 +70,12 @@ addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "io-mon" / "src")
 addPathIfDir(getEnv("SHM_QUEUE_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
+# io-mon's writer now imports `shm_gset/transport` (the grow-only shared-memory
+# set that backs io-mon's Linux dependency-capture channel), in addition to
+# `shm_queue`. Thread nim-shm-gset onto the path the same way, or the `ct`
+# compile fails with `cannot open file: shm_gset/transport`.
+addPathIfDir(getEnv("SHM_GSET_SRC"))
+addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
 addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
 
