@@ -30,8 +30,13 @@ proc newDocsDevServer*(contentDir = "content";
 
 when isMainModule:
   let port = if paramCount() >= 1: parseInt(paramStr(1)) else: 8000
+  # host: 2nd arg or AH_DEV_HOST env; default loopback (pass 0.0.0.0 for LAN).
+  let host =
+    if paramCount() >= 2: paramStr(2)
+    elif existsEnv("AH_DEV_HOST"): getEnv("AH_DEV_HOST")
+    else: "127.0.0.1"
   let server = newDocsDevServer()
-  stdout.writeLine "CodeTracer book dev server -> http://localhost:" & $port &
-    "  (watching content/, live reload on; Ctrl-C to stop)"
+  stdout.writeLine "CodeTracer book dev server -> http://" & host & ":" & $port &
+    "  (watching content/ + shared design system, live reload on; Ctrl-C to stop)"
   stdout.flushFile()
-  waitFor serve(server, port)
+  waitFor serve(server, port, host = host)

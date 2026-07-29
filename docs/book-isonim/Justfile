@@ -14,8 +14,8 @@ build:
 # every open tab on any content edit. (`dev` is reserved for an app dev server;
 # docs commands are namespaced `-docs` -- see metacraft-dev-guidelines
 # repo-requirements.) Run this, then `just open-docs` in another shell.
-dev-docs port='8000':
-    nim c -r --hints:off src/dev.nim {{port}}
+dev-docs port='8000' host='127.0.0.1':
+    nim c -r --hints:off src/dev.nim {{port}} {{host}}
 
 # Open the running docs server in a browser (Linux xdg-open / macOS open).
 open-docs port='8000':
