@@ -40,6 +40,10 @@
 ## | `web_session_200.expected.jsonl` | Ground truth for the 200-request container. |
 ## | `no_spans.ct`               | The same writer with no span registered — bit 13 |
 ## |                             | stays clear and the container is unchanged.      |
+## | `web_session_tail_stage1..4.ct` | FOUR SNAPSHOTS of one growing session — see  |
+## |                             | "Fixture D" below.  Stage `k+1` is stage `k`     |
+## |                             | plus more sealed chunks.                         |
+## | `web_session_tail_stageN.expected.jsonl` | Settled ground truth per stage. |
 ##
 ## The `.expected.jsonl` sidecars are written from the span values the generator
 ## fed the writer, NOT from re-reading the container, so a writer bug cannot make
@@ -309,6 +313,122 @@ proc writeContainer(outPath, program, recordingId: string,
   except IOError:
     fail("failed to write " & outPath)
 
+# ---------------------------------------------------------------------------
+# Fixture D — one session, observed at four points WHILE IT GROWS (RS-M3).
+# ---------------------------------------------------------------------------
+#
+# RS-M3's tail must decode only the chunks a recording GAINED between two
+# polls.  Proving that needs a container the test can watch grow, so this
+# fixture is four snapshots of the SAME session: stage `k+1` holds every record
+# stage `k` held, in the same chunks, plus more.
+#
+# Two properties make the snapshots a faithful stand-in for a live container
+# rather than four unrelated files:
+#
+# 1. **Every stage ends exactly at a flush point.**  `flushChunk` is a no-op on
+#    an empty buffer, so `close()` seals nothing extra and no stage ends with a
+#    partial chunk that the next stage would seal differently.  Chunk `k`
+#    therefore holds the same records in every stage that has it — which is the
+#    immutability a chunk-count cursor depends on.  The Rust test asserts this
+#    prefix property against the fixtures instead of trusting this comment.
+# 2. **Open records and their completions straddle stage boundaries.**  Span 6
+#    is published open in stage 1 and completed in stage 2; span 9 is published
+#    open in stage 3 and completed in stage 4.  A consumer that does not apply
+#    last-record-wins ACROSS deltas will show a settled request as still in
+#    flight, or show it twice.
+#
+# The stage boundaries and seal points are chosen so the chunk counts are
+# 2 / 3 / 5 / 8: a client that tails all four stages decodes 8 chunks in total
+# (each exactly once), where a client that re-read the whole stream each time
+# would decode 2 + 3 + 5 + 8 = 18.
+
+const TailStageCount = 4
+
+proc buildTailSpans(): tuple[spans: seq[SpanRecord], flushAfter: seq[int],
+    stages: seq[int]] {.raises: [].} =
+  ## The append-order record sequence of the growing session, the 1-based
+  ## record ordinals after which a chunk is sealed, and the 1-based record
+  ## ordinals at which each snapshot is taken.  Every stage boundary is also a
+  ## seal point, by construction (checked in `main`).
+  var spans: seq[SpanRecord] = @[]
+
+  # The process descriptor, as in fixture A: a live panel must not mistake it
+  # for a request row even when it arrives in the very first delta.
+  spans.add(SpanRecord(
+    spanId: 1,
+    status: spanStatusOk,
+    startWallNs: 1_765_000_000_000_000_000'u64,
+    endWallNs: 1_765_000_000_900_000_000'u64,
+    processOrd: 0,
+    threadId: 1,
+    startStep: 0,
+    endStep: 900_000,
+    spanType: "process",
+    label: "/usr/bin/php-fpm",
+    sharesTimeline: true,
+    metadata: @[
+      ("process.pid", "5150"),
+      ("process.exe", "/usr/bin/php-fpm"),
+    ]))
+
+  # -- chunk 0: the process span plus the first four completed requests -----
+  spans.add(webRequestSpan(2, "GET", "/api/users", 200, 12, 2148, 120, 480))
+  spans.add(webRequestSpan(3, "POST", "/api/users", 201, 31, 96, 481, 1_040))
+  spans.add(webRequestSpan(4, "GET", "/api/users/42", 200, 8, 512, 1_041, 1_260))
+  spans.add(webRequestSpan(5, "GET", "/static/app.css", 304, 1, 0, 1_261, 1_290))
+  var flushAfter = @[5]
+
+  # -- chunk 1: span 6 published OPEN, alone, the way a live recorder makes an
+  #             in-flight request visible.
+  var open6 = webRequestSpan(6, "GET", "/api/reports/slow", 0, 0, 0, 1_291, 0)
+  open6.isOpen = true
+  open6.status = spanStatusUnknown
+  open6.endWallNs = 0
+  open6.endStep = 0
+  spans.add(open6)
+  flushAfter.add(6)
+  var stages = @[6]                     # -- STAGE 1: 6 records, 2 chunks --
+
+  # -- chunk 2: span 6's completion, then two more requests.
+  spans.add(webRequestSpan(6, "GET", "/api/reports/slow", 200, 940, 8192,
+    1_291, 4_400))
+  spans.add(webRequestSpan(7, "DELETE", "/api/users/42", 404, 5, 48, 4_401, 4_500))
+  spans.add(webRequestSpan(8, "GET", "/health", 200, 1, 2, 4_501, 4_520))
+  flushAfter.add(9)
+  stages.add(9)                         # -- STAGE 2: 9 records, 3 chunks --
+
+  # -- chunk 3: span 9 published OPEN.
+  var open9 = webRequestSpan(9, "PUT", "/api/orders/7", 0, 0, 0, 4_521, 0)
+  open9.isOpen = true
+  open9.status = spanStatusUnknown
+  open9.endWallNs = 0
+  open9.endStep = 0
+  spans.add(open9)
+  flushAfter.add(10)
+
+  # -- chunk 4: two requests served WHILE span 9 is still in flight.
+  spans.add(webRequestSpan(10, "GET", "/api/orders", 200, 4, 1024, 4_600, 4_700))
+  spans.add(webRequestSpan(11, "GET", "/api/reports/monthly", 500, 88, 76, 4_701, 5_000))
+  flushAfter.add(12)
+  stages.add(12)                        # -- STAGE 3: 12 records, 5 chunks --
+
+  # -- chunk 5: span 9's completion, arriving a whole poll after its open
+  #             record — the case the client's cross-delta merge has to get
+  #             right.
+  spans.add(webRequestSpan(9, "PUT", "/api/orders/7", 204, 1_400, 0, 4_521, 6_800))
+  flushAfter.add(13)
+
+  # -- chunks 6 and 7: four more completed requests.
+  spans.add(webRequestSpan(12, "POST", "/api/orders", 201, 44, 128, 6_801, 7_000))
+  spans.add(webRequestSpan(13, "GET", "/health", 200, 1, 2, 7_001, 7_020))
+  flushAfter.add(15)
+  spans.add(webRequestSpan(14, "GET", "/admin/api/users", 403, 3, 32, 7_021, 7_100))
+  spans.add(webRequestSpan(15, "GET", "/static/app.css", 304, 1, 0, 7_101, 7_130))
+  flushAfter.add(17)
+  stages.add(17)                        # -- STAGE 4: 17 records, 8 chunks --
+
+  (spans, flushAfter, stages)
+
 proc main() {.raises: [].} =
   let args = commandLineParams()
   if args.len < 1:
@@ -374,6 +494,33 @@ proc main() {.raises: [].} =
   # spec's Design Goal 6 makes.
   writeContainer(outDir / "no_spans.ct", "/srv/app/index.php",
     "01949fcc-7d92-7e9c-a003-000000000003", @[], @[])
+
+  # --- Fixture D: web_session_tail_stage1..4.ct --------------------------
+  let (tailSpans, tailFlush, tailStages) = buildTailSpans()
+  if tailStages.len != TailStageCount:
+    fail("tail fixture declares " & $tailStages.len & " stages, expected " &
+      $TailStageCount)
+  for boundary in tailStages:
+    # A stage that did not end on a seal point would leave a partial chunk for
+    # `close()` to seal, and the next stage would seal that same chunk with
+    # MORE records in it — the chunk partition would stop being a prefix and a
+    # chunk-count cursor would silently skip records.  Refuse to emit such a
+    # fixture rather than ship one that quietly breaks the tail.
+    if boundary notin tailFlush:
+      fail("tail stage boundary " & $boundary & " is not a flush point")
+  for stage, boundary in tailStages:
+    var prefixFlush: seq[int] = @[]
+    for f in tailFlush:
+      if f <= boundary:
+        prefixFlush.add(f)
+    let name = "web_session_tail_stage" & $(stage + 1)
+    writeContainer(outDir / (name & ".ct"), "/srv/app/index.php",
+      "01949fcc-7d92-7e9c-a004-000000000004",
+      tailSpans[0 ..< boundary], prefixFlush)
+    var stageExpected: seq[string] = @[]
+    for s in settledOf(tailSpans[0 ..< boundary]):
+      stageExpected.add(expectedLine(s))
+    writeLines(outDir / (name & ".expected.jsonl"), stageExpected)
 
   echo "wrote span-stream fixtures to " & outDir
 

@@ -41,7 +41,7 @@ use serde_json::Value;
 
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::span_stream::{
-    SPAN_TYPE_WEB_REQUEST, SpanRecord, SpanStatus, SpanStreamReader,
+    SPAN_TYPE_WEB_REQUEST, SpanRecord, SpanStatus, SpanStreamReader, resolve_spans,
 };
 
 /// Legacy sidecar written by the PHP recorder
@@ -270,19 +270,7 @@ impl RequestSpans {
 
     /// Convert one span into a `RequestRecord`, resolving its external binding.
     pub fn to_request_record(&self, span: &SpanRecord) -> RequestRecord {
-        RequestRecord {
-            id: span.span_id,
-            http_method: span.metadata_value(KEY_HTTP_METHOD).unwrap_or_default().to_string(),
-            url: span.metadata_value(KEY_HTTP_URL).unwrap_or_default().to_string(),
-            status_code: parse_numeric_metadata(span, KEY_HTTP_STATUS_CODE),
-            duration_ms: parse_numeric_metadata(span, KEY_HTTP_DURATION_MS),
-            response_size: parse_numeric_metadata(span, KEY_HTTP_RESPONSE_SIZE),
-            start_geid: span.start_step,
-            is_open: span.is_open,
-            status: status_name(span.status).to_string(),
-            external_trace_path: resolve_external_container(span, &self.base_dir)
-                .map(|p| p.to_string_lossy().into_owned()),
-        }
+        to_request_record(span, &self.base_dir)
     }
 
     /// Apply the filters, then page — in that order.
@@ -324,6 +312,30 @@ impl RequestSpans {
             source: self.source.as_str().to_string(),
             skipped_lines: self.skipped_lines,
         }
+    }
+}
+
+/// Convert one span into a `RequestRecord`, resolving its external binding
+/// relative to `base_dir`.
+///
+/// Free function rather than a method so the RS-M3 tail
+/// ([`RequestSpanTail`]) — which owns a reader and not a [`RequestSpans`] —
+/// projects records through EXACTLY the same code path as the RS-M2 one-shot
+/// query. A delta row and a full-query row for the same span must be
+/// indistinguishable on the wire, otherwise a client that merges the two ends
+/// up with two different renderings of one request.
+pub fn to_request_record(span: &SpanRecord, base_dir: &Path) -> RequestRecord {
+    RequestRecord {
+        id: span.span_id,
+        http_method: span.metadata_value(KEY_HTTP_METHOD).unwrap_or_default().to_string(),
+        url: span.metadata_value(KEY_HTTP_URL).unwrap_or_default().to_string(),
+        status_code: parse_numeric_metadata(span, KEY_HTTP_STATUS_CODE),
+        duration_ms: parse_numeric_metadata(span, KEY_HTTP_DURATION_MS),
+        response_size: parse_numeric_metadata(span, KEY_HTTP_RESPONSE_SIZE),
+        start_geid: span.start_step,
+        is_open: span.is_open,
+        status: status_name(span.status).to_string(),
+        external_trace_path: resolve_external_container(span, base_dir).map(|p| p.to_string_lossy().into_owned()),
     }
 }
 
@@ -432,6 +444,452 @@ pub fn load_request_spans(trace_path: &Path) -> Result<Option<RequestSpans>, Str
     // No stream: fall back to the read-only sidecar shim so pre-cutover
     // sessions keep opening.
     load_legacy_jsonl_spans(&base_dir)
+}
+
+// ── RS-M3 part A — the held tail cursor ─────────────────────────────────
+//
+// `load_request_spans` above re-opens the container and decodes the WHOLE
+// stream on every call. That is right for a one-shot query and wrong for a
+// live panel: a poll loop over a growing container would re-decompress every
+// chunk it has already seen, so the cost of the Nth poll is O(total chunks)
+// and the cost of a session is O(polls x chunks). The `spans.idx` cumulative
+// column and [`SpanStreamReader::read_spans_since`] exist to make the poll
+// cost O(new chunks); what was missing is somewhere to keep the cursor.
+//
+// [`RequestSpanTail`] is that place. It holds the reader across polls and
+// decodes only the chunks sealed since the caller last looked.
+//
+// ## What invalidates the cursor
+//
+// | Trigger                                    | Effect                        |
+// | ------------------------------------------ | ----------------------------- |
+// | The session's trace folder changed         | owner drops the whole tail    |
+// | The source file changed (grew / rewritten) | reader rebuilt, cursor kept   |
+// | The source file SHRANK                     | reader rebuilt, `reset`       |
+// | The source file was swapped (sidecar -> stream, or a different container) | reader rebuilt, `reset` |
+// | The client's cursor is past the head       | full snapshot, `reset`        |
+// | Any read/decode error                      | reader dropped, error raised, next poll rebuilds from scratch |
+//
+// "Reader rebuilt, cursor kept" is safe because a sealed chunk is IMMUTABLE:
+// the writer appends the chunk body, syncs it, then appends the index entry
+// and syncs that (`span_stream.nim`'s `flushChunk`), so a reader that has seen
+// N index entries has seen N final chunks. Chunk k means the same records in
+// every later observation of the same container, which is exactly what makes a
+// chunk count usable as a cursor.
+//
+// ## Last-record-wins across deltas: the CLIENT resolves
+//
+// Within one delta the backend applies [`resolve_spans`], so a delta that
+// carries both an open record and its completion yields ONE settled row.
+// Across deltas the CLIENT resolves, by merging each payload into its list
+// keyed on `RequestRecord::id` (last wins).
+//
+// Why not resolve on the backend: doing so would require the backend to
+// remember every span it ever sent to every client, i.e. state proportional to
+// the whole stream — which is precisely the cost the tail exists to avoid —
+// and it still could not be authoritative, because a client may replay an
+// older cursor, reconnect, or run two panels over one session.
+//
+// The wire contract makes client-side resolution correct rather than merely
+// possible:
+//
+// * `id` is the span's `span_id`: 1-based, stable, and the same key the
+//   backend's own last-record-wins uses. A record is never re-keyed.
+// * `isOpen` tells the client whether a row is in flight, so it can render the
+//   greyed state and know a completion is still coming.
+// * A delta always ends at the CURRENT head, so the records it carries are the
+//   settled state as of now for every span in its range. Replaying an older
+//   cursor therefore yields a SUPERSET of the newer delta whose overlapping
+//   rows are identical or newer — never staler. Merging an overlapping delta
+//   can only re-apply what the client already has; it can never resurrect a
+//   superseded open record. That is what makes deltas overlap-safe.
+
+/// The sidecar this session would be tailed from, if any.
+///
+/// Deliberately different from the probe inside [`load_legacy_jsonl_spans`],
+/// which SKIPS an empty sidecar so a created-but-never-appended PHP manifest
+/// does not mask a populated Ruby/Python one. A live session starts with an
+/// empty manifest and grows it, so for the tail an empty file is the right
+/// thing to bind to, not a reason to look elsewhere.
+fn legacy_sidecar_path(session_dir: &Path) -> Option<PathBuf> {
+    [PHP_SESSION_MANIFEST_FILE, RUBY_PYTHON_SPANS_FILE]
+        .into_iter()
+        .map(|name| session_dir.join(name))
+        .find(|path| path.is_file())
+}
+
+/// Filesystem identity of the bytes a held reader was built from.
+///
+/// Length AND mtime, because neither alone is sufficient. A `.ct` container is
+/// block-padded, so appending a chunk very often leaves its file LENGTH
+/// unchanged — mtime is what actually moves. Conversely a filesystem with a
+/// coarse mtime clock can report the same mtime for two appends inside one
+/// tick, and there the length usually differs.
+///
+/// A missed change costs LATENCY, not correctness: the poll returns an empty
+/// delta and the next one — by which time the clock has moved — returns
+/// everything from the same cursor. Nothing is skipped, because the cursor only
+/// advances over chunks that were actually read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SourceStamp {
+    len: u64,
+    modified_ns: u128,
+}
+
+/// Stamp `path`, or `None` when the filesystem cannot tell us enough to detect
+/// a change.
+///
+/// `None` is the FAIL-SAFE answer: the caller treats an unstampable source as
+/// "changed", so the tail rebuilds its reader every poll rather than serving
+/// records from a stale image. It costs performance, never correctness.
+fn stamp_of(path: &Path) -> Option<SourceStamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified_ns = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(SourceStamp {
+        len: meta.len(),
+        modified_ns,
+    })
+}
+
+/// What a [`RequestSpanTail`] is currently reading.
+#[derive(Debug)]
+enum TailBody {
+    /// The container's `spans.dat`, held open across polls. This is the case
+    /// the whole design is for.
+    Stream {
+        container: PathBuf,
+        /// `meta.dat`'s UUIDv7 recording id. Held so that a container REPLACED
+        /// in place — the user re-records to the same path — is recognised as a
+        /// different recording rather than tailed as if it were a continuation
+        /// of the old one. The path is identical in that case and the file
+        /// length often is too (containers are block-padded), so the recording
+        /// id is the only reliable identity available without decoding.
+        recording_id: String,
+        reader: SpanStreamReader,
+    },
+    /// A pre-cutover sidecar. There are no chunks to skip, so the cursor counts
+    /// RECORDS already delivered and the file is re-parsed whenever it changes.
+    /// Cheap by comparison — parsing text costs no zstd frames — and it keeps
+    /// the live panel working for the PHP/Ruby/Python sessions that exist today.
+    Legacy { path: PathBuf, spans: Vec<SpanRecord> },
+    /// The recording carries neither. Polls answer empty rather than failing:
+    /// "this program served no HTTP requests" is the ordinary case.
+    Absent,
+}
+
+impl TailBody {
+    /// The file whose changes this body must track, or `None` when absent.
+    fn source_path(&self) -> Option<&Path> {
+        match self {
+            TailBody::Stream { container, .. } => Some(container.as_path()),
+            TailBody::Legacy { path, .. } => Some(path.as_path()),
+            TailBody::Absent => None,
+        }
+    }
+
+    /// What a cursor issued against this body is counting. Two bodies with
+    /// different identities do not share a cursor space, so a change here
+    /// forces a `reset`.
+    fn identity(&self) -> (Option<PathBuf>, String) {
+        let recording = match self {
+            TailBody::Stream { recording_id, .. } => recording_id.clone(),
+            _ => String::new(),
+        };
+        (self.source_path().map(Path::to_path_buf), recording)
+    }
+
+    /// Wire string for the delta's `source` field.
+    fn source_name(&self) -> &'static str {
+        match self {
+            TailBody::Stream { .. } => RequestSpanSource::SpanStream.as_str(),
+            TailBody::Legacy { .. } => RequestSpanSource::LegacyJsonl.as_str(),
+            TailBody::Absent => "none",
+        }
+    }
+}
+
+/// Arguments of the `ct/load-request-spans-since` DAP request.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadRequestSpansSinceArguments {
+    /// The `cursor` from the client's previous delta. Omitted (or `0`) asks for
+    /// a full snapshot.
+    ///
+    /// OPAQUE to the client: it is a chunk count for a span stream and a record
+    /// count for a legacy sidecar. Clients echo it back and never interpret it.
+    #[serde(default)]
+    pub cursor: Option<u64>,
+}
+
+/// Response body of `ct/load-request-spans-since`, and the body of the
+/// `ct/updated-http-requests` event.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestSpanDelta {
+    /// The web-request rows in this delta, settled WITHIN the delta and
+    /// ascending by `id`. Merge into the client list keyed on `id`, last wins.
+    pub spans: Vec<RequestRecord>,
+    /// The cursor to send with the next poll.
+    pub cursor: u64,
+    /// `true` when `spans` is the COMPLETE settled set rather than a delta, so
+    /// the client must replace its list instead of merging. Set on the first
+    /// poll and after any invalidation.
+    pub reset: bool,
+    /// `"span-stream"` | `"legacy-jsonl"` | `"none"`.
+    pub source: String,
+}
+
+/// A live tail over one recording's request spans.
+///
+/// Owned by the DAP handler for the duration of a session and re-created when
+/// the session's trace folder changes. See the section comment above for the
+/// invalidation rules and the last-record-wins contract.
+#[derive(Debug)]
+pub struct RequestSpanTail {
+    /// The recording this tail is bound to — a `.ct` container or the directory
+    /// holding one.
+    trace_path: PathBuf,
+    /// Directory external bindings resolve relative to.
+    base_dir: PathBuf,
+    body: TailBody,
+    /// Identity of the bytes `body` was built from; `None` means "unknown, so
+    /// rebuild".
+    stamp: Option<SourceStamp>,
+    /// Chunk decompressions charged to readers this tail has already retired.
+    /// The live reader's own counter is added on read — see
+    /// [`Self::chunk_decompressions`].
+    retired_decompressions: u64,
+    /// The next delta must be a full snapshot.
+    reset_pending: bool,
+}
+
+impl RequestSpanTail {
+    /// Bind a tail to a recording WITHOUT touching it.
+    ///
+    /// Nothing is opened, stat-ed or decoded here, for the same reason
+    /// `Handler::set_trace_folder` stores a bare path: the overwhelming
+    /// majority of recordings carry no spans at all, and a session that never
+    /// opens the Request panel must not pay for one.
+    pub fn new(trace_path: &Path) -> RequestSpanTail {
+        let base_dir = if trace_path.is_dir() {
+            trace_path.to_path_buf()
+        } else {
+            trace_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+        };
+        RequestSpanTail {
+            trace_path: trace_path.to_path_buf(),
+            base_dir,
+            body: TailBody::Absent,
+            stamp: None,
+            retired_decompressions: 0,
+            // The first delta a client ever receives is by definition the whole
+            // settled set, so it is flagged as a snapshot.
+            reset_pending: true,
+        }
+    }
+
+    /// The recording this tail is bound to. The owner compares it against the
+    /// session's current trace folder to decide whether the tail still applies.
+    pub fn trace_path(&self) -> &Path {
+        &self.trace_path
+    }
+
+    /// TEST SEAM. Total zstd frames decompressed by this tail, across every
+    /// reader generation it has held.
+    ///
+    /// The tail's entire reason to exist is that this number grows with the
+    /// chunks a session ADDS, not with the chunks it has. That is a performance
+    /// property with no functional shadow — polling the RS-M2 one-shot query in
+    /// a loop returns identical records — so the only way to pin it is to count.
+    /// Nothing in this module reads the counter, so no production path can
+    /// branch on it.
+    pub fn chunk_decompressions(&self) -> u64 {
+        let live = match &self.body {
+            TailBody::Stream { reader, .. } => reader.chunk_decompressions(),
+            _ => 0,
+        };
+        self.retired_decompressions + live
+    }
+
+    /// Charge the live reader's decompressions to the retired total, so the
+    /// counter survives the reader it was accumulated on.
+    fn retire_body(&mut self) {
+        if let TailBody::Stream { reader, .. } = &self.body {
+            self.retired_decompressions += reader.chunk_decompressions();
+        }
+        self.body = TailBody::Absent;
+        self.stamp = None;
+    }
+
+    /// Open a fresh body for `trace_path`, preferring the stream over the shim.
+    fn open_body(trace_path: &Path) -> Result<(TailBody, PathBuf), String> {
+        let base_dir = if trace_path.is_dir() {
+            trace_path.to_path_buf()
+        } else {
+            trace_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+        };
+
+        if let Some(ct_path) = find_ct_container(trace_path) {
+            let mut ctfs =
+                CtfsReader::open(&ct_path).map_err(|e| format!("failed to open {}: {e}", ct_path.display()))?;
+            // Read before the reader is built: a container with no readable
+            // `meta.dat` also has no span stream, so an empty id here is only
+            // ever paired with `TailBody::Absent` or a legacy body.
+            let recording_id = ctfs
+                .read_file("meta.dat")
+                .ok()
+                .and_then(|meta| crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&meta).ok())
+                .map(|meta| meta.recording_id)
+                .unwrap_or_default();
+            if let Some(reader) = SpanStreamReader::open_from_ctfs(&mut ctfs)? {
+                // External bindings are relative to the CONTAINER's directory,
+                // which is not necessarily `trace_path`.
+                let dir = ct_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+                return Ok((
+                    TailBody::Stream {
+                        container: ct_path,
+                        recording_id,
+                        reader,
+                    },
+                    dir,
+                ));
+            }
+        }
+
+        if let Some(path) = legacy_sidecar_path(&base_dir) {
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            let (spans, _skipped) = parse_legacy_jsonl(&text, &path);
+            return Ok((TailBody::Legacy { path, spans }, base_dir));
+        }
+
+        Ok((TailBody::Absent, base_dir))
+    }
+
+    /// Bring the held body up to date with what is on disk.
+    ///
+    /// The fast path is the point: when the source file is byte-identical to
+    /// what the held reader was built from, this performs ONE `stat` and
+    /// returns — no container open, no index parse, no decompression. That is
+    /// the state a poll loop is in most of the time.
+    fn refresh(&mut self) -> Result<(), String> {
+        let bound = self.body.identity();
+        // A tail with no source yet (`TailBody::Absent`) has nothing to stamp,
+        // so it re-probes on every poll. That is deliberate rather than
+        // wasteful: a live session's container declares its span stream the
+        // first time the recorder registers a span, so "no spans here" is a
+        // state a poll loop must be able to leave.
+        if let (Some(path), Some(seen)) = (bound.0.as_deref(), self.stamp) {
+            match stamp_of(path) {
+                Some(now) if now == seen => return Ok(()),
+                Some(now) if now.len < seen.len => {
+                    // The source lost bytes: it was truncated, rotated or
+                    // replaced. Whatever the client's cursor names, it no
+                    // longer names the same records. (Block padding can hide a
+                    // shrink; the authoritative guard is the cursor-past-head
+                    // check in `poll`, and the recording-id check below.)
+                    self.reset_pending = true;
+                }
+                _ => {}
+            }
+        }
+
+        self.retire_body();
+        let (body, base_dir) = self.rebuild()?;
+        // A source SWAP — a container appeared next to the sidecar we were
+        // tailing, a different container was selected, or the same path now
+        // holds a DIFFERENT recording — changes what a cursor counts, so the
+        // client must start over.
+        if body.identity() != bound {
+            self.reset_pending = true;
+        }
+        self.stamp = body.source_path().and_then(stamp_of);
+        self.body = body;
+        self.base_dir = base_dir;
+        Ok(())
+    }
+
+    /// Re-open the source, leaving the tail in a clean "rebuild me" state if
+    /// that fails so a later poll is not served off a half-initialised reader.
+    fn rebuild(&mut self) -> Result<(TailBody, PathBuf), String> {
+        match RequestSpanTail::open_body(&self.trace_path) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.reset_pending = true;
+                Err(e)
+            }
+        }
+    }
+
+    /// Return everything appended since `client_cursor`.
+    ///
+    /// `client_cursor` is the client's own cursor, NOT the tail's: a client
+    /// that replays an older one gets a superset ending at the same head, which
+    /// merges to the same set (see the section comment). A cursor past the head
+    /// is not an error — it is a client whose recording was replaced — and
+    /// yields a `reset` snapshot.
+    pub fn poll(&mut self, client_cursor: u64) -> Result<RequestSpanDelta, String> {
+        self.refresh()?;
+
+        let force_reset = self.reset_pending;
+        let source = self.body.source_name().to_string();
+        let outcome = match &mut self.body {
+            TailBody::Stream { reader, .. } => {
+                let head = reader.chunk_count() as u64;
+                let effective = if force_reset || client_cursor > head {
+                    0
+                } else {
+                    client_cursor
+                };
+                usize::try_from(effective)
+                    .map_err(|_| format!("request-span cursor {effective} does not fit in usize"))
+                    .and_then(|from| reader.read_spans_since(from))
+                    // Last-record-wins WITHIN the delta: an open record and its
+                    // completion that land in the same batch must arrive as one
+                    // settled row, not as two rows the client has to untangle.
+                    .map(|raw| (resolve_spans(raw), head, effective == 0))
+            }
+            TailBody::Legacy { spans, .. } => {
+                let head = spans.len() as u64;
+                let effective = if force_reset || client_cursor > head {
+                    0
+                } else {
+                    client_cursor
+                };
+                let from = usize::try_from(effective).unwrap_or(0).min(spans.len());
+                Ok((spans[from..].to_vec(), head, effective == 0))
+            }
+            TailBody::Absent => Ok((Vec::new(), 0, force_reset)),
+        };
+
+        let (spans, cursor, reset) = match outcome {
+            Ok(v) => v,
+            Err(e) => {
+                // A decode failure poisons the cursor: we do not know how much
+                // of the stream we actually consumed. Drop the reader so the
+                // next poll rebuilds and re-snapshots.
+                self.retire_body();
+                self.reset_pending = true;
+                return Err(e);
+            }
+        };
+        self.reset_pending = false;
+
+        Ok(RequestSpanDelta {
+            spans: spans
+                .iter()
+                .filter(|s| s.span_type == SPAN_TYPE_WEB_REQUEST)
+                .map(|s| to_request_record(s, &self.base_dir))
+                .collect(),
+            cursor,
+            reset,
+            source,
+        })
+    }
 }
 
 // ── Legacy JSONL shim (read-only) ───────────────────────────────────────

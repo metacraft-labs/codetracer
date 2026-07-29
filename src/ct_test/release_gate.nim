@@ -43,6 +43,10 @@ const
     "src/tests/gui/tests/editor/editor_vm_test.nim",
     "src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim",
     "src/tests/gui/tests/views/isonim_views_test.nim",
+    # RS-M3: the Request Panel's live span-delta path.  Registered here
+    # because this array IS the CI gate — a ViewModel test that exists but
+    # is not listed runs nowhere (a gap this campaign found repeatedly).
+    "src/tests/gui/tests/request-panel/request_panel_live_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

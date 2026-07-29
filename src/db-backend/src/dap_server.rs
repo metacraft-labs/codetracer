@@ -1786,6 +1786,21 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
                 .unwrap_or_default(),
             sender.clone(),
         )?,
+        // RS-M3 — HTTP Request Panel, live: return only the request spans
+        // appended since the client's cursor, and emit them as a
+        // `ct/updated-http-requests` event.  The handler holds the span-stream
+        // reader across calls so a poll decodes only the chunks the recording
+        // gained.  Spec:
+        // codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md
+        // §"Reader and Frontend Surface".
+        "ct/load-request-spans-since" => handler.load_request_spans_since(
+            req.clone(),
+            // `cursor` is optional: a first poll with no `arguments` at all is
+            // a valid "give me the snapshot" request.
+            req.load_args::<crate::request_spans::LoadRequestSpansSinceArguments>()
+                .unwrap_or_default(),
+            sender.clone(),
+        )?,
         "ct/seek-to-geid" => handler.seek_to_geid(
             req.clone(),
             req.load_args::<crate::dap_handler::SeekToGeidArguments>()?,

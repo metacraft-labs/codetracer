@@ -244,6 +244,13 @@ required-features = ["io-transport"]
 [dev-dependencies]
 ct-dap-client = { path = "../../libs/ct-dap-client" }
 tempfile = "3"
+# RS-M3 — tests/request_span_tail_test.rs publishes successive snapshots of a
+# growing container and needs each snapshot to carry a strictly later mtime.
+# A `.ct` container is block-padded, so two stages routinely have the SAME
+# file length and mtime is the only signal the tail's staleness check can use;
+# setting it explicitly keeps the test deterministic instead of racing the
+# filesystem clock. Already in the lock file transitively.
+filetime = "0.2"
 # Performance + E2E Coverage campaign P4.6 / P9.2: the
 # tracepoint_interpreter Criterion bench at benches/tracepoint_interpreter.rs.
 # default-features = false drops criterion's `rayon` + `plotters`

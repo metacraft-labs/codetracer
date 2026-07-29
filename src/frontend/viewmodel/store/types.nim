@@ -537,6 +537,35 @@ type
     ## ``startGeid``    — Global Event ID at the handler entry point;
     ##                    used by ``jumpToHandler`` so the debugger
     ##                    can seek to the captured handler frame.
+    ## ``isOpen``       — ``true`` while the request is still in
+    ##                    flight: the recorder published an *open*
+    ##                    record whose completion has not arrived yet.
+    ##                    Such a row carries ``statusCode == 0`` and
+    ##                    ``status == "unknown"``, and the view renders
+    ##                    it distinctly (see the pane spec's "Live
+    ##                    Sessions" section).  A later delta carrying
+    ##                    the same ``id`` supersedes it in place — it
+    ##                    never produces a second row.
+    ## ``status``       — the span's own status byte as a wire string:
+    ##                    ``"unknown"`` / ``"ok"`` / ``"error"``.  Not
+    ##                    always derivable from ``statusCode``: an
+    ##                    aborted request has neither a status code nor
+    ##                    a duration, yet is definitely not in flight.
+    ## ``externalTracePath``
+    ##                  — absolute path of the container this request's
+    ##                    execution lives in, when the span carries an
+    ##                    external binding *and* the target container is
+    ##                    present on disk.  Empty for the normal case
+    ##                    (an inline span whose execution is in the
+    ##                    container already open).  When set, activating
+    ##                    the row opens that container instead of
+    ##                    seeking inside the current one.
+    ##
+    ## The field set matches the backend's ``RequestRecord``
+    ## (``src/db-backend/src/request_spans.rs``), which serialises
+    ## camelCase and is the body of both the
+    ## ``ct/load-request-spans-since`` response and the
+    ## ``ct/updated-http-requests`` event.
     id*: int
     httpMethod*: string
     url*: string
@@ -544,6 +573,9 @@ type
     durationMs*: int
     responseSize*: int
     startGeid*: int64
+    isOpen*: bool
+    status*: string
+    externalTracePath*: string
 
   # -------------------------------------------------------------------
   # Welcome screen — recent traces, recent folders, start options,

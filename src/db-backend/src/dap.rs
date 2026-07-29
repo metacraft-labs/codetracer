@@ -277,6 +277,31 @@ impl DapClient {
         }))
     }
 
+    /// RS-M3 — `ct/updated-http-requests`: a batch of HTTP Request Panel rows
+    /// appended since the client's cursor.
+    ///
+    /// Emitted alongside the `ct/load-request-spans-since` response, following
+    /// the `ct/updated-origin-chain` precedent, so an event-driven panel can
+    /// consume the tail without correlating responses.
+    ///
+    /// The body is a [`crate::request_spans::RequestSpanDelta`]:
+    /// `{ spans, cursor, reset, source }`. `spans` is settled within the batch
+    /// and keyed on `id`; the client merges by that key, last wins. See the
+    /// last-record-wins section in `request_spans.rs`.
+    pub fn updated_http_requests_event(
+        &mut self,
+        delta: &crate::request_spans::RequestSpanDelta,
+    ) -> DapResult<DapMessage> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-http-requests".to_string(),
+            body: serde_json::to_value(delta)?,
+        }))
+    }
+
     pub fn calltrace_search_event(&mut self, search_res: Vec<task::Call>) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {

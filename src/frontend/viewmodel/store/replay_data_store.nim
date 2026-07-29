@@ -32,6 +32,23 @@ const
   LiveRecordingRestoreAtCommand* = "ct/live-restore-at"
   LiveMcrStepCommand* = "ct/mcr-live-step"
   SeekToGeidCommand* = "ct/seek-to-geid"
+  LoadRequestSpansSinceCommand* = "ct/load-request-spans-since"
+    ## RS-M3 — poll the backend for HTTP request spans committed since the
+    ## cursor we last received.  The response body and the body of the
+    ## ``ct/updated-http-requests`` event are the same shape, so both are fed
+    ## through ``applyRequestSpanDelta``.
+
+  UpdatedHttpRequestsEventKind* = "CtUpdatedHttpRequests"
+    ## ``CtEventKind`` name the RealBackendService stamps into the envelope's
+    ## ``kind`` field (see ``backend/real_backend.nim`` — it forwards
+    ## ``$CtEventKind`` plus the raw body under ``data``).
+  LoadRequestSpansSinceEventKind* = "CtLoadRequestSpansSince"
+    ## The same envelope for the *response* to our own poll.  The renderer's
+    ## ``asyncSendCtRequest`` resolves its promise immediately with an empty
+    ## object and delivers the real body through the DAP response channel, so
+    ## the response has to be consumed here rather than off the future.
+    ## Applying it is harmless when the event already arrived: a delta merge is
+    ## idempotent (same ids, same cursor).
 
 # ---------------------------------------------------------------------------
 # Store identity tracking — unique ID per store instance for diagnostics
@@ -105,6 +122,28 @@ type
       ## RR or Materialized.  Empty string means "no source" — the
       ## view falls back to the ``no-code`` class with a blank label.
 
+  RequestSpansStore* = object
+    ## RS-M3 — reactive state for the HTTP Request panel's live tail.
+    ##
+    ## The store, not the panel VM, owns the span list: the tail keeps
+    ## growing while the panel is closed, and a panel re-mount must show the
+    ## rows that arrived meanwhile rather than an empty table.
+    requests*: Signal[seq[RequestRecord]]
+      ## Merged rows in capture order (ascending ``id``, oldest first — the
+      ## order the pane spec's Layout section requires).  A delta record
+      ## whose ``id`` is already present replaces that row *in place*, so an
+      ## open row settling into its completion never produces a second row.
+    cursor*: Signal[int64]
+      ## The cursor to send with the next poll.  **Opaque**: a chunk count
+      ## for a span stream, a record count for a legacy sidecar.  It is
+      ## echoed back verbatim and never has arithmetic done to it.  ``0``
+      ## means "no cursor yet", which asks the backend for a snapshot.
+    source*: Signal[string]
+      ## ``"span-stream"`` / ``"legacy-jsonl"`` / ``"none"`` — which
+      ## producer the last delta came from.  Diagnostics only; the merge
+      ## rules do not depend on it.
+    loadingState*: Signal[LoadingState]
+
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
@@ -115,6 +154,7 @@ type
     agentSessions*: Signal[AgentSessionsState]
     calltrace*: CalltraceStore
     locals*: LocalsStore
+    requestSpans*: RequestSpansStore
     backend*: BackendService
     requestTracker*: RequestTracker
 
@@ -188,6 +228,152 @@ proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
     timeline.maxRRTicks = rrTicks
   store.timeline.val = timeline
 
+# ---------------------------------------------------------------------------
+# RS-M3 — HTTP request span deltas
+#
+# Wire contract (implemented and tested backend-side in
+# ``src/db-backend/src/request_spans.rs``; see
+# ``codetracer-specs/Planned-Features/Request-Panel-Live-Sessions.milestones.org``
+# §RS-M3):
+#
+#   { "spans": RequestRecord[], "cursor": <opaque>, "reset": bool,
+#     "source": "span-stream" | "legacy-jsonl" | "none" }
+#
+# The same body is the ``ct/load-request-spans-since`` response AND the
+# ``ct/updated-http-requests`` event payload, so one apply proc serves both.
+#
+# Client algorithm:
+#   reset == true  -> replace the list with ``spans``
+#   reset == false -> merge each record keyed on ``id``, last wins
+#
+# Filtering stays on the client (``RequestPanelVM.filteredRequests``). The
+# backend deliberately never filters a delta: a row that matches a filter
+# while it is open may stop matching once it completes, and if the backend
+# had filtered the open row out, the superseding completion would never be
+# sent and the panel would keep a stale in-flight row forever.
+# ---------------------------------------------------------------------------
+
+proc parseRequestRecord*(node: JsonNode): RequestRecord =
+  ## Decode one wire ``RequestRecord``.  Every field is read defensively:
+  ## a recorder that omits an optional key (``responseSize``,
+  ## ``externalTracePath``) or a backend built before a field existed must
+  ## degrade to a usable row rather than drop the request.
+  if node.isNil or node.kind != JObject:
+    return RequestRecord(status: "unknown")
+  RequestRecord(
+    id: node{"id"}.getInt(0),
+    httpMethod: node{"httpMethod"}.getStr(""),
+    url: node{"url"}.getStr(""),
+    statusCode: node{"statusCode"}.getInt(0),
+    durationMs: node{"durationMs"}.getInt(0),
+    responseSize: node{"responseSize"}.getInt(0),
+    startGeid: node{"startGeid"}.getBiggestInt(0).int64,
+    isOpen: node{"isOpen"}.getBool(false),
+    # An absent status byte is "unknown", matching the backend's
+    # ``SpanStatus::Unknown`` default rather than silently reading as "ok".
+    status:
+      if node{"status"}.getStr("").len > 0: node{"status"}.getStr("")
+      else: "unknown",
+    # ``externalTracePath`` is nullable on the wire; ``getStr`` maps both
+    # ``null`` and an absent key to "", which is this layer's "no external
+    # container" sentinel (avoids Option noise across the JS/native split).
+    externalTracePath: node{"externalTracePath"}.getStr(""),
+  )
+
+proc mergeRequestSpans*(existing: seq[RequestRecord];
+                        delta: seq[RequestRecord]): seq[RequestRecord] =
+  ## Merge ``delta`` into ``existing`` keyed on ``id``, last wins.
+  ##
+  ## ``id`` is the span id — 1-based and stable — so a re-delivered range
+  ## (deltas may overlap; the backend re-sends a record whose completion
+  ## superseded an earlier open one) updates the row in place and never
+  ## appends a duplicate.  New ids are appended in delta order, which is
+  ## ascending, preserving the panel's oldest-first ordering.
+  result = existing
+  var indexById = initTable[int, int]()
+  for i, req in result:
+    indexById[req.id] = i
+  for req in delta:
+    if indexById.hasKey(req.id):
+      result[indexById[req.id]] = req
+    else:
+      indexById[req.id] = result.len
+      result.add(req)
+
+proc applyRequestSpanDelta*(store: ReplayDataStore; body: JsonNode) =
+  ## Apply one delta body (response or event) to the store.
+  ##
+  ## Malformed bodies are ignored rather than clearing the panel: a
+  ## truncated or unexpected payload must not destroy rows the user is
+  ## looking at.
+  if body.isNil or body.kind != JObject:
+    return
+  if not body.hasKey("spans") and not body.hasKey("cursor"):
+    # Not a delta envelope at all (e.g. the empty object the renderer's
+    # ``asyncSendCtRequest`` resolves its promise with).
+    return
+
+  var incoming: seq[RequestRecord] = @[]
+  let spansNode = body{"spans"}
+  if not spansNode.isNil and spansNode.kind == JArray:
+    incoming = newSeqOfCap[RequestRecord](spansNode.len)
+    for item in spansNode:
+      incoming.add(parseRequestRecord(item))
+
+  let reset = body{"reset"}.getBool(false)
+  store.requestSpans.requests.val =
+    if reset: incoming
+    else: mergeRequestSpans(store.requestSpans.requests.val, incoming)
+
+  if body.hasKey("cursor"):
+    store.requestSpans.cursor.val = body{"cursor"}.getBiggestInt(0).int64
+  let source = body{"source"}.getStr("")
+  if source.len > 0:
+    store.requestSpans.source.val = source
+  store.requestSpans.loadingState.val = lsIdle
+
+proc clearRequestSpans*(store: ReplayDataStore) =
+  ## Drop every tailed row and forget the cursor, so the next poll asks for
+  ## a fresh snapshot.  Used when the session restarts or the panel's
+  ## "Clear" button is pressed.
+  store.requestSpans.requests.val = @[]
+  store.requestSpans.cursor.val = 0'i64
+  store.requestSpans.source.val = ""
+  store.requestSpans.loadingState.val = lsIdle
+
+proc requestRequestSpansSince*(store: ReplayDataStore) =
+  ## Poll for spans committed since the stored cursor.
+  ##
+  ## The cursor is echoed back untouched.  A zero cursor asks for a
+  ## snapshot, which is exactly what the first poll of a session wants.
+  ##
+  ## The future's value is applied when it carries a delta envelope (the
+  ## mock and stdio backends resolve with the real body); in the Electron
+  ## renderer the promise resolves with ``{}`` and the body arrives through
+  ## the DAP response/event channel handled in
+  ## ``installBackendEventHandlers``.  Both paths are idempotent.
+  let key = "load-request-spans-since"
+  let cursor = store.requestSpans.cursor.val
+  if store.requestTracker.isDuplicate(key, $cursor):
+    return
+
+  store.requestTracker.markPending(key, $cursor)
+  store.requestSpans.loadingState.val = lsLoading
+
+  let fut = store.backend.send(LoadRequestSpansSinceCommand,
+                               %*{"cursor": cursor})
+  let s = store
+  async_compat.onComplete(fut,
+    onSuccess = proc(response: JsonNode) =
+      s.requestTracker.markComplete(key)
+      s.applyRequestSpanDelta(response)
+      if s.requestSpans.loadingState.val == lsLoading:
+        s.requestSpans.loadingState.val = lsIdle,
+    onError = proc(msg: string) =
+      s.requestTracker.markComplete(key)
+      s.requestSpans.loadingState.val = lsError,
+  )
+
 proc installBackendEventHandlers(store: ReplayDataStore) =
   ## Consume backend responses/events that are not mirrored through the
   ## legacy component bridge. Most panel data still arrives through the
@@ -205,6 +391,15 @@ proc installBackendEventHandlers(store: ReplayDataStore) =
         else: event
       let head = payload.readRRTicks(s.session.val.recordingHeadRRTicks)
       s.updateRecordingHead(head)
+    of UpdatedHttpRequestsEventKind, LoadRequestSpansSinceEventKind:
+      # RS-M3 — the live Request-panel tail.  The RealBackendService wraps
+      # the DAP body under ``data``; the mock backend (and any caller that
+      # already holds a bare delta) emits the envelope itself, so fall back
+      # to the event node, exactly as the CtMcrGetRecordingHead branch does.
+      let payload =
+        if event.hasKey("data"): event["data"]
+        else: event
+      s.applyRequestSpanDelta(payload)
     else:
       discard
 
@@ -258,6 +453,14 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         loadingState: createSignal(lsIdle),
         loadedForRRTicks: createSignal(0'u64),
         codeStateLine: createSignal(""),
+      ),
+
+      # -- HTTP request spans (RS-M3 live tail) --
+      requestSpans: RequestSpansStore(
+        requests: createSignal(newSeq[RequestRecord]()),
+        cursor: createSignal(0'i64),
+        source: createSignal(""),
+        loadingState: createSignal(lsIdle),
       ),
 
       # -- services --
