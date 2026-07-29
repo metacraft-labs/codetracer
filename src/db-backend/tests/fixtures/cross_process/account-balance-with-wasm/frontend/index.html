@@ -2,19 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>account-balance-with-wasm fixture</title>
+    <title>Account Balance (cross-process origin demo)</title>
   </head>
   <body>
     <!--
-      Cross-Tracer Origin E2E — Fixture A' (three-tracer variant per
-      TCT-M4). The Vite dev server resolves /app.js as an ES module
-      under the codetracer-js-recorder host, which in turn loads the
-      Rust→WASM `balance-calc` crate from ./pkg/. The single
-      observable side-effect is the `#status` element flipping to
-      "stored" once the backend's POST /balance handler replies.
+      Cross-process origin demo, browser tier.
+
+      Loading ./app.js as a module starts the whole flow: the CodeTracer
+      browser runtime attaches, the instrumented WebAssembly module is
+      instantiated against its own recorder, the balance is computed and
+      POSTed to the Node backend, and both browser-side recordings are
+      finalised.
+
+      The single observable side-effect is #status flipping to "stored".
+      The recording harness waits on that before closing the page, which
+      is what guarantees the trace covers the complete exchange.
     -->
     <main>
-      <h1>Account Balance (WASM)</h1>
+      <h1>Account Balance</h1>
       <p>Status: <span id="status">pending</span></p>
     </main>
     <script type="module" src="./app.js"></script>
