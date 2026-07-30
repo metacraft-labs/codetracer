@@ -1437,15 +1437,55 @@ demo-request-panel LANG="synthetic":
     exec ct replay -t "$demo_dir"
   fi
 
+  if [ "{{LANG}}" = "php" ]; then
+    # RS-M7.  Same shape as the Python and Ruby arms: the recorder sibling
+    # records the demo app into $CODETRACER_DEMO_DIR and prints the spans it
+    # wrote; the GUI half stays here so every language opens the session the
+    # same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-php}"
+    recorder_repo="${CODETRACER_PHP_RECORDER_DIR:-$(pwd)/../codetracer-php-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-php-recorder checkout at $recorder_repo."
+        echo "The PHP demo records a real \`php -S\` server with that recorder, so"
+        echo "the sibling repo has to be present (override with"
+        echo "CODETRACER_PHP_RECORDER_DIR=/path/to/codetracer-php-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the PHP demo app with the PHP recorder"
+    # Its own dev shell: the recorder needs php with development headers and
+    # phpize to build its C extension, neither of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-php builtin
+    )
+    # A PHP worker owns its recording, so the container lives under
+    # $demo_dir/worker_<pid>/; the recipe leaves the path it used in a marker
+    # file rather than making this side guess the worker's pid.
+    worker_dir="$(cat "$demo_dir/.worker_dir")"
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$worker_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$worker_dir"
+  fi
+
   if [ "{{LANG}}" != "synthetic" ]; then
     {
       echo "ERROR: no recorder emits web-request spans for '{{LANG}}' yet."
-      echo "PHP / Elixir / JS emission is RS-M7..RS-M9; each of those"
+      echo "Elixir / JS emission is RS-M8..RS-M9; each of those"
       echo "milestones adds its own LANG value to this recipe."
       echo
       echo "Today:  just demo-request-panel synthetic"
       echo "        just demo-request-panel python"
       echo "        just demo-request-panel ruby"
+      echo "        just demo-request-panel php"
     } >&2
     exit 1
   fi
@@ -2041,12 +2081,13 @@ test-vm-native: vm-test-prereqs
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
 # Also skips request-panel/demo_recipe_vm_test.nim (RS-M4),
-# request-panel/python_request_panel_vm_test.nim (RS-M5) and
-# request-panel/ruby_request_panel_vm_test.nim (RS-M6): the first writes a real
-# `.ct` container with the canonical Nim writer, the other two read one recorded
-# by the Python and Ruby recorders, and all three link zstd through a C FFI that
-# has no `nim js` equivalent.  They run in test-vm-native and are registered in
-# release_gate.nim's CoreViewModelGateTests.
+# request-panel/python_request_panel_vm_test.nim (RS-M5),
+# request-panel/ruby_request_panel_vm_test.nim (RS-M6) and
+# request-panel/php_request_panel_vm_test.nim (RS-M7): the first writes a real
+# `.ct` container with the canonical Nim writer, the other three read one
+# recorded by the Python, Ruby and PHP recorders, and all four link zstd through
+# a C FFI that has no `nim js` equivalent.  They run in test-vm-native and are
+# registered in release_gate.nim's CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
   set -e
@@ -2065,6 +2106,7 @@ test-vm-js: vm-test-prereqs
     ! -path '*/request-panel/demo_recipe_vm_test.nim' \
     ! -path '*/request-panel/python_request_panel_vm_test.nim' \
     ! -path '*/request-panel/ruby_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/php_request_panel_vm_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"

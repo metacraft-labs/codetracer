@@ -67,6 +67,16 @@ const
     # handler.  Native-only (real container bytes through a zstd FFI), hence
     # excluded from `just test-vm-js` and listed here.
     "src/tests/gui/tests/request-panel/ruby_request_panel_vm_test.nim",
+    # RS-M7: the PHP row of the language matrix.
+    # `vm_php_request_panel_rows_and_seek` drives the panel from a container the
+    # PHP recorder produced while a real `php -S` process served real HTTP
+    # requests, and asserts the rows plus that activating a row seeks into that
+    # request's own step range.  PHP is the milestone that moved the writer from
+    # per-request to per-worker lifetime, so this is also the GUI-side guard that
+    # eight requests are eight intervals of ONE recording.  Native-only (real
+    # container bytes through a zstd FFI), hence excluded from `just test-vm-js`
+    # and listed here.
+    "src/tests/gui/tests/request-panel/php_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
