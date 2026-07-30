@@ -336,6 +336,9 @@
     margin-top: 5px
     margin-bottom: 5px
 
+    &:empty
+      display: none
+
   #menu-search
     margin-left: 4px
     margin-right: 4px
@@ -397,7 +400,7 @@
   .menu-sub-group-separator
     border: 0
     // width: "calc(%s - 2px)" % MENU_NODE_WIDTH
-    height: 14px
+    height: 0.875em
     margin: 0
     background-color: colors-ui-surface-input-default
 
@@ -412,12 +415,7 @@
 
   .menu-active-node
     background-color: colors-ui-surface-input-default
-
-    .menu-node
-      background-color: colors-ui-surface-primary-tertiary
-
-    .menu-node-icon
-      opacity: 1
+    // .ct-menu-item--active inside handles the blue focus bg via menu_item.styl
 
   .menu-active-search-result
     background-color: colors-ui-surface-primary-tertiary

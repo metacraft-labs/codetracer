@@ -71,7 +71,7 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
   for key, option in self.options:
     let action = self.actions[key]
     let optionDom = kdom.document.createElement("div")
-    optionDom.class = cstring"context-menu-option"
+    optionDom.class = cstring"context-menu-option ct-menu-item"
     optionDom.addEventListener(cstring"click", proc(e: Event) =
       action()
       self.dom.toJs.classList.remove("visible"))
