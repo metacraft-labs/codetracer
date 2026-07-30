@@ -127,6 +127,28 @@ const
     # the span-stream ground truth from disk, which `std/os` cannot do on the
     # `nim js` backend.
     "src/tests/gui/tests/request-panel/remote_request_panel_vm_test.nim",
+    # RS-M12: the CROSS-language row.  `request_span_conformance_all_languages`
+    # runs ONE assertion set over all six recorded fixtures — Python, Ruby,
+    # PHP, Elixir, JavaScript and native — and asserts it against a per-
+    # language capability declaration (`request_span_languages.nim`).  The six
+    # tests above each know their own session by heart, which is what makes
+    # them good regression tests and also what made them blind to a recorder
+    # drifting away from the others: nothing forced the six to agree.  This is
+    # that agreement, and it fails per language naming the field, so one run
+    # says WHICH recorder broke and WHICH key it broke on.  The declaration is
+    # what keeps it honest: the genuine differences (native publishes no open
+    # records and has no step stream, Elixir's step ranges hold no application
+    # source position, `contiguous_on_one_thread` legitimately varies) are
+    # asserted as declared values rather than waived, so an unintended change
+    # in any of them still fails.  Native-only (real container bytes through a
+    # zstd FFI), hence excluded from `just test-vm-js` and listed here.
+    #
+    # The milestone's other required test,
+    # `no_recorder_writes_sidecar_manifests`, is deliberately NOT here: it
+    # drives a real recording per language through the recorder siblings, so
+    # it belongs in the sibling-gated `just test-no-sidecar-manifests` lane
+    # rather than in this toolchain-free one.
+    "src/tests/gui/tests/request-panel/request_span_conformance_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

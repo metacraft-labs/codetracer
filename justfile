@@ -2179,6 +2179,7 @@ test-vm-native: vm-test-prereqs
     ! -path '*/integration/language_smoke_test.nim' \
     ! -path '*/multi-replay/*' \
     ! -path '*/noir-space-ship/*' \
+    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-native-$name"
@@ -2215,8 +2216,10 @@ test-vm-native: vm-test-prereqs
 # request-panel/php_request_panel_vm_test.nim (RS-M7),
 # request-panel/elixir_request_panel_vm_test.nim (RS-M8),
 # request-panel/js_request_panel_vm_test.nim (RS-M9),
-# request-panel/native_request_panel_vm_test.nim (RS-M10) and
-# request-panel/remote_request_panel_vm_test.nim (RS-M11): the first writes a
+# request-panel/native_request_panel_vm_test.nim (RS-M10),
+# request-panel/remote_request_panel_vm_test.nim (RS-M11) and
+# request-panel/request_span_conformance_test.nim (RS-M12, which reads all six
+# of those containers at once): the first writes a
 # real `.ct` container with the canonical Nim writer, the next six read one
 # recorded by the Python, Ruby, PHP, BEAM and JS recorders and by `ct-mcr`,
 # and all seven link zstd through a C FFI that has no `nim js` equivalent.
@@ -2248,6 +2251,8 @@ test-vm-js: vm-test-prereqs
     ! -path '*/request-panel/js_request_panel_vm_test.nim' \
     ! -path '*/request-panel/native_request_panel_vm_test.nim' \
     ! -path '*/request-panel/remote_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/request_span_conformance_test.nim' \
+    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"
@@ -2285,6 +2290,38 @@ test-vm-js: vm-test-prereqs
 
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
+
+# RS-M12: assert no recorder writes a sidecar manifest any more.
+#
+# `src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim` runs each
+# recorder sibling's own `record-request-panel-fixture` recipe — the same real
+# recording run that produced the checked-in fixtures — into a scratch
+# directory, with `CODETRACER_SPAN_MANIFEST` deliberately SET, and requires
+# that no `session_manifest.jsonl` / `codetracer_spans.jsonl` appears anywhere
+# the run could have written one.  Setting the retired opt-in is what makes it
+# a proof that the write path is GONE rather than a snapshot of today's
+# defaults.
+#
+# It is excluded from `test-vm-native` / `test-vm-js` because it needs six
+# recorder toolchains, which is exactly what the checked-in fixtures exist to
+# spare that lane.  A sibling that is not checked out is reported through the
+# same `MISSING-RECORDER SKIP:` marker `test-vm-recorder-gated` uses, and the
+# test's own zero-test guard fails an all-skipped run so a sibling-less
+# environment cannot masquerade as a pass.
+test-no-sidecar-manifests: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-no-sidecar-manifests.log) 2>&1
+  echo "=== RS-M12 sidecar retirement (real recording per language) ==="
+  f=src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim
+  name=$(basename "$f" .nim)
+  cache="/tmp/ct-nim-cache/vm-native-$name"
+  nim c -r --hints:off \
+    --path:src/frontend/viewmodel \
+    --nimcache:"$cache" \
+    -o:"$cache/$name" \
+    "$f"
 
 # Compile + run the recorder-gated ViewModel headless tests that live under
 # src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /
