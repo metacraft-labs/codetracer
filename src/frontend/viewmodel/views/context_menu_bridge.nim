@@ -35,6 +35,7 @@ when defined(js):
 
       let item = kdom.document.createElement(cstring"div")
       item.classList.add(cstring"context-menu-item")
+      item.classList.add(cstring"ct-menu-item")
       item.id = cstring(fmt"menu-item-{i}")
       item.innerHTML = option.name
       item.onclick = proc(ev: kdom.Event) {.nimcall.} =

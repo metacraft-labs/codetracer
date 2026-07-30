@@ -6,26 +6,33 @@
  * Base class: .ct-menu-item
  * Sub-elements:
  *   .ct-menu-item-icon      — left icon (svg background or inline)
- *   .ct-menu-item-label     — primary text (bold)
- *   .ct-menu-item-sublabel  — secondary / descriptive text
- *   .ct-menu-item-trailing  — right element (chevron › or checkmark ✓)
+ *   .ct-menu-item-label     — primary text
+ *   .ct-menu-item-sublabel  — secondary / descriptive text (keyboard shortcut)
+ *   .ct-menu-item-trailing  — right chevron (›)
  *
- * State attributes:
- *   [data-disabled="true"]  — disabled row
- *   [data-selected="true"]  — selected row (trailing shows checkmark)
- *   [data-focused="true"]   — programmatically focused row (keyboard nav)
+ * State modifier classes (IsoNim-friendly, no data-attributes):
+ *   .ct-menu-item--disabled  — disabled row
+ *   .ct-menu-item--active    — keyboard-navigation active row (tab focus)
  *
  * Variants:
- *   Standard  — left icon
- *   Checkbox  — left .ct-checkmark inside .ct-menu-item-icon
+ *   Standard  — left icon (current implementation)
+ *   Checkbox  — left .ct-checkmark inside .ct-menu-item-icon (future)
+ *
+ * Design token mapping (from design system):
+ *   Default:  fill=colors-ui-surface-base-raised
+ *   Hover:    fill=colors-ui-surface-primary-default-hover
+ *   Focused:  fill=colors-ui-border-focus
+ *   Disabled: icon=colors-ui-icon-primary-disabled, text=colors-ui-text-primary-disabled
+ *   Icon:     colors-ui-icon-primary-default
+ *   Text:     colors-ui-text-primary-body
+ *   Subtext:  colors-ui-text-primary-body-subtle
  */
 
 .ct-menu-item
-  font-size: 0.75rem
   display: flex
   align-items: center
   gap: 0.5em
-  padding: 0.5em 0.75em
+  padding: 0.5em
   min-height: 2.125em
   width: 100%
   box-sizing: border-box
@@ -52,7 +59,7 @@
     display: flex
     align-items: center
     justify-content: center
-    color: colors-ui-text-primary-label
+    color: colors-ui-icon-primary-default
 
   .ct-menu-item-label
     font-weight: 400
@@ -82,27 +89,33 @@
 
   // ── Hover ─────────────────────────────────────────────────
 
-  &:hover:not([data-disabled="true"])
+  &:hover:not(.ct-menu-item--disabled)
     background: colors-ui-surface-primary-default-hover
 
-  // ── Focused (keyboard navigation or :focus-visible) ───────
+  // ── Keyboard navigation active (blue) ────────────────────
+  // Only .ct-menu-item--active gets the blue background.
+  // :focus-visible is intentionally excluded — it fires on
+  // mouse clicks too and would override the hover gray.
 
-  &:focus-visible:not([data-disabled="true"]),
-  &[data-focused="true"]:not([data-disabled="true"])
+  &.ct-menu-item--active:not(.ct-menu-item--disabled)
     outline: none
-    background: colors-ui-surface-primary-default-hover
+    background: colors-ui-border-focus
 
   // ── Disabled ──────────────────────────────────────────────
 
-  &[data-disabled="true"]
+  &.ct-menu-item--disabled
     cursor: not-allowed
     pointer-events: none
 
-    .ct-menu-item-icon,
+    .ct-menu-item-icon
+      color: colors-ui-icon-primary-disabled
+
     .ct-menu-item-label,
-    .ct-menu-item-sublabel,
-    .ct-menu-item-trailing
+    .ct-menu-item-sublabel
       color: colors-ui-text-primary-disabled
+
+    .ct-menu-item-trailing
+      opacity: 0.3
 
     .ct-checkmark
       --ct-checkmark-border: rgba(255, 255, 255, 0.14)

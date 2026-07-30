@@ -152,13 +152,14 @@ proc resultRowClass*(entry: CommandPaletteResultEntry; index: int;
   ## selected modifiers in a stable order so tests can assert on the
   ## exact string.  Empty modifiers (e.g. ``cpnlInfo``) are skipped
   ## so the class string never carries spurious double spaces.
-  var parts = @[CommandPaletteResultRowClass, resultKindClass(entry.kind)]
+  var parts = @["ct-menu-item", CommandPaletteResultRowClass, resultKindClass(entry.kind)]
   let lvl = resultLevelClass(entry.level)
   if lvl.len > 0:
     parts.add lvl
   parts.add rowZebraClass(index)
   if selected:
     parts.add "command-selected"
+    parts.add "ct-menu-item--active"
   parts.join(" ")
 
 proc rowSuffixText*(entry: CommandPaletteResultEntry): string =
@@ -201,9 +202,9 @@ proc renderMockResultRow(r: MockRenderer; vm: CommandPaletteVM;
     tdiv(class = cls,
          onclick = proc() =
            vm.runResult(rowIndex)):
-      span(class = "command-result-value"):
+      span(class = "command-result-value ct-menu-item-label"):
         text value
-      span(class = "command-result-suffix"):
+      span(class = "command-result-suffix ct-menu-item-sublabel"):
         text suffix
   row
 
@@ -328,11 +329,11 @@ when defined(js):
       vm.runResult(rowIndex))
 
     let valueSpan = createWebTextElement("span", entry.value,
-                                         "command-result-value")
+                                         "command-result-value ct-menu-item-label")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(valueSpan))
 
     let suffixSpan = createWebTextElement("span", rowSuffixText(entry),
-                                          "command-result-suffix")
+                                          "command-result-suffix ct-menu-item-sublabel")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(suffixSpan))
     row
 
