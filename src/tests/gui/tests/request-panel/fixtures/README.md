@@ -262,3 +262,65 @@ made of the thread events that bracket it. That is a real, distinct, ordered
 coordinate — the panel seeks to it — but it does not resolve to a line of
 `router.ex`, which is why this row's ViewModel test asserts distinct seek
 targets rather than a seek into the handler's source.
+
+## `js_express/index.ct` — a recorded Express session (RS-M9)
+
+A **real recording**, on the same terms as the rows above. The JS recorder's
+Express middleware (`codetracer-js-recorder`, `packages/express`) opened and
+settled the spans and the recorder's native addon wrote them into `spans.dat`,
+while that repo's `test-programs/web/express/index.js` served seven HTTP
+requests over loopback to the demo app in `test-programs/web/express/app.js`.
+
+It is consumed by `../js_request_panel_vm_test.nim` (`vm_js_request_panel_rows`),
+registered in `src/ct_test/release_gate.nim`'s `CoreViewModelGateTests`, and is
+checked in so that ViewModel test needs no Node toolchain, no Express and no
+server.
+
+### Regenerating
+
+```sh
+direnv exec ../codetracer-js-recorder just \
+  record-request-panel-fixture \
+  "$PWD/src/tests/gui/tests/request-panel/fixtures/js_express"
+```
+
+The recipe **replaces the whole target directory** and keeps only the `.ct`
+container: the recorder also writes a `files/<absolute-source-path>` copy of
+every recorded source, which reproduces the recording machine's directory tree
+verbatim and would put one developer's `$HOME` in this repo's history for no
+benefit — the ViewModel test reads the container and nothing else.
+
+It records exactly the schedule `just demo-request-panel js` records.
+
+### What is different about the JavaScript row
+
+**A request is a slice of one event loop.** Node is single-threaded: concurrent
+requests do not run in parallel, they interleave across `await` points on one
+exec stream. The recorder maps each Node async context
+(`async_hooks.executionAsyncId()`) onto a container **thread**, so all seven
+spans carry `process_ord == 0` and seven distinct `thread_id`s — the context
+each request entered on.
+
+**`contiguous_on_one_thread` takes both values in this one sequential
+recording**, and this is the first fixture in which it does. A handler that runs
+to completion without yielding is an uninterrupted run of the exec stream and is
+contiguous. The `await`ing handler (`/api/reports/slow`) is not, because its own
+continuation lands on a different async context inside its range. Neither is the
+`POST`, because `express.json()` awaits the request body before the handler
+runs. `concurrent_with_siblings` is false throughout this fixture — the demo
+driver issues its requests one at a time — and the recorder repo's
+`express_span_contiguity_reflects_the_event_loop` test records the same schedule
+concurrently and requires the bit to flip, so neither bit can be passing as a
+constant.
+
+**Seeks resolve to the handler's source.** The instrumenter instruments the app
+but not `node_modules`, so a request's step range is made of real per-line steps
+of `app.js`; the ViewModel test walks each range and requires it to cover that
+request's own handler lines, distinctly from every other row's — including
+telling the two `/api/users/:userId` rows apart by the branch each took.
+
+One caveat the test asserts rather than hides: a span's `start_step` is the
+first *exec-stream event* of its interval, and where that event is a
+`ThreadStart` (the `POST`, whose handler resumes on a new async context after
+the body parser) it carries no source position of its own. The range still
+covers the handler.

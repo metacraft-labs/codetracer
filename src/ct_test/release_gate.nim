@@ -88,6 +88,20 @@ const
     # Native-only (real container bytes through a zstd FFI), hence excluded
     # from `just test-vm-js` and listed here.
     "src/tests/gui/tests/request-panel/elixir_request_panel_vm_test.nim",
+    # RS-M9: the JavaScript/Node row of the language matrix.
+    # `vm_js_request_panel_rows` drives the panel from a container the JS
+    # recorder produced while a real Express app on a real `http.Server`
+    # served real HTTP requests over loopback.  Node is the row where a
+    # request is a slice of ONE event loop, so this is the GUI-side guard
+    # that `contiguous_on_one_thread` is measured rather than declared: the
+    # handlers that never yield are contiguous, the POST (whose body parser
+    # awaits) and the `await`ing handler are not, and the fixture requires
+    # both values to appear.  It also asserts that every row's step range
+    # covers ITS OWN handler's lines, which is what makes a double-click
+    # land in the source rather than merely at a distinct coordinate.
+    # Native-only (real container bytes through a zstd FFI), hence excluded
+    # from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/js_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
