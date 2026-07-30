@@ -77,6 +77,17 @@ const
     # container bytes through a zstd FFI), hence excluded from `just test-vm-js`
     # and listed here.
     "src/tests/gui/tests/request-panel/php_request_panel_vm_test.nim",
+    # RS-M8: the Elixir/Erlang row of the language matrix.
+    # `vm_elixir_request_panel_rows` drives the panel from a container the BEAM
+    # recorder produced while a real Cowboy listener served real HTTP requests
+    # to a real `Plug.Router`.  It is the row where a request is a *thread* of
+    # the recording rather than a slice of one thread's timeline — Cowboy
+    # serves each request on its own BEAM process — so this is also the
+    # GUI-side guard that concurrent, genuinely overlapping requests still
+    # render as twelve distinct rows with twelve distinct seek targets.
+    # Native-only (real container bytes through a zstd FFI), hence excluded
+    # from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/elixir_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

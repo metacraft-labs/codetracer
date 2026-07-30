@@ -216,3 +216,5 @@ SAPI
 SIGQUIT
 zend
 interning
+healthz
+neighbours

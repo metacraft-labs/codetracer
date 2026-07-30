@@ -177,3 +177,88 @@ repo as a middleware and an `auto_prepend_file`
 The stream holds **sixteen** records, not eight: each request is published as an
 open record at `PHP_RINIT` and settled at `PHP_RSHUTDOWN` under the same
 `span_id`, and the reader collapses them last-record-wins.
+
+## `elixir_plug/app.ct` — a recorded Plug/Cowboy session (RS-M8)
+
+A **real recording**, on the same terms as the three above.
+`codetracer-beam-recorder`'s `CodetracerBeamRecorder.Plug` middleware opened and
+settled every span itself, through
+`:codetracer_erlang_runtime.web_request_start/1` and `web_request_stop/2`, while
+a real Cowboy listener served twelve HTTP requests over TCP to the demo
+`Plug.Router` in that repo's `test-programs/elixir/plug_web/`.
+
+It is consumed by `../elixir_request_panel_vm_test.nim`
+(`vm_elixir_request_panel_rows`), which is registered in
+`src/ct_test/release_gate.nim`'s `CoreViewModelGateTests`. It is checked in so
+that ViewModel test needs no Erlang/Elixir toolchain, no Hex packages and no
+server.
+
+### Regenerating
+
+```sh
+direnv exec ../codetracer-beam-recorder just \
+  record-request-panel-fixture \
+  "$PWD/src/tests/gui/tests/request-panel/fixtures/elixir_plug" plug
+```
+
+The recipe **replaces the whole target directory**, which is why this file lives
+one level up. Pass `phoenix` instead of `plug` to record the Phoenix demo; the
+ViewModel test expects the Plug one.
+
+It records exactly the schedule `just demo-request-panel elixir` records —
+`PlugWeb.main/0` in `codetracer-beam-recorder` — so the fixture and the hand-run
+demo always show the same session.
+
+### What the session contains
+
+Twelve requests in two phases. The first four are issued **at once** and block
+in `PlugWeb.Barrier` until the whole cohort has arrived, so all four are inside
+their handlers at the same instant; the remaining eight are issued one at a
+time.
+
+| #     | Request                     | Status | Route                 | Concurrent |
+| ----- | --------------------------- | ------ | --------------------- | ---------- |
+| 1..4  | `GET /concurrent/{1..4}`    | 200    | `/concurrent/:slot`   | yes        |
+| 5     | `GET /api/users`            | 200    | `/api/users`          | no         |
+| 6     | `POST /api/users`           | 201    | `/api/users`          | no         |
+| 7     | `GET /api/users/2`          | 200    | `/api/users/:user_id` | no         |
+| 8     | `GET /static/app.css`       | 304    | `/static/app.css`     | no         |
+| 9     | `GET /api/users/999`        | 404    | `/api/users/:user_id` | no         |
+| 10    | `GET /slow`                 | 200    | `/slow`               | no         |
+| 11    | `GET /boom`                 | 500    | `/boom`               | no         |
+| 12    | `GET /healthz`              | 200    | `/healthz`            | no         |
+
+The cohort's arrival order is a property of the scheduler, so the ViewModel test
+compares those four URLs as a set and everything else exactly. Every status
+bucket the panel colours is present, `/slow` sleeps 400 ms inside its handler so
+one duration is unambiguously substantial, and `/boom` raises and is answered
+500 by `Plug.ErrorHandler`.
+
+The stream holds **twenty-four** records, not twelve: each request is published
+open when the middleware enters and settled from its `before_send` callback
+under the same `span_id`, and the reader collapses them last-record-wins.
+
+### What is different about the BEAM row
+
+**A request is a thread, not a process.** RS-M1b fixes a span's coordinate as
+*(process_ord, thread_id, step range)*. The BEAM recorder records one OS process
+— the `beam.smp` it launched — and maps each *BEAM* process onto a container
+**thread**, so all twelve spans carry `process_ord == 0` and twelve distinct
+`thread_id`s, with the BEAM pid alongside as `beam.pid` metadata. Cowboy serves
+each request on its own connection process, so this is the first fixture in
+which the requests are genuinely different threads of one recording rather than
+successive slices of one thread.
+
+**The cohort spans are not `contiguous_on_one_thread`.** The recorder replays
+its session sidecar into a single exec stream, so an overlapping request's
+events are interleaved into its neighbours' ranges. The eight sequential
+requests are contiguous. Both bits are measured from the recorded ranges, not
+declared.
+
+**There are no per-line step events.** The recorder applies step instrumentation
+to `.erl` sources; an Elixir app recorded through `mix run` reaches the
+container as call/return records in `calls.dat`, so a request's step range is
+made of the thread events that bracket it. That is a real, distinct, ordered
+coordinate — the panel seeks to it — but it does not resolve to a line of
+`router.ex`, which is why this row's ViewModel test asserts distinct seek
+targets rather than a seek into the handler's source.
