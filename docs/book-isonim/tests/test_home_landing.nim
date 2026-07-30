@@ -26,9 +26,18 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
     check html.contains("class=\"docs-md-button\" href=\"/getting_started/installation\"")
     check html.contains("class=\"docs-md-button docs-md-button-secondary\"")
 
-    # Two card grids (Start here + Popular articles) = 3 + 6 = 9 cards total.
-    check html.count("class=\"docs-md-card-grid\"") == 2
-    check html.count("class=\"docs-md-card\"") == 9
+    # Two card grids: "Start here" is the default (category-card) grid; "Popular
+    # articles" is the M6 compact (WebFlow popular-article-card) variant.
+    check html.contains("class=\"docs-md-card-grid\">")           # Start here (default)
+    check html.contains("class=\"docs-md-card-grid docs-md-card-grid--compact\">") # Popular (compact)
+    # 3 default category cards + 6 compact popular-article cards = 9 total.
+    check html.count("class=\"docs-md-card\" href=") == 3
+    check html.count("class=\"docs-md-card docs-md-card--compact\" href=") == 6
+
+    # M6: the landing gets the WIDER content column and DROPS the prev/next
+    # pager (the WebFlow home has neither a narrow article column nor a pager).
+    check html.contains("class=\"docs-main docs-main--wide\"")
+    check not html.contains("docs-nav-adjacent")
 
   test "the three category cards carry the WebFlow titles + real section links":
     let (_, html) = renderRoute("/", "content")
@@ -46,8 +55,18 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
                           ("Graphical interface", "/usage_guide/gui"),
                           ("Command-line interface", "/usage_guide/cli"),
                           ("Build systems", "/reference/build_systems")]:
-      check html.contains("class=\"docs-md-card\" href=\"" & href & "\"")
+      # M6: popular-article cards carry the compact variant modifier.
+      check html.contains("class=\"docs-md-card docs-md-card--compact\" href=\"" & href & "\"")
       check html.contains("class=\"docs-md-card-title\">" & title & "</div>")
+
+  test "M6: a normal article page keeps the narrow column + prev/next pager (landing-only widening)":
+    let (status, html) = renderRoute("/getting_started/introduction", "content")
+    check status == 200
+    # No hero on an article -> the `<main>` is the plain narrow column...
+    check html.contains("class=\"docs-main\" tabindex=\"-1\">")
+    check not html.contains("docs-main--wide")
+    # ...and the framework's prev/next pager is present, unlike the landing.
+    check html.contains("docs-nav-adjacent")
 
   test "card/button hrefs are resolved routes, never raw .md content paths":
     let (_, html) = renderRoute("/", "content")

@@ -1213,3 +1213,61 @@ h6.docs-md-heading {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================================
+ * M6: remaining WebFlow-home fidelity deltas. The framework capabilities added
+ * in isonim-docs/src -- the `:::cards variant="compact"` card modifier, and the
+ * `pageHasHero`-driven `.docs-main--wide` class + prev/next pager suppression --
+ * are opted into here. Every rule keys on a hero/compact class, so non-landing
+ * article pages stay byte-for-byte unchanged.
+ * ==========================================================================*/
+
+/* Delta 1 -- popular-article cards (`:::cards variant="compact"`). WebFlow's
+ * `.popular-article-card` title is `.display-xs` (0.95rem / 500) with a tight
+ * inner gap (--space-3xs), lighter/smaller than the category-card `.display-s`
+ * (1.15rem / 600) the default grid reuses. */
+.docs-md-card-grid--compact .docs-md-card {
+  gap: var(--docs-space-1); /* WebFlow popular-article-card gap = --space-3xs */
+}
+
+.docs-md-card-grid--compact .docs-md-card-title {
+  font-size: 0.95rem; /* WebFlow .display-xs */
+  font-weight: 500;
+}
+
+/* Delta 3 -- section labels ("Start here" / "Popular articles"). WebFlow renders
+ * these as `<h2 class="display-s">` (1.15rem / 600, no underline rule), smaller
+ * than this book's global underlined article H2 (1.4rem). Scope the smaller,
+ * rule-free label to the landing only (via `:has(.docs-md-hero)`, like the
+ * title-suppression rule above), so every ordinary article page keeps its
+ * 1.4rem underlined H2 unchanged. */
+.docs-main:has(.docs-md-hero) h2.docs-md-heading {
+  font-size: 1.15rem; /* WebFlow .display-s */
+  border-bottom: none;
+  padding-bottom: 0;
+  margin: var(--docs-space-6) 0 var(--docs-space-2);
+}
+
+/* Delta 2 -- the landing uses a WIDER content column than a normal article. The
+ * framework tags a hero page's `<main>` with `.docs-main--wide`; on the desktop
+ * three-column grid it spans across the (hidden) right TOC rail and drops the
+ * 50rem article cap, so the card grid reaches the WebFlow home's content width
+ * (~68rem => three ~352px cards). Guarded to the multi-column layout so the
+ * mobile single-column reset (`.docs-main { grid-column: 1 }`) still wins below
+ * the breakpoint. Normal article pages (no hero) keep the narrow 50rem column. */
+@media (min-width: 961px) {
+  .docs-main.docs-main--wide {
+    grid-column: 2 / -1;
+    max-width: none;
+  }
+
+  .docs-main--wide .docs-md-body {
+    max-width: none;
+  }
+}
+
+/* The WebFlow home has no right-hand table-of-contents rail; hide it on the
+ * landing so the wide content column spans the full width. */
+.docs-frame:has(.docs-md-hero) .docs-nav-toc {
+  display: none;
+}

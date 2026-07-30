@@ -31,7 +31,7 @@ The command-line interface, the GUI replay interface, tracepoints and the CodeTr
 
 ## Popular articles
 
-:::cards
+:::cards variant="compact"
 :::card title="Introduction" href="/getting_started/introduction"
 Getting Started
 :::card title="Installation" href="/getting_started/installation"
