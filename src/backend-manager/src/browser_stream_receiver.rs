@@ -147,9 +147,126 @@ pub enum BrowserEvent {
         #[serde(rename = "showText", default, skip_serializing_if = "Option::is_none")]
         show_text: Option<String>,
     },
+    /// Spec §3.3 host-supplied initial state: the contents of every
+    /// memory and global the WASM module *imports* rather than defines,
+    /// as they stood immediately before the module's first exported call.
+    ///
+    /// Emitted at most once per recording, by
+    /// `codetracer-wasm-instrumenter/recorder-runtime/browser_session.js`,
+    /// and only when the page registered an imported memory or global.
+    /// A module that defines its own memory needs none of this — the
+    /// `.wasm` already carries it — so most recordings have no such
+    /// event at all.
+    ///
+    /// It is **not** part of the trace event stream: it describes the
+    /// module's starting state, not something that happened at a step.
+    /// The writer therefore puts it in the `boundary_state.json` sidecar
+    /// and emits no `TraceLowLevelEvent` for it.
+    HostInitialState {
+        #[serde(default)]
+        memories: Vec<ImportedMemoryState>,
+        #[serde(default)]
+        globals: Vec<ImportedGlobalState>,
+    },
+    /// Spec §3.4 host mutation: what the host wrote into imported memory
+    /// or assigned to an imported global *while servicing an imported
+    /// call*, anchored to the boundary crossing it accompanied.
+    ///
+    /// The module observes the written memory and the call's return value
+    /// as one indivisible outcome, so the replayer applies these before
+    /// handing the recorded results back.
+    HostMutation {
+        /// `Crossing.Seq` of the crossing this accompanied, as the
+        /// replayer's assembler numbers crossings recovered from this
+        /// same recording. The producer mirrors that numbering; see
+        /// `browser_session.js`'s "crossing sequence numbers".
+        #[serde(rename = "afterCrossing")]
+        after_crossing: u32,
+        #[serde(rename = "memoryWrites", default)]
+        memory_writes: Vec<MemoryWrite>,
+        #[serde(rename = "globalSets", default)]
+        global_sets: Vec<GlobalSet>,
+    },
     /// Session lifecycle teardown: emitted on `pagehide` / explicit
     /// `__ct.stop()`.
     SessionEnd {},
+}
+
+// ---------------------------------------------------------------------------
+// Host-supplied state payloads (spec §§3.3, 3.4)
+// ---------------------------------------------------------------------------
+//
+// These shapes are the *consumer's* schema, not one invented here: they
+// mirror `HostState`, `ImportedMemory`, `ImportedGlobal`, `HostMutation`,
+// `MemoryWrite` and `GlobalSet` in
+// `codetracer-wasm-recorder/internal/boundarylog/hoststate.go`, which reads
+// the `boundary_state.json` this daemon writes and rejects a version it does
+// not implement rather than guessing.  They derive both `Deserialize` (the
+// browser event) and `Serialize` (the sidecar), because the two are the same
+// shape — the daemon's job here is framing, not translation.
+
+/// One memory the module imports, and the host-supplied bytes in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportedMemoryState {
+    /// Import module name, e.g. `"env"`.
+    pub module: String,
+    /// Import field name, e.g. `"memory"`.
+    pub name: String,
+    /// Size in 64 KiB pages when the recording started.
+    #[serde(rename = "minPages")]
+    pub min_pages: u32,
+    /// Declared maximum, or `None` for unbounded.  Recorded because spec
+    /// §7 makes `memory.grow`'s result depend on the host limit.
+    #[serde(rename = "maxPages")]
+    pub max_pages: Option<u32>,
+    /// The regions the host supplied, base64 (standard alphabet, padded).
+    #[serde(default)]
+    pub data: Vec<MemoryRegion>,
+}
+
+/// A run of bytes at an absolute offset in linear memory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryRegion {
+    pub offset: u32,
+    #[serde(rename = "bytesB64")]
+    pub bytes_b64: String,
+}
+
+/// One global the module imports, and its host-supplied initial value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportedGlobalState {
+    pub module: String,
+    pub name: String,
+    /// Lowercase scalar spelling: `"i32"` / `"i64"` / `"f32"` / `"f64"`.
+    #[serde(rename = "type")]
+    pub value_type: String,
+    /// Whether the module may write it — and therefore whether a §3.4
+    /// mutation may target it.  The consumer rejects a `GlobalSet` for a
+    /// global the initial state does not declare mutable.
+    pub mutable: bool,
+    /// Exact decimal spelling of the value (a JSON number would round an
+    /// `i64` above 2^53).
+    pub value: String,
+}
+
+/// One host write into an imported memory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryWrite {
+    pub module: String,
+    pub name: String,
+    pub offset: u32,
+    #[serde(rename = "bytesB64")]
+    pub bytes_b64: String,
+}
+
+/// One host assignment to an imported mutable global.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlobalSet {
+    pub module: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub value_type: String,
+    pub value: String,
 }
 
 /// Errors surfaced by [`parse_event_line`].

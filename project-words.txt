@@ -194,3 +194,15 @@ solana
 Solana
 optimiser
 headful
+bindgen
+unrepresentable
+uninstrumented
+instrumenter
+boundarylog
+hoststate
+replayer
+replayer's
+materialised
+synthesises
+maintester
+dwarfwarn

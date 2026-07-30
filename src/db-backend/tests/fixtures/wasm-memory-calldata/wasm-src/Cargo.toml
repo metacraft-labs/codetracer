@@ -1,0 +1,38 @@
+# Host-supplied-state demo — WebAssembly settlement tier.
+#
+# Built by `regenerate.sh` with
+#
+#     RUSTFLAGS="-C link-arg=--import-memory -C link-arg=-zstack-size=65536" \
+#         cargo build --target wasm32-unknown-unknown
+#
+# `--import-memory` is what makes `env.memory` an import rather than a
+# definition, and therefore what makes this module's starting state
+# *host-supplied* — the case spec §3.3 exists for. The reduced stack size
+# only keeps the memory (and so the recorded state) small; nothing depends
+# on the number.
+#
+# No dependencies, no wasm-bindgen: the page calls `WebAssembly.instantiate`
+# itself and hands the recorder's `__codetracer` namespace straight in. See
+# the header of `../../cross_process/account-balance-with-wasm/wasm-src/lib.rs`
+# for the longer version of that argument.
+[package]
+name = "ledger-settle"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+
+# The dev profile keeps the DWARF line programs `ct-instrument` reads and
+# the offline replay turns into per-line steps. A release build with LTO
+# drops the per-unit line tables, and the materialised trace would then
+# name functions and nothing finer — which would make the "the replayed
+# trace has real steps" check vacuous.
+[profile.dev]
+debug = true
+strip = false

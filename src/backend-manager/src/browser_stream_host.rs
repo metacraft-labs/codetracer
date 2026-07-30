@@ -131,7 +131,8 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::browser_stream_receiver::{
-    BrowserEvent, CtfsWriter, EncodedValue, StreamReceiver, default_output_path,
+    BrowserEvent, CtfsWriter, EncodedValue, GlobalSet, ImportedGlobalState, ImportedMemoryState,
+    MemoryWrite, StreamReceiver, default_output_path,
 };
 
 /// Default listen address.  Matches the URL the browser runtime ships to
@@ -479,6 +480,72 @@ pub struct JsonFileCtfsWriter {
     /// bundle one) — in that case the writer falls back to the
     /// `<browser>` placeholder path and site-id-as-line encoding.
     manifest: Option<InstrumentationManifest>,
+    /// Accumulated spec §3.3 / §3.4 host state, rendered to
+    /// `boundary_state.json`.  Empty (and no file written) for every
+    /// recording whose module defines its own memory and globals.
+    host_state: HostStateSidecar,
+}
+
+/// Name of the spec §3.3 / §3.4 sidecar inside the `.ct` directory.
+///
+/// Must match `HostStateFileName` in
+/// `codetracer-wasm-recorder/internal/boundarylog/hoststate.go`.
+const HOST_STATE_FILE_NAME: &str = "boundary_state.json";
+
+/// Schema version of the sidecar.
+///
+/// The consumer treats an unrecognised version as a **hard error** rather
+/// than reading what it recognises, because the whole point of §3.3 is
+/// that a missing input produces a divergence later, at a point unrelated
+/// to the cause.  Bumping this therefore means bumping it there too.
+const HOST_STATE_VERSION: u32 = 1;
+
+/// `boundary_state.json` as it is written.
+///
+/// Mirrors `HostState` in the consumer, field for field.  `tables` is
+/// always empty: the producer never records imported-table state, and the
+/// consumer *rejects* a recording that carries any (spec §8 lists
+/// host-mutated imported tables among the constructs refused rather than
+/// silently degraded).  It is emitted rather than omitted so the file
+/// states the fact instead of leaving it to a missing key.
+#[derive(Debug, Serialize)]
+struct HostStateSidecar {
+    version: u32,
+    initial: InitialStateSidecar,
+    mutations: Vec<HostMutationRecord>,
+    /// Not serialised: whether a `HostInitialState` event has been seen,
+    /// which is what distinguishes "the host supplied nothing" from "the
+    /// host supplied an empty set of regions".
+    #[serde(skip)]
+    initial_seen: bool,
+}
+
+impl Default for HostStateSidecar {
+    fn default() -> Self {
+        Self {
+            version: HOST_STATE_VERSION,
+            initial: InitialStateSidecar::default(),
+            mutations: Vec::new(),
+            initial_seen: false,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+struct InitialStateSidecar {
+    memories: Vec<ImportedMemoryState>,
+    globals: Vec<ImportedGlobalState>,
+    tables: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct HostMutationRecord {
+    #[serde(rename = "afterCrossing")]
+    after_crossing: u32,
+    #[serde(rename = "memoryWrites")]
+    memory_writes: Vec<MemoryWrite>,
+    #[serde(rename = "globalSets")]
+    global_sets: Vec<GlobalSet>,
 }
 
 /// Decoded form of the instrumenter's trace manifest.
@@ -562,6 +629,7 @@ impl JsonFileCtfsWriter {
             last_output_path: None,
             var_index: indexmap_compat::OrderedSet::new(),
             manifest: None,
+            host_state: HostStateSidecar::default(),
         }
     }
 
@@ -953,12 +1021,80 @@ impl JsonFileCtfsWriter {
                     content,
                 }))?;
             }
+            // --- spec §3.3 / §3.4: host-supplied state ------------------
+            //
+            // These describe the module's *starting state* and what the
+            // host did to it during a host call.  Neither is something
+            // that happened at a step, so neither becomes a
+            // `TraceLowLevelEvent`: emitting one would put a record into
+            // `trace.json` that the boundary-log assembler would then have
+            // to learn to skip, and would shift nothing but risk.  They go
+            // into the `boundary_state.json` sidecar instead.
+            BrowserEvent::HostInitialState { memories, globals } => {
+                if self.host_state.initial_seen {
+                    // The producer emits this once, immediately before the
+                    // first exported call.  A second one would mean two
+                    // recordings were spliced together; keeping the first
+                    // is the only reading that stays true to the calls
+                    // already written.
+                    log::warn!(
+                        "browser-stream writer: ignoring a second HostInitialState event; \
+                         spec §3.3 state is the state before the FIRST exported call"
+                    );
+                } else {
+                    self.host_state.initial_seen = true;
+                    self.host_state.initial.memories = memories.clone();
+                    self.host_state.initial.globals = globals.clone();
+                }
+                self.write_host_state()?;
+            }
+            BrowserEvent::HostMutation {
+                after_crossing,
+                memory_writes,
+                global_sets,
+            } => {
+                self.host_state.mutations.push(HostMutationRecord {
+                    after_crossing: *after_crossing,
+                    memory_writes: memory_writes.clone(),
+                    global_sets: global_sets.clone(),
+                });
+                self.write_host_state()?;
+            }
             // Lifecycle events are handled in the trait impls below.
             BrowserEvent::SessionStart { .. }
             | BrowserEvent::Manifest { .. }
             | BrowserEvent::SessionEnd {} => {}
         }
         Ok(())
+    }
+
+    /// Render `boundary_state.json`, the spec §3.3 / §3.4 sidecar.
+    ///
+    /// Written every time it changes rather than once at session end, for
+    /// the same reason `trace.json` is appended to rather than buffered
+    /// (M38c): a `.ct` that is being consumed while it is still being
+    /// produced must not have to wait for the page to close.  It is
+    /// rewritten whole each time because it is small — a boundary
+    /// recording's host state is the calldata a page supplied, not the
+    /// memory image — and because a partially-written array is not a
+    /// document any consumer could read.
+    ///
+    /// Nothing is written when the page supplied no host state at all,
+    /// which is the common case: the consumer treats a missing file as
+    /// "this module defines its own memory and globals", and an empty
+    /// sidecar would say the same thing more confusingly.
+    fn write_host_state(&mut self) -> io::Result<()> {
+        if !self.host_state.initial_seen && self.host_state.mutations.is_empty() {
+            return Ok(());
+        }
+        self.open_stream()?;
+        let trace_dir = self
+            .trace_dir
+            .clone()
+            .expect("open_stream fixes the trace dir");
+        let json = serde_json::to_string(&self.host_state)
+            .map_err(|e| io::Error::other(format!("host state serialisation: {e}")))?;
+        fs::write(trace_dir.join(HOST_STATE_FILE_NAME), json)
     }
 
     /// Resolve the runtime's `fn_id` to a canonical on-disk function id.
@@ -1043,6 +1179,11 @@ impl JsonFileCtfsWriter {
 
         self.write_metadata(&trace_dir)?;
         self.write_paths(&trace_dir)?;
+        // Idempotent: the sidecar is already current, since it is
+        // rewritten on every host-state event.  Repeating it here means
+        // the "recording is final" guarantee covers it too, without the
+        // caller having to know it was written earlier.
+        self.write_host_state()?;
 
         self.session_ended = true;
         self.last_output_path = Some(trace_dir.clone());
@@ -2463,5 +2604,278 @@ mod tests {
         let metadata_json = std::fs::read_to_string(trace_dir.join("trace_metadata.json")).unwrap();
         let metadata: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
         assert_eq!(metadata["program"], "smoke");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Host-supplied state sidecar (spec §§3.3, 3.4)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod host_state_tests {
+    use super::*;
+    use crate::browser_stream_receiver::{
+        BrowserEvent, GlobalSet, ImportedGlobalState, ImportedMemoryState, MemoryRegion,
+        MemoryWrite, parse_event_line,
+    };
+    use tempfile::TempDir;
+
+    /// The exact line `browser_session.js` puts on the wire for a §3.3
+    /// record.  Parsed through the real `parse_event_line`, so the test
+    /// pins the wire contract and not just this file's structs — a rename
+    /// on either side breaks it.
+    const INITIAL_LINE: &str = concat!(
+        r#"{"kind":"HostInitialState","memories":[{"module":"env","name":"memory","#,
+        r#""minPages":17,"maxPages":null,"data":[{"offset":1048576,"bytesB64":"BwAAAGQ="}]}],"#,
+        r#""globals":[{"module":"env","name":"fee_bps","type":"i32","mutable":true,"value":"25"}]}"#
+    );
+
+    /// The exact line for a §3.4 record.
+    const MUTATION_LINE: &str = concat!(
+        r#"{"kind":"HostMutation","afterCrossing":1,"#,
+        r#""memoryWrites":[{"module":"env","name":"memory","offset":1048584,"bytesB64":"+g=="}],"#,
+        r#""globalSets":[{"module":"env","name":"fee_bps","type":"i32","value":"250"}]}"#
+    );
+
+    fn writer_in(tmp: &TempDir) -> JsonFileCtfsWriter {
+        JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf())
+    }
+
+    #[test]
+    fn the_producers_wire_lines_deserialise_into_the_host_state_events() {
+        match parse_event_line(INITIAL_LINE).expect("HostInitialState must parse") {
+            BrowserEvent::HostInitialState { memories, globals } => {
+                assert_eq!(
+                    memories,
+                    vec![ImportedMemoryState {
+                        module: "env".to_string(),
+                        name: "memory".to_string(),
+                        min_pages: 17,
+                        max_pages: None,
+                        data: vec![MemoryRegion {
+                            offset: 1_048_576,
+                            bytes_b64: "BwAAAGQ=".to_string(),
+                        }],
+                    }]
+                );
+                assert_eq!(
+                    globals,
+                    vec![ImportedGlobalState {
+                        module: "env".to_string(),
+                        name: "fee_bps".to_string(),
+                        value_type: "i32".to_string(),
+                        mutable: true,
+                        value: "25".to_string(),
+                    }]
+                );
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+        match parse_event_line(MUTATION_LINE).expect("HostMutation must parse") {
+            BrowserEvent::HostMutation {
+                after_crossing,
+                memory_writes,
+                global_sets,
+            } => {
+                assert_eq!(after_crossing, 1);
+                assert_eq!(
+                    memory_writes,
+                    vec![MemoryWrite {
+                        module: "env".to_string(),
+                        name: "memory".to_string(),
+                        offset: 1_048_584,
+                        bytes_b64: "+g==".to_string(),
+                    }]
+                );
+                assert_eq!(
+                    global_sets,
+                    vec![GlobalSet {
+                        module: "env".to_string(),
+                        name: "fee_bps".to_string(),
+                        value_type: "i32".to_string(),
+                        value: "250".to_string(),
+                    }]
+                );
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_state_events_land_in_the_sidecar_in_the_consumers_schema() {
+        let tmp = TempDir::new().unwrap();
+        let mut writer = writer_in(&tmp);
+        writer.session_start("frontend-wasm", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        writer
+            .event(&parse_event_line(INITIAL_LINE).unwrap())
+            .unwrap();
+        writer
+            .event(&parse_event_line(MUTATION_LINE).unwrap())
+            .unwrap();
+        let dir = writer.session_end().unwrap();
+
+        let raw = std::fs::read_to_string(dir.join("boundary_state.json"))
+            .expect("boundary_state.json must be written");
+        let doc: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        // Field-for-field against `hoststate.go`'s `HostState`.
+        assert_eq!(doc["version"], 1);
+        assert_eq!(doc["initial"]["tables"], serde_json::json!([]));
+        let mem = &doc["initial"]["memories"][0];
+        assert_eq!(mem["module"], "env");
+        assert_eq!(mem["name"], "memory");
+        assert_eq!(mem["minPages"], 17);
+        assert_eq!(mem["maxPages"], serde_json::Value::Null);
+        assert_eq!(mem["data"][0]["offset"], 1_048_576);
+        assert_eq!(mem["data"][0]["bytesB64"], "BwAAAGQ=");
+        let g = &doc["initial"]["globals"][0];
+        assert_eq!(g["type"], "i32");
+        assert_eq!(g["mutable"], true);
+        assert_eq!(g["value"], "25");
+        let mu = &doc["mutations"][0];
+        assert_eq!(mu["afterCrossing"], 1);
+        assert_eq!(mu["memoryWrites"][0]["offset"], 1_048_584);
+        assert_eq!(mu["memoryWrites"][0]["bytesB64"], "+g==");
+        assert_eq!(mu["globalSets"][0]["value"], "250");
+    }
+
+    #[test]
+    fn host_state_events_add_nothing_to_the_trace_stream() {
+        // The sidecar describes the module's starting state, not a step.
+        // A record in `trace.json` would have to be skipped by the
+        // boundary-log assembler, and every `Function` / `VariableName` /
+        // `Path` index downstream of it is positional.
+        let tmp = TempDir::new().unwrap();
+        let mut writer = writer_in(&tmp);
+        writer.session_start("frontend-wasm", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let dir = {
+            writer
+                .event(&parse_event_line(INITIAL_LINE).unwrap())
+                .unwrap();
+            writer
+                .event(&parse_event_line(MUTATION_LINE).unwrap())
+                .unwrap();
+            writer.session_end().unwrap()
+        };
+        let with_state = std::fs::read_to_string(dir.join("trace.json")).unwrap();
+
+        let tmp2 = TempDir::new().unwrap();
+        let mut plain = writer_in(&tmp2);
+        plain.session_start("frontend-wasm", &[]).unwrap();
+        plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let dir2 = plain.session_end().unwrap();
+        let without_state = std::fs::read_to_string(dir2.join("trace.json")).unwrap();
+
+        assert_eq!(
+            with_state, without_state,
+            "host-state events must not change trace.json by one byte"
+        );
+    }
+
+    #[test]
+    fn a_recording_with_no_host_state_writes_no_sidecar() {
+        // The consumer reads a missing file as "this module defines its
+        // own memory and globals", which is the truth for almost every
+        // module; an empty sidecar would say the same thing less clearly.
+        let tmp = TempDir::new().unwrap();
+        let mut writer = writer_in(&tmp);
+        writer.session_start("frontend-wasm", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let dir = writer.session_end().unwrap();
+        assert!(!dir.join("boundary_state.json").exists());
+    }
+
+    #[test]
+    fn the_sidecar_is_readable_while_the_recording_is_still_running() {
+        // M38c made `trace.json` incremental so a consumer can replay a
+        // recording as it arrives.  A sidecar that only appeared at
+        // session end would be useless to that consumer, since §3.3 state
+        // has to be applied *before* the first exported call.
+        let tmp = TempDir::new().unwrap();
+        let mut writer = writer_in(&tmp);
+        writer.session_start("frontend-wasm", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        writer
+            .event(&parse_event_line(INITIAL_LINE).unwrap())
+            .unwrap();
+
+        let dir = tmp.path().join("frontend-wasm.ct");
+        let raw = std::fs::read_to_string(dir.join("boundary_state.json"))
+            .expect("the sidecar must exist before session_end");
+        let doc: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(doc["initial"]["memories"][0]["minPages"], 17);
+        assert_eq!(doc["mutations"], serde_json::json!([]));
+
+        writer.session_end().unwrap();
+    }
+
+    #[test]
+    fn mutations_keep_the_order_the_page_reported_them_in() {
+        // `MutationsFor(seq)` selects by anchor, but two mutations
+        // anchored to the same crossing are applied in file order, so the
+        // later write must win exactly as it did in the browser.
+        let tmp = TempDir::new().unwrap();
+        let mut writer = writer_in(&tmp);
+        writer.session_start("frontend-wasm", &[]).unwrap();
+        for seq in [3u32, 1, 3] {
+            writer
+                .event(&BrowserEvent::HostMutation {
+                    after_crossing: seq,
+                    memory_writes: vec![MemoryWrite {
+                        module: "env".to_string(),
+                        name: "memory".to_string(),
+                        offset: seq,
+                        bytes_b64: "AA==".to_string(),
+                    }],
+                    global_sets: vec![],
+                })
+                .unwrap();
+        }
+        let dir = writer.session_end().unwrap();
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
+        )
+        .unwrap();
+        let anchors: Vec<u64> = doc["mutations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["afterCrossing"].as_u64().unwrap())
+            .collect();
+        assert_eq!(anchors, vec![3, 1, 3]);
+    }
+
+    #[test]
+    fn a_second_initial_state_event_does_not_overwrite_the_first() {
+        // §3.3 is the state before the FIRST exported call.  A second
+        // record can only mean two recordings were spliced; keeping the
+        // first is the only reading that stays true to the calls already
+        // written.
+        let tmp = TempDir::new().unwrap();
+        let mut writer = writer_in(&tmp);
+        writer.session_start("frontend-wasm", &[]).unwrap();
+        writer
+            .event(&parse_event_line(INITIAL_LINE).unwrap())
+            .unwrap();
+        writer
+            .event(&BrowserEvent::HostInitialState {
+                memories: vec![ImportedMemoryState {
+                    module: "env".to_string(),
+                    name: "memory".to_string(),
+                    min_pages: 99,
+                    max_pages: None,
+                    data: vec![],
+                }],
+                globals: vec![],
+            })
+            .unwrap();
+        let dir = writer.session_end().unwrap();
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(doc["initial"]["memories"][0]["minPages"], 17);
     }
 }
