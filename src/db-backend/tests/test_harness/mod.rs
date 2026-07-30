@@ -1014,6 +1014,17 @@ impl DapStdioTestClient {
 
     /// Initialize the DAP session and launch with a recording (DB-trace variant).
     pub fn initialize_and_launch(&mut self, recording: &TestRecording) -> Result<(), String> {
+        self.initialize_and_launch_trace(&recording.trace_dir)
+    }
+
+    /// Initialize the DAP session and launch a **committed** DB trace by
+    /// path.
+    ///
+    /// Use this rather than fabricating a [`TestRecording`] around a
+    /// checked-in fixture: `TestRecording::drop` deletes its `temp_dir`,
+    /// so a hand-built value pointing at a fixture erases the fixture
+    /// from the working tree the moment the test ends.
+    pub fn initialize_and_launch_trace(&mut self, trace_folder: &Path) -> Result<(), String> {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;
@@ -1031,7 +1042,7 @@ impl DapStdioTestClient {
         let launch_args = LaunchRequestArguments {
             program: None,
             args: None,
-            trace_folder: Some(recording.trace_dir.clone()),
+            trace_folder: Some(trace_folder.to_path_buf()),
             live_recording: None,
             live_recording_dir: None,
             trace_file: None,
@@ -1183,6 +1194,15 @@ impl DapStdioTestClient {
     /// formatted error strings.
     pub fn read_until_response_msg(&mut self, command: &str, timeout: Duration) -> Result<DapMessage, String> {
         self.read_until_response(command, timeout)
+    }
+
+    /// Public wrapper around the private `read_until_event` helper —
+    /// returns the matching event message, surfacing timeouts as
+    /// formatted error strings.  Stepping tests need the
+    /// `ct/complete-move` event because that is the only message that
+    /// carries the post-step `Location`.
+    pub fn read_until_event_msg(&mut self, event_name: &str, timeout: Duration) -> Result<DapMessage, String> {
+        self.read_until_event(event_name, timeout)
     }
 
     fn read_next(&mut self, timeout: Duration) -> Result<DapMessage, String> {

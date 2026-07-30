@@ -34,7 +34,10 @@
  * Once `regenerate.sh` is wired into CI, the spec flips SKIP → PASS
  * without source changes.
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { expect, readyOnEntryTest as readyOnEntry, test } from "../../lib/fixtures";
+import { getCurrentLine } from "../../lib/column-aware-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { OriginChainPanePageObject } from "../../page-objects/originChainPane";
 import {
@@ -50,6 +53,32 @@ import {
  * three containers land here, and Electron opens the session.
  */
 const fixtureRoot = threeTraceFixtureRoot();
+
+/**
+ * 1-based line of `const balance = payload.balance;` in the demo
+ * backend.
+ *
+ * Resolved out of the source rather than hard-coded, mirroring
+ * `src/db-backend/tests/cross_process_three_trace_dap_test.rs`, which
+ * finds the same statement the same way. An edit to the demo therefore
+ * retargets the headless test and this spec together instead of
+ * silently pointing one of them at the wrong statement.
+ */
+function balanceBindingLine(): number {
+  const serverSource = path.join(fixtureRoot, "backend", "server.js");
+  const index = fs
+    .readFileSync(serverSource, "utf8")
+    .split(/\r?\n/)
+    .findIndex((line) => line.includes("const balance = payload.balance"));
+  if (index < 0) {
+    throw new Error(
+      `${serverSource} no longer binds \`balance\` from the request payload — ` +
+        "the fixture's demo program changed and this spec's target statement " +
+        "must be updated with it.",
+    );
+  }
+  return index + 1;
+}
 
 test.use({ sourcePath: fixtureRoot, launchMode: "trace-folder" });
 test.setTimeout(240_000);
@@ -123,27 +152,70 @@ test("e2e_origin_cross_tracer_three_recording_balance_chain", async ({ ctPage })
     "switching to the backend process must open server.js in the editor",
   ).toBeTruthy();
 
-  // ---- 4. Step over to the line where `balance` is bound -----------------
+  // ---- 4. Run to the line where `balance` is bound ------------------------
   //
   // Per the fixture's `ANSWERS.md`: `const balance = payload.balance;`
-  // in `backend/server.js`. We run-to-entry then step-over until the
-  // State Pane surfaces a non-empty `balance` local. The fixture's
-  // backend handler is short — well under 30 statements before the
-  // assignment — so a 30-iteration cap covers it with margin.
+  // in `backend/server.js`. The fixture's own README describes this
+  // step as "Step to the `const balance = payload.balance;` line"
+  // without prescribing a gesture, and we reach it the way the headless
+  // DAP test that proves this feature reaches it
+  // (`src/db-backend/tests/cross_process_three_trace_dap_test.rs`): set
+  // a breakpoint on that statement and continue to it.
+  //
+  // Not by pressing step-over, which is what this spec used to do.
+  // `balance` is bound *inside* `handleBalance`, a synchronous callee
+  // of the request-handler arrow — so step-over steps OVER the frame
+  // that binds it, by definition and correctly. The recorded
+  // step-over walk goes `server.js:84 → 57 → 74`, never entering
+  // `handleBalance`'s body, and no number of presses changes that. The
+  // old comment here ("the fixture's backend handler is short — well
+  // under 30 statements before the assignment") mistook call depth for
+  // statement count; the loop it justified could not have terminated
+  // on a correct replay engine.
+  //
+  // How the cursor gets to the line is scaffolding. Everything this
+  // spec asserts once it is there — the origin chain, its breadcrumb
+  // chips, the boundary hops — is unchanged.
   await layout.runToEntryButton().click();
   await ctPage.waitForTimeout(1_000);
   const statePane = (await layout.programStateTabs(true))[0];
   expect(statePane, "the backend process must own a State Pane").toBeDefined();
 
-  let balanceVisible = (await statePane.variableValueText("balance")) !== "";
-  for (let i = 0; i < 30 && !balanceVisible; i++) {
-    await layout.nextButton().click();
-    await ctPage.waitForTimeout(500);
-    balanceVisible = (await statePane.variableValueText("balance")) !== "";
-  }
+  const balanceLine = balanceBindingLine();
+  // Monaco virtualises its gutter, and `server.js` is long enough that
+  // the target line starts outside the rendered window — scroll it into
+  // view first or the gutter row simply does not exist in the DOM.
+  await backendEditor!.revealLine(balanceLine);
+  await expect(
+    backendEditor!.gutterElement(balanceLine),
+    `the gutter row for server.js:${balanceLine} must render before it can be clicked`,
+  ).toHaveCount(1, { timeout: 30_000 });
+
+  // A left-click on the CodeTracer gutter toggles a line breakpoint
+  // (`lineActionClick` in `ui/editor.nim`) — the same user gesture the
+  // column-breakpoint specs drive.
+  await backendEditor!.gutterElement(balanceLine).click();
+  await expect
+    .poll(() => backendEditor!.hasBreakpointAt(balanceLine), { timeout: 30_000 })
+    .toBeTruthy();
+
+  await layout.continueButton().click();
+  await expect
+    .poll(() => getCurrentLine(backendEditor!), { timeout: 60_000 })
+    .toBe(balanceLine);
+
+  // The binding is visible from the statement that creates it onwards.
+  // Poll rather than read once: the State Pane is repopulated
+  // asynchronously after the cursor moves.
+  await expect
+    .poll(async () => await statePane.variableValueText("balance"), {
+      timeout: 30_000,
+    })
+    .not.toBe("");
+  const balanceVisible = (await statePane.variableValueText("balance")) !== "";
   expect(
     balanceVisible,
-    "stepping over the JSON-decode line must surface `balance` in the State Pane",
+    "reaching the JSON-decode line must surface `balance` in the State Pane",
   ).toBe(true);
 
   // ---- 5. Right-click → "Show value origin" -------------------------------
@@ -189,10 +261,9 @@ test("e2e_origin_cross_tracer_three_recording_balance_chain", async ({ ctPage })
     "side panel must render at least one origin hop",
   ).toBeVisible({ timeout: 15_000 });
 
-  // Snapshot the hops + breadcrumbs so we can pin their persistence
-  // across process switches in step 9.
+  // Snapshot the breadcrumbs so we can pin their persistence across
+  // process switches in step 9.
   const initialBreadcrumbCount = await origin.breadcrumbChips().count();
-  const initialHopCount = await origin.sidePanelHops().count();
 
   // ---- 7. Click the WASM-side hop ----------------------------------------
   //
@@ -202,12 +273,20 @@ test("e2e_origin_cross_tracer_three_recording_balance_chain", async ({ ctPage })
   // to the hop's owning recording per `session_vm.nim::onSeekToHop` so
   // the editor + state pane both follow.
   //
-  // The hop index is chain-shape-sensitive (the fixture can have 6 or
-  // 9 hops depending on whether the §14.3 serialisation-aware collapse
-  // is applied). We pick a middle hop that ANSWERS.md places in the
-  // WASM span (hop 4 / hop 5 in the canonical numbering). Clamp to the
-  // available range so the spec is resilient to minor composer churn.
-  const wasmHopIndex = Math.min(2, Math.max(0, initialHopCount - 2));
+  // The hop is addressed by the file it names, not by an ordinal. Hop
+  // counts are composer-sensitive — this chain has four hops, while the
+  // ordinal this step used to use (`min(2, hopCount - 2)`) was derived
+  // from ANSWERS.md's six-to-nine-hop canonical numbering and resolved
+  // to hop 2, which is the *frontend-js* hop (`app.js:43`). The
+  // assertion below then read "clicking the WASM hop must open lib.rs"
+  // while the spec had in fact clicked the JavaScript one. Asking for
+  // the hop that names `lib.rs` says what the step means and cannot
+  // drift with the chain's shape.
+  const wasmHopIndex = await origin.sidePanelHopIndexForFile("lib.rs");
+  expect(
+    wasmHopIndex,
+    "the chain must render a hop in the WebAssembly source for the WASM seek to be exercisable",
+  ).toBeGreaterThanOrEqual(0);
   await origin.clickSidePanelHop(wasmHopIndex);
   await ctPage.waitForTimeout(1_000);
 
@@ -234,13 +313,17 @@ test("e2e_origin_cross_tracer_three_recording_balance_chain", async ({ ctPage })
 
   // ---- 8. Click the JS-side terminator hop -------------------------------
   //
-  // Per `ANSWERS.md`: hops 6-8 live in `frontend-js`. Hop 7 is the
-  // `TrivialCopy` terminator carrying `userId = 42` at
-  // `frontend/app.js:31`. We click the last side-panel hop — the chain
-  // walks most-recent-first per spec §4.4, so the final hop is the
-  // terminator-side leaf in the JS recording.
-  const refreshedHopCount = await origin.sidePanelHops().count();
-  const jsHopIndex = Math.max(0, refreshedHopCount - 1);
+  // Per `ANSWERS.md` the chain terminates in `frontend/app.js`. Same
+  // correction as step 7: "the last side-panel hop" was an ordinal
+  // standing in for "the JavaScript-side hop", and in this chain the
+  // last hop is the WebAssembly one — the walk ends in `lib.rs`, so
+  // clicking `hopCount - 1` re-clicked the hop step 7 had just
+  // clicked and asserted `app.js` opened. Address it by file instead.
+  const jsHopIndex = await origin.sidePanelHopIndexForFile("app.js");
+  expect(
+    jsHopIndex,
+    "the chain must render a hop in the browser JavaScript source",
+  ).toBeGreaterThanOrEqual(0);
   await origin.clickSidePanelHop(jsHopIndex);
   await ctPage.waitForTimeout(1_000);
 

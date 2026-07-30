@@ -412,3 +412,36 @@ GUI-test flake to know about: `fixtures.ts::importTraceFolder` caps `ct host`
 at a 15 s `spawnSync` timeout, and on a loaded machine that trips as
 `spawnSync ... ETIMEDOUT` for ordinary CTFS folders too (seen on
 `tracepoints_type_error.spec.ts`). It is not specific to sessions.
+
+Not every recorded step belongs to a call. `DbStep.call_key` can be
+`CallKey(NO_KEY)` — a FRAMELESS step — and the JavaScript recorder produces them
+routinely: three bootstrap steps before `<module>` opens even in a trivial
+script, plus one or more at the event-loop level between one callback returning
+and the next being entered. Python traces have none. Anything that resolves
+`call_key` and treats `None` as an error is wrong on JS traces; that is exactly
+what `step_over_depths_step_id` did, which made step-over hold forever at the
+last statement of a Node module body (M50). Frameless steps sit at the trace's
+OUTERMOST level — `db::OUTERMOST_CALL_DEPTH` — because the `<module>` call and
+every callback the loop invokes are all recorded with `depth = 0` and
+`parent = NO_KEY`; there is no recorded frame that is shallower.
+
+`step_over_depths_step_id` and `next_step_id_relative_to*` exist TWICE, as
+deliberate mirrors: the `TraceReader` trait defaults in `trace_reader.rs` (the
+live path — neither `CTFSTraceReader` nor `InMemoryTraceReader` overrides them)
+and inherent copies on `Db` in `db.rs`. Change one, change the other.
+
+`TestRecording::drop` does `fs::remove_dir_all(self.temp_dir)`. Never hand-build
+a `TestRecording` around a committed fixture to reuse `initialize_and_launch` —
+it deletes the fixture from the working tree when the test ends. Use
+`DapStdioTestClient::initialize_and_launch_trace(path)` instead.
+
+The tup rule for the db-backend (`src/db-backend/Tupfile`) *names* only
+`src/main.rs` as its input, but that is not the whole dependency set: tup
+discovers the rest through its FUSE sandbox, recording every file the cargo
+invocation actually reads. Editing any file under `src/db-backend/src/` does
+re-run the rule on the next `just build-once`, and `src/build-debug/bin/
+replay-server` is refreshed — verified by editing `trace_reader.rs` alone and
+observing tup execute the rule and cargo emit `Compiling replay-server`. Note
+that `just build-once` runs tup twice (before and after webpack); the second
+pass legitimately reports "No commands to execute", so read the FIRST pass when
+checking whether the engine was rebuilt.

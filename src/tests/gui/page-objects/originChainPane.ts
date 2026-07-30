@@ -129,6 +129,32 @@ export class OriginChainPanePageObject {
   }
 
   /**
+   * Index of the first side-panel hop whose seek button names
+   * `fileName`, or `-1` when the chain has no such hop.
+   *
+   * Each hop's button is labelled `<path>:<line>` by
+   * `ui/isonim_origin_chain.nim::renderPanelDom`, so the file a hop
+   * points at is readable straight off the rendered chain. Specs that
+   * want "the WebAssembly-side hop" or "the browser-side hop" should
+   * ask for it by file rather than by ordinal: hop counts are
+   * composer-sensitive (a chain can gain or lose a collapsed
+   * serialisation hop without any behaviour changing), and an ordinal
+   * guess silently clicks a different recording's hop while the
+   * assertion that follows still reads as if it had clicked the
+   * intended one.
+   */
+  async sidePanelHopIndexForFile(fileName: string): Promise<number> {
+    const hops = await this.sidePanelHops().all();
+    for (let index = 0; index < hops.length; index++) {
+      const label = await hops[index].locator("button").first().innerText();
+      if (label.includes(fileName)) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  /**
    * Expand the `<details>` element of the focused Computational hop's
    * operand snapshots (spec §3.2.2: "For computational hops, a chevron
    * to the right of Line 1 expands a third group showing operand

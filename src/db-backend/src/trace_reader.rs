@@ -9,7 +9,9 @@ use codetracer_trace_types::{
     TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
 };
 
-use crate::db::{CellChange, DbCall, DbRecordEvent, DbStep, EndOfProgram, NEXT_INTERNAL_STEP_OVERS_LIMIT};
+use crate::db::{
+    CellChange, DbCall, DbRecordEvent, DbStep, EndOfProgram, NEXT_INTERNAL_STEP_OVERS_LIMIT, OUTERMOST_CALL_DEPTH,
+};
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::task::{Call, CallArg, Location, RRTicks};
@@ -697,16 +699,32 @@ pub trait TraceReader: std::fmt::Debug + Send {
             );
             return start_step_id;
         };
-        let Some(initial_call) = self.call(initial_step.call_key) else {
-            warn!(
-                "step_over_depths_step_id: call_key {:?} for step {:?} is out of bounds (calls len {})",
-                initial_step.call_key,
-                start_step_id,
-                self.call_count()
-            );
-            return start_step_id;
+        // A step whose `call_key` does not resolve to a recorded call is a
+        // FRAMELESS step, not an error and not a dead end.  Event-driven
+        // runtimes record them routinely: the JavaScript recorder emits
+        // steps at the event-loop level — the bootstrap steps before the
+        // module frame opens, and the steps between one callback returning
+        // and the next being entered — and those carry `CallKey(NO_KEY)`
+        // because no recorded call encloses them.
+        //
+        // Frameless steps sit at the trace's OUTERMOST level, which is the
+        // same level as the frames the event loop drives (the `<module>`
+        // call and every callback invoked from the loop are recorded with
+        // `depth = 0` and `parent = NO_KEY`).  Their effective depth is
+        // therefore 0, and a step-over from one behaves exactly like a
+        // step-over at the outermost level: advance to the next step that
+        // is not deeper.
+        //
+        // Bailing out with `start_step_id` here — as this code used to —
+        // meant step-over reported "no successor" for every frameless
+        // step, so pressing F10 at the last statement of a Node module
+        // body held the cursor forever even though step-into and continue
+        // both advanced from the identical position.  See
+        // `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org` §M50.
+        let initial_call_depth: i64 = match self.call(initial_step.call_key) {
+            Some(call) => call.depth as i64,
+            None => OUTERMOST_CALL_DEPTH,
         };
-        let initial_call_depth = initial_call.depth;
         let mut current_step_id = start_step_id;
 
         // Iterate using steps_from slice, skipping the first element (the start step itself).
@@ -742,7 +760,7 @@ pub trait TraceReader: std::fmt::Debug + Send {
             info!("for returned: {:?} with depth: {:?}", new_step, new_call.depth);
 
             // depth - delta can be < 0: compare as i64 to avoid underflow.
-            if (new_call.depth as i64) <= (initial_call_depth as i64) - (delta as i64) {
+            if (new_call.depth as i64) <= initial_call_depth - (delta as i64) {
                 break;
             }
         }
