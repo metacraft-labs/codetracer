@@ -70,6 +70,15 @@ addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "io-mon" / "src")
 addPathIfDir(getEnv("SHM_QUEUE_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
+# io-mon's dependency-capture writer (`io_mon/writer.nim`) imports
+# `shm_gset/transport` — the grow-only-set transport that is now its PRIMARY
+# Linux dependency channel, with the `nim-shm-queue` ring retained only for the
+# legacy path. Both transports therefore have to be on the search path for
+# anything that reaches io-mon (the top-level `ct` entry point does, via
+# `src/ct_test/incremental_cli`), otherwise `ct` fails to compile with
+# "cannot open file: shm_gset/transport".
+addPathIfDir(getEnv("SHM_GSET_SRC"))
+addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
 addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
 

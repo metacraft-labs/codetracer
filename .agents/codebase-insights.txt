@@ -248,3 +248,35 @@
 - 2026-05-04: The GoldenLayout stack-header dropdown in `ui/layout.nim` is direct DOM now (`createLayoutDropdown`), not a Karax `makeNestedButton` VNode island. Keep the `.layout-buttons-container`, `.layout-dropdown hidden`, and `.layout-dropdown-node` class contract intact because auto-hide and visual-audit GUI specs click those selectors for the "Pin to ..." actions.
 - 2026-06-23 (Incremental-Test-Runner M0–M2): `src/ct_test/incremental/*.nim` is now the CANONICAL, codetracer-owned incremental-testing engine — it is NO LONGER a generated reprobuild vendor copy (M0 de-vendored it: provenance banners + `#@ctvendor` markers removed, native backend wired in; reprobuild now reaches the runner ONLY through the engine-free `reprobuild-ct-test-runner` adapter, a one-way dependency). EDIT THESE FILES DIRECTLY. Key facts: the per-test ROOT HASH (M2) is the engine's `deepHash` (§16.7.3 sorted-by-name fold over the executed set's `(name, shallow)` pairs) — the SAME function `decide` uses, so the artifact root hash and a live decision can never diverge. `root_hash.nim` owns the root hash + the `RootHashArtifact` re-decide schema (root hash + executed functions with identities/shallow hashes + a RESERVED empty `readFiles` slot for M6) behind a swappable `RootHashArtifactCodec` boundary (provisional JSON now; the CTFS-vs-custom format decision is M3, the concrete codec is M4 — do not hard-commit a format). `buildArtifact`/`redecideFromArtifact` REUSE the engine's `record`/`decide`; never reimplement extraction or hashing. The CLI surface is `ct test --incremental [--write-artifact] [--artifact PATH]` in `incremental_cli.nim`. Tests build/run via `direnv exec <codetracer> nim c -r src/ct_test/incremental/<test>.nim` (config.nims pins `results>=0.5` + the zstd include for the trace-format-nim reader).
 - 2026-06-24 (Incremental-Test-Runner §16.7.8 launched-binary fold): a test's invalidation set = code deps ∪ read-file deps ∪ LAUNCHED-BINARY deps. Launched binaries (e.g. a compiler a test shells out to) load via mmap/dyld so they NEVER appear as open/read — io-mon records them as spawn/exec records (`mrProcessSpawn`/`mrProcessExec`, observation `moExecute`, binary path in `record.path`). `src/ct_test/incremental/io_mon_capture.nim::launchedBinaryPathsFromDepFile` extracts the successful (result>=0), de-duped, path-sorted launched-binary set; `readFilesFromDepFile` now folds BOTH read files AND launched binaries into the SAME `ReadFile` dep set (path + size/mtime signature), de-duped by path, so a changed launched binary re-runs every launcher through the identical M4b store + root-hash fold. A SIP-rewritten exec path (transient `CT_SANDBOX_TOOLS_DIR` copy) is mapped BACK to the original system path via `stackable_hooks/propagation.unrewriteSipPath` (inverse of `rewriteSipPath`), so the dep is keyed on the real binary identity. An un-stat'able launched binary ⇒ Err ⇒ re-run (fail-safe). Tests: `incremental/test_io_mon_launched_binaries.nim`.
+- 2026-07-30: `config.nims` must add BOTH shared-memory transports to the Nim
+  search path, not just `nim-shm-queue`. The top-level `ct` entry point reaches
+  io-mon via `src/ct_test/incremental_cli`, and `io-mon/src/io_mon/writer.nim`
+  now imports `shm_gset/transport` (nim-shm-gset is io-mon's PRIMARY Linux
+  dependency channel; the shm-queue ring is only the legacy path). Without
+  `addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")` the whole `ct` build
+  dies with `cannot open file: shm_gset/transport`, which reads like a
+  codetracer bug but is sibling-dependency drift.
+- 2026-07-30: The three-recording cross-process value-origin fixture
+  (`src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/`) is
+  consumable ONLY by the headless Rust DAP tests, not by the GUI. Three
+  independent reasons: (1) `ct` has no `session.toml` support at all — session
+  manifests are parsed solely by `db-backend/src/session_manifest.rs`, so
+  `ct host --trace-path` imports ONE `.ct` container and there is no
+  multi-recording launch path; (2) `findCtFileInFolder` wants a `.ct` FILE, and
+  every `*.ct` in this fixture is a DIRECTORY — so `ct host --trace-path
+  <fixtureRoot>` (exactly what the Playwright harness `launchMode:
+  "trace-folder"` passes) exits 1 with "trace folder missing `.ct` CTFS
+  container" before Electron even starts. Pointing it one level deeper does not
+  rescue the other two either: `frontend.ct/` and `frontend-wasm.ct/` hold only
+  retired pre-M-REC-1.5 sidecar JSON (`trace.json` + `trace_metadata.json` +
+  `trace_paths.json`), so they fail identically; only `backend.ct/` (real CTFS
+  `server.ct`) imports. Re-recording the two browser traces as CTFS containers
+  would break the Rust tests that read the legacy shape directly
+  (`m25b_event_log_test.rs` opens `frontend.ct/` as a trace dir); (3) the
+  frontend never populates the process tree in production —
+  `SessionViewModel.applyListProcessesResponse` is called only from tests, and
+  `event_log_vm.jumpToCounterpart` sends `ct/listProcesses` but DISCARDS the
+  reply. `ProcessTreeVM` also has no DOM renderer (there is no
+  `isonim_process_tree_view.nim`; the only `data-role` attribute in the product
+  is on origin-chain breadcrumb chips in `ui/isonim_origin_chain.nim`). The
+  §14.8 process-tree / "Switch process" surface is still deferred.
