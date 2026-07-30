@@ -28,4 +28,13 @@ proc bookDocsConfig*(): DocsConfig =
     siteLogo: "/assets/img/logo-black-horizontal.svg",
     logoHref: "/",
     footerHtml: "Built by <a href=\"https://github.com/metacraft-labs\">metacraft-labs</a> — 2026",
+    # M1 (client-JS bundle): ship + inject the compiled client app on every
+    # page so the theme toggle, live search and sidebar collapse are live. The
+    # bundle is `src/main.nim` (compiled by `build.nim`/the dev server); the
+    # asset-hash pass rewrites this placeholder to the cache-busted filename.
+    appScriptHref: defaultAppScriptUrl,
+    # M1 (robust no-JS nav): render all three sidebar sections default-expanded
+    # (WebFlow shows all its blocks open) so the article links are visible and
+    # navigable on a plain page load even before/without the client JS.
+    expandAllNavSections: true,
   )

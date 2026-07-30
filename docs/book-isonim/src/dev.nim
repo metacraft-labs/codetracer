@@ -26,7 +26,10 @@ proc newDocsDevServer*(contentDir = "content";
                assetsDirs = assetsDirs,
                docsTokensCss = docsTokensCssLive(),
                tokensCssProvider = (proc(): string = docsTokensCssLive()),
-               watchPaths = @[docsDesignSystemPath])
+               watchPaths = @[docsDesignSystemPath],
+               # M1: serve this book's compiled JS mount entry at /assets/app.js
+               # (compiled lazily on first request), so dev matches the built site.
+               clientEntry = "src/main.nim")
 
 when isMainModule:
   let port = if paramCount() >= 1: parseInt(paramStr(1)) else: 8000

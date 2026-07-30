@@ -31,7 +31,11 @@ const legacySummaryPath = "../book/src/SUMMARY.md"
 when isMainModule:
   let tokensCss = emitTokensCss(metacraftDocsTokenLayer(), designSystemTokens())
   let n = buildSite(contentDir = "content", cfg = bookDocsConfig(),
-                    docsTokensCss = tokensCss)
+                    docsTokensCss = tokensCss,
+                    # M1: compile this book's own JS mount entry (embeds THIS
+                    # site's content) into the hashed `assets/app.js` the pages
+                    # reference via `bookDocsConfig().appScriptHref`.
+                    clientEntry = "src/main.nim")
   if dirExists("static"):
     copyDir("static", "public" / "assets")
   # Post-build: emit legacy-URL redirect artifacts (meta-refresh *.html
