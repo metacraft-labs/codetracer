@@ -17,7 +17,19 @@ when defined(server):
 
 
 when not defined(server):
-  var chalk* = cast[Chalk](require(cstring"chalk"))
+  # chalk 5.x is ESM-only and cannot be require()'d in CommonJS Electron.
+  # Two-step: catch the ESM error with an `except: undefined` (matches how
+  # electron-debug is handled), then substitute a passthrough object outside
+  # the try block so chalk.blue/red/etc degrade gracefully to identity functions
+  # instead of crashing the main process at module load time.
+  proc passthroughChalk(): js {.importjs: """(function() {
+    var id = function(s) { return s; };
+    return { yellow: id, blue: id, red: id, green: id,
+             bold: id, underline: id,
+             keyword: function() { return id; } };
+  })()""".}
+  var chalkRaw: js = try: require(cstring"chalk") except: undefined
+  var chalk*: Chalk = cast[Chalk](if not isUndefined(chalkRaw): chalkRaw else: passthroughChalk())
   type DebugMainIPC = ref object
     electron*: js
 

@@ -489,11 +489,21 @@ input:checked ~ .checkmark:after
     right: 0 !important
     font-size: 0.875rem
     border: 0.0625em solid colors-ui-border-tertiary
+    border-radius: 0.5em
+    overflow: hidden
 
     .layout-dropdown-node
       border-top: 0.0625em solid colors-ui-border-tertiary
       padding-left: 0.5em
       padding-right: 0.5em
+
+      &:first-child
+        border-top: none
+        border-radius: 0.5em 0.5em 0 0
+
+      &:last-child
+        border-bottom: none
+        border-radius: 0 0 0.5em 0.5em
 
       &:hover
         background-color: colors-ui-surface-primary-default-hover

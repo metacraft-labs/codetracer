@@ -200,7 +200,7 @@ method onUp*(self: MenuComponent) {.async.} =
     if self.activeSearchIndex > 0:
       self.activeSearchIndex -= 1
 
-  self.data.redraw()
+  self.requestMenuRender()
 
 method onDown*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
@@ -212,15 +212,17 @@ method onDown*(self: MenuComponent) {.async.} =
     if self.activeSearchIndex < self.searchResults.len:
       self.activeSearchIndex += 1
 
-  self.data.redraw()
+  self.requestMenuRender()
 
 method onRight*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
   enterFolder(self)
+  self.requestMenuRender()
 
 method onLeft*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
   closeFolder(self)
+  self.requestMenuRender()
 
 method onEnter*(self: MenuComponent) {.async.} =
   self.enterElement()
@@ -577,3 +579,5 @@ when defined(js):
         self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
       self.debug.requestDebugControlsRender()
     wireMenuKeyboard(container, self)
+    if self.keyNavigation:
+      focusNavigationSoon()
