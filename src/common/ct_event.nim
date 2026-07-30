@@ -101,6 +101,15 @@ type
     CtSetActiveSourceViewResponse,
     CtInstallSourceView,
     CtInstallSourceViewResponse,
+    # Multi-process sessions (M29 §5.2 / M42 §14.8). `ct/listProcesses`
+    # is unusual in that the backend speaks it in BOTH directions: as a
+    # request the frontend may issue, and as an unsolicited event
+    # dispatched once per session load
+    # (`db-backend/src/dap_server.rs::dispatch_session_load_event`).
+    # Both carry the same body shape, so both route to this kind and
+    # `SessionViewModel.applyListProcessesResponse` decodes either.
+    CtListProcesses,
+    CtListProcessesResponse,
 
 when defined(js):
   import std / jsffi

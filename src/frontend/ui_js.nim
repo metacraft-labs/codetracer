@@ -30,6 +30,19 @@ proc configureIPC(data: Data)
 proc jsMissing(value: JsObject): bool {.
   importjs: "((function(v) { return v === undefined || v === null; })(#))".}
 
+proc stringifyJsObject(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
+proc parseJsonFromJsObject(o: JsObject): JsonNode =
+  ## Convert a raw DAP payload into a stdlib `JsonNode`.
+  ##
+  ## Nim's JS backend represents `JsonNode` as a tagged Nim object, not
+  ## a plain JavaScript value, so a payload must round-trip through a
+  ## JSON string before the `kind` checks in the decoders will hold.
+  ## Same conversion as `viewmodel/backend/real_backend.parseJsonFromJs`
+  ## and `ui/state.nim`; duplicated rather than exported because those
+  ## modules would otherwise pull their whole dependency graph in here.
+  parseJson($stringifyJsObject(o))
+
 proc fsExistsSync(path: cstring): bool {.importjs: """
   ((typeof require === 'function') && require('fs').existsSync(#))
 """.}
@@ -168,6 +181,13 @@ import viewmodel/viewmodels/visual_replay_layout
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
+from ui/process_tree import
+  consumeListProcessesEvent, mountProcessTree
+import viewmodel/viewmodels/state_vm
+import viewmodel/viewmodels/origin_chain_types
+from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, openSidePanel, onCancelLoad
+from isonim/core/signals import val
+from isonim/core/computation import val
 var activeSessionVM: SessionViewModel
 var activeCollabFrontEndAdapter: FrontEndAdapter
 var activeIsoNimApp: IsoNimApp
@@ -1598,6 +1618,126 @@ when not defined(ctInExtension):
         let ocvm = state.activeOriginChainVM()
         if not ocvm.isNil:
           activeSessionVM.attachOriginChainVM(ocvm)
+      # M42 §14.8 — multi-process session surface.
+      #
+      # `ct/listProcesses` is the only description of a session's
+      # recordings the renderer ever receives. The backend dispatches it
+      # as an unsolicited DAP event exactly once per session load
+      # (`dap_server.rs::dispatch_session_load_event`), so this
+      # subscription is what makes `processTree` non-empty in a real
+      # session — there is no polling fallback and no second source.
+      initPanelVM("subscribeListProcesses"):
+        dap.on[JsObject](dapRef, CtListProcesses,
+          proc(kind: CtEventKind, raw: JsObject) =
+            if activeSessionVM.isNil or raw.isNil:
+              return
+            try:
+              activeSessionVM.consumeListProcessesEvent(parseJsonFromJsObject(raw))
+            except CatchableError as e:
+              cerror "ct/listProcesses: failed to decode payload: " & e.msg)
+
+      # The `ct/originChain` reply had the same fate as `ct/listProcesses`
+      # before M42: `OriginChainVM.onShowOrigin` fires the request and
+      # discards the future (`asyncSendCtRequest` resolves immediately —
+      # real replies arrive out-of-band on the DAP channel), and nothing
+      # called `applyChainResponse`, so `activeChain` stayed `none` and
+      # the Origin Chain side panel never had a chain to draw. The
+      # backend emits `ct/updated-origin-chain` alongside every chain
+      # response — including the session-composed cross-process one, whose
+      # wire shape is deliberately identical — so one subscription feeds
+      # the VM for both the single- and multi-recording paths.
+      initPanelVM("subscribeUpdatedOriginChain"):
+        dap.on[JsObject](dapRef, CtUpdatedOriginChain,
+          proc(kind: CtEventKind, raw: JsObject) =
+            let ocvm = state.activeOriginChainVM()
+            if ocvm.isNil or raw.isNil:
+              return
+            try:
+              ocvm.applyChainResponse(
+                parseOriginChain(parseJsonFromJsObject(raw)))
+              # Spec §3.2.2 — "Show value origin" opens the dedicated
+              # side panel. There are two menus that can start the
+              # request (the IsoNim State Pane row menu, which goes
+              # through `OriginChainVM.onShowOrigin`, and the legacy
+              # value-row menu in `ui/value.nim`, which emits
+              # `CtOriginChain` on the mediator and never touches the
+              # VM). Opening here covers both, and a chain only ever
+              # arrives because a user asked for one.
+              ocvm.openSidePanel()
+            except CatchableError as e:
+              cerror "ct/updated-origin-chain: failed to decode chain: " & e.msg)
+        # The `ct/originChain` response carries the identical chain body
+        # and is the request's direct correlate, so it is consumed too:
+        # the companion event is emitted only on success, and a failed
+        # query would otherwise leave the panel silently shut with no
+        # trace of why.
+        dap.on[JsObject](dapRef, CtOriginChainResponse,
+          proc(kind: CtEventKind, raw: JsObject) =
+            let ocvm = state.activeOriginChainVM()
+            if ocvm.isNil or raw.isNil:
+              return
+            try:
+              let body = parseJsonFromJsObject(raw)
+              if body.kind == JObject and body.hasKey("hops"):
+                ocvm.applyChainResponse(parseOriginChain(body))
+                ocvm.openSidePanel()
+              else:
+                ocvm.onCancelLoad()
+                cerror "ct/originChain: query returned no chain: " & $body
+            except CatchableError as e:
+              cerror "ct/originChain: failed to decode response: " & e.msg)
+
+      # The process tree's click handler rotates the ViewModel's active
+      # recording; this bridge is what makes that rotation visible in
+      # the backend. Requests are routed to a recording purely by the
+      # composed `threadId` they carry
+      # (`dap_server.rs::handle_request_via_session`), so switching
+      # process means re-pointing that id and then moving the cursor
+      # into the new recording so the editor and State Pane follow.
+      initPanelVM("installSwitchProcessBridge"):
+        activeSessionVM.onSwitchProcessProc = proc(recordingId: string) =
+          if activeSessionVM.isNil:
+            return
+          let entryOpt = activeSessionVM.entryForRecording(recordingId)
+          if entryOpt.isNone:
+            cerror "switch process: unknown recording " & recordingId
+            return
+          let threadId = entryOpt.get.routingThreadId()
+          if threadId == 0:
+            cerror "switch process: recording " & recordingId &
+              " advertises no thread id; leaving routing unchanged"
+            return
+          setActiveSessionThreadId(threadId)
+          data.dapApi.sendCtRequest(CtRunToEntry, JsObject{})
+
+      # Spec §14.8 — the State Pane's "Switch process" right-click
+      # entry. Offered only while a cross-process correlation is
+      # active: the targets are the sibling recordings the open origin
+      # chain reaches, minus the one already being viewed.
+      initPanelVM("installSwitchProcessMenuBridges"):
+        let svm = state.activeStateVM()
+        if not svm.isNil:
+          svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
+            result = @[]
+            if activeSessionVM.isNil:
+              return
+            let activeId = activeSessionVM.activeProcessRecordingId.val
+            var seen: seq[string] = @[]
+            for span in activeSessionVM.crossProcessSpans.val:
+              if span.recordingId.len == 0 or span.recordingId == activeId:
+                continue
+              if span.recordingId in seen:
+                continue
+              seen.add(span.recordingId)
+              result.add(ProcessSwitchTarget(
+                recordingId: span.recordingId, role: span.role))
+          svm.onSwitchProcessProc = proc(recordingId: string) =
+            if not activeSessionVM.isNil:
+              activeSessionVM.onSwitchProcess(recordingId)
+
+      initPanelVM("mountProcessTree"):
+        mountProcessTree(activeSessionVM)
+
       initPanelVM("initDebugControlsVMWithStore"):
         debug.initDebugControlsVMWithStore(activeSessionVM.store)
       initPanelVM("initCalltraceVMWithStore"):

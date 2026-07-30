@@ -53,8 +53,28 @@ export class VariableStatePane {
     return this.root.locator(`[data-variable-name="${name}"]`).first();
   }
 
-  async variableValueText(name: string): Promise<string> {
-    return ((await this.variableRow(name).textContent()) ?? "").trim();
+  /**
+   * Text of a variable row, or `""` when the pane holds no such row.
+   *
+   * The `""` return is load-bearing, not a convenience: every caller
+   * uses `variableValueText(x) !== ""` as an *existence* probe inside a
+   * stepping loop ("keep stepping until `balance` is bound"). Playwright's
+   * `Locator.textContent()` auto-waits, so on an absent row it does not
+   * return `null` — it throws `TimeoutError` after the default 30s. That
+   * made the very first probe of every such loop fatal, so none of those
+   * loops was reachable: the specs could not wait for a value that takes
+   * more than zero steps to appear. `waitFor` with a short cap restores
+   * the intended semantics while still tolerating a row that is a beat
+   * behind the step it belongs to.
+   */
+  async variableValueText(name: string, timeoutMs = 1_000): Promise<string> {
+    const row = this.variableRow(name);
+    try {
+      await row.waitFor({ state: "attached", timeout: timeoutMs });
+    } catch {
+      return "";
+    }
+    return ((await row.textContent()) ?? "").trim();
   }
 
   async programStateVariables(forceReload = false): Promise<ValueComponentView[]> {

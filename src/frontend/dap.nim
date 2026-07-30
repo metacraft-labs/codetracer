@@ -144,7 +144,53 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtSetActiveSourceViewResponse: "",
   CtInstallSourceView: "ct/install-source-view",
   CtInstallSourceViewResponse: "",
+  # Multi-process sessions (M29 §5.2 / M42 §14.8). The same command
+  # string names both the request the frontend may issue and the
+  # session-load event the backend dispatches unsolicited, so a single
+  # mapping entry serves `asyncSendCtRequest` and `receiveEvent`.
+  CtListProcesses: "ct/listProcesses",
+  CtListProcessesResponse: "",
 ]
+
+# ---------------------------------------------------------------------------
+# Multi-process request routing (M42 §14.8).
+#
+# `db-backend/src/dap_server.rs::handle_request_via_session` selects
+# which recording of a multi-trace session serves a request purely from
+# the request's `threadId` argument (composed as `slot << 24 | inner`,
+# see `session_handler.rs::compose_thread_id`); a request without one
+# falls back to slot 0, the first `[[trace]]` in `session.toml`.
+#
+# The renderer therefore has exactly one lever for "which process am I
+# debugging": the `threadId` it stamps on outgoing requests. Rather
+# than thread an id through every call site (the legacy step path in
+# `renderer.nim` hardcodes `DapStepArguments(threadId: 1)`), we stamp it
+# once here, at the single choke point every DAP request passes
+# through.
+#
+# `0` means "not a multi-process session" and leaves every request
+# byte-identical to the pre-M42 wire, so single-recording sessions —
+# i.e. every existing test — are unaffected. The process tree installs
+# a real id via `setActiveSessionThreadId` only once a session with
+# more than one recording reports its process list.
+# ---------------------------------------------------------------------------
+
+var activeSessionThreadId: int = 0
+
+proc isMissingArgs(value: JsObject): bool {.
+  importjs: "((function(v) { return v === undefined || v === null; })(#))".}
+  ## `null`/`undefined` probe for a request's `arguments` slot. Nim's
+  ## `isNil` covers `null` but not `undefined`, and both reach here from
+  ## call sites that pass a bare `js{}` or omit the argument entirely.
+
+proc setActiveSessionThreadId*(threadId: int) =
+  ## Route subsequent DAP requests to the recording owning `threadId`.
+  ## Pass `0` to restore the default (slot 0) routing.
+  activeSessionThreadId = threadId
+
+proc getActiveSessionThreadId*(): int =
+  ## Current session-wide routing thread id; `0` when unset.
+  activeSessionThreadId
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
 
@@ -190,6 +236,8 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # Column-Aware Replay Navigation (M3)
   of CtSetActiveSourceView: CtSetActiveSourceViewResponse
   of CtInstallSourceView: CtInstallSourceViewResponse
+  # Multi-process sessions (M42 §14.8)
+  of CtListProcesses: CtListProcessesResponse
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
@@ -229,6 +277,8 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   # Column-Aware Replay Navigation (M3)
   of "ct/set-active-source-view": CtSetActiveSourceViewResponse
   of "ct/install-source-view": CtInstallSourceViewResponse
+  # Multi-process sessions (M42 §14.8)
+  of "ct/listProcesses": CtListProcessesResponse
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")
@@ -286,11 +336,21 @@ when not defined(ctInExtension):
                          kind: CtEventKind,
                          rawValue: JsObject): Future[JsObject] {.async.} =
 
+    # M42 §14.8 — stamp the active recording's composed thread id so the
+    # session router in `dap_server.rs` dispatches to the process the
+    # user selected in the process tree. No-op (and no allocation) for
+    # single-recording sessions, where `activeSessionThreadId` is 0.
+    var args = rawValue
+    if activeSessionThreadId != 0:
+      if isMissingArgs(args):
+        args = JsObject{}
+      args["threadId"] = activeSessionThreadId
+
     let packet = JsObject{
       seq:        dap.seq,
       `type`:     cstring"request",
       command:    toDapCommandOrEvent(kind),
-      arguments:  rawValue
+      arguments:  args
     }
 
     dap.seq += 1

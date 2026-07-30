@@ -291,6 +291,26 @@ proc buildVariableRowContextMenu*(vm: StateVM;
     action: proc() =
       stateVM.onShowOrigin(name, loc),
   )
+  # Spec §14.8 — "The State Pane's right-click menu gains a 'Switch
+  # process' entry that pivots to the same step coordinate in a sibling
+  # process if a cross-process correlation is active." One entry per
+  # sibling recording the active chain reaches; nothing at all when no
+  # such correlation exists, so single-recording sessions see the same
+  # two-item menu they always did.
+  if not stateVM.crossProcessSwitchTargets.isNil:
+    for target in stateVM.crossProcessSwitchTargets():
+      if target.recordingId.len == 0:
+        continue
+      let switchTo = target.recordingId
+      let switchLabel =
+        if target.role.len > 0: target.role else: target.recordingId
+      result.add OriginContextMenuEntry(
+        label: "Switch process: " & switchLabel,
+        hint: "",
+        action: proc() =
+          if not stateVM.onSwitchProcessProc.isNil:
+            stateVM.onSwitchProcessProc(switchTo),
+      )
 
 proc onShowVariableRowContextMenu*(vm: StateVM;
                                    item: proc(): VariableViewState):

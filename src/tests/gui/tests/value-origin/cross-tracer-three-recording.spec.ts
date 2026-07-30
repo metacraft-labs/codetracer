@@ -82,15 +82,18 @@ test("e2e_origin_cross_tracer_three_recording_balance_chain", async ({ ctPage })
   // the session manifest (see `viewmodel/session_vm.nim::setProcessTree`).
   // We probe for the three canonical roles emitted by the
   // `ct/listProcesses` reply (`frontend-js` / `frontend-wasm` / `backend`).
-  // The exact DOM selector is forward-tolerant: the renderer may live
-  // under `[data-role="..."]` (current ViewModel wire shape) or a
-  // future `.ct-process-tree-entry[data-role="..."]` rendering. We use
-  // a permissive locator that matches either.
+  //
+  // M42 settled the renderer on ONE attribute, `data-process-role`
+  // (`viewmodel/views/isonim_process_tree_view.nim`), and this locator
+  // was narrowed to it per that milestone's deliverable. The earlier
+  // three-way permissive form was a placeholder written before any
+  // renderer existed, and it cannot be kept: the Origin Chain
+  // breadcrumb chips emit `data-role` carrying the very same role
+  // tokens, so `[data-role="backend"]` would match both a process row
+  // and a chip once the chain panel is open, and the `toHaveCount(1)`
+  // assertions below would fail on a correct product.
   const processEntry = (role: string) =>
-    ctPage.locator(
-      `[data-process-role="${role}"], [data-role="${role}"], ` +
-        `.ct-process-tree-entry[data-role="${role}"]`,
-    );
+    ctPage.locator(`[data-process-role="${role}"]`);
 
   for (const role of ["frontend-js", "frontend-wasm", "backend"]) {
     await expect(

@@ -129,6 +129,25 @@ type
       ## the JS-only ``showContextMenu`` primitive is invoked so
       ## headless tests can inspect the menu items and exercise the
       ## "Show value origin" action proc without running a real DOM.
+    crossProcessSwitchTargets*: proc(): seq[ProcessSwitchTarget]
+      ## Optional bridge (spec §14.8: "The State Pane's right-click
+      ## menu gains a 'Switch process' entry ... if a cross-process
+      ## correlation is active"). Returns the sibling recordings the
+      ## currently-active origin chain reaches, excluding the recording
+      ## already being viewed. An empty result — the single-process
+      ## case, or a session with no chain open — means no switch entry
+      ## is offered at all, which is what "if a cross-process
+      ## correlation is active" asks for.
+    onSwitchProcessProc*: proc(recordingId: string)
+      ## Optional bridge invoked by the "Switch process" menu entry.
+      ## Installed by the host so the pivot goes through
+      ## `SessionViewModel.onSwitchProcess` (which also re-points DAP
+      ## request routing) rather than mutating anything here.
+
+  ProcessSwitchTarget* = object
+    ## One candidate of the §14.8 "Switch process" menu entry.
+    recordingId*: string
+    role*: string
 
   OriginContextMenuEntry* = object
     ## Renderer-agnostic context-menu item used by the State Pane
