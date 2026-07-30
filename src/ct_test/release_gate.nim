@@ -47,6 +47,12 @@ const
     # because this array IS the CI gate — a ViewModel test that exists but
     # is not listed runs nowhere (a gap this campaign found repeatedly).
     "src/tests/gui/tests/request-panel/request_panel_live_vm_test.nim",
+    # RS-M4: the GUI demo launch path.  `demo_recipe_produces_populated_session`
+    # runs `just demo-request-panel`'s container-production step headlessly and
+    # asserts meta.dat bit 13 plus the rendered rows, so the recipe cannot rot
+    # unnoticed.  Native-only (real container bytes through a zstd FFI), hence
+    # excluded from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

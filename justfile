@@ -1325,6 +1325,172 @@ demo-cross-tracer:
   echo "[demo] Launching CodeTracer GUI with session manifest: $session"
   exec ct replay -t "$session"
 
+# RS-M4 — one-command "watch HTTP requests arrive in CodeTracer".
+#
+# ############################################################################
+# # THE SPANS ARE SYNTHESISED.  THE PANEL PATH IS REAL.                      #
+# ############################################################################
+#
+# No language recorder emits `span_type: "web-request"` records yet — per
+# language emission is RS-M5..RS-M9 (Python, Ruby, PHP, Elixir, JS), every one
+# of which depends on RS-M4.  So this recipe cannot record a real server; it
+# produces the container with the CANONICAL Nim writer instead
+# (`codetracer-trace-format-nim`'s multi_stream_writer + span_stream, the same
+# writer the recorders link and the same path
+# `src/db-backend/tests/fixtures/span_stream/gen_span_fixtures.nim` uses).
+#
+# EVERYTHING DOWNSTREAM OF THE CONTAINER IS PRODUCTION CODE: `ct replay` opens
+# it, the db-backend's Rust span reader decodes spans.dat/spans.idx, meta.dat
+# bit 13 gates it, `ct/load-request-spans-since` tails it, and the Request
+# Panel's ViewModel merges the deltas and renders the rows.
+#
+# RS-M5+ replaces the synthetic producer with a real server under its
+# language's recorder and adds `just demo-request-panel <that lang>`.  Nothing
+# else in this recipe changes: only who writes the span records.
+#
+# LANG selects the producer.  `synthetic` is the only value that works today;
+# each language milestone adds its own.  See the "Trying it" section of
+# codetracer-specs/GUI/Core-Panes/Request-Panel.md.
+demo-request-panel LANG="synthetic":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== RS-M4 Request Panel demo — {{LANG}} ==="
+
+  if [ "{{LANG}}" != "synthetic" ]; then
+    {
+      echo "ERROR: no recorder emits web-request spans yet, so '{{LANG}}' has"
+      echo "no demo to run.  Per-language emission is RS-M5..RS-M9; each of"
+      echo "those milestones adds its own LANG value to this recipe."
+      echo
+      echo "Today:  just demo-request-panel synthetic"
+    } >&2
+    exit 1
+  fi
+
+  demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel}"
+  work="${TMPDIR:-/tmp}/ct-demo-request-panel"
+  mkdir -p "$work"
+
+  if ! command -v nim >/dev/null 2>&1; then
+    {
+      echo "ERROR: no 'nim' on PATH.  The demo container is written by the"
+      echo "canonical Nim writer, so this recipe needs the dev shell:"
+      echo "  direnv exec . just demo-request-panel {{LANG}}"
+    } >&2
+    exit 1
+  fi
+
+  echo "[demo] compiling the container producer (canonical Nim writer)"
+  nim c -d:release --hints:off --warnings:off \
+    --out:"$work/demo_request_session" \
+    src/tools/demo_request_session.nim
+
+  echo "[demo] producing the demo container in $demo_dir"
+  rm -rf "$demo_dir"
+  container=$("$work/demo_request_session" "$demo_dir")
+  echo "[demo] wrote $container"
+
+  # Show what the panel is about to display, straight out of the container,
+  # so a failure to render in the GUI is distinguishable from a failure to
+  # record.  `ct print -f http` reads spans.dat through the Nim reader.
+  ct print -f http "$demo_dir" || true
+
+  echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+  echo "[demo] first delta arrives (bottom edge strip if you close it)."
+  exec ct replay -t "$demo_dir"
+
+# RS-M4 — the same demo, but the container GROWS while the GUI watches it, so
+# rows appear live and one request is seen in flight before it settles.
+#
+# The in-flight row is a real observation, not a figure of speech.  One stage
+# (`--through=6 --open-only`) stops INSIDE request 6: its open span record is
+# published, its completion is not.  That stage has to exist as its own step,
+# because a stage that published the open record and its completion together
+# would be one atomic rename, and the backend applies `resolve_spans` WITHIN a
+# delta — the panel would only ever see the settled row.  With the extra step
+# the panel shows request 6 greyed and status-less for one interval, then
+# settles it.
+#
+# Read the header of `demo-request-panel` first: the spans are synthesised the
+# same way here.  One extra caveat is specific to this recipe:
+# `MultiStreamTraceWriter` builds its container IN MEMORY and serialises at
+# close (see `flushSpans`' own docs in
+# codetracer-trace-format-nim/src/codetracer_trace_writer/multi_stream_writer.nim),
+# so the grower rewrites the whole image and renames it into place rather than
+# appending to a live file.  Every stage nonetheless re-seals its earlier chunks
+# to the SAME bytes — seal points and record contents are both derived from the
+# request index, never from the stage count — so each stage's span stream is a
+# strict CHUNK PREFIX of the next, which is exactly what the backend's
+# chunk-count cursor requires.  The whole reader half is therefore genuinely
+# exercised: held reader, per-poll delta, `reset` only on the first poll,
+# client-side last-record-wins across deltas.  True in-place append needs the
+# writer built on `createCtfsStreaming(path)`; that is a writer change, not a
+# panel change.
+#
+# Both properties are asserted headlessly by
+# src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim, over the same stage
+# sequence the loop below walks.
+demo-request-panel-live LANG="synthetic" INTERVAL="2":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== RS-M4 Request Panel demo (live session) — {{LANG}} ==="
+
+  if [ "{{LANG}}" != "synthetic" ]; then
+    echo "ERROR: only 'synthetic' exists today; see just demo-request-panel." >&2
+    exit 1
+  fi
+
+  demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-live}"
+  work="${TMPDIR:-/tmp}/ct-demo-request-panel"
+  mkdir -p "$work"
+
+  if ! command -v nim >/dev/null 2>&1; then
+    echo "ERROR: no 'nim' on PATH; run under 'direnv exec .'." >&2
+    exit 1
+  fi
+
+  echo "[demo] compiling the container producer"
+  nim c -d:release --hints:off --warnings:off \
+    --out:"$work/demo_request_session" \
+    src/tools/demo_request_session.nim
+
+  echo "[demo] seeding the session with its first request"
+  rm -rf "$demo_dir"
+  "$work/demo_request_session" "$demo_dir" --through=1 >/dev/null
+
+  # Grow the session in the background while the GUI tails it.  The GUI polls
+  # `ct/load-request-spans-since` every 500 ms, so a 2 s stage interval makes
+  # each new row visibly arrive on its own.
+  #
+  # The `--open-only` element is the in-flight step: it adds request 6's open
+  # record and nothing else, so the panel renders it as in flight until the next
+  # stage — one interval later — appends the completion.
+  stages=(
+    "--through=2"
+    "--through=3"
+    "--through=4"
+    "--through=5"
+    "--through=6 --open-only"
+    "--through=6"
+    "--through=7"
+    "--through=8"
+  )
+  (
+    for stage in "${stages[@]}"; do
+      sleep "{{INTERVAL}}"
+      # Unquoted on purpose: an element may carry two flags.
+      "$work/demo_request_session" "$demo_dir" $stage >/dev/null
+      echo "[demo] session grew: $stage"
+    done
+    echo "[demo] session complete (8 requests)"
+  ) &
+
+  # `ct replay` execv()s into Electron on POSIX, so this shell is replaced and
+  # never reaches a `wait`.  The grower is already a detached child and keeps
+  # feeding the container; it exits on its own after the eighth stage.
+  echo "[demo] launching the GUI — watch rows appear in the REQUESTS panel"
+  exec ct replay -t "$demo_dir"
+
 # Elixir materialized trace DAP flow integration test (DB-based, no rr required).
 # Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
 # (legacy CODETRACER_ELIXIR_RECORDER_PATH still honored during the BEAM rename
@@ -1791,6 +1957,10 @@ test-vm-native: vm-test-prereqs
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
+# Also skips request-panel/demo_recipe_vm_test.nim (RS-M4): it writes a real
+# `.ct` container with the canonical Nim writer, which links zstd through a C
+# FFI that has no `nim js` equivalent.  It runs in test-vm-native and is
+# registered in release_gate.nim's CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
   set -e
@@ -1806,6 +1976,7 @@ test-vm-js: vm-test-prereqs
     ! -path '*/multi-replay/*' \
     ! -path '*/noir-space-ship/*' \
     ! -path '*/agentic-coding/*' \
+    ! -path '*/request-panel/demo_recipe_vm_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"
