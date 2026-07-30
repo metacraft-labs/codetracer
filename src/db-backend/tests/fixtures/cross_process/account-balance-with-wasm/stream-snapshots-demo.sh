@@ -20,9 +20,11 @@
 # it: a slice is sealed when the *next* quiescent point opens, so a slice
 # whose successor point the consumer has not replayed yet is sealed late
 # simply because the consumer is behind. Observed range on this workload is
-# five to eight of eight, load-dependent. The property under test is that
-# slices are sealed during the run at all — that snapshots are derived from
-# a stream rather than from a finished file.
+# five to eight of eight, load-dependent; since M38d gave the producers a
+# time-based flush the observed figure is eight of eight, each sealed one
+# call-gap (2s) after the last. The property under test is that slices are
+# sealed during the run at all — that snapshots are derived from a stream
+# rather than from a finished file.
 #
 # Nothing here writes a committed file. The page is built and served from a
 # scratch copy, and the recordings land in a scratch directory — producing
@@ -34,30 +36,32 @@
 #
 # # Why the page is a variant of the fixture's
 #
-# Two reasons, and both are properties of the committed page rather than
-# conveniences.
+# One reason, and it is a property of the committed page rather than a
+# convenience: **it calls into WebAssembly exactly once.** One exported
+# call is one quiescent point, and a slice can only be *sealed* when the
+# next one opens — so that workload has no intermediate slice to time, no
+# matter how promptly the consumer works. The scratch copy calls
+# `compute_balance` several times, spaced apart. That patch is applied to
+# the copy and verified to have applied; the committed `app.js` is
+# read-only here.
 #
-# 1. **It calls into WebAssembly exactly once.** One exported call is one
-#    quiescent point, and a slice can only be *sealed* when the next one
-#    opens — so that workload has no intermediate slice to time, no matter
-#    how promptly the consumer works. The scratch copy calls
-#    `compute_balance` several times, spaced apart.
+# **The recorders' flush policy is no longer patched** (M38d). It used to
+# be: both browser producers buffered 256 events before their first flush
+# with no time bound, and the demo's WASM recording is ~85 records, so a
+# default-configured page shipped the *entire* recording in one batch at
+# `stop()` — after which nothing downstream could seal a slice "while the
+# page is still running", however incrementally the daemon wrote and
+# however promptly the consumer replayed. This script therefore patched
+# `flushThreshold: 1` into its scratch `bootstrap.js`, which was fine for a
+# demonstration and wrong as a default (one WebSocket frame per event).
 #
-# 2. **Its recorders buffer 256 events before their first flush.** That is
-#    `flushThreshold`'s default in both `@codetracer/runtime-browser` and
-#    `codetracer-wasm-instrumenter`'s browser session. The demo's WASM
-#    recording is ~85 records, so a default-configured page never reaches
-#    the threshold and ships the *entire* recording in one batch at
-#    `stop()` — after which nothing downstream can possibly seal a slice
-#    "while the page is still running", however incrementally the daemon
-#    writes and however promptly the consumer replays. The scratch copy
-#    therefore also sets `flushThreshold: 1` on the WASM recorder.
-#
-# The second point is a real limitation of the default configuration, not
-# an artefact of this script: for a short page, §2's timeline needs either
-# a lower threshold or a workload that exceeds 256 events. Both patches are
-# applied to the copy and verified to have applied; the committed
-# `app.js` and `bootstrap.js` are read-only here.
+# Both producers now flush on a *time* bound as well as a count bound —
+# `DEFAULT_FLUSH_INTERVAL_MS`, 50ms since the batch's first event — so a
+# short page's records reach the daemon as it produces them without any
+# configuration at all. That is what makes this check a check on the
+# **shipped defaults**: `bootstrap.js` is copied unmodified, and if the
+# defaults regress to count-only this script fails rather than quietly
+# measuring a page it had reconfigured.
 #
 # # Why the comparison point is `trace.json`'s mtime
 #
@@ -265,34 +269,19 @@ assert source.count(original) == 1, "expected exactly one call site to patch"
 open(path, "w").write(source.replace(original, patched))
 PATCH
 
-# The recorder's default `flushThreshold` is 256 events, and this page
-# produces far fewer, so a default-configured run ships every record in one
-# batch at `stop()` — there is then no "during the recording" for any
-# consumer to act in. Flush per event instead, so records reach the daemon
-# as the page produces them. See the header.
-ORIGINAL_RECORDER='  manifest: wasmManifest,'
-grep -qF "$ORIGINAL_RECORDER" "$PAGE/bootstrap.js" || {
-	echo "[stream-demo] bootstrap.js no longer contains the line this script patches:" >&2
-	echo "[stream-demo]     $ORIGINAL_RECORDER" >&2
-	echo "[stream-demo] Update the patch below to match, rather than letting the" >&2
-	echo "[stream-demo] check silently measure the batched-at-the-end workload again." >&2
+# `bootstrap.js` is copied UNMODIFIED, and that is the point of this check
+# since M38d: the recorders' shipped defaults are what has to make a short
+# page stream. Guard it, so a future edit that re-introduces a flush knob
+# here is noticed rather than silently making the verdict about a
+# reconfigured page.
+if grep -qE 'flush(Threshold|IntervalMs)' "$PAGE/bootstrap.js"; then
+	echo "[stream-demo] the scratch bootstrap.js configures the flush policy:" >&2
+	grep -nE 'flush(Threshold|IntervalMs)' "$PAGE/bootstrap.js" >&2
+	echo "[stream-demo] This check exists to prove the DEFAULTS stream. If the page" >&2
+	echo "[stream-demo] needs a flush override to pass, the defaults have regressed" >&2
+	echo "[stream-demo] and that is the thing to fix." >&2
 	exit 1
-}
-python3 - "$PAGE/bootstrap.js" <<'PATCH'
-import sys
-
-path = sys.argv[1]
-original = "  manifest: wasmManifest,"
-patched = "\n".join([
-    "  manifest: wasmManifest,",
-    "  // Patched by stream-snapshots-demo.sh: the default is 256 buffered",
-    "  // events, which for a page this short means one batch at stop().",
-    "  flushThreshold: 1,",
-])
-source = open(path).read()
-assert source.count(original) == 1, "expected exactly one manifest option to patch"
-open(path, "w").write(source.replace(original, patched))
-PATCH
+fi
 
 # ---------------------------------------------------------------------------
 # 3/5 — the consumer dispatcher.
