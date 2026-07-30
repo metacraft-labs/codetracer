@@ -799,7 +799,7 @@ suite "trace_index recent folders":
     # Check that names are correctly extracted (not empty)
     var names: seq[string] = @[]
     for f in folders:
-      if f.path == "/tmp/test_dir1/" or f.path == "C:\\tmp\\test_dir2\\" or f.path == "/tmp/test_dir3":
+      if f.path == "/tmp/test_dir1" or f.path == "C:\\tmp\\test_dir2" or f.path == "/tmp/test_dir3":
         names.add(f.name)
 
     check "test_dir1" in names

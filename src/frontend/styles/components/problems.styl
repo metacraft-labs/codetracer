@@ -6,10 +6,10 @@
   flex-direction: column
   height: 100%
   overflow: hidden
-  color: PRIMARY_TEXT_COLOR
+  color: colors-ui-text-primary-body
   font-size: 13px
   font-family: "FiraCode", monospace
-  background: BACKGROUND_COLOR
+  background: colors-ui-surface-base-panel
 
 // -- Header bar --
 
@@ -18,8 +18,8 @@
   align-items: center
   justify-content: space-between
   padding: 4px 10px
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-  background: HEADER_PANEL_BACKGROUND_COLOR
+  border-bottom: 1px solid colors-ui-surface-input-default
+  background: colors-ui-surface-primary-tertiary
   flex-shrink: 0
   user-select: none
 
@@ -50,13 +50,13 @@
   border-radius: 4px
   cursor: pointer
   font-size: 12px
-  color: DROPDOWN_TEXT_COLOR
+  color: colors-ui-text-primary-body
   background: transparent
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-input-default
   &.active
-    background: ACTIVE_MENU_BACKGROUND
-    color: PRIMARY_TEXT_COLOR
+    background: colors-ui-surface-input-default
+    color: colors-ui-text-primary-body
     font-weight: 600
 
 // -- Problem list --
@@ -80,9 +80,9 @@
   padding: 3px 10px
   cursor: pointer
   white-space: nowrap
-  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+  border-bottom: 1px solid colors-ui-border-secondary
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-input-default
 
 .problems-icon
   flex-shrink: 0
@@ -115,7 +115,7 @@
   flex: 1
   overflow: hidden
   text-overflow: ellipsis
-  color: PRIMARY_TEXT_COLOR
+  color: colors-ui-text-primary-body
 
 // -- Grouped-by-file mode --
 

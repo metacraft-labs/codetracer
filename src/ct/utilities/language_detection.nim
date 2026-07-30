@@ -100,6 +100,7 @@ const LANGS = {
   "exs": LangElixir,
   "erl": LangErlang,
   "hrl": LangErlang,
+  "php": LangPhp,
 }.toTable()
 
 const WASM_LANGS = {

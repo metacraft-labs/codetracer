@@ -28,6 +28,8 @@ var contextHandlers*: JsAssoc[cstring, JsAssoc[cstring, ContextHandler]] = JsAss
 
 const RESULT_LIMIT = 20
 
+var activeDraggedItem: GoldenContentItem
+
 # FIND
 
 proc historyFind*(tab: js, args: seq[string]) =
@@ -144,28 +146,39 @@ type
 
 proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem) =
   ## Attach a right-click context menu to a GL tab element that offers
-  ## "Send to Window" for cross-window panel transfer (M21/M22).
+  ## pin (left/bottom/right), close, and maximise actions.
   let tabElement = tab.element
   if tabElement.isNil or tabElement.isUndefined:
     return
 
   tabElement.addEventListener(cstring"contextmenu", proc(event: JsObject) =
     event.preventDefault()
-    let sessionId = if data.sessions.len > 0:
-        int(data.activeSessionIndex)
-      else:
-        0
     let x = event.clientX.to(int)
     let y = event.clientY.to(int)
-
-    # Use an async wrapper so we can await the window list without relying on
-    # Future.then, which is only available on Nim >= 1.5.1.
-    proc showWindowMenu() {.async.} =
-      let response = await requestWindowList()
-      let items = buildSendToWindowMenuItems(contentItem, sessionId, response)
-      showContextMenu(items, x, y)
-
-    discard showWindowMenu())
+    let capturedItem = contentItem
+    let stack = cast[js](capturedItem.parent)
+    let maxLabel =
+      if cast[bool](stack.isMaximised): cstring"Minimise container"
+      else: cstring"Maximise container"
+    showContextMenu(@[
+      ContextMenuItem(name: cstring"Pin to Left", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Left)),
+      ContextMenuItem(name: cstring"Pin to Bottom", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Bottom)),
+      ContextMenuItem(name: cstring"Pin to Right", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Right)),
+      ContextMenuItem(name: cstring"Close", hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          capturedItem.parent.removeChild(capturedItem)),
+      ContextMenuItem(name: maxLabel, hint: cstring"",
+        handler: proc(ev: kdom.Event) =
+          let s = cast[js](capturedItem.parent)
+          if cast[bool](s.isMaximised): s.minimise()
+          else: s.maximise())
+    ], x, y))
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
@@ -226,6 +239,82 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
       e.stopPropagation();
       _onPin();
     });
+  """.}
+
+
+proc setupDragToPinListeners(layout: GoldenLayout) =
+  ## Wire drag-to-pin listener.
+  ## Coordinates mousemove/mouseup events when a tab is dragged to check
+  ## if it intersects with the Left, Right, or Bottom auto-hide drop zones.
+  {.emit: """
+    (function() {
+      var isActuallyDragging = false;
+      window.addEventListener('mousemove', function(e) {
+        if (!`activeDraggedItem`) return;
+        if (document.querySelector('.lm_dragProxy') !== null) {
+          isActuallyDragging = true;
+        }
+        if (!isActuallyDragging) return;
+
+        var x = e.clientX;
+        var y = e.clientY;
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+
+        var leftStrip = document.getElementById('auto-hide-strip-left');
+        var rightStrip = document.getElementById('auto-hide-strip-right');
+        var bottomStrip = document.getElementById('auto-hide-bottom-strip');
+
+        if (leftStrip) leftStrip.classList.remove('drag-over');
+        if (rightStrip) rightStrip.classList.remove('drag-over');
+        if (bottomStrip) bottomStrip.classList.remove('drag-over');
+
+        if (x >= 0 && x <= 40) {
+          if (leftStrip) leftStrip.classList.add('drag-over');
+        } else if (x >= width - 40 && x <= width) {
+          if (rightStrip) rightStrip.classList.add('drag-over');
+        } else if (y >= height - 40 && y <= height) {
+          if (bottomStrip) bottomStrip.classList.add('drag-over');
+        }
+      });
+
+      window.addEventListener('mouseup', function(e) {
+        var wasDragging = isActuallyDragging;
+        isActuallyDragging = false;
+
+        if (!`activeDraggedItem`) return;
+
+        var x = e.clientX;
+        var y = e.clientY;
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+
+        var leftStrip = document.getElementById('auto-hide-strip-left');
+        var rightStrip = document.getElementById('auto-hide-strip-right');
+        var bottomStrip = document.getElementById('auto-hide-bottom-strip');
+
+        if (leftStrip) leftStrip.classList.remove('drag-over');
+        if (rightStrip) rightStrip.classList.remove('drag-over');
+        if (bottomStrip) bottomStrip.classList.remove('drag-over');
+
+        if (wasDragging) {
+          var edge = -1;
+          if (x >= 0 && x <= 40) {
+            edge = 0; // Left
+          } else if (x >= width - 40 && x <= width) {
+            edge = 1; // Right
+          } else if (y >= height - 40 && y <= height) {
+            edge = 2; // Bottom
+          }
+
+          if (edge !== -1) {
+            `pinPanel`(`layout`, `activeDraggedItem`, edge);
+          }
+        }
+
+        `activeDraggedItem` = null;
+      });
+    })();
   """.}
 
 
@@ -604,6 +693,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
       cerror "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+
+      # Clean up the panel from autoHideState.panels list now that it is reparented
+      if not autoHideState.isNil:
+        autoHideState.panels = autoHideState.panels.filterIt(it != panel)
+        if not autoHideState.onChanged.isNil:
+          autoHideState.onChanged()
+
       dispatchLayoutUpdated()
     else:
       cerror "[GENERIC_REG] Regular mount (non-reparenting)"
@@ -631,13 +727,49 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # container.tab.contentItem reference to golden layout item
         lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-      tab.setTitle(cstring(convertTabTitle($state.content)))
+      if state.content == Content.VCS:
+        let component = data.ui.componentMapping[state.content][state.id]
+        if not component.isNil:
+          let vcsComp = VCSComponent(component)
+          if not vcsComp.diffTarget.isNil and ($vcsComp.diffTarget).startsWith("diff:"):
+            let target = ($vcsComp.diffTarget)[5 .. ^1]
+            if target == "Working Tree":
+              tab.setTitle("Diff: Working Tree")
+            elif target.startsWith("file:"):
+              let filepath = target[5 .. ^1]
+              let slashIdx = filepath.rfind('/')
+              let baseName = if slashIdx >= 0: filepath[slashIdx + 1 .. ^1] else: filepath
+              tab.setTitle(cstring("Diff: " & baseName))
+            elif target.startsWith("commit:"):
+              let commitPart = target[7 .. ^1]
+              let colonIdx = commitPart.find(':')
+              if colonIdx >= 0:
+                let filepath = commitPart[colonIdx + 1 .. ^1]
+                let slashIdx = filepath.rfind('/')
+                let baseName = if slashIdx >= 0: filepath[slashIdx + 1 .. ^1] else: filepath
+                tab.setTitle(cstring("Diff: " & baseName & " (" & commitPart[0 ..< min(6, colonIdx)] & ")"))
+              else:
+                tab.setTitle(cstring("Diff: " & commitPart[0 ..< min(6, commitPart.len)]))
+            else:
+              tab.setTitle(cstring("Diff: " & target))
+          else:
+            tab.setTitle(cstring(convertTabTitle($state.content)))
+        else:
+          tab.setTitle(cstring(convertTabTitle($state.content)))
+      else:
+        tab.setTitle(cstring(convertTabTitle($state.content)))
 
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
       let genericContentItem = cast[GoldenContentItem](tab.contentItem)
       injectPinButton(tab.element, proc() =
         pinPanel(cast[GoldenLayout](layout), genericContentItem, AutoHideEdge.Left))
+
+      let tabEl = cast[Element](tab.element)
+      if not tabEl.isNil:
+        tabEl.addEventListener(cstring"mousedown", proc(ev: Event) =
+          activeDraggedItem = genericContentItem
+        )
 
     # Components that still enter the generic GoldenLayout route mount
     # directly into the GoldenLayout container. Editor tabs use the separate
@@ -934,63 +1066,35 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.
   initAutoHideState()
+  setupDragToPinListeners(layout)
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
-    let content = panel.content
     let isEditor = panel.config.componentState.isEditor.to(bool)
-    var parent: GoldenContentItem = nil
+    let edge = panel.edge
+    # Place the panel in its own new standalone group at the correct edge.
+    # We call addItem(config, index) directly on the main row/column —
+    # GL2 wraps the component in a fresh stack automatically.
+    #
+    # AutoHideEdge ordinals: Bottom=0, Left=1, Right=2
+    let ground = layout.groundItem
+    if ground.isNil or ground.contentItems.len == 0:
+      discard ground.addItem(panel.config)
+      return
 
-    let similarComponents = data.ui.componentMapping[content]
-    let openSimilarComponentsTabs = data.ui.openComponentIds[content]
+    let main = ground.contentItems[0]
 
-    cerror "[UNPIN] content=" & $content & " isEditor=" & $isEditor & " similarComponents.len=" & $similarComponents.len & " openSimilarComponentsTabs.len=" & $openSimilarComponentsTabs.len
-
-    var similarParent: GoldenContentItem = nil
-    if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
-      for i in countdown(openSimilarComponentsTabs.len - 1, 0):
-        let similarId = openSimilarComponentsTabs[i]
-        if similarComponents.hasKey(similarId):
-          let comp = similarComponents[similarId]
-          if not comp.isNil and not comp.layoutItem.isNil and isAttachedToLayout(comp.layoutItem, layout):
-            similarParent = cast[GoldenContentItem](comp.layoutItem.parent)
-            break
-
-    if not similarParent.isNil:
-      parent = similarParent
-      cerror "[UNPIN] selected parent from similarComponents"
-    else:
-      let hasOpenEditors = data.hasActiveOpenEditors()
-      cerror "[UNPIN] hasOpenEditors=" & $hasOpenEditors & " data.ui.editorPanels[ViewSource] isNil=" & $(data.ui.editorPanels[EditorView.ViewSource].isNil)
-      if isEditor and not data.ui.editorPanels[EditorView.ViewSource].isNil and hasOpenEditors:
-        let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
-        if isAttachedToLayout(activeEditorPanel, layout):
-          parent = activeEditorPanel
-          cerror "[UNPIN] selected parent from editorPanels"
-        else:
-          cerror "[UNPIN] opening new layout container stack"
-          parent = data.openNewLayoutContainer(cstring"stack", isEditor)
-          if isEditor:
-            data.ui.editorPanels[EditorView.ViewSource] = parent
-            cerror "[UNPIN] set editorPanels[ViewSource] to new parent"
-      else:
-        cerror "[UNPIN] opening new layout container stack"
-        parent = data.openNewLayoutContainer(cstring"stack", isEditor)
-        if isEditor:
-          data.ui.editorPanels[EditorView.ViewSource] = parent
-          cerror "[UNPIN] set editorPanels[ViewSource] to new parent"
-
-    cerror "[UNPIN] final parent isNil=" & $(parent.isNil)
-    if not parent.isNil:
-      cerror "[UNPIN] parent.addItem called"
-      discard parent.addItem(panel.config)
-    else:
-      let ground = layout.groundItem
-      cerror "[UNPIN] adding to ground, ground isNil=" & $(ground.isNil)
-      if not ground.isNil and ground.contentItems.len > 0:
-        cerror "[UNPIN] adding to ground.contentItems[0]"
-        discard ground.contentItems[0].addItem(panel.config)
-      else:
-        cerror "[UNPIN] adding to ground directly"
-        discard ground.addItem(panel.config)
+    case edge:
+    of AutoHideEdge.Left:
+      # Prepend: insert at position 0 of the main row.
+      discard main.addItem(panel.config, 0)
+    of AutoHideEdge.Right:
+      # Append: insert after all existing children.
+      discard main.addItem(panel.config, main.contentItems.len)
+    of AutoHideEdge.Bottom:
+      # If the main container is already a column, append the panel as a new
+      # standalone stack at the very bottom.  For a flat row (the common case)
+      # append it at the end of the row — it still gets its own group and GL
+      # avoids the restructuring that causes the component to disappear.
+      discard main.addItem(panel.config, main.contentItems.len)
   # When an auto-hide panel's overlay is shown, refresh that panel's mounted
   # surface so it displays current content after reparenting.
   autoHideState.onPanelShown = proc(panel: AutoHidePanel) =
@@ -999,6 +1103,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       of Content.Build:         cstring"buildComponent-0"
       of Content.BuildErrors:   cstring"errorsComponent-0"
       of Content.SearchResults: cstring"searchResultsComponent-0"
+      of Content.RequestPanel:  cstring"requestPanelComponent-0"
       else:
         # For panels pinned from GL, try the standard label format.
         convertComponentLabel(panel.content, panel.componentId)
@@ -1026,6 +1131,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       search_results.isoNimSearchResultsMounted = false
       search_results.tryMountIsoNimSearchResultsPanel()
       return
+    if panel.content == Content.RequestPanel:
+      let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
+      if not reqComp.isNil:
+        request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
+      request_panel.tryMountIsoNimRequestPanel()
+      return
     # Pinned GoldenLayout panels already carry a liveElement that showOverlay()
     # reparents into the overlay. Remaining legacy-backed GL panels (currently
     # Editor) keep their renderer instance behind renderer.nim; IsoNim-owned
@@ -1042,11 +1153,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     requestAutoHideSideStripRender(
       cstring"auto-hide-strip-right",
       AutoHideEdge.Right)
-    # Bottom tabs are rendered inside the status bar; refresh the direct
-    # IsoNim status shell so its nested auto-hide hosts are recreated before
-    # the bottom-tab view is mounted into them.
+    # Bottom strip lives in #status-base. Re-render status first so the
+    # #auto-hide-bottom-strip host exists, then mount the strip into it.
     if not data.ui.status.isNil:
       data.ui.status.requestStatusRender()
+    requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
 
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-left",
@@ -1054,6 +1165,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-right",
     AutoHideEdge.Right)
+  requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
 
   # Wire overlay header buttons and dismissal handlers.
   setupAutoHideOverlay(layout)
@@ -1093,6 +1205,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       (content: Content.Build,         title: cstring"BUILD",          label: cstring"buildComponent-0"),
       (content: Content.BuildErrors,   title: cstring"PROBLEMS",       label: cstring"errorsComponent-0"),
       (content: Content.SearchResults, title: cstring"SEARCH RESULTS", label: cstring"searchResultsComponent-0"),
+      (content: Content.RequestPanel,  title: cstring"REQUESTS",       label: cstring"requestPanelComponent-0"),
     ]
 
     let host = kdom.document.getElementById(cstring"auto-hide-standalone-host")
@@ -1171,6 +1284,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           search_results.tryMountIsoNimSearchResultsPanel()
         except:
           cerror "auto_hide: tryMountIsoNimSearchResultsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      elif panelDef.content == Content.RequestPanel:
+        try:
+          let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
+          if not reqComp.isNil:
+            request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
+          request_panel.tryMountIsoNimRequestPanel()
+        except:
+          cerror "auto_hide: tryMountIsoNimRequestPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
       addStandaloneAutoHidePanel(
         panelDef.title,
         panelDef.content,

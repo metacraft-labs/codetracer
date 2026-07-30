@@ -769,6 +769,7 @@ type
     deletions*: int
 
   VCSComponent* = ref object of Component
+    diffTarget*: cstring
     currentBranch*: cstring
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
@@ -1907,6 +1908,7 @@ type
     lspStarted*:            bool
     lastRestartKind*:       RestartKind
     workspaceFolder*:       cstring  # The folder opened in edit mode (persists across mode switches)
+    pendingReRecord*:       JsObject
 
     # DeepReview data: populated when DeepReview mode is active.
     # Stored at the Data level so that all panels (editor, filesystem,

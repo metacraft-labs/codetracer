@@ -1,13 +1,6 @@
 {
   description = "Code Tracer";
 
-  nixConfig = {
-    extra-substituters = [ "https://cache.metacraft-labs.com/metacraft-codetracer" ];
-    extra-trusted-public-keys = [
-      "metacraft-codetracer:9OV9wCDX560bt5/MrD4dlqnPpCitAEjpoqhNfQpWY3U="
-    ];
-  };
-
   inputs = {
     # Multi-language toolchain management.
     # All CodeTracer repos share the same nixpkgs pin via this flake to ensure
@@ -166,6 +159,15 @@
     };
     codetracer-trace-format-nim = {
       url = "github:metacraft-labs/codetracer-trace-format-nim/dev";
+      flake = false;
+    };
+
+    # codetracer_trace_writer_nim imports both `results` and `stew/*` while
+    # building the locked Python recorder. The main source input does not
+    # include Git submodules, so pin the exact nim-stew revision recorded by
+    # this repository's libs/nim-stew gitlink for sandboxed recorder builds.
+    nim-stew = {
+      url = "github:status-im/nim-stew/9c3596d9de809a5933fd777cec1183c2cdf521ec";
       flake = false;
     };
 

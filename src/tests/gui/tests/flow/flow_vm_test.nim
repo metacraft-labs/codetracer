@@ -393,3 +393,51 @@ suite "FlowVM auto-load effect":
         check cmd.command != "ct/load-flow"
 
       dispose()
+
+  test "test_flow_loop_iteration_display":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+
+      # Simulate total iterations being 10
+      vm.iterationCount.val = 10
+      check vm.totalIterations.val == 10
+
+      # Verify selecting iteration correctly updates the selected iteration
+      vm.selectIteration(0)
+      check vm.selectedIteration.val == 0
+
+      vm.selectIteration(1)
+      check vm.selectedIteration.val == 1
+
+      vm.selectIteration(2)
+      check vm.selectedIteration.val == 2
+
+      # Clamps to max iteration (totalIterations - 1)
+      vm.selectIteration(10)
+      check vm.selectedIteration.val == 9
+
+      dispose()
+
+  test "test_loop_controls_arrow_navigation":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+
+      # Set initial total iterations
+      vm.iterationCount.val = 5
+      vm.selectIteration(0)
+      check vm.selectedIteration.val == 0
+
+      # Simulate step forward iteration selections
+      vm.selectIteration(vm.selectedIteration.val + 1)
+      check vm.selectedIteration.val == 1
+
+      vm.selectIteration(vm.selectedIteration.val + 1)
+      check vm.selectedIteration.val == 2
+
+      # Simulate step backward iteration selections
+      vm.selectIteration(vm.selectedIteration.val - 1)
+      check vm.selectedIteration.val == 1
+
+      dispose()

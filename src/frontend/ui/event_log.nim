@@ -41,6 +41,7 @@ proc eventLogAfterRedraws(self: EventLogComponent)
 when defined(js):
   proc stringifyJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
   proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
+  proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
 
   proc jsonToJsObject(j: JsonNode): JsObject =
     jsonParseJs(cstring($j))
@@ -1389,6 +1390,7 @@ proc loadEvents*(self: EventLogComponent, update: TableData) =
 
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
+  let component = self
   let response = res.tableUpdate
 
   if not response.isTrace and self.drawId == response.data.draw:
@@ -1445,11 +1447,11 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
       let delay = 250 * self.pendingReloadRetries  # 250, 500, 750, ... ms
       cerror "[PIPELINE] event_log: onUpdatedTable got 0 records, scheduling reload retry " &
              $self.pendingReloadRetries & " in " & $delay & "ms"
-      discard setTimeout(proc() =
-        if not self.receivedUpdates and
-           not self.denseTable.isNil and not self.denseTable.context.isNil:
-          self.denseTable.context.ajax.reload(nil, false)
-      , delay)
+      setTimeoutWithArg(proc(comp: EventLogComponent) {.cdecl.} =
+        if not comp.receivedUpdates and
+           not comp.denseTable.isNil and not comp.denseTable.context.isNil:
+          comp.denseTable.context.ajax.reload(nil, false)
+      , delay, component)
 
 method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.} =
   if response.firstUpdate or response.refreshEventLog or
@@ -1615,6 +1617,7 @@ proc afterMove(self: EventLogComponent) =
     self.isFlowUpdate = false
 
 method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
+  let component = self
   # Feed the same position into the parallel ViewModel store.
   initEventLogVM()
   syncEventLogDebuggerPosition(
@@ -1641,19 +1644,18 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
   self.activeRowTicks = response.location.rrTicks
   self.lastJumpFireTime = currentTime
   let liveRowAdded = self.addLiveDebuggerStopRow(response.location)
-  if liveRowAdded and not self.denseTable.isNil and not self.denseTable.context.isNil:
-    discard setTimeout(proc() =
-      if not self.denseTable.isNil and not self.denseTable.context.isNil:
-        self.denseTable.context.ajax.reload(nil, false)
-    , 0)
+  let dt = self.denseTable
+  if liveRowAdded and not dt.isNil and not dt.context.isNil:
+    setTimeoutWithArg(proc(dTable: DataTableComponent) {.cdecl.} =
+      if not dTable.isNil and not dTable.context.isNil:
+        dTable.context.ajax.reload(nil, false)
+    , 0, dt)
   if self.isFlowUpdate:
     self.findActiveRow(self.activeRowTicks, false)
 
-    discard windowSetTimeout(
-      proc =
-        self.afterMove(),
-        cast[int](MOVE_DELAY)
-    )
+    setTimeoutWithArg(proc(comp: EventLogComponent) {.cdecl.} =
+      comp.afterMove()
+    , cast[int](MOVE_DELAY), component)
   else:
     if not self.denseTable.isNil:
       self.rowSelected = response.eventLogIndex
@@ -1699,18 +1701,19 @@ method onEnter*(self: EventLogComponent) {.async.} =
   self.programEventJump(event)
 
 method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
-  self.api = api
+  let component = self
+  component.api = api
 
   # Store a module-level reference so the IsoNim mount callback can
   # trigger DataTables initialisation via eventLogAfterRedraws().
   if eventLogComponentRef.isNil:
-    eventLogComponentRef = self
+    eventLogComponentRef = component
     # If the VM was already created before the component registered,
     # try mounting now.
     tryMountIsoNimEventLogPanel()
 
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    discard self.onCompleteMove(response)
+    discard component.onCompleteMove(response)
     # On the first CtCompleteMove, DataTables has already been initialised
     # and its initial ajax request returned 0 records (the backend had not
     # finished loading events from the ct/event-load request yet).
@@ -1726,53 +1729,52 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
         vmtypes.liveMcr,
         vmtypes.liveMaterialized,
         vmtypes.historicalFromLive}
-    if not self.started or (hasSourceRevision and liveEventStream):
-      let firstLoad = not self.started
-      self.started = true
+    if not component.started or (hasSourceRevision and liveEventStream):
+      let firstLoad = not component.started
+      component.started = true
       # Emit CtEventLoad to ensure the backend loads or refreshes events.
       # Live sessions can grow after the first stop, so source-revisioned
       # positions intentionally refresh the event table.
-      self.api.emit(CtEventLoad, EmptyArg())
-      if not self.denseTable.isNil and not self.denseTable.context.isNil:
-        discard setTimeout(proc() =
-          if not self.denseTable.isNil and not self.denseTable.context.isNil:
-            if firstLoad:
-              cerror "[PIPELINE] event_log: first CtCompleteMove, reloading DataTables ajax"
-            else:
-              cerror "[PIPELINE] event_log: source-revision move, reloading DataTables ajax"
-            self.denseTable.context.ajax.reload(nil, false)
-        , 500)
+      component.api.emit(CtEventLoad, EmptyArg())
+      let dt = component.denseTable
+      if not dt.isNil and not dt.context.isNil:
+        setTimeoutWithArg(proc(comp: EventLogComponent) {.cdecl.} =
+          let dTable = comp.denseTable
+          if not dTable.isNil and not dTable.context.isNil:
+            cerror "[PIPELINE] event_log: first/revision CtCompleteMove, reloading DataTables ajax"
+            dTable.context.ajax.reload(nil, false)
+        , 500, component)
   )
 
   api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
-    discard self.onUpdatedEvents(response)
+    discard component.onUpdatedEvents(response)
   )
 
   api.subscribe(CtUpdatedEventsContent, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
-    if self.ignoreOutput:
+    if component.ignoreOutput:
       return
 
     let lines = response.split(jsNl)
     var lineIndex = 0
     var eventsIndex = 0
-    while lineIndex < lines.len and eventsIndex < self.programEvents.len:
+    while lineIndex < lines.len and eventsIndex < component.programEvents.len:
       while true:
-        if eventsIndex < self.programEvents.len:
-          if self.programEvents[eventsIndex].kind in {Write, WriteFile, WriteOther, Read, ReadFile, ReadOther}:
-            self.programEvents[eventsIndex].content = lines[lineIndex]
+        if eventsIndex < component.programEvents.len:
+          if component.programEvents[eventsIndex].kind in {Write, WriteFile, WriteOther, Read, ReadFile, ReadOther}:
+            component.programEvents[eventsIndex].content = lines[lineIndex]
             lineIndex += 1
           eventsIndex += 1
         else:
           echo fmt"warn: no event for line number {lineIndex}"
           break
 
-    self.redraw()
+    component.redraw()
   )
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
-    discard self.onUpdatedTable(response)
+    discard component.onUpdatedTable(response)
   )
   api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
-    discard self.onUpdatedTrace(response)
+    discard component.onUpdatedTrace(response)
   )
 
   api.emit(InternalLastCompleteMove, EmptyArg())

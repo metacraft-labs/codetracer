@@ -20,6 +20,40 @@ let
   runquotaPkgs = inputs'.runquota.packages;
   reprobuildPkgs = inputs'.reprobuild.packages;
 
+  # The recorder's Cargo.toml uses ../../codetracer-trace-format path
+  # dependencies. Materialise all three locked repositories in that exact
+  # relative layout; using the recorder's inner source directory by itself
+  # makes Cargo escape the Nix build directory and look under /.
+  pythonRecorderSource = pkgs.runCommand "codetracer-python-recorder-layout" { } ''
+    mkdir -p "$out/codetracer-python-recorder"
+    cp -R \
+      ${inputs."codetracer-python-recorder"}/codetracer-python-recorder \
+      "$out/codetracer-python-recorder/codetracer-python-recorder"
+    cp -R ${inputs.codetracer-trace-format} "$out/codetracer-trace-format"
+    cp -R ${inputs.codetracer-trace-format-nim} "$out/codetracer-trace-format-nim"
+  '';
+
+  upstreamPythonRecorderPkg =
+    (inputs."codetracer-python-recorder".lib.mkCodetracerPackages pkgs pkgs.python312)
+    .codetracer-python-recorder;
+  pythonRecorderPkg = upstreamPythonRecorderPkg.overrideAttrs (old: {
+    src = pythonRecorderSource;
+    sourceRoot = "codetracer-python-recorder-layout/codetracer-python-recorder/codetracer-python-recorder";
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ ourPkgs.nim-codetracer ];
+    propagatedBuildInputs = (old.propagatedBuildInputs or [ ]) ++ [ pkgs.python312Packages.black ];
+
+    # writer_nim normally asks nimble to fetch these dependencies. Nix builds
+    # are network-isolated, so use the exact nim-stew gitlink revision pinned
+    # in flake.lock; its stew directory also supplies the compatible results
+    # module used by trace-format-nim.
+    CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
+    CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
+  });
+  pythonWithRecorder = pkgs.python312.withPackages (ps: [
+    ps.black
+    pythonRecorderPkg
+  ]);
+
   # Rust toolchain matches main.nix exactly: native build + wasm32-{
   # unknown-unknown, unknown-emscripten, wasip1 } targets needed by
   # ct, db-backend, the browser replay bundle and the MCR emulator
@@ -111,6 +145,7 @@ with pkgs;
     # Linux/ARM).
     python3Packages.flake8
     python3Packages.distutils
+    pythonWithRecorder
     shellcheck
 
     # Attic cache push + GitHub CLI + AWS artifact upload — used by
@@ -231,6 +266,11 @@ with pkgs;
     esac
     export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+
+    # Materialized Python origin-DAP tests must not depend on a runner-global
+    # Python or an adjacent checkout. This absolute interpreter contains the
+    # Rust-backed recorder built from the flake-locked input above.
+    export CODETRACER_PYTHON_CMD="${pythonWithRecorder}/bin/python3"
 
     export PATH=$CODETRACER_BUILD_DIR/bin:$PATH
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH

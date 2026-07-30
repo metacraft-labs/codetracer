@@ -282,6 +282,7 @@ proc createNewSession*(data: Data) =
   discard data.makeBuildComponent()
   discard data.makeErrorsComponent()
   discard data.makeSearchResultsComponent()
+  discard data.makeRequestPanelComponent(0)
   discard data.makeStatusComponent(
     data.buildComponent(0), data.errorsComponent(0), data.ui.searchResults)
   discard data.makeCommandPaletteComponent()

@@ -15,15 +15,30 @@ when defined(js):
 type
   AutoHideSideStripRecord* = object
     title*: string
+    active*: bool
 
   AutoHideSideStripCallbacks* = object
     onSelect*: proc(index: int)
+    onClose*: proc(index: int)
+    onUnpin*: proc(index: int)
     onCollapsedSelect*: proc()
+    ## Called when mouse enters a tab — starts the hover-preview timer.
+    onHoverEnter*: proc(index: int)
+    ## Called when mouse leaves a tab — cancels the pending hover-preview timer.
+    onHoverLeave*: proc(index: int)
+    ## Called on right-click with the tab index and mouse viewport coordinates.
+    onContextMenu*: proc(index: int; x: int; y: int)
 
 const
   AutoHideSideStripHasTabsClass* = "has-tabs"
   AutoHideSideStripCollapsedClass* = "has-tabs collapsed-mode"
   AutoHideSideStripTabClass* = "auto-hide-strip-tab"
+  AutoHideSideStripTabActiveClass* = "auto-hide-strip-tab active"
+  AutoHideSideStripTabLabelClass* = "auto-hide-strip-tab-label"
+  AutoHideSideStripTabButtonsClass* = "auto-hide-strip-tab-buttons"
+  AutoHideSideStripTabBtnClass* = "auto-hide-strip-tab-btn"
+  AutoHideSideStripTabCloseBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-close"
+  AutoHideSideStripTabUnpinBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-unpin"
   AutoHideCollapsedStripLineClass* = "collapsed-strip-line"
 
 proc sideStripClass*(hasTabs, collapsed: bool): string =
@@ -38,20 +53,43 @@ proc invokeSelect(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onSelect.isNil:
     callbacks.onSelect(index)
 
+proc invokeClose(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onClose.isNil:
+    callbacks.onClose(index)
+
+proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onUnpin.isNil:
+    callbacks.onUnpin(index)
+
 proc invokeCollapsedSelect(callbacks: AutoHideSideStripCallbacks) =
   if not callbacks.onCollapsedSelect.isNil:
     callbacks.onCollapsedSelect()
+
+proc invokeHoverEnter(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onHoverEnter.isNil:
+    callbacks.onHoverEnter(index)
+
+proc invokeHoverLeave(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onHoverLeave.isNil:
+    callbacks.onHoverLeave(index)
+
+proc invokeContextMenu(callbacks: AutoHideSideStripCallbacks; index: int; x: int; y: int) =
+  if not callbacks.onContextMenu.isNil:
+    callbacks.onContextMenu(index, x, y)
 
 proc renderSideStripTab(
     r: MockRenderer;
     tab: AutoHideSideStripRecord;
     index: int;
     callbacks: AutoHideSideStripCallbacks): MockNode =
+  let cls = if tab.active: AutoHideSideStripTabActiveClass
+            else: AutoHideSideStripTabClass
   ui(r):
     tdiv(
-        class = AutoHideSideStripTabClass,
+        class = cls,
         onclick = proc() = callbacks.invokeSelect(index)):
-      text tab.title
+      span(class = AutoHideSideStripTabLabelClass):
+        text tab.title
 
 proc renderCollapsedLine(
     r: MockRenderer;
@@ -62,16 +100,37 @@ proc renderCollapsedLine(
         onclick = proc() = callbacks.invokeCollapsedSelect())
 
 when defined(js):
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
+
   proc renderSideStripTab(
       r: WebRenderer;
       tab: AutoHideSideStripRecord;
       index: int;
       callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
-    ui(r):
-      tdiv(
-          class = AutoHideSideStripTabClass,
-          onclick = proc() = callbacks.invokeSelect(index)):
-        text tab.title
+    let cls = if tab.active: AutoHideSideStripTabActiveClass
+              else: AutoHideSideStripTabClass
+    # mouseenter on the tab triggers the 200ms hover-preview timer.
+    var tabEl: isonim_dom.Element
+    result = ui(r):
+      tdiv(ref = tabEl,
+           class = cls,
+           onclick = proc() = callbacks.invokeSelect(index)):
+        span(class = AutoHideSideStripTabLabelClass):
+          text tab.title
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
+      proc(ev: isonim_dom.Event) =
+        callbacks.invokeHoverEnter(index))
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
+      proc(ev: isonim_dom.Event) =
+        callbacks.invokeHoverLeave(index))
+    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.preventDefault()
+        ev.stopPropagation()
+        callbacks.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
 
   proc renderCollapsedLine(
       r: WebRenderer;

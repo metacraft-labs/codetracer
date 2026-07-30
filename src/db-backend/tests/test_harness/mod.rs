@@ -251,6 +251,8 @@ pub enum Language {
     Elixir,
     /// Erlang/BEAM: recorded by codetracer-beam-recorder
     Erlang,
+    /// PHP: recorded by codetracer-php-recorder
+    Php,
     /// D: native, built via `ldc2` by ct-native-replay, recorded by MCR.
     D,
     /// Fortran: native, built via `gfortran` by ct-native-replay, recorded by MCR.
@@ -292,6 +294,7 @@ impl Language {
             Language::Cadence => "cdc",
             Language::Elixir => "ex",
             Language::Erlang => "erl",
+            Language::Php => "php",
             Language::D => "d",
             Language::Fortran => "f90",
             Language::Pascal => "pas",
@@ -356,6 +359,7 @@ impl Language {
                 | Language::Cadence
                 | Language::Elixir
                 | Language::Erlang
+                | Language::Php
         )
     }
 }
@@ -1911,6 +1915,30 @@ pub fn find_elixir_recorder() -> Option<PathBuf> {
 /// `CODETRACER_RUBY_RECORDER_PATH` still works for out-of-tree experiments.
 ///
 /// Returns `None` if a CTFS-capable recorder is not found.
+/// Find the PHP recorder C extension.
+///
+/// Search order:
+/// 1. `CODETRACER_PHP_RECORDER_PATH` env var (explicit override)
+/// 2. Sibling repo: `../../../codetracer-php-recorder/ext/modules/codetracer.so`
+///
+/// Returns `None` if the recorder is not found.
+pub fn find_php_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_PHP_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir.join("../../../codetracer-php-recorder/ext/modules/codetracer.so");
+    if path.exists() {
+        return Some(safe_canonicalize(&path));
+    }
+
+    None
+}
+
 pub fn find_ruby_recorder() -> Option<PathBuf> {
     if let Ok(path) = env::var("CODETRACER_RUBY_RECORDER_PATH") {
         let p = PathBuf::from(&path);
@@ -2187,6 +2215,48 @@ fn record_python_trace_with_format(source_path: &Path, trace_dir: &Path, trace_f
         if !dest.exists() {
             fs::copy(source_path, &dest).map_err(|e| format!("failed to copy source to trace dir: {}", e))?;
         }
+    }
+
+    Ok(())
+}
+
+/// Record a PHP trace.
+fn record_php_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let recorder = find_php_recorder()
+        .ok_or("PHP recorder not found. Set CODETRACER_PHP_RECORDER_PATH or build it in the sibling repo")?;
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let trace_format_nim_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../codetracer-trace-format-nim");
+    let trace_format_nim_dir = safe_canonicalize(&trace_format_nim_dir);
+
+    let mut ld_path = trace_format_nim_dir.to_str().unwrap().to_string();
+    if let Some(existing) = env::var("LD_LIBRARY_PATH").ok().filter(|s| !s.is_empty()) {
+        ld_path = format!("{}:{}", ld_path, existing);
+    }
+    let mut dyld_path = trace_format_nim_dir.to_str().unwrap().to_string();
+    if let Some(existing) = env::var("DYLD_LIBRARY_PATH").ok().filter(|s| !s.is_empty()) {
+        dyld_path = format!("{}:{}", dyld_path, existing);
+    }
+
+    let output = Command::new("php")
+        .args([
+            "-d",
+            &format!("extension={}", recorder.to_str().unwrap()),
+            source_path.to_str().unwrap(),
+        ])
+        .env("CODETRACER_ENABLED", "1")
+        .env("CODETRACER_TRACE_DIR", trace_dir)
+        .env("LD_LIBRARY_PATH", &ld_path)
+        .env("DYLD_LIBRARY_PATH", &dyld_path)
+        .output()
+        .map_err(|e| format!("failed to run PHP recorder: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "PHP recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(())
@@ -4475,6 +4545,7 @@ impl TestRecording {
                 }
                 record_erlang_trace(source_path, &trace_dir)?
             }
+            Language::Php => record_php_trace(source_path, &trace_dir)?,
             _ => return Err(format!("{:?} is not a DB-based language", language)),
         }
 

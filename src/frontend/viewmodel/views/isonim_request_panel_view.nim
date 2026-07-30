@@ -108,9 +108,13 @@ proc countText*(vm: RequestPanelVM): string =
   ## the resulting text node updates whenever either signal changes
   ## without rebuilding the surrounding span (the test fixtures grab
   ## the span by class once and re-check ``textContent``).
-  let filtered = vm.filteredRequests.val.len
   let total = vm.requests.val.len
-  countText(filtered, total)
+  $total & " requests"
+
+proc methodBadgeClass*(httpMethod: string): string =
+  ## Returns the full CSS class string for the per-method badge:
+  ## ``"request-method-badge request-method-<lowercase-method>"``.
+  "request-method-badge request-method-" & httpMethod.toLowerAscii()
 
 proc onRowClick(vm: RequestPanelVM; index: int): proc() =
   ## Closure factory that captures the row's filtered-list index so
@@ -135,12 +139,14 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
                    req: RequestRecord; index: int;
                    selected: bool): MockNode =
   ## Render a single filtered request row.  Click/dblclick handlers
-  ## map onto the VM actions; the status column wraps the code in a
-  ## ``span`` carrying ``request-status-<bucket>`` so CSS rules can
-  ## colour it independently.
+  ## map onto the VM actions.  The method column wraps the text in a
+  ## ``span`` with a per-method badge class; the status column wraps
+  ## the code in a ``span`` carrying ``request-status-<bucket>`` so
+  ## CSS rules colour both independently.
   let onClick = onRowClick(vm, index)
   let onDblClick = onRowDoubleClick(vm, index)
   let statusCls = statusClass(req.statusCode)
+  let badgeCls = methodBadgeClass(req.httpMethod)
   let row = ui(r):
     tdiv(class = rowClass(selected),
          onclick = onClick,
@@ -148,7 +154,8 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
       tdiv(class = "request-col-id"):
         text $req.id
       tdiv(class = "request-col-method"):
-        text req.httpMethod
+        span(class = badgeCls):
+          text req.httpMethod
       tdiv(class = "request-col-url"):
         text req.url
       tdiv(class = "request-col-status"):
@@ -175,35 +182,41 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
   var methodSelectEl: MockNode
   var statusSelectEl: MockNode
   var searchInputEl: MockNode
-  var countContainer: MockNode
+  var clearBtnEl: MockNode
   var bodyContainer: MockNode
 
   let panel = ui(r):
     tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
-      tdiv(class = "request-panel-header"):
-        tdiv(class = "request-panel-filters"):
-          # Method filter
-          select(ref = methodSelectEl, class = "request-filter-select"):
-            option(value = ""):
-              text "All Methods"
-            for m in HttpMethods:
-              option(value = m):
-                text m
-          # Status-class filter
-          select(ref = statusSelectEl, class = "request-filter-select"):
-            option(value = ""):
-              text "All Status"
-            for opt in StatusBucketOptions:
-              option(value = opt.value):
-                text opt.label
-          # URL search
-          input(ref = searchInputEl,
-                class = "request-filter-search",
-                `type` = "text",
-                placeholder = "Search URL...")
-        tdiv(ref = countContainer, class = "request-panel-count"):
-          span(class = "request-panel-count-text"):
-            text countText(vm)
+      # Title bar: "Requests  N requests  [Clear]"
+      tdiv(class = "request-panel-title-bar"):
+        span(class = "request-panel-title"):
+          text "Requests"
+        span(class = "request-panel-count-badge"):
+          text countText(vm)
+        span(ref = clearBtnEl, class = "request-panel-clear-btn"):
+          text "Clear"
+      # Filter bar: Method ▼  Status ▼  [Filter by URL...]  □ XHR/Fetch only
+      tdiv(class = "request-panel-filters"):
+        select(ref = methodSelectEl, class = "request-filter-select"):
+          option(value = ""):
+            text "Method: All"
+          for m in HttpMethods:
+            option(value = m):
+              text m
+        select(ref = statusSelectEl, class = "request-filter-select"):
+          option(value = ""):
+            text "Status: All"
+          for opt in StatusBucketOptions:
+            option(value = opt.value):
+              text opt.label
+        input(ref = searchInputEl,
+              class = "request-filter-search",
+              `type` = "text",
+              placeholder = "Filter by URL...")
+        label(class = "request-xhr-only"):
+          input(`type` = "checkbox")
+          text "XHR/Fetch only"
+      # Column headers
       tdiv(class = "request-table-header"):
         tdiv(class = "request-col-id"):
           text "#"
@@ -241,12 +254,9 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
     let v = captureSearchEl.attributes.getOrDefault("value", "")
     captureVm.setSearchText(v)
   )
-
-  # Count badge — the ``text countText(vm)`` call inside the static
-  # ``ui()`` block above is wired reactively by the DSL: only the
-  # text node updates when ``filteredRequests`` / ``requests``
-  # change, so the surrounding span (which test fixtures grab once
-  # via ``findByClass``) keeps its identity across re-renders.
+  r.addEventListener(clearBtnEl, "click", proc() =
+    captureVm.clearRequests()
+  )
 
   # Table body — rebuilt whenever the filtered list or selection
   # changes.  ``selectedIndex`` is read inside the effect so the
@@ -311,8 +321,12 @@ when defined(js):
     let idDiv = createWebTextElement("div", $req.id, "request-col-id")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(idDiv))
 
-    let methodDiv = createWebTextElement("div", req.httpMethod,
-                                         "request-col-method")
+    # Method badge: <div.request-col-method><span.request-method-badge ...>
+    let methodDiv = createWebElement("div", "request-col-method")
+    let methodBadge = createWebTextElement("span", req.httpMethod,
+                                           methodBadgeClass(req.httpMethod))
+    isonim_dom.appendChild(isonim_dom.Node(methodDiv),
+                           isonim_dom.Node(methodBadge))
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(methodDiv))
 
     let urlDiv = createWebTextElement("div", req.url, "request-col-url")
@@ -350,24 +364,33 @@ when defined(js):
     var methodSelectEl: isonim_dom.Element
     var statusSelectEl: isonim_dom.Element
     var searchInputEl: isonim_dom.Element
-    var countContainer: isonim_dom.Element
+    var clearBtnEl: isonim_dom.Element
     var bodyContainer: isonim_dom.Element
 
     let panel = ui(r):
       tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
-        tdiv(class = "request-panel-header"):
-          tdiv(class = "request-panel-filters"):
-            select(ref = methodSelectEl, class = "request-filter-select"):
-              discard
-            select(ref = statusSelectEl, class = "request-filter-select"):
-              discard
-            input(ref = searchInputEl,
-                  class = "request-filter-search",
-                  `type` = "text",
-                  placeholder = "Search URL...")
-          tdiv(ref = countContainer, class = "request-panel-count"):
-            span(class = "request-panel-count-text"):
-              text countText(vm)
+        # Title bar: "Requests  N requests  [Clear]"
+        tdiv(class = "request-panel-title-bar"):
+          span(class = "request-panel-title"):
+            text "Requests"
+          span(class = "request-panel-count-badge"):
+            text countText(vm)
+          span(ref = clearBtnEl, class = "request-panel-clear-btn"):
+            text "Clear"
+        # Filter bar: Method ▼  Status ▼  [Filter by URL...]  □ XHR/Fetch only
+        tdiv(class = "request-panel-filters"):
+          select(ref = methodSelectEl, class = "request-filter-select"):
+            discard
+          select(ref = statusSelectEl, class = "request-filter-select"):
+            discard
+          input(ref = searchInputEl,
+                class = "request-filter-search",
+                `type` = "text",
+                placeholder = "Filter by URL...")
+          label(class = "request-xhr-only"):
+            input(`type` = "checkbox")
+            text "XHR/Fetch only"
+        # Column headers
         tdiv(class = "request-table-header"):
           tdiv(class = "request-col-id"):
             text "#"
@@ -385,22 +408,24 @@ when defined(js):
           discard
 
     # Populate the dropdown options imperatively — the DSL ``select``
-    # body uses ``discard`` so nothing was emitted there.
+    # bodies use ``discard`` so nothing was emitted there.
+    # Labels match the reference design: "Method: All" / "Status: All".
     isonim_dom.appendChild(isonim_dom.Node(methodSelectEl),
-                           isonim_dom.Node(createOption("", "All Methods")))
+                           isonim_dom.Node(createOption("", "Method: All")))
     for m in HttpMethods:
       isonim_dom.appendChild(isonim_dom.Node(methodSelectEl),
                              isonim_dom.Node(createOption(m, m)))
     isonim_dom.appendChild(isonim_dom.Node(statusSelectEl),
-                           isonim_dom.Node(createOption("", "All Status")))
+                           isonim_dom.Node(createOption("", "Status: All")))
     for opt in StatusBucketOptions:
       isonim_dom.appendChild(isonim_dom.Node(statusSelectEl),
                              isonim_dom.Node(createOption(opt.value, opt.label)))
 
-    # Filter widget handlers.  Read the value off the live element
+    # Filter widget handlers.  Read the value off the live element.
     let methodNode = isonim_dom.Node(methodSelectEl)
     let statusNode = isonim_dom.Node(statusSelectEl)
     let searchNode = isonim_dom.Node(searchInputEl)
+    let clearNode  = isonim_dom.Node(clearBtnEl)
     isonim_dom.addEventListener(methodNode, cstring"change",
       proc(ev: isonim_dom.Event) =
         vm.setFilterMethod($methodNode.inputValue()))
@@ -410,15 +435,11 @@ when defined(js):
     isonim_dom.addEventListener(searchNode, cstring"input",
       proc(ev: isonim_dom.Event) =
         vm.setSearchText($searchNode.inputValue()))
+    isonim_dom.addEventListener(clearNode, cstring"click",
+      proc(ev: isonim_dom.Event) =
+        vm.clearRequests())
 
-    # Count badge — the ``text countText(vm)`` call inside the static
-    # ``ui()`` block above produces a reactive text node managed by
-    # the DSL.  Only the text node is patched when the signals
-    # change; the surrounding span and its
-    # ``request-panel-count-text`` class stay stable across updates.
-
-    # Table body — rebuilt on filteredRequests / selectedIndex
-    # changes.
+    # Table body — rebuilt on filteredRequests / selectedIndex changes.
     createRenderEffect proc() =
       let filtered = vm.filteredRequests.val
       let selected = vm.selectedIndex.val

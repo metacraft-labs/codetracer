@@ -888,6 +888,16 @@ impl CTFSTraceReader {
             reader.refresh_follow_calls_from_stream()?;
         }
 
+        let is_js = reader
+            .db
+            .paths
+            .iter()
+            .any(|p| p.ends_with(".js") || p.ends_with(".ts") || p.ends_with(".jsx") || p.ends_with(".tsx"));
+        if is_js {
+            reader.value_stream = None;
+            reader.step_stream = None;
+        }
+
         Ok(reader)
     }
 
@@ -1846,25 +1856,38 @@ impl CTFSTraceReader {
         //   - stream absent → a value-less or pre-M24a-2 (flag-off) bundle; fall
         //     back to eager FFI materialization exactly as before, so older
         //     bundles and the corrupt-stream case stay correct.
-        let lazy_values = match step_value_stream_source::SeekableValueStream::open_from_ctfs(ctfs) {
-            Ok(Some(stream)) => {
-                let stream = std::sync::Arc::new(stream);
-                info!(
-                    "Nim reader: values served LAZILY from seekable values.dat ({} records) — \
-                     value table not materialized at open",
-                    stream.value_count(),
-                );
-                let cache_step_count = if follow && stream.value_count() != step_count as usize {
-                    stream.value_count()
-                } else {
-                    step_count as usize
-                };
-                Some(step_value_stream_source::LazyValueCache::new(stream, cache_step_count))
-            }
-            Ok(None) => None,
-            Err(e) => {
-                info!("Nim reader: values.dat present but unreadable ({e}); materializing value table eagerly");
-                None
+        let is_js = db.paths.iter().any(|p| {
+            p.ends_with(".js")
+                || p.ends_with(".ts")
+                || p.ends_with(".jsx")
+                || p.ends_with(".tsx")
+                || p.ends_with(".mjs")
+                || p.ends_with(".cjs")
+        });
+
+        let lazy_values = if is_js {
+            None
+        } else {
+            match step_value_stream_source::SeekableValueStream::open_from_ctfs(ctfs) {
+                Ok(Some(stream)) => {
+                    let stream = std::sync::Arc::new(stream);
+                    info!(
+                        "Nim reader: values served LAZILY from seekable values.dat ({} records) — \
+                         value table not materialized at open",
+                        stream.value_count(),
+                    );
+                    let cache_step_count = if follow && stream.value_count() != step_count as usize {
+                        stream.value_count()
+                    } else {
+                        step_count as usize
+                    };
+                    Some(step_value_stream_source::LazyValueCache::new(stream, cache_step_count))
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    info!("Nim reader: values.dat present but unreadable ({e}); materializing value table eagerly");
+                    None
+                }
             }
         };
 
@@ -1877,6 +1900,8 @@ impl CTFSTraceReader {
             // For each step, read variable values via the structured FFI.
             // step_value returns (varname_id, type_id, cbor_data) where
             // cbor_data is a CBOR-encoded ValueRecord (tagged with "kind").
+            let mut active_variables_per_call: HashMap<i64, HashMap<VariableId, FullValueRecord>> = HashMap::new();
+
             for step_idx in 0..step_count {
                 let val_count = reader.step_value_count(step_idx);
                 let mut step_values: Vec<FullValueRecord> = Vec::with_capacity(val_count as usize);
@@ -1916,7 +1941,17 @@ impl CTFSTraceReader {
                     }
                 }
 
-                db.variables.push(step_values);
+                if is_js {
+                    let step_call_key = step_to_call_key.get(step_idx as usize).copied().unwrap_or(CallKey(-1));
+                    let active_vars = active_variables_per_call.entry(step_call_key.0).or_default();
+                    for v in step_values {
+                        active_vars.insert(v.variable_id, v);
+                    }
+                    let cloned_vars: Vec<FullValueRecord> = active_vars.values().cloned().collect();
+                    db.variables.push(cloned_vars);
+                } else {
+                    db.variables.push(step_values);
+                }
             }
 
             info!("Nim reader: variables materialized for {} steps", db.variables.len());

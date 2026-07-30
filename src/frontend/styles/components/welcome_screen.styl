@@ -56,8 +56,8 @@
   background-repeat: no-repeat
 
 .welcome-screen-wrapper
-  color: WELCOME_SCREEN_TEXT_COLOR;
-  background-color: WELCOME_SCREEN_BACKGROUND_COLOR;
+  color: colors-ui-text-primary-body;
+  background-color: colors-ui-surface-input-default;
   min-height: 100%;
   height: 100%;
   position: relative;
@@ -76,12 +76,12 @@
     width: 56.25em
     padding: 3em
     padding-bottom: 3.75em
-    background: WELCOME_SCREEN_BACKGROUND_COLOR
+    background: colors-ui-surface-input-default
     display: flex
     flex-direction: column
     border-radius: 0.75em
     align-items: center
-    border: 0.0625em solid LINE_STROKE
+    border: 0.0625em solid colors-ui-border-secondary
 
     &.welcome-screen-loading
       cursor: wait !important
@@ -93,7 +93,7 @@
       display: flex
       align-items: flex-end
       justify-content: space-between
-      color: WELCOME_SCREEN_TEXT_COLOR
+      color: colors-ui-text-primary-body
       width: -webkit-fill-available
 
       .welcome-text
@@ -106,7 +106,7 @@
         letter-spacing: -0.02em
 
       .welcome-version
-        color: WELCOME_SCREEN_VERSION_TEXT_COLOR
+        color: colors-ui-text-primary-disabled
         font-size: 0.75em
         font-family: "SpaceMono"
         font-weight: 400
@@ -175,10 +175,10 @@
         font-weight: BOLD_WEIGHT
         letter-spacing: -0.00875em
         line-height: 1.125em
-        background-color: ACTIVE_ROW
+        background-color: colors-ui-surface-primary-secondary-hover
         display: flex
         align-items: center
-        color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR
+        color: colors-ui-text-primary-body
         justify-content: center
         white-space: nowrap
         padding: 0.375em
@@ -187,16 +187,16 @@
         border-radius: 0.375em
 
         &.hovered
-          // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
-          // background-color: PRIMARY_BASE
-          outline: 0.0625em solid SEARCH_STROKE
+          // color: colors-ui-text-primary-active
+          // background-color: colors-ui-surface-primary-tertiary
+          outline: 0.0625em solid colors-ui-border-primary
           opacity: 1
 
     // Recent traces styles - in welcome-right-panel
     .recent-traces
       position: relative
       width: -webkit-fill-available
-      background-color: SECONDARY_BASE
+      background-color: colors-ui-surface-base-panel
       border-radius: 0.375em
       padding: 0.5em
       margin-top: 3em
@@ -229,7 +229,7 @@
           font-size: 1em
           font-weight: 600
           font-family: "SpaceGrotesk"
-          color: PRIMARY_TEXT_COLOR
+          color: colors-ui-text-primary-body
 
         .empty-state-text
           font-size: 0.8125em
@@ -243,8 +243,8 @@
         justify-content: space-between
 
       .recent-trace
-        color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-        background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
+        color: colors-ui-text-warning-on-color
+        background-color: colors-ui-surface-primary-secondary-hover
         height: 1.75em
         margin-top: 0.125em
         margin-bottom: 0.375em
@@ -256,7 +256,7 @@
 
         &:hover
           cursor: pointer
-          background-color: PRIMARY_BASE
+          background-color: colors-ui-surface-primary-tertiary
 
           .recent-trace-tooltip
             opacity: 1
@@ -271,7 +271,7 @@
           min-width: 0
 
           .separate-bar
-            border-color: WELCOME_SCREEN_SEPARATE_BAR_COLOR
+            border-color: colors-ui-border-secondary
 
           .recent-trace-title-time
             margin-left: 0.5em
@@ -326,7 +326,7 @@
     .recent-folders
       position: relative
       width: -webkit-fill-available
-      background-color: SECONDARY_BASE
+      background-color: colors-ui-surface-base-panel
       border-radius: 0.375em
       padding: 0.5em
       margin-top: 3em
@@ -356,7 +356,7 @@
           font-size: 1em
           font-weight: 600
           font-family: "SpaceGrotesk"
-          color: PRIMARY_TEXT_COLOR
+          color: colors-ui-text-primary-body
 
         .empty-state-text
           font-size: 0.8125em
@@ -370,8 +370,8 @@
         justify-content: space-between
 
       .recent-folder
-        color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-        background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
+        color: colors-ui-text-warning-on-color
+        background-color: colors-ui-surface-primary-secondary-hover
         height: 1.75em
         margin-top: 0.125em
         margin-bottom: 0.375em
@@ -383,7 +383,7 @@
 
         &:hover
           cursor: pointer
-          background-color: PRIMARY_BASE
+          background-color: colors-ui-surface-primary-tertiary
 
         .recent-folder-name
           margin-left: 0.5em
@@ -408,13 +408,13 @@
     z-index: 50
 
     hr
-      border-color: HEADER_ELEMENT_BACKGROUND_COLOR
+      border-color: colors-ui-surface-primary-tertiary
 
     .new-record-screen-content
       position: relative
       width: 43.75em
-      background: WELCOME_SCREEN_BACKGROUND_COLOR
-      border: 0.0625em solid LINE_STROKE
+      background: colors-ui-surface-input-default
+      border: 0.0625em solid colors-ui-border-secondary
       border-radius: 0.75em
       padding: 3em
       padding-bottom: 3.75em
@@ -452,7 +452,7 @@
           width: 100%;
           text-indent: 13vw;
           font-style: italic;
-          color: FORM_INVALID_INPUT_COLOR;
+          color: colors-ui-text-error-primary;
 
         .new-record-input-row
           position: relative
@@ -471,18 +471,18 @@
           position: relative
           width: fit-content
           text-align: left
-          color: NEW_RECORD_LABEL_COLOR
+          color: colors-ui-text-primary-label
           font-family: "SpaceMono"
           font-weight: bold
           font-size: 0.875em
           font-weight: 400
 
         // input
-        //   background-color: NEW_RECORD_SCREEN_INPUT_BACKGROUND_COLOR
+        //   background-color: colors-ui-surface-base-panel
         //   margin-left: 0px !important
         //   margin-bottom: 0px !important
         //   background-image: none !important
-        //   color: NEW_RECORD_LABEL_COLOR
+        //   color: colors-ui-text-primary-label
         //   padding-left: 8px !important
 
         //   &.disabled
@@ -490,16 +490,16 @@
         //     opacity: 0.4
 
         //   &.invalid
-        //     outline: 2px solid FORM_INVALID_INPUT_COLOR
+        //     outline: 2px solid colors-ui-text-error-primary
 
         // button
         //   min-width: 8px
-        //   background-color: NEW_RECORD_SCREEN_BUTTON_BACKGROUND_COLOR
+        //   background-color: colors-ui-surface-primary-secondary
         //   margin-left: 8px
         //   position: relative
         //   border: 0
         //   border-radius: 6px
-        //   color: TEXT_CONTENT_COLOR
+        //   color: colors-ui-text-primary-body
         //   font-weight: 400
         //   padding: 0px !important
         //   padding-left: 22px !important
@@ -517,26 +517,26 @@
 
         //   &:hover
         //     opacity: 0.5
-        //     // background-color: TEXT_CONTENT_COLOR
-        //     // color: NEW_RECORD_SCREEN_INPUT_BACKGROUND_COLOR
+        //     // background-color: colors-ui-text-primary-body
+        //     // color: colors-ui-surface-base-panel
 
         //   &.cancel-button
-        //     background-color: DEBUG_BUTTON_BORDER_COLOR !important
+        //     background-color: colors-ui-surface-primary-secondary-hover !important
         //     margin: 0px !important
 
         //   &.confirmation-button
-        //     background-color: NEW_RECORD_CONFIRMATION_BUTTON_BACKGROUND !important
+        //     background-color: colors-ui-surface-action-primary !important
         //     margin-left: 8px !important
         //     width: 146px
         //     padding-left: 16px
         //     padding-right: 16px
 
         //     &:hover
-        //       background-color: CT_PRIMARY_DEFAULT_FOCUSED !important
+        //       background-color: colors-ui-surface-action-primary !important
         //       opacity: 1 !important
 
         //     &:active
-        //       outline: 1px solid NEW_RECORD_ACTIVE_BUTTON_BORDER !important
+        //       outline: 1px solid colors-ui-border-focus !important
 
       .new-record-form-row:last-child
         display: flex
@@ -555,13 +555,13 @@
         outline: none
 
       &.in-progress
-        outline: 0.0625em solid NOTIFICATION_INFO_COLOR
+        outline: 0.0625em solid colors-ui-text-information-primary
 
       &.failed
-        outline: 0.0625em solid NOTIFICATION_ERROR_COLOR
+        outline: 0.0625em solid colors-ui-text-error-primary
 
       &.success
-        outline: 0.0625em solid NOTIFICATION_SUCCESS_COLOR
+        outline: 0.0625em solid colors-ui-text-success-primary
 
       .new-record-result
         position: relative
@@ -612,18 +612,18 @@
     margin-bottom: 0.375em
     height: 1.75em
     width: 1.75em
-    background-color: DEBUG_BUTTON_BORDER_COLOR
+    background-color: colors-ui-surface-primary-secondary-hover
     border-radius: 0.25em
     cursor: pointer
   upload
     &:hover
-      outline: 0.0625em solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+      outline: 0.0625em solid colors-ui-border-secondary
 
     &:active
-      background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+      background-color: colors-ui-surface-primary-secondary
 
     &.trace-info-button-active
-      background-color: WELCOME_SCREEN_ACTIVE_BACKGROUND
+      background-color: colors-ui-text-warning-primary
 
   .recent-trace-buttons-image
     background-repeat: no-repeat
@@ -645,7 +645,7 @@
     width: 0.875em
     height: 0.875em
     border-radius: 50%
-    background-color: ACTIVE_ROW
+    background-color: colors-ui-surface-primary-secondary-hover
     position: absolute
     z-index: 2
     transform: translate(0.4375em, 0.4375em)
@@ -679,7 +679,7 @@
     &:after
       top: 18%
       left: -0.875em
-      border-color: transparent TOOLTIP_BACKGROUND transparent transparent !important
+      border-color: transparent colors-ui-surface-canvas transparent transparent !important
 
 .recent-trace-container
   display: flex
@@ -696,7 +696,7 @@
   text-align: left
   font-size: 1.125em
   font-weight: 700
-  background-color: SECONDARY_BASE
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.375em
   padding: 1em
   flex-direction: column
@@ -741,14 +741,14 @@
   text-align: center
   align-items: center
   width: -webkit-fill-available
-  color: WELCOME_SCREEN_RECENT_TRACE_COLOR
+  color: colors-ui-text-warning-on-color
   font-family: "SpaceMono"
 
   #tx-success
-    color: STATUS_SUCCESS
+    color: colors-ui-text-success-primary
 
   #tx-unsuccess
-    color: STATUS_UNSUCCESS
+    color: colors-ui-text-error-primary
 
 .action-transaction-button
   margin-left: 0.5em
@@ -756,7 +756,7 @@
   margin-bottom: 0.375em
   height: 1.75em
   width: 1.75em
-  background-color: DEBUG_BUTTON_BORDER_COLOR
+  background-color: colors-ui-surface-primary-secondary-hover
   border-radius: 0.25em
   cursor: pointer
   background-image: RECENT_TRANSACTION_ACTION_BUTTON

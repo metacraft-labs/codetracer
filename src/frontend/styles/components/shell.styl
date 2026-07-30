@@ -5,8 +5,8 @@
   width: 100%
   min-height: 0
   box-sizing: border-box
-  background-color: BACKGROUND_COLOR
-  color: TEXT_CONTENT_COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   font-family: "FiraCode", monospace
   font-size: 13px
   overflow: hidden
@@ -29,7 +29,7 @@
   .shell-prompt,
   .shell-history-indicator,
   .shell-scroll-indicator
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
 
   .shell-input
     flex: 1 1 auto
@@ -38,7 +38,7 @@
     border: 0
     border-radius: 0
     background-color: transparent
-    color: TEXT_CONTENT_COLOR
+    color: colors-ui-text-primary-body
     font: inherit
     padding: 0
     outline: 0
@@ -54,7 +54,7 @@
     padding: 0 0.5em 0.35em
 
 .shell-container
-  // background-color: BACKGROUND_COLOR
+  // background-color: colors-ui-surface-base-panel
   display: flex
   height: 100%
   width: 100%
@@ -183,7 +183,7 @@
   height: calc(100% + 28px)
 
 .shell-gutter
-  background-color: BACKGROUND_COLOR
+  background-color: colors-ui-surface-base-panel
   border-right: 2px solid grey
   height: 100%
   position: absolute
@@ -200,7 +200,7 @@
   font-family: "SpaceMono"
 
   // &::-webkit-scrollbar-corner
-  //   background-color: SECONDARY_BASE !important
+  //   background-color: colors-ui-surface-base-panel !important
 
   // &::-webkit-scrollbar
   //   width: 10px !important
@@ -208,7 +208,7 @@
 
   // &::-webkit-scrollbar-thumb:vertical,
   // &::-webkit-scrollbar-thumb:horizontal
-  //   border: 2px solid SECONDARY_BASE !important
+  //   border: 2px solid colors-ui-surface-base-panel !important
 
 
 .xterm-screen
@@ -218,7 +218,7 @@
 
   .xterm-rows
     position: relative
-    color: DROPDOWN_TEXT_COLOR !important
+    color: colors-ui-text-primary-body !important
 
     div
       overflow: visible !important

@@ -2926,6 +2926,23 @@
         "type": "github"
       }
     },
+    "nim-stew_4": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1657272861,
+        "narHash": "sha256-VwzRBT99TYX3i3xMh2MFEy79A9Ty4IbZQ81v6oWGR2w=",
+        "owner": "status-im",
+        "repo": "nim-stew",
+        "rev": "9c3596d9de809a5933fd777cec1183c2cdf521ec",
+        "type": "github"
+      },
+      "original": {
+        "owner": "status-im",
+        "repo": "nim-stew",
+        "rev": "9c3596d9de809a5933fd777cec1183c2cdf521ec",
+        "type": "github"
+      }
+    },
     "nim-termctl": {
       "flake": false,
       "locked": {
@@ -4799,6 +4816,7 @@
         "nim-langserver": "nim-langserver",
         "nim-pty": "nim-pty",
         "nim-stackable-hooks": "nim-stackable-hooks",
+        "nim-stew": "nim-stew_4",
         "nim-termctl": "nim-termctl",
         "nix-blockchain-development": "nix-blockchain-development",
         "nix-blockchain-development-sui": "nix-blockchain-development-sui",

@@ -4,7 +4,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 function makeFixtureDir(prefix: string, content: string): { dir: string; file: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const baseDir = path.join(process.cwd(), "non-nix-build", "tmp");
+  fs.mkdirSync(baseDir, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(baseDir, prefix));
   const file = path.join(dir, "main.py");
   fs.writeFileSync(file, content, "utf8");
   return { dir, file };
@@ -60,5 +62,37 @@ test.describe("External File Changes - dirty buffers", () => {
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await expect.poll(async () => activeEditorValue(ctPage), { timeout: 10_000 })
       .toContain("ours in memory");
+  });
+
+  test("re-record queues launch when files are dirty and triggers after save completes", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
+    await expect.poll(async () => activeEditorValue(ctPage), { timeout: 10_000 })
+      .toContain("initial");
+
+    // Make the editor dirty
+    await setActiveEditorValue(ctPage, 'print("ours in memory for re-record")\n');
+
+    // Evaluate in browser context to mock data.trace and call reRecordCurrent
+    await ctPage.evaluate(() => {
+      const data = (window as any).__CODETRACER_DATA__;
+      data.trace = { program: "main.py", lang: "python" }; // mock non-nil trace
+      data.reRecordCurrent(false);
+    });
+
+    // Verify it is queued
+    await expect.poll(async () => {
+      return await ctPage.evaluate(() => {
+        const data = (window as any).__CODETRACER_DATA__;
+        return data.pendingReRecord != null;
+      });
+    }, { timeout: 5000 }).toBe(true);
+
+    // Wait for the automatic save and verify the queue is cleared (meaning re-record triggered)
+    await expect.poll(async () => {
+      return await ctPage.evaluate(() => {
+        const data = (window as any).__CODETRACER_DATA__;
+        return data.pendingReRecord == null;
+      });
+    }, { timeout: 10_000 }).toBe(true);
   });
 });

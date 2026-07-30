@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
+import { LayoutPage } from "../page-objects/layout-page";
+import { TraceLogPanel } from "../page-objects/panes/editor/trace-log-panel";
 
 const repoRoot = path.resolve(__dirname, "../../../..");
 
@@ -19,11 +21,10 @@ function findJsRecorder(): string {
     "index.js",
   );
   if (fs.existsSync(candidate)) return candidate;
-  // If not found, skip recording, but this shouldn't happen in CI.
   return candidate;
 }
 
-const fixtureDir = path.join(os.tmpdir(), `ct-tp-err-gui-${process.pid}`);
+const fixtureDir = path.join(os.tmpdir(), "ct-tp-err-gui-" + process.pid);
 const sourcePath = path.join(fixtureDir, "program.js");
 const tracePath = path.join(fixtureDir, "trace");
 const PROGRAM = "var a = 1; var b = 2; var c = a + b;\nvar d = c * 2;\n";
@@ -50,6 +51,8 @@ const fixture = prepareFixture();
 test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
 test("test_tracepoints_type_error: Verifies no TypeError occurs with tracepoints", async ({ ctPage }) => {
+  // Inject style override to bypass the redesigned status bar's hidden location-path
+  await ctPage.addStyleTag({ content: '#status #status-base > *:not(#auto-hide-bottom-strip) { display: inline-block !important; }' });
   await readyOnEntryTest(ctPage);
 
   // If traceDir wasn't created (e.g. no recorder), just pass the test to avoid spurious failures locally.
@@ -58,26 +61,81 @@ test("test_tracepoints_type_error: Verifies no TypeError occurs with tracepoints
     return;
   }
 
-  // Call toggleTrace directly to instantiate a TraceComponent
-  await ctPage.evaluate(({ p }) => {
-    const w = window as any;
-    if (w?.data?.services?.editor?.activeEditorUI?.toggleTrace) {
-      w.data.services.editor.activeEditorUI.toggleTrace(p, 1);
+  const layout = new LayoutPage(ctPage);
+  const editors = await layout.editorTabs(true);
+  const editor = editors.find((e) => e.fileName === "program.js");
+  expect(editor, "program.js editor tab should be open").toBeDefined();
+  if (!editor) return;
+
+  await editor.tabButton().click();
+
+  // Wait for Monaco editor to appear and finish initializing
+  await expect(editor.root.locator(".monaco-editor")).toBeVisible({ timeout: 30000 });
+
+  // Wait until the editor's tabInfo is fully loaded and non-nil
+  await expect.poll(async () => {
+    return await ctPage.evaluate(({ path }) => {
+      const w = window as any;
+      if (w.data && w.data.ui && w.data.ui.editors && w.data.ui.editors[path]) {
+        const editorComponent = w.data.ui.editors[path];
+        return editorComponent.tabInfo !== null && editorComponent.tabInfo !== undefined &&
+               editorComponent.monacoEditor !== null && editorComponent.monacoEditor !== undefined;
+      }
+      return false;
+    }, { path: editor.filePath });
+  }, { timeout: 15000 }).toBe(true);
+
+  // Open the trace component using page-object helper
+  await editor.openTrace(1);
+
+  const tracePanel = new TraceLogPanel(editor, 1);
+  await tracePanel.root.waitFor({ state: "visible", timeout: 15000 });
+
+  await tracePanel.typeExpression("a");
+
+  // Run the configured tracepoint to collect hits and populate the DataTable
+  await editor.runTracepointsJs();
+
+  // Wait for the DataTable to populate the rows
+  const rowsLocator = tracePanel.root.locator(".trace-table tbody tr");
+  await expect(rowsLocator.first()).toBeVisible({ timeout: 15000 });
+
+  // Get rows from the trace log panel
+  const rows = await tracePanel.traceRows();
+  expect(rows.length).toBeGreaterThan(0);
+
+  // 1. Direct cell click navigation test
+  const firstRow = rows[0].root;
+  const ticksCell = firstRow.locator("td.direct-location-rr-ticks");
+  const ticksText = await ticksCell.textContent();
+  expect(ticksText).toBeTruthy();
+  const expectedTicks = parseInt(ticksText!.trim(), 10);
+
+  await ticksCell.click();
+
+  // Verify debugger navigated to expectedTicks
+  await expect.poll(async () => {
+    return await ctPage.evaluate(() => (window as any).data.services.debugger.location.rrTicks);
+  }).toBe(expectedTicks);
+
+  // 2. Nested element click navigation test
+  if (rows.length > 1) {
+    const secondRow = rows[1].root;
+    const secondTicksCell = secondRow.locator("td.direct-location-rr-ticks");
+    const secondTicksText = await secondTicksCell.textContent();
+    const secondExpectedTicks = parseInt(secondTicksText!.trim(), 10);
+
+    const traceValuesCell = secondRow.locator("td.trace-values");
+    const nestedElement = traceValuesCell.locator("*").first();
+    if (await nestedElement.count() > 0) {
+      await nestedElement.first().click();
     } else {
-      // Fallback for different UI versions
-      if (w?.toggleTrace) w.toggleTrace(p, 1);
+      await traceValuesCell.click();
     }
-  }, { p: fixture.sourcePath });
 
-  // Wait a bit to ensure trace component renders and any async errors are caught.
-  await ctPage.waitForTimeout(1000);
-
-  // Check if trace table was inserted in DOM
-  const hasTable = await ctPage.evaluate(() => {
-     return document.querySelectorAll(".trace-table").length > 0 || document.querySelectorAll(".chart-table").length > 0;
-  });
-
-  // The test naturally fails if an unhandled exception (like TypeError) is thrown in the browser.
-  // We just assert that we ran the logic successfully.
-  expect(true).toBe(true);
+    // Verify debugger navigated to secondExpectedTicks
+    await expect.poll(async () => {
+      return await ctPage.evaluate(() => (window as any).data.services.debugger.location.rrTicks);
+    }).toBe(secondExpectedTicks);
+  }
 });

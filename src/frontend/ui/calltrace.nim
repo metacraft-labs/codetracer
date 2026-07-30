@@ -977,15 +977,16 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
   # update the active index and scroll position without re-requesting.
   echo "ON COMPLETE MOVE; is db?: ", self.usesMaterializedTracesTrace
   if self.usesMaterializedTracesTrace and self.loadedCallKeys.hasKey(response.location.key):
+    self.lastSelectedCallKey = response.location.key
     let buffer = self.getStartBufferLen()
 
-    self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key] - buffer
+    self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key]
 
     if calltraceVMInstance != nil:
       calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
 
     if self.loadedCallKeys[response.location.key] >= self.panelHeight() - 1 + buffer:
-      self.calltraceScroll((self.activeCallIndex - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
+      self.calltraceScroll(((self.activeCallIndex - buffer) - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
   elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true

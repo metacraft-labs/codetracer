@@ -95,8 +95,8 @@ proc flattenVariables(
     var historyRows: seq[VariableHistoryRowView] = @[]
     if histExpanded and valueHistory.hasKey(path):
       for r in valueHistory[path]:
-        let txt = if r.value != nil: $r.value.text else: ""
-        historyRows.add VariableHistoryRowView(locationTicks: r.time, valueText: txt)
+        let txt = if r.value != nil: r.value.textRepr else: ""
+        historyRows.add VariableHistoryRowView(locationTicks: r.location.rrTicks, valueText: txt)
 
     result.add VariableViewState(
       name: v.name,

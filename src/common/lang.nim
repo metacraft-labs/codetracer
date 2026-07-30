@@ -60,6 +60,7 @@ proc toLang*(lang: string): Lang =
     "erl": LangErlang,
     "hrl": LangErlang,
     "erlang": LangErlang,
+    "php": LangPhp,
   }.toTable()
   if langs.hasKey(lang.toLowerAscii):
     result = langs[lang.toLowerAscii]
@@ -75,7 +76,7 @@ let SUPPORTED_LANGS* = @[
   LangRubyDb, LangNoir,
   LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
   LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
-  LangSolana, LangElixir, LangErlang
+  LangSolana, LangElixir, LangErlang, LangPhp
 ]
 
 proc getExtension*(lang: Lang): string =
@@ -118,7 +119,8 @@ proc getExtension*(lang: Lang): string =
     "cdc",    # LangCadence
     "",       # LangSolana (folder-based)
     "ex",     # LangElixir
-    "erl"     # LangErlang
+    "erl",    # LangErlang
+    "php"     # LangPhp
   ]
   result = extensions[lang]
 

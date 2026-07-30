@@ -15,7 +15,7 @@
   min-height: 100px
   height: -webkit-fill-available
   // overflow-y: scroll
-  // background-color: BACKGROUND_COLOR
+  // background-color: colors-ui-surface-base-panel
   color: colors-ui-text-default-label
   // margin-left: 2px
 
@@ -36,14 +36,14 @@
   white-space: nowrap
 
   &:hover
-    background-color: ACTIVE_ROW
+    background-color: colors-ui-surface-primary-secondary-hover
 
 .filesystem-entry-children
   grid-column: 1 / -1
   padding-left: 1.35em
 
 .filesystem-entry-twisty
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   opacity: 0.85
   text-align: center
 
@@ -60,7 +60,7 @@
     height: 1em
 
 .filesystem-entry-folder-icon
-  border: 0.09em solid TEXT_CONTENT_COLOR
+  border: 0.09em solid colors-ui-text-primary-body
   border-radius: 0.12em
   width: 0.95em
   height: 0.7em
@@ -72,12 +72,12 @@
     top: -0.28em
     width: 0.45em
     height: 0.25em
-    border: 0.09em solid TEXT_CONTENT_COLOR
+    border: 0.09em solid colors-ui-text-primary-body
     border-bottom: 0
     border-radius: 0.12em 0.12em 0 0
 
 .filesystem-entry-file-icon
-  border-left: 0.12em solid TEXT_CONTENT_COLOR
+  border-left: 0.12em solid colors-ui-text-primary-body
   height: 1em
 
 .filesystem-entry-label
@@ -85,7 +85,7 @@
   text-overflow: ellipsis
 
 .jstree-anchor
-  color: TEXT_CONTENT_COLOR !important
+  color: colors-ui-text-primary-body !important
 
 .diff-file-added
   color: green !important
@@ -101,14 +101,14 @@
   height: auto
   display: flex
   flex-direction: column
-  border-top: 4px solid PRIMARY_BASE
+  border-top: 4px solid colors-ui-surface-primary-tertiary
   overflow-y: auto
   overflow-x: hidden
   margin-left: 2px
-  background-color: PRIMARY_BASE
+  background-color: colors-ui-surface-primary-tertiary
 
   &::-webkit-scrollbar-thumb
-    border-color: PRIMARY_BASE
+    border-color: colors-ui-surface-primary-tertiary
     margin-right: 2px
 
 .diff-file-path
@@ -116,6 +116,6 @@
   padding-left: 8px
 
 .path-odd
-  background: INACTIVE_BASE
+  background: colors-ui-surface-primary-secondary
 .path-even
-  background: ACTIVE_ROW
+  background: colors-ui-surface-primary-secondary-hover

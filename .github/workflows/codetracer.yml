@@ -221,16 +221,45 @@ jobs:
               "Falling back to pinned download"
             )
 
-  # M13: Windows TTD origin-DAP per-PR subset (python + rust + MCP/CLI smoke).
-  # Per the M13 scope-control text, TTD test runs are 5–10x slower than RR on
-  # equivalent hardware, so per-PR full-matrix is not practical. Full matrix
-  # runs nightly via origin-dap-windows-nightly below.
+  # M13: Windows materialized origin-DAP verification. The per-PR job runs the
+  # seven substantive Python scenarios against the locked Rust-backed Python
+  # recorder. Rust TTD and MCP/CLI coverage remain follow-up work and are not
+  # exercised or claimed by this job.
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org §M13.
   origin-dap-windows:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
-    name: origin-DAP (per-PR subset, Windows)
+    name: origin-DAP (materialized Python, Windows)
     steps:
+      - name: Ensure Git supports recursive checkout
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -253,55 +282,109 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install capnproto
-        shell: pwsh
-        run: choco install capnproto -y
+      - name: Provision verified origin-DAP toolchain
+        shell: powershell
+        run: ./ci/ensure-origin-dap-windows-toolchain.ps1
 
-      - name: Install Nim toolchain
-        shell: pwsh
-        run: |
-          choco install nim -y
-          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
-          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
-          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Prefer Git Bash over WSL bash stub
-        shell: pwsh
+      - name: Read locked Python recorder revision
+        id: python-recorder-lock
+        shell: powershell
         run: |
-          $wslStub = "$env:SystemRoot\System32\bash.exe"
-          if (Test-Path $wslStub) {
-            takeown /f $wslStub | Out-Null
-            icacls $wslStub /grant "Administrators:(F)" | Out-Null
-            Remove-Item -Force $wslStub
+          $lock = Get-Content -Raw flake.lock | ConvertFrom-Json
+          $revision = $lock.nodes.'codetracer-python-recorder'.locked.rev
+          if ($revision -notmatch '^[0-9a-f]{40}$') {
+            throw "flake.lock does not contain a valid codetracer-python-recorder revision"
           }
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Verify Windows bootstrap and private recorder authentication contracts
+        shell: powershell
+        run: |
+          ./ci/test/ensure-git-for-checkout.ps1
+          ./ci/test/ensure-origin-dap-windows-toolchain.ps1
+          ./ci/test/checkout-locked-python-recorder.ps1
+
+      - name: Checkout locked Python recorder adjacent to CodeTracer
+        shell: powershell
+        env:
+          RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
+          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
+          ./ci/checkout-locked-python-recorder.ps1 `
+            -Revision $env:RECORDER_REVISION `
+            -Destination $destination
+
+      - name: Install and verify locked Rust-backed Python recorder
+        shell: powershell
+        run: |
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $recorder = Join-Path $env:GITHUB_WORKSPACE `
+            "..\codetracer-python-recorder\codetracer-python-recorder"
+          $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $nimPathConfig = @(
+            "--path:`"$stewRoot/stew`""
+            "--path:`"$stewRoot`""
+          )
+          foreach ($nimConfigDir in @(
+            (Join-Path $env:APPDATA "nim"),
+            (Join-Path $env:USERPROFILE ".config\nim")
+          )) {
+            New-Item -ItemType Directory -Force -Path $nimConfigDir | Out-Null
+            $nimPathConfig | Add-Content -Path (Join-Path $nimConfigDir "nim.cfg")
+          }
+          $env:CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1"
+          & $python -m pip install --disable-pip-version-check $recorder
+          if ($LASTEXITCODE -ne 0) { throw "failed to install the locked Python recorder" }
+          & $python -c "import codetracer_python_recorder"
+          if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
+          "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
+
+      - name: Verify Git Bash for the strict gate
+        shell: powershell
+        run: |
+          $git = Get-Command git.exe -CommandType Application -ErrorAction Stop |
+            Select-Object -First 1
+          $gitDirectory = Split-Path -Parent $git.Source
+          $gitRoot = Split-Path -Parent $gitDirectory
+          $gitBash = Join-Path (Join-Path $gitRoot "bin") "bash.exe"
+          if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) {
+            throw "The verified Git installation does not include Git Bash."
+          }
+          $bashDirectory = Split-Path -Parent $gitBash
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $bashDirectory
+          Write-Host "Using Git Bash from $gitBash for the strict gate."
 
       - name: Generate tree-sitter-nim parser
-        shell: pwsh
+        shell: powershell
         run: |
           npm install -g tree-sitter-cli
           cd libs/tree-sitter-nim
           tree-sitter generate
 
-      - name: Install just
-        shell: pwsh
-        run: |
-          choco install just -y
-          just --version
-
-      - name: Run origin-DAP per-PR subset (python + rust)
+      - name: Run required materialized Python origin-DAP gate
         shell: bash
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CT_TEST_LANGS: python,rust
+          CT_ORIGIN_DAP_REQUIRED: "1"
+          CT_TEST_LANGS: python
         run: just test-origin-dap
 
-  # M13: Windows nightly full matrix — runs every supported language.
-  # Gated on schedule / workflow_dispatch events because TTD runs are slow.
+  # M13: Definition of the eventual Windows nightly routed matrix. In this
+  # target, `all` means only Python, Ruby and JavaScript, matching
+  # test-origin-dap's strict router. It does not include or claim Rust TTD,
+  # other languages, or MCP/CLI. This workflow currently has only push and PR
+  # triggers, so the guarded job remains inactive until a scheduled or manual
+  # trigger is added deliberately.
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
-    name: origin-DAP (nightly full matrix, Windows)
+    name: origin-DAP (nightly routed materialized matrix, Windows)
     steps:
       - name: Generate CI token
         id: app-token
@@ -329,6 +412,37 @@ jobs:
         shell: pwsh
         run: choco install capnproto -y
 
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read locked Python recorder revision
+        id: python-recorder-lock
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw flake.lock | ConvertFrom-Json
+          $revision = $lock.nodes.'codetracer-python-recorder'.locked.rev
+          if ($revision -notmatch '^[0-9a-f]{40}$') {
+            throw "flake.lock does not contain a valid codetracer-python-recorder revision"
+          }
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Verify private recorder checkout authentication contract
+        shell: pwsh
+        run: ./ci/test/checkout-locked-python-recorder.ps1
+
+      - name: Checkout locked Python recorder adjacent to CodeTracer
+        shell: pwsh
+        env:
+          RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
+          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
+          ./ci/checkout-locked-python-recorder.ps1 `
+            -Revision $env:RECORDER_REVISION `
+            -Destination $destination
+
       - name: Install Nim toolchain
         shell: pwsh
         run: |
@@ -336,6 +450,31 @@ jobs:
           $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
           if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+
+      - name: Install and verify locked Rust-backed Python recorder
+        shell: pwsh
+        run: |
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $recorder = Join-Path $env:GITHUB_WORKSPACE `
+            "..\codetracer-python-recorder\codetracer-python-recorder"
+          $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $nimPathConfig = @(
+            "--path:`"$stewRoot/stew`""
+            "--path:`"$stewRoot`""
+          )
+          foreach ($nimConfigDir in @(
+            (Join-Path $env:APPDATA "nim"),
+            (Join-Path $env:USERPROFILE ".config\nim")
+          )) {
+            New-Item -ItemType Directory -Force -Path $nimConfigDir | Out-Null
+            $nimPathConfig | Add-Content -Path (Join-Path $nimConfigDir "nim.cfg")
+          }
+          $env:CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1"
+          & $python -m pip install --disable-pip-version-check $recorder
+          if ($LASTEXITCODE -ne 0) { throw "failed to install the locked Python recorder" }
+          & $python -c "import codetracer_python_recorder"
+          if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
+          "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
       - name: Prefer Git Bash over WSL bash stub
         shell: pwsh
@@ -361,7 +500,7 @@ jobs:
           choco install just -y
           just --version
 
-      - name: Run origin-DAP full matrix (all languages)
+      - name: Run routed materialized origin-DAP matrix
         shell: bash
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
@@ -886,14 +1025,15 @@ jobs:
         run: nix develop . --command just test-reprobuild-linux-smoke
 
   # M12: macOS verification pass for Value Origin Tracking.
-  # Per-PR subset: Python materialized + Rust RR + MCP/CLI smoke. The full
-  # per-language matrix (Ruby, JS, C, C++, Nim, Go, smart-contract languages)
-  # runs nightly via origin-dap-macos-nightly below.
+  # The per-PR gate runs the seven materialized Python origin-DAP scenarios.
+  # Ruby and JavaScript join Python in the routed nightly job below; other
+  # language families remain follow-up work and are not claimed by these jobs.
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org
   # §M12. The CT_TEST_LANGS env var is read by the just test-origin-dap
   # target as a comma-separated allowlist (default 'all').
   origin-dap-macos:
+    name: origin-DAP (materialized Python, macOS)
     runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -935,15 +1075,18 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
-      - name: Run origin-DAP per-PR subset (python + rust)
+      - name: Run required materialized Python origin-DAP gate
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CT_TEST_LANGS: python,rust
+          CT_ORIGIN_DAP_REQUIRED: "1"
+          CT_TEST_LANGS: python
         run: nix develop . --command just test-origin-dap
 
-  # M12: macOS nightly full matrix — runs every supported language. Scheduled
-  # via the cron job at the top of this workflow (or manually via workflow_dispatch).
+  # M12: Definition of the eventual macOS nightly routed matrix — currently
+  # Python, Ruby and JavaScript. This workflow has only push and PR triggers,
+  # so the guarded job remains inactive until a scheduled or manual trigger
+  # is added deliberately.
   origin-dap-macos-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
@@ -987,7 +1130,7 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
-      - name: Run origin-DAP full matrix (all languages)
+      - name: Run routed materialized origin-DAP matrix
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
@@ -999,10 +1142,9 @@ jobs:
   # `just test-cross-process` entrypoint canonicalised in
   # `Cross-Process-Origin-E2E-Test-Design.md` §6.
   #
-  # Both 3-trace cargo tests skip cleanly when the
-  # `account-balance-with-wasm/` fixture's `.ct` containers aren't
-  # materialised; the envelope invokes `regenerate.sh` first and tolerates
-  # its honest-skip (exit code 75).
+  # The committed three-trace fixture and both GUI specs are required. The
+  # envelope rejects missing prerequisites, ignored/skipped tests, count
+  # drift, and any Playwright skip result.
   cross-process-linux:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     name: cross-process value-origin (Linux)
@@ -1026,6 +1168,11 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      - name: Setup isonim siblings
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Build frontend (needed by gated Playwright stage)
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
@@ -1036,6 +1183,7 @@ jobs:
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CT_CROSS_PROCESS_REQUIRED: "1"
         run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process
 
   viewmodel-tests:
@@ -2073,6 +2221,7 @@ jobs:
             codetracer-trace-format
             codetracer-trace-format-nim
             codetracer-native-recorder
+            nim-stackable-hooks
             codetracer-visual-replay
             codetracer-native-backend
 
@@ -2126,7 +2275,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
-      # codetracer-native-recorder, codetracer-visual-replay and
+      # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
       # codetracer-native-backend are now cloned adjacent to this checkout
       # (``../<name>``) at workspace-lock-pinned revisions by the
       # ``Setup dev env`` step above. The macOS cargo path deps
@@ -2381,6 +2530,7 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+          skip-token-revoke: false
 
       - name: Checkout CodeTracer
         uses: actions/checkout@v5
@@ -2390,13 +2540,11 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones codetracer-visual-replay plus VR's own native siblings
-        # (native-backend, native-recorder, native-test-programs,
-        # visual-replay-fixtures) adjacent to this checkout at the
-        # workspace-lock-pinned revisions, replacing the former Install Nix /
-        # Checkout-manifests / Resolve-lock / clone-repo / restore-pins-loop
-        # steps. All five are codetracer-workspace members so their pinned
-        # SHAs come from the single workspace lock; a missing lock fails loudly.
+        # clones every source dependency used by the visual gate adjacent to
+        # this checkout at workspace-lock-pinned revisions. That includes the
+        # frontend's IsoNim/agent libraries, the incremental runner's trace and
+        # I/O libraries, and visual replay's own native siblings. A missing
+        # lock entry fails loudly before the build starts.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -2404,6 +2552,16 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
+            isonim
+            nim-everywhere
+            nim-acp
+            nim-agent-harbor
+            nim-agents
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            io-mon
+            nim-shm-queue
+            nim-stackable-hooks
             codetracer-visual-replay
             codetracer-native-backend
             codetracer-native-recorder
@@ -2412,9 +2570,79 @@ jobs:
 
       - name: Run visual replay regression gate
         env:
+          # The CodeTracer dev shell already supplies Nim/Nimble. Build the
+          # recorder emulator directly instead of re-entering its freshly
+          # cloned, unapproved direnv environment; provide the vendored
+          # results/stew paths that build_native_api.sh imports.
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CODETRACER_VISUAL_REPLAY_REPO_PATH: ${{ github.workspace }}/../codetracer-visual-replay
+          CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN: ${{ steps.ci_token.outputs.token }}
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: |
+          set -euo pipefail
+
+          # Cargo's default libgit2 transport does not honor the Git URL
+          # authentication installed by setup-dev-env. Force the Git CLI and
+          # give it a process-scoped HTTP header for the one private dependency
+          # used by codetracer-native-backend. Keep the repository URL free of
+          # credentials so the token cannot enter git-remote-https argv. No
+          # credential file is written; the App token is revoked by its
+          # action's post-job hook.
+          lldb_sys_url="https://github.com/metacraft-labs/lldb-sys.rs.git"
+          cargo_auth_basic="$(
+            printf 'x-access-token:%s' "${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN}" |
+              base64 | tr -d '\r\n'
+          )"
+          cargo_home="${RUNNER_TEMP}/visual-replay-cargo-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "${cargo_home}"
+          mkdir -p "${cargo_home}"
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          export CARGO_HOME="${cargo_home}"
+          export CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME=true
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_ASKPASS=/bin/false
+          export SSH_ASKPASS=/bin/false
+          export GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_SYSTEM=/dev/null
+
+          # A self-hosted runner may carry process-scoped Git configuration
+          # from its launcher. Remove every numbered entry before installing
+          # the closed configuration below; entries above GIT_CONFIG_COUNT are
+          # ignored by Git today, but must not become active if this list is
+          # extended later. GIT_CONFIG_PARAMETERS is a separate inline channel.
+          for git_env_name in "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"; do
+            if [[ "${git_env_name}" =~ ^GIT_CONFIG_(KEY|VALUE)_[0-9]+$ ]]; then
+              unset "${git_env_name}"
+            fi
+          done
+          unset GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_ALLOW_PROTOCOL
+
+          # Carry only the header and helper block through Nix shell startup.
+          # The gate re-establishes all non-secret policy values after the
+          # git-hooks shell hook has finished and before invoking Git/Cargo.
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0="http.${lldb_sys_url}.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${cargo_auth_basic}"
+          export GIT_CONFIG_KEY_1="credential.helper"
+          export GIT_CONFIG_VALUE_1=""
+          unset CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN cargo_auth_basic
+
+          cleanup_private_cargo_auth() {
+            rm -rf "${cargo_home}"
+            unset CARGO_NET_GIT_FETCH_WITH_CLI CARGO_HOME
+            unset CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME
+            unset GIT_TERMINAL_PROMPT GIT_ASKPASS SSH_ASKPASS
+            unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+            unset GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_ALLOW_PROTOCOL
+            unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+            unset GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1
+            unset git_env_name lldb_sys_url cargo_home
+          }
+          trap cleanup_private_cargo_auth EXIT
+
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
 
       - name: Stage sibling artifacts into workspace

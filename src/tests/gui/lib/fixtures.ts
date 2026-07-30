@@ -881,6 +881,58 @@ function attachMainProcessCapture(
  * Also probes the page for any errors that occurred before attachment.
  */
 function attachErrorCollectors(page: Page, bucket: string[]): void {
+  const initScript = () => {
+    const handleErr = (error: any, type: string) => {
+      const visited = new Set();
+      function nimValueToString(v: any): string {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "string") return v;
+        if (typeof v === "object") {
+          if (visited.has(v)) return "[Circular]";
+          visited.add(v);
+          if (Array.isArray(v)) {
+            if (v.every(x => typeof x === "number")) {
+              return String.fromCharCode(...v);
+            }
+            return "[" + v.map(nimValueToString).join(", ") + "]";
+          }
+          if (Array.isArray(v.data)) {
+            return nimValueToString(v.data);
+          }
+          const keys = Object.keys(v);
+          if (keys.length === 0) return String(v);
+          return "{" + keys.map(k => `${k}: ${nimValueToString(v[k])}`).join(", ") + "}";
+        }
+        return String(v);
+      }
+
+      if (error && typeof error === "object") {
+        try {
+          const keys = Object.getOwnPropertyNames(error);
+          const props: Record<string, string> = {};
+          for (const k of keys) {
+            props[k] = nimValueToString(error[k]);
+          }
+          console.error(`[BROWSER_ERROR_INSPECT][${type}] Details: ${JSON.stringify(props)}`);
+        } catch (e) {
+          console.error(`[BROWSER_ERROR_INSPECT][${type}] Failed to inspect: ${e}`);
+        }
+      } else {
+        console.error(`[BROWSER_ERROR_INSPECT][${type}] Non-object error: ${error}`);
+      }
+    };
+
+    window.addEventListener("error", (event) => {
+      handleErr(event.error, "error");
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      handleErr(event.reason, "unhandledrejection");
+    });
+  };
+
+  page.addInitScript(initScript);
+  page.evaluate(initScript).catch(() => {});
+
   const dumpPath = process.env.CODETRACER_TEST_CONSOLE_DUMP_PATH;
   const dumpAll = process.env.CODETRACER_TEST_LOG_ALL_CONSOLE === "1";
   page.on("console", (msg) => {
@@ -899,12 +951,44 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
     }
   });
   page.on("pageerror", (error) => {
-    bucket.push(`[pageerror] ${error.message}`);
+    function nimValueToString(v: any): string {
+      if (v === null || v === undefined) return "";
+      if (typeof v === "string") return v;
+      if (Array.isArray(v)) {
+        if (v.every(x => typeof x === "number")) {
+          return String.fromCharCode(...v);
+        }
+        return "[" + v.map(nimValueToString).join(", ") + "]";
+      }
+      if (typeof v === "object") {
+        if (Array.isArray(v.data)) {
+          return nimValueToString(v.data);
+        }
+        const keys = Object.keys(v);
+        if (keys.length === 0) return String(v);
+        return "{" + keys.map(k => `${k}: ${nimValueToString(v[k])}`).join(", ") + "}";
+      }
+      return String(v);
+    }
+
+    let msg = error.message || String(error);
+    let stack = error.stack ?? "";
+    try {
+      if (error && typeof error === "object") {
+        const keys = Object.getOwnPropertyNames(error);
+        const props: Record<string, any> = {};
+        for (const k of keys) {
+          props[k] = nimValueToString((error as any)[k]);
+        }
+        msg += " | details: " + JSON.stringify(props);
+      }
+    } catch {}
+    bucket.push(`[pageerror] ${msg}\n${stack}`);
     if (dumpPath) {
       try {
         require("node:fs").appendFileSync(
           dumpPath,
-          `[pageerror] ${error.message}\n${error.stack ?? ""}\n`,
+          `[pageerror] ${msg}\n${stack}\n`,
         );
       } catch { /* ignore */ }
     }
@@ -1028,7 +1112,16 @@ async function launchTraceElectron(
 function importTraceFolder(traceFolder: string): string {
   const ctProcess = childProcess.spawnSync(
     codetracerPath,
-    ["host", "--trace-path", traceFolder, "0", "--port=0", "--idle-timeout=1ms"],
+    [
+      "host",
+      "--trace-path",
+      traceFolder,
+      "0",
+      "--port=0",
+      "--idle-timeout=1ms",
+      "--backend-socket-port=0",
+      "--frontend-socket=0",
+    ],
     {
       cwd: codetracerInstallDir,
       stdio: "pipe",

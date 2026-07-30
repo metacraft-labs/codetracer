@@ -13,13 +13,13 @@
 .eventLog-medium-control-button
   user-select: none
   border-radius: 6px
-  color: DROPDOWN_TEXT_COLOR
+  color: colors-ui-text-primary-body
   white-space: nowrap
   cursor: pointer
   height: 28px
   // margin-bottom: 10px
   margin-left: 10px
-  background-color: ACTIVE_MENU_BACKGROUND
+  background-color: colors-ui-surface-input-default
   text-align: center
   transform: rotate(0deg)
   width: fit-content
@@ -34,14 +34,14 @@
   font-weight: 400
 
   &:hover
-    background-color: SECONDARY_BASE
-    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    background-color: colors-ui-surface-base-panel
+    color: colors-ui-text-primary-body
 
   &:active
-    background-color: ACTIVE_ROW
+    background-color: colors-ui-surface-primary-secondary-hover
 
   &.active
-    background-color: ACTIVE_ROW
+    background-color: colors-ui-surface-primary-secondary-hover
 
   .custom-tooltip
     width: 200px
@@ -66,13 +66,13 @@
   align-items: center
   user-select: none
   border-radius: 6px
-  color: DROPDOWN_TEXT_COLOR
+  color: colors-ui-text-primary-body
   cursor: pointer
   height: 28px
   width: 28px
   margin-bottom: 10px
   margin-left: 10px
-  background-color: CT_PRIMARY_DEFAULT
+  background-color: colors-ui-border-action
   background-image: EVENT_LOG_FA_DOWN_ICON
   background-position: center
   background-repeat: no-repeat
@@ -82,8 +82,8 @@
   font-weight: bold
 
   &:focus
-    color: DROPDOWN_TEXT_FOCUSED_COLOR
-    background-color: CT_PRIMARY_DEFAULT_FOCUSED !important
+    color: colors-ui-text-primary-body
+    background-color: colors-ui-surface-action-primary !important
     background-image: EVENT_LOG_FA_UP_ICON !important
     outline: none !important
     box-shadow: none !important
@@ -93,8 +93,8 @@
     box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
   &:hover
-    background-color: CT_PRIMARY_DEFAULT_FOCUSED
-    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    background-color: colors-ui-surface-action-primary
+    color: colors-ui-text-primary-body
 
 .hamburger-dropdown-container
   position: relative
@@ -104,10 +104,10 @@
 
 .hamburger-dropdown
   border-radius: 6px
-  color: DROPDOWN_COLOR
+  color: colors-ui-text-primary-body
   cursor: pointer
   height: 24px
-  background-color: PRIMARY_BASE
+  background-color: colors-ui-surface-primary-tertiary
   right: 0
   width: 24px
   position: relative
@@ -127,17 +127,17 @@
     outline: none !important
     box-shadow: none !important
     cursor: pointer
-    background-color: BUTTON_HOVER_BACKGROUND
+    background-color: colors-ui-surface-base-panel
 
   &:focus-visible
     outline: none !important
     box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
     cursor: pointer
-    background-color: BUTTON_HOVER_BACKGROUND
+    background-color: colors-ui-surface-base-panel
 
   &:hover
-    background-color: BUTTON_HOVER_BACKGROUND
-    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    background-color: colors-ui-surface-base-panel
+    color: colors-ui-text-primary-body
 
 .dropdown-container
   position: absolute
@@ -431,13 +431,13 @@
     color: EVENT_LOG_BUTTON_UNSELECTED_COLOR
 
   .eventLog-normal-color-button, .eventLog-selected-kind, .eventLog-selected-category
-    color: EVENT_LOG_BUTTON_SELECTED_COLOR
+    color: colors-ui-surface-primary-secondary
 
   .eventLog-button
     i
       margin-left: 5px
       vertical-align: -2px
-      color: EVENT_LOG_CARET_DOWN_COLOR
+      color: colors-ui-text-primary-label
 
   .eventLog-header
     position: relative
@@ -468,9 +468,9 @@
     tr
       display: flex
       flex-direction: column
-      background-color: BACKGROUND_COLOR
+      background-color: colors-ui-surface-base-panel
       width: 100%
-      border: 0.0625em COLOR solid
+      border: 0.0625em colors-ui-text-primary-body solid
       margin-bottom: 1.25em
 
     thead
@@ -480,14 +480,14 @@
 label
   text-align: start
   min-width: 110px
-  color: DROPDOWN_TEXT_COLOR
+  color: colors-ui-text-primary-body
   font-weight: 400
 
 .eventLog-cell
   text-overflow: ellipsis
   white-space: pre
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
+  color: colors-ui-text-primary-body
   font-weight: bold
   padding-right: 0.625em
 
@@ -508,7 +508,7 @@ label
 
 //     &::-webkit-scrollbar-thumb:horizontal
 //       border: 0px !important
-//       background-color: PRIMARY_BASE
+//       background-color: colors-ui-surface-primary-tertiary
 
 //   .eventLog-lowlevellocation:hover
 //     overflow-x: overlay

@@ -3306,10 +3306,21 @@ impl Handler {
         lines.sort();
         let mut closest_line: Option<usize> = None;
 
-        for &line in lines.iter() {
-            if line >= &loc.line {
+        // Search for the closest preceding line first.
+        for &line in lines.iter().rev() {
+            if line <= &loc.line {
                 closest_line = Some(*line);
                 break;
+            }
+        }
+
+        // If no preceding line has a step, fall back to the closest succeeding line.
+        if closest_line.is_none() {
+            for &line in lines.iter() {
+                if line >= &loc.line {
+                    closest_line = Some(*line);
+                    break;
+                }
             }
         }
 
@@ -4191,6 +4202,8 @@ impl Handler {
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        info!("trace_jump: received request with event direct_location_rr_ticks = {}", event.direct_location_rr_ticks);
+        eprintln!("[RUST_DIAG] trace_jump: event.direct_location_rr_ticks = {}", event.direct_location_rr_ticks);
         self.replay.tracepoint_jump(&event)?;
         // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         _ = self.replay.load_location(&mut self.expr_loader)?;
@@ -6075,6 +6088,21 @@ mod tests {
             sender.clone(),
         )?;
         assert_eq!(handler.step_id, StepId(1));
+
+        // Test fallback: line 5 has no step, should fall back to closest preceding (line 3 -> StepId(2))
+        handler.source_line_jump(
+            dap::Request::default(),
+            SourceLocation {
+                path: path.to_string(),
+                line: 5,
+                column: None,
+                condition: None,
+                log_message: None,
+            },
+            sender.clone(),
+        )?;
+        assert_eq!(handler.step_id, StepId(2));
+
         handler.source_call_jump(
             dap::Request::default(),
             SourceCallJumpTarget {
@@ -6147,6 +6175,73 @@ mod tests {
         // assert_eq!(call_a.location.key, "2".to_string());
         // assert_eq!(call_b.location.function_name, "b".to_string());
         // assert_eq!(call_b.location.key, "3".to_string());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_js_load_locals_function_scope() -> Result<(), Box<dyn Error>> {
+        let mut tracer = NonStreamingTraceWriter::new("example.js", &[]);
+        let path = &PathBuf::from("/test/workdir/example.js");
+        tracer.start(path, Line(1));
+
+        let a_arg = tracer.arg("a", NONE_VALUE);
+        let b_arg = tracer.arg("b", NONE_VALUE);
+
+        let function_id = tracer.ensure_function_id("test", path, Line(1));
+        tracer.register_call(function_id, vec![a_arg, b_arg]);
+
+        tracer.register_step(path, Line(2));
+        tracer.register_variable_with_full_value("x", NONE_VALUE);
+
+        tracer.register_step(path, Line(3));
+        tracer.register_variable_with_full_value("y", NONE_VALUE);
+
+        let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
+            workdir: PathBuf::from("/test/workdir"),
+            program: "example.js".to_string(),
+            args: vec![],
+        };
+
+        let mut db = Db::new(&trace_metadata.workdir);
+        let mut trace_processor = TraceProcessor::new(&mut db);
+        trace_processor.postprocess(&tracer.events).unwrap();
+
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+
+        // Seek to step 1 (where y is not yet assigned)
+        handler.step_in(true)?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        handler.load_locals(
+            dap::Request::default(),
+            task::CtLoadLocalsArguments::default(),
+            tx.clone(),
+        )?;
+        if let Ok(DapMessage::Response(resp)) = rx.recv() {
+            let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
+            let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
+            assert!(names.contains(&"a".to_string()));
+            assert!(names.contains(&"b".to_string()));
+            assert!(names.contains(&"x".to_string()));
+            assert!(!names.contains(&"y".to_string()));
+        } else {
+            panic!("Expected CtLoadLocalsResponseBody");
+        }
+
+        // Seek to step 2 (where both x and y are assigned)
+        handler.step_in(true)?;
+        handler.load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), tx)?;
+        if let Ok(DapMessage::Response(resp)) = rx.recv() {
+            let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
+            let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
+            assert!(names.contains(&"a".to_string()));
+            assert!(names.contains(&"b".to_string()));
+            assert!(names.contains(&"x".to_string()));
+            assert!(names.contains(&"y".to_string()));
+        } else {
+            panic!("Expected CtLoadLocalsResponseBody");
+        }
 
         Ok(())
     }

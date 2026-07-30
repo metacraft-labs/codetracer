@@ -1,6 +1,6 @@
 .write-file
-  background-color: BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
 
   .write-file-path
     color: blue
@@ -26,7 +26,7 @@
 .traceLog
   display: flex;
   flex-direction: column;
-  color: COLOR
+  color: colors-ui-text-primary-body
   height: 100%
   min-height: 0
   overflow: hidden
@@ -36,8 +36,8 @@
     grid-template-columns: 120px 160px 180px minmax(0, 1fr)
     flex: 0 0 24px
     align-items: center
-    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-    color: VALUE_TYPE_COLOR
+    border-bottom: 1px solid colors-ui-surface-input-default
+    color: colors-ui-text-primary-body
     font-family: "FiraCode"
     font-size: 13px
     line-height: 20px
@@ -57,14 +57,14 @@
     grid-template-columns: 120px 160px 180px minmax(0, 1fr)
     min-height: 24px
     align-items: center
-    border-top: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
-    color: TEXT_CONTENT_COLOR
+    border-top: 1px solid colors-ui-border-secondary
+    color: colors-ui-text-primary-body
     padding: 0 8px
     cursor: pointer
 
     &:hover,
     &.selected
-      background: ACTIVE_ROW
+      background: colors-ui-surface-primary-secondary-hover
 
   .trace-col-rr-ticks,
   .trace-col-location,
@@ -85,11 +85,11 @@
       right: 12px
       bottom: 4px
       height: 2px
-      background: CT_SECONDARY_BLUE
+      background: colors-ui-text-primary-active
 
   .trace-log-empty
     padding: 12px 8px
-    color: VALUE_TYPE_COLOR
+    color: colors-ui-text-primary-body
     font-family: "FiraCode"
     font-size: 13px
 
@@ -114,8 +114,8 @@
 .trace-main
   // stop:8px
   top: 8px
-  background-color: BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   // width: calc(100%+71px)
   width: 100% !important
   padding-right: 1ch
@@ -200,7 +200,7 @@
 
     .trace-line
       width: 20%
-      color: COLOR
+      color: colors-ui-text-primary-body
 
     .trace-values
       padding-top: 0.25em !important
@@ -208,7 +208,7 @@
       width: auto
       min-width: max-content
       flex: 0 0 auto
-      color: TEXT_CONTENT_COLOR
+      color: colors-ui-text-primary-body
       cursor: pointer
       overflow: visible
       white-space: nowrap
@@ -219,7 +219,7 @@
 
       //   &::-webkit-scrollbar-thumb:horizontal
       //     border: 0px !important
-      //     background-color: PRIMARY_BASE
+      //     background-color: colors-ui-surface-primary-tertiary
 
       //   &::-webkit-scrollbar
       //     height: 4px !important
@@ -253,7 +253,7 @@
       width: 80px;
       height: 2px;
       top: 0;
-      background-color: TRACEPOINT_CHEVRON_COLOR;
+      background-color: colors-ui-text-primary-label;
       z-index: 3;
       left: calc(50% - 40px);
       border-top-left-radius: 2px
@@ -264,12 +264,12 @@
       width: 10px;
       height: 2px;
       top: 0;
-      background-color: TRACEPOINT_BACKGROUND_COLOR;
+      background-color: colors-ui-surface-input-default;
       z-index: 3;
       left: calc(50% - 5px);
 
     .trace-chevron-arrow
-      color: TRACEPOINT_CHEVRON_COLOR
+      color: colors-ui-text-primary-label
       cursor: pointer
       position: absolute
       left: 50%
@@ -293,7 +293,7 @@
     position: relative
     display: none
     margin-left: 60px
-    background-color: TRACEPOINT_BACKGROUND_COLOR
+    background-color: colors-ui-surface-input-default
     width: 85%
     overflow: visible
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 5
@@ -365,14 +365,14 @@
 
   .dropdown-list.active
     .fa
-      color: DROPDOWN_TEXT_BACKGROUND_COLOR
+      color: colors-ui-surface-input-default
 
   .run-trace-button
     border-radius: 6px;
     color: BORDER_COLOR;
     cursor: pointer;
     height: 24px;
-    background: BUTTON_COLOR;
+    background: colors-ui-surface-primary-tertiary;
     width: 24px;
     position: relative;
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
@@ -381,7 +381,7 @@
     align-items: center
 
     &:hover
-      background: BUTTON_HOVER_BACKGROUND
+      background: colors-ui-surface-base-panel
 
   .trace-search
     width: -webkit-fill-available
@@ -391,8 +391,8 @@
     //   height: 24px
     //   font-size: 14px
     //   border: 0
-    //   background-color: HEADER_ELEMENT_BACKGROUND_COLOR
-    //   color: TEXT_CONTENT_COLOR
+    //   background-color: colors-ui-surface-primary-tertiary
+    //   color: colors-ui-text-primary-body
     //   margin-left: 10%
     //   // margin-top: 5px
     //   margin-bottom: 0px !important
@@ -400,7 +400,7 @@
     //   padding-left: 24px
 
     //   &:focus
-    //     border: 1px solid BORDERS_COLOR
+    //     border: 1px solid colors-ui-border-secondary
     //     outline: none
 
   .hamburger-dropdown
@@ -451,7 +451,7 @@
 
     // button
     //   background-color: TRACE_HEADER_BACKGROUND_COLOR
-    //   color: COLOR
+    //   color: colors-ui-text-primary-body
     //   height: 25px
     //   margin-top: 0
     //   margin-left: 0
@@ -466,7 +466,7 @@
       cursor: pointer
       height: 30px
       margin-top: 10px
-      background-color: DROPDOWN_TEXT_BACKGROUND_COLOR
+      background-color: colors-ui-surface-input-default
       padding-top: 2px
       padding-left: 15px
       padding-right: 30px
@@ -584,14 +584,14 @@ RESIZING_BORDER_SIZE = 4px
   background-color COLOR_PANEL_BORDER
 
 .trace-error
-  color: NOTIFICATION_ERROR_COLOR
+  color: colors-ui-text-error-primary
   padding-right: 8px
 
 .trace-simple-metadata
   flex-grow: 20
 
 .trace-expandables
-  border-color: COLOR
+  border-color: colors-ui-text-primary-body
   display: flex
   flex-direction: column
 
@@ -619,8 +619,8 @@ RESIZING_BORDER_SIZE = 4px
   text-align: center
   height: 25px
   width: 100px
-  background-color: HEADER_ELEMENT_BACKGROUND_COLOR
-  color: TEXT_CONTENT_COLOR
+  background-color: colors-ui-surface-primary-tertiary
+  color: colors-ui-text-primary-body
   font-size: 15px
   border-radius: 15px
   cursor: pointer
@@ -637,7 +637,7 @@ RESIZING_BORDER_SIZE = 4px
     height: 25px
     width: 100px
     background-color: #b8c0cf
-    color: HEADER_ELEMENT_BACKGROUND_COLOR
+    color: colors-ui-surface-primary-tertiary
     font-size: 15px
     cursor: pointer
     position: absolute
@@ -646,7 +646,7 @@ RESIZING_BORDER_SIZE = 4px
 
   &:hover
     background-color: #b8c0cf
-    color: HEADER_ELEMENT_BACKGROUND_COLOR
+    color: colors-ui-surface-primary-tertiary
 
   ::after
     margin-left: 10px !important
@@ -677,7 +677,7 @@ RESIZING_BORDER_SIZE = 4px
     border-radius: 4px
 
     &:hover
-      background-color: ACTIVE_ROW
+      background-color: colors-ui-surface-primary-secondary-hover
 
   // .dropdown-list
   //   min-width: 80px !important
@@ -685,8 +685,8 @@ RESIZING_BORDER_SIZE = 4px
 // based on https://stackoverflow.com/questions/2941189/how-to-overlay-one-div-over-another-div
 .tracepoint-overlay
   opacity: 0.8
-  background-color: BACKGROUND_COLOR
-  color: COLOR
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   z-index: TRACE_LOG_EDITOR_Z_INDEX + 6
   position: absolute
   width: 100%
@@ -723,5 +723,5 @@ RESIZING_BORDER_SIZE = 4px
 //   width: 100%
 
 .error-trace
-  color: NOTIFICATION_ERROR_COLOR
+  color: colors-ui-text-error-primary
   padding-right: 8px

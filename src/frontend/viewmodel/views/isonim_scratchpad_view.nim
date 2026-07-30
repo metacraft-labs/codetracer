@@ -38,6 +38,7 @@
 ##   static shell, imperative renderer ops inside the effect handle
 ##   the row list).
 
+import std/sets
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
 import isonim/testing/mock_dom
@@ -76,48 +77,145 @@ const CloseButtonClass* =
 # Reactive helpers used inside DSL expressions
 # ---------------------------------------------------------------------------
 
+type
+  ScratchpadRowView* = object
+    expression*: string
+    path*: string
+    valueText*: string
+    typeName*: string
+    isExpanded*: bool
+    hasChildren*: bool
+    depth*: int
+    isError*: bool
+    isLiteral*: bool
+    entryIndex*: int
+
+proc flattenScratchpadEntry(
+    name: string;
+    valueText: string;
+    typeName: string;
+    isError: bool;
+    isLiteral: bool;
+    hasChildren: bool;
+    children: seq[Variable];
+    expandedPaths: HashSet[string];
+    depth: int;
+    path: string;
+    entryIndex: int;
+    result: var seq[ScratchpadRowView]) =
+
+  let expanded = path in expandedPaths
+  result.add(ScratchpadRowView(
+    expression: name,
+    path: path,
+    valueText: valueText,
+    typeName: typeName,
+    isExpanded: expanded,
+    hasChildren: hasChildren,
+    depth: depth,
+    isError: isError,
+    isLiteral: isLiteral,
+    entryIndex: entryIndex
+  ))
+
+  if expanded and hasChildren:
+    for child in children:
+      let childPath = path & "." & child.name
+      flattenScratchpadEntry(
+        child.name,
+        child.value,
+        child.typeName,
+        isError = false,
+        isLiteral = false,
+        child.hasChildren,
+        child.children,
+        expandedPaths,
+        depth + 1,
+        childPath,
+        entryIndex,
+        result
+      )
+
+proc getScratchpadRowViews*(vm: ScratchpadVM): seq[ScratchpadRowView] =
+  let entries = vm.entries.val
+  let expandedPaths = vm.expandedPaths.val
+  for i, entry in entries:
+    flattenScratchpadEntry(
+      entry.expression,
+      entry.valueText,
+      entry.typeName,
+      entry.isError,
+      entry.isLiteral,
+      entry.hasChildren,
+      entry.children,
+      expandedPaths,
+      depth = 0,
+      path = $i,
+      entryIndex = i,
+      result
+    )
+
 proc rowClass*(isError: bool): string =
-  ## ``.scratchpad-value-view`` row modifier — the legacy CSS expects
-  ## the bare class plus an ``error-trace`` modifier when the captured
-  ## value was a backend error.  Mirrors the
-  ## ``error-trace`` span the legacy ``localsToText`` emitted (see
-  ## trace_log §1.69 for the parallel rule).
   if isError:
     "scratchpad-value-view scratchpad-value-error"
   else:
     "scratchpad-value-view"
 
+proc rowClass*(row: ScratchpadRowView): string =
+  rowClass(row.isError)
+
 proc cellText*(entry: ScratchpadValueEntry): string =
-  ## Single-line preview text for tests and literal fallback display.
   if entry.isError:
     "<error: " & entry.valueText & ">"
   else:
     entry.valueText
 
+proc cellText*(row: ScratchpadRowView): string =
+  if row.isError:
+    "<error: " & row.valueText & ">"
+  else:
+    row.valueText
+
 proc valueExpandedClass*(): string =
-  ## Root class restored from the legacy ValueComponent collapsed row.
-  ## The Scratchpad VM has no depth/type tree, so every flattened entry
-  ## renders at depth 0.
   "value-expanded border-value-0 value-expanded-name"
 
+proc valueExpandedClass*(row: ScratchpadRowView): string =
+  "value-expanded border-value-" & $row.depth & " value-expanded-name"
+
+proc rowPaddingLeft*(row: ScratchpadRowView; pxPerLevel: int): string =
+  let depth = row.depth
+  if depth > 0: $(depth * pxPerLevel) & "px" else: "0px"
+
 proc valueAtomClass*(entry: ScratchpadValueEntry; index: int): string =
-  ## Atom row class restored from ``ValueComponent.atomValueView``.  The
-  ## legacy component alternated atom-even / atom-odd as rows were
-  ## rendered; keep that visual rhythm for multiple pinned values.
   let parity = if index mod 2 == 0: "atom-even" else: "atom-odd"
   if entry.isError:
     "value-error value-expanded-text"
   else:
     "value-expanded-atom atom-string " & parity & " value-expanded-default"
 
+proc valueAtomClass*(row: ScratchpadRowView; index: int): string =
+  let parity = if index mod 2 == 0: "atom-even" else: "atom-odd"
+  if row.isError:
+    "value-error value-expanded-text"
+  else:
+    "value-expanded-atom atom-string " & parity & " value-expanded-default"
+
+proc caretClass*(row: ScratchpadRowView): string =
+  if row.isExpanded: "caret-expand" else: "caret-collapse"
+
+proc atomOrCompoundClass*(row: ScratchpadRowView): string =
+  if row.hasChildren and row.isExpanded:
+    "value-expanded-compound-parent"
+  else:
+    "value-expanded-atom-parent"
+
 proc onCloseClick(vm: ScratchpadVM; index: int): proc() =
-  ## Closure factory that captures the row's index so each row's
-  ## close-button handler refers to its own value.  Without the
-  ## per-row capture every row's closure would observe the loop
-  ## variable's final value (same closure-capture concern as the
-  ## trace_log / request_panel views).
   let captured = index
   result = proc() = vm.removeValue(captured)
+
+proc onToggleExpand(vm: ScratchpadVM; path: string): proc() =
+  let captured = path
+  result = proc() = vm.toggleExpand(captured)
 
 # ---------------------------------------------------------------------------
 # Origin-chain entry rendering (M4 deliverable §3.5 + spec §8.1
@@ -241,32 +339,42 @@ proc diffHeading*(left, right: ScratchpadChainEntry): string =
 # ---------------------------------------------------------------------------
 
 proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
-                   entry: ScratchpadValueEntry; index: int): MockNode =
+                   row: ScratchpadRowView; index: int): MockNode =
   ## Render a single scratchpad row.  The close button maps onto
   ## ``vm.removeValue``; the value body keeps the collapsed legacy
   ## ``ValueComponent`` class surface around the flattened preview.
-  let onClick = onCloseClick(vm, index)
-  let cell = cellText(entry)
-  let row = ui(r):
-    tdiv(class = rowClass(entry.isError)):
-      button(class = CloseButtonClass, id = "close-element",
-             onclick = onClick):
-        discard
-      tdiv(class = valueExpandedClass()):
-        tdiv(class = "value-expanded-atom-parent"):
+  let onClick = onCloseClick(vm, row.entryIndex)
+  let onToggle = onToggleExpand(vm, row.path)
+  let cell = cellText(row)
+  let itemRow = ui(r):
+    tdiv(class = rowClass(row)):
+      if row.depth == 0:
+        button(class = CloseButtonClass, id = "close-element",
+               onclick = onClick):
+          discard
+      tdiv(class = valueExpandedClass(row),
+           padding_left = rowPaddingLeft(row, 16)):
+        tdiv(class = atomOrCompoundClass(row)):
           tdiv(class = "value-name-container"):
+            if row.hasChildren:
+              span(class = "value-expand-button", onclick = onToggle):
+                tdiv(class = caretClass(row)):
+                  discard
             span(class = "value-name"):
-              text entry.expression & ": "
+              text row.expression & (if row.depth == 0: ": " else: "")
           tdiv:
             span(class = "value-view"):
-              if entry.isError:
-                tdiv(class = valueAtomClass(entry, index)):
+              if row.isError:
+                tdiv(class = valueAtomClass(row, index)):
                   text cell
               else:
-                tdiv(class = valueAtomClass(entry, index)):
+                tdiv(class = valueAtomClass(row, index)):
                   span(class = "value-expanded-text"):
                     text cell
-  row
+                  if row.typeName.len > 0:
+                    span(class = "value-type"):
+                      text row.typeName
+  itemRow
 
 proc renderChainDiffMock(r: MockRenderer; left, right: ScratchpadChainEntry;
                          pairIndex: int): MockNode =
@@ -350,12 +458,12 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
         text ScratchpadEmptyStateText
 
   createRenderEffect proc() =
-    let entries = vm.entries.val
+    let rowViews = getScratchpadRowViews(vm)
     let chains = vm.chainEntries.val
     r.clearChildren(listContainer)
-    for i, entry in entries:
-      let row = renderRowMock(r, vm, entry, i)
-      r.appendChild(listContainer, row)
+    for i, row in rowViews:
+      let itemRow = renderRowMock(r, vm, row, i)
+      r.appendChild(listContainer, itemRow)
     r.clearChildren(chainListContainer)
     for i, entry in chains:
       let card = renderChainRowMock(r, vm, entry, i)
@@ -376,7 +484,7 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
     # reactive updates (matches the trace_log / request_panel
     # placeholder pattern).  The overlay hides as soon as EITHER list
     # has rows so a pinned chain alone is enough to hide it.
-    if entries.len == 0 and chains.len == 0:
+    if rowViews.len == 0 and chains.len == 0:
       r.setAttribute(emptyContainer, "class", "empty-overlay")
     else:
       r.setAttribute(emptyContainer, "class", "empty-overlay hidden")
@@ -409,25 +517,38 @@ when defined(js):
     while not isonim_dom.isNodeNil(asNode.firstChild):
       discard isonim_dom.removeChild(asNode, asNode.firstChild)
 
-  proc renderRowWeb(vm: ScratchpadVM; entry: ScratchpadValueEntry;
+  proc renderRowWeb(vm: ScratchpadVM; row: ScratchpadRowView;
                     index: int): isonim_dom.Element =
     ## Build a scratchpad row in the real DOM.  Same shape as the Mock
     ## variant; click handler is wired imperatively via
     ## ``addEventListener``.
-    let row = createWebElement("div", rowClass(entry.isError))
+    let elementRow = createWebElement("div", rowClass(row))
 
-    let closeBtn = createWebElement("button", CloseButtonClass,
-                                    "close-element")
-    let onClick = onCloseClick(vm, index)
-    isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
-                                proc(ev: isonim_dom.Event) = onClick())
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(closeBtn))
+    if row.depth == 0:
+      let closeBtn = createWebElement("button", CloseButtonClass,
+                                      "close-element")
+      let onClick = onCloseClick(vm, row.entryIndex)
+      isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
+                                  proc(ev: isonim_dom.Event) = onClick())
+      isonim_dom.appendChild(isonim_dom.Node(elementRow), isonim_dom.Node(closeBtn))
 
-    let valueRoot = createWebElement("div", valueExpandedClass())
-    let parent = createWebElement("div", "value-expanded-atom-parent")
+    let valueRoot = createWebElement("div", valueExpandedClass(row))
+    if row.depth > 0:
+      isonim_dom.setAttribute(valueRoot, cstring"style", cstring("padding-left: " & rowPaddingLeft(row, 16)))
+
+    let parent = createWebElement("div", atomOrCompoundClass(row))
     let nameContainer = createWebElement("div", "value-name-container")
+    if row.hasChildren:
+      let expandBtn = createWebElement("span", "value-expand-button")
+      let caret = createWebElement("div", caretClass(row))
+      let onToggle = onToggleExpand(vm, row.path)
+      isonim_dom.addEventListener(isonim_dom.Node(expandBtn), cstring"click",
+                                  proc(ev: isonim_dom.Event) = onToggle())
+      isonim_dom.appendChild(isonim_dom.Node(expandBtn), isonim_dom.Node(caret))
+      isonim_dom.appendChild(isonim_dom.Node(nameContainer), isonim_dom.Node(expandBtn))
+
     let nameSpan = createWebElement("span", "value-name")
-    appendWebText(nameSpan, entry.expression & ": ")
+    appendWebText(nameSpan, row.expression & (if row.depth == 0: ": " else: ""))
     isonim_dom.appendChild(isonim_dom.Node(nameContainer),
                            isonim_dom.Node(nameSpan))
     isonim_dom.appendChild(isonim_dom.Node(parent),
@@ -435,14 +556,20 @@ when defined(js):
 
     let valueLine = createWebElement("div")
     let valueView = createWebElement("span", "value-view")
-    let valueAtom = createWebElement("div", valueAtomClass(entry, index))
-    if entry.isError:
-      appendWebText(valueAtom, cellText(entry))
+    let valueAtom = createWebElement("div", valueAtomClass(row, index))
+    if row.isError:
+      appendWebText(valueAtom, cellText(row))
     else:
       let valueText = createWebElement("span", "value-expanded-text")
-      appendWebText(valueText, cellText(entry))
+      appendWebText(valueText, cellText(row))
       isonim_dom.appendChild(isonim_dom.Node(valueAtom),
                              isonim_dom.Node(valueText))
+      if row.typeName.len > 0:
+        let typeSpan = createWebElement("span", "value-type")
+        appendWebText(typeSpan, row.typeName)
+        isonim_dom.appendChild(isonim_dom.Node(valueAtom),
+                               isonim_dom.Node(typeSpan))
+
     isonim_dom.appendChild(isonim_dom.Node(valueView),
                            isonim_dom.Node(valueAtom))
     isonim_dom.appendChild(isonim_dom.Node(valueLine),
@@ -451,8 +578,8 @@ when defined(js):
                            isonim_dom.Node(valueLine))
     isonim_dom.appendChild(isonim_dom.Node(valueRoot),
                            isonim_dom.Node(parent))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(valueRoot))
-    row
+    isonim_dom.appendChild(isonim_dom.Node(elementRow), isonim_dom.Node(valueRoot))
+    elementRow
 
   proc renderChainDiffWeb(left, right: ScratchpadChainEntry;
                           pairIndex: int): isonim_dom.Element =
@@ -543,13 +670,13 @@ when defined(js):
           text ScratchpadEmptyStateText
 
     createRenderEffect proc() =
-      let entries = vm.entries.val
+      let rowViews = getScratchpadRowViews(vm)
       let chains = vm.chainEntries.val
       clearWebChildren(listContainer)
-      for i, entry in entries:
-        let row = renderRowWeb(vm, entry, i)
+      for i, row in rowViews:
+        let itemRow = renderRowWeb(vm, row, i)
         isonim_dom.appendChild(isonim_dom.Node(listContainer),
-                               isonim_dom.Node(row))
+                               isonim_dom.Node(itemRow))
       clearWebChildren(chainListContainer)
       for i, entry in chains:
         let card = renderChainRowWeb(vm, entry, i)
@@ -563,7 +690,7 @@ when defined(js):
           isonim_dom.appendChild(isonim_dom.Node(diffContainer),
                                  isonim_dom.Node(diff))
 
-      if entries.len == 0 and chains.len == 0:
+      if rowViews.len == 0 and chains.len == 0:
         isonim_dom.setAttribute(emptyContainer, cstring"class",
                                 cstring"empty-overlay")
       else:

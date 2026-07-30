@@ -22,6 +22,28 @@ from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_flow_view import
   mountIsoNimFlow
 
+proc removeMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
+  #.changeViewZones(function(accessor) {
+    accessor.removeZone(#);
+  })
+""".}
+
+proc addMonacoViewZone(editor: MonacoEditor, zone: js): int {.importjs: """
+  (function() {
+    let zoneId = 0;
+    #.changeViewZones(function(accessor) {
+      zoneId = accessor.addZone(#);
+    });
+    return zoneId;
+  })()
+""".}
+
+proc layoutMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
+  #.changeViewZones(function(accessor) {
+    accessor.layoutZone(#);
+  })
+""".}
+
 proc appendToDocumentBody(node: dom_api.Node) {.importjs: "document.body.appendChild(#)".}
 
 # Module-level FlowVM instance. Created once and fed data whenever
@@ -30,6 +52,9 @@ proc appendToDocumentBody(node: dom_api.Node) {.importjs: "document.body.appendC
 var flowVMInstance: FlowVM
 var flowVMStore: ReplayDataStore
 var isoNimFlowMounted*: bool = false
+
+when defined(js):
+  proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
 
 proc tryMountIsoNimFlowPanel()
 
@@ -98,6 +123,30 @@ proc jsQuerySelector(selector: cstring): dom_api.Element
   ## Thin wrapper around `document.querySelector` for cases where
   ## the isonim dom_api does not expose this method.
 
+type
+  FlowMountData = ref object
+    retryCount: int
+
+proc doMountFlowPanel(data: FlowMountData) {.cdecl.} =
+  if isoNimFlowMounted:
+    return
+  data.retryCount += 1
+  let container = jsQuerySelector(cstring".flow-component-container")
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    if data.retryCount > 100:
+      clog "IsoNim flow panel: container not found after 100 retries, giving up"
+      return
+    setTimeoutWithArg(doMountFlowPanel, 0, data)
+    return
+
+  let containerNode = dom_api.Node(container)
+  while not dom_api.isNodeNil(containerNode.firstChild):
+    discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+  isoNimFlowMounted = true
+  mountIsoNimFlow(dom_api.Element(containerNode), flowVMInstance)
+  clog "IsoNim flow panel: mounted as primary renderer in .flow-component-container"
+
 proc tryMountIsoNimFlowPanel() =
   ## Mount the IsoNim flow panel view into the first
   ## `.flow-component-container` element in the DOM. The IsoNim view
@@ -116,35 +165,8 @@ proc tryMountIsoNimFlowPanel() =
   if isoNimFlowMounted or flowVMInstance.isNil:
     return
 
-  # Try to mount synchronously. If the container doesn't exist yet,
-  # retry on the next event loop tick instead of using a 500ms delay.
-  # Gives up after 100 retries to avoid infinite spinning.
-  var flowRetryCount = 0
-  proc doMount() =
-    if isoNimFlowMounted:
-      return
-    flowRetryCount += 1
-    let container = jsQuerySelector(cstring".flow-component-container")
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if flowRetryCount > 100:
-        clog "IsoNim flow panel: container not found after 100 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 0)
-      return
-
-    # Clear existing Karax-rendered content so the IsoNim view has a
-    # clean container. The existing DOM manipulation code
-    # (createFlowViewZone, makeSlider, etc.) will re-populate the
-    # container via its normal code paths.
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimFlowMounted = true
-    mountIsoNimFlow(dom_api.Element(containerNode), flowVMInstance)
-    clog "IsoNim flow panel: mounted as primary renderer in .flow-component-container"
-
-  doMount()
+  let mountData = FlowMountData(retryCount: 0)
+  doMountFlowPanel(mountData)
 
 # thank, God!
 proc resizeLineSlider(self: FlowComponent, position: int)
@@ -608,7 +630,8 @@ let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
   emptyKeywords,  # LangCadence
   emptyKeywords,  # LangSolana
   emptyKeywords,  # LangElixir
-  emptyKeywords   # LangErlang
+  emptyKeywords,  # LangErlang
+  emptyKeywords   # LangPhp
 ]
 
 func isSymbol(c: char, lang: Lang): bool =
@@ -689,8 +712,7 @@ func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
 
 proc removeExpandedFlow(self: FlowComponent, line: int) =
   if self.multilineZones.hasKey(line):
-    self.editorUI.monacoEditor.changeViewZones do (view: js):
-      view.removeZone(self.multilineZones[line].zoneID)
+    removeMonacoViewZone(self.editorUI.monacoEditor, self.multilineZones[line].zoneID)
 
 proc registerScratchpadValue(self: ScratchpadComponent, expression: cstring, value: Value) =
   self.programValues.add((expression, value))
@@ -779,6 +801,10 @@ proc openTooltip*(self: FlowComponent, containerId: cstring, value: Value) =
   self.displayTooltip(containerId, valueDom)
 
 func ensureTokens(self: FlowComponent, line: int) =
+  if self.tab.isNil or self.tab.sourceLines.len == 0:
+    return
+  if line - 1 < 0 or line - 1 >= self.tab.sourceLines.len:
+    return
   if not self.editorUI.tokens.hasKey(line):
     self.editorUI.tokens[line] = JsAssoc[cstring, int]{}
     let tokens = tokenizeExpressions(self.tab.sourceLines[line - 1], self.data.trace.lang)
@@ -1817,8 +1843,7 @@ proc clearParallel(self: FlowComponent) =
 
     if not tab.monacoEditor.isNil:
       for _, viewZone in self.loopViewZones:
-        tab.monacoEditor.changeViewZones do (view: js):
-          view.removeZone(viewZone)
+        removeMonacoViewZone(tab.monacoEditor, viewZone)
       # clear flow line content widgets
       for _, flowLine in self.flowLines:
         if not flowLine.contentWidget.isNil:
@@ -1855,12 +1880,11 @@ proc removeViewZones(self: FlowComponent, zones: JsAssoc[int, int]) =
   if self.inExtension or self.editorUI.isNil or self.editorUI.monacoEditor.isNil:
     return
 
-  self.editorUI.monacoEditor.changeViewZones do (view: js):
-    for _, zoneId in zones:
-      try:
-        view.removeZone(zoneId)
-      except:
-        discard
+  for _, zoneId in zones:
+    try:
+      removeMonacoViewZone(self.editorUI.monacoEditor, zoneId)
+    except:
+      discard
 
 proc clearViewZones(self: FlowComponent) =
   self.removeViewZones(self.viewZones)
@@ -2417,11 +2441,21 @@ proc insertFlowInlineValues(self: FlowComponent, step: FlowStep) =
         self.flowLines[step.position].decorationsDoms[expression] = lineDecorationsDoms[index]
         index += 1
 
+type
+  InlineFlowValuesData = ref object
+    self: FlowComponent
+    step: FlowStep
+
+proc triggerInsertFlowInlineValues(data: InlineFlowValuesData) {.cdecl.} =
+  if not data.self.isNil:
+    data.self.insertFlowInlineValues(data.step)
+
 proc makeInlineFlowLines(self: FlowComponent, step: FlowStep) =
   if self.flowLines[step.position].decorationsIds.len == 0:
     self.insertInlineDecorations(step)
 
-  let id = setTimeout(proc = self.insertFlowInlineValues(step), 50)
+  let valData = InlineFlowValuesData(self: self, step: step)
+  setTimeoutWithArg(triggerInsertFlowInlineValues, 50, valData)
 
 proc renderContinuousStep(
   self: FlowComponent,
@@ -3330,11 +3364,11 @@ proc flowLoopValue*(
   allIterations: int,
   style: VStyle
 ): Node =
-  # let flowMode =
-  #   ($self.data.config.flow.realFlowUI)
-  #     .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
-  #     .toLowerAscii()
-  var iteration = step.iteration
+  var iteration =
+    if self.loopStates.hasKey(step.loop):
+      self.loopStates[step.loop].activeIteration
+    else:
+      step.iteration
   var width = len(intToStr(allIterations))
 
   proc onEnter(self: FlowComponent) =
@@ -3394,23 +3428,30 @@ proc flowLoopValue*(
   result.appendChild(loopSpan)
 
 proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration = step.iteration
+  let iteration =
+    if self.loopStates.hasKey(step.loop):
+      self.loopStates[step.loop].activeIteration
+    else:
+      step.iteration
   let previousIteration = max(iteration - 1, 0)
 
   result = document.createElement(cstring"button")
-  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border")
+  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border flow-loop-button backward")
   result.setAttribute(cstring"id", cstring"backward-loop")
   result.applyStyle(style)
   if iteration - 1 < 0:
     result.setAttribute(cstring"disabled", cstring"disabled")
   result.addEventListener(cstring"click", proc(e: Event) =
     self.selectLoopIteration(step.loop, previousIteration, step.position)
-    self.redrawFlow()
     self.redraw()
   )
 
 proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration = step.iteration
+  let iteration =
+    if self.loopStates.hasKey(step.loop):
+      self.loopStates[step.loop].activeIteration
+    else:
+      step.iteration
   let maxIterations =
     if step.loop >= 0 and step.loop < self.flow.loopIterationSteps.len:
       self.flow.loopIterationSteps[step.loop].len - 1
@@ -3419,14 +3460,13 @@ proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): 
   let nextIteration = min(iteration + 1, maxIterations)
 
   result = document.createElement(cstring"button")
-  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border")
+  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border flow-loop-button forward")
   result.setAttribute(cstring"id", cstring"forward-loop")
   result.applyStyle(style)
   if maxIterations == iteration:
     result.setAttribute(cstring"disabled", cstring"disabled")
   result.addEventListener(cstring"click", proc(e: Event) =
     self.selectLoopIteration(step.loop, nextIteration, step.position)
-    self.redrawFlow()
     self.redraw()
   )
 
@@ -3472,7 +3512,11 @@ proc makeLoopLine(
 proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   let expression = &"for-{step.position}"
   # render variable lines in the viewZone
-  let allIterations = self.flow.loops[step.loop].rrTicksForIterations.len - 1
+  let allIterations =
+    if step.loop >= 0 and step.loop < self.flow.loopIterationSteps.len:
+      self.flow.loopIterationSteps[step.loop].len - 1
+    else:
+      self.flow.loops[step.loop].rrTicksForIterations.len - 1
   let dom = self.makeLoopLine(step, allIterations)
   cast[Node](self.flowLoops[step.position].flowZones.dom).appendChild(dom)
 
@@ -3676,22 +3720,25 @@ proc renderActiveLoopIterationValues(self: FlowComponent) =
     let step = self.flow.steps[stepCount]
     self.renderLoopIterationStepValue(step.loop, step)
 
+type
+  LoopIterationRenderData = ref object
+    self: FlowComponent
+
+proc doRenderActiveLoopIterationValues(data: LoopIterationRenderData) {.cdecl.} =
+  if data.self.isNil or data.self.flow.isNil:
+    return
+  data.self.renderActiveLoopIterationValues()
+  if not data.self.inExtension and not data.self.editorUI.isNil:
+    data.self.editorUI.adjustEditorWidth()
+    data.self.resizeFlowSlider()
+
 proc scheduleActiveLoopIterationValueRender*(self: FlowComponent) =
-  proc renderLater(delay: int) =
-    discard setTimeout(proc() =
-      if self.flow.isNil:
-        return
-
-      self.renderActiveLoopIterationValues()
-      if not self.inExtension and not self.editorUI.isNil:
-        self.editorUI.adjustEditorWidth()
-    , delay)
-
-  renderLater(0)
-  renderLater(100)
-  renderLater(500)
-  renderLater(1000)
-  renderLater(2000)
+  let renderData = LoopIterationRenderData(self: self)
+  setTimeoutWithArg(doRenderActiveLoopIterationValues, 0, renderData)
+  setTimeoutWithArg(doRenderActiveLoopIterationValues, 100, renderData)
+  setTimeoutWithArg(doRenderActiveLoopIterationValues, 500, renderData)
+  setTimeoutWithArg(doRenderActiveLoopIterationValues, 1000, renderData)
+  setTimeoutWithArg(doRenderActiveLoopIterationValues, 2000, renderData)
 
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
@@ -3757,13 +3804,20 @@ proc renderFlowLines*(self: FlowComponent) =
 proc reloadFlow*(self:FlowComponent) =
   self.renderFlowLines()
 
+type
+  FlowRedrawData = ref object
+    self: FlowComponent
+
+proc doFlowRedraw(data: FlowRedrawData) {.cdecl.} =
+  if data.self.isNil or data.self.flow.isNil:
+    return
+  data.self.redrawFlow()
+  data.self.redraw()
+  data.self.scheduleActiveLoopIterationValueRender()
+
 proc scheduleFlowRedraw(self: FlowComponent, delay: int) =
-  discard setTimeout(proc() =
-    if not self.flow.isNil:
-      self.redrawFlow()
-      self.redraw()
-      self.scheduleActiveLoopIterationValueRender()
-  , delay)
+  let redrawData = FlowRedrawData(self: self)
+  setTimeoutWithArg(doFlowRedraw, delay, redrawData)
 
 proc createFlowLines(self: FlowComponent) =
   let editorContentLeft =
@@ -3883,6 +3937,10 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     self.status = update.status
 
     let editorView = if self.inExtension: EditorView.ViewSource else: self.editorUI.editorView
+    if ord(editorView) < 0 or ord(editorView) >= update.view_updates.len:
+      cerror "flow: editorView index out of bounds: " & $ord(editorView) & " updates len: " & $update.view_updates.len
+      return
+
     if update.location.key != self.key:
       self.resetFlow()
       self.key = update.location.key
@@ -3897,6 +3955,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     self.recalculateAndRedrawFlow()
 
     self.redrawFlow()
+    self.updateFlowOnMove(self.location.rrTicks, self.location.line)
 
     self.recalculate = true
     self.redraw()
@@ -3904,8 +3963,6 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     self.scheduleFlowRedraw(100)
     self.scheduleActiveLoopIterationValueRender()
   except:
-    cerror lastJSError
-    cerror lastJSError.stack
     cerror "flow: " & getCurrentExceptionMsg()
 
 
@@ -3960,6 +4017,8 @@ proc makeSliderDom(self: FlowComponent, position: int): Node =
     dom.appendChild(childDom)
 
   self.flowLoops[position].sliderDom = dom.childNodes[0]
+  if self.flowLines.hasKey(position):
+    self.flowLines[position].sliderDom = dom.childNodes[0]
 
   return dom
 
@@ -3974,12 +4033,22 @@ proc resizeEditorHandler(self:FlowComponent, position: int) =
   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
   self.resizeFlowSlider()
 
+type
+  ResizeEditorData = ref object
+    self: FlowComponent
+    position: int
+
+proc triggerResizeEditorHandler(data: ResizeEditorData) {.cdecl.} =
+  if not data.self.isNil:
+    resizeEditorHandler(data.self, data.position)
+
 proc setEditorResizeObserver(self: FLowComponent, position: int) =
   let activeEditor = "\"" & self.data.services.editor.active & "\""
   let editorDom = jq(fmt"[data-label={activeEditor}]")
+  let resizeData = ResizeEditorData(self: self, position: position)
   let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
     for entry in entries:
-      let timeout = setTimeout(proc = resizeEditorHandler(self, position),100))
+      setTimeoutWithArg(triggerResizeEditorHandler, 100, resizeData))
 
   resizeObserver.observe(cast[Node](editorDom))
 
@@ -4011,13 +4080,11 @@ proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, i
         }
 
     if isLoop:
-      self.editorUI.monacoEditor.changeViewZones do (view: js):
-        var zoneId = cast[int](view.addZone(viewZone))
-        self.loopViewZones[position] = zoneId
+      var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
+      self.loopViewZones[position] = zoneId
     else:
-      self.editorUI.monacoEditor.changeViewZones do (view: js):
-        var zoneId = cast[int](view.addZone(viewZone))
-        self.viewZones[position] = zoneId
+      var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
+      self.viewZones[position] = zoneId
 
   # calculate previous position indentations count
   let lineNumberDom = document.createElement("div")
@@ -4090,7 +4157,6 @@ proc makeSlider(self: FlowComponent, position: int) =
       self.flowLoops[position].loopStep = activeStep
       self.activeStep = activeStep
     # self.updateFlowOnMove(newStepCount + 1, activeStep.position)
-    self.redrawFlow()
     # TODO?
     # if self.lastSliderUpdateTimeInMs <= 0 or newTimeInMs - self.lastSliderUpdateTimeInMs >= 100:
     self.lastSliderUpdateTimeInMs = newTimeInMs
@@ -4497,7 +4563,13 @@ proc resizeFlowSlider*(self: FlowComponent) =
   self.shouldRecalcFlow = false
 
   for position, loop in self.flowLoops:
-    loop.sliderDom.applyStyle(self.loopSliderStyle(position))
+    if not loop.sliderDom.isNil:
+      loop.sliderDom.applyStyle(self.loopSliderStyle(position))
+      let container = jq(fmt"#flow-loop-slider-container-{position}")
+      if not container.isNil and not loop.flowDom.isNil:
+        let leftValue = cast[Element](loop.flowDom).clientWidth
+        if leftValue != 0:
+          container.style.left = cstring(fmt"calc({leftValue}px - 2ch)")
 
 proc redrawFlow*(self: FlowComponent) =
   self.clear()
@@ -4528,15 +4600,20 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
     # add "active" class to step containers of the steps of the active loop iteration
     if self.loopStates.hasKey(activeLoop) and not flowLine.stepLoopCells.isUndefined:
       let loopContainer = self.loopStates[activeLoop].containerDoms[line]
-      let activeIterationStep = self.flow.steps[flowLine.loopStepCounts[activeLoop][activeIteration]]
-      let activeIterationStepDom = flowLine.stepLoopCells[activeLoop][activeIteration]
+      if flowLine.loopStepCounts.hasKey(activeLoop) and
+         activeIteration >= 0 and
+         activeIteration < flowLine.loopStepCounts[activeLoop].len and
+         flowLine.stepLoopCells.hasKey(activeLoop) and
+         flowLine.stepLoopCells[activeLoop].hasKey(activeIteration):
+        let activeIterationStep = self.flow.steps[flowLine.loopStepCounts[activeLoop][activeIteration]]
+        let activeIterationStepDom = flowLine.stepLoopCells[activeLoop][activeIteration]
 
-      if not activeIterationStepDom.isNil:
-        activeIterationStepDom.toJs.classList.toJs.add("active-flow-step")
-        flowLine.activeIterationPosition =
-          self.getStepDomOffsetLeft(activeIterationStep)
-        if flowLine.activeIterationPosition > self.maxLoopActiveIterationOffset:
-          self.maxLoopActiveIterationOffset = flowLine.activeIterationPosition
+        if not activeIterationStepDom.isNil:
+          activeIterationStepDom.toJs.classList.toJs.add("active-flow-step")
+          flowLine.activeIterationPosition =
+            self.getStepDomOffsetLeft(activeIterationStep)
+          if flowLine.activeIterationPosition > self.maxLoopActiveIterationOffset:
+            self.maxLoopActiveIterationOffset = flowLine.activeIterationPosition
 
     case self.data.config.flow.realFlowUI:
     of FlowMultiline:
@@ -4590,31 +4667,31 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
       flowLineAtLocation.activeLoopIteration.loopIndex
     let activeIterationAtLocation =
       flowLineAtLocation.activeLoopIteration.iteration
-    let activeLoopFirstLine = self.flow.loops[activeLoopAtLocation].first
+    if activeLoopAtLocation >= 0 and activeLoopAtLocation < self.flow.loops.len:
+      let activeLoopFirstLine = self.flow.loops[activeLoopAtLocation].first
 
-    self.move(activeLoopAtLocation,
-              activeIterationAtLocation,
-              activeLoopFirstLine)
+      self.move(activeLoopAtLocation,
+                activeIterationAtLocation,
+                activeLoopFirstLine)
 
-    let activeLoopBaseIteration = self.flow.loops[activeLoopAtLocation].baseIteration
-    var sliderPositionsCount = 0
+      let activeLoopBaseIteration = self.flow.loops[activeLoopAtLocation].baseIteration
+      var sliderPositionsCount = 0
 
-    if activeLoopBaseIteration == -1:
-      sliderPositionsCount = activeIterationAtLocation
-    else:
-      let iterationRatio =
-        activeIterationAtLocation.float / self.flow.loops[activeLoopAtLocation].iteration.float
-      sliderPositionsCount =
-        self.calculateSliderPosition(activeLoopFirstLine, activeLoopBaseIteration, iterationRatio)
+      if activeLoopBaseIteration == -1:
+        sliderPositionsCount = activeIterationAtLocation
+      else:
+        let iterationRatio =
+          activeIterationAtLocation.float / self.flow.loops[activeLoopAtLocation].iteration.float
+        sliderPositionsCount =
+          self.calculateSliderPosition(activeLoopFirstLine, activeLoopBaseIteration, iterationRatio)
 
-    if not self.flowLines[activeLoopFirstLine].sliderDom.isNil and not self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.isNil:
-      self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
+      if not self.flowLines[activeLoopFirstLine].sliderDom.isNil and not self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.isNil:
+        self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
 
 
 method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
   self.location = response.location
-  # self.updateFlowOnMove(self.location.rrTicks, self.location.line)
-  self.redrawFlow()
+  self.updateFlowOnMove(self.location.rrTicks, self.location.line)
   self.scheduleActiveLoopIterationValueRender()
 
 method onLoadedFlowShape*(self: Component, update: FlowShape) {.async.} =

@@ -561,6 +561,7 @@ proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
 proc makeVCSComponent*(data: Data, id: int): VCSComponent =
   result = VCSComponent(
     id: id,
+    diffTarget: cstring"",
     currentBranch: cstring"",
     branches: @[],
     commits: @[],
@@ -682,7 +683,7 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: 
     id: id,
     lineCount: 1,
     resultsHeight: 36,
-    # name: name,
+    name: name,
     line: line,
     tracepoint: Tracepoint(
       tracepointId: id,
@@ -1052,7 +1053,7 @@ proc openPanel*(
   # works for non-viewer tabs, TODO?
   # cdebug "tabs: openPanel " & label & " " & $content & " " & $editorView
 
-  let componentName = if isEditor: cstring"editorComponent" else: cstring"genericUiComponent"
+  let componentName = if isEditor and content == Content.EditorView: cstring"editorComponent" else: cstring"genericUiComponent"
 
   var itemConfig = GoldenLayoutConfig(
     `type`: cstring"component",
@@ -1231,7 +1232,7 @@ proc openLayoutTab*(
     parent = similarParent
   else:
     let hasOpenEditors = data.hasActiveOpenEditors()
-    if (content == Content.EditorView or content == Content.NoInfo) and
+    if (content == Content.EditorView or content == Content.NoInfo or (content == Content.VCS and isEditor)) and
       not data.ui.editorPanels[EditorView.ViewSource].isNil and
       hasOpenEditors:
       let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
@@ -1254,7 +1255,11 @@ proc openLayoutTab*(
         else:
           data.generateId(content)
 
-      data.makeComponent(content, newId, layoutPath)
+      let comp = data.makeComponent(content, newId, layoutPath)
+      if content == Content.VCS:
+        let vcsComp = cast[VCSComponent](comp)
+        vcsComp.diffTarget = layoutPath
+      comp
     else:
       data.ui.editors[layoutPath]
 

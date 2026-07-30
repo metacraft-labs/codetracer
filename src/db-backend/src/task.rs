@@ -885,17 +885,22 @@ pub struct ProgramEvent {
     #[serde(default)]
     pub semantic_kind: String,
     pub content: String,
+    #[serde(default)]
     pub rr_event_id: usize,
     pub high_level_path: String,
     pub high_level_line: i64,
     pub metadata: String,
+    #[serde(default)]
     pub bytes: usize,
+    #[serde(default)]
     pub stdout: bool,
     #[serde(rename = "directLocationRRTicks")]
     pub direct_location_rr_ticks: i64,
+    #[serde(default)]
     pub tracepoint_result_index: i64,
+    #[serde(default)]
     pub event_index: usize,
-    #[serde(rename = "base64Encoded")]
+    #[serde(rename = "base64Encoded", default)]
     pub base64_encoded: bool,
     #[serde(rename = "maxRRTicks")]
     pub max_rr_ticks: i64,

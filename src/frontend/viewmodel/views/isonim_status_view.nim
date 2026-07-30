@@ -62,8 +62,8 @@ const
   StatusBaseId* = "status-base"
   CollapsedIconZoneHostId* = "auto-hide-collapsed-icon-zone"
   CollapsedIconZoneClass* = "collapsed-icon-zone"
-  BottomTabsHostId* = "auto-hide-bottom-tabs"
-  BottomTabsClass* = "auto-hide-bottom-tabs"
+  BottomStripHostId* = "auto-hide-bottom-strip"
+  BottomStripClass* = "auto-hide-bottom-strip"
 
 proc invokePause(callbacks: StatusShellCallbacks) =
   if not callbacks.onPauseActiveNotifications.isNil:
@@ -183,7 +183,7 @@ template renderStatusShellImpl(
           span(id = "operation-status"):
             span(id = "stable-status", class = model.base.processClass):
               text model.base.processText
-        tdiv(id = BottomTabsHostId, class = BottomTabsClass):
+        tdiv(id = BottomStripHostId, class = BottomStripClass):
           discard
         if model.base.showTestMovement:
           span(class = "test-movement"):

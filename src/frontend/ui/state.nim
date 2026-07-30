@@ -15,6 +15,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/viewmodels/state_vm
 import ../viewmodel/viewmodels/origin_chain_vm
 import ../viewmodel/viewmodels/origin_chain_types
@@ -32,6 +33,10 @@ var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
 var stateHistoryBridge: proc(expression: string)
 var isoNimStateMounted: bool = false
+
+when defined(js):
+  proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
+
 
 # Value Origin Tracking (M4): a single module-level OriginChainVM
 # instance is created alongside the StateVM so the State Pane's inline
@@ -109,6 +114,49 @@ when defined(ctInExtension):
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
+type
+  StateMountData = ref object
+    key: cstring
+    retryCount: int
+
+proc doMountStatePanel(data: StateMountData) {.cdecl.} =
+  if isoNimStateMounted:
+    return
+  data.retryCount += 1
+  let container = dom_api.getElementById(dom_api.document, data.key)
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    if data.retryCount mod 10 == 0:
+      cerror "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $data.retryCount
+    if data.retryCount > 200:
+      cerror "[PIPELINE] tryMountIsoNimStatePanel: not ready after 200 retries, giving up"
+      return
+    setTimeoutWithArg(doMountStatePanel, 10, data)
+    return
+
+  let containerNode = dom_api.Node(container)
+  while not dom_api.isNodeNil(containerNode.firstChild):
+    discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+  cerror "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
+  isoNimStateMounted = true
+  mountIsoNimStatePanel(container, stateVMInstance)
+  cerror "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
+
+  let panelContainer = container
+  createEffect proc() =
+    # Reading the signal subscribes us so we re-fire whenever a new
+    # batch of locals (and therefore a new batch of placeholder
+    # tokens) arrives.
+    discard stateVMInstance.originSummaries.val
+    # Defer the DOM walk via setTimeoutWithArg
+    setTimeoutWithArg(proc(containerEl: dom_api.Element) {.cdecl.} =
+      let nodeList = containerEl.toJs.querySelectorAll(
+        cstring"button.ct-origin-badge.ct-origin-badge-placeholder")
+      let count = nodeList.length.to(int)
+      for i in 0 ..< count:
+        observePlaceholderBadgeJs(nodeList[i])
+    , 0, panelContainer)
+
 proc tryMountIsoNimStatePanel() =
   ## Mount the IsoNim state panel view into the GoldenLayout-managed
   ## state component container. The container is created by GoldenLayout
@@ -126,62 +174,11 @@ proc tryMountIsoNimStatePanel() =
     cerror "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
     return
 
-  # Wait for the DOM container to exist. GoldenLayout creates it when
-  # the component is registered. IsoNim mounts directly into it.
-  let key = cstring"stateComponent-0"
-  var stateRetryCount = 0
-  proc doMount() =
-    if isoNimStateMounted:
-      return
-    stateRetryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if stateRetryCount mod 10 == 0:
-        cerror "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $stateRetryCount
-      if stateRetryCount > 200:
-        cerror "[PIPELINE] tryMountIsoNimStatePanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    cerror "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
-    isoNimStateMounted = true
-    mountIsoNimStatePanel(container, stateVMInstance)
-    cerror "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
-    # M4 deliverable §3.2.3 + Gap 4 — install the
-    # IntersectionObserver-driven lazy-fill bridge once the panel is
-    # mounted.  A reactive effect re-walks the State Pane each time
-    # the per-row ``originSummaries`` signal changes (which is also
-    # the only moment placeholder badges can appear) and registers
-    # every fresh placeholder pill with the shared observer.  The
-    # observer auto-un-observes each pill on first intersection, so
-    # re-walking on later updates only picks up newly-rendered
-    # placeholders.
-    let panelContainer = container
-    createEffect proc() =
-      # Reading the signal subscribes us so we re-fire whenever a new
-      # batch of locals (and therefore a new batch of placeholder
-      # tokens) arrives.
-      discard stateVMInstance.originSummaries.val
-      # Defer the DOM walk via setTimeout(0) so the IsoNim reactive
-      # effect that rebuilds the row list has a chance to finish
-      # appending the new badge nodes before we querySelectorAll for
-      # them.  Without this defer we'd race the render and miss new
-      # placeholder pills.
-      discard setTimeout(proc() =
-        let containerEl = panelContainer
-        let nodeList = containerEl.toJs.querySelectorAll(
-          cstring"button.ct-origin-badge.ct-origin-badge-placeholder")
-        let count = nodeList.length.to(int)
-        for i in 0 ..< count:
-          observePlaceholderBadgeJs(nodeList[i])
-      , 0)
-
-  doMount()
+  let mountData = StateMountData(
+    key: cstring"stateComponent-0",
+    retryCount: 0
+  )
+  doMountStatePanel(mountData)
 
 # ---------------------------------------------------------------------------
 # Origin Chain side-panel mount (M4 deliverable #9). The panel lives
@@ -382,7 +379,7 @@ proc initStateVM() =
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()
 
-proc valueDisplayText(v: Value): string =
+proc valueDisplayText*(v: Value): string =
   ## Rendered text representation matching what the legacy value row emitted
   ## for atom values.
   ##
@@ -402,7 +399,7 @@ proc valueDisplayText(v: Value): string =
     return ""
   $v
 
-proc valueDisplayType(v: Value): string =
+proc valueDisplayType*(v: Value): string =
   ## Original-language type name (``i32``, ``int``, ``string`` …)
   ## matching the legacy ``span.value-type`` text. The legacy value
   ## renderer used ``value.typ.langType`` directly for atom rows;
@@ -413,6 +410,62 @@ proc valueDisplayType(v: Value): string =
   if not v.typ.isNil and v.typ.langType.len > 0:
     return $v.typ.langType
   $v.kind
+
+proc toVariableChildren*(val: Value): seq[store_types.Variable] =
+  result = @[]
+  if val.isNil:
+    return
+
+  var value = val
+  if value.kind in {TypeKind.Pointer, TypeKind.Ref} and not value.refValue.isNil:
+    value = value.refValue
+
+  case value.kind:
+  of Seq, Set, HashSet, OrderedSet, Array, Varargs:
+    for i, element in value.elements:
+      let childName = "[" & $i & "]"
+      let hasChild = (if element.isNil: false else: element.elements.len > 0 or element.kind in {TypeKind.Pointer, TypeKind.Ref} or element.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+      result.add(makeVariable(
+        name = childName,
+        value = valueDisplayText(element),
+        typeName = valueDisplayType(element),
+        hasChildren = hasChild,
+        children = toVariableChildren(element)
+      ))
+  of Variant:
+    if not value.activeVariantValue.isNil:
+      result = toVariableChildren(value.activeVariantValue)
+  of TableKind:
+    for items in value.items:
+      let childName = $items[0]
+      let element = items[1]
+      let hasChild = (if element.isNil: false else: element.elements.len > 0 or element.kind in {TypeKind.Pointer, TypeKind.Ref} or element.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+      result.add(makeVariable(
+        name = childName,
+        value = valueDisplayText(element),
+        typeName = valueDisplayType(element),
+        hasChildren = hasChild,
+        children = toVariableChildren(element)
+      ))
+  of Instance, Union, Tuple:
+    if value.kind == Union:
+      if not value.activeVariantValue.isNil:
+        result = toVariableChildren(value.activeVariantValue)
+    else:
+      for i, label in value.typ.labels:
+        if i < value.elements.len:
+          let element = value.elements[i]
+          let childName = $label
+          let hasChild = (if element.isNil: false else: element.elements.len > 0 or element.kind in {TypeKind.Pointer, TypeKind.Ref} or element.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+          result.add(makeVariable(
+            name = childName,
+            value = valueDisplayText(element),
+            typeName = valueDisplayType(element),
+            hasChildren = hasChild,
+            children = toVariableChildren(element)
+          ))
+  else:
+    discard
 
 proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the
@@ -431,11 +484,13 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
     return
   var vmLocals = newVariableSeq()
   for v in legacyLocals:
+    let hasChild = (if v.value.isNil: false else: v.value.elements.len > 0 or v.value.kind in {TypeKind.Pointer, TypeKind.Ref} or v.value.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
     vmLocals.add(makeVariable(
       name = $v.expression,
       value = valueDisplayText(v.value),
       typeName = valueDisplayType(v.value),
-      hasChildren = (if v.value.isNil: false else: v.value.elements.len > 0),
+      hasChildren = hasChild,
+      children = toVariableChildren(v.value),
     ))
   stateVMStore.updateLocals(vmLocals)
   cerror fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
@@ -463,6 +518,23 @@ proc lookupSourceLine(path: cstring; line: int): string =
   if line > lines.len:
     return ""
   $lines[line - 1]
+
+type
+  SourceLineRetryData = ref object
+    path: cstring
+    line: int
+    attempts: int
+
+proc retrySourceLine(data: SourceLineRetryData) {.cdecl.} =
+  if stateVMStore.isNil:
+    return
+  data.attempts += 1
+  let cur = lookupSourceLine(data.path, data.line)
+  if cur.len > 0:
+    stateVMStore.updateCodeStateLine(data.line, cur)
+    return
+  if data.attempts < 30:
+    setTimeoutWithArg(retrySourceLine, 100, data)
 
 proc syncStoreCodeStateLine*(path: cstring; line: int) =
   ## Mirror the active source line into the ViewModel store so the
@@ -495,20 +567,12 @@ proc syncStoreCodeStateLine*(path: cstring; line: int) =
   # for the duration of this scheduled re-check; any subsequent move
   # cancels the relevance of older retries because the next call to
   # ``syncStoreCodeStateLine`` overwrites the signal anyway.
-  let capturedPath = path
-  let capturedLine = line
-  var attempts = 0
-  proc retry() =
-    if stateVMStore.isNil:
-      return
-    attempts += 1
-    let cur = lookupSourceLine(capturedPath, capturedLine)
-    if cur.len > 0:
-      stateVMStore.updateCodeStateLine(capturedLine, cur)
-      return
-    if attempts < 30:
-      discard setTimeout(proc() = retry(), 100)
-  discard setTimeout(proc() = retry(), 100)
+  let retryData = SourceLineRetryData(
+    path: path,
+    line: line,
+    attempts: 0
+  )
+  setTimeoutWithArg(retrySourceLine, 100, retryData)
 
 proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int;
                                 sourceGeneration: int = 0;
@@ -568,7 +632,7 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
     if self.values.hasKey(expression):
       let value = self.values[expression]
 
-      for chart in value.charts:
+      for _, chart in value.charts:
         chart.replaceAllValues(expression, localVariable.value.elements)
 
       # # to not leave history for expressions with older context
@@ -643,7 +707,7 @@ when defined(ctInExtension):
 
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.location = response.location
-  for value in self.values:
+  for _, value in self.values:
     value.location = response.location
 
   # Mirror the debugger position into the parallel ViewModel store.

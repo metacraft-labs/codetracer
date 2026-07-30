@@ -43,9 +43,9 @@ import
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_auto_hide_bottom_tabs_view import
-    AutoHideBottomTabRecord, AutoHideBottomTabsCallbacks,
-    renderAutoHideBottomTabsInto
+  from ../viewmodel/views/isonim_auto_hide_bottom_strip_view import
+    AutoHideBottomStripRecord, AutoHideBottomStripCallbacks,
+    renderAutoHideBottomStripInto
   from ../viewmodel/views/isonim_auto_hide_side_strip_view import
     AutoHideSideStripRecord, AutoHideSideStripCallbacks,
     renderAutoHideSideStripInto
@@ -55,6 +55,7 @@ when defined(js):
   from ../viewmodel/views/isonim_auto_hide_overlay_tabs_view import
     AutoHideOverlayTabRecord, AutoHideOverlayTabsCallbacks,
     renderAutoHideOverlayTabsInto
+  from ../viewmodel/views/context_menu_bridge import showContextMenu
 
 # JS array helpers (not exported from any shared module).
 proc newJsArray(): JsObject {.importjs: "(new Array())".}
@@ -85,6 +86,9 @@ type
     domTab*: Element          ## The strip tab DOM element (for removal)
     liveElement*: Element     ## The preserved live DOM element from the GL container
     containerElement*: Element ## The GL container element (parent of liveElement)
+    overlayWidth*: int   ## Remembered overlay pixel width for left/right panels (0 = CSS default)
+    overlayHeight*: int  ## Remembered overlay pixel height for bottom panels (0 = CSS default)
+    isUnpinning*: bool
 
   AutoHideState* = ref object
     ## Central state for all auto-hidden panels.
@@ -92,6 +96,12 @@ type
     activeOverlay*: AutoHidePanel  ## Currently shown overlay, or nil
     lastActivePanel*: AutoHidePanel  ## Last panel shown in overlay (survives hideOverlay)
     overlayVisible*: bool
+    ## True when the overlay was opened via a click (stays open on mouse-leave).
+    ## False when opened via hover-preview (auto-dismisses on mouse-leave).
+    pinnedOpen*: bool
+    ## Panel currently docked into the inline sidebar (not the overlay). nil if none.
+    dockedPanel*: AutoHidePanel
+    dockedVisible*: bool
     ## Collapsed mode: when true, side strips render as 1px accent lines
     ## instead of 28px text-label strips.  Activated when the window is
     ## maximized and the edge is bounded (no adjacent monitor).  Can be
@@ -114,6 +124,41 @@ type
 
 var autoHideState*: AutoHideState = nil
 
+## The GoldenLayout instance, stored so strip-tab callbacks (close/unpin)
+## can call unpinPanel without re-threading layout through every call site.
+## Set by wireOverlayButtons in auto_hide_overlay.nim during layout init.
+var autoHideLayout*: GoldenLayout = nil
+
+## Timer ID for the pending hover-preview open. -1 when idle.
+## Cancelled when the mouse leaves the tab before 200ms elapses.
+var hoverPreviewTimerId: int = -1
+
+## Delay before a hover opens the overlay as a preview (ms).
+const HOVER_PREVIEW_DELAY_MS* = 300
+
+## Resize-drag state for docked sidebars (left/right — horizontal drag).
+var dockedResizing: bool = false
+var dockedResizeStartX: int = 0
+var dockedResizeStartWidth: int = 0
+var dockedResizeContainerId: cstring = cstring""
+## True when dragging the left-panel handle (drag right = expand).
+## False for the right-panel handle (drag left = expand).
+var dockedResizeIsLeft: bool = true
+
+## Resize-drag state for the bottom docked panel (vertical drag).
+var dockedBottomResizing: bool = false
+var dockedBottomResizeStartY: int = 0
+var dockedBottomResizeStartHeight: int = 0
+
+## Resize-drag state for the overlay (hover) panel.
+## Works for both horizontal (left/right) and vertical (bottom) drags.
+var overlayResizing: bool = false
+var overlayResizeIsHorizontal: bool = true  ## true = left/right panel, false = bottom panel
+var overlayResizeIsLeft: bool = true        ## true = left (drag right to expand), false = right
+var overlayResizeStartX: int = 0
+var overlayResizeStartY: int = 0
+var overlayResizeStartSize: int = 0
+
 proc initAutoHideState*() =
   ## Initialise the auto-hide state. Call once during layout init.
   if autoHideState.isNil:
@@ -130,7 +175,7 @@ proc initAutoHideState*() =
 
 proc panelsForEdge*(state: AutoHideState, edge: AutoHideEdge): seq[AutoHidePanel] =
   ## Return all panels pinned to a given edge.
-  state.panels.filterIt(it.edge == edge)
+  state.panels.filterIt(it.edge == edge and not it.isUnpinning)
 
 proc findPanelByContent*(state: AutoHideState, content: Content): AutoHidePanel =
   ## Return the first auto-hidden panel matching the given Content type,
@@ -163,6 +208,14 @@ proc edgeOverlayCssClass*(edge: AutoHideEdge): cstring =
   of Left:   cstring"auto-hide-overlay-left"
   of Right:  cstring"auto-hide-overlay-right"
   of Bottom: cstring"auto-hide-overlay-bottom"
+
+# Forward declarations — defined in the docked sidebar section below.
+# Placed here so pinPanel / unpinPanel can call them before they are defined.
+proc hideDockedPanel*()
+proc cancelHoverPreview*()
+proc hideOverlay*()
+proc deferredUpdateGLSize()
+
 
 # ---------------------------------------------------------------------------
 # Pin / Unpin
@@ -282,7 +335,8 @@ proc pinPanel*(
     config: config,
     domTab: nil,  # will be set when strip is rendered
     liveElement: liveEl,
-    containerElement: containerEl
+    containerElement: containerEl,
+    isUnpinning: false
   )
   autoHideState.panels.add(panel)
 
@@ -291,6 +345,10 @@ proc pinPanel*(
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
 
+  # When the first panel is pinned to a side edge, the strip expands from
+  # 0 to 2em, compressing #ROOT.  GL must recompute its size to fill the
+  # narrower container; defer so the flex reflow is done first.
+  deferredUpdateGLSize()
   dispatchLayoutUpdated()
 
 proc addStandaloneAutoHidePanel*(
@@ -326,7 +384,8 @@ proc addStandaloneAutoHidePanel*(
     config: js{},  # No GL config — standalone panel
     domTab: nil,
     liveElement: liveElement,
-    containerElement: nil
+    containerElement: nil,
+    isUnpinning: false
   )
   autoHideState.panels.add(panel)
 
@@ -346,6 +405,14 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   ## the newly created GL container, preserving all component state.
   if autoHideState.isNil or layout.isNil:
     return
+
+  panel.isUnpinning = true
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
+  # Detach the live element from the docked sidebar if it's currently there.
+  if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+    hideDockedPanel()
 
   # Detach the live element from the overlay if it's currently shown there.
   if autoHideState.activeOverlay == panel:
@@ -383,16 +450,363 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
         discard ground.addItem(panel.config)
   except:
     cerror "auto_hide: failed to re-add panel to GL: " & getCurrentExceptionMsg()
+    panel.isUnpinning = false
+    if not autoHideState.onChanged.isNil:
+      autoHideState.onChanged()
   finally:
     if not data.ui.isNil:
       data.ui.isReparenting = false
 
-  # Remove from state regardless of whether re-add succeeded, so the
-  # strip tab is cleaned up and the user can retry by re-opening
-  # the component from the menu.
+  cdebug fmt"auto_hide: unpinned panel '{panel.title}'"
+
+  # When the last panel is unpinned from a side edge, the strip collapses
+  # back to 0, widening #ROOT.  GL must recompute its size; defer so the
+  # flex reflow and GL's addItem DOM changes are settled first.
+  deferredUpdateGLSize()
+  dispatchLayoutUpdated()
+
+proc repinPanelToEdge*(panel: AutoHidePanel, newEdge: AutoHideEdge) =
+  ## Move an already-pinned panel to a different auto-hide strip without
+  ## restoring it to the GL layout.  Hides the panel if currently visible,
+  ## then updates its edge and triggers a strip re-render.
+  if autoHideState.isNil or panel.isNil:
+    return
+  if autoHideState.dockedPanel == panel and autoHideState.dockedVisible:
+    hideDockedPanel()
+  if autoHideState.activeOverlay == panel:
+    hideOverlay()
+  panel.edge = newEdge
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
+# ---------------------------------------------------------------------------
+# Docked sidebar — inline panel that pushes GL content sideways (click open).
+# ---------------------------------------------------------------------------
+
+proc dockedContainerId(edge: AutoHideEdge): cstring =
+  case edge
+  of Left:   cstring"auto-hide-docked-left"
+  of Right:  cstring"auto-hide-docked-right"
+  of Bottom: cstring"auto-hide-docked-bottom"
+
+proc dockedContentId(edge: AutoHideEdge): cstring =
+  case edge
+  of Left:   cstring"auto-hide-docked-left-content"
+  of Right:  cstring"auto-hide-docked-right-content"
+  of Bottom: cstring"auto-hide-docked-bottom-content"
+
+proc getElementOffsetWidth(el: Element): int {.importjs: "#.offsetWidth".}
+proc getElementOffsetHeight(el: Element): int {.importjs: "#.offsetHeight".}
+
+proc updateGLSize() =
+  ## Tell GoldenLayout to recompute its size after the docked sidebar
+  ## changes width.  autoHideLayout is set by wireOverlayButtons once
+  ## the layout is initialised.
+  if not autoHideLayout.isNil:
+    {.emit: "`autoHideLayout`.updateSize();".}
+
+proc deferredUpdateGLSize() =
+  ## Schedule two GL size updates: one on the next animation frame (so the
+  ## browser has reflowed the new docked-panel width before GL reads it)
+  ## and one after the 150ms CSS transition completes.  Both are needed:
+  ## the first corrects the initial reflow, the second catches the final
+  ## post-transition size.
+  if autoHideLayout.isNil:
+    return
+  {.emit: """
+    requestAnimationFrame(function() {
+      if (`autoHideLayout`[0]) `autoHideLayout`[0].updateSize();
+    });
+  """.}
+  discard windowSetTimeout(proc() = updateGLSize(), 200)
+
+proc hideDockedPanel*() =
+  ## Collapse the docked sidebar back to nothing.
+  if autoHideState.isNil or not autoHideState.dockedVisible:
+    return
+
+  let panel = autoHideState.dockedPanel
+  if not panel.isNil:
+    let contentEl = document.getElementById(dockedContentId(panel.edge))
+    if not contentEl.isNil and not panel.liveElement.isNil:
+      if panel.liveElement.parentNode == cast[Node](contentEl):
+        contentEl.removeChild(panel.liveElement)
+    let containerEl = document.getElementById(dockedContainerId(panel.edge))
+    if not containerEl.isNil:
+      containerEl.classList.remove(cstring"docked-open")
+
+  autoHideState.dockedPanel = nil
+  autoHideState.dockedVisible = false
+
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
+  deferredUpdateGLSize()
+  dispatchLayoutUpdated()
+
+proc showDockedPanel*(panel: AutoHidePanel) =
+  ## Expand the inline docked sidebar for `panel` (triggered by tab click).
+  ## The panel content is reparented into the sidebar, pushing GL content
+  ## sideways.  Clicking the same tab again collapses the sidebar.
+  if autoHideState.isNil:
+    return
+
+  cancelHoverPreview()
+
+  # Toggle: clicking the same tab closes it.
+  if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+    hideDockedPanel()
+    return
+
+  # If a different panel is already docked, close it first.
+  if autoHideState.dockedVisible:
+    hideDockedPanel()
+
+  # If this panel is currently shown in the hover overlay, close that too.
+  if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
+    hideOverlay()
+
+  let contentEl = document.getElementById(dockedContentId(panel.edge))
+  let containerEl = document.getElementById(dockedContainerId(panel.edge))
+  if contentEl.isNil or containerEl.isNil:
+    cerror fmt"auto_hide: docked elements not found for edge {panel.edge}"
+    return
+
+  # Reparent the live DOM element — same live-element preservation as overlay.
+  contentEl.innerHTML = cstring""
+  if not panel.liveElement.isNil:
+    contentEl.appendChild(panel.liveElement)
+    panel.liveElement.style.display = cstring"block"
+    panel.liveElement.style.width = cstring"100%"
+    panel.liveElement.style.height = cstring"100%"
+    panel.liveElement.style.position = cstring"relative"
+    cdebug fmt"auto_hide: docked live element for '{panel.title}'"
+  else:
+    console.warn cstring"auto_hide: no live element for docked panel"
+
+  containerEl.classList.add(cstring"docked-open")
+
+  # Restore the remembered size so docked and overlay share the same dimensions.
+  # Without this the CSS default (360px/280px) always wins on first dock.
+  case panel.edge:
+  of Left, Right:
+    if panel.overlayWidth > 0:
+      containerEl.style.width = cstring($panel.overlayWidth & "px")
+  of Bottom:
+    if panel.overlayHeight > 0:
+      containerEl.style.height = cstring($panel.overlayHeight & "px")
+
+  autoHideState.dockedPanel = panel
+  autoHideState.dockedVisible = true
+
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
+  if not autoHideState.onPanelShown.isNil:
+    autoHideState.onPanelShown(panel)
+    let shownPanel = panel
+    discard windowSetTimeout(proc() =
+      if not autoHideState.isNil and autoHideState.dockedPanel == shownPanel:
+        if not autoHideState.onPanelShown.isNil:
+          autoHideState.onPanelShown(shownPanel)
+    , 50)
+
+  deferredUpdateGLSize()
+  dispatchLayoutUpdated()
+
+proc setupDockedResizeHandles*() =
+  ## Wire drag-to-resize for left, right, and bottom docked panels.
+  ## Must be called once after the DOM is ready.
+
+  # Left / right side panels — horizontal drag (ew-resize).
+  document.addEventListener(cstring"mousemove", proc(ev: Event) =
+    if not dockedResizing:
+      return
+    let mouseEv = cast[JsObject](ev)
+    let clientX = mouseEv.clientX.to(int)
+    let dx = if dockedResizeIsLeft: clientX - dockedResizeStartX
+             else: dockedResizeStartX - clientX
+    let newWidth = max(150, min(800, dockedResizeStartWidth + dx))
+    let containerEl = document.getElementById(dockedResizeContainerId)
+    if not containerEl.isNil:
+      containerEl.style.width = cstring($newWidth & "px")
+    # Save back so overlay and docked share the same remembered size.
+    if not autoHideState.isNil and not autoHideState.dockedPanel.isNil:
+      autoHideState.dockedPanel.overlayWidth = newWidth
+    updateGLSize())
+
+  document.addEventListener(cstring"mouseup", proc(ev: Event) =
+    if dockedResizing:
+      dockedResizing = false
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring""
+      let lh = document.getElementById(cstring"auto-hide-docked-left-resize")
+      let rh = document.getElementById(cstring"auto-hide-docked-right-resize")
+      if not lh.isNil: lh.classList.remove(cstring"resizing")
+      if not rh.isNil: rh.classList.remove(cstring"resizing"))
+
+  proc attachResizeHandle(handleId: cstring; containerId: cstring; isLeft: bool) =
+    let handle = document.getElementById(handleId)
+    let container = document.getElementById(containerId)
+    if handle.isNil or container.isNil:
+      return
+    handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+      let mouseEv = cast[JsObject](ev)
+      dockedResizing = true
+      dockedResizeIsLeft = isLeft
+      dockedResizeStartX = mouseEv.clientX.to(int)
+      dockedResizeStartWidth = getElementOffsetWidth(container)
+      dockedResizeContainerId = containerId
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring"none"
+      handle.classList.add(cstring"resizing"))
+
+  attachResizeHandle(
+    cstring"auto-hide-docked-left-resize",
+    cstring"auto-hide-docked-left",
+    true)
+  attachResizeHandle(
+    cstring"auto-hide-docked-right-resize",
+    cstring"auto-hide-docked-right",
+    false)
+
+  # Bottom panel — vertical drag (ns-resize). Dragging UP increases height.
+  document.addEventListener(cstring"mousemove", proc(ev: Event) =
+    if not dockedBottomResizing:
+      return
+    let mouseEv = cast[JsObject](ev)
+    let clientY = mouseEv.clientY.to(int)
+    let dy = dockedBottomResizeStartY - clientY  # drag up = positive delta
+    let newHeight = max(100, min(600, dockedBottomResizeStartHeight + dy))
+    let containerEl = document.getElementById(cstring"auto-hide-docked-bottom")
+    if not containerEl.isNil:
+      containerEl.style.height = cstring($newHeight & "px")
+    # Save back so overlay and docked share the same remembered size.
+    if not autoHideState.isNil and not autoHideState.dockedPanel.isNil:
+      autoHideState.dockedPanel.overlayHeight = newHeight
+    updateGLSize())
+
+  document.addEventListener(cstring"mouseup", proc(ev: Event) =
+    if dockedBottomResizing:
+      dockedBottomResizing = false
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring""
+      let bh = document.getElementById(cstring"auto-hide-docked-bottom-resize")
+      if not bh.isNil: bh.classList.remove(cstring"resizing"))
+
+  let bottomHandle = document.getElementById(cstring"auto-hide-docked-bottom-resize")
+  let bottomContainer = document.getElementById(cstring"auto-hide-docked-bottom")
+  if not bottomHandle.isNil and not bottomContainer.isNil:
+    bottomHandle.addEventListener(cstring"mousedown", proc(ev: Event) =
+      let mouseEv = cast[JsObject](ev)
+      dockedBottomResizing = true
+      dockedBottomResizeStartY = mouseEv.clientY.to(int)
+      dockedBottomResizeStartHeight = getElementOffsetHeight(bottomContainer)
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring"none"
+      bottomHandle.classList.add(cstring"resizing"))
+
+proc setupOverlayResizeHandle*() =
+  ## Wire drag-to-resize for the hover overlay panel.
+  ## Size changes are stored per-panel so each tab independently remembers
+  ## the width (left/right) or height (bottom) the user last set.
+  ## Must be called once after the DOM is ready.
+
+  document.addEventListener(cstring"mousemove", proc(ev: Event) =
+    if not overlayResizing:
+      return
+    let mouseEv = cast[JsObject](ev)
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if overlayEl.isNil:
+      return
+    let panel = if not autoHideState.isNil: autoHideState.activeOverlay else: nil
+    if overlayResizeIsHorizontal:
+      let clientX = mouseEv.clientX.to(int)
+      let dx = if overlayResizeIsLeft: clientX - overlayResizeStartX
+               else: overlayResizeStartX - clientX
+      let newWidth = max(150, min(800, overlayResizeStartSize + dx))
+      overlayEl.style.width = cstring($newWidth & "px")
+      if not panel.isNil:
+        panel.overlayWidth = newWidth
+    else:
+      let clientY = mouseEv.clientY.to(int)
+      let dy = overlayResizeStartY - clientY  # drag up = positive delta = taller
+      let newHeight = max(100, min(600, overlayResizeStartSize + dy))
+      overlayEl.style.height = cstring($newHeight & "px")
+      if not panel.isNil:
+        panel.overlayHeight = newHeight)
+
+  document.addEventListener(cstring"mouseup", proc(ev: Event) =
+    if overlayResizing:
+      overlayResizing = false
+      let bodyEl = cast[JsObject](document.body)
+      bodyEl.style.userSelect = cstring""
+      let handle = document.getElementById(cstring"auto-hide-overlay-resize")
+      if not handle.isNil:
+        handle.classList.remove(cstring"resizing"))
+
+  let handle = document.getElementById(cstring"auto-hide-overlay-resize")
+  if handle.isNil:
+    return
+  handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+    let mouseEv = cast[JsObject](ev)
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if overlayEl.isNil:
+      return
+    let panel = if not autoHideState.isNil: autoHideState.activeOverlay else: nil
+    if panel.isNil:
+      return
+    case panel.edge:
+    of Left:
+      overlayResizeIsHorizontal = true
+      overlayResizeIsLeft = true
+      overlayResizeStartX = mouseEv.clientX.to(int)
+      overlayResizeStartSize = getElementOffsetWidth(overlayEl)
+    of Right:
+      overlayResizeIsHorizontal = true
+      overlayResizeIsLeft = false
+      overlayResizeStartX = mouseEv.clientX.to(int)
+      overlayResizeStartSize = getElementOffsetWidth(overlayEl)
+    of Bottom:
+      overlayResizeIsHorizontal = false
+      overlayResizeStartY = mouseEv.clientY.to(int)
+      overlayResizeStartSize = getElementOffsetHeight(overlayEl)
+    overlayResizing = true
+    let bodyEl = cast[JsObject](document.body)
+    bodyEl.style.userSelect = cstring"none"
+    handle.classList.add(cstring"resizing"))
+
+proc closePanelFromStrip*(panel: AutoHidePanel) =
+  ## Remove a panel from the auto-hide strip entirely, discarding it.
+  ## Unlike unpinPanel, the panel is NOT re-added to Golden Layout —
+  ## the user can re-open it via the menu if they want it back.
+  if autoHideState.isNil:
+    return
+
+  # If this panel is currently docked, collapse the sidebar.
+  if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+    hideDockedPanel()
+
+  # If this panel is currently shown in the overlay, detach its live
+  # element first so the overlay is cleaned up.
+  if autoHideState.activeOverlay == panel:
+    let contentEl = document.getElementById(cstring"auto-hide-overlay-content")
+    if not contentEl.isNil and not panel.liveElement.isNil:
+      if panel.liveElement.parentNode == cast[Node](contentEl):
+        contentEl.removeChild(panel.liveElement)
+    autoHideState.activeOverlay = nil
+    autoHideState.overlayVisible = false
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if not overlayEl.isNil:
+      overlayEl.classList.remove(cstring"visible")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-left")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-right")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
+      overlayEl.classList.remove(cstring"collapsed-overlay")
+
   autoHideState.panels = autoHideState.panels.filterIt(it != panel)
 
-  cdebug fmt"auto_hide: unpinned panel '{panel.title}'"
+  cdebug fmt"auto_hide: closed panel '{panel.title}' from strip"
 
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
@@ -402,6 +816,12 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
 # ---------------------------------------------------------------------------
 # Overlay show / hide
 # ---------------------------------------------------------------------------
+
+proc cancelHoverPreview*() =
+  ## Cancel any pending hover-preview open timer.
+  if hoverPreviewTimerId != -1:
+    windowClearTimeout(hoverPreviewTimerId)
+    hoverPreviewTimerId = -1
 
 proc isEdgeCollapsed*(edge: AutoHideEdge): bool =
   ## Returns true when the given edge should render in collapsed (1px) mode.
@@ -419,6 +839,9 @@ proc hideOverlay*() =
   ## back into the overlay on next show, or into GL on unpin.
   if autoHideState.isNil:
     return
+
+  cancelHoverPreview()
+  autoHideState.pinnedOpen = false
 
   # Before clearing state, detach the live element from the overlay so it
   # survives. We must NOT use innerHTML = "" which would destroy child nodes.
@@ -448,23 +871,11 @@ proc hideOverlay*() =
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
 
-proc showOverlay*(panel: AutoHidePanel) =
-  ## Show a slide-in overlay for the given pinned panel.
-  ##
-  ## The overlay container is a pre-existing DOM element in index.html
-  ## (#auto-hide-overlay). We inject the component content into
-  ## #auto-hide-overlay-content and apply edge-specific CSS classes
-  ## for positioning/animation.
-  if autoHideState.isNil:
-    return
-
-  # If the same panel is already shown, toggle it off.
-  if autoHideState.activeOverlay == panel and autoHideState.overlayVisible:
-    hideOverlay()
-    return
-
-  # Capture the previously active panel before updating state, so we can
-  # safely detach its live element from the overlay without destroying it.
+proc doShowOverlayImpl(panel: AutoHidePanel) =
+  ## Internal: perform the DOM manipulation to show `panel` in the overlay.
+  ## Callers must set `autoHideState.pinnedOpen` before calling.
+  ## Capture the previously active panel before updating state, so we can
+  ## safely detach its live element from the overlay without destroying it.
   let previousPanel = autoHideState.lastActivePanel
 
   autoHideState.activeOverlay = panel
@@ -487,6 +898,24 @@ proc showOverlay*(panel: AutoHidePanel) =
   overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
   overlayEl.classList.add(edgeOverlayCssClass(panel.edge))
   overlayEl.classList.add(cstring"visible")
+
+  # Restore per-panel stored size so each tab remembers what the user set.
+  # Always clear BOTH dimensions first: a stale inline width from a previous
+  # left/right overlay would shrink a bottom overlay (whose CSS uses left:0/right:0
+  # to span the full window), and vice versa.
+  case panel.edge:
+  of Left, Right:
+    overlayEl.style.height = cstring""  # clear any stale height from a bottom panel
+    if panel.overlayWidth > 0:
+      overlayEl.style.width = cstring($panel.overlayWidth & "px")
+    else:
+      overlayEl.style.width = cstring""  # let CSS default (360px) take effect
+  of Bottom:
+    overlayEl.style.width = cstring""   # clear any stale width from a left/right panel
+    if panel.overlayHeight > 0:
+      overlayEl.style.height = cstring($panel.overlayHeight & "px")
+    else:
+      overlayEl.style.height = cstring""  # let CSS default (280px) take effect
 
   # In collapsed mode, add "collapsed-overlay" class to hide the header
   # row and show the floating pin button instead.
@@ -564,6 +993,51 @@ proc showOverlay*(panel: AutoHidePanel) =
           autoHideState.onPanelShown(shownPanel)
     , 50)
 
+proc showOverlayPreview*(panel: AutoHidePanel) =
+  ## Show the overlay as a hover preview — auto-dismisses on mouse-leave.
+  ## Does nothing if the overlay is already pinned open or the panel is docked.
+  if autoHideState.isNil:
+    return
+  # Don't show preview for a panel that's already visible in the sidebar.
+  if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+    return
+  # Don't override a click-pinned overlay with a preview.
+  if autoHideState.overlayVisible and autoHideState.pinnedOpen:
+    return
+  # Same panel already shown in preview — nothing to do.
+  if autoHideState.activeOverlay == panel and autoHideState.overlayVisible:
+    return
+  autoHideState.pinnedOpen = false
+  doShowOverlayImpl(panel)
+
+proc showOverlay*(panel: AutoHidePanel) =
+  ## Show the overlay pinned open (via click).
+  ## Clicking the same panel again toggles it closed.
+  ## Clicking a different panel while in preview mode upgrades to pinned.
+  ##
+  ## The overlay container is a pre-existing DOM element in index.html
+  ## (#auto-hide-overlay). We inject the component content into
+  ## #auto-hide-overlay-content and apply edge-specific CSS classes
+  ## for positioning/animation.
+  if autoHideState.isNil:
+    return
+
+  cancelHoverPreview()
+
+  if autoHideState.activeOverlay == panel and autoHideState.overlayVisible:
+    if autoHideState.pinnedOpen:
+      # Already pinned open for this panel — toggle it closed.
+      hideOverlay()
+    else:
+      # Currently a preview — upgrade to pinned without re-rendering.
+      autoHideState.pinnedOpen = true
+      if not autoHideState.onChanged.isNil:
+        autoHideState.onChanged()
+    return
+
+  autoHideState.pinnedOpen = true
+  doShowOverlayImpl(panel)
+
 # ---------------------------------------------------------------------------
 # Strip rendering (called from layout.nim or a dedicated Karax renderer)
 # ---------------------------------------------------------------------------
@@ -615,13 +1089,25 @@ when defined(js):
     let model = sideAutoHideTabsModel(edge)
     var records: seq[AutoHideSideStripRecord] = @[]
     for panel in model.panels:
-      records.add(AutoHideSideStripRecord(title: $panel.title))
+      # Tab is active when the panel is docked OR shown in the overlay.
+      let isActive = not autoHideState.isNil and (
+        (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
+        (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
+      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive))
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
-          showOverlay(panels[index]),
+          showDockedPanel(panels[index]),
+      onClose: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          closePanelFromStrip(panels[index]),
+      onUnpin: proc(index: int) =
+        if not autoHideLayout.isNil and index >= 0 and index < panels.len:
+          hideOverlay()
+          hideDockedPanel()
+          unpinPanel(autoHideLayout, panels[index]),
       onCollapsedSelect: proc() =
         if panels.len > 0:
           let target = if not autoHideState.isNil and
@@ -630,7 +1116,51 @@ when defined(js):
               autoHideState.lastActivePanel
             else:
               panels[0]
-          showOverlay(target))
+          showDockedPanel(target),
+      onHoverEnter: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          # Don't show a hover preview for the panel that's already docked.
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
+            return
+          cancelHoverPreview()
+          let capturedPanel = panels[index]
+          hoverPreviewTimerId = windowSetTimeout(proc() =
+            hoverPreviewTimerId = -1
+            showOverlayPreview(capturedPanel)
+          , HOVER_PREVIEW_DELAY_MS),
+      onHoverLeave: proc(index: int) =
+        cancelHoverPreview(),
+      onContextMenu: proc(index: int; x: int; y: int) =
+        if index >= 0 and index < panels.len:
+          let capturedPanel = panels[index]
+          var items: seq[ContextMenuItem]
+          if edge != AutoHideEdge.Left:
+            items.add(ContextMenuItem(
+              name: cstring"Pin to Left", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Left)))
+          if edge != AutoHideEdge.Bottom:
+            items.add(ContextMenuItem(
+              name: cstring"Pin to Bottom", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Bottom)))
+          if edge != AutoHideEdge.Right:
+            items.add(ContextMenuItem(
+              name: cstring"Pin to Right", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Right)))
+          items.add(ContextMenuItem(
+            name: cstring"Unpin", hint: cstring"",
+            handler: proc(ev: kdom.Event) =
+              if not autoHideLayout.isNil:
+                hideOverlay()
+                hideDockedPanel()
+                unpinPanel(autoHideLayout, capturedPanel)))
+          items.add(ContextMenuItem(
+            name: cstring"Close", hint: cstring"",
+            handler: proc(ev: kdom.Event) =
+              closePanelFromStrip(capturedPanel)))
+          showContextMenu(items, x, y))
     let r = WebRenderer()
     renderAutoHideSideStripInto(
       r, container, records, model.collapsed, callbacks)
@@ -638,33 +1168,84 @@ else:
   proc requestAutoHideSideStripRender*(containerId: cstring, edge: AutoHideEdge) =
     discard
 
-proc bottomAutoHideTabsModel*(): seq[AutoHidePanel] =
-  ## Derive bottom-pinned panels for the status-bar bottom tab host.
+proc bottomStripModel*(): seq[AutoHidePanel] =
+  ## Derive bottom-pinned panels for the status-bar bottom strip.
   if autoHideState.isNil:
     return @[]
   autoHideState.panelsForEdge(AutoHideEdge.Bottom)
 
 when defined(js):
-  proc requestBottomAutoHideTabsRender*(containerId: cstring) =
-    ## Refresh bottom auto-hide tabs through IsoNim direct DOM.
+  proc requestAutoHideBottomStripRender*(containerId: cstring) =
+    ## Refresh the bottom auto-hide strip through IsoNim direct DOM.
     let container = dom_api.getElementById(dom_api.document, containerId)
     if dom_api.isNodeNil(dom_api.Node(container)):
       return
 
-    let panels = bottomAutoHideTabsModel()
-    var records: seq[AutoHideBottomTabRecord] = @[]
+    let panels = bottomStripModel()
+    var records: seq[AutoHideBottomStripRecord] = @[]
     for panel in panels:
-      records.add(AutoHideBottomTabRecord(title: $panel.title))
+      let isActive = not autoHideState.isNil and (
+        (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
+        (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
+      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive))
 
-    let callbacks = AutoHideBottomTabsCallbacks(
+    let callbacks = AutoHideBottomStripCallbacks(
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
-          showOverlay(panels[index]))
+          showDockedPanel(panels[index]),
+      onClose: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          closePanelFromStrip(panels[index]),
+      onUnpin: proc(index: int) =
+        if not autoHideLayout.isNil and index >= 0 and index < panels.len:
+          hideOverlay()
+          hideDockedPanel()
+          unpinPanel(autoHideLayout, panels[index]),
+      onHoverEnter: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
+            return
+          cancelHoverPreview()
+          let capturedPanel = panels[index]
+          hoverPreviewTimerId = windowSetTimeout(proc() =
+            hoverPreviewTimerId = -1
+            showOverlayPreview(capturedPanel)
+          , HOVER_PREVIEW_DELAY_MS),
+      onHoverLeave: proc(index: int) =
+        cancelHoverPreview(),
+      onContextMenu: proc(index: int; x: int; y: int) =
+        if index >= 0 and index < panels.len:
+          let capturedPanel = panels[index]
+          showContextMenu(@[
+            ContextMenuItem(
+              name: cstring"Pin to Left", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Left)),
+            ContextMenuItem(
+              name: cstring"Pin to Right", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                repinPanelToEdge(capturedPanel, AutoHideEdge.Right)),
+            ContextMenuItem(
+              name: cstring"Unpin", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                if not autoHideLayout.isNil:
+                  hideOverlay()
+                  hideDockedPanel()
+                  unpinPanel(autoHideLayout, capturedPanel)),
+            ContextMenuItem(
+              name: cstring"Close", hint: cstring"",
+              handler: proc(ev: kdom.Event) =
+                closePanelFromStrip(capturedPanel))
+          ], x, y))
     let r = WebRenderer()
-    renderAutoHideBottomTabsInto(r, container, records, callbacks)
+    renderAutoHideBottomStripInto(r, container, records, callbacks)
 else:
-  proc requestBottomAutoHideTabsRender*(containerId: cstring) =
+  proc requestAutoHideBottomStripRender*(containerId: cstring) =
     discard
+
+## Keep old name as an alias so any lingering call sites don't break.
+proc requestBottomAutoHideTabsRender*(containerId: cstring) =
+  requestAutoHideBottomStripRender(containerId)
 
 proc collapsedIconZoneModel*(): seq[AutoHidePanel] =
   ## Derive side-pinned panels that should appear in the collapsed status-bar
@@ -807,7 +1388,8 @@ proc restoreAutoHideState*(saved: JsObject) =
       config: obj["config"],
       domTab: nil,
       liveElement: nil,      # No live element for restored panels — will use config fallback
-      containerElement: nil
+      containerElement: nil,
+      isUnpinning: false
     )
     autoHideState.panels.add(panel)
 

@@ -40,7 +40,7 @@ proc normalizeTraceEnumsJs(trace: JsObject) {.importjs: """
     LangPythonDb:21, LangUnknown:22, LangBash:23, LangZsh:24, LangSolidity:25,
     LangMasm:26, LangSway:27, LangMove:28, LangPolkavm:29, LangCairo:30,
     LangCircom:31, LangLeo:32, LangTolk:33, LangAiken:34, LangCadence:35,
-    LangSolana:36, LangElixir:37, LangErlang:38
+    LangSolana:36, LangElixir:37, LangErlang:38, LangPhp:39
   };
   var MODE = {
     NoInstrumentation:0, CallKeyOnly:1, RawRecordNoValues:2, FullRecord:3

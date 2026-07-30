@@ -23,7 +23,6 @@ when defined(js):
     if container.isNil:
       return
 
-    let y = yPos - 30
     container.style.display = cstring"flex"
     container.innerHTML = cstring""
     contextMenuHandlers.setLen(options.len)
@@ -60,16 +59,13 @@ when defined(js):
     let contextHeight = cast[dom.Element](container).clientHeight
     let clientWidth = windowInnerWidth()
     let clientHeight = windowInnerHeight()
-    let leftPos =
-      if x + contextWidth > clientWidth:
-        max(0, x - ((x + contextWidth + 10) - clientWidth))
-      else:
-        x
-    let topPos =
-      if y + contextHeight > clientHeight:
-        max(0, y - ((y + contextHeight + 10) - clientHeight))
-      else:
-        max(0, y)
+    # Anchor the menu corner closest to the cursor:
+    # default is top-left at cursor; flip horizontally if too far right,
+    # flip vertically if too far down.
+    let tooFarRight = x + contextWidth > clientWidth
+    let tooFarDown  = yPos + contextHeight > clientHeight
+    let leftPos = max(0, if tooFarRight: x - contextWidth else: x)
+    let topPos  = max(0, if tooFarDown:  yPos - contextHeight else: yPos)
 
     container.style.top = cstring(fmt"{topPos}px")
     container.style.left = cstring(fmt"{leftPos}px")

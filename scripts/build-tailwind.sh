@@ -23,7 +23,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 isonim_root=""
+if [ -n "${ISONIM_SRC:-}" ]; then
+	isonim_candidate="$(cd "$ISONIM_SRC/.." && pwd)"
+	if [ -f "$isonim_candidate/tools/tailwind-extract.mjs" ]; then
+		isonim_root="$isonim_candidate"
+	else
+		echo "Error: ISONIM_SRC does not identify an IsoNim source tree: $ISONIM_SRC" >&2
+		exit 1
+	fi
+fi
+
 for candidate in "$CT_ROOT/../isonim" "$CT_ROOT/../../isonim"; do
+	if [ -n "$isonim_root" ]; then
+		break
+	fi
 	if [ -f "$candidate/tools/tailwind-extract.mjs" ]; then
 		isonim_root="$(cd "$candidate" && pwd)"
 		break

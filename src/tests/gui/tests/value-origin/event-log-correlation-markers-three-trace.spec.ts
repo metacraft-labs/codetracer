@@ -20,21 +20,39 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { test, expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
-import { isCtBinaryAvailable, ctBinaryPath } from "../../lib/value-origin-fixtures";
+import {
+  expect,
+  readyOnEntryTest as readyOnEntry,
+  test,
+} from "../../lib/fixtures";
+import {
+  isCtBinaryAvailable,
+  ctBinaryPath,
+} from "../../lib/value-origin-fixtures";
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
 
 const fixtureDir = path.join(
   repoRoot,
-  "src", "db-backend", "tests", "fixtures",
-  "cross_process", "account-balance-with-wasm",
+  "src",
+  "db-backend",
+  "tests",
+  "fixtures",
+  "cross_process",
+  "account-balance-with-wasm",
 );
 
 const HTTP_BOUNDARY_ID = "account-balance-with-wasm";
 const JS_WASM_BOUNDARY_ID = "js-wasm-realm";
 const REQUIRED_CONTAINERS = ["frontend.ct", "frontend-wasm.ct", "backend.ct"];
+
+// `trace-folder` is the Electron-only fixture path. It launches the real
+// CodeTracer binary against the materialized multi-trace session and exposes
+// its renderer as `ctPage`; the base Playwright `page` fixture would only
+// create an unrelated blank Chromium tab.
+test.use({ sourcePath: fixtureDir, launchMode: "trace-folder" });
 
 /** First missing `.ct` container under the fixture root, or null. */
 function firstMissingTraceContainer(): string | null {
@@ -66,8 +84,7 @@ async function readMarkerRow(
   boundaryId: string,
   timeoutMs = 30_000,
 ): Promise<{ keyValue: string; stepId: string; chipText: string } | null> {
-  const selector =
-    `div.event-log-marker-rows div.marker-row[data-boundary-id="${boundaryId}"]`;
+  const selector = `div.event-log-marker-rows div.marker-row[data-boundary-id="${boundaryId}"]`;
   try {
     await page.locator(selector).first().waitFor({
       state: "visible",
@@ -102,28 +119,33 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
   });
 
   test("e2e_event_log_jump_renders_in_codetracer_electron — both boundary markers render with chip badges", async ({
-    page,
+    ctPage,
   }, testInfo) => {
     if (skipReason !== null) {
       testInfo.skip(true, skipReason);
       return;
     }
 
+    await readyOnEntry(ctPage);
+
     // §5.1 — both boundary families must render as marker rows. The M25
     // HTTP boundary `account-balance-with-wasm` and the M27 → M25
     // PairIndex-bridge boundary `js-wasm-realm` are the two pairs the
     // fixture's ANSWERS.md pins.
-    const httpRow = await readMarkerRow(page, HTTP_BOUNDARY_ID);
+    const httpRow = await readMarkerRow(ctPage, HTTP_BOUNDARY_ID);
     expect(httpRow, "HTTP boundary marker row must render").not.toBeNull();
     expect(httpRow!.chipText).toBe(`[${HTTP_BOUNDARY_ID}]`);
     expect(httpRow!.keyValue, "matches ANSWERS.md").toBe("620");
 
-    const realmRow = await readMarkerRow(page, JS_WASM_BOUNDARY_ID);
-    expect(realmRow, "js-wasm-realm boundary marker row must render").not.toBeNull();
+    const realmRow = await readMarkerRow(ctPage, JS_WASM_BOUNDARY_ID);
+    expect(
+      realmRow,
+      "js-wasm-realm boundary marker row must render",
+    ).not.toBeNull();
     expect(realmRow!.chipText).toBe(`[${JS_WASM_BOUNDARY_ID}]`);
 
     // Every rendered marker row must carry a direction icon (↑/↓).
-    const counts = await page.evaluate(() => {
+    const counts = await ctPage.evaluate(() => {
       const rows = Array.from(
         document.querySelectorAll("div.event-log-marker-rows div.marker-row"),
       );
@@ -138,16 +160,16 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
     // §5.3 — click the HTTP marker chip; the active recording must
     // switch to the matched sibling per `EventLogVM.jumpToCounterpart`
     // (routes through `ct/listProcesses` + `ct/goto-ticks`).
-    await page
+    await ctPage
       .locator(
         `div.event-log-marker-rows div.marker-row[data-boundary-id="${HTTP_BOUNDARY_ID}"] ` +
           `span.marker-boundary-chip`,
       )
       .first()
       .click();
-    await page.waitForTimeout(1500);
+    await ctPage.waitForTimeout(1500);
 
-    const activeRole = await page.evaluate(() => {
+    const activeRole = await ctPage.evaluate(() => {
       const d = (window as any).data;
       return (
         d?.activeRecording?.role ??
@@ -157,15 +179,17 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
         null
       );
     });
-    expect(activeRole, "click on HTTP marker chip must switch active recording").toBe(
-      "frontend-js",
-    );
+    expect(
+      activeRole,
+      "click on HTTP marker chip must switch active recording",
+    ).toBe("frontend-js");
 
     // Confirm the editor settles on the JS-side send-marker source
     // location (`frontend/app.js` per ANSWERS.md).
-    const labels: string[] = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("div[id^='editorComponent']"))
-        .map((el) => el.getAttribute("data-label") ?? ""),
+    const labels: string[] = await ctPage.evaluate(() =>
+      Array.from(document.querySelectorAll("div[id^='editorComponent']")).map(
+        (el) => el.getAttribute("data-label") ?? "",
+      ),
     );
     expect(
       labels.some((l) => l.includes("frontend/app.js") || l.endsWith("app.js")),

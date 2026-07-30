@@ -55,6 +55,7 @@
 ## native (``test-vm-native``) and JS (``test-vm-js``) backends without
 ## ``cstring`` / ``langstring`` conversion noise.
 
+import std/sets
 import std/tables
 
 import isonim/core/[signals, computation, owner]
@@ -71,6 +72,7 @@ type
     # -- Mutable state --
     entries*: Signal[seq[ScratchpadValueEntry]]
     localsByExpression*: Signal[Table[string, ScratchpadValueEntry]]
+    expandedPaths*: Signal[HashSet[string]]
 
     # Value Origin Tracking (M4) — sibling variant of
     # `ScratchpadValueEntry` per spec §8.1 "Scratchpad data model
@@ -113,6 +115,7 @@ proc clearValues*(vm: ScratchpadVM) =
   ## Drop every captured row.  Used during a session switch / fresh
   ## debugging run.
   vm.entries.val = @[]
+  vm.expandedPaths.val = initHashSet[string]()
 
 proc setLocals*(vm: ScratchpadVM;
                 entries: openArray[ScratchpadValueEntry]) =
@@ -151,6 +154,14 @@ proc removeChain*(vm: ScratchpadVM; index: int) =
 proc clearChains*(vm: ScratchpadVM) =
   vm.chainEntries.val = @[]
 
+proc toggleExpand*(vm: ScratchpadVM; path: string) =
+  var paths = vm.expandedPaths.val
+  if path in paths:
+    paths.excl(path)
+  else:
+    paths.incl(path)
+  vm.expandedPaths.val = paths
+
 proc addFromExpression*(vm: ScratchpadVM; expression: string) =
   ## Look up ``expression`` in the locals table and append the
   ## corresponding entry to the scratchpad.  Mirrors the legacy
@@ -176,6 +187,7 @@ proc createScratchpadVM*(store: ReplayDataStore): ScratchpadVM =
     let entries = createSignal(newSeq[ScratchpadValueEntry]())
     let localsByExpression =
       createSignal(initTable[string, ScratchpadValueEntry]())
+    let expandedPaths = createSignal(initHashSet[string]())
     let chainEntries = createSignal(newSeq[ScratchpadChainEntry]())
 
     let isEmpty = createMemo[bool] proc(): bool =
@@ -188,6 +200,7 @@ proc createScratchpadVM*(store: ReplayDataStore): ScratchpadVM =
       store: store,
       entries: entries,
       localsByExpression: localsByExpression,
+      expandedPaths: expandedPaths,
       chainEntries: chainEntries,
       isEmpty: isEmpty,
       rowCount: rowCount,
