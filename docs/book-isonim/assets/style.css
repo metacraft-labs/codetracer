@@ -112,7 +112,11 @@ a:hover {
   align-items: center;
   gap: 24px;
   flex-wrap: wrap;
-  padding: var(--docs-space-4) 0;
+  /* M2 (issue 3): match WebFlow `.nav-top` -- a taller header (min 6vh) with
+   * --space-m (1.5rem) vertical breathing room, gap 24px, sticky, hairline
+   * bottom rule. */
+  min-height: 6vh;
+  padding: var(--docs-space-5) 0;
   border-bottom: 1px solid var(--docs-border);
   position: sticky;
   top: 0;
@@ -134,8 +138,10 @@ a:hover {
 
 .docs-logo {
   display: inline-block;
-  height: 1.6rem;
-  width: auto;
+  /* M2 (issue 3): WebFlow `.nav-logo` reads ~8rem wide; the horizontal mark's
+   * ~4.4:1 aspect keeps it a compact ~1.8rem tall. */
+  width: 8rem;
+  height: auto;
 }
 
 .docs-title {
@@ -1270,4 +1276,160 @@ h6.docs-md-heading {
  * landing so the wide content column spans the full width. */
 .docs-frame:has(.docs-md-hero) .docs-nav-toc {
   display: none;
+}
+
+/* ============================================================================
+ * M2: WebFlow header + sidebar chrome. The framework already emits these hooks
+ * from `bookDocsConfig()` -- `.docs-header-nav`/`.docs-header-nav-btn` (WebFlow
+ * `.ct-nav-links`/`.ct-nav-btn`), `.docs-sidebar-extras`/`.docs-sidebar-link`
+ * (WebFlow `.layout-nav-link-group`/`.link-with-icon`), and the sidebar-bottom
+ * `.docs-theme-switch-wrap` pill (WebFlow `.theme-switch`). This section styles
+ * that real markup to the WebFlow computed values, consuming only `--docs-*`
+ * tokens for colours.
+ * ==========================================================================*/
+
+/* issue 5 -- header nav buttons (Sign In / Support / FAQ). WebFlow
+ * `.ct-nav-links` sits flush-right (`margin-left:auto`) after the centered
+ * search; each `.ct-nav-btn` is a 38px pill-less button (radius 8px, 1px
+ * border). */
+.docs-header-nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.docs-header-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-md); /* 8px */
+  background: var(--docs-input-bg);
+  color: var(--docs-fg);
+  font-size: 0.9375rem; /* WebFlow .ct-nav-btn */
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.docs-header-nav-btn:hover,
+.docs-header-nav-btn:active {
+  background: var(--docs-bg-raised);
+  border-color: var(--docs-bg-raised);
+  text-decoration: none;
+}
+
+/* issue 6 + issue 4 -- the bottom-of-sidebar extras block: the Github/Twitter
+ * social links, then the Dark-mode toggle pill. Divided from the nav sections
+ * above by a hairline rule + generous top margin. */
+.docs-sidebar-extras {
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-3);
+  margin-top: var(--docs-space-6);
+  padding-top: var(--docs-space-5);
+  border-top: 1px solid var(--docs-border);
+}
+
+/* issue 6 -- social link row (WebFlow `.link-with-icon`): a small icon chip
+ * followed by the label, muted and low-key. */
+.docs-sidebar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--docs-space-2);
+  color: var(--docs-fg-muted);
+  font-size: var(--docs-font-size-sm);
+  text-decoration: none;
+}
+
+.docs-sidebar-link:hover {
+  color: var(--docs-fg);
+  text-decoration: none;
+}
+
+.docs-sidebar-link-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+/* issue 4 (style + placement) -- the Dark-mode toggle PILL. The framework emits
+ * `<div class="docs-theme-switch-wrap"><button class="docs-theme-toggle" .../></div>`
+ * where the button carries a `data-theme` attribute reflecting the active
+ * theme. We restyle that single button into WebFlow's `.theme-switch-track`
+ * (42x24 pill), draw the `.theme-switch-thumb` as its `::before`, hide the
+ * fallback glyph, and add the static "Dark mode" label as the wrap's `::after`
+ * -- so the same `#docs-theme-toggle` element the M1 JS binds to now reads as
+ * the WebFlow pill. */
+.docs-theme-switch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: var(--docs-space-1);
+  color: var(--docs-fg-muted);
+  font-size: 0.85rem;
+}
+
+.docs-theme-switch-wrap::after {
+  content: "Dark mode";
+}
+
+/* The toggle button reshaped into the 42x24 track (overriding the header
+ * `.docs-theme-toggle` defaults). The glyph text is hidden (font-size 0). */
+.docs-theme-switch-wrap .docs-theme-toggle {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--docs-border);
+  font-size: 0;
+  line-height: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 0.2s;
+}
+
+.docs-theme-switch-wrap .docs-theme-toggle:hover {
+  background: var(--docs-border);
+}
+
+/* the sliding thumb -- 18px circle, 3px inset. */
+.docs-theme-switch-wrap .docs-theme-toggle::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s;
+}
+
+/* dark active -> blue track + thumb slid to the right (WebFlow --blue). */
+.docs-theme-switch-wrap .docs-theme-toggle[data-theme="dark"] {
+  background: var(--docs-accent);
+}
+
+.docs-theme-switch-wrap .docs-theme-toggle[data-theme="dark"]::before {
+  transform: translateX(18px);
+}
+
+/* Monochrome social icons invert onto the dark canvas, like the logo + search
+ * glyph (WebFlow `.link-with-icon img{filter:invert(1)}`). */
+[data-theme="dark"] .docs-sidebar-link-icon {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .docs-sidebar-link-icon {
+    filter: invert(1);
+  }
 }
