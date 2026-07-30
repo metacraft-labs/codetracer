@@ -1369,6 +1369,11 @@ demo-cross-tracer:
 #               request is a slice of ONE event loop.  CODETRACER_DEMO_SCHEDULE
 #               picks `sequential` (the default) or `concurrent`, which
 #               interleaves the handlers so their step ranges overlap.
+#   native    — RS-M10: a REAL nginx recorded by `ct-mcr`, where NOTHING in the
+#               recorded program knows what a request is.  There is no
+#               middleware seam in nginx and the recorder records syscalls, so
+#               the spans are DISCOVERED afterwards from the recording's own
+#               `recv` / `writev` payloads and appended to the container.
 #
 # Each language milestone adds its own value the same way.  See the "Trying it" section of
 # codetracer-specs/GUI/Core-Panes/Request-Panel.md.
@@ -1559,6 +1564,46 @@ demo-request-panel LANG="synthetic":
     exec ct replay -t "$trace_dir"
   fi
 
+  if [ "{{LANG}}" = "native" ]; then
+    # RS-M10.  Same shape as the arms above, with one difference that is the
+    # whole point of the milestone: the recorder sibling does not instrument
+    # the server at all.  It records a real nginx with `ct-mcr`, then reads
+    # that container's own OS events back and writes the request spans it
+    # discovers into the same container.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-native}"
+    recorder_repo="${CODETRACER_NATIVE_RECORDER_DIR:-$(pwd)/../codetracer-native-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-native-recorder checkout at $recorder_repo."
+        echo "The native demo records a real nginx with ct-mcr, so the sibling"
+        echo "repo has to be present (override with"
+        echo "CODETRACER_NATIVE_RECORDER_DIR=/path/to/codetracer-native-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording nginx with ct-mcr"
+    # Its own dev shell: the recorder needs its Nim/Rust toolchain and ships
+    # the nginx the recording runs, neither of which is in codetracer's shell.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" direnv exec . just demo-request-panel-native
+    )
+    # ct-mcr writes ONE container per recording; the recipe leaves the path it
+    # used in a marker file rather than making this side guess the name.
+    trace_file="$(cat "$demo_dir/.trace_file")"
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$trace_file" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    # `-t` names the trace DIRECTORY, which `importTrace` then searches for the
+    # `.ct` container — the same thing every other arm above passes.  Handing it
+    # the container file instead fails in `importTrace` with "no `.ct` CTFS
+    # container found in <file>" before the GUI is ever reached.  `ct print`
+    # above is the one that takes the container path itself.
+    exec ct replay -t "$demo_dir"
+  fi
+
   if [ "{{LANG}}" != "synthetic" ]; then
     {
       echo "ERROR: no recorder emits web-request spans for '{{LANG}}' yet."
@@ -1569,6 +1614,7 @@ demo-request-panel LANG="synthetic":
       echo "        just demo-request-panel php"
       echo "        just demo-request-panel elixir      # CODETRACER_DEMO_FRAMEWORK=plug|phoenix"
       echo "        just demo-request-panel js          # CODETRACER_DEMO_SCHEDULE=sequential|concurrent"
+      echo "        just demo-request-panel native      # nginx under ct-mcr; spans are DISCOVERED"
     } >&2
     exit 1
   fi
@@ -2167,12 +2213,13 @@ test-vm-native: vm-test-prereqs
 # request-panel/python_request_panel_vm_test.nim (RS-M5),
 # request-panel/ruby_request_panel_vm_test.nim (RS-M6),
 # request-panel/php_request_panel_vm_test.nim (RS-M7),
-# request-panel/elixir_request_panel_vm_test.nim (RS-M8) and
-# request-panel/js_request_panel_vm_test.nim (RS-M9): the first writes a
-# real `.ct` container with the canonical Nim writer, the other five read one
-# recorded by the Python, Ruby, PHP, BEAM and JS recorders, and all six link
-# zstd through a C FFI that has no `nim js` equivalent.  They run in
-# test-vm-native and are registered in release_gate.nim's
+# request-panel/elixir_request_panel_vm_test.nim (RS-M8),
+# request-panel/js_request_panel_vm_test.nim (RS-M9) and
+# request-panel/native_request_panel_vm_test.nim (RS-M10): the first writes a
+# real `.ct` container with the canonical Nim writer, the other six read one
+# recorded by the Python, Ruby, PHP, BEAM and JS recorders and by `ct-mcr`,
+# and all seven link zstd through a C FFI that has no `nim js` equivalent.
+# They run in test-vm-native and are registered in release_gate.nim's
 # CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
@@ -2195,6 +2242,7 @@ test-vm-js: vm-test-prereqs
     ! -path '*/request-panel/php_request_panel_vm_test.nim' \
     ! -path '*/request-panel/elixir_request_panel_vm_test.nim' \
     ! -path '*/request-panel/js_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/native_request_panel_vm_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"

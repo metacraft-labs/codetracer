@@ -102,6 +102,20 @@ const
     # Native-only (real container bytes through a zstd FFI), hence excluded
     # from `just test-vm-js` and listed here.
     "src/tests/gui/tests/request-panel/js_request_panel_vm_test.nim",
+    # RS-M10: the native/MCR row of the language matrix.
+    # `vm_native_request_panel_rows` drives the panel from a container
+    # `ct-mcr record` produced while a real nginx served real HTTP requests
+    # over loopback.  It is the row where NOTHING in the recorded program
+    # knows what a request is — nginx has no middleware seam and the recorder
+    # records syscalls — so the spans are DISCOVERED from the recording's own
+    # `recv` / `writev` payloads and appended to the container afterwards.
+    # That makes this the GUI-side guard for two things no other row covers:
+    # that a post-pass stamps `meta.dat` bit 13 on an already-closed
+    # container, and that a stream of settled-only records (no open/settled
+    # pair, because a post-pass has no in-flight moment) still renders.
+    # Native-only (real container bytes through a zstd FFI), hence excluded
+    # from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/native_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

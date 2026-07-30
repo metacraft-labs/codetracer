@@ -324,3 +324,79 @@ first *exec-stream event* of its interval, and where that event is a
 `ThreadStart` (the `POST`, whose handler resumes on a new async context after
 the body parser) it carries no source position of its own. The range still
 covers the handler.
+
+## native_nginx/nginx.ct — real nginx recorded by ct-mcr (RS-M10)
+
+A **real recording**, and the one row of the matrix that no middleware
+produced. `ct-mcr record` recorded a real `nginx` process under LD_PRELOAD
+interposition while `curl` drove five requests at it over loopback;
+`codetracer-native-recorder`'s request discoverer then read that container's
+own OS events back and appended the spans it found to the same container's
+`spans.dat` / `spans.idx` / `spantype.ns`, stamping `meta.dat` bit 13 in place.
+
+It is consumed by `../native_request_panel_vm_test.nim`
+(`vm_native_request_panel_rows`), registered in `src/ct_test/release_gate.nim`'s
+`CoreViewModelGateTests`, and is checked in so that ViewModel test needs no
+nginx, no recorder build and no server.
+
+### Regenerating
+
+```sh
+direnv exec ../codetracer-native-recorder just \
+  record-request-panel-fixture \
+  "$PWD/src/tests/gui/tests/request-panel/fixtures/native_nginx"
+```
+
+The recipe **replaces the whole target directory**. It records exactly the
+schedule `just demo-request-panel native` records.
+
+It passes `--no-full-snapshot`, which is what makes the result checkable in at
+all: the recording-start memory image of an nginx process is ~58 MB of
+`cp0.mem`, and nothing the Request Panel reads — the span stream, `meta.dat`,
+the per-thread event streams the spans index into — comes from it. Even so this
+fixture is ~2.1 MB against ~170–290 KB for the five managed rows, because a
+native recording holds every syscall and lock event the process made, not a
+per-line step stream of application code.
+
+### What the session contains
+
+| # | Request              | Status | Why it is in the schedule                                  |
+|---|----------------------|--------|------------------------------------------------------------|
+| 1 | `GET /index.html`    | 200    | a static file, served through `ngx_writev_chain` (`sendfile off`) |
+| 2 | `GET /ping`          | 200    | a body nginx generates itself (`return 200`)               |
+| 3 | `GET /missing.html`  | 404    | a file that is not there                                   |
+| 4 | `GET /teapot`        | 418    | a non-standard status, so reading the status line cannot be faked by recognising common codes |
+| 5 | `POST /ping`         | 403    | same URL as row 2, different method and status — a row cannot be identified by its URL alone |
+
+### What is different about the native row
+
+**Nothing in the recorded program knows what a request is.** Every other row is
+produced by a middleware inside the recorded process calling the span writer.
+nginx has no such seam and `ct-mcr` records syscalls, so these spans are
+**discovered**: the recording's `recv(2)` payloads are matched to the
+`writev(2)` payloads that answered them, per thread. Every row carries a
+`discovery.mode` metadata key saying so — the one key no managed recorder
+emits.
+
+**One settled record per row, not an open/settled pair.** A live middleware
+publishes an open record when a request arrives and a settled one when it
+finishes, which is why the Elixir and JS tests assert
+`readAllSpanRecords().len == rows * 2`. A post-pass has no in-flight moment to
+publish, so it appends exactly one record per row and the native test asserts
+`== rows`. Both are valid streams under last-record-wins.
+
+**No source resolution at all.** A `ct-mcr` container carries no `steps.dat`
+(the test asserts `not meta.hasStepStream`), so a span's `start_step` /
+`end_step` are GEIDs — positions in the recording's own event ordering. A
+double-click seeks to a real, distinct, ordered coordinate of this container,
+not to a line of C. This is the Elixir situation, more so.
+
+**The wall clock is the server's, at the server's resolution.** There is no
+per-event timestamp in a native container — `meta.dat` reports
+`tickSource: none`, so the tick is an event counter — so each span is anchored
+on the nearest clock reading nginx itself took. Those come from the vDSO
+`time(2)` fast path and have one-second resolution, so `http.duration_ms` is 0
+for a request served in under a second. That is the true value at the
+resolution the recording holds, and the test asserts the epoch is real and the
+duration well formed rather than asserting a number the container does not
+contain.
