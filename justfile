@@ -1830,6 +1830,60 @@ test-vm-js: vm-test-prereqs
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
 
+# Compile + run the `ct` CLI's trace-layer unit suites
+# (src/ct/trace/*_test.nim).
+#
+# These are Nim `unittest` suites over the recording-folder shape
+# detector, the session-manifest open path, CTFS source materialization,
+# path handling and `ct host`'s idle-timeout parser.  They were invoked
+# by nothing: `test-vm` globs only src/tests/gui/tests, and
+# `test-vm-recorder-gated` only src/frontend/viewmodel/tests/unit, so
+# every file under src/ct/trace was a test that never ran.  They are
+# pure-Nim, need no recorder sibling and no display, so they belong in
+# their own cheap lane rather than gated behind either of those.
+test-ct-trace-units:
+  #!/usr/bin/env bash
+  set -e
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-trace-units.log) 2>&1
+  echo "=== ct trace-layer unit tests ==="
+  failed=0
+  passed=0
+  total_oks=0
+  for f in $(find src/ct/trace -name '*_test.nim' | sort); do
+    name=$(basename "$f" .nim)
+    cache="/tmp/ct-nim-cache/ct-trace-$name"
+    echo -n "  $f ... "
+    output=$(nim c -r --hints:off \
+      --nimcache:"$cache" \
+      -o:"$cache/$name" \
+      "$f" 2>&1) || true
+    oks=$(echo "$output" | grep -c '\[OK\]' || true)
+    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
+    total_oks=$((total_oks + oks))
+    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
+      echo "COMPILE ERROR"
+      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ]; then
+      echo "PARTIAL ($oks OK, $fails FAILED)"
+      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    else
+      echo "OK ($oks tests)"
+      passed=$((passed + 1))
+    fi
+  done
+  echo ""
+  echo "ct trace units: $passed file(s) passed, $failed failed, $total_oks case(s)"
+  # Guard against a vacuous pass: a glob that silently matches nothing,
+  # or suites that compile but assert nothing, must not read as green.
+  if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
+    echo "ERROR: no ct trace-layer test cases ran"
+    exit 1
+  fi
+  [ "$failed" -eq 0 ]
+
 # Compile + run the recorder-gated ViewModel headless tests that live under
 # src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /
 # statement-step suites).  These are NOT covered by `test-vm` above, which

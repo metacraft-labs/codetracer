@@ -337,3 +337,78 @@
   The mapping is `.auto-hide-bottom-tabs` -> `#auto-hide-bottom-strip`, but
   several of those specs also assert tab counts and nesting, so it is not a
   pure textual substitution. Tracked as its own milestone.
+
+## Recording folder shapes: `.ct` is not always a container (M41, 2026-07-30)
+
+`ct` accepts three on-disk shapes for a recording folder, classified in one
+place: `src/ct/trace/trace_container.nim::detectTraceFolderShape`.
+
+  1. a `*.ct` CTFS container FILE (magic-checked) — what `ct record` writes;
+  2. a materialized `runtime_tracing` directory (`trace.json` / `trace.bin`
+     plus `trace_metadata.json` + `trace_paths.json`) — what `ct record-web`
+     writes for browser recordings, and what the Rust replay engine has always
+     autodetected (`dap_server.rs::auto_detect_materialized_trace_file`);
+  3. a `session.toml` multi-recording session manifest.
+
+Two traps this resolves:
+
+  * A **directory** named `foo.ct` is NOT a container. The cross-process
+    fixture names its per-process recordings `frontend.ct/` etc., which is why
+    `ct host --trace-path <fixture-root>` used to die with "trace folder
+    missing `.ct` CTFS container" against a folder that visibly contained
+    `backend.ct`. `describeMissingTraceContainer` now names what it found.
+  * There used to be two `findCtFileInFolder` implementations with different
+    semantics (`storage_and_import.nim` accepted any `*.ct` file;
+    `online_sharing/mcr_enrichment.nim` also verified CTFS magic). They are
+    unified in `trace_container.nim`; `mcr_enrichment` re-exports it.
+
+Sessions: `ct` never parses `session.toml` itself — it shells out to
+`replay-server session <manifest>` (~20 ms) so the only parser is
+`db-backend/src/session_manifest.rs`. A session is registered in the recording
+index IN PLACE (its `output_folder` is the manifest's directory, not a copy
+under `codetracerTraceDir`), because `[[trace]]` paths only resolve next to the
+manifest. The GUI needs no per-recording plumbing to open one: the DAP launch
+sends that folder as `traceFolder`, and `dap_server.rs::resolve_launch_trace_file`
+turns "folder contains session.toml" into a `setup_session` launch.
+
+Beware: `dap_server.rs` has TWO `launch` handlers (the initial one in
+`handle_message` and the stable thread's re-launch one). They MUST agree on
+trace-file resolution or a session opens as a session on one path and as one of
+its members on the other — which is silent, not a crash. Both now call
+`resolve_launch_trace_file`.
+
+Which test covers which handler: `cross_process_three_trace_dap_test::
+a_session_folder_launches_as_the_whole_session` covers only the STABLE-thread
+handler (`task_thread`) — reverting `handle_message`'s call to
+`resolve_launch_trace_file` leaves that integration test green. The
+`handle_message` half is what the cached-launch flow and tracepoint worker
+threads replay, and it is pinned separately by
+`dap_server::tests::handle_message_launch_resolves_a_session_folder_to_its_manifest`.
+If you touch either handler, run both.
+
+A third `launch` handler exists behind `#[cfg(feature = "browser-transport")]`
+(`handle_message_browser`): it re-runs trace detection against the WASM VFS and
+OVERWRITES `ctx.launch_trace_file`. `setup_from_vfs` has no session branch, so
+that path now refuses a folder holding a `session.toml` outright rather than
+latching onto a `trace.ct`/`trace.json` beside it.
+
+Opening a recording MUTATES it, for the CTFS shape only: `importTraceFolder`
+runs `materializeCtfsSources(<container>, <source folder>)`, which writes a
+`paths.json` **into the folder you pointed at** — including committed fixtures
+(`ct host --trace-path .../backend.ct` leaves an untracked `paths.json` in the
+fixture). The materialized branch was fixed to normalize the copy in the
+recording store instead; the CTFS branch still does it in place because
+`importTrace` then copies that sidecar next to the `files/` payload. Discard the
+stray file rather than committing it.
+
+Nim test runners cover three roots and `src/ct` was not one of them:
+`just test-vm` globs `src/tests/gui/tests/**/*_test.nim`,
+`just test-vm-recorder-gated` covers `src/frontend/viewmodel/tests/unit/`, and
+(new) `just test-ct-trace-units` covers `src/ct/trace/*_test.nim`. Before that
+last recipe every suite under `src/ct/trace` was a test nothing invoked. If you
+add a Nim test outside those three roots, add a runner too.
+
+GUI-test flake to know about: `fixtures.ts::importTraceFolder` caps `ct host`
+at a 15 s `spawnSync` timeout, and on a loaded machine that trips as
+`spawnSync ... ETIMEDOUT` for ordinary CTFS folders too (seen on
+`tracepoints_type_error.spec.ts`). It is not specific to sessions.

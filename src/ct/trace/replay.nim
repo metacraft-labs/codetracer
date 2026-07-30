@@ -2,6 +2,7 @@ import std / [options, os, osproc, strutils, strformat ],
   ../utilities/[ env, zip ],
   ../cli/[ interactive_replay ],
   ../trace / storage_and_import,
+  ../trace / session_import,
   ../../common/[ types, common_trace_index, lang, paths, config,
                   recording_id ],
   ../codetracerconf,
@@ -142,7 +143,30 @@ proc replay*(
 
     # not a multitrace:
 
-    trace = findTraceForArgs(patternArg, recordingIdArg, traceFolderArg)
+    # M41 — a multi-recording `session.toml` opens as one session.
+    #
+    # The user may name it either way round, so both spellings are
+    # accepted: `--trace-folder <dir-or-session.toml>` and the bare
+    # positional argument. The positional is normally a *program-name
+    # pattern*, so the path interpretation is taken only when
+    # `findSessionManifest` finds a real manifest on disk — a pattern
+    # that merely looks path-shaped keeps its existing meaning.
+    let sessionManifest = block:
+      var found = ""
+      if traceFolderArg.isSome:
+        found = findSessionManifest(traceFolderArg.get)
+      if found.len == 0 and patternArg.isSome:
+        found = findSessionManifest(patternArg.get)
+      found
+
+    if sessionManifest.len > 0:
+      try:
+        trace = importSessionManifest(sessionManifest)
+      except CatchableError as e:
+        echo "error: ", e.msg
+        quit(1)
+    else:
+      trace = findTraceForArgs(patternArg, recordingIdArg, traceFolderArg)
 
     if trace.isNil and traceFolderArg.isSome:
       let traceFolder = traceFolderArg.get()

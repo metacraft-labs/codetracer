@@ -192,6 +192,47 @@ fn three_recordings_load_as_one_session_with_canonical_roles() {
     );
 }
 
+/// M41 — the GUI launches a session by **folder**, not by manifest path.
+///
+/// `ct host` registers a session in the recording index with the
+/// manifest's *directory* as the recording's `output_folder`, and the
+/// frontend's DAP launch sends that folder verbatim as `traceFolder`
+/// (`src/frontend/middleware.nim`). Nothing in that path ever names
+/// `session.toml`.
+///
+/// So the folder spelling has to load the same session the manifest
+/// spelling loads. The failure mode this pins is specifically *not* a
+/// crash: before M41 the launch auto-detected a single trace file inside
+/// the folder, which would have opened one arbitrary member and shown
+/// the user a third of their program with no error at all.
+#[test]
+fn a_session_folder_launches_as_the_whole_session() {
+    if let Some(missing) = missing_fixture_piece() {
+        panic!("fixture incomplete: {missing}");
+    }
+    let folder = fixture_root();
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&folder)
+        .expect("launch the session by folder");
+
+    let entries = list_processes(&mut client);
+    let roles: Vec<String> = entries
+        .iter()
+        .filter_map(|e| e.get("role").and_then(|r| r.as_str()).map(str::to_string))
+        .collect();
+    assert_eq!(
+        roles,
+        vec![
+            ROLE_FRONTEND_JS.to_string(),
+            ROLE_FRONTEND_WASM.to_string(),
+            ROLE_BACKEND.to_string()
+        ],
+        "launching the session FOLDER must load all three recordings, not one member; got {roles:?}"
+    );
+}
+
 // Diagnosing a failure of the test below:
 //
 // If the origin chain stops inside the server recording, the usual

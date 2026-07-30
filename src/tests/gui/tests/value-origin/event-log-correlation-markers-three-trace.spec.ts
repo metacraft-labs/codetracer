@@ -30,21 +30,24 @@ import {
 import {
   isCtBinaryAvailable,
   ctBinaryPath,
+  threeTraceFixtureRoot,
 } from "../../lib/value-origin-fixtures";
 
-const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
+// Shared with the sibling TCT-M5 spec rather than recomputed here. The
+// local `path.resolve(__dirname, "..", "..", "..", "..")` this replaces
+// climbed one directory too few — a spec under `tests/value-origin/`
+// needs five levels, not four, to reach the repo root — so `fixtureDir`
+// pointed at `<repo>/src/src/db-backend/...`, every container looked
+// missing, and the spec skipped on every run instead of ever launching.
+const fixtureDir = threeTraceFixtureRoot();
 
-const fixtureDir = path.join(
-  repoRoot,
-  "src",
-  "db-backend",
-  "tests",
-  "fixtures",
-  "cross_process",
-  "account-balance-with-wasm",
-);
-
-const HTTP_BOUNDARY_ID = "account-balance-with-wasm";
+// The HTTP boundary token the fixture's `frontend/app.js` passes to
+// `__ct.markCorrelation` (`const BOUNDARY_HTTP = "account-balance";`),
+// pinned by the fixture's `ANSWERS.md` and `README.md`. It is NOT the
+// fixture directory name — the recordings carried the directory name
+// until the fixture was rebuilt as a runnable three-tier demo, and this
+// constant was left behind pointing at a token no recording emits.
+const HTTP_BOUNDARY_ID = "account-balance";
 const JS_WASM_BOUNDARY_ID = "js-wasm-realm";
 const REQUIRED_CONTAINERS = ["frontend.ct", "frontend-wasm.ct", "backend.ct"];
 
@@ -129,13 +132,16 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
     await readyOnEntry(ctPage);
 
     // §5.1 — both boundary families must render as marker rows. The M25
-    // HTTP boundary `account-balance-with-wasm` and the M27 → M25
+    // HTTP boundary `account-balance` and the M27 → M25
     // PairIndex-bridge boundary `js-wasm-realm` are the two pairs the
     // fixture's ANSWERS.md pins.
     const httpRow = await readMarkerRow(ctPage, HTTP_BOUNDARY_ID);
     expect(httpRow, "HTTP boundary marker row must render").not.toBeNull();
     expect(httpRow!.chipText).toBe(`[${HTTP_BOUNDARY_ID}]`);
-    expect(httpRow!.keyValue, "matches ANSWERS.md").toBe("620");
+    // ANSWERS.md: `send | account-balance | req-0001 | 620 (names result)`.
+    // The correlation *key* is the request id; `620` is the shown value.
+    // This assertion used to expect the shown value in the key column.
+    expect(httpRow!.keyValue, "matches ANSWERS.md").toBe("req-0001");
 
     const realmRow = await readMarkerRow(ctPage, JS_WASM_BOUNDARY_ID);
     expect(

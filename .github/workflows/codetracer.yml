@@ -1219,6 +1219,14 @@ jobs:
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
+      - name: Run ct trace-layer unit tests
+        # src/ct/trace/*_test.nim (recording-folder shape detection,
+        # session-manifest open path, CTFS source materialization, path
+        # handling, ct host idle-timeout parsing) is matched by neither
+        # `test-vm`'s glob nor `test-vm-recorder-gated`'s, so these suites
+        # ran nowhere.  Pure Nim, no recorder sibling, no display.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-ct-trace-units
+
       - name: Clone codetracer-js-recorder sibling
         # The recorder-gated ViewModel tests
         # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,

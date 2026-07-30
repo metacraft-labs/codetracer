@@ -695,6 +695,11 @@ fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
     }
 }
 
+/// File name of a multi-recording session manifest. Mirrored on the Nim
+/// side by `ct/src/ct/trace/trace_container.nim::SESSION_MANIFEST_FILE`.
+/// Spec: `codetracer-specs/Trace-Files/Session-Manifest.md` §5.
+pub const SESSION_MANIFEST_FILE: &str = "session.toml";
+
 /// Returns true when the launch's `trace_folder`/`trace_file` resolves
 /// to a `session.toml` manifest. The check is path-shaped — we accept
 /// the manifest either as `trace_folder` itself (the typical CLI
@@ -709,7 +714,48 @@ fn is_session_manifest_path(path: &Path) -> bool {
         && path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "session.toml")
+            .is_some_and(|name| name == SESSION_MANIFEST_FILE)
+}
+
+/// Resolve a `launch` request's effective `trace_file` from its
+/// `trace_folder` and its optional explicit `trace_file`.
+///
+/// There are two `launch` handlers — the initial one in
+/// `handle_message` and the one the stable thread runs for re-launches —
+/// and they must agree exactly, or a session opens as a session on one
+/// path and as one of its members on the other. This is the single
+/// implementation both call.
+///
+/// Resolution order:
+///
+/// 1. an explicit `trace_file` always wins;
+/// 2. a `trace_folder` that *is* a `session.toml` needs no trace file —
+///    the manifest declares its own trace list (M24);
+/// 3. a `trace_folder` that *contains* a `session.toml` is a session:
+///    naming the manifest routes the launch through `setup_session`
+///    (M41). Auto-detecting a single trace file here instead would open
+///    one arbitrary member and silently show a fraction of the program;
+/// 4. otherwise auto-detect, preferring CTFS containers but keeping
+///    legacy materialized `trace.json` / `trace.bin` fixtures loadable;
+/// 5. failing that, default to `trace.ct` so `setup`'s error message
+///    points at the canonical name.
+fn resolve_launch_trace_file(folder: &Path, explicit: Option<&PathBuf>) -> PathBuf {
+    if let Some(trace_file) = explicit {
+        return trace_file.clone();
+    }
+    if is_session_manifest_path(folder) {
+        return PathBuf::new();
+    }
+    if is_session_manifest_path(&folder.join(SESSION_MANIFEST_FILE)) {
+        return SESSION_MANIFEST_FILE.into();
+    }
+    match auto_detect_materialized_trace_file(folder) {
+        Some(trace_path) => trace_path
+            .strip_prefix(folder)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path)),
+        None => "trace.ct".into(),
+    }
 }
 
 /// Resolve the path the launch's `trace_folder` + `trace_file` point
@@ -2290,31 +2336,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.launch_program_args.clear();
                 ctx.launch_cwd = None;
                 ctx.launch_live_recording_dir = None;
-                if let Some(trace_file) = &args.trace_file {
-                    ctx.launch_trace_file = trace_file.clone();
-                } else if is_session_manifest_path(folder) {
-                    // M24 session.toml — the manifest declares its own
-                    // trace list, so there is no per-launch trace_file
-                    // to resolve.
-                    ctx.launch_trace_file = PathBuf::new();
-                } else {
-                    // Auto-detect the trace file. Prefer CTFS containers, but
-                    // keep legacy materialized `trace.json` / `trace.bin`
-                    // fixtures loadable until the fixture catalogue is fully
-                    // migrated.
-                    if let Some(trace_path) = auto_detect_materialized_trace_file(folder) {
-                        let rel_path = trace_path
-                            .strip_prefix(folder)
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path));
-                        ctx.launch_trace_file = rel_path;
-                    } else {
-                        // No materialized trace file found; default to
-                        // "trace.ct" so the error message in setup() points
-                        // at the canonical name.
-                        ctx.launch_trace_file = "trace.ct".into();
-                    }
-                }
+                ctx.launch_trace_file = resolve_launch_trace_file(folder, args.trace_file.as_ref());
 
                 // TODO: log this when logging logic is properly abstracted
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
@@ -2530,6 +2552,28 @@ pub fn handle_message_browser(
             // VFS-aware lookups. Materialized traces are CTFS-only.
             {
                 let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
+
+                // A multi-recording session must never degrade into one of
+                // its members. `setup_from_vfs` has no session branch, and
+                // the VFS probe below would happily latch onto a
+                // `trace.ct`/`trace.json` sitting beside the manifest and
+                // open a fraction of the program with no error at all —
+                // the exact silent failure the native launch path was
+                // fixed for. Refuse loudly instead.
+                let session_vfs_path = if folder.is_empty() {
+                    SESSION_MANIFEST_FILE.to_string()
+                } else {
+                    format!("{}/{}", folder.trim_end_matches('/'), SESSION_MANIFEST_FILE)
+                };
+                if crate::vfs::vfs_exists(&session_vfs_path) {
+                    return Err(format!(
+                        "{session_vfs_path} is a multi-recording session manifest; \
+                         browser replay opens a single recording only. Launch one \
+                         of the manifest's `[[trace]]` paths directly."
+                    )
+                    .into());
+                }
+
                 // `trace.ct` is the canonical CTFS container; `trace.json`
                 // is the legacy `runtime_tracing` materialized layout still
                 // emitted by some recorders (e.g. `nargo trace`).  Probe
@@ -2763,25 +2807,7 @@ fn task_thread(
             let args = request.load_args::<dap::LaunchRequestArguments>()?;
             if let Some(folder) = &args.trace_folder {
                 let launch_trace_folder = folder.clone();
-                let launch_trace_file = if let Some(trace_file) = &args.trace_file {
-                    trace_file.clone()
-                } else if is_session_manifest_path(folder) {
-                    // M24 — session.toml carries its own trace list, so
-                    // there is no per-launch `trace_file` to resolve.
-                    PathBuf::new()
-                } else {
-                    // Prefer CTFS containers, but keep legacy materialized
-                    // `trace.json` / `trace.bin` fixtures loadable until the
-                    // fixture catalogue is fully migrated.
-                    if let Some(trace_path) = auto_detect_materialized_trace_file(folder) {
-                        trace_path
-                            .strip_prefix(folder)
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path))
-                    } else {
-                        "trace.ct".into()
-                    }
-                };
+                let launch_trace_file = resolve_launch_trace_file(folder, args.trace_file.as_ref());
 
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
@@ -3341,5 +3367,142 @@ mod tests {
             !is_mcr_ctfs_container(&mut ctfs),
             "corrupt meta.dat must be treated as not-MCR so the typed error surfaces later",
         );
+    }
+
+    // ── Launch trace-file resolution ───────────────────────────────────
+    //
+    // `launch` is handled in more than one place: `handle_message`
+    // stores the resolution on `Ctx` (which the flow and tracepoint
+    // worker threads then replay through their cached launch), and
+    // `task_thread` re-resolves it from the request arguments for the
+    // stable thread. If the two disagree about what a *folder holding a
+    // `session.toml`* means, the failure is silent: the stable thread
+    // opens the whole session while the workers open one member, or
+    // vice versa, and nothing errors.
+    //
+    // `cross_process_three_trace_dap_test::a_session_folder_launches_as_the_whole_session`
+    // covers the `task_thread` side end to end against the real fixture.
+    // The tests below cover the shared resolver and, specifically, the
+    // `handle_message` side — which that integration test does *not*
+    // exercise, as reverting it alone leaves the suite green.
+
+    /// Minimal on-disk session: a `session.toml` next to a member that
+    /// would auto-detect as a single trace if the manifest were ignored.
+    fn write_session_fixture(dir: &Path) {
+        std::fs::write(dir.join(SESSION_MANIFEST_FILE), "version = 1\n").unwrap();
+        std::fs::write(dir.join("trace.json"), "[]").unwrap();
+    }
+
+    /// Build a DAP `launch` request naming `folder` as `traceFolder`,
+    /// exactly as `src/frontend/middleware.nim` sends it.
+    fn launch_request_for_folder(folder: &Path) -> dap::Request {
+        dap::Request {
+            base: ProtocolMessage {
+                seq: 1,
+                type_: "request".to_string(),
+            },
+            command: "launch".to_string(),
+            arguments: json!({ "traceFolder": folder }),
+        }
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_prefers_a_session_manifest_over_a_member() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), None),
+            PathBuf::from(SESSION_MANIFEST_FILE),
+            "a folder carrying a session.toml must launch as the session, not as the trace.json beside it",
+        );
+        assert!(
+            resolve_session_manifest_path(dir.path(), Path::new(SESSION_MANIFEST_FILE)).is_some(),
+            "the resolved pair must route through setup_session",
+        );
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_accepts_the_manifest_path_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+        let manifest = dir.path().join(SESSION_MANIFEST_FILE);
+        assert_eq!(
+            resolve_launch_trace_file(&manifest, None),
+            PathBuf::new(),
+            "a traceFolder that IS the manifest needs no per-launch trace file",
+        );
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_honours_an_explicit_trace_file() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+        let explicit = PathBuf::from("other.ct");
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), Some(&explicit)),
+            explicit,
+            "an explicit trace_file always wins",
+        );
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_auto_detects_a_single_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+        assert_eq!(resolve_launch_trace_file(dir.path(), None), PathBuf::from("trace.json"),);
+
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_launch_trace_file(empty.path(), None),
+            PathBuf::from("trace.ct"),
+            "with nothing to detect, fall back to the canonical name so setup()'s error names it",
+        );
+    }
+
+    /// The `handle_message` launch handler must reach the same
+    /// conclusion the stable thread does. Reverting it to a plain
+    /// auto-detect leaves `a_session_folder_launches_as_the_whole_session`
+    /// green, so this is the only guard on that half.
+    #[test]
+    fn handle_message_launch_resolves_a_session_folder_to_its_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        let mut ctx = Ctx::default();
+        let request = launch_request_for_folder(dir.path());
+        handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
+
+        assert_eq!(
+            ctx.launch_trace_file,
+            PathBuf::from(SESSION_MANIFEST_FILE),
+            "handle_message must store the manifest, not an auto-detected member",
+        );
+        assert!(
+            resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_some(),
+            "the stored launch must route the cached-launch worker threads through setup_session",
+        );
+        assert_eq!(
+            ctx.recreator_exe,
+            PathBuf::new(),
+            "a session resolves its replay-worker exe per member, so the session-level value stays unset",
+        );
+    }
+
+    /// The same handler must keep resolving an ordinary single
+    /// recording, so the session branch cannot be "fixed" by making
+    /// every folder look like a session.
+    #[test]
+    fn handle_message_launch_still_auto_detects_a_single_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        let mut ctx = Ctx::default();
+        let request = launch_request_for_folder(dir.path());
+        handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
+
+        assert_eq!(ctx.launch_trace_file, PathBuf::from("trace.json"));
+        assert!(resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_none(),);
     }
 }

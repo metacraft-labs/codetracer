@@ -141,12 +141,17 @@ symptom is an empty `record-web` output directory rather than an error.
 ```bash
 cd <workspace>/codetracer
 just build-once                       # if the Electron app is not built yet
-./src/build-debug/bin/ct replay \
-    src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/session.toml
+./src/build-debug/bin/ct replay --trace-folder \
+    src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm
 ```
 
-Passing the `session.toml` — rather than a single `.ct` — is what makes
-this a multi-process session. Once it opens:
+Either the directory or the `session.toml` inside it may be named; both
+open the whole session. `ct host --trace-path <same-path>` does the same
+for the browser-hosted UI. What makes this a multi-process session is
+the manifest, not the individual recordings: `ct` registers the session
+folder as one entry in the recording index, and the replay engine loads
+every `[[trace]]` behind a single session (see
+`src/ct/trace/session_import.nim`). Once it opens:
 
 1. The **process tree** lists all three recordings by their manifest
    roles: `frontend-js`, `frontend-wasm`, `backend`.
@@ -193,6 +198,48 @@ Other views: `ct print <trace>` for a summary, `ct print --format json
 <trace>` for the fully decoded document, and `ct-print --markers` /
 `--full` / `--events` from `codetracer-trace-format-nim` for the same
 data with more options.
+
+## On-disk shapes of the three recordings
+
+The three recording directories are **not** all the same shape, and that
+is deliberate — each carries what its recorder actually writes:
+
+| Directory          | Shape                                    | Contents                                                     |
+| ------------------ | ---------------------------------------- | ------------------------------------------------------------ |
+| `backend.ct`       | CTFS container                           | `server.ct` (+ `files/`)                                      |
+| `frontend.ct`      | materialized `runtime_tracing` directory | `trace.json`, `trace_metadata.json`, `trace_paths.json`        |
+| `frontend-wasm.ct` | materialized `runtime_tracing` directory | `trace.json`, `trace_metadata.json`, `trace_paths.json`        |
+
+The two browser recordings are materialized because that is what `ct
+record-web` emits: the browser streams events to the recording daemon,
+which writes them out directly rather than sealing a CTFS container.
+Both shapes are first-class — the replay engine autodetects them
+(`db-backend/src/dap_server.rs::auto_detect_materialized_trace_file`),
+and since M41 so does `ct`
+(`src/ct/trace/trace_container.nim::detectTraceFolderShape`), so each of
+the three directories can also be opened on its own:
+
+```bash
+ct replay --trace-folder .../account-balance-with-wasm/frontend.ct
+```
+
+Converting the browser recordings to CTFS was considered and rejected
+for this fixture: `db-backend/tests/m25b_event_log_test.rs` reads
+`frontend.ct/trace.json` directly (it asserts the path *is a file*), so
+the conversion would have had to rewrite a headless test in order to
+make a GUI test launch. The `.ct` suffix on the directory names is a
+naming convention from `session.toml`, not a claim that each is a
+container file.
+
+Opening a recording is read-only for the two materialized directories —
+the import normalizes the copy in the recording store, not the fixture.
+`backend.ct` is the exception: opening it directly still writes a
+`paths.json` beside `server.ct`, because the CTFS import materializes
+its sources in place. That is pre-existing CTFS behaviour, not something
+the session path does — opening the session (the folder, or
+`session.toml`) writes nothing here — but `git status` after a bare
+`ct host --trace-path .../backend.ct` will show the stray file, and it
+should be discarded rather than committed.
 
 ## What is committed
 
