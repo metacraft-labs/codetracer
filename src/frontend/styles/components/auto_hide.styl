@@ -4,7 +4,9 @@
 //
 // Layout: side strips tile WITH the GL container in a flex row, so the GL
 // area shrinks to accommodate them (no overlay on top of content).
-// Bottom auto-hide tabs render in #status-base (2rem tall, tabs only).
+// Bottom auto-hide tabs render inside #status-base (the 2rem-tall status bar),
+// sharing the bar with the collapsed-icon zone, the language/encoding readout
+// and the location path — see Auto-Hide-Panes.md §3.1.
 
 // ---------------------------------------------------------------------------
 // Layout row — flex container that holds left strip, GL (#ROOT), right strip.
@@ -240,7 +242,8 @@
   cursor: ns-resize
 
 // ---------------------------------------------------------------------------
-// Bottom auto-hide strip — the sole content of the redesigned #status-base.
+// Bottom auto-hide strip — one of #status-base's flex children, taking the
+// slack between the left-hand readouts and the right-hand location path.
 // The bar is 2rem tall with 0.25em padding-top/bottom (matching side-strip
 // padding-left/right) for curve visibility and consistent breathing room.
 // Tabs fill the inner 1.5em height via align-items: stretch.

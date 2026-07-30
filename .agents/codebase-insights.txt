@@ -280,3 +280,60 @@
   `isonim_process_tree_view.nim`; the only `data-role` attribute in the product
   is on origin-chain breadcrumb chips in `ui/isonim_origin_chain.nim`). The
   §14.8 process-tree / "Switch process" surface is still deferred.
+- 2026-07-30 (M43): The Electron Playwright suite had THREE independent
+  suite-wide harness/product DOM-contract breaks, all introduced by
+  design-system redesign commits that renamed or hid elements without
+  updating the shared page objects:
+  (1) FIXED. `b27da3947 "feat: Redesign of the status bar"` added
+  `#status #status-base > *:not(#auto-hide-bottom-strip) { display: none
+  !important }` to `src/frontend/styles/components/status_bar.styl`, making the
+  footer a tabs-only strip. That hid `.location-path` (+ `#copy-path-image`,
+  `#file-info-status`, and — because the `!important` beat
+  `.collapsed-icon-zone.has-icons` — `#auto-hide-collapsed-icon-zone`).
+  `readyOnEntryTest` in `src/tests/gui/lib/fixtures.ts` waits for
+  `.location-path` to be VISIBLE, so essentially every Electron spec died at
+  its first line with a 15 s timeout on an element that was present with the
+  right `title`. The rule contradicted `Auto-Hide-Panes.md` §3.1 ("the status
+  bar's right section retains its existing content (language, encoding, cursor
+  location)") and §10.3 (icon zone in the same bar), and nothing else in the
+  frontend renders `StatusBaseModel.locationText` — so the product was wrong
+  and the rule was removed. Do NOT relax the wait to `state: "attached"`: the
+  element is attached with correct content long before it has a box, so an
+  attachment wait reports readiness for a footer that never renders. The
+  footer contract is now pinned by
+  `src/tests/gui/tests/status-bar/status-bar-footer-contract.spec.ts`, which
+  also re-injects the removed rule as a negative control. Two width facts
+  worth knowing: the footer's three regions need ~1035px of min-content and
+  `BrowserWindow.minWidth` (index/window.nim) is 1050, so there is only ~15px
+  of slack before the bar overflows horizontally; and `.location-path` needed
+  `white-space: nowrap` added — it had `overflow: hidden` +
+  `text-overflow: ellipsis`, but ellipsis is inert on a wrapping line, so at
+  1050px the path wrapped to three lines and spilled out of the 2em bar
+  (`#status-base` is `overflow: visible` for the tab curves). `.status-right`
+  and `#location-status` also needed `min-width: 0` for the flex item to
+  shrink far enough for the ellipsis to engage.
+  (2) FIXED. `d0727512c "fix: Design details"` renamed EVERY
+  debug-toolbar button id from `*-debug` to `*-image`
+  (`run-to-entry-debug` -> `run-to-entry-image`, `next-debug` -> `next-image`,
+  ... only `jump-to-live-debug` kept its name), but
+  `src/tests/gui/page-objects/layout-page.ts` still located `#run-to-entry-debug`
+  etc., so any spec calling `LayoutPage.runToEntryButton()/continueButton()/...`
+  timed out after 30 s on a locator matching nothing. The repo has TWO layout
+  page objects — `layout-page.ts` (hyphen, the rich one nearly every spec
+  imports) and `layout_page.ts` (underscore, a smaller API used by ~5 specs) —
+  and they each kept their own copy of the id list, which is how they drifted.
+  The ids now live once in `src/tests/gui/page-objects/debug-toolbar-ids.ts`
+  and both page objects read from it; five specs that hard-coded `#next-debug`
+  / `#reverse-next-debug` / `#reverse-continue-debug` inline were fixed too.
+  (3) STILL BROKEN. The same `b27da3947` replaced the bottom tabs container:
+  tabs are now direct children of `#auto-hide-bottom-strip`, and the
+  `.auto-hide-bottom-tabs` wrapper class exists only in
+  `isonim_auto_hide_bottom_tabs_view.nim`, which nothing but
+  `storybook_components.nim` still imports — i.e. the class is absent from the
+  live app DOM. About 48 locator sites across 8 spec files still use it
+  (`tests/auto-hide/auto-hide-panes.spec.ts`,
+  `tests/build/{build-panel-e2e,build-header-controls,problems-panel,real-compiler-errors,search-results-e2e}.spec.ts`,
+  `tests/visual-audit/{strip-layout-verify,comprehensive-v2}.spec.ts`).
+  The mapping is `.auto-hide-bottom-tabs` -> `#auto-hide-bottom-strip`, but
+  several of those specs also assert tab counts and nesting, so it is not a
+  pure textual substitution. Tracked as its own milestone.

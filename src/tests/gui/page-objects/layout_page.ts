@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { debugToolbarSelector } from "./debug-toolbar-ids";
 
 export class BasePage {
   readonly page: Page;
@@ -284,31 +285,31 @@ export class LayoutPage extends BasePage {
   private programStateTabsCache: ProgramStateTab[] = [];
 
   runToEntryButton(): Locator {
-    return this.page.locator("#run-to-entry-image");
+    return this.page.locator(debugToolbarSelector("runToEntry"));
   }
   continueButton(): Locator {
-    return this.page.locator("#continue-image");
+    return this.page.locator(debugToolbarSelector("continue"));
   }
   reverseContinueButton(): Locator {
-    return this.page.locator("#reverse-continue-image");
+    return this.page.locator(debugToolbarSelector("reverseContinue"));
   }
   stepOutButton(): Locator {
-    return this.page.locator("#step-out-image");
+    return this.page.locator(debugToolbarSelector("stepOut"));
   }
   reverseStepOutButton(): Locator {
-    return this.page.locator("#reverse-step-out-image");
+    return this.page.locator(debugToolbarSelector("reverseStepOut"));
   }
   stepInButton(): Locator {
-    return this.page.locator("#step-in-image");
+    return this.page.locator(debugToolbarSelector("stepIn"));
   }
   reverseStepInButton(): Locator {
-    return this.page.locator("#reverse-step-in-image");
+    return this.page.locator(debugToolbarSelector("reverseStepIn"));
   }
   nextButton(): Locator {
-    return this.page.locator("#next-image");
+    return this.page.locator(debugToolbarSelector("next"));
   }
   reverseNextButton(): Locator {
-    return this.page.locator("#reverse-next-image");
+    return this.page.locator(debugToolbarSelector("reverseNext"));
   }
 
   async eventLogTabs(forceReload = false): Promise<EventLogTab[]> {
