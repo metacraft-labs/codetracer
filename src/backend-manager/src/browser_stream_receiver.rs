@@ -488,11 +488,15 @@ mod tests {
                 boundary,
                 key,
                 payload,
+                show_text,
             } => {
                 assert_eq!(direction, MarkerDirection::Send);
                 assert_eq!(boundary, "outbound");
                 assert_eq!(key, serde_json::json!("user-42"));
                 assert!(payload.is_none());
+                // `showText` is optional on the wire — a marker that names
+                // no resume binding must still parse.
+                assert!(show_text.is_none());
             }
             other => panic!("unexpected variant: {other:?}"),
         }

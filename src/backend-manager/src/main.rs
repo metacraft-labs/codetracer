@@ -151,6 +151,32 @@ enum Commands {
         /// Defaults to the host process's current working directory.
         #[arg(long)]
         workdir: Option<PathBuf>,
+        /// Command spawned once per recording, fed the exact `trace.json`
+        /// byte stream on stdin, so snapshots and slices are derived while
+        /// the page is still running.
+        ///
+        /// Repeat the flag once per word of the command line — the program
+        /// first, then each argument — so no shell quoting rules are
+        /// involved and an argument may safely begin with `-`.
+        /// `{trace_dir}` in any of them is replaced with the recording's
+        /// `.ct` path, which the daemon only knows once the page has
+        /// announced its program name.
+        ///
+        /// Off by default: without it `record-web` spawns nothing and
+        /// behaves exactly as it always has.  The consumer's absence or
+        /// failure costs seek performance only; the recording is the
+        /// source of truth and is unaffected.  See
+        /// `codetracer-specs/Recording-Backends/WASM-Replay-Snapshots-And-Slices.md`
+        /// §2, and `stream-snapshots-demo.sh` in the cross-process demo
+        /// fixture for a worked example.
+        #[arg(long = "snapshot-consumer", value_name = "WORD")]
+        snapshot_consumer: Vec<String>,
+        /// Create this marker file inside the `.ct` once `trace.json` is
+        /// complete, for the file-following consumer shape
+        /// (`--boundary-stream <file> --stream-done <marker>`).  Off by
+        /// default, because it adds a file to the recording directory.
+        #[arg(long, value_name = "NAME")]
+        stream_done_marker: Option<String>,
     },
 }
 
@@ -3020,6 +3046,7 @@ async fn run_record_web(
     bind: &str,
     out_dir: &Path,
     workdir: Option<&Path>,
+    stream_consumer: browser_stream_host::StreamConsumerConfig,
 ) -> Result<(), Box<dyn Error>> {
     let bind_addr: std::net::SocketAddr = bind
         .parse()
@@ -3034,6 +3061,7 @@ async fn run_record_web(
         bind: bind_addr,
         out_dir: out_dir.clone(),
         workdir,
+        stream_consumer: stream_consumer.clone(),
     };
     let host = browser_stream_host::BrowserStreamHost::new(config);
     let running = host.bind().await?;
@@ -3046,6 +3074,15 @@ async fn run_record_web(
         "writing recorded `.ct` directories under: {}",
         out_dir.display(),
     );
+    if !stream_consumer.command.is_empty() {
+        eprintln!(
+            "streaming each recording into: {}",
+            stream_consumer.command.join(" "),
+        );
+    }
+    if let Some(marker) = &stream_consumer.done_marker {
+        eprintln!("marking each finished recording with: <program>.ct/{marker}");
+    }
     // Wait for Ctrl+C, then shut down cleanly so in-flight recordings
     // get a chance to flush.
     signal::ctrl_c().await?;
@@ -3216,10 +3253,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         bind,
         out_dir,
         workdir,
+        snapshot_consumer,
+        stream_done_marker,
     }) = &cli.command
     {
         flexi_logger::init();
-        return run_record_web(bind, out_dir, workdir.as_deref()).await;
+        let stream_consumer = browser_stream_host::StreamConsumerConfig {
+            command: snapshot_consumer.clone(),
+            done_marker: stream_done_marker.clone(),
+        };
+        return run_record_web(bind, out_dir, workdir.as_deref(), stream_consumer).await;
     }
 
     // ------------------------------------------------------------------
