@@ -53,6 +53,13 @@ const
     # unnoticed.  Native-only (real container bytes through a zstd FFI), hence
     # excluded from `just test-vm-js` and listed here.
     "src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim",
+    # RS-M5: the Python row of the language matrix.  `vm_python_request_panel_rows`
+    # drives the panel from a container the Python recorder produced while a real
+    # Flask app served real HTTP requests, and asserts the rows, the status
+    # colouring and the double-click seek into the handler.  Native-only (real
+    # container bytes through a zstd FFI), hence excluded from `just test-vm-js`
+    # and listed here.
+    "src/tests/gui/tests/request-panel/python_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

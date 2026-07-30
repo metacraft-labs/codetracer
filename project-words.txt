@@ -192,3 +192,6 @@ Miden
 recognises
 solana
 Solana
+WSGI
+wsgiref
+colours

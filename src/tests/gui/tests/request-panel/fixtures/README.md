@@ -1,0 +1,59 @@
+# Request-panel test fixtures
+
+## `python_flask/serve.ct` — a recorded Flask session (RS-M5)
+
+A **real recording**, not a hand-built container. The Python recorder's WSGI
+middleware wrote its `spans.dat` records while `wsgiref` served eight HTTP
+requests to the demo Flask app in the sibling recorder repo
+(`codetracer-python-recorder/test-programs/web/flask/app.py`). `meta.dat` bit 13
+(`FlagHasSpanStream`) is set by the writer because spans were registered, not by
+hand.
+
+It is consumed by `../python_request_panel_vm_test.nim`
+(`vm_python_request_panel_rows`), which is registered in
+`src/ct_test/release_gate.nim`'s `CoreViewModelGateTests`. It is checked in so
+that ViewModel test needs no Python toolchain, no network and no server.
+
+### Regenerating
+
+```sh
+direnv exec ../codetracer-python-recorder just \
+  record-request-panel-fixture \
+  "$PWD/src/tests/gui/tests/request-panel/fixtures/python_flask" flask
+```
+
+The recipe **replaces the whole target directory**, which is why this file lives
+one level up.
+
+It records exactly the schedule `just demo-request-panel python` records —
+`DEMO_REQUESTS` in
+`codetracer-python-recorder/test-programs/web/session_driver.py` — so the fixture
+and the hand-run demo always show the same session. Regenerate whenever the demo
+app's routes, the request schedule or the span metadata change, and update
+`ExpectedRows` in the ViewModel test to match. The test asserts the schedule
+(methods, URLs, statuses, routes) as constants and the timing-dependent values
+(durations, byte counts, step indices) as properties, so a re-recording on a
+different machine does not require touching the test.
+
+### What the session contains
+
+| # | Request                    | Status | Route                        |
+| - | -------------------------- | ------ | ---------------------------- |
+| 1 | `GET /api/users`           | 200    | `/api/users`                 |
+| 2 | `POST /api/users`          | 201    | `/api/users`                 |
+| 3 | `GET /api/users/2`         | 200    | `/api/users/<int:user_id>`   |
+| 4 | `GET /static/app.css`      | 304    | `/static/app.css`            |
+| 5 | `GET /api/users/999`       | 404    | `/api/users/<int:user_id>`   |
+| 6 | `GET /api/reports/slow`    | 200    | `/api/reports/slow`          |
+| 7 | `GET /api/boom`            | 500    | `/api/boom`                  |
+| 8 | `GET /api/users`           | 200    | `/api/users`                 |
+
+Every status bucket the panel colours is present, request 6 sleeps 50 ms inside
+its handler so a duration is unambiguously non-zero, and request 7's handler
+raises so its span carries `error.message`.
+
+The recording's absolute source paths point at the machine that recorded it;
+that is fine for the ViewModel test (which only reads spans and step bindings)
+but means the editor pane will not find the sources when opening this fixture by
+hand. Use `just demo-request-panel python` for that — it records into a fresh
+directory next to a live checkout.

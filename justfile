@@ -1348,21 +1348,66 @@ demo-cross-tracer:
 # language's recorder and adds `just demo-request-panel <that lang>`.  Nothing
 # else in this recipe changes: only who writes the span records.
 #
-# LANG selects the producer.  `synthetic` is the only value that works today;
-# each language milestone adds its own.  See the "Trying it" section of
+# LANG selects the producer:
+#
+#   synthetic — the RS-M4 producer described above (no server, real container).
+#   python    — RS-M5: a REAL Flask app served over real HTTP by a real recorded
+#               process, whose middleware writes the span records itself.  The
+#               container production lives in the sibling
+#               `codetracer-python-recorder` repo (only it can record Python);
+#               this recipe delegates to its
+#               `just demo-request-panel-python` and then opens the result.
+#
+# Each further language milestone (RS-M6..RS-M9) adds its own value the same
+# way.  See the "Trying it" section of
 # codetracer-specs/GUI/Core-Panes/Request-Panel.md.
 demo-request-panel LANG="synthetic":
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "=== RS-M4 Request Panel demo — {{LANG}} ==="
+  echo "=== Request Panel demo — {{LANG}} ==="
+
+  if [ "{{LANG}}" = "python" ]; then
+    # RS-M5.  The recorder sibling records the demo app into $CODETRACER_DEMO_DIR
+    # and prints the spans it wrote; the GUI half stays here so every language
+    # opens the session exactly the same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-python}"
+    recorder_repo="${CODETRACER_PYTHON_RECORDER_DIR:-$(pwd)/../codetracer-python-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-python-recorder checkout at $recorder_repo."
+        echo "The Python demo records a real Flask app with that recorder, so the"
+        echo "sibling repo has to be present (override with"
+        echo "CODETRACER_PYTHON_RECORDER_DIR=/path/to/codetracer-python-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the Flask demo app with the Python recorder"
+    # Its own dev shell: the recorder needs its Rust/maturin toolchain and its
+    # uv environment, neither of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-python flask
+    )
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$demo_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$demo_dir"
+  fi
 
   if [ "{{LANG}}" != "synthetic" ]; then
     {
-      echo "ERROR: no recorder emits web-request spans yet, so '{{LANG}}' has"
-      echo "no demo to run.  Per-language emission is RS-M5..RS-M9; each of"
-      echo "those milestones adds its own LANG value to this recipe."
+      echo "ERROR: no recorder emits web-request spans for '{{LANG}}' yet."
+      echo "Ruby / PHP / Elixir / JS emission is RS-M6..RS-M9; each of those"
+      echo "milestones adds its own LANG value to this recipe."
       echo
       echo "Today:  just demo-request-panel synthetic"
+      echo "        just demo-request-panel python"
     } >&2
     exit 1
   fi
@@ -1957,10 +2002,12 @@ test-vm-native: vm-test-prereqs
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
-# Also skips request-panel/demo_recipe_vm_test.nim (RS-M4): it writes a real
-# `.ct` container with the canonical Nim writer, which links zstd through a C
-# FFI that has no `nim js` equivalent.  It runs in test-vm-native and is
-# registered in release_gate.nim's CoreViewModelGateTests.
+# Also skips request-panel/demo_recipe_vm_test.nim (RS-M4) and
+# request-panel/python_request_panel_vm_test.nim (RS-M5): the first writes a real
+# `.ct` container with the canonical Nim writer, the second reads one recorded by
+# the Python recorder, and both link zstd through a C FFI that has no `nim js`
+# equivalent.  They run in test-vm-native and are registered in
+# release_gate.nim's CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
   set -e
@@ -1977,6 +2024,7 @@ test-vm-js: vm-test-prereqs
     ! -path '*/noir-space-ship/*' \
     ! -path '*/agentic-coding/*' \
     ! -path '*/request-panel/demo_recipe_vm_test.nim' \
+    ! -path '*/request-panel/python_request_panel_vm_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"
