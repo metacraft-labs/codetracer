@@ -150,7 +150,7 @@
     margin-left: 6px
     background: colors-ui-surface-canvas
     border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.75em
+    border-radius: 0.5em
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
 
 
@@ -301,7 +301,7 @@
   #menu-elements
     width: 100%
     overflow: hidden
-    border-radius: 0.75em
+    border-radius: 0.5em
 
   .menu-node-container
     width: 100%
@@ -314,13 +314,17 @@
     padding: 0
     background: colors-ui-surface-canvas
     border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.75em
+    border-radius: 0.5em
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
     overflow: hidden
 
   #menu-elements, .menu-nested-elements
+    .menu-node-container:first-child > .ct-menu-item
+      border-radius: 0.5em 0.5em 0 0
+
     .menu-node-container:last-child > .ct-menu-item
       border-bottom: none
+      border-radius: 0 0 0.5em 0.5em
 
   .menu-enabled
     color: colors-ui-text-primary-body

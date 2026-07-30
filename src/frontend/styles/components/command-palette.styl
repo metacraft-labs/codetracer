@@ -258,6 +258,7 @@
     max-width: 48em
     font-size: 0.75rem
     z-index: 25
+    position: relative  // anchor the absolutely-positioned dropdown to this element
 
     .command-input-row
       height: 1.75rem
@@ -270,7 +271,9 @@
       padding: 0 0.75rem
 
     .command-input-placeholder
-      left: 0.75rem
+      // Must match .ct-input-search-image padding-left (1.875em !important) so
+      // the ghost-text starts at the same x-position as the real input text.
+      left: 1.875em
       right: 0.75rem
 
     .command-results,

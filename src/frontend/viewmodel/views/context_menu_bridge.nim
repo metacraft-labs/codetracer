@@ -37,7 +37,10 @@ when defined(js):
       item.classList.add(cstring"context-menu-item")
       item.classList.add(cstring"ct-menu-item")
       item.id = cstring(fmt"menu-item-{i}")
-      item.innerHTML = option.name
+      let labelEl = kdom.document.createElement(cstring"span")
+      labelEl.classList.add(cstring"ct-menu-item-label")
+      labelEl.innerHTML = option.name
+      discard cast[dom.Element](item).append(cast[dom.Element](labelEl))
       item.onclick = proc(ev: kdom.Event) {.nimcall.} =
         let targetId = $ev.currentTargetId()
         if targetId.startsWith("menu-item-"):
@@ -47,8 +50,8 @@ when defined(js):
         hideContextMenu()
 
       if option.hint.len > 0:
-        let hint = kdom.document.createElement(cstring"div")
-        hint.classList.add(cstring"context-menu-hint")
+        let hint = kdom.document.createElement(cstring"span")
+        hint.classList.add(cstring"ct-menu-item-sublabel")
         hint.id = cstring(fmt"menu-hint-{i}")
         hint.innerHTML = option.hint
         discard cast[dom.Element](item).append(cast[dom.Element](hint))

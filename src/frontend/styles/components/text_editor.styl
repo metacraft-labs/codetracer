@@ -194,35 +194,23 @@
   // border: 0.0625em solid grey
   position: fixed
   background-color: colors-ui-surface-input-default
-  border-radius: 0.375em
-  padding-top: 0.25em
-  padding-bottom: 0.25em
-  font-family: "SpaceMono"
+  border-radius: 0.5em
+  font-family: "SpaceGrotesk"
   font-size: 0.875em
   z-index: 1000
 
 .context-menu-item-container
   background-color: colors-ui-surface-input-default
-  line-height: 1.75em
+
+  &:first-child .context-menu-item
+    border-radius: 0.5em 0.5em 0 0
+
+  &:last-child .context-menu-item
+    border-bottom: none
+    border-radius: 0 0 0.5em 0.5em
 
 .context-menu-item
-  // Layout overrides on top of .ct-menu-item base styles
-  margin-left: 0.25em
-  margin-right: 0.25em
-  border-radius: 0.375em
-  white-space: nowrap
-
-.context-menu-hint
-  color: colors-ui-text-primary-body
-  text-align: right
-  font-size: 0.625em
-  padding: 0.25em
-  line-height: 0.625em
-  // margin-right: 0.5em
-  margin-left: 0.5em
-  background-color: colors-ui-surface-primary-secondary-hover
-  border-radius: 0.375em
-  line-height: 0.625em
+  // No per-item border-radius or margins — items flow flush like the main menu
 
 .expansion-1
   .monaco-editor, .margin

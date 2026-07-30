@@ -32,8 +32,8 @@
   display: flex
   align-items: center
   gap: 0.5em
-  padding: 0.5em
-  min-height: 2.125em
+  padding: 0 0.5em
+  height: 1.75em
   width: 100%
   box-sizing: border-box
   cursor: pointer
@@ -42,7 +42,7 @@
   color: colors-ui-text-primary-body
   font-family: "SpaceGrotesk"
   font-size: inherit
-  line-height: 1.2
+  line-height: 1.25em
   border: none
   border-bottom: 0.0625em solid colors-ui-border-secondary
   border-radius: 0
@@ -62,6 +62,7 @@
     color: colors-ui-icon-primary-default
 
   .ct-menu-item-label
+    font-size: 0.875em
     font-weight: 400
     color: colors-ui-text-primary-body
     white-space: nowrap
@@ -69,6 +70,7 @@
     text-overflow: ellipsis
 
   .ct-menu-item-sublabel
+    font-size: 0.875em
     color: colors-ui-text-primary-body-subtle
     white-space: nowrap
     overflow: hidden
@@ -96,10 +98,16 @@
   // Only .ct-menu-item--active gets the blue background.
   // :focus-visible is intentionally excluded — it fires on
   // mouse clicks too and would override the hover gray.
+  //
+  // Sublabel keeps colors-ui-text-primary-body-subtle on the
+  // blue background (same as default/hover per design spec).
 
   &.ct-menu-item--active:not(.ct-menu-item--disabled)
     outline: none
     background: colors-ui-border-focus
+
+    .ct-menu-item-sublabel
+      color: colors-ui-text-primary-body-subtle
 
   // ── Disabled ──────────────────────────────────────────────
 

@@ -204,8 +204,6 @@ template renderMenuShellImpl(
                               (if not node.enabled: " ct-menu-item--disabled" else: ""),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
-                          span(class = "ct-menu-item-icon"):
-                            discard
                           span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
@@ -217,9 +215,6 @@ template renderMenuShellImpl(
                               (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
                               (if not node.enabled: " ct-menu-item--disabled" else: ""),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
-                          span(class = "ct-menu-item-icon"):
-                            tdiv(class = "icon " & node.iconClass):
-                              discard
                           span(class = "ct-menu-item-label"):
                             text node.name
                           span(class = "ct-menu-item-trailing"):
