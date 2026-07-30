@@ -400,3 +400,31 @@ for a request served in under a second. That is the true value at the
 resolution the recording holds, and the test asserts the epoch is real and the
 duration well formed rather than asserting a number the container does not
 contain.
+
+## `remote_http_range/deltas.jsonl` (RS-M11)
+
+Unlike every other directory here, this is **not a recording** — it is a
+**capture of the wire**. Each line is one `RequestSpanDelta`, in poll order,
+exactly as the production remote tail
+(`db-backend/src/remote_request_spans.rs`) serialised it while
+`db-backend/tests/remote_span_tail_http_test.rs::remote_live_panel_over_http_range`
+read a growing container over a real HTTP socket with real byte-range requests.
+
+Regenerate:
+
+```
+cd src/db-backend
+direnv exec ../.. env CT_REGENERATE_REMOTE_DELTA_FIXTURE=1 \
+  cargo test --test remote_span_tail_http_test remote_live_panel_over_http_range
+```
+
+**It cannot rot.** That Rust test re-derives the capture on every run and fails
+if it differs from the committed bytes, printing the command above. So
+`../remote_request_panel_vm_test.nim` is always replaying what the remote
+reader actually emits, not a hand-written approximation — which matters because
+the whole claim under test is that a remote session produces the SAME payload a
+local one does, and a stale copy would make that claim untestable.
+
+The *ground truth* for the rows is not this file: the Nim test asserts against
+`db-backend/tests/fixtures/span_stream/web_session_tail_stage{1..4}.expected.jsonl`,
+which the span-stream generator wrote from the values fed to the Nim writer.

@@ -116,6 +116,17 @@ const
     # Native-only (real container bytes through a zstd FFI), hence excluded
     # from `just test-vm-js` and listed here.
     "src/tests/gui/tests/request-panel/native_request_panel_vm_test.nim",
+    # RS-M11: the remote row.  `vm_remote_request_panel_rows` drives the panel
+    # from the payloads the production remote tail emitted over a real HTTP
+    # socket while a growing container was served with byte-range requests
+    # (captured by `src/db-backend/tests/remote_span_tail_http_test.rs`, which
+    # re-derives and re-checks the capture on every run).  It is the GUI-side
+    # guard for the milestone's central claim — that a remote live session
+    # needs NO new protocol, so the panel renders it with no remote code path
+    # at all.  Excluded from `just test-vm-js` because it reads the capture and
+    # the span-stream ground truth from disk, which `std/os` cannot do on the
+    # `nim js` backend.
+    "src/tests/gui/tests/request-panel/remote_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

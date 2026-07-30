@@ -482,8 +482,19 @@ fn first_frame_compressed_size(data: &[u8]) -> Result<usize, String> {
 /// one-chunk cache makes a sequential walk cost one decompression per chunk.
 #[derive(Debug)]
 pub struct SpanStreamReader {
-    /// Raw (still COMPRESSED) `spans.dat` content.
+    /// Raw (still COMPRESSED) `spans.dat` content — either the whole file, or,
+    /// for a reader built by [`SpanStreamReader::from_partial_files`], the
+    /// SUFFIX of it that starts at [`Self::data_base`].
     data: Vec<u8>,
+    /// The `spans.dat` byte offset that `data[0]` corresponds to.
+    ///
+    /// `0` for the ordinary whole-file reader.  A remote tail (RS-M11) fetches
+    /// only the bytes of the chunks it has not seen and sets this to the first
+    /// of them, so the index's absolute offsets still address the right bytes
+    /// without the reader ever holding the chunks it already consumed.  Asking
+    /// such a reader for a chunk BELOW the base is an error, not a silent
+    /// mis-read — see [`Self::chunk_byte_range`].
+    data_base: u64,
     /// The index header's records-per-chunk field: the writer's seal-at
     /// threshold, and therefore only an upper-bound HINT.
     chunk_size: u32,
@@ -563,6 +574,40 @@ impl SpanStreamReader {
     /// index parse and its validation, and independent of the number of span
     /// records: **nothing is decompressed here**.
     pub fn from_files(dat: Vec<u8>, idx: &[u8]) -> Result<SpanStreamReader, String> {
+        SpanStreamReader::build(dat, 0, idx, true)
+    }
+
+    /// Build a reader from `spans.idx` and only a SUFFIX of `spans.dat`.
+    ///
+    /// `dat` holds the `spans.dat` bytes starting at `data_base`; everything
+    /// before that is simply absent.  This is the constructor a range-fetching
+    /// tail uses (RS-M11): having decoded chunks `0..k` on earlier polls, it
+    /// fetches `[offsets[k], committed_end)` and nothing else, so the bytes on
+    /// the wire are proportional to the DELTA rather than to the stream.
+    ///
+    /// The index is still the whole index — it is 16 bytes per chunk and its
+    /// cumulative column is what makes the delta addressable — so `count()`,
+    /// `chunk_count()` and the chunk arithmetic are unchanged.  Only
+    /// [`Self::read_span`] / [`Self::read_spans_in_chunks`] on a chunk BELOW
+    /// `data_base` are unavailable, and they say so rather than mis-reading.
+    ///
+    /// Unlike [`Self::from_files`], an index entry that points PAST the bytes
+    /// held here is not an error: it names a chunk that has not been fetched or
+    /// has not yet landed, which is the ordinary state of a partial reader.
+    /// [`Self::chunk_is_resident`] is what such a caller asks. Everything else
+    /// the index must satisfy — version, stride, monotonic offsets, monotonic
+    /// cumulative counts — is still enforced here, because those are corruption
+    /// and corruption is never a reason to wait.
+    pub fn from_partial_files(dat: Vec<u8>, data_base: u64, idx: &[u8]) -> Result<SpanStreamReader, String> {
+        SpanStreamReader::build(dat, data_base, idx, false)
+    }
+
+    fn build(
+        dat: Vec<u8>,
+        data_base: u64,
+        idx: &[u8],
+        require_all_chunks_resident: bool,
+    ) -> Result<SpanStreamReader, String> {
         if idx.len() < SPANS_INDEX_HEADER_SIZE {
             return Err(format!("{SPANS_INDEX_FILE_NAME} too small for its header"));
         }
@@ -603,9 +648,9 @@ impl SpanStreamReader {
         // column, and `chunk_byte_range` is only sound on non-decreasing,
         // in-bounds offsets — so both are checked here rather than trusted.
         // O(C) in the chunk count, and it reads no chunk bytes.
-        let dat_len = dat.len() as u64;
+        let dat_len = data_base + dat.len() as u64;
         for i in 0..num_chunks {
-            if offsets[i] > dat_len {
+            if require_all_chunks_resident && offsets[i] > dat_len {
                 return Err(format!(
                     "{SPANS_INDEX_FILE_NAME}: chunk {i} offset is past the end of {SPANS_DATA_FILE_NAME}"
                 ));
@@ -626,6 +671,7 @@ impl SpanStreamReader {
 
         Ok(SpanStreamReader {
             data: dat,
+            data_base,
             chunk_size,
             offsets,
             cumulative,
@@ -708,12 +754,26 @@ impl SpanStreamReader {
                 self.offsets.len()
             ));
         }
-        let start_off = self.offsets[chunk_number] as usize;
+        // Translate the index's ABSOLUTE `spans.dat` offsets into indices of
+        // the (possibly partial) buffer this reader holds.
+        let rebase = |absolute: u64| -> Result<usize, String> {
+            absolute
+                .checked_sub(self.data_base)
+                .ok_or_else(|| {
+                    format!(
+                        "span chunk at {SPANS_DATA_FILE_NAME} offset {absolute} is below this \
+                         reader's base offset {} (it was not fetched)",
+                        self.data_base
+                    )
+                })
+                .and_then(|rel| usize::try_from(rel).map_err(|_| "span chunk offset does not fit in usize".to_string()))
+        };
+        let start_off = rebase(self.offsets[chunk_number])?;
         if start_off > self.data.len() {
             return Err(format!("span chunk offset past end of {SPANS_DATA_FILE_NAME}"));
         }
         if chunk_number + 1 < self.offsets.len() {
-            let end_off = self.offsets[chunk_number + 1] as usize;
+            let end_off = rebase(self.offsets[chunk_number + 1])?;
             if end_off < start_off || end_off > self.data.len() {
                 return Err("span chunk offsets out of range".to_string());
             }
@@ -725,11 +785,26 @@ impl SpanStreamReader {
         let frame_len = first_frame_compressed_size(&self.data[start_off..])?;
         let end_off = start_off + frame_len;
         if end_off > self.data.len() {
-            return Err(format!(
-                "span chunk frame extends past end of {SPANS_DATA_FILE_NAME}"
-            ));
+            return Err(format!("span chunk frame extends past end of {SPANS_DATA_FILE_NAME}"));
         }
         Ok((start_off, end_off))
+    }
+
+    /// Whether chunk `chunk_number`'s COMPRESSED BYTES are fully present in
+    /// this reader's `spans.dat` buffer.
+    ///
+    /// This is a question about byte AVAILABILITY, never about content: it is
+    /// `true` exactly when the chunk's `[start, end)` frame is bounded and
+    /// resident, and `false` when the bytes have not arrived (a writer that has
+    /// published the index entry but not yet the frame; a container whose
+    /// upload was cut short).  A resident chunk whose CONTENT is bad still
+    /// fails loudly from [`Self::decode_chunk`] — availability is a reason to
+    /// wait, corruption never is.
+    ///
+    /// Consumers use it to stop cleanly at the committed prefix instead of
+    /// turning a partial transfer into an error or, worse, into a partial span.
+    pub fn chunk_is_resident(&self, chunk_number: usize) -> bool {
+        self.chunk_byte_range(chunk_number).is_ok()
     }
 
     /// Decompress one chunk and split it into its length-prefixed records.

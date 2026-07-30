@@ -2214,11 +2214,15 @@ test-vm-native: vm-test-prereqs
 # request-panel/ruby_request_panel_vm_test.nim (RS-M6),
 # request-panel/php_request_panel_vm_test.nim (RS-M7),
 # request-panel/elixir_request_panel_vm_test.nim (RS-M8),
-# request-panel/js_request_panel_vm_test.nim (RS-M9) and
-# request-panel/native_request_panel_vm_test.nim (RS-M10): the first writes a
-# real `.ct` container with the canonical Nim writer, the other six read one
+# request-panel/js_request_panel_vm_test.nim (RS-M9),
+# request-panel/native_request_panel_vm_test.nim (RS-M10) and
+# request-panel/remote_request_panel_vm_test.nim (RS-M11): the first writes a
+# real `.ct` container with the canonical Nim writer, the next six read one
 # recorded by the Python, Ruby, PHP, BEAM and JS recorders and by `ct-mcr`,
 # and all seven link zstd through a C FFI that has no `nim js` equivalent.
+# RS-M11's is excluded for a different reason: it replays a delta capture and
+# the span-stream ground truth from disk, and `std/os` file reads are not
+# available on the `nim js` backend.
 # They run in test-vm-native and are registered in release_gate.nim's
 # CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
@@ -2243,6 +2247,7 @@ test-vm-js: vm-test-prereqs
     ! -path '*/request-panel/elixir_request_panel_vm_test.nim' \
     ! -path '*/request-panel/js_request_panel_vm_test.nim' \
     ! -path '*/request-panel/native_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/remote_request_panel_vm_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"

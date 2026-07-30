@@ -243,10 +243,29 @@ impl BlockSource for HttpRangeSource {
 
     fn refresh(&mut self) -> Result<(), CtfsError> {
         // Re-probe the resource length so a growing remote trace (a live
-        // recording served over HTTP) can surface appended blocks. For a
-        // finalized trace this is unchanged; the cached blocks stay valid
-        // because CTFS data blocks are immutable once written (append-only).
+        // recording served over HTTP) can surface appended blocks.
         self.size = self.fetcher.total_size()?;
+        // DROP the block cache. An earlier version of this comment claimed the
+        // cached blocks "stay valid because CTFS data blocks are immutable once
+        // written". That is false for the live case this method exists to
+        // serve, in two distinct ways, and RS-M11 found both:
+        //
+        // 1. A block is not immutable until it is FULL. A growing internal file
+        //    keeps writing into its last, partially-filled data block, so the
+        //    block whose bytes we cached at 600 bytes of `spans.dat` is the
+        //    same block that holds 2082 bytes of it later. Caching it across a
+        //    refresh serves a stale prefix as if it were current.
+        // 2. The container itself may be REPUBLISHED. The writer cannot append
+        //    in place, so a live session is published as successive whole
+        //    containers renamed over one path (see `demo_request_session.nim`).
+        //    Every block number can name different bytes after a rename.
+        //
+        // `refresh()` is precisely the moment the caller says "the resource may
+        // have changed", so it is the right place to give the cache up. The
+        // cost is one re-fetch of Block 0 per poll — the cache exists to make
+        // repeated directory lookups WITHIN one generation free, and it still
+        // does that.
+        self.block_cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
         Ok(())
     }
 

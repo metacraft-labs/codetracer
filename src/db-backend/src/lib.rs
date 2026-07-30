@@ -138,6 +138,13 @@ pub mod source_views;
 // DAP surface in `dap_handler`.  Spec:
 // `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`.
 pub mod request_spans;
+// RS-M11 — the same request spans, read over HTTP byte ranges from a container
+// that is still growing somewhere else.  Produces the SAME `RequestSpanDelta`
+// wire payload as `request_spans`, which is the milestone's central claim: a
+// remote live panel needs no new protocol, only a poll loop.  Spec:
+// `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`
+// §"Streaming and Remote Access".
+pub mod remote_request_spans;
 // Column-Aware-Tracing-And-Deminification §P4 — auto-format fallback
 // for minified sources that ship without a sourcemap.  Self-contained
 // module that wraps `prettier` / `black` as subprocesses; the
