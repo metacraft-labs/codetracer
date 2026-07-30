@@ -5,7 +5,7 @@ order: 1
 ---
 # Welcome to CodeTracer Docs
 
-:::hero title="Welcome to CodeTracer Docs" subtitle="CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages — record a program's execution into a shareable trace file and move forward and backward through it."
+:::hero title="Welcome to CodeTracer Docs"
 :::button href="/getting_started/installation" variant="primary"
 Get Started
 :::button href="https://github.com/metacraft-labs/codetracer/issues" variant="secondary"
@@ -17,6 +17,8 @@ Support
 CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages. It records the execution of a program into a shareable, self-contained trace file, which you can load to move forward and backward through the execution to examine the state of memory and variables at any point.
 
 Use the sidebar to get started with installation, learn how to record and replay traces for your language, and explore the usage guide.
+
+:::video xZsJ55JVqmU title="CodeTracer - Noir Release Demo"
 
 ## Start here
 

@@ -18,13 +18,16 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
     let (status, html) = renderRoute("/", "content")
     check status == 200
 
-    # Hero: H1 title + subtitle + a primary and a secondary action button.
+    # Hero: H1 title + a primary and a secondary action button.
     check html.contains("class=\"docs-md-hero\"")
     check html.contains("class=\"docs-md-hero-title\"")
     check html.contains("Welcome to CodeTracer Docs")
-    check html.contains("class=\"docs-md-hero-subtitle\"")
     check html.contains("class=\"docs-md-button\" href=\"/getting_started/installation\"")
     check html.contains("class=\"docs-md-button docs-md-button-secondary\"")
+
+    # M3 (issue 2a): the hero carries NO subtitle -- WebFlow has no extra
+    # paragraph between the hero buttons and the Overview section.
+    check not html.contains("class=\"docs-md-hero-subtitle\"")
 
     # Two card grids: "Start here" is the default (category-card) grid; "Popular
     # articles" is the M6 compact (WebFlow popular-article-card) variant.
@@ -72,6 +75,45 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
     let (_, html) = renderRoute("/", "content")
     check not html.contains(".md\"")
     check not html.contains("index.md")
+
+  test "M3 (issue 2b): the home embeds the overview YouTube video after Overview":
+    let (_, html) = renderRoute("/", "content")
+    # The framework `:::video` block renders a privacy-friendly nocookie embed.
+    check html.contains("class=\"docs-md-video\"")
+    check html.contains("class=\"docs-md-video-frame\" src=\"" &
+      "https://www.youtube-nocookie.com/embed/xZsJ55JVqmU\"")
+    check html.contains("title=\"CodeTracer - Noir Release Demo\"")
+    # Order (within the content body -- the TOC rail repeats these labels): the
+    # Overview section precedes the video, which precedes the Start-here cards.
+    let bodyAt = html.find("class=\"docs-md-body\"")
+    check bodyAt >= 0
+    let overviewAt = html.find("id=\"overview\"", bodyAt)
+    let videoAt = html.find("docs-md-video", bodyAt)
+    let startHereAt = html.find("id=\"start-here\"", bodyAt)
+    check overviewAt >= 0 and videoAt >= 0 and startHereAt >= 0
+    check overviewAt < videoAt
+    check videoAt < startHereAt
+
+  test "M3 (issue 2c): the 'Need some help?' footer block renders with support + FAQ":
+    let (_, html) = renderRoute("/", "content")
+    check html.contains("class=\"docs-need-help\"")
+    check html.contains("class=\"docs-need-help-heading\">Need some help?</div>")
+    check html.contains("class=\"docs-need-help-link\" href=\"/support\"")
+    check html.contains("class=\"docs-need-help-link\" href=\"/faq\"")
+    check html.contains("<span>Contact our support</span>")
+    check html.contains("<span>Frequently asked questions</span>")
+    check html.contains("/assets/img/icon__support.svg")
+    check html.contains("/assets/img/icon__faq.svg")
+
+  test "M3 (issue 7): the built-by attribution is in the content footer, after need-help":
+    let (_, html) = renderRoute("/", "content")
+    check html.contains("Built by <a href=\"https://github.com/metacraft-labs\">metacraft-labs</a>")
+    # The need-help block precedes the `.docs-footer` built-by line (both live in
+    # the content column via the M3 CSS; DOM order pins the sequence).
+    let needHelpAt = html.find("docs-need-help")
+    let footerAt = html.find("class=\"docs-footer\"")
+    check needHelpAt >= 0 and footerAt >= 0
+    check needHelpAt < footerAt
 
   test "the Introduction prose is preserved at its own reachable route":
     let (status, html) = renderRoute("/getting_started/introduction", "content")

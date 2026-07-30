@@ -1433,3 +1433,112 @@ h6.docs-md-heading {
     filter: invert(1);
   }
 }
+
+/* ============================================================================
+ * M3: WebFlow home content + footer fidelity (operator issues 2 and 7).
+ *   - the `:::video` responsive embed (WebFlow `.w-video`);
+ *   - the "Need some help?" block (WebFlow content-column `.footer` left item);
+ *   - constrain the need-help + built-by footer to the CONTENT COLUMN so they
+ *     no longer span full width (issue 7 -- WebFlow nests them in the content
+ *     column, not the page footer).
+ * Every rule keys on a framework hook already emitted for this book, so no
+ * other consumer is affected.
+ * ==========================================================================*/
+
+/* issue 2b -- the home overview video. Framework `:::video` renders
+ * `<div class="docs-md-video"><iframe class="docs-md-video-frame" .../></div>`;
+ * WebFlow wraps its embed in `.w-video` with a 56.17% padding-top aspect box
+ * and an absolutely-filled iframe. Same technique here (16:9), so the frame is
+ * fluid and never letterboxes. */
+.docs-md-video {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9, ~ WebFlow .w-video 56.17% */
+  margin: var(--docs-space-6) 0;
+  border-radius: var(--docs-radius-md);
+  overflow: hidden;
+  background: var(--docs-bg-raised);
+}
+
+.docs-md-video-frame,
+.docs-md-video iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* issue 2c -- the "Need some help?" block. Framework `renderNeedHelpHtml` emits
+ * `<section class="docs-need-help">` (heading + `.docs-need-help-link` rows with
+ * `.docs-need-help-link-icon` chips). WebFlow styles these as `.link-blue`
+ * icon-links under a `.display-xs` heading. It sits in the content column
+ * (grid-column 2) like `.docs-main`; on the landing it widens with the content
+ * (see the footer-placement rule below). */
+.docs-need-help {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--docs-space-2);
+  padding-top: var(--docs-space-6);
+}
+
+.docs-need-help-heading {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--docs-fg);
+  margin-bottom: var(--docs-space-1);
+}
+
+.docs-need-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--docs-space-2);
+  color: var(--docs-link);
+  font-size: var(--docs-font-size-sm);
+  text-decoration: none;
+}
+
+.docs-need-help-link:hover {
+  text-decoration: underline;
+}
+
+.docs-need-help-link-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+/* issue 7 -- on the landing the need-help + built-by footer must live INSIDE
+ * the (wide) content column, not span full page width. The landing's `<main>`
+ * carries `.docs-main--wide` (grid-column 2 / -1, the right TOC rail hidden);
+ * match it here so both align with the content column exactly as WebFlow nests
+ * them. Scoped to the desktop grid; the mobile single-column reset (below)
+ * still wins under the breakpoint. Normal article pages keep the full-width
+ * footer + content-column need-help. */
+@media (min-width: 961px) {
+  .docs-frame:has(.docs-md-hero) .docs-need-help,
+  .docs-frame:has(.docs-md-hero) .docs-footer {
+    grid-column: 2 / -1;
+  }
+}
+
+@media (max-width: 960px) {
+  .docs-need-help {
+    grid-column: 1;
+  }
+}
+
+/* Monochrome need-help icons invert onto the dark canvas, like the sidebar
+ * social + logo glyphs (WebFlow `.link-with-icon img{filter:invert(1)}`). */
+[data-theme="dark"] .docs-need-help-link-icon {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .docs-need-help-link-icon {
+    filter: invert(1);
+  }
+}

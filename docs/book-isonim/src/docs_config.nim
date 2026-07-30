@@ -61,6 +61,20 @@ proc bookDocsConfig*(): DocsConfig =
     # the sidebar-bottom pill (WebFlow `.theme-switch`). The header stops
     # emitting its standalone toggle glyph; there is still exactly one toggle
     # (same `#docs-theme-toggle` id), so the M1 client JS click wiring is
-    # unchanged. (`needHelp` + the home video are M3.)
+    # unchanged.
     sidebarThemeToggle: true,
+    # M3 (issue 2c): the "Need some help?" block WebFlow renders inside the
+    # content-column `.footer` (the framework's `renderNeedHelpHtml` emits it as
+    # a `.docs-need-help` section above `.docs-footer`; the M3 CSS constrains
+    # both to the content column). Contact-support + FAQ links with the same
+    # monochrome chrome icons WebFlow uses (copied into `static/img/`).
+    needHelp: (
+      heading: "Need some help?",
+      links: @[
+        (label: "Contact our support", href: "/support",
+         icon: "/assets/img/icon__support.svg"),
+        (label: "Frequently asked questions", href: "/faq",
+         icon: "/assets/img/icon__faq.svg"),
+      ],
+    ),
   )
