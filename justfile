@@ -1357,6 +1357,9 @@ demo-cross-tracer:
 #               `codetracer-python-recorder` repo (only it can record Python);
 #               this recipe delegates to its
 #               `just demo-request-panel-python` and then opens the result.
+#   ruby      — RS-M6: the same, with a REAL Sinatra app and the Rack
+#               middleware, produced by the sibling `codetracer-ruby-recorder`
+#               repo's `just demo-request-panel-ruby`.
 #
 # Each further language milestone (RS-M6..RS-M9) adds its own value the same
 # way.  See the "Trying it" section of
@@ -1400,14 +1403,49 @@ demo-request-panel LANG="synthetic":
     exec ct replay -t "$demo_dir"
   fi
 
+  if [ "{{LANG}}" = "ruby" ]; then
+    # RS-M6.  Same shape as the Python arm above: the recorder sibling records
+    # the demo app into $CODETRACER_DEMO_DIR and prints the spans it wrote; the
+    # GUI half stays here so every language opens the session the same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-ruby}"
+    recorder_repo="${CODETRACER_RUBY_RECORDER_DIR:-$(pwd)/../codetracer-ruby-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-ruby-recorder checkout at $recorder_repo."
+        echo "The Ruby demo records a real Sinatra app with that recorder, so the"
+        echo "sibling repo has to be present (override with"
+        echo "CODETRACER_RUBY_RECORDER_DIR=/path/to/codetracer-ruby-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the Sinatra demo app with the Ruby recorder"
+    # Its own dev shell: the recorder needs its Rust toolchain and a Ruby with
+    # Sinatra and Rails, none of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-ruby sinatra
+    )
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$demo_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$demo_dir"
+  fi
+
   if [ "{{LANG}}" != "synthetic" ]; then
     {
       echo "ERROR: no recorder emits web-request spans for '{{LANG}}' yet."
-      echo "Ruby / PHP / Elixir / JS emission is RS-M6..RS-M9; each of those"
+      echo "PHP / Elixir / JS emission is RS-M7..RS-M9; each of those"
       echo "milestones adds its own LANG value to this recipe."
       echo
       echo "Today:  just demo-request-panel synthetic"
       echo "        just demo-request-panel python"
+      echo "        just demo-request-panel ruby"
     } >&2
     exit 1
   fi
@@ -2002,11 +2040,12 @@ test-vm-native: vm-test-prereqs
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
-# Also skips request-panel/demo_recipe_vm_test.nim (RS-M4) and
-# request-panel/python_request_panel_vm_test.nim (RS-M5): the first writes a real
-# `.ct` container with the canonical Nim writer, the second reads one recorded by
-# the Python recorder, and both link zstd through a C FFI that has no `nim js`
-# equivalent.  They run in test-vm-native and are registered in
+# Also skips request-panel/demo_recipe_vm_test.nim (RS-M4),
+# request-panel/python_request_panel_vm_test.nim (RS-M5) and
+# request-panel/ruby_request_panel_vm_test.nim (RS-M6): the first writes a real
+# `.ct` container with the canonical Nim writer, the other two read one recorded
+# by the Python and Ruby recorders, and all three link zstd through a C FFI that
+# has no `nim js` equivalent.  They run in test-vm-native and are registered in
 # release_gate.nim's CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
@@ -2025,6 +2064,7 @@ test-vm-js: vm-test-prereqs
     ! -path '*/agentic-coding/*' \
     ! -path '*/request-panel/demo_recipe_vm_test.nim' \
     ! -path '*/request-panel/python_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/ruby_request_panel_vm_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"

@@ -57,3 +57,61 @@ that is fine for the ViewModel test (which only reads spans and step bindings)
 but means the editor pane will not find the sources when opening this fixture by
 hand. Use `just demo-request-panel python` for that — it records into a fresh
 directory next to a live checkout.
+
+## `ruby_sinatra/ruby.ct` — a recorded Sinatra session (RS-M6)
+
+A **real recording**, on the same terms as the Flask one above. The Ruby
+recorder's Rack middleware (`codetracer-ruby-recorder`,
+`gems/codetracer-rack/lib/codetracer/rack/middleware.rb`) wrote its `spans.dat`
+records while that repo's `test-programs/web/rack_server.rb` served eight HTTP
+requests to the demo Sinatra app in `test-programs/web/sinatra/app.rb`.
+
+It is consumed by `../ruby_request_panel_vm_test.nim`
+(`vm_ruby_request_panel_rows`), registered in `src/ct_test/release_gate.nim`'s
+`CoreViewModelGateTests`, and is checked in so that ViewModel test needs no Ruby
+toolchain, no Sinatra and no server.
+
+### Regenerating
+
+```sh
+direnv exec ../codetracer-ruby-recorder just \
+  record-request-panel-fixture \
+  "$PWD/src/tests/gui/tests/request-panel/fixtures/ruby_sinatra" sinatra
+```
+
+The recipe **replaces the whole target directory** and drops the bundled
+`meta_dat/sources/` tree, which is keyed by the recording machine's absolute
+paths and would be pure churn here.
+
+It records exactly the schedule `just demo-request-panel ruby` records —
+`DEMO_REQUESTS` in
+`codetracer-ruby-recorder/test-programs/web/session_driver.rb` — so the fixture
+and the hand-run demo always show the same session.
+
+### What the session contains
+
+| # | Request                    | Status | Route                     |
+| - | -------------------------- | ------ | ------------------------- |
+| 1 | `GET /api/users`           | 200    | `/api/users`              |
+| 2 | `POST /api/users`          | 201    | `/api/users`              |
+| 3 | `GET /api/users/2`         | 200    | `/api/users/:user_id`     |
+| 4 | `GET /static/app.css`      | 304    | `/static/app.css`         |
+| 5 | `GET /api/users/999`       | 404    | `/api/users/:user_id`     |
+| 6 | `GET /api/reports/slow`    | 200    | `/api/reports/slow`       |
+| 7 | `GET /api/boom`            | 500    | `/api/boom`               |
+| 8 | `GET /api/users`           | 200    | `/api/users`              |
+
+The same coverage as the Flask fixture — every status bucket the panel colours,
+a 50 ms handler, and a handler that raises so its span carries `error.message`.
+
+Two properties differ from the Python recording and the ViewModel test relies on
+both:
+
+- **Every row's seek lands on the matched route's own line.** There is no
+  synthetic-step drift here, so `/api/users/:user_id` seeks into the handler
+  exactly like a fixed route does.
+- **The trace is column-UNAWARE.** The Ruby recorder does not opt into
+  column-aware steps, so a step's `global_position_index` is the writer's
+  line-only encoding and `decodeGlobalPositionIndex` refuses it; the test
+  resolves steps the way `ct print` does, through `buildGlobalLineIndex` over
+  `DefaultLinesPerFile`.

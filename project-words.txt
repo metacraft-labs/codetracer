@@ -195,3 +195,9 @@ Solana
 WSGI
 wsgiref
 colours
+Sinatra
+sinatra
+Railtie
+railtie
+ActionDispatch
+parameterised

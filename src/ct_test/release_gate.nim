@@ -60,6 +60,13 @@ const
     # container bytes through a zstd FFI), hence excluded from `just test-vm-js`
     # and listed here.
     "src/tests/gui/tests/request-panel/python_request_panel_vm_test.nim",
+    # RS-M6: the Ruby row of the language matrix.  `vm_ruby_request_panel_rows`
+    # drives the panel from a container the Ruby recorder produced while a real
+    # Sinatra app served real HTTP requests through the Rack middleware, and
+    # asserts the rows, the status colouring and the double-click seek into the
+    # handler.  Native-only (real container bytes through a zstd FFI), hence
+    # excluded from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/ruby_request_panel_vm_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
