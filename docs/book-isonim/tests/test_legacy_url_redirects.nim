@@ -47,9 +47,9 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
     let expected = {
       "getting_started/python.html": "/getting_started/python",
       "usage_guide/cli.html": "/usage_guide/cli",
-      "installation.html": "/installation",
+      "installation.html": "/getting_started/installation",
       "reference/ct_cli.html": "/reference/ct_cli",
-      "misc/troubleshooting.html": "/misc/troubleshooting",
+      "misc/troubleshooting.html": "/reference/troubleshooting",
     }.toTable
     for oldRel, cleanUrl in expected:
       let stubPath = publicDir() / oldRel
@@ -60,22 +60,27 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
       check html.contains("rel=\"canonical\" href=\"" & cleanUrl & "\"")
       check html.contains("location.replace(\"" & cleanUrl & "\")")
 
-  test "the overview -> section-index and CONTRIBUTING -> misc remaps hold":
+  test "the overview -> section-index and CONTRIBUTING -> reference remaps hold":
     var byOld = initTable[string, string]()
     for r in redirects:
       byOld[r.oldRelPath] = r.newRoute
     check byOld["getting_started/overview.html"] == "/getting_started"
     check byOld["usage_guide/overview.html"] == "/usage_guide"
-    check byOld["CONTRIBUTING.html"] == "/misc/contributing"
-    check byOld["introduction.html"] == "/"
+    # CONTRIBUTING folds into the reference section (the M1 3-section reorg
+    # folded `misc/` and `building_and_packaging/` into `reference/`).
+    check byOld["CONTRIBUTING.html"] == "/reference/contributing"
+    # M5: the Introduction prose moved out of the root landing into its own
+    # Getting Started article, so its legacy URL follows the content.
+    check byOld["introduction.html"] == "/getting_started/introduction"
 
   test "the real generated site is present (build ran)":
-    # The redirect stubs are ADDITIONAL to the 46 real pages; the framework
-    # output must still be intact.
+    # The redirect stubs are ADDITIONAL to the real pages (46 M1 pages + the M5
+    # `getting_started/introduction` split = 47); the framework output must
+    # still be intact.
     check dirExists(publicDir())
     check fileExists(publicDir() / "index.html")
     let entries = loadContentEntries(contentDir())
-    check entries.len == 46
+    check entries.len == 47
 
   test "no legacy URL is left without a redirect":
     # Build the set of clean routes the real site actually serves, so we can

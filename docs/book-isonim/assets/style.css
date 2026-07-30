@@ -1042,3 +1042,174 @@ h6.docs-md-heading {
     max-height: none;
   }
 }
+
+/* ============================================================================
+ * M5: WebFlow home fidelity -- the docs landing (hero + category cards +
+ * popular-articles grid). Ports the M2/M3 content-component look from
+ * `isonim/docs/users/assets/style.css`, tuned to the WebFlow reference home
+ * (webflow-ref/index.html) computed values so `content/index.md`'s
+ * `:::hero`/`:::cards` render docs.codetracer.com's landing. Consumes only the
+ * shared `--docs-*` tokens (this file defines none). Every rule keys on the
+ * `docs-md-hero`/`docs-md-card*` classes the framework directives emit, so
+ * article pages with no hero/cards are byte-unchanged.
+ * ==========================================================================*/
+
+/* Hero -- WebFlow `.content-title` + `.display-2xl`: the big landing H1
+ * (2.25rem / 600 / -1px tracking / 1.25em leading), an optional subtitle, and
+ * a row of primary/secondary action buttons. */
+.docs-md-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-5); /* WebFlow .content-title gap = --space-m (1.5rem) */
+  margin: 0 0 var(--docs-space-8);
+}
+
+.docs-md-hero-title {
+  margin: 0;
+  font-size: 2.25rem;   /* WebFlow .display-2xl */
+  font-weight: 600;
+  line-height: 1.25;    /* WebFlow --lh-heading (1.25em) */
+  letter-spacing: -1px; /* WebFlow .display-2xl override */
+  color: var(--docs-fg);
+}
+
+.docs-md-hero-subtitle {
+  margin: 0;
+  max-width: 46rem;
+  color: var(--docs-fg-muted);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.docs-md-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--docs-space-3);
+  margin-top: var(--docs-space-1);
+}
+
+/* Card grid -- WebFlow `.category-card`/`.popular-article-card`: a 3-up grid
+ * (collapsing to 1 column on narrow viewports) of bordered cards, each a
+ * focusable <a> with an optional icon chip, a title and a muted blurb.
+ * WebFlow `.grid` gap = --space-s (1rem) = --docs-space-4. */
+.docs-md-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--docs-space-4);
+  margin: 0 0 var(--docs-space-6);
+}
+
+.docs-md-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-3);
+  padding: var(--docs-space-5); /* WebFlow --space-m (1.5rem) */
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-sm); /* WebFlow --space-3xs (.25rem = 4px) */
+  color: var(--docs-fg);
+  text-decoration: none;
+  transition: background-color 0.35s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.docs-md-card:hover {
+  background: var(--docs-bg-raised); /* WebFlow .category-card:hover = --shade-20 */
+  text-decoration: none;
+}
+
+.docs-md-card:focus-visible {
+  outline: 3px solid var(--docs-focus-ring);
+  outline-offset: 2px;
+}
+
+.docs-md-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.docs-md-card-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.docs-md-card-title {
+  font-weight: 600;
+  font-size: 1.15rem; /* WebFlow .display-s */
+  line-height: 1.25;
+  color: var(--docs-fg);
+}
+
+.docs-md-card-description {
+  margin: 0;
+  color: var(--docs-fg-muted);
+  font-size: var(--docs-font-size-sm);
+}
+
+/* Action buttons -- WebFlow `.button` (black, `--shade-100`) and
+ * `.button.button-secondary` (light `--shade-10`, `--shade-40` border). Both
+ * ride the inverting `--docs-fg`/`--docs-bg` pair so they flip in dark mode. */
+.docs-md-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem; /* WebFlow .button */
+  padding: var(--docs-space-2) var(--docs-space-4); /* --space-2xs --space-s */
+  border: 1px solid var(--docs-fg);
+  border-radius: var(--docs-radius-sm);
+  background: var(--docs-fg);
+  color: var(--docs-bg);
+  font-weight: 500;
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: background-color 0.35s cubic-bezier(0.165, 0.84, 0.44, 1),
+    border-color 0.35s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.docs-md-button:hover {
+  background: var(--docs-fg-muted);
+  border-color: var(--docs-fg-muted);
+  text-decoration: none;
+}
+
+.docs-md-button:focus-visible {
+  outline: 3px solid var(--docs-focus-ring);
+  outline-offset: 2px;
+}
+
+.docs-md-button-secondary {
+  background: var(--docs-input-bg);
+  border-color: var(--docs-border);
+  color: var(--docs-fg);
+}
+
+.docs-md-button-secondary:hover {
+  background: var(--docs-bg-raised);
+  border-color: var(--docs-border);
+}
+
+/* Landing hero owns the page's big H1 (WebFlow's `.content-title` block: on
+ * the WebFlow home the top chrome carries only the logo + search, and the page
+ * title lives in the content hero). This book's shell renders the page title as
+ * `header.docs-header > h1.docs-title`; on the landing that duplicates the hero
+ * H1, so hide it whenever the page body contains a `:::hero`. `.docs-frame` is
+ * the nearest common ancestor of the header and the `.docs-md-body` hero, so
+ * the `:has()` scopes to the landing only -- every ordinary article page (no
+ * hero) keeps its `.docs-title` header. The framework's own in-content title
+ * variant (`.docs-md-title`/`.docs-md-meta`, used by other consumers' shells)
+ * is suppressed the same way, so the rule is correct regardless of which shell
+ * places the title. */
+.docs-frame:has(.docs-md-hero) .docs-header .docs-title,
+.docs-main:has(.docs-md-hero) > .docs-md-title,
+.docs-main:has(.docs-md-hero) > .docs-md-meta {
+  display: none;
+}
+
+/* Narrow viewports: collapse the card grid to a single column. */
+@media (max-width: 40rem) {
+  .docs-md-card-grid {
+    grid-template-columns: 1fr;
+  }
+}

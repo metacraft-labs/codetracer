@@ -51,16 +51,18 @@ suite "the gh-pages publish output has the expected shape":
     check html.contains("<html")
     check html.toLowerAscii.contains("codetracer")
 
-  test "all 46 rendered pages are present as clean-route index.html files":
+  test "all 47 rendered pages are present as clean-route index.html files":
     # The SSG emits every content page at `<route>/index.html`; the count must
-    # match the ported content set exactly (46 pages -- see M1).
+    # match the ported content set exactly (46 M1 pages + the M5
+    # `getting_started/introduction` article split out of the old root
+    # `index.md` when it became the WebFlow-parity landing = 47).
     var pageCount = 0
     for path in walkDirRec(pub, yieldFilter = {pcFile}):
       if path.lastPathPart == "index.html":
         inc pageCount
-    check pageCount == 46
+    check pageCount == 47
     # Cross-check against the content source of truth.
-    check loadContentEntries(contentDir()).len == 46
+    check loadContentEntries(contentDir()).len == 47
 
   test "a representative page from every top-level section is present":
     let pages = [
@@ -69,9 +71,9 @@ suite "the gh-pages publish output has the expected shape":
       "usage_guide/index.html",
       "usage_guide/cli/index.html",
       "reference/ct_cli/index.html",
-      "building_and_packaging/build_systems/index.html",
-      "misc/contributing/index.html",     # CONTRIBUTING.md remap
-      "installation/index.html",
+      "reference/build_systems/index.html",  # M1 reorg folded building_and_packaging/ into reference/
+      "reference/contributing/index.html",   # CONTRIBUTING.md remap (folded into reference/)
+      "getting_started/installation/index.html",  # root installation moved under getting_started/
     ]
     for rel in pages:
       check fileExists(pub / rel)

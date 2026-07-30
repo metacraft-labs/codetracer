@@ -23,7 +23,10 @@ suite "book nav matches the WebFlow 3-section organization":
   let entries = loadContentEntries(dir)
 
   test "every page survives the fold (nothing dropped)":
-    check entries.len == 46
+    # 46 folded pages + the M5 `getting_started/introduction` article the home
+    # landing links to (the Introduction prose lifted out of the old root
+    # `index.md` when it became the WebFlow-parity landing).
+    check entries.len == 47
 
   test "content collapses to exactly the three WebFlow sections":
     var sections: seq[string] = @[]
@@ -47,7 +50,8 @@ suite "book nav matches the WebFlow 3-section organization":
     proc leads(section: string; expected: seq[string]) =
       let actual = bySection[section]
       check actual[0 ..< expected.len] == expected
-    leads("getting_started", @["/getting_started", "/getting_started/installation",
+    leads("getting_started", @["/getting_started", "/getting_started/introduction",
+      "/getting_started/installation",
       "/getting_started/noir", "/getting_started/stylus", "/getting_started/wasm",
       "/getting_started/ruby", "/getting_started/python"])
     leads("usage_guide", @["/usage_guide", "/usage_guide/cli", "/usage_guide/gui",

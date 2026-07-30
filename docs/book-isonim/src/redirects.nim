@@ -34,14 +34,17 @@ type
 proc mapNewRoute*(relNoExt: string): string =
   ## Map an old book source path (no `.md`, forward-slash) to its new clean
   ## route, mirroring how the content was ported in M1:
-  ##   introduction        -> /                       (root Introduction -> home)
+  ##   introduction        -> /getting_started/introduction  (M5: the Introduction
+  ##                                                            prose moved out of the
+  ##                                                            root landing into its
+  ##                                                            own Getting Started page)
   ##   CONTRIBUTING         -> /misc/contributing      (SUMMARY groups it under Misc)
   ##   <section>/overview   -> /<section>              (section overview -> section index)
   ##   <section>/<page>     -> /<section>/<page>
   ##   <page>               -> /<page>
   var route =
     if relNoExt == "introduction":
-      "/"
+      "/getting_started/introduction"
     elif relNoExt == "CONTRIBUTING":
       "/reference/contributing"
     elif relNoExt.endsWith("/overview"):
