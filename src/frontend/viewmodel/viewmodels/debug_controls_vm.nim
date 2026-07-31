@@ -171,16 +171,29 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       let dbg = store.debugger.val
       dbg.status in {dsIdle}
 
-    # Derived: the debugger can step backward when it is idle and
-    # either the backend explicitly supports step back or the current
-    # position is past the start of the timeline.
+    # Derived: the debugger can step backward when it is idle and backward
+    # navigation is available. Backward stepping is available when:
+    #   * the backend explicitly advertised it (`supportsStepBack`, from the DAP
+    #     initialize capabilities), or
+    #   * the current position is past the start of the timeline
+    #     (`rrTicks > minRRTicks`), or
+    #   * this is a *completed* (non-live) replay — a recorded DB/materialized
+    #     trace is inherently time-travellable, so backward navigation is always
+    #     supported regardless of whether the `supportsStepBack` capability made
+    #     it through in time (it can be dropped when the DAP initialize response
+    #     races session-VM creation) and regardless of whether `rrTicks` is
+    #     tracked for this backend (DB traces do not populate rr ticks). This
+    #     keeps the reverse-step buttons enabled on completed Noir/DB replays,
+    #     where they were wrongly disabled.
     let canStepBackward = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       let tl = store.timeline.val
       let session = store.session.val
       session.debugSessionMode notin {liveMcr, liveMaterialized} and
         dbg.status == dsIdle and
-        (session.supportsStepBack or dbg.rrTicks > tl.minRRTicks)
+        (session.supportsStepBack or
+          session.debugSessionMode == completedReplay or
+          dbg.rrTicks > tl.minRRTicks)
 
     # Derived: continue is possible when the debugger is idle.
     let canContinue = createMemo[bool] proc(): bool =

@@ -1,0 +1,34 @@
+# codetracer/docs/book-isonim -- task entry points.
+#
+# Every recipe assumes the IsoNim dev shell is active. From a clean checkout:
+#   nix develop ../../../isonim -c just --justfile docs/book-isonim/Justfile --working-directory docs/book-isonim build
+
+test:
+    nim c -r tests/test_nav_order_matches_summary.nim
+    nim c -r tests/test_dev.nim
+
+build:
+    nim c -r --hints:off -o:build/build src/build.nim
+
+# Live-reloading docs server: serves content/ + themed assets and hot-reloads
+# every open tab on any content edit. (`dev` is reserved for an app dev server;
+# docs commands are namespaced `-docs` -- see metacraft-dev-guidelines
+# repo-requirements.) Run this, then `just open-docs` in another shell.
+dev-docs port='8000' host='127.0.0.1':
+    nim c -r --hints:off src/dev.nim {{port}} {{host}}
+
+# Live docs server bound to 0.0.0.0 for your private LAN (trusted networks only).
+dev-docs-lan port='8000':
+    @just dev-docs {{port}} 0.0.0.0
+
+# Open the running docs server in a browser (Linux xdg-open / macOS open).
+open-docs port='8000':
+    @xdg-open http://localhost:{{port}}/ 2>/dev/null || open http://localhost:{{port}}/ 2>/dev/null || echo "open http://localhost:{{port}}/ manually"
+
+# One-shot SSR docs preview (no live reload).
+serve-docs:
+    nim c -r --hints:off src/ssr.nim
+
+# Launch the shared theme editor (isonim-docs/site) that themes this book -- Save persists a token; run `just dev-docs` in another shell to see it hot-reload.
+design port='8080' host='127.0.0.1':
+    cd ../../../isonim-docs/site && just design {{port}} {{host}}

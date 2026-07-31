@@ -299,7 +299,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "${CODETRACER_REPROBUILD_TARGET:-.}" \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
-		--diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
+		--write-diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
 		--log="${CODETRACER_REPROBUILD_LOG:-quiet}"
 	# post-build-setcap.sh re-applies BPF capabilities (cap_bpf +
 	# cap_perfmon + cap_dac_read_search) to the freshly built ct binary
