@@ -1403,6 +1403,36 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
   # M8: Extract sessionId from the message for future multi-session routing.
   # During M8 there is only one session, so we log but do not route.
   let sessionId = getSessionIdFromMessage(raw)
+  # M49 — settle the `asyncSendCtRequest` continuation waiting on this
+  # request's `seq` first. This is what makes `BackendService.send`
+  # resolve with the response the backend actually sent; before it, the
+  # future was resolved with an empty object at send time and every
+  # ViewModel that read a body got `{}`.
+  #
+  # It runs *before* the `receiveResponse` fan-out and outside its
+  # try/except on purpose: the fan-out is keyed on
+  # `commandToCtResponseEventKind`, which raises for any command with
+  # no `*Response` CtEventKind — `ct/event-load` among them — and that
+  # must not swallow the continuation for a command the fan-out has no
+  # mapping for. The two paths are independent: legacy subscribers keep
+  # receiving exactly what they received before.
+  #
+  # The continuation is settled on the `DapApi` that *sent* the request,
+  # which is not necessarily `data.dapApi`. Every replay session owns its
+  # own `DapApi` with its own `seq` counter, while `data.dapApi` forwards
+  # to whichever session is on screen; a user with a second tab open
+  # would otherwise leave the first tab's continuations unclaimed until
+  # their liveness timeout, and — since the counters both start at zero —
+  # risk handing a response to an identically numbered request in the
+  # wrong session. The main process already tags every response with the
+  # session that issued it (`ipc_subsystems/dap.nim::resolveSessionId`),
+  # so the owner is known without any new wire field.
+  var responseDap = data.dapApi
+  for session in data.sessions:
+    if not session.dapApi.isNil and session.dapApi.sessionId == sessionId:
+      responseDap = session.dapApi
+      break
+  resolvePendingDapResponse(responseDap, raw)
   try:
     receiveResponse(data.dapApi, raw["command"].to(cstring), raw["body"])
   except ValueError:
@@ -1744,6 +1774,12 @@ when not defined(ctInExtension):
         calltrace.initCalltraceVMWithStore(activeSessionVM.store)
       initPanelVM("initEventLogVMWithStore"):
         event_log.initEventLogVMWithStore(activeSessionVM.store)
+        # §5.3 — an Event Log boundary chip whose counterpart lives in
+        # a sibling recording rotates the session, exactly as clicking
+        # that recording in the process tree would.
+        event_log.installEventLogSwitchProcessBridge(proc(recordingId: string) =
+          if not activeSessionVM.isNil:
+            activeSessionVM.onSwitchProcess(recordingId))
       initPanelVM("initFlowVMWithStore"):
         flow.initFlowVMWithStore(activeSessionVM.store)
       initPanelVM("initEditorVMWithStore"):

@@ -12,14 +12,14 @@
  *   - `div.marker-row[data-boundary-id=…][data-key-value=…]` — per row
  *   - `span.marker-boundary-chip` / `span.marker-direction-icon`
  *
+ * and from `src/frontend/viewmodel/views/isonim_process_tree_view.nim`:
+ *   - `.ct-process-tree-entry[data-process-role=…][aria-selected=…]`
+ *
  * Skip discipline: SKIPs cleanly when the fixture isn't materialised
  * (any of frontend.ct / frontend-wasm.ct / backend.ct missing) or when
  * the `ct` binary is missing. Mirrors the M29 Rust sentinel wording from
  * `cross_process_origin_test.rs` so log greps land on both layers.
  */
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import type { Page } from "@playwright/test";
 
 import {
@@ -28,9 +28,8 @@ import {
   test,
 } from "../../lib/fixtures";
 import {
-  isCtBinaryAvailable,
-  ctBinaryPath,
   threeTraceFixtureRoot,
+  threeTraceFixtureSkipReason,
 } from "../../lib/value-origin-fixtures";
 
 // Shared with the sibling TCT-M5 spec rather than recomputed here. The
@@ -49,7 +48,6 @@ const fixtureDir = threeTraceFixtureRoot();
 // constant was left behind pointing at a token no recording emits.
 const HTTP_BOUNDARY_ID = "account-balance";
 const JS_WASM_BOUNDARY_ID = "js-wasm-realm";
-const REQUIRED_CONTAINERS = ["frontend.ct", "frontend-wasm.ct", "backend.ct"];
 
 // `trace-folder` is the Electron-only fixture path. It launches the real
 // CodeTracer binary against the materialized multi-trace session and exposes
@@ -57,28 +55,32 @@ const REQUIRED_CONTAINERS = ["frontend.ct", "frontend-wasm.ct", "backend.ct"];
 // create an unrelated blank Chromium tab.
 test.use({ sourcePath: fixtureDir, launchMode: "trace-folder" });
 
-/** First missing `.ct` container under the fixture root, or null. */
-function firstMissingTraceContainer(): string | null {
-  for (const name of REQUIRED_CONTAINERS) {
-    const candidate = path.join(fixtureDir, name);
-    if (!fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-}
+/** One row of the §14.8 process tree, addressed by its manifest role. */
+const processEntry = (page: Page, role: string) =>
+  page.locator(`.ct-process-tree-entry[data-process-role="${role}"]`);
 
-function specSkipReason(): string | null {
-  if (!isCtBinaryAvailable()) {
-    return `ct binary missing at ${ctBinaryPath()} — run \`just build-once\``;
-  }
-  const missing = firstMissingTraceContainer();
-  if (missing !== null) {
-    return (
-      `SKIPPED: account-balance-with-wasm fixture not materialized: ${missing} ` +
-      "(regenerate.sh requires wasm-pack + codetracer_python_recorder + " +
-      "codetracer-js-recorder + browser_stream_receiver + Playwright)"
+/**
+ * The role of the recording the session is currently debugging.
+ *
+ * Read off the process tree, which renders `aria-selected="true"` on the
+ * row bound to `SessionViewModel.activeProcessRecordingId` — the signal
+ * that actually routes DAP requests (see `dap.nim`'s
+ * `setActiveSessionThreadId`).
+ *
+ * This replaces a probe of `window.data.activeRecording.role`, a global
+ * that exists nowhere in the product. It was written into `window` by an
+ * `importjs` block in `ui/event_log.nim` that fired only for a boundary
+ * id equal to the fixture's *directory* name, which no recording emits —
+ * so the probe read `null` on every path it tried. Both the fake global
+ * and its writer are gone.
+ */
+async function activeRecordingRole(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const active = document.querySelector(
+      '.ct-process-tree-entry[aria-selected="true"]',
     );
-  }
-  return null;
+    return active?.getAttribute("data-process-role") ?? null;
+  });
 }
 
 /** Wait for a marker row carrying `boundaryId` and return its attrs/chip text. */
@@ -114,7 +116,7 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
   let skipReason: string | null = null;
 
   test.beforeAll(() => {
-    skipReason = specSkipReason();
+    skipReason = threeTraceFixtureSkipReason();
   });
 
   test.beforeEach(({}, testInfo) => {
@@ -129,7 +131,18 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
       return;
     }
 
+    let lastEditorLabels: string[] = [];
+
     await readyOnEntry(ctPage);
+
+    // The session opens on its first `[[trace]]`, `frontend-js`, and the
+    // Event Log shows that recording's marker firings. `frontend.ct` is
+    // the only recording that carries both boundary families — verify
+    // with `ct print --filter markers frontend.ct`.
+    await expect(
+      processEntry(ctPage, "frontend-js"),
+      "the session must open on its first recording",
+    ).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
 
     // §5.1 — both boundary families must render as marker rows. The M25
     // HTTP boundary `account-balance` and the M27 → M25
@@ -163,9 +176,38 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
     expect(counts.withIcon).toBe(counts.total);
     expect(counts.total).toBeGreaterThanOrEqual(2);
 
+    // §5.3 — the jump. The gesture is only meaningful from the side that
+    // *received* the value, so switch to the server recording first:
+    // `backend.ct` carries exactly one marker, `recv account-balance`,
+    // whose counterpart is the `send` in `frontend.ct`. Clicking its
+    // chip must therefore land the session in `frontend-js` — a value
+    // observed on the server, explained by the browser that sent it,
+    // which is the whole §14.8 story in one click.
+    await processEntry(ctPage, "backend").click();
+    await expect(
+      processEntry(ctPage, "backend"),
+      "clicking the backend row must select it",
+    ).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+
+    // The Event Log must follow the active recording: the backend's own
+    // `recv account-balance` firing, not the browser's `send`.
+    const backendHttpRow = await readMarkerRow(ctPage, HTTP_BOUNDARY_ID);
+    expect(
+      backendHttpRow,
+      "the Event Log must show the newly-active recording's markers",
+    ).not.toBeNull();
+    expect(backendHttpRow!.keyValue).toBe("req-0001");
+    await expect(
+      ctPage.locator(
+        `div.event-log-marker-rows div.marker-row[data-boundary-id="${HTTP_BOUNDARY_ID}"]`,
+      ),
+      "backend.ct declares exactly one correlation marker",
+    ).toHaveCount(1);
+
     // §5.3 — click the HTTP marker chip; the active recording must
-    // switch to the matched sibling per `EventLogVM.jumpToCounterpart`
-    // (routes through `ct/listProcesses` + `ct/goto-ticks`).
+    // switch to the matched sibling per `EventLogVM.jumpToCounterpartOf`
+    // (resolves the counterpart through `ct/pairIndexLookup`, then
+    // rotates through `SessionViewModel.onSwitchProcess`).
     await ctPage
       .locator(
         `div.event-log-marker-rows div.marker-row[data-boundary-id="${HTTP_BOUNDARY_ID}"] ` +
@@ -173,33 +215,43 @@ test.describe("M25b §5.3 — Event Log correlation-marker rendering (three-trac
       )
       .first()
       .click();
-    await ctPage.waitForTimeout(1500);
 
-    const activeRole = await ctPage.evaluate(() => {
-      const d = (window as any).data;
-      return (
-        d?.activeRecording?.role ??
-        d?.activeProcess?.role ??
-        d?.session?.activeProcess?.role ??
-        d?.sessions?.[d?.activeSessionIndex ?? 0]?.activeRecording?.role ??
-        null
-      );
-    });
-    expect(
-      activeRole,
-      "click on HTTP marker chip must switch active recording",
-    ).toBe("frontend-js");
+    await expect
+      .poll(() => activeRecordingRole(ctPage), {
+        message: "click on HTTP marker chip must switch active recording",
+        timeout: 60_000,
+      })
+      .toBe("frontend-js");
 
     // Confirm the editor settles on the JS-side send-marker source
-    // location (`frontend/app.js` per ANSWERS.md).
-    const labels: string[] = await ctPage.evaluate(() =>
-      Array.from(document.querySelectorAll("div[id^='editorComponent']")).map(
-        (el) => el.getAttribute("data-label") ?? "",
-      ),
-    );
+    // location (`frontend/app.js` per ANSWERS.md). Polled rather than
+    // read once after a fixed sleep: the rotation is asynchronous, and
+    // a sleep long enough to be reliable is a sleep that hides how long
+    // the gesture actually takes.
+    await expect
+      .poll(
+        async () => {
+          const labels: string[] = await ctPage.evaluate(() =>
+            Array.from(
+              document.querySelectorAll("div[id^='editorComponent']"),
+            ).map((el) => el.getAttribute("data-label") ?? ""),
+          );
+          lastEditorLabels = labels;
+          return labels.some(
+            (l) => l.includes("frontend/app.js") || l.endsWith("app.js"),
+          );
+        },
+        {
+          message: "expected an editor tab on frontend/app.js",
+          timeout: 60_000,
+        },
+      )
+      .toBe(true);
     expect(
-      labels.some((l) => l.includes("frontend/app.js") || l.endsWith("app.js")),
-      `expected an editor tab on frontend/app.js, got: ${labels.join(", ")}`,
+      lastEditorLabels.some(
+        (l) => l.includes("frontend/app.js") || l.endsWith("app.js"),
+      ),
+      `expected an editor tab on frontend/app.js, got: ${lastEditorLabels.join(", ")}`,
     ).toBe(true);
   });
 });

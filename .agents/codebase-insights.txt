@@ -445,3 +445,48 @@ observing tup execute the rule and cargo emit `Compiling replay-server`. Note
 that `just build-once` runs tup twice (before and after webpack); the second
 pass legitimately reports "No commands to execute", so read the FIRST pass when
 checking whether the engine was rebuilt.
+
+In the Electron build, `dap.nim::asyncSendCtRequest` used to be fire-and-forget:
+it wrote the request frame over IPC and resolved the `Future[JsObject]` it
+returned with an empty `js{}` immediately, having never seen a response.
+Responses arrive on a *separate* IPC channel (`CODETRACER::dap-receive-response`)
+and were only fanned out to `dap.on(...)` subscribers. So every
+`BackendService.send(...)` in the desktop app resolved with `{}`, and any
+ViewModel that read the resolved body silently got nothing — the VS Code build
+was fine, because it goes through `activeDebugSession.customRequest`, which
+really does return the body. M49 fixed this by correlating on the `request_seq`
+the Backend Manager already stamps on every response (`DapApi.pendingResponses`,
+settled from `ui_js.nim::onDapReceiveResponse`). If you are debugging a panel
+that gets data through events but not through request bodies, this is the
+history to know.
+
+`DapApi` is built in four places, and only `dap.nim::newDapApi` uses the named
+constructor — `types.nim` and `ui/session_switch.nim` build one from an object
+literal per replay session. A field added to `DapApi` and initialised only in
+`newDapApi` will be nil on most instances.
+
+`data.dapApi` is NOT one object: it is a template for
+`data.sessions[data.activeSessionIndex].dapApi`, so it follows whichever tab is
+on screen, and each session's `DapApi` has its own `seq` counter starting at
+zero. Anything that has to pair a response with the request that produced it
+must therefore pick the session's `DapApi` by the `sessionId` the main process
+stamps on the response (`ipc_subsystems/dap.nim::resolveSessionId`), not read
+`data.dapApi` — otherwise it silently addresses the wrong session as soon as a
+second tab exists. Note also that `ui_js.nim` captures `let dapRef = data.dapApi`
+once when it builds the `SessionViewModel`, so the whole ViewModel layer still
+talks to the session that was active at bootstrap.
+
+A ViewModel command string needs THREE registrations to reach the wire: a
+`CtEventKind` in `common/ct_event.nim`, a non-empty entry in
+`dap.nim::EVENT_KIND_TO_DAP_MAPPING`, and a string in
+`viewmodel/backend/dap_commands.nim::VALID_DAP_COMMANDS_SEQ`. Miss the first two
+and `dapCommandToEventKind` raises `ValueError`, which kills the whole reactive
+batch, and the request is never sent — silently, from the caller's point of
+view. `scenarios/integration_test.nim`'s "all ViewModel commands are valid DAP
+commands" suite is the guard, but it only sees commands the test actually
+triggers: a command sent solely from a click handler needs its own case there.
+
+`ct/pairIndexLookup` must be answered at the session layer
+(`dap_server.rs::handle_request_via_session`), not by the per-trace `Handler`:
+`Handler::build_local_pair_index` sees only its own recording's marker firings,
+and a correlation marker's counterpart is by definition in another process.

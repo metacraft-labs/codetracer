@@ -220,7 +220,7 @@ fn test_origin_chain_vm_renders_cross_process_spans() {
     };
 
     let identity = TraceIdentity::new("rec-fe", "frontend");
-    let mut resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> {
+    let mut resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> {
         Some(SiblingContinuation {
             sibling_identity: TraceIdentity::new("rec-be", "backend"),
             sibling_hops: vec![make_hop("db_row.balance", 6, "backend/server.py", 5)],

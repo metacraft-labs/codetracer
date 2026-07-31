@@ -893,6 +893,50 @@ fn build_session_threads_response(session: &SessionHandler) -> Result<Vec<crate:
         })
         .collect())
 }
+/// M49 — answer `ct/pairIndexLookup` from the session-wide pair index.
+///
+/// Mirrors `Handler::pair_index_lookup`'s response shape exactly (a
+/// `{"counterparts": [...]}` object of `PairIndexCounterpart`) so the
+/// frontend's single row-mapper works whether the request was served by
+/// a single-trace launch or by a session; the only difference is the
+/// index it reads, which here spans every loaded recording.
+fn build_session_pair_index_lookup_response(
+    session: &mut SessionHandler,
+    req: &dap::Request,
+) -> Result<Value, Box<dyn Error>> {
+    let args: crate::dap_handler::PairIndexLookupArguments = req.load_args()?;
+    let direction =
+        crate::correlation_markers::MarkerDirection::parse(&args.direction).ok_or_else(|| -> Box<dyn Error> {
+            format!(
+                "ct/pairIndexLookup: unknown direction `{}` (expected `send` or `recv`)",
+                args.direction
+            )
+            .into()
+        })?;
+
+    let index = session.pair_index();
+    let counterparts: Vec<crate::dap_handler::PairIndexCounterpart> = index
+        .get(&args.boundary_id, direction.opposite())
+        .iter()
+        .filter(|view| view.payload.key_value == args.key_value)
+        .map(|view| crate::dap_handler::PairIndexCounterpart {
+            recording_id: view.recording_id.clone(),
+            step_id: view.step_id,
+            source_path: view.source_path.clone(),
+            source_line: view.source_line,
+            marker_id: view.payload.marker_id,
+            boundary_id: view.payload.boundary_id.clone(),
+            direction: view.payload.direction.as_str().to_string(),
+            key_text: view.payload.key_text.clone(),
+            key_value: view.payload.key_value.clone(),
+            show_text: view.payload.show_text.clone(),
+            show_value: view.payload.show_value.clone(),
+            format: view.payload.format.clone(),
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "counterparts": counterparts }))
+}
 
 /// Build the `ct/listProcesses` payload. Each entry carries the
 /// manifest role, recording id, thread count, and the composed thread
@@ -1034,6 +1078,34 @@ fn handle_request_via_session(
         sender.send(response)?;
         return Ok(());
     }
+    // M49 — `ct/pairIndexLookup` is a *cross-trace* question and must
+    // be answered from the session-wide pair index.
+    //
+    // The per-trace `Handler::pair_index_lookup` walks
+    // `build_local_pair_index`, which sees only its own recording's
+    // marker firings. That is the right answer for a single-trace
+    // launch and the wrong one for a session: a correlation marker's
+    // whole purpose is that its counterpart is in *another* process,
+    // so routing the lookup down to one trace guarantees an empty
+    // result for precisely the case the feature exists to serve. The
+    // Event Log's boundary chip is the user-visible consequence —
+    // clicking it resolved no counterpart and so rotated nothing.
+    if req.command == "ct/pairIndexLookup" {
+        let body = build_session_pair_index_lookup_response(session, &req)?;
+        let response = dap::DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: 0,
+                type_: "response".to_string(),
+            },
+            request_seq: req.base.seq,
+            success: true,
+            command: req.command.clone(),
+            message: None,
+            body,
+        });
+        sender.send(response)?;
+        return Ok(());
+    }
     // `threads` is special: the single-trace `Handler::threads` only
     // knows about its own trace; for sessions we want the aggregated
     // list. We answer at the session layer rather than per-trace.
@@ -1151,18 +1223,32 @@ fn handle_origin_chain_via_session(
     let composed = {
         let session_ref = &mut *session;
         let mut resolver =
-            |sibling_recording_id: &str, step_id: i64, display_variable: &str| -> Option<SiblingContinuation> {
+            |sibling_recording_id: &str, step_id: i64, display_variable: Option<&str>| -> Option<SiblingContinuation> {
                 let recording = crate::session_manifest::RecordingId(sibling_recording_id.to_string());
                 let sibling_slot = session_ref.slot_for_recording_id(&recording)?;
                 let sibling_identity = {
                     let loaded = session_ref.trace(sibling_slot)?;
                     TraceIdentity::new(loaded.entry.recording_id.0.clone(), loaded.entry.role.clone())
                 };
+                // M36b — the send marker named no binding (no `show=`
+                // declaration, and none synthesised by the recorder). There
+                // is nothing to walk in the sibling, and inventing a name
+                // would turn "the sender did not say" into "CodeTracer
+                // looked for X and did not find it". Report the identity so
+                // the composer can still show which recording the value came
+                // from, and no hops; the composer supplies the terminator.
+                let Some(display_variable) = display_variable else {
+                    return Some(SiblingContinuation {
+                        sibling_identity,
+                        sibling_hops: Vec::new(),
+                        sibling_terminator: crate::task::Terminator::new(crate::task::TerminatorKind::UnknownSource),
+                        sibling_truncated: false,
+                    });
+                };
                 // Continue on the send-side display variable at the marker's
-                // step. `display_variable` is the marker's `show=` text (or
-                // its `key=` text when `show` was omitted) — i.e. the name
-                // of the sibling-side binding that carried the value across
-                // the boundary.
+                // step — the marker's `show=` text, i.e. the name of the
+                // sibling-side binding that carried the value across the
+                // boundary.
                 let sibling_args = crate::task::CtOriginChainArguments {
                     variable_name: display_variable.to_string(),
                     step_id,

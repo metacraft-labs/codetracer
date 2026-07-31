@@ -92,6 +92,13 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   # the `ct/originChain` / `ct/originSummary` arms).
   "ct/originChain",
   "ct/originSummary",
+  # Multi-process sessions (M42 §14.8) and the M25b §5.3 Event Log
+  # boundary-chip jump. `ct/listProcesses` had a `CtEventKind` but was
+  # missing here, so the two lists this module's header promises to
+  # keep in sync had already drifted.
+  "ct/listProcesses",
+  "ct/pairIndexLookup",
+  "ct/goto-ticks",
 ]
 
 let VALID_DAP_COMMANDS*: HashSet[string] = VALID_DAP_COMMANDS_SEQ.toHashSet

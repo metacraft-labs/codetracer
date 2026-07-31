@@ -189,8 +189,8 @@ fn fixture_a_backend_hops() -> Vec<OriginHop> {
 }
 
 /// Resolver factory: returns canned Fixture A backend continuation.
-fn fixture_a_resolver() -> impl FnMut(&str, i64, &str) -> Option<SiblingContinuation> {
-    move |sibling_id: &str, _step: i64, _display: &str| -> Option<SiblingContinuation> {
+fn fixture_a_resolver() -> impl FnMut(&str, i64, Option<&str>) -> Option<SiblingContinuation> {
+    move |sibling_id: &str, _step: i64, _display: Option<&str>| -> Option<SiblingContinuation> {
         // `_step` is the sibling-side resume step — a real
         // resolver feeds it to the per-backend single-trace path
         // (here we ignore it because the fixture's hop list is
@@ -492,3 +492,252 @@ fn test_origin_cross_process_missing_correlation_terminates_cleanly() {
 // and serialisation-aware-copy branches, which need hand-built inputs to
 // reach deterministically.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// M36b — a chain must not resume on a binding no marker named.
+//
+// Two defects, both in `extend_chain_with_send` / its caller, both
+// exercised here in isolation because the three-recording fixture hits
+// them together and the DAP test can only pin their joint outcome.
+// ---------------------------------------------------------------------------
+
+/// A send marker that names no binding, at `backend/server.py:5`.
+///
+/// This is the common shape, not an exotic one: `show_text` is the
+/// textual form of a marker's optional `show=<expr>` declaration, so
+/// every `markCorrelation(direction, boundary, key, value)` call that
+/// does not declare one produces it — including the realm markers
+/// `browser_session.js` mirrors onto the JavaScript side for a module
+/// *entry*, whose arguments came from an expression rather than from a
+/// binding the page declared.
+fn be_send_marker_naming_no_binding(step_id: i64) -> MarkerEventView {
+    let payload = MarkerPayload {
+        marker_id: 2,
+        boundary_id: BOUNDARY_ID.to_string(),
+        direction: MarkerDirection::Send,
+        // The literal `key` is what a recorder-synthesised marker
+        // carries here, and it is a field label, not a variable.
+        key_text: "key".to_string(),
+        key_value: MATCH_KEY.to_string(),
+        show_text: None,
+        show_value: Some(MATCH_KEY.to_string()),
+        description: None,
+        format: None,
+    };
+    MarkerEventView::new(BE_RECORDING, step_id, "backend/server.py", 5, payload)
+}
+
+/// The composer must not turn an absent `show_text` into a variable
+/// query for `key_text`.
+///
+/// Before M36b the fallback was `key_text`, so this configuration drove
+/// a sibling origin query for a variable literally named `key`, which
+/// no program declares. The walk then closed with `UnknownVariable /
+/// key` — a terminator reporting a failed lookup for something that
+/// never existed, which is a materially different (and unactionable)
+/// claim from "the sender did not say which binding carried the value".
+///
+/// The crossing itself still happened, so the sibling's span is still
+/// recorded: the user is entitled to know which recording the value
+/// came from even when that recording cannot say more.
+#[test]
+fn test_origin_cross_process_absent_show_text_names_no_binding() {
+    let pair_index = PairIndex::build(&[fe_recv_marker(12), be_send_marker_naming_no_binding(5)]);
+    let chain = make_frontend_chain(false);
+    let original_hops = chain.hops.len();
+
+    // Record what the composer asks the resolver to walk.
+    let mut requested: Vec<Option<String>> = Vec::new();
+    let mut resolver = |sibling_id: &str, _step: i64, binding: Option<&str>| -> Option<SiblingContinuation> {
+        requested.push(binding.map(str::to_string));
+        assert_eq!(sibling_id, BE_RECORDING);
+        // What the production resolver does for `None`: report the
+        // identity so the span can be drawn, and no hops.
+        Some(SiblingContinuation {
+            sibling_identity: TraceIdentity::new(BE_RECORDING, "backend"),
+            sibling_hops: Vec::new(),
+            sibling_terminator: Terminator::new(TerminatorKind::UnknownSource),
+            sibling_truncated: false,
+        })
+    };
+    let identity = TraceIdentity::new(FE_RECORDING, "frontend");
+    let (chain, outcome) =
+        apply_cross_process_clause(chain, &identity, &pair_index, &mut resolver as SiblingChainResolver);
+
+    assert!(matches!(outcome, CrossProcessOutcome::Extended));
+    assert_eq!(
+        requested,
+        vec![None],
+        "the composer must tell the resolver the sender named no binding, not hand it `key_text`"
+    );
+    assert_eq!(chain.hops.len(), original_hops, "the sibling contributed no hops");
+
+    // The span survives: the boundary was genuinely crossed.
+    let roles: Vec<&str> = chain.cross_process_spans.iter().map(|s| s.role.as_str()).collect();
+    assert_eq!(roles, vec!["frontend", "backend"], "spans={roles:?}");
+
+    // And the terminator says why the walk stopped, in terms of the
+    // marker rather than of a variable lookup.
+    assert!(
+        matches!(chain.terminator.kind, TerminatorKind::UnknownSource),
+        "expected UnknownSource, got {:?}",
+        chain.terminator.kind
+    );
+    assert!(
+        chain.terminator.expression.contains("named no binding"),
+        "terminator must state that the sender named no binding; got {:?}",
+        chain.terminator.expression
+    );
+    assert!(
+        !chain.terminator.expression.contains("key`"),
+        "terminator must not quote the marker's key label as if it were a variable; got {:?}",
+        chain.terminator.expression
+    );
+}
+
+/// Whitespace is not a binding name either.
+///
+/// `show_text` arrives as recorded text, so a producer emitting an
+/// empty `show=` would otherwise drive a sibling query for `""` —
+/// the same class of nonsense as `key`, one layer down.
+#[test]
+fn test_origin_cross_process_blank_show_text_names_no_binding() {
+    let mut send = be_send_marker_naming_no_binding(5);
+    send.payload.show_text = Some("   ".to_string());
+    let pair_index = PairIndex::build(&[fe_recv_marker(12), send]);
+
+    let mut requested: Vec<Option<String>> = Vec::new();
+    let mut resolver = |_: &str, _: i64, binding: Option<&str>| -> Option<SiblingContinuation> {
+        requested.push(binding.map(str::to_string));
+        Some(SiblingContinuation {
+            sibling_identity: TraceIdentity::new(BE_RECORDING, "backend"),
+            sibling_hops: Vec::new(),
+            sibling_terminator: Terminator::new(TerminatorKind::UnknownSource),
+            sibling_truncated: false,
+        })
+    };
+    let identity = TraceIdentity::new(FE_RECORDING, "frontend");
+    let (_chain, _outcome) = apply_cross_process_clause(
+        make_frontend_chain(false),
+        &identity,
+        &pair_index,
+        &mut resolver as SiblingChainResolver,
+    );
+    assert_eq!(requested, vec![None]);
+}
+
+// --- the re-crossing guard --------------------------------------------------
+
+/// A receive marker in the *backend* recording, sitting on the tail of
+/// the hops the sibling resolver returns (`backend/server.py:4`).
+fn be_recv_marker_at_chain_tail(boundary: &str, key: &str, step_id: i64) -> MarkerEventView {
+    let payload = MarkerPayload {
+        marker_id: 3,
+        boundary_id: boundary.to_string(),
+        direction: MarkerDirection::Recv,
+        key_text: "key".to_string(),
+        key_value: key.to_string(),
+        show_text: None,
+        show_value: None,
+        description: None,
+        format: None,
+    };
+    MarkerEventView::new(BE_RECORDING, step_id, "backend/server.py", 4, payload)
+}
+
+/// The send counterpart of the above, back in the *frontend* recording
+/// the walk arrived from.
+fn fe_send_marker_pointing_back(boundary: &str, key: &str, step_id: i64) -> MarkerEventView {
+    let payload = MarkerPayload {
+        marker_id: 4,
+        boundary_id: boundary.to_string(),
+        direction: MarkerDirection::Send,
+        key_text: "key".to_string(),
+        key_value: key.to_string(),
+        show_text: Some("request_id".to_string()),
+        show_value: Some("r-1".to_string()),
+        description: None,
+        format: None,
+    };
+    MarkerEventView::new(FE_RECORDING, step_id, "frontend/app.js", 9, payload)
+}
+
+/// Drive the frontend → backend crossing, then offer the composer a
+/// second pair pointing back at the frontend over `return_boundary`.
+/// Returns the composed chain's span roles.
+fn spans_after_a_return_crossing(return_boundary: &str) -> Vec<String> {
+    let pair_index = PairIndex::build(&[
+        fe_recv_marker(12),
+        be_send_marker(5),
+        be_recv_marker_at_chain_tail(return_boundary, "k2", 4),
+        fe_send_marker_pointing_back(return_boundary, "k2", 20),
+    ]);
+    let mut resolver = |sibling_id: &str, _step: i64, _binding: Option<&str>| -> Option<SiblingContinuation> {
+        if sibling_id == BE_RECORDING {
+            Some(SiblingContinuation {
+                sibling_identity: TraceIdentity::new(BE_RECORDING, "backend"),
+                sibling_hops: fixture_a_backend_hops(),
+                sibling_terminator: Terminator::new(TerminatorKind::Computational),
+                sibling_truncated: false,
+            })
+        } else {
+            Some(SiblingContinuation {
+                sibling_identity: TraceIdentity::new(FE_RECORDING, "frontend"),
+                sibling_hops: vec![make_hop(
+                    "request_id",
+                    20,
+                    "frontend/app.js",
+                    9,
+                    OriginKind::Computational,
+                    "const request_id = nextId()",
+                    0.9,
+                )],
+                sibling_terminator: Terminator::new(TerminatorKind::Computational),
+                sibling_truncated: false,
+            })
+        }
+    };
+    let identity = TraceIdentity::new(FE_RECORDING, "frontend");
+    let (chain, _outcome) = apply_cross_process_clause(
+        make_frontend_chain(false),
+        &identity,
+        &pair_index,
+        &mut resolver as SiblingChainResolver,
+    );
+    chain.cross_process_spans.iter().map(|s| s.role.clone()).collect()
+}
+
+/// The walk declines to re-cross the boundary it just entered through.
+///
+/// `find_receive_marker_for_tail` matches a marker to the chain's tail
+/// hop within a ±1-step window, which is right for a recorder whose
+/// line snapshot can lag the marker — but it means the marker that
+/// *opened* a short boundary recording can match the hop that closes
+/// it. Following that pair sends the walk straight back where it came
+/// from, to be asked about a value it has already explained.
+#[test]
+fn test_origin_cross_process_declines_to_recross_the_boundary_it_arrived_on() {
+    let roles = spans_after_a_return_crossing(BOUNDARY_ID);
+    assert_eq!(
+        roles,
+        vec!["frontend".to_string(), "backend".to_string()],
+        "the walk bounced back through the crossing it had just made; spans={roles:?}"
+    );
+}
+
+/// …but the guard is about *that* crossing, not about the recording.
+///
+/// A value that leaves A over one boundary and comes back over another
+/// is an ordinary multi-tier shape — a request placed over HTTP whose
+/// answer arrives on a queue, say — and the walk must still follow it.
+/// A guard phrased as "never return to a recording already visited"
+/// would silently truncate those chains.
+#[test]
+fn test_origin_cross_process_still_follows_a_return_over_a_different_boundary() {
+    let roles = spans_after_a_return_crossing("reply-queue");
+    assert_eq!(
+        roles,
+        vec!["frontend".to_string(), "backend".to_string(), "frontend".to_string()],
+        "a return crossing over a different boundary is a real hop; spans={roles:?}"
+    );
+}

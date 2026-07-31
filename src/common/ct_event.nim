@@ -110,6 +110,19 @@ type
     # `SessionViewModel.applyListProcessesResponse` decodes either.
     CtListProcesses,
     CtListProcessesResponse,
+    # M25b §5.3 / M49 — Event Log correlation-marker counterpart lookup.
+    # The boundary chip's jump resolves a marker's counterpart through
+    # this request; without a kind here `dapCommandToEventKind` raises
+    # and the request is never written to the wire, so the click
+    # resolved nothing and rotated nothing.
+    CtPairIndexLookup,
+    CtPairIndexLookupResponse,
+    # M25b §5.3 / M49 — seek the active recording's timeline to a
+    # marker firing's step. `EventLogVM.jumpToCounterpart` has always
+    # named this command; it had no kind, so the send raised and the
+    # jump landed wherever the process switch happened to leave the
+    # cursor instead of on the correlated step.
+    CtGotoTicks,
 
 when defined(js):
   import std / jsffi

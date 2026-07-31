@@ -20,10 +20,10 @@ readonly FIXTURE_DIR
 readonly CROSS_PROCESS_TARGET="cross_process_origin_test"
 readonly THREE_TRACE_TARGET="cross_process_three_trace_dap_test"
 readonly LIST_PROCESSES_TARGET="dap_server_list_processes_event_test"
-readonly CROSS_PROCESS_EXPECTED_COUNT=6
-readonly THREE_TRACE_EXPECTED_COUNT=2
+readonly CROSS_PROCESS_EXPECTED_COUNT=10
+readonly THREE_TRACE_EXPECTED_COUNT=5
 readonly LIST_PROCESSES_EXPECTED_COUNT=5
-readonly RUST_EXPECTED_COUNT=13
+readonly RUST_EXPECTED_COUNT=20
 readonly PLAYWRIGHT_EXPECTED_COUNT=2
 
 gate_tmp_dir=""
@@ -32,11 +32,15 @@ gate_tmp_dir=""
 # inputs: the ambiguous / missing-correlation branches cannot be reached
 # reliably from a recording.
 readonly -a CROSS_PROCESS_EXPECTED_TESTS=(
+	test_origin_cross_process_absent_show_text_names_no_binding
 	test_origin_cross_process_ambiguous_correlation_terminates_cleanly
+	test_origin_cross_process_blank_show_text_names_no_binding
+	test_origin_cross_process_declines_to_recross_the_boundary_it_arrived_on
 	test_origin_cross_process_fixture_a_python_aiohttp_mode1
 	test_origin_cross_process_fixture_a_python_aiohttp_mode3
 	test_origin_cross_process_missing_correlation_terminates_cleanly
 	test_origin_cross_process_serialisation_aware_json_collapses_to_trivial_copy
+	test_origin_cross_process_still_follows_a_return_over_a_different_boundary
 	test_parity_origin_cross_process_fixture_a_python_aiohttp
 )
 
@@ -44,7 +48,10 @@ readonly -a CROSS_PROCESS_EXPECTED_TESTS=(
 # production dispatcher. This is the target that would have caught the
 # composer being unreachable from the product.
 readonly -a THREE_TRACE_EXPECTED_TESTS=(
+	a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording
+	a_session_folder_launches_as_the_whole_session
 	origin_of_the_server_balance_reaches_the_browser_recordings
+	the_chain_terminates_in_the_wasm_recording_rather_than_on_a_name_no_marker_used
 	three_recordings_load_as_one_session_with_canonical_roles
 )
 

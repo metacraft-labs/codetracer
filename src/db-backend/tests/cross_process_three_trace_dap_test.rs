@@ -385,3 +385,224 @@ fn origin_of_the_server_balance_reaches_the_browser_recordings() {
         chain.hops.len()
     );
 }
+
+/// M36b — the chain must terminate where the walk ran out, not on a
+/// binding no marker ever named.
+///
+/// # What went wrong, and why an assertion on the terminator catches it
+///
+/// The composer resumes the walk in a sibling recording on the binding
+/// the matched *send* marker names, which is `MarkerPayload::show_text`.
+/// It used to fall back to `key_text` when `show_text` was absent —
+/// but `key_text` is the label of the correlation *key* expression, and
+/// for every marker a recorder synthesises it is the literal string
+/// `key`. So a crossing whose sender named no binding drove a sibling
+/// origin query for a variable called `key`, found nothing, and closed
+/// the chain with `UnknownVariable / key`.
+///
+/// That terminator is unactionable — it reports a failed lookup for a
+/// name the program never had — and it arrived attached to an *empty*
+/// cross-process span, which is a shape the walk produces legitimately
+/// too. `origin_of_the_server_balance_reaches_the_browser_recordings`
+/// above asserts properties that an empty trailing span satisfies, so
+/// the nonsense passed unnoticed for as long as it existed. Pinning
+/// the terminator is what separates the two.
+///
+/// # The expected shape
+///
+/// ```text
+/// spans:  backend        hops 0..1
+///         frontend-js    hops 2..2
+///         frontend-wasm  hops 3..3
+/// ```
+///
+/// Three spans, one per recording, each owning real hops. There is no
+/// fourth: after landing in the WebAssembly recording the walk finds
+/// that module's *entry* marker sitting one step from the result hop
+/// (the recording is three steps long, so the composer's ±1-step
+/// window reaches it) and that marker's counterpart is the send in the
+/// JavaScript recording the walk just came from. Following it would
+/// re-cross the boundary it had just entered through and ask the
+/// JavaScript side to explain a value it has already explained.
+/// Relating an export's result to its arguments needs the module's
+/// interior, which is the offline replay of
+/// `Recording-Backends/WASM-Instrumentation-Layer.md` §6 — so the walk
+/// declines, and the chain ends in the recording that last had
+/// something to say.
+#[test]
+fn the_chain_terminates_in_the_wasm_recording_rather_than_on_a_name_no_marker_used() {
+    if let Some(missing) = missing_fixture_piece() {
+        panic!("fixture incomplete: {missing}");
+    }
+    let root = fixture_root();
+    let manifest = root.join("session.toml");
+    let server_source = root.join("backend/server.js");
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&manifest)
+        .expect("launch the three-trace session");
+
+    let source = std::fs::read_to_string(&server_source).expect("read the demo server source");
+    let line = source
+        .lines()
+        .position(|l| l.contains("const balance = payload.balance"))
+        .map(|idx| idx as u32 + 1)
+        .expect("the demo server must bind `balance` from the request payload");
+
+    let entries = list_processes(&mut client);
+    let backend_thread = thread_id_for_role(&entries, ROLE_BACKEND);
+    client
+        .set_breakpoint_on_thread(&server_source, line, backend_thread)
+        .expect("set a breakpoint in the server recording");
+    let location = client
+        .continue_to_breakpoint_on_thread(backend_thread)
+        .expect("run to the balance binding");
+    let chain = request_origin_chain(&mut client, "balance", location.rr_ticks.0, backend_thread);
+
+    let spans: Vec<String> = chain
+        .cross_process_spans
+        .iter()
+        .map(|s| format!("{}[{}..{}]", s.role, s.first_hop_index, s.last_hop_index))
+        .collect();
+
+    // (1) Every span indexes hops that exist. A span whose
+    // `first_hop_index` is past the end of the hop list is the
+    // placeholder shape — the walk crossed a boundary and the sibling
+    // had nothing to add. It is a legitimate shape in general, but not
+    // one this fixture should produce, and the assertion below says
+    // which recording is allowed to be the terminus.
+    for span in &chain.cross_process_spans {
+        assert!(
+            (span.first_hop_index as usize) < chain.hops.len(),
+            "span `{}` is a placeholder indexing past the {} hops the chain has; spans={spans:?}",
+            span.role,
+            chain.hops.len()
+        );
+    }
+
+    // (2) The walk ends in the WebAssembly recording. Anything after it
+    // is the bounce back across the realm boundary the composer must
+    // decline.
+    assert_eq!(
+        chain.cross_process_spans.last().map(|s| s.role.as_str()),
+        Some(ROLE_FRONTEND_WASM),
+        "the walk must stop in the recording that last had something to say; spans={spans:?}"
+    );
+    assert_eq!(spans.len(), 3, "one span per recording, no re-entry; spans={spans:?}");
+
+    // (3) No span re-enters the recording the immediately preceding one
+    // came from over the same boundary. Stated as a property rather
+    // than as "there is no fourth span" so it keeps its meaning if the
+    // demo grows another tier.
+    for pair in chain.cross_process_spans.windows(2) {
+        let (previous, current) = (&pair[0], &pair[1]);
+        assert!(
+            !(current.to_process == previous.from_process && current.correlator == previous.correlator),
+            "the walk re-crossed `{}` back into `{}`, the recording it had just left; spans={spans:?}",
+            current.correlator,
+            current.to_process
+        );
+    }
+
+    // (4) The terminator names something real. `UnknownVariable` here
+    // means the walk asked a recording for a binding and did not find
+    // it — the exact failure `key_text` used to manufacture. The
+    // literal `key` is called out separately because that is the string
+    // the regression produced, and a reader hitting this assertion
+    // should not have to rediscover why it is special.
+    assert_ne!(
+        chain.terminator.expression, "key",
+        "the chain terminated on `key`, which is a marker field label and not a binding any \
+         program declares — the composer resolved `MarkerPayload::key_text` as a variable name"
+    );
+    assert!(
+        !matches!(chain.terminator.kind, db_backend::task::TerminatorKind::UnknownVariable),
+        "the walk reports a failed lookup for `{}`; every hop in this chain resolves, so a \
+         terminator that says otherwise means the composer resumed on a name no marker supplied",
+        chain.terminator.expression
+    );
+}
+
+/// M49 — `ct/pairIndexLookup` must answer from the *session* index.
+///
+/// A correlation marker's whole point is that its counterpart lives in
+/// another process. The per-trace handler walks `build_local_pair_index`,
+/// which sees only its own recording's firings, so routing this request
+/// down to one trace returns an empty set for exactly the case the
+/// feature exists to serve — and the Event Log's boundary chip, whose
+/// jump is built on this lookup, rotates nothing.
+///
+/// The query below is the one the GUI issues when the user clicks the
+/// `account-balance` chip while viewing the server recording: `backend.ct`
+/// holds the `recv`, and the only `send` is in `frontend.ct`.
+#[test]
+fn a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording() {
+    if let Some(missing) = missing_fixture_piece() {
+        panic!("fixture incomplete: {missing}");
+    }
+    let manifest = fixture_root().join("session.toml");
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&manifest)
+        .expect("launch the three-trace session");
+
+    let entries = list_processes(&mut client);
+    let backend_thread = thread_id_for_role(&entries, ROLE_BACKEND);
+    let frontend_js_recording = entries
+        .iter()
+        .find(|e| e.get("role").and_then(|r| r.as_str()) == Some(ROLE_FRONTEND_JS))
+        .and_then(|e| e.get("recordingId"))
+        .and_then(|r| r.as_str())
+        .expect("the session must advertise the frontend-js recording id")
+        .to_string();
+
+    // Ask as the backend recording does: "who sent the `account-balance`
+    // message keyed `req-0001` that I received?"
+    let mut args = serde_json::json!({
+        "boundaryId": "account-balance",
+        "direction": "recv",
+        "keyValue": "req-0001",
+        "threadId": backend_thread,
+    });
+    if let Some(obj) = args.as_object_mut() {
+        obj.insert("threadId".to_string(), serde_json::json!(backend_thread));
+    }
+    let request = client.dap_client_mut().request("ct/pairIndexLookup", args);
+    client.send_message(&request).expect("send ct/pairIndexLookup");
+    let response = client
+        .read_until_response_msg("ct/pairIndexLookup", Duration::from_secs(30))
+        .expect("ct/pairIndexLookup response");
+    let body = match response {
+        DapMessage::Response(r) => {
+            assert!(r.success, "ct/pairIndexLookup failed: {:?}", r.message);
+            r.body
+        }
+        other => panic!("expected a response, got {other:?}"),
+    };
+
+    let counterparts = body
+        .get("counterparts")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        counterparts.len(),
+        1,
+        "exactly one recording sends `account-balance/req-0001`; got {counterparts:?}"
+    );
+    let counterpart = &counterparts[0];
+    assert_eq!(
+        counterpart.get("recordingId").and_then(|v| v.as_str()),
+        Some(frontend_js_recording.as_str()),
+        "the counterpart must be attributed to the browser recording that sent it, \
+         otherwise the Event Log's chip has no recording to switch to"
+    );
+    assert_eq!(
+        counterpart.get("direction").and_then(|v| v.as_str()),
+        Some("send"),
+        "a `recv` query returns `send` firings"
+    );
+    assert_eq!(counterpart.get("keyValue").and_then(|v| v.as_str()), Some("req-0001"));
+}
