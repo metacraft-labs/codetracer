@@ -546,9 +546,15 @@ when defined(js):
                               cstring("0 0 " & $width & " " & $height))
       if lines.len < 2:
         return
+      # Row padding offset: .calltrace-row already had padding-left: 0.3125em
+      # (5px at 16px font-size), which the original x1=10.0 was calibrated for.
+      # .calltrace-call-line now overrides that with padding-left: 0.5em (8px),
+      # a net increase of 0.1875em = 3px.  Add only the delta so the connector
+      # lines stay centred on the toggle icons.
+      const rowPaddingPx = 3.0
       for i in 0 ..< lines.len:
         let depth = max(lines[i].depth, 0)
-        let x1 = 10.0 + float(depth * 8)
+        let x1 = rowPaddingPx + 10.0 + float(depth * 8)
         let topY = float(i) * rowHeight
         let centerY = topY + 12.5
         let bottomY = topY + rowHeight
@@ -557,7 +563,7 @@ when defined(js):
         if endY > startY:
           appendTraceLine(svgContainer, x1, startY, x1, endY)
         if i < lines.high:
-          let nextX = 10.0 + float(max(lines[i + 1].depth, 0) * 8)
+          let nextX = rowPaddingPx + 10.0 + float(max(lines[i + 1].depth, 0) * 8)
           appendTraceLine(svgContainer, x1, bottomY, nextX, bottomY)
 
   proc renderCalltracePanel*(r: WebRenderer;
