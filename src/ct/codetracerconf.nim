@@ -718,12 +718,21 @@ type
         desc: "Program to record"
       .} : string
 
+      # NOTE: this cannot be `{.restOfArgs.}` even though that is exactly what
+      # it is.  confutils rejects `restOfArgs` in any command that also has
+      # flags: its check walks EVERY option, not just the positional ones, and
+      # requires each to be a required Arg (nim-confutils.nim ~line 866 -- the
+      # `previousOpt.kind == Arg` half of the condition is commented out).
+      # `run` gets away with `restOfArgs` only because it declares no flags.
+      #
+      # So the child's argv is split off from ct's own BEFORE confutils sees
+      # it, in `codetracer.nim` -- see `splitRecordChildArgv` there.
       recordArgs* {.
         argument
         defaultValue: @[]
-        desc: "Arguments for record",
-        longDesc: "longer description " &
-          "for record"
+        desc: "Arguments for the recorded program",
+        longDesc: "Everything after `--` is passed to the recorded " &
+          "program unchanged, including flags."
       .} : seq[string]
 
     of StartupCommand.`record-test`:
