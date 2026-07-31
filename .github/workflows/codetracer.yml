@@ -1079,11 +1079,6 @@ jobs:
           #   arch: arm64
           #   plat_name: manylinux_2_17_aarch64
 
-          - name: macos-amd64
-            runner: eph-macos-arm64
-            target_os: macos
-            arch: amd64
-            plat_name: macosx_10_9_x86_64
           - name: macos-arm64
             runner: eph-macos-arm64
             target_os: macos
