@@ -543,9 +543,9 @@ ct replay --trace-folder .../account-balance-with-wasm/frontend.ct
 ### Live, during recording
 
 Snapshots and slices are derived **as the page runs**, not by a pass over
-a finished file, per
-[`WASM-Replay-Snapshots-And-Slices.md`](../../../../../../../codetracer-specs/Recording-Backends/WASM-Replay-Snapshots-And-Slices.md)
-§2. `stream-snapshots-demo.sh` demonstrates that end to end:
+a finished file (design: `Recording-Backends/WASM-Replay-Snapshots-And-Slices.md`
+§2, in the internal `codetracer-specs` repo).
+`stream-snapshots-demo.sh` demonstrates that end to end:
 
 ```bash
 cd <workspace>/codetracer
@@ -717,9 +717,9 @@ needed in `lib.rs`.
 The same rewrite records the *values* that cross those edges: every
 argument of an exported call, and every value it returns. That is the
 whole of what the browser observes — the module's interior is deliberately
-not recorded (see
-[`WASM-Instrumentation-Layer.md`](../../../../../../../codetracer-specs/Recording-Backends/WASM-Instrumentation-Layer.md)
-§§ 2–4). `compute_balance` computes in locals through two private helpers
+not recorded (design: `Recording-Backends/WASM-Instrumentation-Layer.md`
+§§ 2–4, in the internal `codetracer-specs` repo).
+`compute_balance` computes in locals through two private helpers
 and writes nothing to linear memory; the recording contains its two
 arguments and its result, attributed to a line of `lib.rs`.
 
