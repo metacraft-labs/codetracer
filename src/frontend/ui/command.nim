@@ -429,6 +429,31 @@ proc initCommandPaletteVM*() =
 
 when defined(js):
   proc focusElement(input: kdom.Element) {.importcpp: "#.focus()".}
+  proc scrollResultsForNavigation(
+      resultsEl: kdom.Element; goingDown: bool; currentIdx: int) =
+    ## Pre-scroll synchronously BEFORE redrawAll — no timing race with
+    ## Karax's requestAnimationFrame.
+    ## Row positions are computed from the index and measured row height
+    ## (offsetHeight is element-intrinsic and not affected by viewport
+    ## coordinates, unlike getBoundingClientRect).
+    let anyRow = cast[kdom.Element](
+      resultsEl.toJs.querySelector(cstring ".ct-menu-item"))
+    if isNil(anyRow): return
+    let rowH      = cast[float](anyRow.toJs.offsetHeight)
+    if rowH <= 0.0: return
+    let clientH   = cast[float](resultsEl.toJs.clientHeight)
+    let scrollTop = cast[float](resultsEl.toJs.scrollTop)
+    if goingDown:
+      # bottom of the row one step ahead
+      let nextBottom = float(currentIdx + 2) * rowH
+      if nextBottom > scrollTop + clientH:
+        resultsEl.toJs.scrollTop = nextBottom - clientH
+    else:
+      if currentIdx > 0:
+        # top of the row one step back
+        let prevTop = float(currentIdx - 1) * rowH
+        if prevTop < scrollTop:
+          resultsEl.toJs.scrollTop = prevTop
 
   proc wireLegacyCommandPaletteInput(self: CommandPaletteComponent) =
     ## The IsoNim view owns the DOM, but the mature command/search/agent
@@ -459,9 +484,23 @@ when defined(js):
     input.addEventListener(cstring"keydown", proc(ev: Event) =
       let keyCode = cast[int](ev.toJs.keyCode)
       if keyCode == DOWN_KEY_CODE:
+        ev.preventDefault()
+        let resultsElDown = kdom.document.querySelector(cstring ".command-results")
+        if not resultsElDown.isNil:
+          scrollResultsForNavigation(resultsElDown, true, self.selected)
         commandSelectNext()
+        discard setTimeout(proc() =
+          let fresh = kdom.document.getElementById(cstring CommandPaletteInputId)
+          if not fresh.isNil: fresh.focusElement(), 16)
       elif keyCode == UP_KEY_CODE:
+        ev.preventDefault()
+        let resultsElUp = kdom.document.querySelector(cstring ".command-results")
+        if not resultsElUp.isNil:
+          scrollResultsForNavigation(resultsElUp, false, self.selected)
         commandSelectPrevious()
+        discard setTimeout(proc() =
+          let fresh = kdom.document.getElementById(cstring CommandPaletteInputId)
+          if not fresh.isNil: fresh.focusElement(), 16)
       elif keyCode == ENTER_KEY_CODE:
         self.runQuery()
       elif keyCode == ESC_KEY_CODE:

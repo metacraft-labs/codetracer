@@ -62,18 +62,27 @@
     border: 0.0625em solid #4f4f4f
     border-top: 0
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
-    border-bottom-left-radius: 0.75em
-    border-bottom-right-radius: 0.75em
+    border-bottom-left-radius: 0.5em
+    border-bottom-right-radius: 0.5em
 
     &.hidden
       display: none
 
   .command-empty-overlay
-    padding: 0.75em 1em
-    color: colors-ui-text-primary-body
-    background: colors-ui-surface-base-panel
+    display: flex
+    align-items: center
+    width: 100%
+    box-sizing: border-box
+    height: 2.25em
+    padding: 0 0.75em
+    color: colors-ui-text-primary-body-subtle
+    background: colors-ui-surface-base-raised
+    font-family: "SpaceGrotesk"
+    font-size: 0.875em
     border: 0.0625em solid #4f4f4f
     border-top: 0
+    border-radius: 0 0 0.5em 0.5em
+    box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
 
     &.hidden
       display: none
