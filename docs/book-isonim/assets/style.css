@@ -112,11 +112,12 @@ a:hover {
   align-items: center;
   gap: 24px;
   flex-wrap: wrap;
-  /* M2 (issue 3): match WebFlow `.nav-top` -- a taller header (min 6vh) with
-   * --space-m (1.5rem) vertical breathing room, gap 24px, sticky, hairline
-   * bottom rule. */
-  min-height: 6vh;
-  padding: var(--docs-space-5) 0;
+  /* WebFlow parity CORRECTION: WebFlow `.nav-top` is a COMPACT ~54px header,
+   * not the ~87px the M2 `min-height:6vh + padding:24px 0` produced. Trim the
+   * vertical padding to --space-xs (0.75rem) so brand+search sit on a slim
+   * 54px rule (the sticky sidebar `top:6vh` still lines up at 1440x900). */
+  min-height: 54px;
+  padding: var(--docs-space-2) 0;
   border-bottom: 1px solid var(--docs-border);
   position: sticky;
   top: 0;
@@ -132,7 +133,11 @@ a:hover {
 .docs-logo-link {
   display: inline-flex;
   align-items: center;
-  flex: 0 0 auto;
+  /* WebFlow parity: the brand is a fixed sidebar-width column (padding-left
+   * matching the sidebar's own inset) so the search bar begins at the sidebar's
+   * right edge -- the "grid-like" column alignment of the WebFlow header. */
+  flex: 0 0 var(--docs-sidebar-width);
+  padding-left: var(--docs-space-5);
   line-height: 0;
 }
 
@@ -172,7 +177,10 @@ a:hover {
 .docs-nav-sidebar {
   grid-column: 1;
   max-width: var(--docs-sidebar-width);
-  padding: var(--docs-space-8) var(--docs-space-6) var(--docs-space-8) 0;
+  /* WebFlow parity: WebFlow `.layout-nav` uses a symmetric horizontal inset;
+   * even the padding (previously 32px right / 0 left) so nav items align under
+   * the brand's own left inset (both --space-m = 1.5rem). Keep the right rule. */
+  padding: var(--docs-space-8) var(--docs-space-5);
   border-right: 1px solid var(--docs-border);
   position: sticky;
   top: 6vh;
@@ -201,12 +209,15 @@ a:hover {
   border-top: 1px solid var(--docs-border);
 }
 
-/* Content column: max 50rem, generous padding. */
+/* Content column: WebFlow's constrained ~800px central column with a ~40px
+ * horizontal inset (WebFlow `.layout-content-inner-wrapper` padding:40px) so
+ * the visible text runs ~720px and never sits edge-to-edge. Applied to BOTH
+ * the landing and article pages (WebFlow uses one 800px column for both). */
 .docs-main {
   grid-column: 2;
   min-width: 0;
   max-width: var(--docs-max-content-width);
-  padding: var(--docs-space-8) 0;
+  padding: var(--docs-space-8) 40px;
 }
 
 /* Gap F (M3): the framework's optional `footerHtml` hook now fills this
@@ -494,6 +505,9 @@ a:hover {
   padding: 9px 12px;
   border-radius: 7px;
   color: var(--docs-code-fg);
+  /* WebFlow parity: result title is 15px / 500 (was inheriting 16px / 400). */
+  font-size: 0.9375rem;
+  font-weight: 500;
 }
 
 .docs-search-result:hover .docs-search-result-link,
@@ -1067,7 +1081,8 @@ h6.docs-md-heading {
   display: flex;
   flex-direction: column;
   gap: var(--docs-space-5); /* WebFlow .content-title gap = --space-m (1.5rem) */
-  margin: 0 0 var(--docs-space-8);
+  /* WebFlow parity: uniform ~64px vertical rhythm between content sections. */
+  margin: 0 0 4rem;
 }
 
 .docs-md-hero-title {
@@ -1094,15 +1109,18 @@ h6.docs-md-heading {
   margin-top: var(--docs-space-1);
 }
 
-/* Card grid -- WebFlow `.category-card`/`.popular-article-card`: a 3-up grid
+/* Card grid -- WebFlow `.category-card`/`.popular-article-card`: a 2-up grid
  * (collapsing to 1 column on narrow viewports) of bordered cards, each a
  * focusable <a> with an optional icon chip, a title and a muted blurb.
- * WebFlow `.grid` gap = --space-s (1rem) = --docs-space-4. */
+ * WebFlow parity CORRECTION: within the constrained ~800px column WebFlow lays
+ * BOTH the category grid and the popular grid out 2-up (~352px cards), not the
+ * M6 3-up. `.grid` gap = --space-s (1rem) = --docs-space-4; ~64px section
+ * rhythm below. */
 .docs-md-card-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--docs-space-4);
-  margin: 0 0 var(--docs-space-6);
+  margin: 0 0 4rem;
 }
 
 .docs-md-card {
@@ -1241,41 +1259,52 @@ h6.docs-md-heading {
   font-weight: 500;
 }
 
-/* Delta 3 -- section labels ("Start here" / "Popular articles"). WebFlow renders
- * these as `<h2 class="display-s">` (1.15rem / 600, no underline rule), smaller
- * than this book's global underlined article H2 (1.4rem). Scope the smaller,
- * rule-free label to the landing only (via `:has(.docs-md-hero)`, like the
- * title-suppression rule above), so every ordinary article page keeps its
- * 1.4rem underlined H2 unchanged. */
-.docs-main:has(.docs-md-hero) h2.docs-md-heading {
+/* Delta 3 CORRECTION -- section labels ("Start here" / "Popular articles").
+ * WebFlow renders THESE as `<h2 class="display-s">` (1.15rem / 600, no underline
+ * rule), but keeps the FIRST content heading ("Overview") as a normal markdown
+ * H2 (1.4rem, underlined). The earlier rule flattened EVERY landing H2, wrongly
+ * demoting "Overview" too. The section labels are the only landing H2s that
+ * immediately precede a `.docs-md-card-grid`, so target exactly those via the
+ * next-sibling `:has(+ .docs-md-card-grid)` -- leaving "Overview" its normal
+ * underlined H2 treatment. ~64px top margin keeps the section rhythm. */
+.docs-main:has(.docs-md-hero) h2.docs-md-heading:has(+ .docs-md-card-grid) {
   font-size: 1.15rem; /* WebFlow .display-s */
   border-bottom: none;
   padding-bottom: 0;
-  margin: var(--docs-space-6) 0 var(--docs-space-2);
+  margin: 4rem 0 var(--docs-space-4);
 }
 
-/* Delta 2 -- the landing uses a WIDER content column than a normal article. The
- * framework tags a hero page's `<main>` with `.docs-main--wide`; on the desktop
- * three-column grid it spans across the (hidden) right TOC rail and drops the
- * 50rem article cap, so the card grid reaches the WebFlow home's content width
- * (~68rem => three ~352px cards). Guarded to the multi-column layout so the
- * mobile single-column reset (`.docs-main { grid-column: 1 }`) still wins below
- * the breakpoint. Normal article pages (no hero) keep the narrow 50rem column. */
-@media (min-width: 961px) {
-  .docs-main.docs-main--wide {
-    grid-column: 2 / -1;
-    max-width: none;
-  }
-
-  .docs-main--wide .docs-md-body {
-    max-width: none;
-  }
+/* Delta 2 CORRECTION -- REVERT the M6 landing WIDENING. WebFlow's home uses the
+ * SAME constrained ~800px central content column as an article, not a full-bleed
+ * 3-up grid. The framework still tags a hero page's `<main>` with
+ * `.docs-main--wide` (the wide capability stays available to OTHER consumers,
+ * e.g. `isonim/docs/users`), so rather than change the framework we pin the
+ * class INERT here: it keeps the base `.docs-main` constrained column
+ * (grid-column 2 + `--docs-max-content-width`). The right-hand TOC rail stays
+ * hidden on the landing (rule below), so the WebFlow whitespace sits to the
+ * right of the central column. */
+.docs-main.docs-main--wide {
+  grid-column: 2;
+  max-width: var(--docs-max-content-width);
 }
 
 /* The WebFlow home has no right-hand table-of-contents rail; hide it on the
- * landing so the wide content column spans the full width. */
+ * landing. */
 .docs-frame:has(.docs-md-hero) .docs-nav-toc {
   display: none;
+}
+
+/* With the right TOC rail hidden on the landing, collapse its grid track to 0
+ * so the constrained content column can reach its full WebFlow ~800px cap
+ * (text ~720px after the 40px inset). The content column stays `grid-column: 2`
+ * (left-aligned, capped by `--docs-max-content-width`), so the reclaimed track
+ * becomes the WebFlow whitespace to the RIGHT of the central column -- NOT a
+ * full-bleed widening. Desktop only; the <=960px single-column reset wins below
+ * the breakpoint. Article pages keep their 3-column grid (TOC visible). */
+@media (min-width: 961px) {
+  .docs-frame:has(.docs-md-hero) {
+    grid-template-columns: minmax(0, var(--docs-sidebar-width)) minmax(0, 1fr) 0;
+  }
 }
 
 /* ============================================================================
@@ -1454,7 +1483,7 @@ h6.docs-md-heading {
   position: relative;
   width: 100%;
   padding-top: 56.25%; /* 16:9, ~ WebFlow .w-video 56.17% */
-  margin: var(--docs-space-6) 0;
+  margin: 4rem 0; /* WebFlow parity: ~64px section rhythm */
   border-radius: var(--docs-radius-md);
   overflow: hidden;
   background: var(--docs-bg-raised);
@@ -1511,17 +1540,17 @@ h6.docs-md-heading {
   object-fit: contain;
 }
 
-/* issue 7 -- on the landing the need-help + built-by footer must live INSIDE
- * the (wide) content column, not span full page width. The landing's `<main>`
- * carries `.docs-main--wide` (grid-column 2 / -1, the right TOC rail hidden);
- * match it here so both align with the content column exactly as WebFlow nests
- * them. Scoped to the desktop grid; the mobile single-column reset (below)
- * still wins under the breakpoint. Normal article pages keep the full-width
- * footer + content-column need-help. */
+/* issue 7 (WebFlow parity CORRECTION) -- on the landing the need-help + built-by
+ * footer live INSIDE the constrained content column, not span full page width.
+ * With the M6 widening reverted, the content column is the base grid-column 2,
+ * so pin both here to grid-column 2 as well (the footer's own base is 1 / -1,
+ * full width, which we override on the landing only). Scoped to the desktop
+ * grid; the mobile single-column reset (below) still wins under the breakpoint.
+ * Normal article pages keep the full-width footer + content-column need-help. */
 @media (min-width: 961px) {
   .docs-frame:has(.docs-md-hero) .docs-need-help,
   .docs-frame:has(.docs-md-hero) .docs-footer {
-    grid-column: 2 / -1;
+    grid-column: 2;
   }
 }
 

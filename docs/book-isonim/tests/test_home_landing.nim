@@ -37,9 +37,18 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
     check html.count("class=\"docs-md-card\" href=") == 3
     check html.count("class=\"docs-md-card docs-md-card--compact\" href=") == 6
 
-    # M6: the landing gets the WIDER content column and DROPS the prev/next
-    # pager (the WebFlow home has neither a narrow article column nor a pager).
-    check html.contains("class=\"docs-main docs-main--wide\"")
+    # WebFlow parity CORRECTION (supersedes the M6 "wider column" target).
+    # Operator feedback: WebFlow's home uses the SAME constrained ~800px CENTRAL
+    # content column as an article -- NOT the M6 full-bleed 3-up widening. The
+    # framework still tags a hero page's <main> with `docs-main--wide` (the wide
+    # capability is retained for OTHER consumers, e.g. isonim/docs/users, whose
+    # own test still asserts it), but the book CSS pins that class INERT back to
+    # the constrained base column. So the class may still be EMITTED here; we no
+    # longer assert it WIDENS. The constrained-column + 2-up-grid target is a CSS
+    # fact guarded by the "landing CSS matches the WebFlow constrained column"
+    # test below. What stays structurally true: the landing <main> is present and
+    # the prev/next pager is DROPPED (the WebFlow home is not a linear article).
+    check html.contains("class=\"docs-main")
     check not html.contains("docs-nav-adjacent")
 
   test "the three category cards carry the WebFlow titles + real section links":
@@ -123,3 +132,20 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
     # ...and the old plain-prose home is gone: the landing, not an article H1.
     let (_, homeHtml) = renderRoute("/", "content")
     check homeHtml.contains("class=\"docs-md-hero\"")
+
+  test "the landing CSS matches the WebFlow constrained central column, not the M6 widening":
+    # WebFlow parity CORRECTION guard. This pins the true WebFlow target that
+    # supersedes the M6 widening (which the operator rejected): a constrained
+    # ~800px central content column and a 2-UP card grid, verified at the CSS
+    # rule level (the SSR HTML alone can't express column width / grid tracks).
+    const styleCssPath = currentSourcePath().parentDir().parentDir() / "assets" / "style.css"
+    let css = readFile(styleCssPath)
+    # The card grid is 2-up (WebFlow), never the reverted 3-up.
+    check css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))")
+    check not css.contains("repeat(3, minmax(0, 1fr))")
+    # No content/footer/need-help block is widened full-bleed (grid-column 2/-1):
+    # the M6 `.docs-main--wide` widening + the full-bleed footer are reverted so
+    # everything stays inside the constrained central column.
+    check not css.contains("2 / -1")
+    # `.docs-main--wide` is pinned INERT back to the constrained base column.
+    check css.contains(".docs-main.docs-main--wide {")
