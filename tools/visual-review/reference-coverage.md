@@ -53,7 +53,7 @@ Representative partial/missing-reference surfaces were captured successfully at
 | Build errors | `errors` | confirmed current IsoNim problems/build-errors panel, `tools/visual-review/reports/errors-laptop.json`; `noir-build-open` also confirms the panel tab in a default layout |
 | Deep review panel | `deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/deepreview-laptop.json` |
 | Agent activity deep review | `agent-activity-deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/agent-activity-deepreview-laptop.json` |
-| Auto-hide bottom tabs | `auto-hide-bottom-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-bottom-tabs-laptop.json` |
+| Auto-hide bottom strip | `auto-hide-bottom-strip` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-bottom-strip-laptop.json` |
 | Auto-hide collapsed icons | `auto-hide-collapsed-icons` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-collapsed-icons-laptop.json` |
 | Auto-hide overlay tabs | `auto-hide-overlay-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-overlay-tabs-laptop.json` |
 | Auto-hide side strip | `auto-hide-side-strip` and `auto-hide-side-strip-collapsed` | confirmed populated and collapsed current IsoNim variants |

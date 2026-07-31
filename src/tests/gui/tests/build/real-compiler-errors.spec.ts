@@ -22,6 +22,7 @@ import { retry } from "../../lib/retry-helpers";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import { BOTTOM_STRIP_TAB_SELECTOR } from "../../page-objects/auto-hide-strip";
 
 // ---------------------------------------------------------------------------
 // Realistic compiler output fixtures
@@ -228,7 +229,7 @@ test.describe("Real compiler errors in build panels", () => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
     // Activate the BUILD tab.
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await retry(
@@ -271,7 +272,7 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await retry(
@@ -310,7 +311,7 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await retry(
@@ -352,7 +353,7 @@ test.describe("Real compiler errors in build panels", () => {
   test("Build failure header shows exit code", async ({ ctPage }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await retry(
@@ -407,7 +408,7 @@ test.describe("Real compiler errors in build panels", () => {
     ]);
 
     // Click the PROBLEMS tab to activate it.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await retry(
@@ -485,7 +486,7 @@ test.describe("Real compiler errors in build panels", () => {
     ]);
 
     // Activate the PROBLEMS tab.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await retry(
@@ -564,7 +565,7 @@ test.describe("Real compiler errors in build panels", () => {
       },
     ]);
 
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await retry(
@@ -648,7 +649,7 @@ test.describe("Real compiler errors in build panels", () => {
       },
     ]);
 
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await retry(
@@ -702,7 +703,7 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await retry(
@@ -751,7 +752,7 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await retry(

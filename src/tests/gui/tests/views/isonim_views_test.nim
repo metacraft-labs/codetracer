@@ -86,7 +86,6 @@ import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
 import views/isonim_auto_hide_overlay_tabs_view
 import views/isonim_auto_hide_collapsed_icons_view
-import views/isonim_auto_hide_bottom_tabs_view
 import views/isonim_auto_hide_bottom_strip_view
 import views/isonim_auto_hide_side_strip_view
 import views/isonim_status_view
@@ -339,42 +338,66 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
     panel.children[1].fireEvent("click")
     check selected == 1
 
-suite "IsoNim Auto-hide Bottom Tabs — structure":
+suite "IsoNim Auto-hide Bottom Strip — structure":
+  ## These three cases used to exercise `isonim_auto_hide_bottom_tabs_view`,
+  ## a second bottom-tabs renderer that only storybook imported and that the
+  ## live app stopped using when commit b27da3947 redesigned the status bar.
+  ## They are re-pointed at the strip view the app actually renders rather
+  ## than deleted: the behaviours they pin (empty state, tab labels in order,
+  ## select callback carrying the tab index) are still contracts — they just
+  ## belong to the surviving renderer.  See milestone M47.
 
-  test "empty state renders the bottom-tabs host without tab children":
+  test "empty state renders the bottom-strip host without tab children":
     let r = MockRenderer()
-    let panel = renderAutoHideBottomTabsPanel(r, tabs = @[])
+    let panel = renderAutoHideBottomStripPanel(r, tabs = @[])
 
-    check panel.attributes["class"] == AutoHideBottomTabsClass
+    # No tabs => no `has-tabs` marker, so the status bar's strip host stays
+    # collapsed instead of reserving space for nothing.
+    check panel.attributes["class"] == ""
     check panel.children.len == 0
 
   test "bottom tabs render strip-tab selector contract and titles":
     let r = MockRenderer()
-    let panel = renderAutoHideBottomTabsPanel(
+    let panel = renderAutoHideBottomStripPanel(
       r,
       tabs = @[
-        AutoHideBottomTabRecord(title: "BUILD"),
-        AutoHideBottomTabRecord(title: "PROBLEMS"),
-        AutoHideBottomTabRecord(title: "SEARCH RESULTS")
+        AutoHideBottomStripRecord(title: "BUILD", active: false),
+        AutoHideBottomStripRecord(title: "PROBLEMS", active: false),
+        AutoHideBottomStripRecord(title: "SEARCH RESULTS", active: false)
       ])
 
-    check panel.attributes["class"] == AutoHideBottomTabsClass
+    check panel.attributes["class"] == AutoHideBottomStripHasTabsClass
     check panel.children.len == 3
-    check panel.children[0].attributes["class"] == AutoHideBottomTabClass
+    # The tabs are direct children carrying `.auto-hide-strip-tab` — the
+    # selector every spec locates them by (`page-objects/auto-hide-strip.ts`).
+    check panel.children[0].attributes["class"] == AutoHideBottomStripTabClass
     check panel.children[0].textContent == "BUILD"
     check panel.children[1].textContent == "PROBLEMS"
     check panel.children[2].textContent == "SEARCH RESULTS"
 
+  test "active bottom tab carries the active class":
+    let r = MockRenderer()
+    let panel = renderAutoHideBottomStripPanel(
+      r,
+      tabs = @[
+        AutoHideBottomStripRecord(title: "BUILD", active: false),
+        AutoHideBottomStripRecord(title: "PROBLEMS", active: true)
+      ])
+
+    check panel.children[0].attributes["class"] == AutoHideBottomStripTabClass
+    check panel.children[1].attributes["class"] ==
+      AutoHideBottomStripTabActiveClass
+
   test "select callback receives bottom tab index":
     let r = MockRenderer()
     var selected = -1
-    let panel = renderAutoHideBottomTabsPanel(
+    let panel = renderAutoHideBottomStripPanel(
       r,
       tabs = @[
-        AutoHideBottomTabRecord(title: "BUILD"),
-        AutoHideBottomTabRecord(title: "SEARCH RESULTS")
+        AutoHideBottomStripRecord(title: "BUILD", active: false),
+        AutoHideBottomStripRecord(title: "SEARCH RESULTS", active: false)
       ],
-      callbacks = AutoHideBottomTabsCallbacks(
+      cb = AutoHideBottomStripCallbacks(
         onSelect: proc(index: int) = selected = index))
 
     panel.children[1].fireEvent("click")

@@ -12,6 +12,10 @@ import { retry } from "../../lib/retry-helpers";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  BOTTOM_STRIP_TAB_SELECTOR,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 test.describe("Problems Panel", () => {
   test.setTimeout(120_000);
@@ -26,10 +30,10 @@ test.describe("Problems Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // The PROBLEMS tab should be present among auto-hide bottom tabs.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await expect(problemsTab).toHaveCount(1);
@@ -43,10 +47,10 @@ test.describe("Problems Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the PROBLEMS auto-hide tab to open the overlay.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await problemsTab.click();
@@ -92,10 +96,10 @@ test.describe("Problems Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the PROBLEMS auto-hide tab to open the overlay.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await problemsTab.click();

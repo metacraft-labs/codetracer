@@ -10,7 +10,10 @@
  *   #auto-hide-layout-row        — flex row: left strip + #ROOT + right strip
  *   #auto-hide-strip-left        — left edge strip (ID, flex item beside GL)
  *   #auto-hide-strip-right       — right edge strip (ID, flex item beside GL)
- *   .auto-hide-bottom-tabs       — bottom tabs rendered inside #status-base
+ *   #auto-hide-bottom-strip      — bottom strip hosted inside #status-base;
+ *                                  its tabs are DIRECT children (the pre-
+ *                                  redesign wrapper element is retired —
+ *                                  see page-objects/auto-hide-strip.ts)
  *   .auto-hide-strip-tab         — individual tab within a strip
  *   #auto-hide-overlay           — slide-in overlay container
  *   #auto-hide-overlay-title     — title text inside overlay header
@@ -23,6 +26,13 @@
 
 import { test, expect, wait } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
+import {
+  DEFAULT_BOTTOM_TAB_COUNT,
+  allStripTabs,
+  bottomStripTab,
+  bottomStripTabs,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -135,13 +145,15 @@ test.describe("Auto-hide panes", () => {
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
-    // Wait for auto-hide bottom tabs to appear (they load after a 500ms delay).
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: WAIT_TIMEOUT_MS });
+    // Wait for the standalone bottom panes to finish registering (they are
+    // mounted from a setTimeout after GoldenLayout builds its containers).
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
 
-    // BUILD, PROBLEMS, and SEARCH RESULTS are default bottom auto-hide tabs.
-    // No user-pinned panels should be present, so only the 3 defaults exist.
-    const bottomTabs = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab");
-    await expect(bottomTabs).toHaveCount(3);
+    // `layout.nim` registers BUILD, PROBLEMS, SEARCH RESULTS and REQUESTS as
+    // default bottom auto-hide tabs.  No user-pinned panels should be
+    // present, so only those defaults exist.
+    const bottomTabs = bottomStripTabs(ctPage);
+    await expect(bottomTabs).toHaveCount(DEFAULT_BOTTOM_TAB_COUNT);
 
     // Side strips should be empty (no panels pinned to left or right).
     for (const stripSelector of [
@@ -163,15 +175,19 @@ test.describe("Auto-hide panes", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for default bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: WAIT_TIMEOUT_MS });
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
 
     // Record the initial number of GL stacks so we can verify one was removed.
     const initialStackCount = await ctPage.locator(".lm_stack").count();
 
-    // There are already 3 default bottom tabs (BUILD, PROBLEMS, SEARCH RESULTS).
-    const bottomStrip = ctPage.locator(".auto-hide-bottom-tabs");
-    const bottomTabs = bottomStrip.locator(".auto-hide-strip-tab");
+    // The standalone bottom panes are already registered; this test measures
+    // a pin as a delta against that settled baseline.
+    const bottomTabs = bottomStripTabs(ctPage);
     const initialBottomCount = await bottomTabs.count();
+    expect(
+      initialBottomCount,
+      "the standalone bottom panes must be registered before pinning",
+    ).toBe(DEFAULT_BOTTOM_TAB_COUNT);
 
     // Pin the active tab of the first stack to the bottom edge.
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
@@ -181,7 +197,7 @@ test.describe("Auto-hide panes", () => {
       await expect(bottomTabs).toHaveCount(initialBottomCount + 1, { timeout: 1000 });
 
       // The pinned panel title should appear among the bottom tabs.
-      const pinnedTab = bottomStrip.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
+      const pinnedTab = bottomStripTab(ctPage, pinnedTitle);
       await expect(pinnedTab).toHaveCount(1, { timeout: 1000 });
 
       // The panel should have been removed from the GL layout
@@ -198,7 +214,7 @@ test.describe("Auto-hide panes", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for default bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: WAIT_TIMEOUT_MS });
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
@@ -225,8 +241,8 @@ test.describe("Auto-hide panes", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for default bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: WAIT_TIMEOUT_MS });
-    const initialTabCount = await ctPage.locator(".auto-hide-strip-tab").count();
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+    const initialTabCount = await allStripTabs(ctPage).count();
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
@@ -261,7 +277,7 @@ test.describe("Auto-hide panes", () => {
       await expect(overlay).not.toHaveClass(/visible/, { timeout: 1000 });
 
       // The pinned strip tab should have been removed (back to initial count).
-      const remainingTabs = ctPage.locator(".auto-hide-strip-tab");
+      const remainingTabs = allStripTabs(ctPage);
       await expect(remainingTabs).toHaveCount(initialTabCount, { timeout: 1000 });
 
       // The panel should be back in the GL layout — look for its title
@@ -279,8 +295,8 @@ test.describe("Auto-hide panes", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for default bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: WAIT_TIMEOUT_MS });
-    const initialTabCount = await ctPage.locator(".auto-hide-strip-tab").count();
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+    const initialTabCount = await allStripTabs(ctPage).count();
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
@@ -302,7 +318,7 @@ test.describe("Auto-hide panes", () => {
 
       // The strip tab should still be present (Escape only hides the
       // overlay; it does not unpin the panel). Total count = initial + 1.
-      const tabsAfter = ctPage.locator(".auto-hide-strip-tab");
+      const tabsAfter = allStripTabs(ctPage);
       await expect(tabsAfter).toHaveCount(initialTabCount + 1, { timeout: 1000 });
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
   });
@@ -313,8 +329,8 @@ test.describe("Auto-hide panes", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for default bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: WAIT_TIMEOUT_MS });
-    const initialTabCount = await ctPage.locator(".auto-hide-strip-tab").count();
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+    const initialTabCount = await allStripTabs(ctPage).count();
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
@@ -338,7 +354,7 @@ test.describe("Auto-hide panes", () => {
       await expect(overlay).not.toHaveClass(/visible/, { timeout: 1000 });
 
       // The strip tab should still be present. Total count = initial + 1.
-      const tabsAfter = ctPage.locator(".auto-hide-strip-tab");
+      const tabsAfter = allStripTabs(ctPage);
       await expect(tabsAfter).toHaveCount(initialTabCount + 1, { timeout: 1000 });
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
   });
@@ -356,8 +372,8 @@ test.describe("Auto-hide panes", () => {
     });
 
     // Wait for default bottom tabs to appear.
-    await expect(ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab")).toHaveCount(3, { timeout: WAIT_TIMEOUT_MS });
-    const initialBottomCount = 3;
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+    const initialBottomCount = DEFAULT_BOTTOM_TAB_COUNT;
 
     const layoutUpdatedPromisePin1 = ctPage.evaluate(() => {
       return new Promise<void>((resolve) => {
@@ -413,11 +429,10 @@ test.describe("Auto-hide panes", () => {
 
     await expect(async () => {
       // Bottom tabs should have one more than the initial default count.
-      const bottomTabs = ctPage
-        .locator(".auto-hide-bottom-tabs .auto-hide-strip-tab");
+      const bottomTabs = bottomStripTabs(ctPage);
       await expect(bottomTabs).toHaveCount(initialBottomCount + 1, { timeout: 1000 });
       // The pinned panel should appear among bottom tabs.
-      const pinnedBottomTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", { hasText: bottomTitle });
+      const pinnedBottomTab = bottomStripTab(ctPage, bottomTitle);
       await expect(pinnedBottomTab).toHaveCount(1, { timeout: 1000 });
 
       // Left strip should have exactly one tab.

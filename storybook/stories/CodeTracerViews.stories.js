@@ -13,11 +13,11 @@ export const MenuShell = story("view", "menu-shell", "populated", "Menu Shell");
 export const StatusShell = story("view", "status-shell", "populated", "Status Shell");
 export const SessionTabs = story("view", "session-tabs", "populated", "Session Tabs");
 export const DebugShell = story("view", "debug-shell", "populated", "Debug Shell");
-export const AutoHideBottomTabs = story(
+export const AutoHideBottomStrip = story(
   "view",
-  "auto-hide-bottom-tabs",
+  "auto-hide-bottom-strip",
   "populated",
-  "Auto Hide Bottom Tabs",
+  "Auto Hide Bottom Strip",
 );
 export const AutoHideCollapsedIcons = story(
   "view",

@@ -28,6 +28,7 @@ import {
   ensureDefaultLayout,
   restoreUserLayout,
 } from "../../lib/layout-reset";
+import { bottomStripTab } from "../../page-objects/auto-hide-strip";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -86,19 +87,21 @@ const BUILD_UNHAPPY_OUTPUT: Array<[string, boolean]> = [
 
 /**
  * Click an auto-hide bottom tab by its label text (e.g. "BUILD").
- * These tabs are .auto-hide-strip-tab elements inside .auto-hide-bottom-tabs
- * rendered inside #status-base.
+ *
+ * The tabs are `.auto-hide-strip-tab` elements rendered as direct children
+ * of `#auto-hide-bottom-strip` inside `#status-base` — see
+ * `page-objects/auto-hide-strip.ts` for why this selector moved.
  */
 async function clickBottomAutoHideTab(
   page: import("@playwright/test").Page,
   label: string,
 ): Promise<void> {
-  const tab = page.locator(
-    "#status-base .auto-hide-bottom-tabs .auto-hide-strip-tab",
-    { hasText: label },
-  );
-  // The bottom auto-hide tabs may not exist if the panel is in GL instead.
-  // In that case, fall back to any .auto-hide-strip-tab with the label.
+  const tab = bottomStripTab(page, label);
+  // A panel is only in the bottom strip while it is pinned to the bottom
+  // edge; when it lives on a side strip instead, fall back to any strip tab
+  // carrying the label.  Until the bottom selector was corrected this
+  // fallback was not a fallback at all — the bottom locator matched nothing
+  // on every call, so every click in this file went through it.
   const fallback = page.locator(".auto-hide-strip-tab", { hasText: label });
   const target = (await tab.count()) > 0 ? tab : fallback;
   await expect(target.first()).toBeVisible({ timeout: 10_000 });

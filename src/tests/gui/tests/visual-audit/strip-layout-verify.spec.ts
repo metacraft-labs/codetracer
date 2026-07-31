@@ -6,6 +6,12 @@
  */
 import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
+import {
+  BOTTOM_STRIP_IN_FOOTER_SELECTOR,
+  DEFAULT_BOTTOM_TAB_COUNT,
+  bottomStripTabs,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 const DIR = "/tmp/strip-layout-verify";
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -108,22 +114,35 @@ test.describe("Strip layout verification", () => {
     await ctPage.screenshot({ path: `${DIR}/02-left-strip-beside-gl.png` });
 
     // --- Pin another panel to the BOTTOM edge ---
+    //
+    // Take the baseline BEFORE pinning.  The strip already carries the
+    // standalone BUILD / PROBLEMS / SEARCH RESULTS panes that `layout.nim`
+    // registers at boot, so "how many tabs are there afterwards" is only
+    // meaningful against a settled starting point.  The previous
+    // `>= 1` assertion was written when the strip's tabs lived inside the
+    // wrapper element the status-bar redesign removed (named by
+    // `RETIRED_BOTTOM_TABS_SELECTOR` in `page-objects/auto-hide-strip.ts`),
+    // so it was counting the children of an element that no longer exists.
+    await waitForDefaultBottomTabs(ctPage);
+    const bottomTabItems = bottomStripTabs(ctPage);
+    const tabsBeforePin = await bottomTabItems.count();
+
     await pinToEdge(ctPage, "Bottom", 0);
 
-    // Verify bottom tabs are inside #status-base (the footer).
-    const bottomTabs = ctPage.locator("#status-base .auto-hide-bottom-tabs");
+    // Verify the bottom strip is inside #status-base (the footer), per
+    // Auto-Hide-Panes.md §3.1.
+    const bottomTabs = ctPage.locator(BOTTOM_STRIP_IN_FOOTER_SELECTOR);
     await expect(bottomTabs).toBeVisible({ timeout: 5_000 });
 
-    // Bottom tabs include the standalone BUILD/PROBLEMS/SEARCH-RESULTS
-    // panes registered by `layout.nim` as auto-hide bottom panes
-    // (they are not in the GL layout) PLUS any panels the test pins
-    // here.  After `pinToEdge("Bottom", 0)` we expect at least one
-    // tab inside `.auto-hide-bottom-tabs`; the exact count depends
-    // on how many standalone panes were registered at boot.
-    const bottomTabItems = bottomTabs.locator(".auto-hide-strip-tab");
-    await expect
-      .poll(async () => bottomTabItems.count(), { timeout: 5_000 })
-      .toBeGreaterThanOrEqual(1);
+    // Pinning one panel to the bottom edge adds exactly one tab to the
+    // strip's standalone panes.
+    await expect(bottomTabItems).toHaveCount(tabsBeforePin + 1, {
+      timeout: 5_000,
+    });
+    expect(
+      tabsBeforePin,
+      "the standalone bottom panes are the strip's baseline",
+    ).toBe(DEFAULT_BOTTOM_TAB_COUNT);
 
     // Verify there is NO separate .auto-hide-strip-bottom element.
     const oldBottomStrip = ctPage.locator(".auto-hide-strip-bottom");

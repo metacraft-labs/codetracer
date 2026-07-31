@@ -38,6 +38,11 @@ import * as path from "node:path";
 import * as childProcess from "node:child_process";
 
 import { test, expect, readyOnEntryTest } from "../../lib/fixtures";
+import {
+  BOTTOM_STRIP_IN_FOOTER_SELECTOR,
+  RETIRED_BOTTOM_TABS_SELECTOR,
+  bottomStripTabs,
+} from "../../page-objects/auto-hide-strip";
 
 const repoRoot = path.resolve(__dirname, "../../../../..");
 
@@ -126,23 +131,30 @@ test.describe("status bar footer contract (Auto-Hide-Panes §3.1 / §10.3)", () 
       ctPage.locator("#status-base #file-info-status #stable-status"),
     ).toContainText("stable:");
 
-    // The bottom tab strip shares the bar and carries the standalone
-    // BUILD / PROBLEMS / SEARCH RESULTS panes registered by `layout.nim`.
-    const strip = ctPage.locator("#status-base #auto-hide-bottom-strip");
+    // The bottom tab strip shares the bar and carries the standalone panes
+    // `layout.nim` registers at boot (see `DEFAULT_BOTTOM_TAB_TITLES` in
+    // `page-objects/auto-hide-strip.ts` — there are four, not three).
+    const strip = ctPage.locator(BOTTOM_STRIP_IN_FOOTER_SELECTOR);
     await expect(strip).toBeVisible();
     await expect
-      .poll(async () => strip.locator(".auto-hide-strip-tab").count())
+      .poll(async () => bottomStripTabs(ctPage).count())
       .toBeGreaterThan(0);
     // Tabs are direct children of `#auto-hide-bottom-strip`; the pre-redesign
-    // `.auto-hide-bottom-tabs` wrapper no longer exists anywhere in the app.
-    await expect(ctPage.locator(".auto-hide-bottom-tabs")).toHaveCount(0);
+    // wrapper no longer exists anywhere in the app.  Named through the shared
+    // constant so this negative control is the *only* place in the suite that
+    // spells the retired class, and the guard in
+    // `bottom-strip-selector-guard.spec.ts` can enforce that.
+    await expect(
+      ctPage.locator(RETIRED_BOTTOM_TABS_SELECTOR),
+    ).toHaveCount(0);
 
     // -- §3.1 ordering: tab strip left of the status readout, no overlap --
     // Read all three boxes inside one `evaluate` rather than with three
-    // `boundingBox()` round-trips: `requestStatusRender` rebuilds the whole
-    // `#status` subtree on every redraw, so separate reads can land either
-    // side of a teardown and come back null (see the readiness-race
-    // milestone).  One synchronous read cannot straddle a rebuild.
+    // `boundingBox()` round-trips.  `requestStatusRender` used to rebuild the
+    // whole `#status` subtree on every redraw, so separate reads could land
+    // either side of a teardown and come back null; it now patches in place
+    // and only rebuilds on a structural change, but a rebuild is still
+    // possible mid-test and one synchronous read cannot straddle one.
     const layout = await ctPage.evaluate(() => {
       const rect = (selector: string) => {
         const el = document.querySelector(selector);

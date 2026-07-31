@@ -10,6 +10,10 @@ import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  BOTTOM_STRIP_TAB_SELECTOR,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 test.describe("Build Header Controls", () => {
   test.setTimeout(120_000);
@@ -25,10 +29,10 @@ test.describe("Build Header Controls", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the BUILD auto-hide tab to open the overlay.
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await buildTab.click();
@@ -63,10 +67,10 @@ test.describe("Build Header Controls", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the BUILD auto-hide tab to open the overlay.
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await buildTab.click();

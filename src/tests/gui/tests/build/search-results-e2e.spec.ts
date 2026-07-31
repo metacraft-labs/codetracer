@@ -10,6 +10,10 @@ import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  BOTTOM_STRIP_TAB_SELECTOR,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 test.describe("Search Results Panel", () => {
   test.setTimeout(120_000);
@@ -24,10 +28,10 @@ test.describe("Search Results Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the SEARCH RESULTS auto-hide tab to open the overlay.
-    const searchTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const searchTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "SEARCH RESULTS",
     });
     await searchTab.click();
@@ -69,10 +73,10 @@ test.describe("Search Results Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the SEARCH RESULTS auto-hide tab to open the overlay.
-    const searchTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const searchTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "SEARCH RESULTS",
     });
     await searchTab.click();

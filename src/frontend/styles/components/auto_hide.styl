@@ -550,17 +550,11 @@
     opacity: 1
     background-color: transparent  // override .auto-hide-strip-tab-btn:hover
 
-// Bottom tabs in the status bar use ct-button-sm-secondary.
-// Override only the layout properties that differ from button defaults.
-.auto-hide-bottom-tabs .ct-button-sm-secondary
-  flex: 0 1 auto !important
-  min-width: 0
-  max-width: 14em
-  align-self: center
-  font-size: 0.6em
-  white-space: nowrap
-  overflow: hidden
-  text-overflow: ellipsis
+// (The `.auto-hide-bottom-tabs .ct-button-sm-secondary` overrides that used
+// to live here were removed with the renderer that emitted them.  The status
+// bar's bottom tabs are `#auto-hide-bottom-strip .auto-hide-strip-tab`
+// elements — styled above — since commit b27da3947 redesigned the bar; the
+// wrapper class and its `ct-button-sm-secondary` tabs had no live producer.)
 
 // ---------------------------------------------------------------------------
 // Backdrop — invisible click-to-dismiss layer behind the slide-in panel.

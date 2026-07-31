@@ -546,7 +546,7 @@ async function main() {
             ".debug-button-svg",
             ".session-tab-bar",
             ".session-tab",
-            ".auto-hide-bottom-tabs",
+            "#auto-hide-bottom-strip",
             ".auto-hide-strip-tab",
             ".auto-hide-collapsed-icon",
             ".auto-hide-overlay-tab",

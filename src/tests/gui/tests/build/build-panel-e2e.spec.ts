@@ -11,6 +11,10 @@ import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  BOTTOM_STRIP_TAB_SELECTOR,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 test.describe("Build panel tabs as auto-hide bottom tabs", () => {
   test.setTimeout(120_000);
@@ -25,19 +29,19 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear (they load after a delay).
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // The BUILD tab should exist among the auto-hide bottom tabs.
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await expect(buildTab).toHaveCount(1);
 
     // Verify the sibling tabs are also present as auto-hide bottom tabs.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
-    const searchTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const searchTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "SEARCH RESULTS",
     });
     await expect(problemsTab).toHaveCount(1);
@@ -49,9 +53,9 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await expect(problemsTab).toHaveCount(1);
@@ -62,9 +66,9 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
-    const searchTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const searchTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "SEARCH RESULTS",
     });
     await expect(searchTab).toHaveCount(1);
@@ -76,10 +80,10 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the BUILD auto-hide tab to open the overlay.
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "BUILD",
     });
     await buildTab.click();
@@ -113,10 +117,10 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // Click the PROBLEMS auto-hide tab to open the overlay.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await problemsTab.click();
