@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   windows-bootstrap-smoke:
-    runs-on: windows-latest
+    runs-on: eph-win-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -220,7 +220,7 @@ jobs:
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org §M13.
   origin-dap-windows:
-    runs-on: windows-latest
+    runs-on: eph-win-x64
     name: origin-DAP (per-PR subset, Windows)
     steps:
       - name: Checkout
@@ -248,7 +248,7 @@ jobs:
   # Gated on schedule / workflow_dispatch events because TTD runs are slow.
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
+    runs-on: eph-win-x64
     name: origin-DAP (nightly full matrix, Windows)
     steps:
       - name: Checkout
@@ -273,7 +273,7 @@ jobs:
         run: just test-origin-dap
 
   windows-named-pipe-tests:
-    runs-on: windows-latest
+    runs-on: eph-win-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -287,7 +287,7 @@ jobs:
         run: cargo test --bin simple-tui windows_named_pipe -- --nocapture
 
   windows-rust-components:
-    runs-on: windows-latest
+    runs-on: eph-win-x64
     steps:
       - name: Generate CI token
         id: app-token
@@ -534,7 +534,7 @@ jobs:
   # Installs all dependencies via env.ps1, builds ct-mcr from the
   # codetracer-native-recorder sibling, then runs the Rust DAP integration tests.
   windows-headless-test:
-    runs-on: windows-latest
+    runs-on: eph-win-x64
     name: test (headless DAP, Windows)
     needs:
       - windows-rust-components
@@ -1069,7 +1069,7 @@ jobs:
       matrix:
         include:
           - name: linux-amd64
-            runner: ubuntu-latest
+            runner: eph-linux-x64
             target_os: linux
             arch: amd64
             plat_name: manylinux_2_17_x86_64
@@ -1080,12 +1080,12 @@ jobs:
           #   plat_name: manylinux_2_17_aarch64
 
           - name: macos-amd64
-            runner: macos-15-intel
+            runner: eph-macos-arm64
             target_os: macos
             arch: amd64
             plat_name: macosx_10_9_x86_64
           - name: macos-arm64
-            runner: macos-14
+            runner: eph-macos-arm64
             target_os: macos
             arch: arm64
             plat_name: macosx_11_0_arm64
@@ -1358,7 +1358,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
 
   dmg-build:
-    runs-on: macos-latest
+    runs-on: eph-macos-arm64
     needs:
       - lint-bash
       - lint-nim
@@ -1403,7 +1403,7 @@ jobs:
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
 
   dmg-lib-check:
-    runs-on: macos-latest
+    runs-on: eph-macos-arm64
     needs:
       - dmg-build
     steps:
@@ -1435,7 +1435,7 @@ jobs:
           ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
 
   appimage-lib-check:
-    runs-on: ubuntu-latest
+    runs-on: eph-linux-x64
     needs:
       - appimage-build
     steps:
@@ -1470,7 +1470,7 @@ jobs:
   # don't need FUSE in the runner.  See
   # scripts/test-appimage-cross-distro.sh.
   appimage-cross-distro:
-    runs-on: ubuntu-latest
+    runs-on: eph-linux-x64
     needs:
       - appimage-build
     strategy:
@@ -1511,7 +1511,7 @@ jobs:
           - platform: nixos
             runner: [self-hosted, nixos]
           - platform: macos
-            runner: macos-latest
+            runner: eph-macos-arm64
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -1611,7 +1611,7 @@ jobs:
           - platform: nixos
             runner: [self-hosted, nixos]
           - platform: macos
-            runner: macos-latest
+            runner: eph-macos-arm64
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2216,7 +2216,7 @@ jobs:
       - test-ui-tests
       - create-release
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
+    runs-on: eph-linux-x64
     steps:
       - name: Download built distributions
         uses: actions/download-artifact@v6
