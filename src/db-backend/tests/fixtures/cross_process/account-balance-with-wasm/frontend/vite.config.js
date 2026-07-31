@@ -39,6 +39,24 @@ const wasmInstrumenter =
 // of a fixture that lives next to the code it tests.
 const backendOrigin = `http://127.0.0.1:${process.env.DEMO_BACKEND_PORT || 8080}`;
 
+// Forward `POST /balance` to the Node backend that `regenerate.sh` — or a
+// developer following README.md — starts under the recorder. The port is
+// configurable because the default is a popular one, and a collision with
+// an unrelated service on the developer's machine would otherwise fail
+// the recording in a confusing way.
+//
+// The key is an anchored regular expression rather than the plain prefix
+// `"/balance"`, because Vite matches a plain proxy key by **prefix**. A
+// prefix key also forwards `/balance_calc.wasm` and
+// `/balance_calc.wasm.manifest.json` — the two files `bootstrap.js` loads
+// by name — to a server that answers anything but `POST /balance` with a
+// 404, so the page loads, fails to instantiate the module, and sits on
+// `pending` for ever. Only `vite dev` hits this: the built bundle renames
+// the module to `/assets/balance_calc-<hash>.wasm` and inlines the
+// manifest, so `vite preview` (what `regenerate.sh` drives) never asks
+// for a path beginning with `/balance`.
+const backendProxy = { "^/balance$": backendOrigin };
+
 const { codetracerVitePlugin } = await import(
   url.pathToFileURL(path.join(jsRecorder, "packages/vite-plugin/dist/index.js"))
     .href
@@ -81,21 +99,15 @@ export default defineConfig({
     }),
   ],
   server: {
+    // `--host 127.0.0.1` on the command line is still worth passing: by
+    // default Vite binds `localhost`, which on a dual-stack machine
+    // resolves to `[::1]` only, so `http://127.0.0.1:5173` is refused.
     port: Number(process.env.DEMO_DEV_PORT || 5173),
-    proxy: {
-      // Forward the POST /balance to the Node backend that
-      // regenerate.sh starts under the recorder. The port is
-      // configurable because the default is a popular one and a
-      // collision with an unrelated service on the developer's machine
-      // would otherwise fail the recording in a confusing way.
-      "/balance": backendOrigin,
-    },
+    proxy: backendProxy,
   },
   preview: {
     port: Number(process.env.DEMO_PREVIEW_PORT || 4173),
-    proxy: {
-      "/balance": backendOrigin,
-    },
+    proxy: backendProxy,
   },
   build: {
     target: "es2022",

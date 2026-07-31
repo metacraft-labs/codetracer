@@ -116,6 +116,25 @@ echo "[regenerate] using ct-instrument: $CT_INSTRUMENT_BIN"
 echo "[regenerate] using record-web:    $RECORD_WEB_BIN"
 echo
 
+# A leftover process from an interrupted run would make the backend fail
+# to bind and silently record nothing useful, so refuse to start rather
+# than produce a confusing trace.
+#
+# Checked HERE, before the clean slate below, and not later beside the
+# other runtime setup: everything from this point on is destructive, and
+# a port collision is the single most likely way for a first run to
+# fail. Deleting the committed recordings and *then* discovering the
+# port is taken would leave the checkout worse than it was found — the
+# tests would start failing on a fixture the operator never meant to
+# touch, for a reason with nothing to do with the recordings.
+if (exec 3<>"/dev/tcp/127.0.0.1/$BACKEND_PORT") 2>/dev/null; then
+	exec 3<&- 3>&-
+	echo "[regenerate] 127.0.0.1:$BACKEND_PORT is already in use." >&2
+	echo "[regenerate] Stop the process holding it (or set DEMO_BACKEND_PORT) and re-run." >&2
+	echo "[regenerate] Nothing was deleted; the committed recordings are untouched." >&2
+	exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Clean slate. Partial recordings from an interrupted run would be worse
 # than none, since the tests gate on the directories existing.
@@ -138,16 +157,6 @@ cleanup() {
 	done
 }
 trap cleanup EXIT
-
-# A leftover process from an interrupted run would make the backend fail
-# to bind and silently record nothing useful, so refuse to start rather
-# than produce a confusing trace.
-if (exec 3<>"/dev/tcp/127.0.0.1/$BACKEND_PORT") 2>/dev/null; then
-	exec 3<&- 3>&-
-	echo "[regenerate] 127.0.0.1:$BACKEND_PORT is already in use." >&2
-	echo "[regenerate] Stop the process holding it (or set DEMO_BACKEND_PORT) and re-run." >&2
-	exit 1
-fi
 
 # Wait for a TCP listener without opening a connection the server will
 # see as a broken client. `record-web` speaks WebSocket, and a bare
