@@ -154,13 +154,56 @@ echo "[regenerate] using record-web:    $RECORD_WEB_BIN"
 echo
 
 cleanup_pids=()
+
+# Drop an already-reaped pid, so the exit trap cannot later signal a
+# *recycled* process group that happens to have been given the same number.
+forget_pid() {
+	local target="$1" pid
+	local kept=()
+	for pid in "${cleanup_pids[@]:-}"; do
+		[ -n "$pid" ] || continue
+		[ "$pid" = "$target" ] || kept+=("$pid")
+	done
+	cleanup_pids=("${kept[@]:-}")
+}
+
 cleanup() {
 	for pid in "${cleanup_pids[@]:-}"; do
 		[ -n "$pid" ] || continue
 		kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
 	done
+	cleanup_pids=()
+}
+
+# Everything started below is `setsid`-detached, so it sits in its own
+# session where no terminal SIGHUP and no `kill -- -<our pgid>` can reach
+# it. This trap is therefore the only reaper in the system, and it is worth
+# being explicit about when it runs.
+#
+# Naming INT/TERM/HUP is deliberate but is *not* what fixes the orphaned
+# daemons, and it would be misleading to imply otherwise: bash already runs
+# an `EXIT` trap when the shell dies on an untrapped SIGTERM, including
+# while it is blocked in a foreground command. This was measured, not
+# assumed. What the explicit traps buy is that the reaping no longer
+# depends on that subtlety, and that a signalled run exits 128+signo
+# instead of whatever the default disposition produces.
+#
+# The real gap is SIGKILL — a CI step timeout, `timeout(1)` escalation, an
+# OOM kill — where no trap of any kind can run. That is why `record-web`
+# also stands itself down after an idle period (`--idle-timeout`, default
+# 10 minutes), which is the only defence that survives this script being
+# killed outright.
+on_signal() {
+	trap - EXIT
+	cleanup
+	# Conventional 128+signo, so a caller can tell a signalled run from a
+	# failed one.
+	exit "$1"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 wait_for_port() {
 	local port="$1" label="$2"
@@ -323,8 +366,10 @@ record_module() {
 
 	kill -INT "$daemon" >/dev/null 2>&1 || true
 	wait "$daemon" 2>/dev/null || true
+	forget_pid "$daemon"
 	kill "$serve" >/dev/null 2>&1 || true
 	wait "$serve" 2>/dev/null || true
+	forget_pid "$serve"
 	wait_for_port_free "$RECORD_WEB_PORT" || exit 1
 	wait_for_port_free "$PREVIEW_PORT" || exit 1
 

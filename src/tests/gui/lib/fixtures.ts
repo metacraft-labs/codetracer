@@ -1977,9 +1977,8 @@ export function wait(ms: number): Promise<void> {
 export async function readyOnEntryTest(p: Page): Promise<void> {
   // Two attempts with a FRESH locator each, not one long wait.
   //
-  // This is not leniency and it does not buy the app more time: the state
-  // asserted (`visible`), the selector, and the total budget are unchanged
-  // from the single 15s wait this replaces.  What it defeats is a harness
+  // This is not leniency: the state asserted (`visible`) and the selector are
+  // unchanged from the single 15s wait this replaces.  What it defeats is a harness
   // failure mode that was measured, not guessed.  When this wait times out,
   // the diagnosis below repeatedly reports `.location-path` present, ~415x24,
   // `display:block`, `visibility:visible`, `isConnected:true`, in the page
@@ -1989,10 +1988,16 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
   // simply stops making progress; nothing about the app is wrong, and no
   // amount of extra time on that locator helps, because it is not looking.
   //
-  // An app that genuinely never reaches an entry location still fails, and
-  // fails no later than it did before.  See Value-Origin-Tracking milestone
-  // M46.
-  const attemptBudgetMs = 8_000;
+  // An app that genuinely never reaches an entry location still fails.
+  //
+  // The per-attempt budget stays at the 15s the single wait used, rather than
+  // halving it to keep the total the same.  Splitting 15s into two 8s attempts
+  // was measurably worse: it defeats a stalled poll but no longer tolerates a
+  // *slow* launch, and on a loaded host (load average >100 observed here) the
+  // launch is exactly what runs long.  Two attempts of the original length
+  // defeats both, and costs extra wall-clock only on a run that was going to
+  // fail anyway.  See Value-Origin-Tracking milestone M46.
+  const attemptBudgetMs = 15_000;
   let lastFailure: Error | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {

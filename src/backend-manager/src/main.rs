@@ -177,7 +177,88 @@ enum Commands {
         /// default, because it adds a file to the recording directory.
         #[arg(long, value_name = "NAME")]
         stream_done_marker: Option<String>,
+        /// Exit by itself once no browser has been connected for this
+        /// long, so the daemon cannot outlive whatever started it.
+        ///
+        /// Accepts `500ms`, `90s`, `10m`, `2h`, or a bare number of
+        /// seconds.  `0`, `never` or `off` disables the watchdog — only
+        /// appropriate for a host a human is supervising, since every
+        /// caller of this subcommand detaches it with `setsid(1)` and can
+        /// then be killed in ways that leave nothing able to reap it.
+        ///
+        /// Overridable per-invocation, and by
+        /// `CODETRACER_RECORD_WEB_IDLE_TIMEOUT` for callers that cannot
+        /// edit the command line.  The clock is reset by every connection
+        /// and never runs while one is open, so it cannot interrupt a
+        /// recording however long it takes.
+        #[arg(long, value_name = "DURATION")]
+        idle_timeout: Option<String>,
     },
+}
+
+/// Environment fallback for `record-web --idle-timeout`.
+const RECORD_WEB_IDLE_TIMEOUT_ENV: &str = "CODETRACER_RECORD_WEB_IDLE_TIMEOUT";
+
+/// Parse a `record-web` idle-timeout specification.
+///
+/// Deliberately the same vocabulary `ct host --idle-timeout` already
+/// accepts (see `src/ct/trace/host.nim::parseIdleTimeoutMs`), so the two
+/// idle timeouts in this product do not disagree about what `10m` means:
+/// an optional `ms`/`s`/`m`/`h` suffix, a bare number meaning seconds, and
+/// `0`/`never`/`off` meaning "no watchdog".
+///
+/// Returns `Ok(None)` for the disabling forms and `Err` for anything it
+/// cannot understand — a typo must not silently disable the watchdog.
+fn parse_idle_timeout(spec: &str) -> Result<Option<std::time::Duration>, String> {
+    let raw = spec.trim();
+    if raw.is_empty() {
+        return Err("idle timeout is empty".to_string());
+    }
+    let lowered = raw.to_ascii_lowercase();
+    if lowered == "never" || lowered == "off" {
+        return Ok(None);
+    }
+
+    let (digits, multiplier_ms) = if let Some(rest) = lowered.strip_suffix("ms") {
+        (rest, 1u64)
+    } else if let Some(rest) = lowered.strip_suffix('s') {
+        (rest, 1_000)
+    } else if let Some(rest) = lowered.strip_suffix('m') {
+        (rest, 60_000)
+    } else if let Some(rest) = lowered.strip_suffix('h') {
+        (rest, 3_600_000)
+    } else {
+        (lowered.as_str(), 1_000)
+    };
+
+    let digits = digits.trim();
+    let value: u64 = digits
+        .parse()
+        .map_err(|_| format!("invalid idle timeout `{spec}`: expected e.g. `90s`, `10m`, `off`"))?;
+    let millis = value
+        .checked_mul(multiplier_ms)
+        .ok_or_else(|| format!("idle timeout `{spec}` overflows"))?;
+    if millis == 0 {
+        // `0` in any unit is the documented "disabled" spelling.
+        return Ok(None);
+    }
+    Ok(Some(std::time::Duration::from_millis(millis)))
+}
+
+/// Resolve the effective `record-web` idle timeout: explicit flag first,
+/// then the environment, then [`browser_stream_host::DEFAULT_IDLE_TIMEOUT`].
+fn resolve_record_web_idle_timeout(
+    flag: Option<&String>,
+) -> Result<Option<std::time::Duration>, String> {
+    if let Some(spec) = flag {
+        return parse_idle_timeout(spec);
+    }
+    match std::env::var(RECORD_WEB_IDLE_TIMEOUT_ENV) {
+        Ok(spec) => {
+            parse_idle_timeout(&spec).map_err(|e| format!("{RECORD_WEB_IDLE_TIMEOUT_ENV}: {e}"))
+        }
+        Err(_) => Ok(Some(browser_stream_host::DEFAULT_IDLE_TIMEOUT)),
+    }
 }
 
 /// Subcommands under `ct trace`.
@@ -3047,6 +3128,7 @@ async fn run_record_web(
     out_dir: &Path,
     workdir: Option<&Path>,
     stream_consumer: browser_stream_host::StreamConsumerConfig,
+    idle_timeout: Option<std::time::Duration>,
 ) -> Result<(), Box<dyn Error>> {
     let bind_addr: std::net::SocketAddr = bind
         .parse()
@@ -3062,9 +3144,10 @@ async fn run_record_web(
         out_dir: out_dir.clone(),
         workdir,
         stream_consumer: stream_consumer.clone(),
+        idle_timeout,
     };
     let host = browser_stream_host::BrowserStreamHost::new(config);
-    let running = host.bind().await?;
+    let mut running = host.bind().await?;
     eprintln!(
         "codetracer browser-stream host listening on ws://{}{}",
         running.local_addr,
@@ -3083,12 +3166,59 @@ async fn run_record_web(
     if let Some(marker) = &stream_consumer.done_marker {
         eprintln!("marking each finished recording with: <program>.ct/{marker}");
     }
-    // Wait for Ctrl+C, then shut down cleanly so in-flight recordings
-    // get a chance to flush.
-    signal::ctrl_c().await?;
-    eprintln!("\ncodetracer browser-stream host: received Ctrl+C, shutting down...");
+    match idle_timeout {
+        Some(timeout) => eprintln!(
+            "exiting automatically after {:.0}s with no browser connected",
+            timeout.as_secs_f64(),
+        ),
+        None => eprintln!("idle timeout disabled: this host runs until it is signalled"),
+    }
+
+    // Three ways to stop, all of which must flush in-flight recordings:
+    //
+    //   * SIGINT  — the fixture scripts' graceful `kill -INT` after the
+    //     page has been driven, and an operator's Ctrl+C.
+    //   * SIGTERM — what a `kill`, a process-group teardown or a
+    //     supervisor sends.  This was documented as handled but was not:
+    //     the default disposition killed the host outright, losing
+    //     whatever had not yet been written.
+    //   * the idle watchdog — nobody has been connected long enough that
+    //     the only remaining explanation is that our launcher died in a
+    //     way that left nothing to reap us.
+    //
+    // SIGKILL is deliberately absent: it cannot be handled, which is
+    // precisely why the watchdog has to exist.
+    let stop_reason = wait_for_stop(&mut running).await?;
+    eprintln!("\ncodetracer browser-stream host: {stop_reason}, shutting down...");
     running.stop().await?;
     Ok(())
+}
+
+/// Block until something asks the browser-stream host to stop, and say
+/// which thing it was.  Split out of [`run_record_web`] so the two signal
+/// implementations do not duplicate the shutdown sequence.
+#[cfg(unix)]
+async fn wait_for_stop(
+    running: &mut browser_stream_host::RunningHost,
+) -> Result<&'static str, Box<dyn Error>> {
+    use tokio::signal::unix::{SignalKind, signal as unix_signal};
+
+    let mut terminate = unix_signal(SignalKind::terminate())?;
+    Ok(tokio::select! {
+        _ = signal::ctrl_c() => "received Ctrl+C",
+        _ = terminate.recv() => "received SIGTERM",
+        _ = running.idle_shutdown() => "idle timeout expired",
+    })
+}
+
+#[cfg(not(unix))]
+async fn wait_for_stop(
+    running: &mut browser_stream_host::RunningHost,
+) -> Result<&'static str, Box<dyn Error>> {
+    Ok(tokio::select! {
+        _ = signal::ctrl_c() => "received Ctrl+C",
+        _ = running.idle_shutdown() => "idle timeout expired",
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -3255,6 +3385,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         workdir,
         snapshot_consumer,
         stream_done_marker,
+        idle_timeout,
     }) = &cli.command
     {
         flexi_logger::init();
@@ -3262,7 +3393,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
             command: snapshot_consumer.clone(),
             done_marker: stream_done_marker.clone(),
         };
-        return run_record_web(bind, out_dir, workdir.as_deref(), stream_consumer).await;
+        // A bad spec is fatal rather than a fallback to the default: a
+        // caller who asked for a specific watchdog and got a different one
+        // would have no way to tell.
+        let idle_timeout = resolve_record_web_idle_timeout(idle_timeout.as_ref())?;
+        return run_record_web(
+            bind,
+            out_dir,
+            workdir.as_deref(),
+            stream_consumer,
+            idle_timeout,
+        )
+        .await;
     }
 
     // ------------------------------------------------------------------
@@ -3369,4 +3511,74 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+/// Tests for the `record-web --idle-timeout` specification parser.
+///
+/// A typo here is dangerous in a specific way: silently falling back to
+/// "no watchdog" would restore the orphaned-daemon leak while leaving the
+/// flag present and apparently honoured.  The parser therefore rejects
+/// what it cannot understand, and these cases pin that.
+#[cfg(test)]
+mod idle_timeout_parsing_tests {
+    use super::parse_idle_timeout;
+    use std::time::Duration;
+
+    #[test]
+    fn units_parse_the_way_ct_host_parses_them() {
+        // Same vocabulary as `src/ct/trace/host.nim::parseIdleTimeoutMs`,
+        // so the product's two idle timeouts agree about what `10m` means.
+        assert_eq!(
+            parse_idle_timeout("500ms"),
+            Ok(Some(Duration::from_millis(500)))
+        );
+        assert_eq!(parse_idle_timeout("90s"), Ok(Some(Duration::from_secs(90))));
+        assert_eq!(
+            parse_idle_timeout("10m"),
+            Ok(Some(Duration::from_secs(600)))
+        );
+        assert_eq!(
+            parse_idle_timeout("2h"),
+            Ok(Some(Duration::from_secs(7200)))
+        );
+    }
+
+    #[test]
+    fn a_bare_number_means_seconds() {
+        assert_eq!(parse_idle_timeout("45"), Ok(Some(Duration::from_secs(45))));
+    }
+
+    #[test]
+    fn the_documented_spellings_disable_the_watchdog() {
+        assert_eq!(parse_idle_timeout("0"), Ok(None));
+        assert_eq!(parse_idle_timeout("0s"), Ok(None));
+        assert_eq!(parse_idle_timeout("never"), Ok(None));
+        assert_eq!(parse_idle_timeout("off"), Ok(None));
+        assert_eq!(parse_idle_timeout("OFF"), Ok(None));
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_tolerated() {
+        assert_eq!(
+            parse_idle_timeout("  30s  "),
+            Ok(Some(Duration::from_secs(30)))
+        );
+    }
+
+    /// The case that matters most: an unparseable spec must be an error,
+    /// never a silent "disabled".
+    #[test]
+    fn a_spec_that_cannot_be_understood_is_an_error_not_a_disabled_watchdog() {
+        for bad in ["", "   ", "abc", "10 minutes", "-5s", "s", "1x", "3.5s"] {
+            assert!(
+                parse_idle_timeout(bad).is_err(),
+                "`{bad}` should be rejected rather than silently disabling the watchdog"
+            );
+        }
+    }
+
+    #[test]
+    fn an_overflowing_spec_is_rejected() {
+        assert!(parse_idle_timeout("99999999999999999999h").is_err());
+    }
 }

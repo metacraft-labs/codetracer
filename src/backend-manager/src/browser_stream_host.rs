@@ -122,7 +122,9 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -194,6 +196,134 @@ pub struct BrowserStreamHostConfig {
     /// Optional §2 streaming-consumer wiring.  Defaults to
     /// [`StreamConsumerConfig::default`], which spawns nothing.
     pub stream_consumer: StreamConsumerConfig,
+    /// Exit by itself once no browser has been connected for this long.
+    /// `None` disables the watchdog and the host runs until signalled.
+    ///
+    /// This is what stops the daemon outliving whatever started it.  See
+    /// [`DEFAULT_IDLE_TIMEOUT`] for why the host has to reap itself rather
+    /// than trusting its launcher to do it.
+    pub idle_timeout: Option<Duration>,
+}
+
+/// How long the host tolerates having no connected browser before it
+/// concludes it has been abandoned and exits.
+///
+/// # Why the host reaps itself
+///
+/// Every caller detaches this process — the fixture regenerators run it
+/// under `setsid(1)` so the recorded page is not in the launcher's process
+/// group.  That is deliberate (the recorded server must not receive the
+/// launcher's signals), but it also means the daemon is unreachable by
+/// every mechanism a supervisor would normally use: it is in its own
+/// session, so no terminal SIGHUP reaches it, and a `kill -- -<pgid>` of
+/// the launcher's group misses it.  The launcher's `trap ... EXIT` is
+/// therefore the only thing in the system that ever reaps it — and an
+/// `EXIT` trap does not run when the launcher is `SIGKILL`ed, which is
+/// exactly how CI step timeouts, `timeout(1)` escalation and OOM kills end
+/// a run.  Measured consequence: 22 orphaned hosts on one developer box,
+/// the oldest 47 hours old and one of them spinning a CPU for 34 of them.
+///
+/// A self-imposed deadline is the only fix that holds, because it is the
+/// only one that survives its launcher dying in a way the launcher cannot
+/// observe.  It is also the only one that is safe under concurrency: the
+/// host reasons *solely about its own accepted connections*, so it can
+/// never take down a peer that another run is legitimately using — unlike
+/// an external sweep over `pgrep`-matched command lines, which cannot tell
+/// a leaked host from a busy one.
+///
+/// # Why ten minutes
+///
+/// The window being bounded is "host started, browser has not connected
+/// yet": the caller still has to start the recorded backend and launch
+/// headless Chromium.  A whole recording run is ~40 s, so ten minutes is
+/// an order of magnitude of headroom for a heavily loaded machine, while
+/// still turning a two-day orphan into a ten-minute one.  The clock is
+/// reset by every connection and every disconnection, so it can never
+/// interrupt work in progress, however long the recording runs.
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Longest gap between two idle checks.  The watchdog wakes at
+/// `min(idle_timeout / 4, IDLE_POLL_MAX)` so a short timeout (tests use
+/// hundreds of milliseconds) is still honoured promptly, while a
+/// production-length one costs a handful of wakeups per minute.
+const IDLE_POLL_MAX: Duration = Duration::from_secs(5);
+
+/// Live-connection count plus the instant the host was last busy, shared
+/// between the accept loop and every spawned connection task.
+///
+/// "Busy" deliberately means *a connection existed*, not *bytes arrived*:
+/// a browser that has connected and is mid-recording may legitimately send
+/// nothing for a long time while the page computes, and the host must not
+/// mistake that for abandonment.  While `live > 0` the host never times
+/// out at all; the timer only runs once the last connection has gone.
+#[derive(Clone)]
+struct IdleState {
+    live: Arc<AtomicUsize>,
+    last_active: Arc<Mutex<Instant>>,
+}
+
+impl IdleState {
+    fn new() -> Self {
+        Self {
+            live: Arc::new(AtomicUsize::new(0)),
+            last_active: Arc::new(Mutex::new(Instant::now())),
+        }
+    }
+
+    /// Reset the abandonment clock.  A poisoned lock is recovered from
+    /// rather than propagated: losing this timestamp must never take down
+    /// a host that is recording.
+    fn touch(&self) {
+        let mut slot = self
+            .last_active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *slot = Instant::now();
+    }
+
+    fn live_connections(&self) -> usize {
+        self.live.load(Ordering::SeqCst)
+    }
+
+    fn idle_for(&self) -> Duration {
+        self.last_active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .elapsed()
+    }
+
+    /// True when nothing is connected and nothing has been for `timeout`.
+    fn abandoned_for(&self, timeout: Duration) -> bool {
+        self.live_connections() == 0 && self.idle_for() >= timeout
+    }
+}
+
+/// RAII counter for one accepted connection.  A guard rather than manual
+/// increment/decrement so the count is still correct when
+/// `handle_connection` returns early through `?`, panics, or is dropped
+/// mid-await at shutdown — any of which would otherwise pin the count
+/// above zero and disable the watchdog permanently.
+struct ConnectionGuard {
+    state: IdleState,
+}
+
+impl ConnectionGuard {
+    fn enter(state: &IdleState) -> Self {
+        state.live.fetch_add(1, Ordering::SeqCst);
+        state.touch();
+        Self {
+            state: state.clone(),
+        }
+    }
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.state.live.fetch_sub(1, Ordering::SeqCst);
+        // Stamp on the way out too, so the timeout is measured from the
+        // end of the last recording rather than from its start.
+        self.state.touch();
+    }
 }
 
 impl BrowserStreamHostConfig {
@@ -209,6 +339,7 @@ impl BrowserStreamHostConfig {
             out_dir,
             workdir,
             stream_consumer: StreamConsumerConfig::default(),
+            idle_timeout: Some(DEFAULT_IDLE_TIMEOUT),
         }
     }
 }
@@ -236,11 +367,13 @@ impl BrowserStreamHost {
         let listener = TcpListener::bind(self.config.bind).await?;
         let local_addr = listener.local_addr()?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let (idle_tx, idle_rx) = oneshot::channel::<()>();
         let config = self.config.clone();
-        let join = tokio::spawn(accept_loop(listener, config, shutdown_rx));
+        let join = tokio::spawn(accept_loop(listener, config, shutdown_rx, idle_tx));
         Ok(RunningHost {
             local_addr,
             shutdown_tx: Some(shutdown_tx),
+            idle_rx: Some(idle_rx),
             join: Some(join),
         })
     }
@@ -252,10 +385,29 @@ impl BrowserStreamHost {
 pub struct RunningHost {
     pub local_addr: SocketAddr,
     shutdown_tx: Option<oneshot::Sender<()>>,
+    idle_rx: Option<oneshot::Receiver<()>>,
     join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl RunningHost {
+    /// Resolves when the accept loop has stopped *itself* because the host
+    /// sat idle for [`BrowserStreamHostConfig::idle_timeout`].
+    ///
+    /// Never resolves when the watchdog is disabled, or when the loop ends
+    /// for any other reason — so a caller can `select!` this against its
+    /// signal handler and treat resolution as "we were abandoned", with no
+    /// risk of a spurious wakeup racing the ordinary shutdown path.
+    pub async fn idle_shutdown(&mut self) {
+        if let Some(rx) = self.idle_rx.take()
+            && rx.await.is_ok()
+        {
+            return;
+        }
+        // Sender dropped without firing (ordinary shutdown), or already
+        // observed: this future must simply never complete.
+        std::future::pending::<()>().await
+    }
+
     /// Send the shutdown signal and await the accept loop's exit.
     pub async fn stop(mut self) -> io::Result<()> {
         if let Some(tx) = self.shutdown_tx.take() {
@@ -286,7 +438,17 @@ async fn accept_loop(
     listener: TcpListener,
     config: BrowserStreamHostConfig,
     mut shutdown_rx: oneshot::Receiver<()>,
+    idle_tx: oneshot::Sender<()>,
 ) {
+    let idle_state = IdleState::new();
+    let idle_timeout = config.idle_timeout;
+    // Poll far more often than the deadline so the check is prompt for the
+    // sub-second timeouts the tests use, and cheap for production ones.
+    let poll_every = idle_timeout
+        .map(|t| (t / 4).clamp(Duration::from_millis(10), IDLE_POLL_MAX))
+        .unwrap_or(IDLE_POLL_MAX);
+    let mut idle_tx = Some(idle_tx);
+
     loop {
         tokio::select! {
             biased;
@@ -294,12 +456,43 @@ async fn accept_loop(
                 log::info!("browser-stream host shutting down");
                 return;
             }
+            // Only armed when a timeout is configured; a disabled watchdog
+            // must not even wake the loop.
+            _ = tokio::time::sleep(poll_every), if idle_timeout.is_some() => {
+                let timeout = match idle_timeout {
+                    Some(t) => t,
+                    None => continue,
+                };
+                if idle_state.abandoned_for(timeout) {
+                    // Say why on stderr as well as in the log: the usual
+                    // reader of this line is someone wondering where their
+                    // recording daemon went, and the fixture scripts do not
+                    // enable the logger.
+                    let secs = timeout.as_secs_f64();
+                    log::info!(
+                        "browser-stream host: no browser connected for {secs:.1}s — exiting"
+                    );
+                    eprintln!(
+                        "codetracer browser-stream host: no browser connected for {secs:.1}s; \
+                         exiting so this daemon does not outlive whatever started it"
+                    );
+                    if let Some(tx) = idle_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    return;
+                }
+            }
             accept = listener.accept() => {
                 match accept {
                     Ok((stream, peer)) => {
                         log::info!("browser-stream host: accepted connection from {peer}");
                         let cfg = config.clone();
+                        // Counted *here*, before the task is spawned, so
+                        // there is no window in which an accepted browser
+                        // is invisible to the watchdog.
+                        let guard = ConnectionGuard::enter(&idle_state);
                         tokio::spawn(async move {
+                            let _guard = guard;
                             if let Err(err) = handle_connection(stream, cfg).await {
                                 log::warn!("browser-stream host: connection from {peer} failed: {err}");
                             }
@@ -309,7 +502,7 @@ async fn accept_loop(
                         log::error!("browser-stream host: accept failed: {err}");
                         // Brief backoff to avoid a tight error loop if the
                         // listener is wedged (e.g. fd exhaustion).
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
                     }
                 }
             }
@@ -1829,7 +2022,11 @@ mod tests_support {
             output.status
         );
         let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-        assert!(path.is_dir(), "materialiser reported a non-directory: {}", path.display());
+        assert!(
+            path.is_dir(),
+            "materialiser reported a non-directory: {}",
+            path.display()
+        );
         *guard = Some(path.clone());
         path
     }
@@ -2406,9 +2603,10 @@ mod tests {
         assert_eq!(of_kind("Function").len(), 2, "one Function record each");
         // And the paths file agrees with the Path records' positions,
         // because a Step's `path_id` indexes it.
-        let paths: Vec<String> =
-            serde_json::from_str(&std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap())
-                .unwrap();
+        let paths: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(paths, vec!["a.js".to_string(), "b.js".to_string()]);
     }
 
@@ -2460,10 +2658,9 @@ mod tests {
 
         // The paths file must list every interned path, in order, and
         // nothing else — the early write must not have left a short list.
-        let recorded: Vec<serde_json::Value> = serde_json::from_str(
-            &std::fs::read_to_string(trace_dir.join("trace.json")).unwrap(),
-        )
-        .unwrap();
+        let recorded: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(trace_dir.join("trace.json")).unwrap())
+                .unwrap();
         let path_records: Vec<String> = recorded
             .iter()
             .filter_map(|r| r.get("Path")?.as_str().map(str::to_string))
@@ -2475,10 +2672,8 @@ mod tests {
         assert_eq!(paths_file, path_records);
         assert_eq!(
             paths_file,
-            serde_json::from_str::<Vec<String>>(
-                &serde_json::to_string(&path_records).unwrap()
-            )
-            .unwrap(),
+            serde_json::from_str::<Vec<String>>(&serde_json::to_string(&path_records).unwrap())
+                .unwrap(),
         );
     }
 
@@ -2572,8 +2767,7 @@ mod tests {
     #[test]
     fn verify_the_stream_done_marker_is_opt_in_and_lands_last() {
         let tmp = TempDir::new().expect("create tempdir");
-        let mut plain =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
+        let mut plain = JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
         plain.session_start("plain", &[]).unwrap();
         let plain_dir = plain.session_end().unwrap();
         assert!(!plain_dir.join(".complete").exists(), "marker is opt-in");
@@ -2712,6 +2906,9 @@ mod tests {
             out_dir: tmp.path().to_path_buf(),
             workdir: tmp.path().to_path_buf(),
             stream_consumer: StreamConsumerConfig::default(),
+            // Not under test here, and a watchdog firing mid-handshake
+            // would make this smoke test flaky for an unrelated reason.
+            idle_timeout: None,
         };
         let host = BrowserStreamHost::new(config);
         let running = host.bind().await.expect("bind");
@@ -2957,7 +3154,10 @@ mod host_state_tests {
         // — the consumer decodes both into the same `InitialState`.
         assert_eq!(initial["initial"]["memories"][0]["name"], "memory");
         assert_eq!(initial["initial"]["memories"][0]["minPages"], 17);
-        assert_eq!(initial["initial"]["memories"][0]["data"][0]["bytesB64"], "BwAAAGQ=");
+        assert_eq!(
+            initial["initial"]["memories"][0]["data"][0]["bytesB64"],
+            "BwAAAGQ="
+        );
         assert_eq!(initial["initial"]["globals"][0]["value"], "25");
         assert_eq!(initial["initial"]["tables"], serde_json::json!([]));
 
@@ -3119,5 +3319,139 @@ mod host_state_tests {
         )
         .unwrap();
         assert_eq!(doc["initial"]["memories"][0]["minPages"], 17);
+    }
+}
+
+/// Idle-watchdog tests.
+///
+/// These pin the property the watchdog exists for: a `record-web` host
+/// must outlive its work but never outlive its usefulness.  Every caller
+/// detaches it with `setsid(1)`, so when the launcher is `SIGKILL`ed there
+/// is nothing left in the system able to reap it — the measured result was
+/// 22 orphans on one machine, the oldest 47 hours old.  The host therefore
+/// has to notice by itself.
+///
+/// No mocking: these bind a real listener on `127.0.0.1:0` and drive it
+/// with a real WebSocket client, because the thing under test is precisely
+/// the interaction between the accept loop and live connections.  Only the
+/// timeout is scaled down, from ten minutes to a few hundred milliseconds.
+#[cfg(test)]
+mod idle_watchdog_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Short enough to keep the suite fast, long enough that a loaded CI
+    /// machine does not trip the "stays alive" assertions spuriously.
+    const TEST_IDLE: Duration = Duration::from_millis(400);
+
+    fn config(tmp: &TempDir, idle_timeout: Option<Duration>) -> BrowserStreamHostConfig {
+        BrowserStreamHostConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            out_dir: tmp.path().to_path_buf(),
+            workdir: tmp.path().to_path_buf(),
+            stream_consumer: StreamConsumerConfig::default(),
+            idle_timeout,
+        }
+    }
+
+    /// The leak, reproduced at the level of the daemon: the launcher dies
+    /// without ever driving a page, and nothing connects.  The host must
+    /// stand itself down.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_host_nobody_ever_connects_to_exits_by_itself() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+
+        tokio::time::timeout(TEST_IDLE * 8, running.idle_shutdown())
+            .await
+            .expect("an abandoned host must exit on its own, not run forever");
+    }
+
+    /// The property that makes the watchdog safe to enable by default: a
+    /// recording in progress is never interrupted, however quiet it is.
+    /// A page that connects and then computes for a long time without
+    /// sending anything must not be mistaken for an abandoned daemon.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connected_browser_keeps_the_host_alive_past_the_deadline() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+        let url = format!("ws://{}/ct-stream", running.local_addr);
+
+        let (_ws, _resp) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect");
+
+        // Hold the socket open across several deadlines while sending
+        // nothing at all.
+        let verdict = tokio::time::timeout(TEST_IDLE * 4, running.idle_shutdown()).await;
+        assert!(
+            verdict.is_err(),
+            "the host timed out while a browser was still connected — a long, \
+             quiet recording would be killed mid-flight"
+        );
+    }
+
+    /// Once the last browser has gone the clock starts again, so a host
+    /// that finished its work and was then never signalled still exits.
+    /// This is the shape a `SIGKILL`ed launcher leaves behind *after* a
+    /// successful recording.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_host_exits_after_the_last_browser_disconnects() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+        let url = format!("ws://{}/ct-stream", running.local_addr);
+
+        {
+            let (ws, _resp) = tokio_tungstenite::connect_async(&url)
+                .await
+                .expect("connect");
+            drop(ws);
+        }
+
+        tokio::time::timeout(TEST_IDLE * 8, running.idle_shutdown())
+            .await
+            .expect("the host must exit once its last browser has disconnected");
+    }
+
+    /// `--idle-timeout off` genuinely disables the watchdog, so a human
+    /// supervising a host by hand is not stood down underneath them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_disabled_watchdog_never_fires() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, None));
+        let mut running = host.bind().await.expect("bind");
+
+        let verdict = tokio::time::timeout(TEST_IDLE * 4, running.idle_shutdown()).await;
+        assert!(
+            verdict.is_err(),
+            "a host configured with no idle timeout must never stand itself down"
+        );
+    }
+
+    /// The counter has to survive a connection ending abnormally, or one
+    /// failed handshake would pin it above zero and silently disable the
+    /// watchdog for the life of the process — reintroducing the leak in a
+    /// form that looks like the fix is present.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connection_that_never_completes_the_handshake_still_releases_its_slot() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+
+        // A raw TCP connect that never speaks WebSocket: `accept_async`
+        // fails, so `handle_connection` returns `Err`.
+        {
+            let stream = tokio::net::TcpStream::connect(running.local_addr)
+                .await
+                .expect("tcp connect");
+            drop(stream);
+        }
+
+        tokio::time::timeout(TEST_IDLE * 8, running.idle_shutdown())
+            .await
+            .expect("a failed handshake must not leak a connection slot");
     }
 }

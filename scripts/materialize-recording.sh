@@ -433,8 +433,22 @@ export DEMO_BACKEND_PORT DEMO_PREVIEW_PORT DEMO_RECORD_WEB_PORT \
 
 echo "[materialize] recording '$FIXTURE' from the current tree (key ${KEY:0:12})" >&2
 
+# `9>&-` closes the lock descriptor in the child, and it is load-bearing.
+#
+# `flock(2)` holds the lock on the *open file description*, which is
+# released only when every descriptor referring to it is closed. Bash sets
+# `FD_CLOEXEC` only on descriptors it allocates internally (>= 10), so an
+# explicit `exec 9>` fd is inherited across both fork and exec — down
+# through `regenerate.sh`, through `setsid`, and into the `record-web`
+# daemon itself. A daemon that outlived its run would then hold this
+# fixture's lock for as long as it lived, and every later
+# `materialize-recording.sh <fixture>` — from `cargo test`, from a
+# Playwright worker, from `just demo-cross-tracer` — would block for the
+# full 1800 s and then fail blaming "another process", with no way to see
+# that the culprit was an orphan. Closing it here keeps the lock's lifetime
+# tied to this script, which is the only process that should ever hold it.
 set +e
-CT_RECORDING_OUT_DIR="$STAGING" "$REGENERATE" >&2
+CT_RECORDING_OUT_DIR="$STAGING" "$REGENERATE" >&2 9>&-
 regenerate_status=$?
 set -e
 
