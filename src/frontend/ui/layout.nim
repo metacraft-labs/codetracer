@@ -62,22 +62,24 @@ proc configureFind =
 var document {.importc.}: js
 
 proc enforceMinStackWidth*(layout: GoldenLayout) =
-  ## Walk every stack in the layout tree and distribute the desired constant
-  ## minimum width evenly across its component items so GL's per-component sum
-  ## always equals MIN_STACK_PX regardless of how many tabs are open.
+  ## Walk every stack in the layout tree and set each component item's
+  ## minimum size to MIN_STACK_PX.
+  ##
+  ## GL uses the ACTIVE component's minSize as the stack's effective minimum,
+  ## not the sum — so the minimum must be set on every component individually
+  ## (not divided by n) to ensure the stack stays at least MIN_STACK_PX wide
+  ## regardless of which tab is currently active.
   ## SizeUnitEnum.Pixel is the string "px" in GL 2.x.
   {.emit: """
-    const MIN_STACK_PX = 150;
+    const MIN_STACK_PX = 200;
     const MIN_STACK_PX_H = 50;
     function visit(item) {
       if (!item || !item.contentItems) return;
       if (item.isStack) {
         const n = item.contentItems.length;
         if (n > 0) {
-          const perW = Math.ceil(MIN_STACK_PX / n);
-          const perH = Math.ceil(MIN_STACK_PX_H / n);
           for (const ci of item.contentItems) {
-            ci.minSize     = `layout`.isColumn ? perH : perW;
+            ci.minSize     = `layout`.isColumn ? MIN_STACK_PX_H : MIN_STACK_PX;
             ci.minSizeUnit = "px";
           }
         }
