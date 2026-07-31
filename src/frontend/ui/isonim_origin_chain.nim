@@ -68,6 +68,36 @@ type
     role*: string
     label*: string
     hopIndex*: int
+    isPlaceholder*: bool
+      ## True when the span owns no hops of its own. The composer emits
+      ## such a span when the walk asked a recording to continue and it
+      ## had nothing to say — see the fixture's `ANSWERS.md`, "The
+      ## trailing `frontend-js` span is the walk noticing that the
+      ## WebAssembly frame was itself entered across the realm boundary
+      ## and asking the JavaScript side to continue. It has nothing
+      ## further to say". Such a chip names a real recording, so it is
+      ## rendered, but it has no hop to seek to and is therefore inert.
+      ## Tracked as M36b.
+
+proc isPlaceholderSpan*(span: CrossProcessSpan): bool =
+  ## Hop-range-only placeholder test: an inverted range.
+  ##
+  ## This is NOT the shape the db-backend composer emits. See
+  ## `cross_process_origin.rs::compose_cross_process_chain` step 4: a
+  ## sibling that contributed no hops gets its range deliberately
+  ## *collapsed* to `first == last == chain.hops.len()` rather than
+  ## left inverted, "because any renderer that slices
+  ## `hops[first..=last]` to draw the span would either panic or
+  ## silently show the wrong hops". Detecting that shape needs the
+  ## chain's hop count, so prefer the two-argument overload below;
+  ## this one only guards against a future wire that does invert.
+  span.firstHopIndex > span.lastHopIndex
+
+proc isPlaceholderSpan*(chain: OriginChain; span: CrossProcessSpan): bool =
+  ## A span that owns no hop of the chain, in either encoding the wire
+  ## can carry: an inverted range, or — the shape the composer actually
+  ## produces — a range starting one past the last hop.
+  isPlaceholderSpan(span) or int(span.firstHopIndex) >= chain.hops.len
 
 proc chainBreadcrumbChips*(chain: OriginChain): seq[BreadcrumbChip] =
   ## Derive one breadcrumb chip per `CrossProcessSpan` in
@@ -91,7 +121,84 @@ proc chainBreadcrumbChips*(chain: OriginChain): seq[BreadcrumbChip] =
       role: span.role,
       label: label,
       hopIndex: int(span.firstHopIndex),
+      isPlaceholder: isPlaceholderSpan(chain, span),
     ))
+
+proc substantiveBreadcrumbChips*(chips: openArray[BreadcrumbChip]): int =
+  ## How many chips correspond to a recording the chain genuinely
+  ## walked hops in. The user-visible claim "this value is explained by
+  ## all three recordings" rests on this count, not on the raw chip
+  ## count, which a zero-hop placeholder span would otherwise inflate.
+  result = 0
+  for chip in chips:
+    if not chip.isPlaceholder:
+      result += 1
+
+proc isCrossProcessHop*(hop: OriginHop): bool =
+  ## M29 §14.8 — a hop is "cross-process" when the composer attached a
+  ## `CorrelationTransition` to it, i.e. the walk left the recording it
+  ## was in through a correlation-marker boundary at this hop. Every
+  ## other hop stays inside its recording.
+  hop.correlationTransition.isSome
+
+proc crossProcessBadgeLabel*(hop: OriginHop): string =
+  ## Short badge text for a cross-process hop: the boundary the chain
+  ## crossed. Falls back to the direction, then to a generic label, so
+  ## the badge never renders empty on a partially-populated transition.
+  if hop.correlationTransition.isNone:
+    return ""
+  let t = hop.correlationTransition.get
+  if t.boundaryId.len > 0:
+    return t.boundaryId
+  if t.direction.len > 0:
+    return t.direction
+  "cross-process"
+
+proc crossProcessBadgeTitle*(hop: OriginHop): string =
+  ## Hover text spelling out both halves of the crossing: which
+  ## boundary was walked and which recording the chain continues in.
+  if hop.correlationTransition.isNone:
+    return ""
+  let t = hop.correlationTransition.get
+  var parts = "Crosses the " & crossProcessBadgeLabel(hop) & " boundary"
+  if t.correlatedRecordingId.len > 0:
+    parts &= " into recording " & t.correlatedRecordingId
+  if t.matchKeyValue.len > 0:
+    parts &= " (key " & t.matchKeyValue & ")"
+  parts
+
+proc spanOwningHop*(chain: OriginChain; hopIndex: int):
+    Option[CrossProcessSpan] =
+  ## The `CrossProcessSpan` whose hop range contains `hopIndex`.
+  ##
+  ## Zero-hop spans — the composer emits one for a recording it asked
+  ## to continue the walk in but which had nothing further to say — are
+  ## skipped in both wire encodings (inverted range, or a range that
+  ## starts one past the last hop); neither describes a real hop, and
+  ## an empty range must never claim ownership of one.
+  for span in chain.crossProcessSpans:
+    if isPlaceholderSpan(chain, span):
+      continue
+    if hopIndex >= int(span.firstHopIndex) and
+       hopIndex <= int(span.lastHopIndex):
+      return some(span)
+  none(CrossProcessSpan)
+
+proc seekToHopInOwningProcess*(vm: OriginChainVM; chain: OriginChain;
+                               hopIndex: int) =
+  ## Spec §3.3 "Click a hop", extended for multi-process chains
+  ## (§14.8). A chain that walked a recording boundary contains hops
+  ## owned by recordings other than the active one; seeking to such a
+  ## hop without first rotating the active recording would send the
+  ## navigation to the wrong process. So: switch first (which re-points
+  ## the host's request routing), then seek.
+  if hopIndex < 0 or hopIndex >= chain.hops.len:
+    return
+  let span = spanOwningHop(chain, hopIndex)
+  if span.isSome and span.get.recordingId.len > 0 and
+     not vm.onSwitchProcessProc.isNil:
+    vm.onSwitchProcessProc(span.get.recordingId)
+  vm.onSeekToHop(chain.hops[hopIndex])
 
 proc hopAriaLabel*(hop: OriginHop; index: int): string =
   ## ARIA label for a hop row. Concrete spec example:
@@ -172,6 +279,47 @@ iterator items*(panel: OriginChainPanel): int =
 when defined(js):
   import std/dom
 
+  # ---------------------------------------------------------------------
+  # Per-row event handlers.
+  #
+  # These are built in dedicated procs on purpose. Building them inline
+  # in the `for` loops below and relying on a `let` copy of the loop
+  # variable does NOT give each iteration its own closure environment on
+  # the JS backend: every handler ends up seeing the *last* iteration's
+  # values. That is not hypothetical — it is why clicking any breadcrumb
+  # chip used to switch to the chain's final span (the trailing zero-hop
+  # `frontend-js` placeholder) instead of the chip the user clicked, and
+  # then bail out of the seek because that span indexes no hop. A proc
+  # call creates a real per-handler scope, so each closure keeps its own
+  # values.
+  # ---------------------------------------------------------------------
+
+  proc breadcrumbChipHandler(vm: OriginChainVM;
+                             chip: BreadcrumbChip): proc(ev: Event) =
+    let recordingId = chip.recordingId
+    let hopIndex = chip.hopIndex
+    let isPlaceholder = chip.isPlaceholder
+    result = proc(_: Event) =
+      # A zero-hop span names a recording the walk reached but found
+      # nothing in; there is no coordinate to jump to.
+      if isPlaceholder:
+        return
+      let active = vm.activeChain.val
+      if active.isNone:
+        return
+      for s in active.get.crossProcessSpans:
+        if s.recordingId == recordingId and int(s.firstHopIndex) == hopIndex:
+          vm.onSwitchToSpan(s)
+          return
+
+  proc hopSeekHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+    let hopIndex = index
+    result = proc(_: Event) =
+      let active = vm.activeChain.val
+      if active.isNone:
+        return
+      vm.seekToHopInOwningProcess(active.get, hopIndex)
+
   proc renderPanelDom*(parent: Node;
                        vm: OriginChainVM;
                        panel: var OriginChainPanel) {.discardable.} =
@@ -202,8 +350,23 @@ when defined(js):
       for chip in chips:
         let chipCopy = chip                  # capture by value for closure
         let crumb = document.createElement(cstring"button")
-        crumb.setAttribute(cstring"class",
-                           cstring"breadcrumb-chip ct-origin-breadcrumb-chip")
+        if chipCopy.isPlaceholder:
+          # Rendered, because the span names a recording the walk really
+          # did reach; inert, because it owns no hop to seek to. Marked
+          # so neither a user nor a test mistakes it for a walked span.
+          crumb.setAttribute(
+            cstring"class",
+            cstring("breadcrumb-chip ct-origin-breadcrumb-chip " &
+                    "ct-origin-breadcrumb-chip-placeholder"))
+          crumb.setAttribute(cstring"data-placeholder", cstring"true")
+          crumb.setAttribute(cstring"aria-disabled", cstring"true")
+          crumb.setAttribute(
+            cstring"title",
+            cstring("The chain reached " & chipCopy.label &
+                    " but found no further origin there"))
+        else:
+          crumb.setAttribute(cstring"class",
+                             cstring"breadcrumb-chip ct-origin-breadcrumb-chip")
         crumb.setAttribute(cstring"data-recording-id",
                            cstring(chipCopy.recordingId))
         crumb.setAttribute(cstring"data-role", cstring(chipCopy.role))
@@ -213,17 +376,8 @@ when defined(js):
         # The click handler re-derives the span at dispatch time so
         # the closure captures only plain-data values — cheaper on
         # Nim-on-JS than capturing the `CrossProcessSpan` object.
-        let handler = proc(_: Event) =
-          let active = vm.activeChain.val
-          if active.isNone:
-            return
-          let activeChain = active.get
-          for s in activeChain.crossProcessSpans:
-            if s.recordingId == chipCopy.recordingId and
-               int(s.firstHopIndex) == chipCopy.hopIndex:
-              vm.onSwitchToSpan(s)
-              return
-        crumb.addEventListener(cstring"click", handler)
+        crumb.addEventListener(cstring"click",
+                               breadcrumbChipHandler(vm, chipCopy))
         nav.appendChild(crumb)
     else:
       for entry in vm.breadcrumbStack.val:
@@ -239,8 +393,35 @@ when defined(js):
     for i, hop in chain.hops:
       let li = document.createElement(cstring"li")
       li.setAttribute(cstring"aria-label", cstring(hopAriaLabel(hop, i)))
+      # M42 §14.8 — "The Origin Chain Panel's hop rendering simply gains
+      # a new badge shape for cross-process hops". A hop carrying a
+      # populated `correlationTransition` is one the composer walked
+      # across a recording boundary; the badge names the boundary and
+      # the recording on the far side so the user can see *why* the
+      # chain left the process they were looking at.
+      let hopIndex = i
+      if isCrossProcessHop(hop):
+        li.setAttribute(cstring"class", cstring"ct-origin-hop ct-origin-hop-cross-process")
+        let transition = hop.correlationTransition.get
+        li.setAttribute(cstring"data-cross-process-boundary",
+                        cstring(transition.boundaryId))
+        li.setAttribute(cstring"data-cross-process-recording",
+                        cstring(transition.correlatedRecordingId))
+        let badge = document.createElement(cstring"span")
+        badge.setAttribute(cstring"class", cstring"ct-origin-cross-process-badge")
+        badge.setAttribute(cstring"title",
+                           cstring(crossProcessBadgeTitle(hop)))
+        badge.innerText = cstring(crossProcessBadgeLabel(hop))
+        li.appendChild(badge)
+      else:
+        li.setAttribute(cstring"class", cstring"ct-origin-hop")
       let button = document.createElement(cstring"button")
       button.innerText = cstring(fmt"{hop.location.path}:{hop.location.line}")
+      # Spec §3.3 "Click a hop" — seek the replay to the hop's step.
+      # `seekToHopInOwningProcess` also rotates the active recording
+      # when the hop lives in a sibling process, so a chain that walked
+      # a boundary can be navigated back across it.
+      button.addEventListener(cstring"click", hopSeekHandler(vm, hopIndex))
       li.appendChild(button)
       if hop.operandSnapshots.len > 0:
         let details = document.createElement(cstring"details")

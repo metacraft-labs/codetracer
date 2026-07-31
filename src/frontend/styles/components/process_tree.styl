@@ -1,0 +1,67 @@
+// Multi-process session sidebar (spec
+// GUI/Debugging-Features/Value-Origin-Tracking.md §14.8: "A process tree
+// in the side bar listing each trace's role + thread count").
+//
+// The host is a flex item of #auto-hide-layout-row, inserted before the
+// left auto-hide strip, so the process tree tiles WITH the GoldenLayout
+// container rather than overlaying it — the same layout discipline the
+// auto-hide side strips follow (see auto_hide.styl).
+//
+// Single-recording sessions render nothing at all (the view's
+// `shouldRenderTree` returns false), and an empty host collapses to zero
+// width, so the pre-multi-process layout is unchanged to the pixel.
+
+#ct-process-tree-host
+  display: flex
+  flex-direction: column
+  flex-shrink: 0
+  flex-grow: 0
+  overflow: hidden
+
+  &:empty
+    width: 0
+    max-width: 0
+
+.ct-process-tree
+  display: flex
+  flex-direction: column
+  box-sizing: border-box
+  width: 12em
+  min-width: 12em
+  height: 100%
+  overflow-y: auto
+  background-color: colors-ui-surface-base-canvas
+  border-right: 1px solid colors-ui-border-base
+  font-size: 0.8rem
+  user-select: none
+
+.ct-process-tree-header
+  padding: 0.4em 0.6em
+  text-transform: uppercase
+  letter-spacing: 0.05em
+  font-weight: bold
+  opacity: 0.6
+
+.ct-process-tree-entry
+  display: flex
+  flex-direction: column
+  padding: 0.35em 0.6em
+  cursor: pointer
+  border-left: 2px solid transparent
+
+  &:hover
+    background-color: colors-ui-surface-base-hover
+
+  &.active
+    border-left-color: colors-ui-text-accent
+    background-color: colors-ui-surface-base-selected
+
+.ct-process-tree-role
+  font-weight: bold
+
+.ct-process-tree-name,
+.ct-process-tree-threads
+  opacity: 0.7
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis

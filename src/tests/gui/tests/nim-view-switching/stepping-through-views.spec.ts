@@ -327,7 +327,7 @@ test.describe("SteppingThroughViews", () => {
 
     // Press the step-forward (next) button. In C view, this should issue a
     // C-level next (nextc) which advances by one C source line.
-    const nextBtn = ctPage.locator("#next-debug");
+    const nextBtn = ctPage.locator("#next-image");
     await nextBtn.click();
     await waitForReadyStatus(ctPage);
 
@@ -372,7 +372,7 @@ test.describe("SteppingThroughViews", () => {
     await waitForReadyStatus(ctPage);
 
     // Step forward a few times to establish a position we can step back from.
-    const nextBtn = ctPage.locator("#next-debug");
+    const nextBtn = ctPage.locator("#next-image");
     for (let i = 0; i < 3; i++) {
       await nextBtn.click();
       await waitForReadyStatus(ctPage);
@@ -385,7 +385,7 @@ test.describe("SteppingThroughViews", () => {
 
     // Step backward (reverse-next). In C view with rr, this should issue a
     // reverse nextc which moves back by one C source line.
-    const reverseNextBtn = ctPage.locator("#reverse-next-debug");
+    const reverseNextBtn = ctPage.locator("#reverse-next-image");
     await reverseNextBtn.click();
     await waitForReadyStatus(ctPage);
 
@@ -463,7 +463,7 @@ test.describe("SteppingThroughViews", () => {
 
     // Step forward. In assembly view, this should move to the next instruction
     // (stepi-level granularity).
-    const nextBtn = ctPage.locator("#next-debug");
+    const nextBtn = ctPage.locator("#next-image");
     await nextBtn.click();
     await waitForReadyStatus(ctPage);
 
@@ -505,7 +505,7 @@ test.describe("SteppingThroughViews", () => {
     await waitForReadyStatus(ctPage);
 
     // Step forward a few times first.
-    const nextBtn = ctPage.locator("#next-debug");
+    const nextBtn = ctPage.locator("#next-image");
     for (let i = 0; i < 3; i++) {
       await nextBtn.click();
       await waitForReadyStatus(ctPage);
@@ -517,7 +517,7 @@ test.describe("SteppingThroughViews", () => {
     const beforeLocation = await waitForStatusBarLocation(statusBar);
 
     // Step backward in assembly view.
-    const reverseNextBtn = ctPage.locator("#reverse-next-debug");
+    const reverseNextBtn = ctPage.locator("#reverse-next-image");
     await reverseNextBtn.click();
     await waitForReadyStatus(ctPage);
 

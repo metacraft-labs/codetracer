@@ -149,9 +149,38 @@
 
 
   #status-base
-    // Redesigned as a standalone auto-hide tab strip.
-    // All legacy status info (language, encoding, location, etc.) is hidden;
-    // only #auto-hide-bottom-strip (the horizontal tab row) is shown.
+    // Hosts the auto-hide bottom tab strip (#auto-hide-bottom-strip) alongside
+    // the status bar's own content, per
+    // `codetracer-specs/Planned-Features/Auto-Hide-Panes.md` §3.1:
+    //
+    //   |-- Status Bar / Footer
+    //   |     |-- Left: auto-hide tab labels for bottom-pinned panels
+    //   |     |-- Right: existing status bar content (language, encoding, location)
+    //
+    // ... and §10.3, which places the collapsed-strip icon zone
+    // (`#auto-hide-collapsed-icon-zone`) in the same bar.
+    //
+    // A `> *:not(#auto-hide-bottom-strip) { display: none !important }` rule
+    // used to live here (added by b27da3947 "feat: Redesign of the status bar")
+    // and made the bar tabs-only.  It was removed because it silently deleted
+    // three surfaces that no other part of the UI provides:
+    //
+    //   * `.location-path` + `#copy-path-image` — the only place the current
+    //     debug location (`path:line#ticks`) is displayed at all; nothing else
+    //     in the frontend renders `StatusBaseModel.locationText`, and the only
+    //     other copy-a-path affordance is the editor tab's "Copy full path"
+    //     context-menu entry (`ui/layout.nim`), which copies the tab label,
+    //     not the location the debugger is actually stopped at.
+    //   * `#file-info-status` — language / encoding / `stable: ready`.
+    //   * `#auto-hide-collapsed-icon-zone` — the `!important` beat
+    //     `.collapsed-icon-zone.has-icons`, so the Auto-Hide-Panes §10.3 icon
+    //     zone could never appear even when panels were collapsed.
+    //
+    // The layout the spec asks for falls out of the DOM order in
+    // `viewmodel/views/isonim_status_view.nim` once nothing is force-hidden:
+    // icon zone and `#file-info-status` on the left, the tab strip taking the
+    // slack (`#auto-hide-bottom-strip { flex: 1 }`), `.status-right` (location
+    // + copy button) pinned to the right edge.
     bottom: 0
     background-color: colors-ui-surface-primary-default
     height: 2em
@@ -164,10 +193,6 @@
     overflow: visible   // allow tab curve pseudo-elements to bleed above the bar
     padding-top: 0.25em    // breathing room so curves are visible above the tabs
     padding-bottom: 0.25em // mirrors side-strip padding-left/right: 0.25em
-
-    // Hide all legacy status content — only the auto-hide tab strip is shown.
-    > *:not(#auto-hide-bottom-strip)
-      display: none !important
 
     .checkbox
       display: inherit
@@ -233,6 +258,13 @@
       width: auto
       // margin-right: 12px
       overflow: hidden
+      // `text-overflow: ellipsis` only takes effect on a non-wrapping line, so
+      // without `nowrap` the declaration below was inert and a long
+      // `path:line#ticks` wrapped instead of ellipsising — at the 1050px
+      // minimum window width (`index/window.nim`) it grew to three lines and
+      // spilled out of the 2em bar, because `#status-base` is `overflow:
+      // visible` for the tab curves.
+      white-space: nowrap
       text-overflow: ellipsis
       text-align: end
       user-select: none
@@ -310,12 +342,18 @@
       width: auto
       display: flex
       padding-right: 8px
+      // Let the location readout shrink so `.location-path`'s ellipsis can
+      // engage: a flex item will not go below its min-content width unless
+      // `min-width` is relaxed, and a `nowrap` path's min-content is the whole
+      // path.
+      min-width: 0
     // margin-right: 3vw
 
     #location-status
       float: left
       display: flex
       align-items: center
+      min-width: 0
 
     .status-flow-buttons
       .status-flow-types-list

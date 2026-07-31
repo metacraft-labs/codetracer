@@ -18,22 +18,41 @@ FIXTURE_DIR="$REPO_ROOT/src/db-backend/tests/fixtures/cross_process/account-bala
 readonly FIXTURE_DIR
 
 readonly CROSS_PROCESS_TARGET="cross_process_origin_test"
+readonly THREE_TRACE_TARGET="cross_process_three_trace_dap_test"
 readonly LIST_PROCESSES_TARGET="dap_server_list_processes_event_test"
-readonly CROSS_PROCESS_EXPECTED_COUNT=7
+readonly CROSS_PROCESS_EXPECTED_COUNT=10
+readonly THREE_TRACE_EXPECTED_COUNT=5
 readonly LIST_PROCESSES_EXPECTED_COUNT=5
-readonly RUST_EXPECTED_COUNT=12
+readonly RUST_EXPECTED_COUNT=20
 readonly PLAYWRIGHT_EXPECTED_COUNT=2
 
 gate_tmp_dir=""
 
+# Unit-scope tests of the composer. These legitimately build their own
+# inputs: the ambiguous / missing-correlation branches cannot be reached
+# reliably from a recording.
 readonly -a CROSS_PROCESS_EXPECTED_TESTS=(
+	test_origin_cross_process_absent_show_text_names_no_binding
 	test_origin_cross_process_ambiguous_correlation_terminates_cleanly
+	test_origin_cross_process_blank_show_text_names_no_binding
+	test_origin_cross_process_declines_to_recross_the_boundary_it_arrived_on
 	test_origin_cross_process_fixture_a_python_aiohttp_mode1
 	test_origin_cross_process_fixture_a_python_aiohttp_mode3
 	test_origin_cross_process_missing_correlation_terminates_cleanly
 	test_origin_cross_process_serialisation_aware_json_collapses_to_trivial_copy
-	test_origin_three_trace_chain_balance_to_frontend_expression
+	test_origin_cross_process_still_follows_a_return_over_a_different_boundary
 	test_parity_origin_cross_process_fixture_a_python_aiohttp
+)
+
+# The end-to-end contract: real recordings, production session loader,
+# production dispatcher. This is the target that would have caught the
+# composer being unreachable from the product.
+readonly -a THREE_TRACE_EXPECTED_TESTS=(
+	a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording
+	a_session_folder_launches_as_the_whole_session
+	origin_of_the_server_balance_reaches_the_browser_recordings
+	the_chain_terminates_in_the_wasm_recording_rather_than_on_a_name_no_marker_used
+	three_recordings_load_as_one_session_with_canonical_roles
 )
 
 readonly -a LIST_PROCESSES_EXPECTED_TESTS=(
@@ -82,13 +101,21 @@ require_fixture() {
 	[ -f "$regenerator" ] || die "fixture regenerator is missing: $regenerator"
 	[ -x "$regenerator" ] || die "fixture regenerator is not executable: $regenerator"
 
-	for container in frontend.ct frontend-wasm.ct backend.ct; do
+	# The browser tiers write the three-file JSON shape; the server tier
+	# writes a CTFS container. Checking the actual payloads (rather than
+	# just the directory) is what stops an interrupted regenerate.sh from
+	# looking like a complete fixture.
+	for container in frontend.ct frontend-wasm.ct; do
 		[ -d "$FIXTURE_DIR/$container" ] ||
 			die "required trace container is missing: $FIXTURE_DIR/$container"
 		for payload in trace.json trace_metadata.json trace_paths.json; do
 			require_file "$FIXTURE_DIR/$container/$payload" "required trace payload"
 		done
 	done
+	[ -d "$FIXTURE_DIR/backend.ct" ] ||
+		die "required trace container is missing: $FIXTURE_DIR/backend.ct"
+	require_file "$FIXTURE_DIR/backend.ct/server.ct" "required CTFS trace payload"
+	require_file "$FIXTURE_DIR/README.md" "fixture README"
 
 	require_file "$FIXTURE_DIR/session.toml" "materialized three-trace session manifest"
 	require_file "$FIXTURE_DIR/session.toml.template" "three-trace session manifest template"
@@ -251,12 +278,16 @@ main() {
 
 	write_expected_manifest "$gate_tmp_dir/$CROSS_PROCESS_TARGET-expected.txt" \
 		"${CROSS_PROCESS_EXPECTED_TESTS[@]}"
+	write_expected_manifest "$gate_tmp_dir/$THREE_TRACE_TARGET-expected.txt" \
+		"${THREE_TRACE_EXPECTED_TESTS[@]}"
 	write_expected_manifest "$gate_tmp_dir/$LIST_PROCESSES_TARGET-expected.txt" \
 		"${LIST_PROCESSES_EXPECTED_TESTS[@]}"
 
 	echo "=== M29 required cross-process value-origin envelope ==="
 	run_rust_target "$cargo_bin" "$CROSS_PROCESS_TARGET" "$CROSS_PROCESS_EXPECTED_COUNT" \
 		"$gate_tmp_dir/$CROSS_PROCESS_TARGET-expected.txt" "$gate_tmp_dir"
+	run_rust_target "$cargo_bin" "$THREE_TRACE_TARGET" "$THREE_TRACE_EXPECTED_COUNT" \
+		"$gate_tmp_dir/$THREE_TRACE_TARGET-expected.txt" "$gate_tmp_dir"
 	run_rust_target "$cargo_bin" "$LIST_PROCESSES_TARGET" "$LIST_PROCESSES_EXPECTED_COUNT" \
 		"$gate_tmp_dir/$LIST_PROCESSES_TARGET-expected.txt" "$gate_tmp_dir"
 	echo "cross-process Rust summary: expected=$RUST_EXPECTED_COUNT executed=$RUST_EXPECTED_COUNT skipped=0"

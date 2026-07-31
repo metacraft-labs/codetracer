@@ -211,7 +211,7 @@ test.describe("StreamingRecording", () => {
     // Step forward once past the function entry to ensure variables are
     // initialized (at function entry, locals may not yet be assigned).
     // Use dispatchEvent to bypass viewport issues with the debug button.
-    const stepOverBtn = ctPage.locator("#next-debug");
+    const stepOverBtn = ctPage.locator("#next-image");
     await stepOverBtn.dispatchEvent("click");
 
     // Wait for the backend to return to ready state

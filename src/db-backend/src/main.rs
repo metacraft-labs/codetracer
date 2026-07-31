@@ -689,7 +689,7 @@ fn run_origin_subcommand(
     };
 
     let identity = TraceIdentity::new(&first_trace.recording_id.0, &first_trace.role);
-    let mut noop_resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> { None };
+    let mut noop_resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> { None };
     let (chain, _outcome) = apply_cross_process_clause(
         chain,
         &identity,

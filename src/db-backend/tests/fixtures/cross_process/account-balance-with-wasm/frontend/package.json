@@ -1,6 +1,6 @@
 {
-  "_comment": "Cross-Tracer Origin E2E — Fixture A' frontend. Minimal Vite manifest so `regenerate.sh` can run `npx vite build` against ./index.html + ./app.js without a global package install. The Rust→WASM module is built separately by `wasm-pack` and dropped into ./pkg/ before Vite resolves the `./pkg/balance_calc.js` import.",
-  "name": "account-balance-with-wasm-frontend",
+  "_comment": "Cross-process origin demo, browser tier. Minimal Vite manifest so regenerate.sh can build ./index.html + ./app.js. The CodeTracer packages are resolved from their sibling repos by the aliases in vite.config.js rather than installed here, so the demo always exercises the working tree rather than a published snapshot.",
+  "name": "account-balance-cross-process-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",

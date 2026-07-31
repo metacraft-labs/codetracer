@@ -251,3 +251,245 @@
 - 2026-07-29 (RS-M2 request span streams): a recording's HTTP requests now live INSIDE the `.ct` container as the `spans.dat` / `spans.idx` / `spantype.ns` span stream gated by `meta.dat` bit 13 `FLAG_HAS_SPAN_STREAM`, not in a `session_manifest.jsonl` / `codetracer_spans.jsonl` sidecar. Bit 13 is a REJECTING bit: `ctfs_trace_reader::meta_dat::KNOWN_FLAGS_MASK` refuses any container with an unknown flag, so before this milestone the db-backend refused every span-bearing container outright — the rollout rule is readers-before-writers. Two traps in the reader (`ctfs_trace_reader/span_stream.rs`, a deliberate mirror of `codetracer-trace-format-nim/src/codetracer_trace_writer/span_stream.nim`): (1) `spans.idx` is v2 with 16-byte `[offset u64][cumulative_records u64]` entries and the CTFS §7 rule "chunk = N div chunk_size" does NOT hold — the writer seals SHORT chunks mid-stream whenever `flush` is called, so a record's chunk comes from a binary search over the cumulative column and `chunk_size` is only an upper-bound hint; (2) opening must stay index-only — RS-M1 decoded every chunk at open and cost 20-210 ms, so `SpanStreamReader::chunk_decompressions()` exists purely as a test seam pinning "open decodes nothing, `read_span` decodes one chunk". Readers apply LAST-RECORD-WINS per `span_id` (an open record superseded by its completion, not necessarily adjacent). `src/request_spans.rs` serves `ct/load-request-spans` (filters are applied BEFORE paging, otherwise a filtered page sequence would not reproduce a full scan) and carries the read-only sidecar shim. Fixtures under `src/db-backend/tests/fixtures/span_stream/` are written by the canonical NIM writer via their `regenerate.sh` — that is the cross-implementation proof, so never regenerate them from the Rust side.
 - 2026-07-29 (sibling build gotcha): `db-backend/build.rs` compiles only `codetracer-native-recorder/ct_emulator/build/native_c_files/*.c` plus the `CT_MCR_EMULATOR_EXTRA_SOURCES` listed by that repo's `export_build_env.sh`. Nim's incremental nimcache may leave `x87_shim.c` / `fma_shim.c` behind as `.sha1` stubs only, and neither the generated dir nor `extra_sources` then carries the real `.c` — the whole db-backend test suite dies at link time with `rust-lld: undefined reference: ct_x87_*` / `ct_fma_*`. Workaround while the sibling is mid-change: copy `ct_emulator/src/ct_emulator/{x87_shim,fma_shim}.c` into `ct_emulator/build/native_c_files/` (gitignored build output). The real fix belongs in the recorder repo's `export_build_env.sh`.
 - 2026-07-30 (RS-M11 remote live request panel over HTTP range): a remote live session really is "the existing `.ct` range reader pointed at a growing file" — `src/db-backend/src/remote_request_spans.rs` produces a `RequestSpanDelta` BYTE-IDENTICAL to the local `RequestSpanTail`'s, and `tests/remote_span_tail_http_test.rs` asserts that equality poll-for-poll, so the frontend has no remote code path. Four traps found building it: (1) **`Content-Length` is NOT a growth signal.** A `.ct` is block-padded — all four RS-M3 tail-stage fixtures are exactly 155648 bytes while `spans.idx` grows 40->56->88->136 — so a remote tail must watch the Block 0 directory's committed `FileEntry.Size` (`CtfsReader::file_size`), never the resource length. (2) **`HttpRangeSource`'s block cache MUST be dropped on `refresh()`.** A growing internal file keeps writing into its last partially-filled data block, and a live session republishes whole containers by rename, so a cached block can name different bytes after either event; the old comment claiming CTFS blocks are immutable once written was wrong for exactly the live case `refresh` exists to serve. (3) **A partial fetch needs byte-granular, not block-granular, prefix semantics** — `CtfsReader::read_file_range_available` clamps to the bytes actually present inside a block, because a 2 KB `spans.dat` living in one 4 KB block would otherwise yield nothing at all. (4) **Chunk residency alone is not fail-closed.** For the LAST indexed chunk, `chunk_byte_range` collapses to an empty range both when the writer sealed an empty chunk and when NONE of its bytes were fetched; trusting it advanced the cursor over undelivered records. The guard is the index's own cumulative column: decoded record count must equal `records_in_chunk`, a mismatch being a hard error when every declared byte landed and a "stop, still landing" otherwise. Related finding: `trace_writer_close()` writes `meta.dat` LAST, so a truncated upload of a FINALIZED container loses the bit-13 declaration before it loses any span byte — no cut of one can yield a partial span list, and the reader must refuse rather than infer bit 13 from a `spans.dat` directory entry.
+- 2026-07-30: `config.nims` must add BOTH shared-memory transports to the Nim
+  search path, not just `nim-shm-queue`. The top-level `ct` entry point reaches
+  io-mon via `src/ct_test/incremental_cli`, and `io-mon/src/io_mon/writer.nim`
+  now imports `shm_gset/transport` (nim-shm-gset is io-mon's PRIMARY Linux
+  dependency channel; the shm-queue ring is only the legacy path). Without
+  `addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")` the whole `ct` build
+  dies with `cannot open file: shm_gset/transport`, which reads like a
+  codetracer bug but is sibling-dependency drift.
+- 2026-07-30: The three-recording cross-process value-origin fixture
+  (`src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/`) is
+  consumable ONLY by the headless Rust DAP tests, not by the GUI. Three
+  independent reasons: (1) `ct` has no `session.toml` support at all — session
+  manifests are parsed solely by `db-backend/src/session_manifest.rs`, so
+  `ct host --trace-path` imports ONE `.ct` container and there is no
+  multi-recording launch path; (2) `findCtFileInFolder` wants a `.ct` FILE, and
+  every `*.ct` in this fixture is a DIRECTORY — so `ct host --trace-path
+  <fixtureRoot>` (exactly what the Playwright harness `launchMode:
+  "trace-folder"` passes) exits 1 with "trace folder missing `.ct` CTFS
+  container" before Electron even starts. Pointing it one level deeper does not
+  rescue the other two either: `frontend.ct/` and `frontend-wasm.ct/` hold only
+  retired pre-M-REC-1.5 sidecar JSON (`trace.json` + `trace_metadata.json` +
+  `trace_paths.json`), so they fail identically; only `backend.ct/` (real CTFS
+  `server.ct`) imports. Re-recording the two browser traces as CTFS containers
+  would break the Rust tests that read the legacy shape directly
+  (`m25b_event_log_test.rs` opens `frontend.ct/` as a trace dir); (3) the
+  frontend never populates the process tree in production —
+  `SessionViewModel.applyListProcessesResponse` is called only from tests, and
+  `event_log_vm.jumpToCounterpart` sends `ct/listProcesses` but DISCARDS the
+  reply. `ProcessTreeVM` also has no DOM renderer (there is no
+  `isonim_process_tree_view.nim`; the only `data-role` attribute in the product
+  is on origin-chain breadcrumb chips in `ui/isonim_origin_chain.nim`). The
+  §14.8 process-tree / "Switch process" surface is still deferred.
+- 2026-07-30 (M43): The Electron Playwright suite had THREE independent
+  suite-wide harness/product DOM-contract breaks, all introduced by
+  design-system redesign commits that renamed or hid elements without
+  updating the shared page objects:
+  (1) FIXED. `b27da3947 "feat: Redesign of the status bar"` added
+  `#status #status-base > *:not(#auto-hide-bottom-strip) { display: none
+  !important }` to `src/frontend/styles/components/status_bar.styl`, making the
+  footer a tabs-only strip. That hid `.location-path` (+ `#copy-path-image`,
+  `#file-info-status`, and — because the `!important` beat
+  `.collapsed-icon-zone.has-icons` — `#auto-hide-collapsed-icon-zone`).
+  `readyOnEntryTest` in `src/tests/gui/lib/fixtures.ts` waits for
+  `.location-path` to be VISIBLE, so essentially every Electron spec died at
+  its first line with a 15 s timeout on an element that was present with the
+  right `title`. The rule contradicted `Auto-Hide-Panes.md` §3.1 ("the status
+  bar's right section retains its existing content (language, encoding, cursor
+  location)") and §10.3 (icon zone in the same bar), and nothing else in the
+  frontend renders `StatusBaseModel.locationText` — so the product was wrong
+  and the rule was removed. Do NOT relax the wait to `state: "attached"`: the
+  element is attached with correct content long before it has a box, so an
+  attachment wait reports readiness for a footer that never renders. The
+  footer contract is now pinned by
+  `src/tests/gui/tests/status-bar/status-bar-footer-contract.spec.ts`, which
+  also re-injects the removed rule as a negative control. Two width facts
+  worth knowing: the footer's three regions need ~1035px of min-content and
+  `BrowserWindow.minWidth` (index/window.nim) is 1050, so there is only ~15px
+  of slack before the bar overflows horizontally; and `.location-path` needed
+  `white-space: nowrap` added — it had `overflow: hidden` +
+  `text-overflow: ellipsis`, but ellipsis is inert on a wrapping line, so at
+  1050px the path wrapped to three lines and spilled out of the 2em bar
+  (`#status-base` is `overflow: visible` for the tab curves). `.status-right`
+  and `#location-status` also needed `min-width: 0` for the flex item to
+  shrink far enough for the ellipsis to engage.
+  (2) FIXED. `d0727512c "fix: Design details"` renamed EVERY
+  debug-toolbar button id from `*-debug` to `*-image`
+  (`run-to-entry-debug` -> `run-to-entry-image`, `next-debug` -> `next-image`,
+  ... only `jump-to-live-debug` kept its name), but
+  `src/tests/gui/page-objects/layout-page.ts` still located `#run-to-entry-debug`
+  etc., so any spec calling `LayoutPage.runToEntryButton()/continueButton()/...`
+  timed out after 30 s on a locator matching nothing. The repo has TWO layout
+  page objects — `layout-page.ts` (hyphen, the rich one nearly every spec
+  imports) and `layout_page.ts` (underscore, a smaller API used by ~5 specs) —
+  and they each kept their own copy of the id list, which is how they drifted.
+  The ids now live once in `src/tests/gui/page-objects/debug-toolbar-ids.ts`
+  and both page objects read from it; five specs that hard-coded `#next-debug`
+  / `#reverse-next-debug` / `#reverse-continue-debug` inline were fixed too.
+  (3) STILL BROKEN. The same `b27da3947` replaced the bottom tabs container:
+  tabs are now direct children of `#auto-hide-bottom-strip`, and the
+  `.auto-hide-bottom-tabs` wrapper class exists only in
+  `isonim_auto_hide_bottom_tabs_view.nim`, which nothing but
+  `storybook_components.nim` still imports — i.e. the class is absent from the
+  live app DOM. About 48 locator sites across 8 spec files still use it
+  (`tests/auto-hide/auto-hide-panes.spec.ts`,
+  `tests/build/{build-panel-e2e,build-header-controls,problems-panel,real-compiler-errors,search-results-e2e}.spec.ts`,
+  `tests/visual-audit/{strip-layout-verify,comprehensive-v2}.spec.ts`).
+  The mapping is `.auto-hide-bottom-tabs` -> `#auto-hide-bottom-strip`, but
+  several of those specs also assert tab counts and nesting, so it is not a
+  pure textual substitution. Tracked as its own milestone.
+
+## Recording folder shapes: `.ct` is not always a container (M41, 2026-07-30)
+
+`ct` accepts three on-disk shapes for a recording folder, classified in one
+place: `src/ct/trace/trace_container.nim::detectTraceFolderShape`.
+
+  1. a `*.ct` CTFS container FILE (magic-checked) — what `ct record` writes;
+  2. a materialized `runtime_tracing` directory (`trace.json` / `trace.bin`
+     plus `trace_metadata.json` + `trace_paths.json`) — what `ct record-web`
+     writes for browser recordings, and what the Rust replay engine has always
+     autodetected (`dap_server.rs::auto_detect_materialized_trace_file`);
+  3. a `session.toml` multi-recording session manifest.
+
+Two traps this resolves:
+
+  * A **directory** named `foo.ct` is NOT a container. The cross-process
+    fixture names its per-process recordings `frontend.ct/` etc., which is why
+    `ct host --trace-path <fixture-root>` used to die with "trace folder
+    missing `.ct` CTFS container" against a folder that visibly contained
+    `backend.ct`. `describeMissingTraceContainer` now names what it found.
+  * There used to be two `findCtFileInFolder` implementations with different
+    semantics (`storage_and_import.nim` accepted any `*.ct` file;
+    `online_sharing/mcr_enrichment.nim` also verified CTFS magic). They are
+    unified in `trace_container.nim`; `mcr_enrichment` re-exports it.
+
+Sessions: `ct` never parses `session.toml` itself — it shells out to
+`replay-server session <manifest>` (~20 ms) so the only parser is
+`db-backend/src/session_manifest.rs`. A session is registered in the recording
+index IN PLACE (its `output_folder` is the manifest's directory, not a copy
+under `codetracerTraceDir`), because `[[trace]]` paths only resolve next to the
+manifest. The GUI needs no per-recording plumbing to open one: the DAP launch
+sends that folder as `traceFolder`, and `dap_server.rs::resolve_launch_trace_file`
+turns "folder contains session.toml" into a `setup_session` launch.
+
+Beware: `dap_server.rs` has TWO `launch` handlers (the initial one in
+`handle_message` and the stable thread's re-launch one). They MUST agree on
+trace-file resolution or a session opens as a session on one path and as one of
+its members on the other — which is silent, not a crash. Both now call
+`resolve_launch_trace_file`.
+
+Which test covers which handler: `cross_process_three_trace_dap_test::
+a_session_folder_launches_as_the_whole_session` covers only the STABLE-thread
+handler (`task_thread`) — reverting `handle_message`'s call to
+`resolve_launch_trace_file` leaves that integration test green. The
+`handle_message` half is what the cached-launch flow and tracepoint worker
+threads replay, and it is pinned separately by
+`dap_server::tests::handle_message_launch_resolves_a_session_folder_to_its_manifest`.
+If you touch either handler, run both.
+
+A third `launch` handler exists behind `#[cfg(feature = "browser-transport")]`
+(`handle_message_browser`): it re-runs trace detection against the WASM VFS and
+OVERWRITES `ctx.launch_trace_file`. `setup_from_vfs` has no session branch, so
+that path now refuses a folder holding a `session.toml` outright rather than
+latching onto a `trace.ct`/`trace.json` beside it.
+
+Opening a recording MUTATES it, for the CTFS shape only: `importTraceFolder`
+runs `materializeCtfsSources(<container>, <source folder>)`, which writes a
+`paths.json` **into the folder you pointed at** — including committed fixtures
+(`ct host --trace-path .../backend.ct` leaves an untracked `paths.json` in the
+fixture). The materialized branch was fixed to normalize the copy in the
+recording store instead; the CTFS branch still does it in place because
+`importTrace` then copies that sidecar next to the `files/` payload. Discard the
+stray file rather than committing it.
+
+Nim test runners cover three roots and `src/ct` was not one of them:
+`just test-vm` globs `src/tests/gui/tests/**/*_test.nim`,
+`just test-vm-recorder-gated` covers `src/frontend/viewmodel/tests/unit/`, and
+(new) `just test-ct-trace-units` covers `src/ct/trace/*_test.nim`. Before that
+last recipe every suite under `src/ct/trace` was a test nothing invoked. If you
+add a Nim test outside those three roots, add a runner too.
+
+GUI-test flake to know about: `fixtures.ts::importTraceFolder` caps `ct host`
+at a 15 s `spawnSync` timeout, and on a loaded machine that trips as
+`spawnSync ... ETIMEDOUT` for ordinary CTFS folders too (seen on
+`tracepoints_type_error.spec.ts`). It is not specific to sessions.
+
+Not every recorded step belongs to a call. `DbStep.call_key` can be
+`CallKey(NO_KEY)` — a FRAMELESS step — and the JavaScript recorder produces them
+routinely: three bootstrap steps before `<module>` opens even in a trivial
+script, plus one or more at the event-loop level between one callback returning
+and the next being entered. Python traces have none. Anything that resolves
+`call_key` and treats `None` as an error is wrong on JS traces; that is exactly
+what `step_over_depths_step_id` did, which made step-over hold forever at the
+last statement of a Node module body (M50). Frameless steps sit at the trace's
+OUTERMOST level — `db::OUTERMOST_CALL_DEPTH` — because the `<module>` call and
+every callback the loop invokes are all recorded with `depth = 0` and
+`parent = NO_KEY`; there is no recorded frame that is shallower.
+
+`step_over_depths_step_id` and `next_step_id_relative_to*` exist TWICE, as
+deliberate mirrors: the `TraceReader` trait defaults in `trace_reader.rs` (the
+live path — neither `CTFSTraceReader` nor `InMemoryTraceReader` overrides them)
+and inherent copies on `Db` in `db.rs`. Change one, change the other.
+
+`TestRecording::drop` does `fs::remove_dir_all(self.temp_dir)`. Never hand-build
+a `TestRecording` around a committed fixture to reuse `initialize_and_launch` —
+it deletes the fixture from the working tree when the test ends. Use
+`DapStdioTestClient::initialize_and_launch_trace(path)` instead.
+
+The tup rule for the db-backend (`src/db-backend/Tupfile`) *names* only
+`src/main.rs` as its input, but that is not the whole dependency set: tup
+discovers the rest through its FUSE sandbox, recording every file the cargo
+invocation actually reads. Editing any file under `src/db-backend/src/` does
+re-run the rule on the next `just build-once`, and `src/build-debug/bin/
+replay-server` is refreshed — verified by editing `trace_reader.rs` alone and
+observing tup execute the rule and cargo emit `Compiling replay-server`. Note
+that `just build-once` runs tup twice (before and after webpack); the second
+pass legitimately reports "No commands to execute", so read the FIRST pass when
+checking whether the engine was rebuilt.
+
+In the Electron build, `dap.nim::asyncSendCtRequest` used to be fire-and-forget:
+it wrote the request frame over IPC and resolved the `Future[JsObject]` it
+returned with an empty `js{}` immediately, having never seen a response.
+Responses arrive on a *separate* IPC channel (`CODETRACER::dap-receive-response`)
+and were only fanned out to `dap.on(...)` subscribers. So every
+`BackendService.send(...)` in the desktop app resolved with `{}`, and any
+ViewModel that read the resolved body silently got nothing — the VS Code build
+was fine, because it goes through `activeDebugSession.customRequest`, which
+really does return the body. M49 fixed this by correlating on the `request_seq`
+the Backend Manager already stamps on every response (`DapApi.pendingResponses`,
+settled from `ui_js.nim::onDapReceiveResponse`). If you are debugging a panel
+that gets data through events but not through request bodies, this is the
+history to know.
+
+`DapApi` is built in four places, and only `dap.nim::newDapApi` uses the named
+constructor — `types.nim` and `ui/session_switch.nim` build one from an object
+literal per replay session. A field added to `DapApi` and initialised only in
+`newDapApi` will be nil on most instances.
+
+`data.dapApi` is NOT one object: it is a template for
+`data.sessions[data.activeSessionIndex].dapApi`, so it follows whichever tab is
+on screen, and each session's `DapApi` has its own `seq` counter starting at
+zero. Anything that has to pair a response with the request that produced it
+must therefore pick the session's `DapApi` by the `sessionId` the main process
+stamps on the response (`ipc_subsystems/dap.nim::resolveSessionId`), not read
+`data.dapApi` — otherwise it silently addresses the wrong session as soon as a
+second tab exists. Note also that `ui_js.nim` captures `let dapRef = data.dapApi`
+once when it builds the `SessionViewModel`, so the whole ViewModel layer still
+talks to the session that was active at bootstrap.
+
+A ViewModel command string needs THREE registrations to reach the wire: a
+`CtEventKind` in `common/ct_event.nim`, a non-empty entry in
+`dap.nim::EVENT_KIND_TO_DAP_MAPPING`, and a string in
+`viewmodel/backend/dap_commands.nim::VALID_DAP_COMMANDS_SEQ`. Miss the first two
+and `dapCommandToEventKind` raises `ValueError`, which kills the whole reactive
+batch, and the request is never sent — silently, from the caller's point of
+view. `scenarios/integration_test.nim`'s "all ViewModel commands are valid DAP
+commands" suite is the guard, but it only sees commands the test actually
+triggers: a command sent solely from a click handler needs its own case there.
+
+`ct/pairIndexLookup` must be answered at the session layer
+(`dap_server.rs::handle_request_via_session`), not by the per-trace `Handler`:
+`Handler::build_local_pair_index` sees only its own recording's marker firings,
+and a correlation marker's counterpart is by definition in another process.

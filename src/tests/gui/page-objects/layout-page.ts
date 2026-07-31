@@ -10,6 +10,7 @@ import { TimelinePane } from "./panes/timeline/timeline-pane";
 import { VariableStatePane } from "./panes/variable-state/variable-state-pane";
 import { retry } from "../lib/retry-helpers";
 import { debugLogger } from "../lib/debug-logger";
+import { DEBUG_TOOLBAR_IDS, debugToolbarSelector } from "./debug-toolbar-ids";
 import {
   LIMIT_COMPONENTS_LOADED_MS,
   LIMIT_TRACE_LOADED_MS,
@@ -245,31 +246,31 @@ export class LayoutPage extends BasePage {
   // ---------------------------------------------------------------------------
 
   runToEntryButton(): Locator {
-    return this.page.locator("#run-to-entry-debug");
+    return this.page.locator(debugToolbarSelector("runToEntry"));
   }
   continueButton(): Locator {
-    return this.page.locator("#continue-debug");
+    return this.page.locator(debugToolbarSelector("continue"));
   }
   reverseContinueButton(): Locator {
-    return this.page.locator("#reverse-continue-debug");
+    return this.page.locator(debugToolbarSelector("reverseContinue"));
   }
   stepOutButton(): Locator {
-    return this.page.locator("#step-out-debug");
+    return this.page.locator(debugToolbarSelector("stepOut"));
   }
   reverseStepOutButton(): Locator {
-    return this.page.locator("#reverse-step-out-debug");
+    return this.page.locator(debugToolbarSelector("reverseStepOut"));
   }
   stepInButton(): Locator {
-    return this.page.locator("#step-in-debug");
+    return this.page.locator(debugToolbarSelector("stepIn"));
   }
   reverseStepInButton(): Locator {
-    return this.page.locator("#reverse-step-in-debug");
+    return this.page.locator(debugToolbarSelector("reverseStepIn"));
   }
   nextButton(): Locator {
-    return this.page.locator("#next-debug");
+    return this.page.locator(debugToolbarSelector("next"));
   }
   reverseNextButton(): Locator {
-    return this.page.locator("#reverse-next-debug");
+    return this.page.locator(debugToolbarSelector("reverseNext"));
   }
   debugControlsRoot(): Locator {
     return this.page
@@ -285,7 +286,9 @@ export class LayoutPage extends BasePage {
       .first();
   }
   jumpToLiveButton(): Locator {
-    return this.page.locator("#jump-to-live-debug, .jump-to-live").first();
+    return this.page
+      .locator(`${debugToolbarSelector("jumpToLive")}, .jump-to-live`)
+      .first();
   }
   async sessionModeAttr(): Promise<string | null> {
     return this.debugControlsRoot().getAttribute("data-session-mode");
@@ -346,40 +349,46 @@ export class LayoutPage extends BasePage {
   }
 
   async clickRunToEntryButton(): Promise<void> {
-    await this.clickDebugButton(this.runToEntryButton(), "run-to-entry-debug");
+    await this.clickDebugButton(
+      this.runToEntryButton(),
+      DEBUG_TOOLBAR_IDS.runToEntry,
+    );
   }
   async clickContinueButton(): Promise<void> {
-    await this.clickDebugButton(this.continueButton(), "continue-debug");
+    await this.clickDebugButton(this.continueButton(), DEBUG_TOOLBAR_IDS.continue);
   }
   async clickReverseContinueButton(): Promise<void> {
     await this.clickDebugButton(
       this.reverseContinueButton(),
-      "reverse-continue-debug",
+      DEBUG_TOOLBAR_IDS.reverseContinue,
     );
   }
   async clickStepOutButton(): Promise<void> {
-    await this.clickDebugButton(this.stepOutButton(), "step-out-debug");
+    await this.clickDebugButton(this.stepOutButton(), DEBUG_TOOLBAR_IDS.stepOut);
   }
   async clickReverseStepOutButton(): Promise<void> {
     await this.clickDebugButton(
       this.reverseStepOutButton(),
-      "reverse-step-out-debug",
+      DEBUG_TOOLBAR_IDS.reverseStepOut,
     );
   }
   async clickStepInButton(): Promise<void> {
-    await this.clickDebugButton(this.stepInButton(), "step-in-debug");
+    await this.clickDebugButton(this.stepInButton(), DEBUG_TOOLBAR_IDS.stepIn);
   }
   async clickReverseStepInButton(): Promise<void> {
     await this.clickDebugButton(
       this.reverseStepInButton(),
-      "reverse-step-in-debug",
+      DEBUG_TOOLBAR_IDS.reverseStepIn,
     );
   }
   async clickNextButton(): Promise<void> {
-    await this.clickDebugButton(this.nextButton(), "next-debug");
+    await this.clickDebugButton(this.nextButton(), DEBUG_TOOLBAR_IDS.next);
   }
   async clickReverseNextButton(): Promise<void> {
-    await this.clickDebugButton(this.reverseNextButton(), "reverse-next-debug");
+    await this.clickDebugButton(
+      this.reverseNextButton(),
+      DEBUG_TOOLBAR_IDS.reverseNext,
+    );
   }
 
   // ---------------------------------------------------------------------------

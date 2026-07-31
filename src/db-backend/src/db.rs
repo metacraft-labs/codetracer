@@ -27,6 +27,24 @@ use crate::value::{Type, Value, ValueRecordWithType};
 
 pub(crate) const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
 
+/// Effective call depth of a step that is not enclosed by any recorded
+/// call (`DbStep.call_key` resolves to no `DbCall` — typically
+/// `CallKey(NO_KEY)`).
+///
+/// Such FRAMELESS steps are normal in event-driven runtimes: the
+/// JavaScript recorder emits them for the bootstrap steps that precede
+/// the `<module>` frame and for the event-loop-level steps between one
+/// callback returning and the next being entered.  They belong to the
+/// trace's outermost level — the same level as the `<module>` call and
+/// as every callback the loop invokes, all of which are recorded with
+/// `depth = 0` and `parent = CallKey(NO_KEY)`.  Treating them as depth
+/// `0` therefore makes the depth-filtered navigation primitives
+/// (`next` / `step out`) behave at a frameless step exactly as they do
+/// at an outermost frame, instead of reporting "no successor".
+///
+/// Spec: `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org` §M50.
+pub(crate) const OUTERMOST_CALL_DEPTH: i64 = 0;
+
 #[derive(Debug, Clone)]
 pub struct Db {
     pub workdir: PathBuf,
@@ -372,16 +390,14 @@ impl Db {
             );
             return start_step_id;
         };
-        let Some(initial_call) = self.calls.get(initial_step.call_key) else {
-            warn!(
-                "step_over_depths_step_id: call_key {:?} for step {:?} is out of bounds (calls len {})",
-                initial_step.call_key,
-                start_step_id,
-                self.calls.len()
-            );
-            return start_step_id;
+        // A step whose `call_key` resolves to no recorded call is FRAMELESS,
+        // not a dead end — see [`OUTERMOST_CALL_DEPTH`] for why event-driven
+        // recorders emit such steps and why their effective depth is 0.
+        // Mirrors `TraceReader::step_over_depths_step_id`.
+        let initial_call_depth: i64 = match self.calls.get(initial_step.call_key) {
+            Some(call) => call.depth as i64,
+            None => OUTERMOST_CALL_DEPTH,
         };
-        let initial_call_depth = initial_call.depth;
         let mut current_step_id = start_step_id;
 
         for new_step in self.step_from(start_step_id, forward) {
@@ -405,7 +421,7 @@ impl Db {
 
             // depth - delta can be < 0: we did get
             // such an underflow crash => compare as i64
-            if (new_call.depth as i64) <= (initial_call_depth as i64) - (delta as i64) {
+            if (new_call.depth as i64) <= initial_call_depth - (delta as i64) {
                 // we're on a more shallow place than
                 // the initial with a delta
                 //

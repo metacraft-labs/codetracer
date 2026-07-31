@@ -14,41 +14,16 @@
 ## modules — those live in the codetracer-native-recorder repo. We rely solely
 ## on the 5-byte CTFS magic header to identify MCR traces.
 
-import std/[os, osproc, strutils, strformat]
+import
+  std/[os, osproc, strutils, strformat],
+  ../trace/trace_container
 
-const
-  ## CTFS container magic bytes.
-  ## Reference: codetracer-native-recorder/ct_recorder/src/ct_recorder/ctfs_nim.nim
-  CtfsMagic*: array[5, byte] = [0xC0'u8, 0xDE, 0x72, 0xAC, 0xE2]
-
-proc hasCtfsMagic(path: string): bool =
-  ## Read the first 5 bytes of `path` and check against the CTFS magic.
-  ## Returns false if the file is too small, unreadable, or does not match.
-  var f: File
-  if not open(f, path, fmRead):
-    return false
-  defer: f.close()
-  var buf: array[5, byte]
-  let bytesRead = f.readBytes(buf, 0, 5)
-  if bytesRead < 5:
-    return false
-  buf[0] == CtfsMagic[0] and
-  buf[1] == CtfsMagic[1] and
-  buf[2] == CtfsMagic[2] and
-  buf[3] == CtfsMagic[3] and
-  buf[4] == CtfsMagic[4]
-
-proc findCtFileInFolder*(folder: string): string =
-  ## Scan `folder` for a file ending in `.ct` that has the CTFS magic header.
-  ## Returns the path to the first matching file, or "" if none found.
-  ## Only checks immediate children (not recursive).
-  if not dirExists(folder):
-    return ""
-  for kind, path in walkDir(folder):
-    if kind in {pcFile, pcLinkToFile}:
-      if path.endsWith(".ct") and hasCtfsMagic(path):
-        return path
-  return ""
+# CTFS magic detection and container lookup used to be duplicated here.
+# There is now a single implementation in ``trace/trace_container`` —
+# the module that owns "what shape is this recording folder?" — and this
+# module re-exports it so existing callers (and
+# ``test_mcr_enrichment.nim``) keep their import surface.
+export CtfsMagic, hasCtfsMagic, findCtFileInFolder
 
 proc findCtMcrBinary*(): string =
   ## Locate the ct-mcr binary. Search order:

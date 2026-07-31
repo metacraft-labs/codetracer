@@ -2282,6 +2282,77 @@ impl Handler {
     /// Used by `event_load()` and other handlers that need the full set of
     /// events.  `load_terminal()` uses a separate fast path
     /// (`ensure_terminal_events_loaded`) that avoids loading all events.
+    /// Collect the correlation markers this recording carries.
+    ///
+    /// Markers reach a trace two different ways, and the cross-process
+    /// composer needs both:
+    ///
+    /// * **Recorder-emitted** — the program called the marker API
+    ///   (`__ct.markCorrelation` and its per-language equivalents), so the
+    ///   marker is an ordinary event in the recorded event log. This is
+    ///   the path every recorder uses today.
+    /// * **Replay-evaluated** — a marker declared as a source comment
+    ///   becomes a hidden tracepoint that fires during replay, landing in
+    ///   `firings_by_source_location`.
+    ///
+    /// Only the second was wired up originally, which meant a recording
+    /// whose markers came from the API had an empty pair index: the
+    /// origin chain would walk correctly right up to the boundary and
+    /// then stop, with nothing to explain why. Scanning the event log
+    /// here is what makes recorder-emitted markers count.
+    ///
+    /// Takes `&mut self` because the event log is loaded lazily.
+    pub fn correlation_markers(&mut self, recording_id: &str) -> Vec<crate::correlation_index::MarkerEventView> {
+        use crate::correlation_index::MarkerEventView;
+        use crate::correlation_markers::MarkerPayload;
+
+        let mut out: Vec<MarkerEventView> = Vec::new();
+
+        // Replay-evaluated markers (hidden tracepoint firings).
+        for (_, firings) in self.event_db.firings_by_source_location.iter() {
+            for firing in firings {
+                let Some(event) = self.event_db.program_event_at(firing) else {
+                    continue;
+                };
+                let Some(payload) = MarkerPayload::decode(&event.metadata) else {
+                    continue;
+                };
+                out.push(MarkerEventView::new(
+                    recording_id,
+                    firing.step_id.0,
+                    event.high_level_path.clone(),
+                    event.high_level_line.max(0) as usize,
+                    payload,
+                ));
+            }
+        }
+
+        // Recorder-emitted markers (recorded event log). Loading the log
+        // can fail on a partially-written trace; that is not a reason to
+        // fail the whole origin query, so we log and carry on with
+        // whatever markers we do have.
+        if let Err(err) = self.ensure_events_loaded() {
+            log::warn!("correlation markers: could not load the event log: {err}");
+            return out;
+        }
+        if let Some(events) = self.cached_events.as_ref() {
+            for event in events {
+                let Some(payload) = MarkerPayload::decode(&event.metadata) else {
+                    continue;
+                };
+                out.push(MarkerEventView::new(
+                    recording_id,
+                    event.direct_location_rr_ticks,
+                    event.high_level_path.clone(),
+                    event.high_level_line.max(0) as usize,
+                    payload,
+                ));
+            }
+        }
+
+        out
+    }
+
     fn ensure_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
         if self.cached_events.is_none() || self.is_live_recreator_session() {
             let events_data = self.replay.load_events()?;
@@ -2769,13 +2840,22 @@ impl Handler {
     // recreator sessions return DAP error 6103 until M11 / M18.
     // -----------------------------------------------------------------
 
-    /// Dispatch handler for `ct/originChain` (spec §5.3).
-    pub fn origin_chain(
+    /// Normalise `args` and derive the per-request budget the way
+    /// [`Self::origin_chain`] does, then run the per-backend single-trace
+    /// algorithm and return the chain **without** touching the DAP wire.
+    ///
+    /// Factored out of [`Self::origin_chain`] so the session-level
+    /// cross-process router
+    /// ([`crate::dap_server::handle_origin_chain_via_session`]) can drive
+    /// the very same computation on a sibling trace's `Handler` while
+    /// composing a multi-recording chain. Keeping one implementation is
+    /// what makes the cross-process chain's sibling hops identical to the
+    /// hops a direct single-trace query on that sibling would produce.
+    pub fn compute_origin_chain(
         &mut self,
-        req: dap::Request,
-        mut args: task::CtOriginChainArguments,
-        sender: Sender<DapMessage>,
-    ) -> Result<(), Box<dyn Error>> {
+        args: &task::CtOriginChainArguments,
+    ) -> Result<task::OriginChain, crate::origin_query::OriginError> {
+        let mut args = args.clone();
         if args.step_id < 0 && self.trace_kind != TraceKind::Recreator {
             args.step_id = self.step_id.0;
         }
@@ -2797,7 +2877,7 @@ impl Handler {
         if self.trace_kind == TraceKind::Emulator && budget.max_hops > crate::emulator_origin::MCR_DEFAULT_MAX_HOPS {
             budget.max_hops = crate::emulator_origin::MCR_DEFAULT_MAX_HOPS;
         }
-        let result = match self.trace_kind {
+        match self.trace_kind {
             TraceKind::Materialized => {
                 let patterns = self.load_origin_patterns();
                 let meta_dat_sources_root = self.meta_dat_sources_root();
@@ -2809,7 +2889,21 @@ impl Handler {
                 let meta_dat_sources_root = self.meta_dat_sources_root();
                 self.recreator_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
             }
-        };
+        }
+    }
+
+    /// Send an already-computed chain back over the DAP wire, emitting
+    /// the companion `ct/updated-origin-chain` event first.
+    ///
+    /// Split out of [`Self::origin_chain`] so the session-level
+    /// cross-process router can reuse the identical response shape after
+    /// the composer has extended the chain across recordings.
+    pub fn respond_origin_chain(
+        &mut self,
+        req: dap::Request,
+        result: Result<task::OriginChain, crate::origin_query::OriginError>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
         match result {
             Ok(chain) => {
                 // Emit the `ct/updated-origin-chain` event alongside the
@@ -2825,6 +2919,23 @@ impl Handler {
                 Ok(())
             }
         }
+    }
+
+    /// Dispatch handler for `ct/originChain` (spec §5.3).
+    ///
+    /// This is the **single-trace** entry point. Multi-recording sessions
+    /// are intercepted one level up in
+    /// [`crate::dap_server::handle_request_via_session`], which runs the
+    /// same computation and then applies the §14.3 cross-process clause
+    /// before responding.
+    pub fn origin_chain(
+        &mut self,
+        req: dap::Request,
+        args: task::CtOriginChainArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let result = self.compute_origin_chain(&args);
+        self.respond_origin_chain(req, result, sender)
     }
 
     /// Dispatch handler for `ct/originSummary` — batch placeholder fill

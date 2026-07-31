@@ -270,7 +270,7 @@ test.describe("MacroExpansionStepping", () => {
     const beforeLocation = await waitForStatusBarLocation(statusBar);
 
     // Step forward through the expanded macro code.
-    const nextBtn = ctPage.locator("#next-debug");
+    const nextBtn = ctPage.locator("#next-image");
     await nextBtn.click();
     await waitForReadyStatus(ctPage);
 
@@ -371,7 +371,7 @@ test.describe("MacroExpansionStepping", () => {
     }
 
     // Step forward a couple of times in expanded code.
-    const nextBtn = ctPage.locator("#next-debug");
+    const nextBtn = ctPage.locator("#next-image");
     await nextBtn.click();
     await waitForReadyStatus(ctPage);
     await nextBtn.click();

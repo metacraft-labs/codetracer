@@ -196,6 +196,11 @@ template renderMarkerRowImpl(r, vm, item: untyped): untyped =
   ## formatted show value, and the counterpart-set indicator. Each
   ## attribute is reactive on the row's signal — the data binding is
   ## entirely declarative.
+  ##
+  ## §5.3 — the boundary chip is the jump control. Clicking it walks
+  ## to this firing's counterpart on the other side of the boundary,
+  ## rotating the session's active recording when the counterpart
+  ## lives in a sibling trace.
   ui(r):
     tdiv(class = "marker-row marker-direction-" & directionWireText(item().direction),
          `data-marker-id` = $item().markerId,
@@ -206,7 +211,8 @@ template renderMarkerRowImpl(r, vm, item: untyped): untyped =
          `data-step-id` = $item().stepId):
       span(class = "marker-direction-icon"):
         text directionDisplayIcon(item().direction)
-      span(class = "marker-boundary-chip"):
+      span(class = "marker-boundary-chip",
+           onclick = proc() = vm.jumpToCounterpartOf(item())):
         text markerBoundaryChip(item())
       span(class = "marker-show-value"):
         text formatShowValue(item())

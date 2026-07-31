@@ -1,0 +1,16 @@
+# Build intermediates produced by regenerate.sh.
+#
+# The three `.ct` directories and `session.toml` ARE committed — they are
+# the recordings the tests consume, and re-recording them on every CI run
+# would make the suite depend on a full browser + Rust toolchain. These
+# entries are the artefacts used to *produce* those recordings, which are
+# reproducible from source and would otherwise add tens of megabytes.
+frontend/node_modules/
+frontend/dist/
+frontend/package-lock.json
+frontend/balance_calc.wasm
+frontend/balance_calc.wasm.manifest.json
+wasm-src/target/
+
+# Dropped into the directory by the nix dev shell's git hooks.
+.pre-commit-config.yaml
