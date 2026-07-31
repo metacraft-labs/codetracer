@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# `rust-lld`, with rustc's automatic `--export <symbol>` pairs dropped.
+#
+# Used only for `pair_stats`. Its multi-value export is written in
+# WebAssembly assembly (`wrap.s`) and calls a Rust function,
+# `sample_packed`, that must NOT itself be exported: an exported function
+# called from inside another exported function is recorded as a *nested
+# export crossing*, which spec §8 refuses to replay because driving it
+# would need the host's own control flow.
+#
+# There is no `rustc` flag for that. `rustc --print link-args` shows it
+# passing a bare two-token `"--export" "<symbol>"` for every `#[no_mangle]`
+# item in the crate, and neither dropping `pub` nor `.hidden` in the
+# assembly nor `--no-export-dynamic` suppresses it — all three measured.
+# The `=`-spelled exports rustc adds for `__heap_base` / `__data_end` are
+# left alone, because they are data globals rather than functions and so
+# are not boundaries.
+#
+# The build then asks for the one export it does want with
+# `-C link-arg=--export=sample_pair`.
+set -euo pipefail
+
+args=()
+skip=0
+for arg in "$@"; do
+	if [ "$skip" = 1 ]; then
+		skip=0
+		continue
+	fi
+	if [ "$arg" = "--export" ]; then
+		skip=1
+		continue
+	fi
+	args+=("$arg")
+done
+
+# `rustc` prepends its own `rustlib/<host>/bin` to PATH before invoking
+# the linker, so the real `rust-lld` is found here without a path.
+exec rust-lld "${args[@]}"

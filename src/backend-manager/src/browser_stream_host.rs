@@ -500,6 +500,47 @@ const HOST_STATE_FILE_NAME: &str = "boundary_state.json";
 /// to the cause.  Bumping this therefore means bumping it there too.
 const HOST_STATE_VERSION: u32 = 1;
 
+/// `boundary_id` of the in-stream spec §3.3 / §3.4 records (M44b).
+///
+/// Deliberately not `js-wasm-realm`: a reader of the realm markers must
+/// not have to tell these apart from a crossing marker, and the consumer's
+/// `parseRealmMarker` rejects this one on the `boundary_id` check alone.
+///
+/// Must match `hostStateBoundary` in
+/// `codetracer-wasm-recorder/internal/boundarylog/hoststate.go`.
+const HOST_STATE_BOUNDARY_ID: &str = "wasm-host-state";
+
+/// The two in-stream record kinds.  Must match `hostStateRecordInitial` /
+/// `hostStateRecordMutation` in the consumer.
+const HOST_STATE_RECORD_INITIAL: &str = "initial";
+const HOST_STATE_RECORD_MUTATION: &str = "mutation";
+
+/// Render one in-stream host-state record's `metadata` document.
+///
+/// The payload rides in `metadata` as a nested JSON string, which is the
+/// shape the realm and correlation markers on this path already use: it is
+/// the only field of `RecordEvent` a producer can put structure into
+/// without inventing a record type every existing reader would have to
+/// learn.
+///
+/// `field` is the key the payload lands under (`initial` or `mutation`),
+/// so the consumer can decode straight into its own schema types rather
+/// than into a variant wrapper.
+fn host_state_marker_metadata<T: Serialize>(
+    record: &str,
+    field: &str,
+    payload: &T,
+) -> io::Result<String> {
+    let document = serde_json::json!({
+        "boundary_id": HOST_STATE_BOUNDARY_ID,
+        "version": HOST_STATE_VERSION,
+        "record": record,
+        field: payload,
+    });
+    serde_json::to_string(&document)
+        .map_err(|e| io::Error::other(format!("host state marker serialisation: {e}")))
+}
+
 /// `boundary_state.json` as it is written.
 ///
 /// Mirrors `HostState` in the consumer, field for field.  `tables` is
@@ -1024,19 +1065,52 @@ impl JsonFileCtfsWriter {
             // --- spec §3.3 / §3.4: host-supplied state ------------------
             //
             // These describe the module's *starting state* and what the
-            // host did to it during a host call.  Neither is something
-            // that happened at a step, so neither becomes a
-            // `TraceLowLevelEvent`: emitting one would put a record into
-            // `trace.json` that the boundary-log assembler would then have
-            // to learn to skip, and would shift nothing but risk.  They go
-            // into the `boundary_state.json` sidecar instead.
+            // host did to it during a host call.  They are written twice,
+            // and the two carriers are for two different consumers:
+            //
+            //   * the `boundary_state.json` sidecar, which a **batch**
+            //     replay of a finished recording reads at startup.  This
+            //     is what M44 built and it is unchanged.
+            //   * one `Event` record apiece, appended to `trace.json` at
+            //     the moment the record arrives, which is the only thing
+            //     a **streaming** consumer can use (M44b).
+            //
+            // The second was originally left out on the reasoning that it
+            // "would put a record into `trace.json` that the boundary-log
+            // assembler would then have to learn to skip".  That is true
+            // and it is the wrong trade: `--boundary-stream` reads
+            // `LoadRecordingMetadata` once, at startup, and the sidecar
+            // cannot exist then — §3.3 is only known at the first exported
+            // call, which happens after the daemon opened the stream and
+            // spawned its consumer.  The consequence was that the whole
+            // streaming pipeline refused every module whose linear memory
+            // is imported: every Stylus contract, every `wasm-bindgen`
+            // glue layer.
+            //
+            // A re-read protocol would not have fixed it either, and not
+            // merely because it is late: `write_host_state` calls
+            // `open_stream`, and `open_stream` is what *spawns* the
+            // consumer, so the consumer's first read races the sidecar's
+            // first write.  Carrying the record in the stream has no such
+            // window, and puts §3.3 in the one place where its position
+            // relative to the first call is unambiguous.
+            //
+            // Nothing downstream had to learn anything: `Event` is an open
+            // extension point on this path (`parseRealmMarker` in
+            // `internal/boundarylog/recording.go` returns "not mine" for a
+            // `boundary_id` it does not know, and the JS recorder already
+            // puts HTTP and other domain markers into its recordings), so
+            // an older `wazero`, `ct-print` and the db-backend all skip
+            // these records.
             BrowserEvent::HostInitialState { memories, globals } => {
                 if self.host_state.initial_seen {
                     // The producer emits this once, immediately before the
                     // first exported call.  A second one would mean two
                     // recordings were spliced together; keeping the first
                     // is the only reading that stays true to the calls
-                    // already written.
+                    // already written.  Nothing is emitted into the stream
+                    // either, so the stream and the sidecar keep saying
+                    // the same thing — the consumer cross-checks them.
                     log::warn!(
                         "browser-stream writer: ignoring a second HostInitialState event; \
                          spec §3.3 state is the state before the FIRST exported call"
@@ -1045,6 +1119,16 @@ impl JsonFileCtfsWriter {
                     self.host_state.initial_seen = true;
                     self.host_state.initial.memories = memories.clone();
                     self.host_state.initial.globals = globals.clone();
+                    let metadata = host_state_marker_metadata(
+                        HOST_STATE_RECORD_INITIAL,
+                        "initial",
+                        &self.host_state.initial,
+                    )?;
+                    self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                        kind: EVENT_KIND_TRACE_LOG_EVENT,
+                        metadata,
+                        content: String::new(),
+                    }))?;
                 }
                 self.write_host_state()?;
             }
@@ -1053,11 +1137,23 @@ impl JsonFileCtfsWriter {
                 memory_writes,
                 global_sets,
             } => {
-                self.host_state.mutations.push(HostMutationRecord {
+                let record = HostMutationRecord {
                     after_crossing: *after_crossing,
                     memory_writes: memory_writes.clone(),
                     global_sets: global_sets.clone(),
-                });
+                };
+                let metadata =
+                    host_state_marker_metadata(HOST_STATE_RECORD_MUTATION, "mutation", &record)?;
+                // Emitted BEFORE the sidecar is rewritten, and before the
+                // import's own `LEAVE` realm marker reaches the stream, so
+                // a streaming consumer has the write in hand at the moment
+                // it services the crossing the write is anchored to.
+                self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                    kind: EVENT_KIND_TRACE_LOG_EVENT,
+                    metadata,
+                    content: String::new(),
+                }))?;
+                self.host_state.mutations.push(record);
                 self.write_host_state()?;
             }
             // Lifecycle events are handled in the trait impls below.
@@ -2045,7 +2141,7 @@ mod tests {
     /// Deliberately dumb and self-contained: its whole job is to hand
     /// [`RecordStream`] the *original file's* bytes rather than anything
     /// this crate re-rendered.
-    fn split_top_level_records(bytes: &[u8]) -> Vec<&[u8]> {
+    pub(super) fn split_top_level_records(bytes: &[u8]) -> Vec<&[u8]> {
         assert_eq!(bytes.first(), Some(&b'['), "not a JSON array");
         assert_eq!(bytes.last(), Some(&b']'), "unterminated JSON array");
         let mut records = Vec::new();
@@ -2741,37 +2837,125 @@ mod host_state_tests {
     }
 
     #[test]
-    fn host_state_events_add_nothing_to_the_trace_stream() {
-        // The sidecar describes the module's starting state, not a step.
-        // A record in `trace.json` would have to be skipped by the
-        // boundary-log assembler, and every `Function` / `VariableName` /
-        // `Path` index downstream of it is positional.
+    fn host_state_events_ride_in_the_trace_stream_and_disturb_nothing_else() {
+        // M44b. This test replaces `host_state_events_add_nothing_to_the_
+        // trace_stream`, which asserted the opposite — that a host-state
+        // event changed `trace.json` by not one byte.
+        //
+        // That was the right call under M44's assumptions and the wrong
+        // one overall. The sidecar it left as the only carrier is a file,
+        // and a file is exactly what a streaming consumer cannot use:
+        // `--boundary-stream` reads its metadata once, at startup, and
+        // §3.3 state is only known at the module's first exported call —
+        // after the daemon opened the stream and spawned the consumer. The
+        // whole streaming pipeline therefore refused every module whose
+        // linear memory is imported.
+        //
+        // The concern behind the old test was real and is preserved here
+        // in the form that actually states it: the reason a new record was
+        // risky is that `Function` / `VariableName` / `Path` are POSITIONAL
+        // tables, so anything that renumbers them silently breaks every
+        // lookup downstream. An `Event` record joins none of those tables,
+        // and the second assertion below proves it rather than assuming
+        // it — remove the host-state records from the new document and the
+        // remaining bytes are the old document, exactly.
         let tmp = TempDir::new().unwrap();
         let mut writer = writer_in(&tmp);
         writer.session_start("frontend-wasm", &[]).unwrap();
         writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        let dir = {
-            writer
-                .event(&parse_event_line(INITIAL_LINE).unwrap())
-                .unwrap();
-            writer
-                .event(&parse_event_line(MUTATION_LINE).unwrap())
-                .unwrap();
-            writer.session_end().unwrap()
-        };
+        writer
+            .event(&parse_event_line(INITIAL_LINE).unwrap())
+            .unwrap();
+        writer
+            .event(&parse_event_line(MUTATION_LINE).unwrap())
+            .unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let dir = writer.session_end().unwrap();
         let with_state = std::fs::read_to_string(dir.join("trace.json")).unwrap();
 
+        // (1) The records are there, in order, in the consumer's schema.
+        let records: Vec<serde_json::Value> = serde_json::from_str(&with_state).unwrap();
+        let host_state: Vec<&serde_json::Value> = records
+            .iter()
+            .filter(|r| {
+                r.get("Event")
+                    .and_then(|e| e.get("metadata"))
+                    .and_then(|m| m.as_str())
+                    .is_some_and(|m| m.contains(HOST_STATE_BOUNDARY_ID))
+            })
+            .collect();
+        assert_eq!(
+            host_state.len(),
+            2,
+            "one Event per host-state message, no more and no fewer"
+        );
+
+        let initial: serde_json::Value =
+            serde_json::from_str(host_state[0]["Event"]["metadata"].as_str().unwrap()).unwrap();
+        assert_eq!(initial["boundary_id"], HOST_STATE_BOUNDARY_ID);
+        assert_eq!(initial["version"], HOST_STATE_VERSION);
+        assert_eq!(initial["record"], HOST_STATE_RECORD_INITIAL);
+        // The payload is the sidecar's `initial` document, field for field
+        // — the consumer decodes both into the same `InitialState`.
+        assert_eq!(initial["initial"]["memories"][0]["name"], "memory");
+        assert_eq!(initial["initial"]["memories"][0]["minPages"], 17);
+        assert_eq!(initial["initial"]["memories"][0]["data"][0]["bytesB64"], "BwAAAGQ=");
+        assert_eq!(initial["initial"]["globals"][0]["value"], "25");
+        assert_eq!(initial["initial"]["tables"], serde_json::json!([]));
+
+        let mutation: serde_json::Value =
+            serde_json::from_str(host_state[1]["Event"]["metadata"].as_str().unwrap()).unwrap();
+        assert_eq!(mutation["record"], HOST_STATE_RECORD_MUTATION);
+        assert_eq!(mutation["mutation"]["afterCrossing"], 1);
+        assert_eq!(mutation["mutation"]["memoryWrites"][0]["bytesB64"], "+g==");
+        assert_eq!(mutation["mutation"]["globalSets"][0]["value"], "250");
+
+        // (2) Nothing else moved. The same session without the host-state
+        // events must be exactly what remains after the host-state records
+        // are removed — same records, same order, same bytes.
         let tmp2 = TempDir::new().unwrap();
         let mut plain = writer_in(&tmp2);
         plain.session_start("frontend-wasm", &[]).unwrap();
         plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
         let dir2 = plain.session_end().unwrap();
         let without_state = std::fs::read_to_string(dir2.join("trace.json")).unwrap();
 
-        assert_eq!(
-            with_state, without_state,
-            "host-state events must not change trace.json by one byte"
+        // Compared as the ORIGINAL bytes, not as re-serialised values:
+        // `serde_json::Value` is a sorted map, so a round trip through it
+        // would normalise key order and hide exactly the kind of change
+        // this assertion exists to catch.
+        let raw_records = super::tests::split_top_level_records(with_state.as_bytes());
+        let kept: Vec<&[u8]> = raw_records
+            .into_iter()
+            .filter(|r| {
+                !std::str::from_utf8(r)
+                    .unwrap()
+                    .contains(HOST_STATE_BOUNDARY_ID)
+            })
+            .collect();
+        let rejoined = format!(
+            "[{}]",
+            kept.iter()
+                .map(|r| std::str::from_utf8(r).unwrap())
+                .collect::<Vec<_>>()
+                .join(",")
         );
+        assert_eq!(
+            rejoined, without_state,
+            "removing the host-state records must leave the document a \
+             recording without host state produces, byte for byte"
+        );
+
+        // (3) And the sidecar still says the same thing, because it is a
+        // rendering of these records rather than a second source of truth.
+        // The consumer refuses a recording whose two carriers disagree.
+        let sidecar: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar["initial"], initial["initial"]);
+        assert_eq!(sidecar["mutations"][0], mutation["mutation"]);
     }
 
     #[test]
