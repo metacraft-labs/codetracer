@@ -299,12 +299,21 @@ proc importTrace*(
     raise newException(IOError,
       "importTrace: " & describeMissingTraceContainer(traceFolder))
 
+  # The folder the recording payload actually lives in.  This is
+  # ``traceFolder`` itself in every case except the one-level descent
+  # `detectTraceFolderShape` performs for the recorders that treat
+  # ``--out-dir`` as the recording's PARENT (codetracer-js-recorder's
+  # ``trace-<n>/``, codetracer-php-recorder's ``worker_<pid>/``).  Reading
+  # the payload from ``traceFolder`` there would look for sidecars one
+  # directory above the ones the detector just matched.
+  let recordingSourceFolder = shape.folder
+
   let ctPath = if shape.kind == TraceShapeCtfs: shape.path else: ""
   let meta =
     if shape.kind == TraceShapeCtfs:
       readCtfsMetaDat(ctPath)
     else:
-      readMaterializedTraceMeta(traceFolder)
+      readMaterializedTraceMeta(recordingSourceFolder)
   let program = meta.program
   var args = meta.args
   var workdir = meta.workdir
@@ -355,7 +364,7 @@ proc importTrace*(
       # engine autodetects ``trace.json`` / ``trace.bin`` in the
       # recording folder exactly as it does in the recorder's output
       # folder (``dap_server.rs::auto_detect_materialized_trace_file``).
-      copyMaterializedTracePayload(traceFolder, outputFolder)
+      copyMaterializedTracePayload(recordingSourceFolder, outputFolder)
 
   let paths: seq[string] = meta.paths
 
@@ -364,9 +373,9 @@ proc importTrace*(
     else:
       detectTraceLang(program, paths, traceKind)
 
-  if dirExists(traceFolder / "files"):
-    if traceFolder != outputFolder:
-      copyDir(traceFolder / "files", outputFolder / "files")
+  if dirExists(recordingSourceFolder / "files"):
+    if recordingSourceFolder != outputFolder:
+      copyDir(recordingSourceFolder / "files", outputFolder / "files")
       # The self-contained ``files/`` payload is only browsable if the
       # frontend can map trace path indices onto it.  ``importTraceFolder``
       # / ``importCtFile`` run ``materializeCtfsSources`` +
@@ -376,9 +385,10 @@ proc importTrace*(
       # ``loadFilenames`` finds it next to the copied ``files/`` payload
       # — without it the frontend falls back to the absolute recorder-
       # side paths and fails to open bundled sources on another machine.
-      if fileExists(traceFolder / "paths.json") and
+      if fileExists(recordingSourceFolder / "paths.json") and
           not fileExists(outputFolder / "paths.json"):
-        copyFile(traceFolder / "paths.json", outputFolder / "paths.json")
+        copyFile(recordingSourceFolder / "paths.json",
+                 outputFolder / "paths.json")
   elif selfContained and downloadUrl == "":
     # for now assuming if no `files/` dir already,
     # it happens on the original machine

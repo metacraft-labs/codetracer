@@ -145,7 +145,8 @@ proc findSessionManifestInFolder*(folder: string): string =
     return candidate
   ""
 
-proc detectTraceFolderShape*(folder: string, allowSession: bool = true): TraceFolderShape =
+proc detectTraceFolderShape*(folder: string, allowSession: bool = true,
+                             descend: bool = true): TraceFolderShape =
   ## Classify `folder`.
   ##
   ## Order matters: a session manifest wins over any single recording
@@ -158,6 +159,36 @@ proc detectTraceFolderShape*(folder: string, allowSession: bool = true): TraceFo
   ##
   ## CTFS wins over the materialized shape so that a recording carrying
   ## both keeps its container as the source of truth (M-REC-1.5).
+  ##
+  ## ``descend``: when the folder itself holds no recording, look one
+  ## level below it.  Some recorders treat ``--out-dir`` as the PARENT of
+  ## the recording rather than the recording itself:
+  ##
+  ## * codetracer-js-recorder writes ``<out-dir>/trace-<n>/`` (which is
+  ##   why `just demo-request-panel js` has to `find` for ``trace-*`` and
+  ##   leave the path in a ``.trace_dir`` marker file);
+  ## * codetracer-php-recorder writes ``<out-dir>/worker_<pid>/`` when it
+  ##   is recording a multi-worker server (`just demo-request-panel php`
+  ##   reads its ``.worker_dir`` marker for the same reason).
+  ##
+  ## Without this ``ct record app.js`` recorded successfully and then
+  ## died in `importTrace` with "no recording found", because the
+  ## container was one directory deeper than the search looked.
+  ##
+  ## Descent is deliberately constrained in two ways, because "look
+  ## harder" is exactly the change that can silently open a *fraction* of
+  ## a multi-recording session:
+  ##
+  ## * it never happens in a folder carrying a ``session.toml``, even
+  ##   under ``allowSession = false``.  The session fixtures put a real
+  ##   CTFS container at ``backend.ct/server.ct`` and materialized
+  ##   recordings at ``frontend.ct/``, so an unguarded one-level search
+  ##   finds exactly one container there and would open the backend alone
+  ##   — the whole regression the manifest exists to prevent;
+  ## * exactly one nested recording is unambiguous.  Several means the
+  ##   folder holds several recordings (a recorded server with several
+  ##   workers), and picking one arbitrarily would silently open the
+  ##   wrong one — the caller has to say which.
   if allowSession:
     let manifest = findSessionManifestInFolder(folder)
     if manifest.len > 0:
@@ -172,6 +203,25 @@ proc detectTraceFolderShape*(folder: string, allowSession: bool = true): TraceFo
   if eventFile.len > 0:
     return TraceFolderShape(
       kind: TraceShapeMaterialized, path: eventFile, folder: folder)
+
+  # Last resort only: everything above looked at `folder` itself.
+  if descend and dirExists(folder) and
+      findSessionManifestInFolder(folder).len == 0:
+    var nested: seq[TraceFolderShape] = @[]
+    for kind, path in walkDir(folder):
+      if kind notin {pcDir, pcLinkToDir}:
+        continue
+      # `descend = false`: one level, never a recursive crawl.  A nested
+      # `session.toml` is a session in its own right and is reported as
+      # such rather than being flattened into one of its members.
+      let inner = detectTraceFolderShape(
+        path, allowSession = true, descend = false)
+      if inner.kind != TraceShapeMissing:
+        nested.add(inner)
+        if nested.len > 1:
+          break
+    if nested.len == 1:
+      return nested[0]
 
   TraceFolderShape(kind: TraceShapeMissing, path: "", folder: folder)
 
@@ -205,7 +255,27 @@ proc describeMissingTraceContainer*(folder: string): string =
     "container file, a materialized recording (" &
     MATERIALIZED_TRACE_EVENT_FILES.join(" or ") & "), or a `" &
     SESSION_MANIFEST_FILE & "` session manifest"
-  if ctDirs.len > 0:
+  # `detectTraceFolderShape` also searched one level down (for the
+  # recorders whose --out-dir names the recording's parent), and treats
+  # several nested recordings as ambiguous rather than picking one.  When
+  # that is why detection failed, saying so is far more useful than
+  # listing the folder's contents: the fix is to name the exact recording.
+  var nestedRecordings: seq[string] = @[]
+  for kind, path in walkDir(folder, relative = true):
+    if kind notin {pcDir, pcLinkToDir}:
+      continue
+    if detectTraceFolderShape(folder / path, allowSession = true,
+                              descend = false).kind != TraceShapeMissing:
+      nestedRecordings.add(path)
+  sort(nestedRecordings)
+
+  if nestedRecordings.len > 1:
+    result.add("; found " & $nestedRecordings.len & " recordings one level " &
+      "below it (" & nestedRecordings.join(", ") & ") — that is ambiguous, " &
+      "so pass the exact recording (e.g. `--trace-path " &
+      folder / nestedRecordings[0] & "`), or describe them together with a `" &
+      SESSION_MANIFEST_FILE & "` in " & folder)
+  elif ctDirs.len > 0:
     result.add("; found the directory(-ies) " & ctDirs.join(", ") &
       " whose name ends in `.ct` but which are not container files — " &
       "a multi-recording session must be described by a `" &

@@ -151,6 +151,37 @@ const
     "src/tests/gui/tests/request-panel/request_span_conformance_test.nim",
   ]
 
+  CliRecordGateTests* = [
+    # The `ct record` CLI dispatch lane.  Same contract as
+    # `CoreViewModelGateTests` above — this array is the registry that says
+    # these files must exist and must not be skip-disabled — but a DIFFERENT
+    # runner: they are not ViewModel tests, so `just test-vm-native`'s
+    # `find src/tests/gui/tests` glob does not reach them.  `just
+    # test-cli-record` is what compiles and runs them.
+    #
+    # They exist because language detection and recorder dispatch were two
+    # unconnected tables: `common/lang.nim` mapped `.php` → LangPhp, `.ex`/
+    # `.exs` → LangElixir and `.erl` → LangErlang and marked all three
+    # `usesMaterializedTraces`, while the dispatch chain in
+    # `src/ct/db_backend_record.nim` had an arm for none of them — so
+    # `ct record app.php` printed "ERROR: unsupported trace kind db" and
+    # exited **0**.  The same chain spawned several recorders without
+    # checking the PATH lookup had succeeded, so a missing recorder produced
+    # a registered trace for a recording that never ran.
+    #
+    # The pure table test asserts the selection and the argv for every
+    # materialized-trace language, including the invariant that closes the
+    # gap (a language that claims `usesMaterializedTraces` must have a
+    # dispatch arm).  Because a wrong-but-consistent table would pass that,
+    # the other two run the SHIPPED `ct` binary: one with the recorders
+    # removed from its environment, asserting the failure is non-zero and
+    # names both the language and the remedy; one against the real recorder
+    # siblings, asserting a real CTFS container comes out.
+    "src/tests/cli/record_dispatch_test.nim",
+    "src/tests/cli/record_missing_recorder_test.nim",
+    "src/tests/cli/record_dispatch_e2e_test.nim",
+  ]
+
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
     GuiActionGateEntry(
       action: "ct.test.run",

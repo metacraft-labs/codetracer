@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, sequtils, strtabs, strformat, json, options],
+import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, options],
   multitrace,
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
@@ -180,6 +180,26 @@ proc storeTraceFolderInfoForPid(traceId: string, traceFolder: string, pid: int) 
   createDir(pidFolder)
   writeFile(pidFolder / fmt"trace-{traceId}", traceFolder)
 
+proc streamRecorderOutput(p: Process): tuple[lines: seq[string], exitCode: int] =
+  ## Relay the recorder's merged stdout/stderr to our own stdout AS IT
+  ## ARRIVES, while keeping every line so the ``recordingId:`` marker can
+  ## still be found afterwards.
+  ##
+  ## ``osproc.readLines`` (what this replaced) waits for the child to exit
+  ## before returning anything, which is invisible for a script that finishes
+  ## in a second and fatal for ``ct record --server``: the whole point of that
+  ## flag is that you watch the session while it runs, and the "watch it live
+  ## with: ct replay -t …" guidance would not have appeared until the server
+  ## was already stopped.
+  var lines: seq[string] = @[]
+  let stream = p.outputStream
+  var line = ""
+  while stream.readLine(line):
+    echo line
+    flushFile(stdout)
+    lines.add(line)
+  (lines, p.waitForExit)
+
 proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTraceFolderForPid: int, upload: bool): Trace =
   # let env = if configPath.len > 0:
   #     setupEnv(configPath)
@@ -194,11 +214,7 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
     # env = env,
     options = {poStdErrToStdOut, poUsePath})
 
-  let (lines, exCode) = p.readLines
-  # echo args
-  # echo exCode
-  for line in lines:
-    echo line
+  let (lines, exCode) = streamRecorderOutput(p)
   # Flush the relayed recorder output (which ends with the
   # ``recordingId:`` marker) so it durably reaches our caller before
   # ``ct`` exits — see the matching note in ``db_backend_record.nim``.
@@ -248,6 +264,13 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
     else:
       echo "ERROR: maybe something wrong with record; couldn't read trace id after recording"
       quit(1)
+  else:
+    # The recorder failed and has already explained why on the stream we
+    # relayed above.  `ct record` used to return nil here and then exit 0,
+    # so `ct record app.php` reported "ERROR: unsupported trace kind db" with
+    # a SUCCESS status — invisible to any script or CI job checking `$?`.
+    # Propagate the recorder's own exit code instead.
+    quit(exCode)
 
 proc nativeRecordingBackendForHost(requested: string): string =
   ## MCR is the default native recorder. Linux can explicitly select RR,
@@ -287,7 +310,8 @@ proc record*(lang: string,
              upload: bool,
              useInterpose: bool,
              program: string,
-             args: seq[string]): Trace =
+             args: seq[string],
+             server: bool = false): Trace =
   let detectedLang = detectLang(program, toLang(lang))
   # echo "DEBUG record: detectedLang=", detectedLang, " usesMaterializedTraces=", detectedLang.usesMaterializedTraces, " program=", program, " outputFolder=", outputFolder
   var outputFolderValue = outputFolder
@@ -312,6 +336,8 @@ proc record*(lang: string,
   if socketPath != "":
     pargs.add("--socket")
     pargs.add(socketPath)
+  if server:
+    pargs.add("--server")
 
   if detectedLang == LangPythonDb:
     let (pythonInterpreter, resolverError) = resolvePythonInterpreter()

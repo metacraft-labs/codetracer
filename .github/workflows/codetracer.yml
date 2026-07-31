@@ -1253,6 +1253,21 @@ jobs:
         # cannot masquerade as a pass).
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
 
+      - name: Build ct (needed by the CLI dispatch tests)
+        # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
+        # drive the SHIPPED `ct` binary rather than importing its modules, so
+        # the lane needs a build.  The pure dispatch table test does not, but
+        # it runs in the same recipe.
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: Run ct record CLI dispatch tests
+        # Asserts that every language detection produces reaches a recorder,
+        # that a missing recorder fails non-zero naming the language and the
+        # remedy, and that a real `ct record` through the JS recorder sibling
+        # cloned above produces a real CTFS container (with a zero-test guard
+        # against an all-skipped run).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-cli-record
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

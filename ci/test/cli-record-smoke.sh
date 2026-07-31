@@ -75,6 +75,16 @@ smoke_test() {
 		elif ls "$trace_dir"/*.ct 1>/dev/null 2>&1; then
 			echo "OK (.ct container produced)"
 			((PASSED++)) || true
+		# Some recorders treat --out-dir as the PARENT of the recording:
+		# codetracer-js-recorder writes `<out-dir>/trace-<n>/` and the PHP
+		# extension writes `<out-dir>/worker_<pid>/` in its multi-worker form.
+		# importTrace searches one level down for exactly this reason (see
+		# findCtFileInFolder in src/ct/trace/storage_and_import.nim), so the
+		# smoke check has to look where the container really lands rather
+		# than reporting a successful recording as a missing trace.
+		elif ls "$trace_dir"/*/*.ct 1>/dev/null 2>&1; then
+			echo "OK (.ct container produced, one level below --out-dir)"
+			((PASSED++)) || true
 		else
 			echo "FAIL (no trace file found in $trace_dir)"
 			echo "    Files: $(ls "$trace_dir" 2>/dev/null || echo "(empty)")"
@@ -102,6 +112,13 @@ LANG_TESTS[python]="$ROOT_DIR/test-programs/py_console_logs/main.py"
 LANG_TESTS[bash]="$ROOT_DIR/src/db-backend/test-programs/bash/bash_flow_test.sh"
 LANG_TESTS[javascript]="$ROOT_DIR/src/db-backend/test-programs/javascript/javascript_flow_test.js"
 LANG_TESTS[noir]="$ROOT_DIR/test-programs/noir_example"
+
+# Languages whose dispatch was added by the recorder-wiring work. Their
+# runtimes live in their own recorder siblings' dev shells rather than in
+# codetracer's, so they are skipped here unless the runtime is on PATH — the
+# Nim lane (`just test-cli-record`) is what covers them without one.
+LANG_TESTS[php]="$ROOT_DIR/test-programs/php_hello/hello.php"
+LANG_TESTS[elixir]="$ROOT_DIR/test-programs/elixir_hello/hello.exs"
 
 # Blockchain/VM recorders (require dedicated recorder binaries)
 LANG_TESTS[masm]="$ROOT_DIR/test-programs/masm_example"
@@ -138,24 +155,50 @@ for lang in "${SELECTED[@]}"; do
 	case "$lang" in
 	ruby) command -v codetracer-ruby-recorder &>/dev/null || {
 		echo "  SKIP $lang — recorder not on PATH"
-		((SKIPPED++))
+		((SKIPPED++)) || true
 		continue
 	} ;;
 	bash) command -v codetracer-bash-recorder &>/dev/null || {
 		echo "  SKIP $lang — recorder not on PATH"
-		((SKIPPED++))
+		((SKIPPED++)) || true
 		continue
 	} ;;
 	javascript) command -v codetracer-js-recorder &>/dev/null || {
 		echo "  SKIP $lang — recorder not on PATH"
-		((SKIPPED++))
+		((SKIPPED++)) || true
 		continue
 	} ;;
 	noir) command -v nargo &>/dev/null || {
 		echo "  SKIP $lang — nargo not on PATH"
-		((SKIPPED++))
+		((SKIPPED++)) || true
 		continue
 	} ;;
+	php)
+		# The PHP recorder is a Zend extension, not an executable: both the
+		# php binary and the built codetracer.so have to be present.
+		command -v php &>/dev/null || {
+			echo "  SKIP $lang — php not on PATH"
+			((SKIPPED++)) || true
+			continue
+		}
+		[[ -f ${CODETRACER_PHP_RECORDER_EXTENSION:-} ]] || {
+			echo "  SKIP $lang — CODETRACER_PHP_RECORDER_EXTENSION not set/built"
+			((SKIPPED++)) || true
+			continue
+		}
+		;;
+	elixir)
+		command -v elixir &>/dev/null || {
+			echo "  SKIP $lang — elixir not on PATH"
+			((SKIPPED++)) || true
+			continue
+		}
+		[[ -x ${CODETRACER_BEAM_RECORDER_BIN:-} ]] || {
+			echo "  SKIP $lang — CODETRACER_BEAM_RECORDER_BIN not set/built"
+			((SKIPPED++)) || true
+			continue
+		}
+		;;
 	esac
 
 	smoke_test "$lang" "$program"
