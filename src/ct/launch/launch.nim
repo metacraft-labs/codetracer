@@ -373,7 +373,8 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordStoreTraceFolderForPid,
         conf.recordUpload,
         conf.recordUseInterpose,
-        conf.recordProgram, conf.recordArgs)
+        conf.recordProgram, conf.recordArgs,
+        server = conf.recordServer)
     of StartupCommand.`record-test`:
       recordTest(
         conf.recordTestTestName, conf.recordTestPath,

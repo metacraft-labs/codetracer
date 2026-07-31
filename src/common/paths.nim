@@ -196,14 +196,64 @@ let
   # JavaScript/TypeScript recorder — Node.js CLI installed via npm.
   jsRecorderExe* = when not defined(js): findTool("codetracer-js-recorder") else: codetracerPrefix / "bin" / "codetracer-js-recorder"
 
+  # PHP recorder — a Zend extension, NOT an executable.  codetracer-php-recorder
+  # ships no wrapper binary: `ct` runs `php -d extension=<so>` itself (the same
+  # thing that repo's scripts/run_with_tracing.sh does), so the two things it
+  # needs are the php binary and the path of the built `codetracer.so`.  There
+  # is nothing for findTool to find for the latter, hence the explicit env var
+  # (exported for a sibling checkout by scripts/detect-siblings.sh) with the
+  # installed-package location as the fallback.
+  phpExe* = env.get("CODETRACER_PHP_EXE_PATH",
+    when not defined(js): findTool("php") else: codetracerPrefix / "bin" / "php")
+  phpRecorderExtension* = env.get("CODETRACER_PHP_RECORDER_EXTENSION",
+    codetracerPrefix / "lib" / "codetracer.so")
+
+  # BEAM recorder (Elixir + Erlang) — one Rust CLI that wraps the command that
+  # starts the BEAM program, so `ct` also needs the language runtime that
+  # command runs.  CODETRACER_BEAM_RECORDER_BIN is what detect-siblings.sh
+  # exports; CODETRACER_ELIXIR_RECORDER_BIN is its legacy alias, kept because
+  # that script still exports both.
+  beamRecorderExe* = env.get("CODETRACER_BEAM_RECORDER_BIN",
+    env.get("CODETRACER_ELIXIR_RECORDER_BIN",
+      when not defined(js): findTool("codetracer-beam-recorder")
+      else: codetracerPrefix / "bin" / "codetracer-beam-recorder"))
+  elixirExe* = env.get("CODETRACER_ELIXIR_EXE_PATH",
+    when not defined(js): findTool("elixir") else: codetracerPrefix / "bin" / "elixir")
+  escriptExe* = env.get("CODETRACER_ESCRIPT_EXE_PATH",
+    when not defined(js): findTool("escript") else: codetracerPrefix / "bin" / "escript")
+
+  # Native SERVER recorder — codetracer-native-recorder's `ct_server_record`
+  # binary, which supervises a long-running server recording (time-sliced
+  # containers, `requests`/`discover` span extraction) rather than recording
+  # one program run the way `ct-mcr record` does.  This is what
+  # `ct record --server` uses for native programs.
+  nativeServerRecorderExe* = env.get("CODETRACER_NATIVE_SERVER_RECORDER_PATH",
+    when not defined(js): findTool("codetracer-native-recorder")
+    else: codetracerPrefix / "bin" / "codetracer-native-recorder")
+
   # Nim native recorder — for ``.nim`` (compiled) programs, ``ct record`` first
   # compiles the source to a native binary via ``nimCompilerExe`` and then
   # records that binary with the MCR ``ct-mcr`` (``ct_cli``) tool from the
   # ``codetracer-native-recorder`` repo.  ``CODETRACER_CT_MCR_PATH`` overrides
   # the lookup; ``CODETRACER_NIM_EXE_PATH`` overrides the compiler used for
   # both ``nim c`` and ``nim e`` (``.nims`` scripts).
-  mcrRecorderExe* = env.get("CODETRACER_CT_MCR_PATH",
-    when not defined(js): findTool("ct-mcr") else: codetracerPrefix / "bin" / "ct-mcr")
+  # Resolution order is the one documented in scripts/detect-siblings.sh (and
+  # implemented by the Rust `find_ct_mcr` in codetracer-native-backend):
+  #   1. $CODETRACER_CT_MCR_CMD — what the dev shell exports for a sibling
+  #      checkout, pointing at codetracer-native-recorder/ct_cli/ct_cli;
+  #   2. $CODETRACER_CT_MCR_PATH — the older ct-side spelling, still honored;
+  #   3. `ct-mcr` on PATH — the installed-package name;
+  #   4. `ct_cli` on PATH — the in-tree build's name.
+  # Only checking (2) and (3) is why `ct record example.nim` could not find
+  # the recorder inside the dev shell at all: the shell exports (1) and puts
+  # a binary named `ct_cli` on PATH, so both lookups missed and the exe was
+  # the empty string.
+  mcrRecorderExe* = env.get("CODETRACER_CT_MCR_CMD",
+    env.get("CODETRACER_CT_MCR_PATH",
+      when not defined(js):
+        (if findTool("ct-mcr").len > 0: findTool("ct-mcr")
+         else: findTool("ct_cli"))
+      else: codetracerPrefix / "bin" / "ct-mcr"))
   nimCompilerExe* = env.get("CODETRACER_NIM_EXE_PATH",
     when not defined(js): findTool("nim") else: codetracerPrefix / "bin" / "nim")
 

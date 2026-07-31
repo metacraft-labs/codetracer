@@ -117,6 +117,36 @@ proc findCtFileInFolder(folder: string): string =
   for entry in walkDir(folder):
     if entry.kind == pcFile and entry.path.endsWith(".ct"):
       return entry.path
+  # One level down, for the recorders whose `--out-dir` names a PARENT of
+  # the recording rather than the recording itself:
+  #
+  # * codetracer-js-recorder writes `<out-dir>/trace-<n>/` (which is why
+  #   `just demo-request-panel js` has to `find` for `trace-*` and leave the
+  #   path in a `.trace_dir` marker file);
+  # * codetracer-php-recorder writes `<out-dir>/worker_<pid>/` when it is
+  #   recording a multi-worker server (`just demo-request-panel php` reads
+  #   its `.worker_dir` marker for the same reason).
+  #
+  # Without this fallback `ct record app.js` recorded successfully and then
+  # died in importTrace with "no `.ct` CTFS container found", because the
+  # container was one directory deeper than the search looked.
+  var nested: seq[string] = @[]
+  for entry in walkDir(folder):
+    if entry.kind != pcDir:
+      continue
+    if fileExists(entry.path / "trace.ct"):
+      nested.add(entry.path / "trace.ct")
+      continue
+    for inner in walkDir(entry.path):
+      if inner.kind == pcFile and inner.path.endsWith(".ct"):
+        nested.add(inner.path)
+        break
+  # Exactly one is unambiguous.  More than one means the folder holds
+  # several recordings (a recorded server with several workers), and
+  # picking one arbitrarily would silently open the wrong session — the
+  # caller has to say which.
+  if nested.len == 1:
+    return nested[0]
   ""
 
 proc importTrace*(
@@ -152,7 +182,10 @@ proc importTrace*(
   let ctPath = findCtFileInFolder(traceFolder)
   if ctPath.len == 0:
     raise newException(IOError,
-      "importTrace: no `.ct` CTFS container found in " & traceFolder &
+      "importTrace: no single `.ct` CTFS container found in " & traceFolder &
+      " (searched the folder and one level below it, for the recorders whose" &
+      " --out-dir names a parent directory; several containers one level down" &
+      " are ambiguous and need the exact recording folder)" &
       " (legacy trace_metadata.json/trace_db_metadata.json sidecars retired in M-REC-1.5)")
 
   let meta = readCtfsMetaDat(ctPath)
