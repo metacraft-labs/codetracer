@@ -173,9 +173,24 @@ a:hover {
   color: var(--docs-fg-muted);
 }
 
-/* Sidebar: warm right-divider column, sticky under the header. */
+/* Sidebar: warm right-divider column, sticky under the header.
+ *
+ * `grid-row: 2 / span 9999` pins the sidebar to the content band (row 2,
+ * directly under the full-width header row) and lets it SPAN every content
+ * row rather than claim a solo auto-placed row of its own. Without this the
+ * grid's sparse row auto-placement drops the sidebar (col 1) and TOC (col 3)
+ * into a dedicated row BETWEEN the breadcrumb row (col 2) and the `.docs-main`
+ * row (col 2) -- the tall sidebar then inflates that row and shoves the article
+ * content ~830px below the breadcrumb. Spanning distributes the sidebar's
+ * height across all the col-2 rows instead, so `.docs-main` sits right under
+ * the breadcrumb. Empty trailing rows collapse (the frame has no row-gap), so
+ * the footer stays tight at the bottom. The landing page is unaffected: its TOC
+ * is `display:none` and col 3 collapses to 0, but the sidebar span is still a
+ * no-op relative to the single col-2 content stack. Reset to `auto` in the
+ * single-column media query below. */
 .docs-nav-sidebar {
   grid-column: 1;
+  grid-row: 2 / span 9999;
   max-width: var(--docs-sidebar-width);
   /* WebFlow parity: WebFlow `.layout-nav` uses a symmetric horizontal inset;
    * even the padding (previously 32px right / 0 left) so nav items align under
@@ -192,6 +207,7 @@ a:hover {
 
 .docs-nav-toc {
   grid-column: 3;
+  grid-row: 2 / span 9999;
   padding-top: var(--docs-space-8);
   position: sticky;
   top: 6vh;
@@ -247,6 +263,7 @@ a:hover {
   .docs-nav-adjacent,
   .docs-main {
     grid-column: 1;
+    grid-row: auto;
     position: static;
     max-height: none;
     max-width: none;
