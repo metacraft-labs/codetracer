@@ -470,8 +470,9 @@ just build-once                       # if the Electron app is not built yet
 ```
 
 Either the directory or the `session.toml` inside it may be named; both
-open the whole session. `ct host --trace-path <same-path>` does the same
-for the browser-hosted UI, and prints what it resolved:
+open the whole session. `ct host --trace-path <same-path> --port 8791`
+does the same for the browser-hosted UI, and prints what it resolved
+(`--port` is required, and any free port will do):
 
 ```
 ct host: importing session manifest: .../account-balance-with-wasm/session.toml
