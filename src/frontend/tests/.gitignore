@@ -1,2 +1,7 @@
 # ignore nim-produced javascript artifacts
 *.js
+
+# Nim-produced native test binaries (same name as the .nim, no extension).
+# Listed by name rather than by a pattern: a bare-name glob would also
+# swallow future source files.
+cross_process_origin_vm_test

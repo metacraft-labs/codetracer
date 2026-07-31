@@ -150,12 +150,23 @@ pub enum CrossProcessOutcome {
 }
 
 /// Callback supplied by the dispatcher. Given the sibling trace's
-/// recording id + the matched Send marker's step + the display
-/// variable name, produces the sibling-side continuation. Returning
-/// `None` indicates the dispatcher refused to compute the sibling
-/// chain (e.g. the sibling trace is not loaded into the session); the
-/// composer treats this the same as a missing correlation.
-pub type SiblingChainResolver<'a> = &'a mut dyn FnMut(&str, i64, &str) -> Option<SiblingContinuation>;
+/// recording id + the matched Send marker's step + the name of the
+/// sibling-side binding the walk should resume on, produces the
+/// sibling-side continuation. Returning `None` indicates the
+/// dispatcher refused to compute the sibling chain (e.g. the sibling
+/// trace is not loaded into the session); the composer treats this
+/// the same as a missing correlation.
+///
+/// **M36b** — the binding name is `Option<&str>`, and `None` is not a
+/// degenerate case to be papered over with a fallback: it means *the
+/// send marker named no binding*. Only `MarkerPayload::show_text`
+/// names a binding; there is no other field that does. A resolver
+/// handed `None` must still report the sibling's [`TraceIdentity`] —
+/// the boundary genuinely was crossed and the user is entitled to see
+/// which recording the value came from — but must **not** invent a
+/// variable to walk. It returns a continuation with no hops; the
+/// composer supplies the terminator.
+pub type SiblingChainResolver<'a> = &'a mut dyn FnMut(&str, i64, Option<&str>) -> Option<SiblingContinuation>;
 
 /// M29 §5.1 — dispatcher-facing extension context.
 ///
@@ -280,6 +291,10 @@ pub fn apply_cross_process_clause_with_cap(
     // iteration's `find_receive_marker_for_tail` searches against
     // the correct trace's recv markers.
     let mut active_identity: TraceIdentity = current_identity.clone();
+    // How the walk got into `active_identity`, or `None` while it is
+    // still in the recording the query targeted. Consumed by the
+    // M36b re-crossing guard in `try_one_hop`.
+    let mut arrived_via: Option<BoundaryArrival> = None;
     let mut hops_performed: usize = 0;
 
     loop {
@@ -299,7 +314,7 @@ pub fn apply_cross_process_clause_with_cap(
             );
         }
 
-        let (next_chain, outcome) = try_one_hop(chain, &active_identity, pair_index, resolver);
+        let (next_chain, outcome) = try_one_hop(chain, &active_identity, arrived_via.as_ref(), pair_index, resolver);
         chain = next_chain;
 
         match outcome {
@@ -313,6 +328,14 @@ pub fn apply_cross_process_clause_with_cap(
                 match chain.cross_process_spans.last() {
                     Some(span) => {
                         active_identity = TraceIdentity::new(span.recording_id.clone(), span.role.clone());
+                        // Remember which recording the walk came from
+                        // and over which boundary, so the next
+                        // iteration can refuse to bounce straight back
+                        // through the same crossing (M36b).
+                        arrived_via = Some(BoundaryArrival {
+                            from_recording: span.from_process.clone(),
+                            boundary_id: span.correlator.clone(),
+                        });
                     }
                     None => {
                         // Should never trip: a successful Extended
@@ -347,17 +370,37 @@ pub fn apply_cross_process_clause_with_cap(
     }
 }
 
+/// How the walk entered the recording its tail currently sits in.
+///
+/// Recorded by [`apply_cross_process_clause_with_cap`] after every
+/// successful hop and consumed by the M36b re-crossing guard in
+/// [`try_one_hop`]. Both fields come off the sibling
+/// [`CrossProcessSpan`] the hop pushed, which is the composer's own
+/// record of the crossing.
+#[derive(Debug, Clone)]
+struct BoundaryArrival {
+    /// Recording the walk was in immediately before the hop.
+    from_recording: String,
+    /// Boundary the hop crossed.
+    boundary_id: String,
+}
+
 /// Single boundary hop — the inner loop body of
 /// [`apply_cross_process_clause_with_cap`]. Returns `Extended` if a
 /// matched sibling trace was hopped into; `NoBoundaryFound` if the
-/// tail hop did not land on a receive marker in the current trace;
+/// tail hop did not land on a receive marker in the current trace
+/// (or landed on one the M36b guard declines to follow);
 /// `MissingCorrelation` / `AmbiguousCorrelation` per spec §14.3
 /// otherwise. The chain's hops list is mutated only on `Extended`;
 /// on `MissingCorrelation` / `AmbiguousCorrelation` only the chain's
 /// terminator is updated.
+///
+/// `arrived_via` is `None` on the first hop (the walk is still in the
+/// recording the query targeted) and `Some` afterwards.
 fn try_one_hop(
     mut chain: OriginChain,
     current_identity: &TraceIdentity,
+    arrived_via: Option<&BoundaryArrival>,
     pair_index: &PairIndex,
     resolver: SiblingChainResolver,
 ) -> (OriginChain, CrossProcessOutcome) {
@@ -380,6 +423,49 @@ fn try_one_hop(
         .into_iter()
         .filter(|c| c.recording_id != current_identity.recording_id)
         .collect();
+
+    // **M36b re-crossing guard.** Decline a pair that would send the
+    // walk straight back through the crossing it just arrived on.
+    //
+    // The composer matches a receive marker to the chain's tail hop
+    // within a ±1-step window (see `find_receive_marker_for_tail`),
+    // which is right for a recorder whose line snapshot can lag the
+    // marker by a step — but in a boundary recording whose whole
+    // content is three steps (entry / arguments / result) that window
+    // is wide enough to match the module's *entry* marker against the
+    // *result* hop. Following it re-enters the recording the walk came
+    // from and asks it to explain a value it has already explained;
+    // the chain gains a span that says nothing and, worse, looks to a
+    // reader like a second genuine crossing.
+    //
+    // Relating an exported function's result to its arguments requires
+    // the module's interior, which is the offline replay of
+    // `Recording-Backends/WASM-Instrumentation-Layer.md` §6 (M37) and
+    // not something the boundary log can answer. So the walk declines
+    // rather than bounces, and the chain ends in the recording that
+    // last had something to say.
+    //
+    // The guard is deliberately narrow — same boundary *and* the
+    // immediately preceding recording. A chain that legitimately
+    // returns to an earlier recording over a *different* boundary (a
+    // request out over HTTP whose response comes back over a queue,
+    // say) is a real multi-tier shape and must keep working.
+    let cross_trace_candidates: Vec<MarkerEventView> = match arrived_via {
+        Some(arrival) if arrival.boundary_id == receive_event.payload.boundary_id => {
+            let total = cross_trace_candidates.len();
+            let forward: Vec<MarkerEventView> = cross_trace_candidates
+                .into_iter()
+                .filter(|c| c.recording_id != arrival.from_recording)
+                .collect();
+            if forward.is_empty() && total > 0 {
+                // Every counterpart pointed back where we came from.
+                // The chain is complete as it stands.
+                return (chain, CrossProcessOutcome::NoBoundaryFound);
+            }
+            forward
+        }
+        _ => cross_trace_candidates,
+    };
 
     match cross_trace_candidates.len() {
         0 => {
@@ -485,10 +571,38 @@ fn extend_chain_with_send(
         .show_value
         .clone()
         .or_else(|| Some(send_payload.key_value.clone()));
-    let display_variable = send_payload
+
+    // **M36b.** The binding the walk resumes on comes from `show_text`
+    // and from nowhere else.
+    //
+    // `show_text` is the textual form of the marker's `show=<expr>`
+    // declaration — the sender's statement of *which binding carried
+    // the value across*. `key_text` is the textual form of `key=<expr>`,
+    // i.e. the label of the correlation key, and it is not a binding at
+    // all: for every marker a recorder synthesises it is the literal
+    // string `key`. Falling back to it (as this did before M36b) drove
+    // a sibling origin query for a variable named `key`, which no
+    // program has, so a crossing whose sender named no binding closed
+    // with `UnknownVariable / key` — a terminator that reports a failed
+    // lookup for something the program never had.
+    //
+    // Absent `show_text` therefore means "the sender named no binding",
+    // which is a different outcome from "the lookup failed", and it is
+    // a legitimate one. A WebAssembly module's *entry* marker names no
+    // JavaScript binding because the arguments came from an expression,
+    // not from a declared variable — `browser_session.js`'s
+    // `emitRealmBoundary` names the crossing binding only on the side
+    // that sends a value it has itself recorded (M35), and M39's import
+    // spelling lives in `show_value`, not here. The producer is right;
+    // the consumer has to stop guessing.
+    //
+    // An empty or whitespace-only `show_text` is treated as absent: it
+    // is no more a variable name than `key` is.
+    let resume_binding: Option<&str> = send_payload
         .show_text
-        .clone()
-        .unwrap_or_else(|| send_payload.key_text.clone());
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
 
     if let Some(last_hop) = chain.hops.last_mut() {
         last_hop.correlation_transition = Some(CorrelationTransition {
@@ -507,13 +621,13 @@ fn extend_chain_with_send(
         });
     }
 
-    // Step 2: drive the sibling-side chain.
-    let display_var_for_resolver = display_variable.as_str();
-    let continuation = resolver(
-        send_event.recording_id.as_str(),
-        send_event.step_id,
-        display_var_for_resolver,
-    );
+    // Step 2: drive the sibling-side chain. When the sender named no
+    // binding the resolver is still consulted — it is the only source
+    // of the sibling's `TraceIdentity`, and the span the composer
+    // pushes below is what tells the user which recording the value
+    // came from — but it is told, explicitly, that there is nothing to
+    // walk. It answers with the identity and no hops.
+    let continuation = resolver(send_event.recording_id.as_str(), send_event.step_id, resume_binding);
 
     let Some(continuation) = continuation else {
         // Resolver declined (e.g. sibling trace not loaded). Treat as
@@ -536,15 +650,30 @@ fn extend_chain_with_send(
 
     // Step 4: append sibling hops + update span ranges.
     let sibling_start = chain.hops.len() as u32;
+    let sibling_hop_count = continuation.sibling_hops.len();
     chain.hops.extend(continuation.sibling_hops);
-    let sibling_end = if chain.hops.is_empty() {
-        0
+
+    // A sibling that contributed no hops still gets a span — the
+    // boundary was genuinely crossed and the user should see that the
+    // value came from that recording, even when the sending side has
+    // nothing further to say about it (a recording without value
+    // capture, for instance).
+    //
+    // Its range is collapsed to `first == last == first_hop_index`
+    // rather than left as `first > last`. An inverted range is not a
+    // harmless quirk: any renderer that slices `hops[first..=last]` to
+    // draw the span would either panic or silently show the wrong
+    // hops. The placeholder convention is documented on
+    // `CrossProcessSpan::last_hop_index`.
+    let sibling_end = if sibling_hop_count == 0 {
+        sibling_start
     } else {
         (chain.hops.len() - 1) as u32
     };
 
     // Sibling span. Index 0 of `cross_process_spans` is the receive-
-    // side trace; index 1 is the send-side sibling.
+    // side trace; each subsequent entry is a trace the walk crossed
+    // into, in the order it was reached.
     chain.cross_process_spans.push(CrossProcessSpan {
         recording_id: continuation.sibling_identity.recording_id.clone(),
         role: continuation.sibling_identity.role.clone(),
@@ -556,7 +685,24 @@ fn extend_chain_with_send(
     });
 
     // Step 5: replace terminator with sibling-side terminator.
-    chain.terminator = continuation.sibling_terminator;
+    //
+    // Unless the sender named no binding (M36b), in which case the
+    // sibling never ran a walk and its terminator would describe
+    // nothing. The chain closes here on the reason it closed, so the
+    // span above reads as a terminus — "the value came from this
+    // recording, which did not say which of its bindings carried it" —
+    // rather than as a lookup that failed.
+    chain.terminator = match resume_binding {
+        Some(_) => continuation.sibling_terminator,
+        None => {
+            let mut terminator = Terminator::new(TerminatorKind::UnknownSource);
+            terminator.expression = format!(
+                "the `{}` send marker in `{}` named no binding, so the walk has nothing to continue on there",
+                recv_payload.boundary_id, send_event.recording_id
+            );
+            terminator
+        }
+    };
     chain.truncated = chain.truncated || continuation.sibling_truncated;
 
     // Step 6: recompute composite confidence across joined hops.
@@ -779,10 +925,13 @@ mod tests {
         );
         let sibling_term = Terminator::new(TerminatorKind::Computational);
 
-        let mut resolver = |sibling_id: &str, step: i64, display: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |sibling_id: &str, step: i64, display: Option<&str>| -> Option<SiblingContinuation> {
             assert_eq!(sibling_id, "rec-be");
             assert_eq!(step, 7);
-            assert!(display == "v" || display == "user-42" || !display.is_empty());
+            // The binding the walk resumes on is the send marker's
+            // `show_text` and nothing else (M36b). `marker_view`
+            // spells it "v" whenever the marker carries a shown value.
+            assert_eq!(display, Some("v"));
             Some(SiblingContinuation {
                 sibling_identity: TraceIdentity::new("rec-be", "backend"),
                 sibling_hops: vec![sibling_hop.clone()],
@@ -847,7 +996,7 @@ mod tests {
         let tail_hop = make_hop("x", 12, "frontend/app.js", 5, OriginKind::TrivialCopy, "x = recv()");
         let chain = make_chain(vec![tail_hop]);
 
-        let mut resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> {
             panic!("resolver must not be called on ambiguous correlation");
         };
 
@@ -888,7 +1037,7 @@ mod tests {
         let tail_hop = make_hop("x", 12, "frontend/app.js", 5, OriginKind::TrivialCopy, "x = recv()");
         let chain = make_chain(vec![tail_hop]);
 
-        let mut resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> {
             panic!("resolver must not be called on missing correlation");
         };
 
@@ -953,7 +1102,7 @@ mod tests {
             OriginKind::FieldAccess,
             "payload = web.json_response({'balance': db_row.balance})",
         );
-        let mut resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> {
             Some(SiblingContinuation {
                 sibling_identity: TraceIdentity::new("rec-be", "backend"),
                 sibling_hops: vec![sibling_hop.clone()],
@@ -990,7 +1139,7 @@ mod tests {
         let chain = make_chain(vec![tail_hop]);
         let original_hop_count = chain.hops.len();
 
-        let mut resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> {
             panic!("resolver must not be called when no boundary is found");
         };
 
@@ -1054,7 +1203,7 @@ mod tests {
             OriginKind::FieldAccess,
             "balance = 1234",
         );
-        let mut resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> {
             Some(SiblingContinuation {
                 sibling_identity: TraceIdentity::new("rec-be", "backend"),
                 sibling_hops: vec![sibling_hop.clone()],
@@ -1072,7 +1221,7 @@ mod tests {
         // Apply the composer a second time — the sibling identity
         // is now "rec-be" so the receive-side substrate test won't
         // match again. Idempotency: the chain is unchanged.
-        let mut noop_resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> { None };
+        let mut noop_resolver = |_: &str, _: i64, _: Option<&str>| -> Option<SiblingContinuation> { None };
         let sibling_identity = TraceIdentity::new("rec-be", "backend");
         let (chain2, outcome2) = apply_cross_process_clause(
             chain1,
@@ -1220,7 +1369,7 @@ mod tests {
             sibling_truncated: false,
         };
         let mut calls: Vec<String> = Vec::new();
-        let mut resolver = |sibling_id: &str, step: i64, _display: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |sibling_id: &str, step: i64, _display: Option<&str>| -> Option<SiblingContinuation> {
             calls.push(format!("{sibling_id}@{step}"));
             match sibling_id {
                 "rec-wasm" => {
@@ -1356,7 +1505,7 @@ mod tests {
         let sibling_terminator = Terminator::new(TerminatorKind::Computational);
 
         let mut call_count: u32 = 0;
-        let mut resolver = |sibling_id: &str, step: i64, _display: &str| -> Option<SiblingContinuation> {
+        let mut resolver = |sibling_id: &str, step: i64, _display: Option<&str>| -> Option<SiblingContinuation> {
             call_count += 1;
             assert_eq!(sibling_id, "rec-be");
             assert_eq!(step, 7);

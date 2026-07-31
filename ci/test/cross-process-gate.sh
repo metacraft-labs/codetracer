@@ -46,6 +46,23 @@ if grep -Eq 'import[[:space:]]*\{[^}]*\btest\b[^}]*\}[[:space:]]*from[[:space:]]
 	fail "event-log spec must not regress to the plain Playwright page fixture"
 fi
 
+# M49 — the spec must reach its fixture through the shared helper rather
+# than climbing to the repo root itself. Per-spec path arithmetic is what
+# broke it: `path.resolve(__dirname, "..", "..", "..", "..")` is four
+# levels, a spec under `tests/value-origin/` needs five, so `fixtureDir`
+# pointed at `<repo>/src/src/db-backend/...`, every container looked
+# missing, and the skip guard fired on every run for as long as it
+# existed. The checks above could not see it: they assert the spec's
+# *shape*, and its shape was correct throughout.
+require_source_line "$EVENT_LOG_SPEC" \
+	'threeTraceFixtureRoot()' \
+	"event-log spec must resolve its fixture through the shared helper"
+# `^[^/*]*` keeps the match off comment lines, so the spec can keep
+# documenting the climb it used to have without tripping its own gate.
+if grep -Eq '^[^/*]*(path\.)?(resolve|join)\([[:space:]]*__dirname' "$EVENT_LOG_SPEC"; then
+	fail "event-log spec must not compute its own repo root — use lib/value-origin-fixtures.ts"
+fi
+
 workflow_job() {
 	local job="$1"
 	awk -v job="$job" '
@@ -108,14 +125,19 @@ mkdir -p \
 	"$fake_root/ci/test" \
 	"$fixture"
 
-for container in frontend.ct frontend-wasm.ct backend.ct; do
+# Mirror the real fixture's shape: the two browser tiers write the
+# three-file JSON layout, the server tier writes a CTFS container.
+for container in frontend.ct frontend-wasm.ct; do
 	mkdir -p "$fixture/$container"
 	for payload in trace.json trace_metadata.json trace_paths.json; do
 		printf '{}\n' >"$fixture/$container/$payload"
 	done
 done
+mkdir -p "$fixture/backend.ct"
+printf 'ctfs\n' >"$fixture/backend.ct/server.ct"
 printf '[[trace]]\n' >"$fixture/session.toml"
 printf '[[trace]]\n' >"$fixture/session.toml.template"
+printf '# fixture\n' >"$fixture/README.md"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture/regenerate.sh"
 chmod +x "$fixture/regenerate.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_root/src/build-debug/bin/ct"
@@ -138,15 +160,18 @@ echo "cargo:${mode#--}:$target" >>"$FAKE_STAGE_LOG"
 case "$target:$mode" in
 cross_process_origin_test:--list)
 	cat <<'LIST'
+test_origin_cross_process_absent_show_text_names_no_binding: test
 test_origin_cross_process_ambiguous_correlation_terminates_cleanly: test
+test_origin_cross_process_blank_show_text_names_no_binding: test
+test_origin_cross_process_declines_to_recross_the_boundary_it_arrived_on: test
 test_origin_cross_process_fixture_a_python_aiohttp_mode1: test
 test_origin_cross_process_fixture_a_python_aiohttp_mode3: test
 test_origin_cross_process_missing_correlation_terminates_cleanly: test
 test_origin_cross_process_serialisation_aware_json_collapses_to_trivial_copy: test
-test_origin_three_trace_chain_balance_to_frontend_expression: test
+test_origin_cross_process_still_follows_a_return_over_a_different_boundary: test
 test_parity_origin_cross_process_fixture_a_python_aiohttp: test
 
-7 tests, 0 benchmarks
+10 tests, 0 benchmarks
 LIST
 	if [ "${FAKE_RUST_MANIFEST_DRIFT:-0}" = "1" ]; then
 		echo "unexpected_cross_process_test: test"
@@ -156,7 +181,25 @@ cross_process_origin_test:--nocapture)
 	if [ "${FAKE_RUST_SKIP:-0}" = "1" ]; then
 		echo "SKIPPED: required three-trace fixture"
 	fi
-	count="${FAKE_RUST_COUNT:-7}"
+	count="${FAKE_RUST_COUNT:-10}"
+	echo "test result: ok. $count passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+	;;
+cross_process_three_trace_dap_test:--list)
+	cat <<'LIST'
+a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording: test
+a_session_folder_launches_as_the_whole_session: test
+origin_of_the_server_balance_reaches_the_browser_recordings: test
+the_chain_terminates_in_the_wasm_recording_rather_than_on_a_name_no_marker_used: test
+three_recordings_load_as_one_session_with_canonical_roles: test
+
+5 tests, 0 benchmarks
+LIST
+	;;
+cross_process_three_trace_dap_test:--nocapture)
+	if [ "${FAKE_THREE_TRACE_SKIP:-0}" = "1" ]; then
+		echo "SKIPPED: required three-recording fixture"
+	fi
+	count="${FAKE_THREE_TRACE_COUNT:-5}"
 	echo "test result: ok. $count passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
 	;;
 dap_server_list_processes_event_test:--list)
@@ -209,6 +252,19 @@ JSON
 	exit 0
 fi
 
+# M49 — the same shape with the *event-log* spec as the one that
+# skipped. This is the exact report a fixture-guard misfire produces,
+# and it is the report the gate saw for as long as the spec's repo-root
+# climb was wrong. A skipped spec still reports `ok: true`, so only the
+# result status and the `skipped` stat distinguish "ran and passed" from
+# "never ran".
+if [ "${FAKE_PLAYWRIGHT_EVENT_LOG_SKIP:-0}" = "1" ]; then
+	cat >"$PLAYWRIGHT_JSON_OUTPUT_NAME" <<'JSON'
+{"suites":[{"specs":[{"title":"e2e_origin_cross_tracer_three_recording_balance_chain","ok":true,"tests":[{"results":[{"status":"passed"}]}]},{"title":"e2e_event_log_jump_renders_in_codetracer_electron — both boundary markers render with chip badges","ok":true,"tests":[{"results":[{"status":"skipped"}]}]}]}],"stats":{"expected":1,"skipped":1,"unexpected":0,"flaky":0}}
+JSON
+	exit 0
+fi
+
 if [ "${FAKE_PLAYWRIGHT_TITLE_DRIFT:-0}" = "1" ]; then
 	cat >"$PLAYWRIGHT_JSON_OUTPUT_NAME" <<'JSON'
 {"suites":[{"specs":[{"title":"unexpected replacement test","ok":true,"tests":[{"results":[{"status":"passed"}]}]},{"title":"e2e_event_log_jump_renders_in_codetracer_electron — both boundary markers render with chip badges","ok":true,"tests":[{"results":[{"status":"passed"}]}]}]}],"stats":{"expected":2,"skipped":0,"unexpected":0,"flaky":0}}
@@ -255,13 +311,13 @@ expect_failure() {
 : >"$stage_log"
 success_output="$(run_gate 2>&1)" || fail "strict fake gate failed: $success_output"
 printf '%s\n' "$success_output" |
-	grep -Fq 'cross-process Rust summary: expected=12 executed=12 skipped=0' ||
+	grep -Fq 'cross-process Rust summary: expected=20 executed=20 skipped=0' ||
 	fail "strict fake gate omitted the exact Rust completion summary"
 printf '%s\n' "$success_output" |
 	grep -Fq 'cross-process Playwright summary: expected=2 executed=2 skipped=0' ||
 	fail "strict fake gate omitted the exact Playwright completion summary"
 
-expected_stages=$'cargo:list:cross_process_origin_test\ncargo:nocapture:cross_process_origin_test\ncargo:list:dap_server_list_processes_event_test\ncargo:nocapture:dap_server_list_processes_event_test\njust:test-gui-prebuilt:tests/value-origin/cross-tracer-three-recording.spec.ts:tests/value-origin/event-log-correlation-markers-three-trace.spec.ts:--reporter=json'
+expected_stages=$'cargo:list:cross_process_origin_test\ncargo:nocapture:cross_process_origin_test\ncargo:list:cross_process_three_trace_dap_test\ncargo:nocapture:cross_process_three_trace_dap_test\ncargo:list:dap_server_list_processes_event_test\ncargo:nocapture:dap_server_list_processes_event_test\njust:test-gui-prebuilt:tests/value-origin/cross-tracer-three-recording.spec.ts:tests/value-origin/event-log-correlation-markers-three-trace.spec.ts:--reporter=json'
 actual_stages="$(cat "$stage_log")"
 [ "$actual_stages" = "$expected_stages" ] ||
 	fail "required stage order/arguments drifted; got: $actual_stages"
@@ -305,12 +361,33 @@ printf '%s\n' "$rust_skip_output" | grep -Fq 'emitted a skip sentinel' ||
 	fail "Rust skip sentinel reported the wrong failure"
 
 set +e
-rust_count_output="$(FAKE_RUST_COUNT=6 run_gate 2>&1)"
+rust_count_output="$(FAKE_RUST_COUNT=9 run_gate 2>&1)"
 rust_count_status=$?
 set -e
 [ "$rust_count_status" -ne 0 ] || fail "wrong Rust execution count unexpectedly succeeded"
-printf '%s\n' "$rust_count_output" | grep -Fq 'did not report exactly 7 executed' ||
+printf '%s\n' "$rust_count_output" | grep -Fq 'did not report exactly 10 executed' ||
 	fail "wrong Rust execution count reported the wrong failure"
+
+# The three-recording target is the one that proves the feature works
+# end to end, so give it the same skip / count protection as the others:
+# a silent skip there would let the whole campaign regress unnoticed.
+set +e
+three_trace_skip_output="$(FAKE_THREE_TRACE_SKIP=1 run_gate 2>&1)"
+three_trace_skip_status=$?
+set -e
+[ "$three_trace_skip_status" -ne 0 ] ||
+	fail "three-recording skip sentinel unexpectedly succeeded"
+printf '%s\n' "$three_trace_skip_output" | grep -Fq 'emitted a skip sentinel' ||
+	fail "three-recording skip sentinel reported the wrong failure"
+
+set +e
+three_trace_count_output="$(FAKE_THREE_TRACE_COUNT=4 run_gate 2>&1)"
+three_trace_count_status=$?
+set -e
+[ "$three_trace_count_status" -ne 0 ] ||
+	fail "wrong three-recording execution count unexpectedly succeeded"
+printf '%s\n' "$three_trace_count_output" | grep -Fq 'did not report exactly 5 executed' ||
+	fail "wrong three-recording execution count reported the wrong failure"
 
 set +e
 rust_manifest_output="$(FAKE_RUST_MANIFEST_DRIFT=1 run_gate 2>&1)"
@@ -344,6 +421,16 @@ set -e
 printf '%s\n' "$playwright_skip_output" |
 	grep -Fq 'Playwright report did not prove exactly two required passing tests with zero skips' ||
 	fail "skipped Playwright result reported the wrong failure"
+
+set +e
+event_log_skip_output="$(FAKE_PLAYWRIGHT_EVENT_LOG_SKIP=1 run_gate 2>&1)"
+event_log_skip_status=$?
+set -e
+[ "$event_log_skip_status" -ne 0 ] ||
+	fail "a SKIPPED event-log spec unexpectedly passed the gate"
+printf '%s\n' "$event_log_skip_output" |
+	grep -Fq 'Playwright report did not prove exactly two required passing tests with zero skips' ||
+	fail "a SKIPPED event-log spec reported the wrong failure"
 
 set +e
 playwright_title_output="$(FAKE_PLAYWRIGHT_TITLE_DRIFT=1 run_gate 2>&1)"

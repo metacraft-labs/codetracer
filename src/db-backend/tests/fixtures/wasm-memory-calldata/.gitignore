@@ -1,0 +1,28 @@
+# Build output. The artefacts the fixture needs are copied out of it by
+# `regenerate.sh` (`module/ledger_settle.wasm.zst` and the instrumented
+# pair under `page/`), so nothing here has to be committed.
+wasm-src/target/
+
+# The original module is committed as `module/ledger_settle.wasm.zst`, and
+# the expanded form is a local convenience the repo root's blanket
+# `*.wasm` already ignores. `verify.sh` expands into a temp directory and
+# never writes here.
+#
+# It is committed at all — unlike the sibling `account-balance-with-wasm`
+# fixture, which rebuilds — because it has to be *this* build.
+# `boundary_state.json` records absolute linear-memory offsets: the host
+# staged its calldata at the address `rust-lld` gave the `LEDGER` symbol.
+# A module compiled by a different toolchain puts `LEDGER` somewhere else,
+# and the committed recording no longer describes it. Measured: a rebuild
+# from this same source diverges at the first host call. The recording and
+# that exact binary are one artefact.
+#
+# It is committed *compressed* because the repo caps a committed file at
+# 500 KB and the raw module is ~1.5 MB — almost entirely DWARF, which is
+# the part the replay turns into per-line steps and locals and so cannot
+# be stripped. zstd takes it to ~270 KB.
+#
+# `page/ledger_settle.instrumented.wasm` is deliberately not committed in
+# any form. It is only needed to *re-record*, and `regenerate.sh` builds
+# it together with a fresh recording, so those two cannot drift apart the
+# way the original and the committed recording could.

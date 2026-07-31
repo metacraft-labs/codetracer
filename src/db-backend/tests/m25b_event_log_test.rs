@@ -242,6 +242,19 @@ fn test_dap_event_log_returns_marker_rows_with_metadata() {
     assert_eq!(events_array.len(), 2);
 }
 
+/// The HTTP boundary token the fixture's `frontend/app.js` passes to
+/// `__ct.markCorrelation` (`const BOUNDARY_HTTP = "account-balance";`),
+/// pinned by the fixture's own `ANSWERS.md` and `README.md`.
+///
+/// It is deliberately *not* the fixture directory name
+/// (`account-balance-with-wasm`), which is what this assertion used to
+/// spell. The recordings carried that older token until the fixture was
+/// rebuilt as a runnable three-tier demo; the boundary id then became
+/// `account-balance` and this expectation was left behind, so the test
+/// had been failing against the committed recordings ever since. The
+/// fixture and its documented answers are the source of truth here.
+const HTTP_BOUNDARY_ID: &str = "account-balance";
+
 #[test]
 fn test_dap_launch_legacy_three_trace_fixture_returns_marker_rows() {
     let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -293,12 +306,17 @@ fn test_dap_launch_legacy_three_trace_fixture_returns_marker_rows() {
         .and_then(JsonValue::as_array)
         .expect("markers array on ct/event-load response");
 
+    // Per the fixture's ANSWERS.md: `send | account-balance | req-0001 |
+    // 620 (names result)`. The correlation *key* is the request id; `620`
+    // is the shown value. Asserting the key equals `620` — as this used
+    // to — conflated the two columns, so both halves are pinned here.
     assert!(
         markers.iter().any(|row| {
-            row.get("boundaryId").and_then(JsonValue::as_str) == Some("account-balance-with-wasm")
-                && row.get("keyValue").and_then(JsonValue::as_str) == Some("620")
+            row.get("boundaryId").and_then(JsonValue::as_str) == Some(HTTP_BOUNDARY_ID)
+                && row.get("keyValue").and_then(JsonValue::as_str) == Some("req-0001")
+                && row.get("showValue").and_then(JsonValue::as_str) == Some("620")
         }),
-        "expected account-balance-with-wasm marker row in {markers:?}"
+        "expected {HTTP_BOUNDARY_ID} marker row (key req-0001, shown 620) in {markers:?}"
     );
     assert!(
         markers.iter().any(|row| {

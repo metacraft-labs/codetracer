@@ -311,23 +311,27 @@ export function threeTraceFixtureRoot(): string {
 }
 
 export function threeTraceFixtureSkipReason(): string | null {
+  // The Electron build is a genuine environment prerequisite: it is not
+  // committed and takes minutes to produce, so a machine without it
+  // legitimately cannot run a GUI spec.
   if (!isCtBinaryAvailable()) {
     return "ct binary missing at " + ctBinaryPath() +
-      " — run `just build-once` to produce the Electron build the M5 specs drive";
+      " — run `just build-once` to produce the Electron build the GUI specs drive";
   }
+  // The recordings, by contrast, ARE committed. A missing one means a
+  // broken checkout, not an under-provisioned machine — so it throws
+  // rather than skipping. Treating it as a skip is what previously let
+  // this spec report success indefinitely without ever opening a trace.
   const root = threeTraceFixtureRoot();
-  for (const name of ["frontend.ct", "frontend-wasm.ct", "backend.ct"]) {
+  for (const name of ["frontend.ct", "frontend-wasm.ct", "backend.ct", "session.toml"]) {
     const candidate = path.join(root, name);
     if (!fs.existsSync(candidate)) {
-      return "SKIPPED: account-balance-with-wasm fixture not materialized: " +
-        candidate +
-        " (regenerate.sh requires wasm-pack + rustup target add " +
-        "wasm32-unknown-unknown + codetracer-js-recorder + " +
-        "codetracer-python-recorder)";
+      throw new Error(
+        `cross-process fixture is incomplete: ${candidate} is missing. ` +
+          `These recordings are committed; run ${root}/regenerate.sh to ` +
+          `rebuild them (see that directory's README.md).`,
+      );
     }
-  }
-  if (!fs.existsSync(path.join(root, "session.toml.template"))) {
-    return "session.toml.template missing under " + root;
   }
   return null;
 }

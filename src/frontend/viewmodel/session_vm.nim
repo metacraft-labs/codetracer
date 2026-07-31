@@ -69,6 +69,13 @@ type
     displayName*: string
     defaultThreadPrefix*: string
     threadCount*: uint32
+    threadIds*: seq[int]
+      ## Composed (`slot << 24 | inner`) DAP thread ids owned by this
+      ## recording, in the order the backend reports them. This is the
+      ## only handle the renderer has for routing a request to this
+      ## recording: `dap_server.rs::handle_request_via_session` picks
+      ## the serving trace from a request's `threadId` and nothing
+      ## else. Empty only when the backend predates the field.
 
   ProcessTreeVM* = ref object of ViewModel
     ## Reactive holder for the multi-process tree (M29 §5.3). Owns
@@ -287,14 +294,42 @@ proc applyListProcessesResponse*(session: SessionViewModel;
     let recordingId = n{"recordingId"}.getStr("")
     if recordingId.len == 0:
       continue
+    var threadIds = newSeq[int]()
+    let rawThreadIds = n{"threadIds"}
+    if not rawThreadIds.isNil and rawThreadIds.kind == JArray:
+      for t in rawThreadIds:
+        if t.kind == JInt:
+          threadIds.add(int(t.getBiggestInt(0)))
     entries.add(ProcessTreeEntry(
       recordingId: recordingId,
       role: n{"role"}.getStr(""),
       displayName: n{"displayName"}.getStr(""),
       defaultThreadPrefix: n{"defaultThreadPrefix"}.getStr(""),
       threadCount: uint32(n{"threadCount"}.getInt(0)),
+      threadIds: threadIds,
     ))
   session.setProcessTree(entries)
+
+proc entryForRecording*(session: SessionViewModel;
+                        recordingId: string): Option[ProcessTreeEntry] =
+  ## Look up a process-tree row by recording id. Returns `none` when
+  ## the tree has not been populated yet or the id is unknown, so
+  ## callers can degrade gracefully rather than index out of range.
+  if session.isNil or session.processTree.isNil:
+    return none(ProcessTreeEntry)
+  for entry in session.processTree.entries.val:
+    if entry.recordingId == recordingId:
+      return some(entry)
+  none(ProcessTreeEntry)
+
+proc routingThreadId*(entry: ProcessTreeEntry): int =
+  ## The composed DAP thread id requests must carry to be served by
+  ## `entry`'s recording. Uses the first thread the backend reported;
+  ## `0` (meaning "leave routing at its default") when the backend
+  ## reported none.
+  if entry.threadIds.len == 0:
+    return 0
+  entry.threadIds[0]
 
 proc onSwitchProcess*(session: SessionViewModel; recordingId: string) =
   ## Switch the active recording to `recordingId`. No-op when the

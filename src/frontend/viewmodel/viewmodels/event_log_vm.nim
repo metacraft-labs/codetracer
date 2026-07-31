@@ -218,6 +218,17 @@ type
       ## §5.4 filter result. Computed reactively from `markerRows` +
       ## `filterBar` + `counterpartCache`.
 
+    # -- Host bridge --
+    onSwitchProcessProc*: proc(recordingId: string)
+      ## §5.3 — rotate the session's active recording.
+      ##
+      ## Installed by the renderer bootstrap (`ui_js.nim`) and routed
+      ## to `SessionViewModel.onSwitchProcess`, exactly as the State
+      ## Pane's "Switch process" menu is. The Event Log holds a hook
+      ## rather than the `SessionViewModel` itself so that a single-
+      ## recording session — where there is nothing to switch to —
+      ## leaves it nil and the jump degrades to a plain seek.
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
@@ -475,7 +486,8 @@ proc counterpartsFor*(vm: EventLogVM; row: MarkerEventRow): seq[MarkerEventRow] 
   else:
     @[]
 
-proc requestCounterparts*(vm: EventLogVM; row: MarkerEventRow) =
+proc requestCounterparts*(vm: EventLogVM; row: MarkerEventRow;
+                          then: proc(counterparts: seq[MarkerEventRow]) = nil) =
   ## Issue `ct/pairIndexLookup` for `row`'s counterpart set and store
   ## the response in `counterpartCache`. The request is keyed by the
   ## row's `(boundary, direction, key_value)` triple per spec §5.3.
@@ -483,9 +495,16 @@ proc requestCounterparts*(vm: EventLogVM; row: MarkerEventRow) =
   ## cache key includes the *opposite* direction (see
   ## `counterpartKey`) so a single Send query satisfies every Send
   ## row sharing the same key.
+  ##
+  ## `then` (optional) runs once the set is known, whether it came
+  ## from the cache or from a fresh lookup. It exists so the §5.3 jump
+  ## gesture can be written as one call instead of duplicating the
+  ## cache-hit / cache-miss split at the call site.
   let key = counterpartKey(row)
   let cache = vm.counterpartCache.val
   if cache.hasKey(key):
+    if not then.isNil:
+      then(cache[key])
     return
   let args = %*{
     "boundaryId": row.boundaryId,
@@ -495,15 +514,20 @@ proc requestCounterparts*(vm: EventLogVM; row: MarkerEventRow) =
   let future = vm.store.backend.send("ct/pairIndexLookup", args)
   let vmRef = vm
   let cacheKey = key
+  let continuation = then
   onComplete(future,
     proc(response: JsonNode) =
-      vmRef.applyPairIndexLookupResponse(cacheKey, response),
+      vmRef.applyPairIndexLookupResponse(cacheKey, response)
+      if not continuation.isNil:
+        continuation(vmRef.counterpartCache.val.getOrDefault(cacheKey)),
     proc(message: string) =
       # On error, install an empty counterpart slot so the renderer
       # treats the row as unmatched rather than blocking on a pending
       # request indefinitely. The error itself is surfaced through
       # the existing notification surface (not modelled here).
-      vmRef.applyPairIndexLookupResponse(cacheKey, newJNull()))
+      vmRef.applyPairIndexLookupResponse(cacheKey, newJNull())
+      if not continuation.isNil:
+        continuation(@[]))
 
 proc parseFilterBar*(raw: string): MarkerFilterBar =
   ## Tokenise the §5.4 filter input. `boundary:<id>` and `unmatched`
@@ -636,14 +660,40 @@ proc jumpToCounterpart*(vm: EventLogVM; row: MarkerEventRow) =
     # both endpoints of the pair are loaded." The view should not
     # render the button at all in this state, but defend in depth.
     return
-  if row.recordingId.len > 0:
-    let switchArgs = %*{"recordingId": row.recordingId}
-    discard vm.store.backend.send("ct/listProcesses", switchArgs)
+  if row.recordingId.len > 0 and not vm.onSwitchProcessProc.isNil:
+    # Rotate the session's active recording through the same entry
+    # point the process tree and the State Pane's "Switch process"
+    # menu use. An earlier revision sent `ct/listProcesses
+    # {recordingId}` here and described it as the switch; that request
+    # is a pure query — `dap_server.rs` builds the process list and
+    # ignores every argument — so the click moved the timeline inside
+    # whichever recording happened to be active and nothing rotated.
+    vm.onSwitchProcessProc(row.recordingId)
   let gotoArgs = %*{
     "rrTicks": row.stepId,
     "ticks": row.stepId,
   }
   discard vm.store.backend.send("ct/goto-ticks", gotoArgs)
+
+proc jumpToCounterpartOf*(vm: EventLogVM; row: MarkerEventRow) =
+  ## §5.3 — the boundary-chip gesture on a marker row.
+  ##
+  ## `row` is a firing in the recording currently being viewed, so it
+  ## is not itself the jump target: the target is its counterpart on
+  ## the other side of the boundary, which lives in a sibling
+  ## recording and is the only row that carries a `recordingId`.
+  ## Resolve the counterpart set (from the cache, or by issuing
+  ## `ct/pairIndexLookup`) and navigate to the first member.
+  ##
+  ## An unmatched marker — one whose boundary the session's other
+  ## recordings never declared — resolves to an empty set and the
+  ## click does nothing, which is the honest outcome: there is no
+  ## other side to go to.
+  let vmRef = vm
+  vm.requestCounterparts(row, proc(counterparts: seq[MarkerEventRow]) =
+    if counterparts.len == 0:
+      return
+    vmRef.jumpToCounterpart(counterparts[0]))
 
 # ---------------------------------------------------------------------------
 # Factory

@@ -1,10 +1,13 @@
 import
-  std/[ os, strutils, strformat, sets, algorithm, sequtils ],
+  std/[ os, strutils, strformat, sets, algorithm, sequtils, json ],
   ../../common/[ trace_index, lang, types, paths ],
   ../utilities/[ git, language_detection ],
   ctfs_sources,
   source_paths,
+  trace_container,
   results
+
+export trace_container
 
 proc isAbsolutePath(path: string): bool =
   isAbsoluteTracePath(path)
@@ -108,16 +111,149 @@ proc deriveWorkdir(program: string): string =
 
   getCurrentDir()
 
-proc findCtFileInFolder(folder: string): string =
-  ## Locate the canonical ``trace.ct`` (falling back to any ``*.ct``) in
-  ## the trace folder.  M-REC-1.5: metadata always comes from this
-  ## container's ``meta.dat``.
-  if fileExists(folder / "trace.ct"):
-    return folder / "trace.ct"
-  for entry in walkDir(folder):
-    if entry.kind == pcFile and entry.path.endsWith(".ct"):
-      return entry.path
-  ""
+proc detectTraceLang*(program: string, paths: seq[string],
+                      traceKind: string): Lang =
+  ## Infer a recording's [Lang] from its recorded `program` identifier
+  ## and captured source `paths`.
+  ##
+  ## The CTFS `meta.dat` stores both the recorded `program` argument (the
+  ## path the user typed to ``ct record``, e.g. ``path/to/main.nim``) and
+  ## the list of source paths actually captured during the recording.
+  ## The pre-M-REC-1.5 code only consulted the paths; that left rr/ttd
+  ## recordings of compiled-language traces classified as `LangUnknown`
+  ## whenever the captured source list happened to start with a path
+  ## whose extension is unknown to `detectLangFromPath` — ``program``
+  ## itself was never used.  Probe ``program`` first so the visible
+  ## "what was recorded" identifier always seeds detection, then fall
+  ## back to scanning the captured paths.
+  ##
+  ## Factored out of `importTrace` so the session importer classifies a
+  ## multi-recording session exactly the way a single recording is
+  ## classified, rather than growing a second, drifting heuristic.
+  let isWasm = program.extractFilename.split(".")[^1] == "wasm"
+  var detectedLang = detectLangFromPath(program, isWasm)
+  if detectedLang == LangUnknown:
+    for path in paths:
+      let p = detectLangFromPath(path, isWasm)
+      if p != LangUnknown:
+        detectedLang = p
+        break
+  if detectedLang == LangUnknown:
+    return LangUnknown
+  # for now assume this is used only for db traces
+  # and that C/C++/Rust there can come only from wasm targets currently
+  if detectedLang == LangRust:
+    return if traceKind == "db": LangRustWasm else: LangRust
+  if detectedLang in {LangC, LangCpp}:
+    return if traceKind == "db": LangCppWasm else: detectedLang
+  detectedLang
+
+proc readTraceFolderMeta*(folder: string): CtfsMetaDat
+
+proc readMaterializedTraceMeta*(folder: string): CtfsMetaDat =
+  ## Read the metadata of a *materialized* `runtime_tracing` recording —
+  ## the shape ``ct record-web`` writes for browser sessions — into the
+  ## same [CtfsMetaDat] record the CTFS path produces, so `importTrace`
+  ## has exactly one downstream code path.
+  ##
+  ## The sidecars are:
+  ##
+  ## * ``trace_metadata.json`` — ``{"program", "args", "workdir",
+  ##   "recorder": {"name", "version"}}``.  This is *not* the retired
+  ##   M-REC-1.5 ``trace_db_metadata.json`` (a serialized Nim ``Trace``);
+  ##   it is the recorder-authored descriptor the Rust replay engine
+  ##   reads today.
+  ## * ``trace_paths.json`` — a flat JSON array of source paths.
+  ##
+  ## No ``recording_id`` is carried by this shape, so the field is left
+  ## empty and `importTrace` mints a fresh UUIDv7 — the same behaviour a
+  ## CTFS container with an absent id gets.
+  ##
+  ## Missing or malformed sidecars are tolerated field-by-field: a
+  ## browser recording whose ``trace_paths.json`` failed to flush is
+  ## still replayable (the event stream carries `Path` records), it just
+  ## has no pre-extracted source list.  A malformed *metadata* file, by
+  ## contrast, raises — silently importing a recording with an empty
+  ## program name would produce an unopenable entry in the trace list.
+  var program = ""
+  var workdir = ""
+  var args: seq[string] = @[]
+
+  let metadataPath = folder / MATERIALIZED_TRACE_METADATA_FILE
+  if fileExists(metadataPath):
+    var metadata: JsonNode
+    try:
+      metadata = parseFile(metadataPath)
+    except CatchableError as e:
+      raise newException(IOError,
+        "malformed " & MATERIALIZED_TRACE_METADATA_FILE & " in " & folder &
+        ": " & e.msg)
+    if metadata.kind != JObject:
+      raise newException(IOError,
+        "malformed " & MATERIALIZED_TRACE_METADATA_FILE & " in " & folder &
+        ": expected a JSON object, got " & $metadata.kind)
+    if metadata.hasKey("program") and metadata["program"].kind == JString:
+      program = metadata["program"].getStr
+    if metadata.hasKey("workdir") and metadata["workdir"].kind == JString:
+      workdir = metadata["workdir"].getStr
+    if metadata.hasKey("args") and metadata["args"].kind == JArray:
+      for arg in metadata["args"]:
+        if arg.kind == JString:
+          args.add(arg.getStr)
+
+  var paths: seq[string] = @[]
+  let pathsPath = folder / MATERIALIZED_TRACE_PATHS_FILE
+  if fileExists(pathsPath):
+    try:
+      let parsed = parseFile(pathsPath)
+      if parsed.kind == JArray:
+        for path in parsed:
+          if path.kind == JString:
+            paths.add(path.getStr)
+    except CatchableError as e:
+      echo "WARNING: ignoring malformed ", MATERIALIZED_TRACE_PATHS_FILE,
+        " in ", folder, ": ", e.msg
+
+  # ``program`` seeds language detection and is what the trace list
+  # shows, so fall back to the folder name rather than leaving it blank.
+  if program.len == 0:
+    program = folder.lastPathPart
+
+  CtfsMetaDat(
+    recordingId: "",
+    program: program,
+    workdir: workdir,
+    args: args,
+    paths: paths)
+
+proc readTraceFolderMeta*(folder: string): CtfsMetaDat =
+  ## Read the metadata of the single recording stored in `folder`,
+  ## whichever on-disk shape it uses.  Raises `IOError` with a
+  ## folder-specific diagnostic when the folder holds no recording.
+  ##
+  ## Session manifests are not a single recording, so they are not
+  ## considered here (`allowSession = false`).
+  let shape = detectTraceFolderShape(folder, allowSession = false)
+  case shape.kind
+  of TraceShapeCtfs:
+    readCtfsMetaDat(shape.path)
+  of TraceShapeMaterialized:
+    readMaterializedTraceMeta(folder)
+  else:
+    raise newException(IOError, describeMissingTraceContainer(folder))
+
+proc copyMaterializedTracePayload(sourceFolder, outputFolder: string) =
+  ## Copy a materialized `runtime_tracing` recording (event stream +
+  ## sidecars) into the recording folder `importTrace` allocated for it.
+  ## Mirrors the CTFS branch's single ``copyFile`` of the container.
+  for name in MATERIALIZED_TRACE_EVENT_FILES:
+    let source = sourceFolder / name
+    if fileExists(source) and source != outputFolder / name:
+      copyFile(source, outputFolder / name)
+  for name in [MATERIALIZED_TRACE_METADATA_FILE, MATERIALIZED_TRACE_PATHS_FILE]:
+    let source = sourceFolder / name
+    if fileExists(source) and source != outputFolder / name:
+      copyFile(source, outputFolder / name)
 
 proc importTrace*(
   traceFolder: string,
@@ -145,17 +281,39 @@ proc importTrace*(
   ## was anonymised) should pass an explicit non-empty
   ## ``recordingIdArg``.
 
-  # M-REC-1.5: metadata is read from the CTFS ``meta.dat`` inside
-  # ``trace.ct``.  Legacy ``trace_metadata.json`` /
-  # ``trace_db_metadata.json`` sidecars are no longer accepted; readers
-  # raise if the container is missing.
-  let ctPath = findCtFileInFolder(traceFolder)
-  if ctPath.len == 0:
+  # M-REC-1.5: for a CTFS recording, metadata is read from the
+  # ``meta.dat`` inside ``trace.ct``; the retired
+  # ``trace_db_metadata.json`` sidecar is not accepted.
+  #
+  # M41: a *materialized* `runtime_tracing` directory (``trace.json`` +
+  # ``trace_metadata.json`` + ``trace_paths.json``) is also accepted.
+  # That is the shape ``ct record-web`` writes for browser recordings
+  # and the shape the Rust replay engine already replays — refusing it
+  # here was the reason a browser recording could be replayed by every
+  # headless suite in the repo yet never opened by the GUI.
+  #
+  # Sessions are deliberately *not* handled here: a ``session.toml``
+  # names several recordings and belongs to `importSessionManifest`.
+  let shape = detectTraceFolderShape(traceFolder, allowSession = false)
+  if shape.kind == TraceShapeMissing:
     raise newException(IOError,
-      "importTrace: no `.ct` CTFS container found in " & traceFolder &
-      " (legacy trace_metadata.json/trace_db_metadata.json sidecars retired in M-REC-1.5)")
+      "importTrace: " & describeMissingTraceContainer(traceFolder))
 
-  let meta = readCtfsMetaDat(ctPath)
+  # The folder the recording payload actually lives in.  This is
+  # ``traceFolder`` itself in every case except the one-level descent
+  # `detectTraceFolderShape` performs for the recorders that treat
+  # ``--out-dir`` as the recording's PARENT (codetracer-js-recorder's
+  # ``trace-<n>/``, codetracer-php-recorder's ``worker_<pid>/``).  Reading
+  # the payload from ``traceFolder`` there would look for sidecars one
+  # directory above the ones the detector just matched.
+  let recordingSourceFolder = shape.folder
+
+  let ctPath = if shape.kind == TraceShapeCtfs: shape.path else: ""
+  let meta =
+    if shape.kind == TraceShapeCtfs:
+      readCtfsMetaDat(ctPath)
+    else:
+      readMaterializedTraceMeta(recordingSourceFolder)
   let program = meta.program
   var args = meta.args
   var workdir = meta.workdir
@@ -193,50 +351,31 @@ proc importTrace*(
       traceFolder
   if recordingIdArg == NO_RECORDING_ID:
     createDir(outputFolder)
-    # Copy the CTFS container itself; downstream tooling treats it as the
-    # source of truth.  Any sibling ``paths.json`` produced by
-    # ``materializeCtfsSources`` is regenerated by callers as needed.
-    let outputCt = outputFolder / "trace.ct"
-    if ctPath != outputCt:
-      copyFile(ctPath, outputCt)
+    if shape.kind == TraceShapeCtfs:
+      # Copy the CTFS container itself; downstream tooling treats it as
+      # the source of truth.  Any sibling ``paths.json`` produced by
+      # ``materializeCtfsSources`` is regenerated by callers as needed.
+      let outputCt = outputFolder / CANONICAL_CT_FILE
+      if ctPath != outputCt:
+        copyFile(ctPath, outputCt)
+    else:
+      # M41: the materialized shape has no single container, so carry
+      # the event stream and its sidecars across instead.  The replay
+      # engine autodetects ``trace.json`` / ``trace.bin`` in the
+      # recording folder exactly as it does in the recorder's output
+      # folder (``dap_server.rs::auto_detect_materialized_trace_file``).
+      copyMaterializedTracePayload(recordingSourceFolder, outputFolder)
 
   let paths: seq[string] = meta.paths
 
-  var lang = langArg
+  let lang = if langArg != LangUnknown:
+      langArg
+    else:
+      detectTraceLang(program, paths, traceKind)
 
-  if lang == LangUnknown:
-    # The CTFS `meta.dat` stores both the recorded `program` argument
-    # (the path the user typed to `ct record`, e.g.
-    # `path/to/main.nim`) and the list of source paths actually
-    # captured during the recording.  The pre-M-REC-1.5 code only
-    # consulted `meta.paths`; that left rr/ttd recordings of
-    # compiled-language traces classified as `LangUnknown` whenever
-    # the captured source list happened to start with a path whose
-    # extension is unknown to `detectLangFromPath` — `program` itself
-    # was never used.  Probe `program` first so the visible
-    # "what was recorded" identifier always seeds detection, then
-    # fall back to scanning the captured paths exactly as before.
-    let isWasm = program.extractFilename.split(".")[^1] == "wasm"
-    var detectedLang = detectLangFromPath(program, isWasm)
-    if detectedLang == LangUnknown:
-      for path in paths:
-        let p = detectLangFromPath(path, isWasm)
-        if p != LangUnknown:
-          detectedLang = p
-          break
-    if detectedLang != LangUnknown:
-      # for now assume this is used only for db traces
-      # and that C/C++/Rust there can come only from wasm targets currently
-      if detectedLang == LangRust:
-        lang = if traceKind == "db": LangRustWasm else: LangRust
-      elif detectedLang in {LangC, LangCpp}:
-        lang = if traceKind == "db": LangCppWasm else: detectedLang
-      else:
-        lang = detectedLang
-
-  if dirExists(traceFolder / "files"):
-    if traceFolder != outputFolder:
-      copyDir(traceFolder / "files", outputFolder / "files")
+  if dirExists(recordingSourceFolder / "files"):
+    if recordingSourceFolder != outputFolder:
+      copyDir(recordingSourceFolder / "files", outputFolder / "files")
       # The self-contained ``files/`` payload is only browsable if the
       # frontend can map trace path indices onto it.  ``importTraceFolder``
       # / ``importCtFile`` run ``materializeCtfsSources`` +
@@ -246,9 +385,10 @@ proc importTrace*(
       # ``loadFilenames`` finds it next to the copied ``files/`` payload
       # — without it the frontend falls back to the absolute recorder-
       # side paths and fails to open bundled sources on another machine.
-      if fileExists(traceFolder / "paths.json") and
+      if fileExists(recordingSourceFolder / "paths.json") and
           not fileExists(outputFolder / "paths.json"):
-        copyFile(traceFolder / "paths.json", outputFolder / "paths.json")
+        copyFile(recordingSourceFolder / "paths.json",
+                 outputFolder / "paths.json")
   elif selfContained and downloadUrl == "":
     # for now assuming if no `files/` dir already,
     # it happens on the original machine

@@ -103,6 +103,24 @@ suite "ct-test M16 release gate":
       check fileExists(corePath)
       checkNoHardSkips(corePath)
 
+  test "cli_record_gate_tests_exist_and_are_registered":
+    # Same gate contract as CoreViewModelGateTests, for the `ct record`
+    # dispatch lane: the files must exist and must not be skip-disabled.
+    for cliPath in CliRecordGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    # ... and, unlike the ViewModel lane (which `just test-vm-native` reaches
+    # by globbing a directory), these have a NAMED runner.  A gate entry with
+    # no runner is the "registered in only one place runs nowhere" failure
+    # this repo has hit repeatedly, so the recipe's existence is asserted
+    # here rather than assumed.
+    check fileExists("justfile")
+    let justfile = readExisting("justfile")
+    check justfile.contains("test-cli-record:")
+    check justfile.contains("find src/tests/cli -name '*_test.nim'")
+
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:
       checkpoint(entry.action)

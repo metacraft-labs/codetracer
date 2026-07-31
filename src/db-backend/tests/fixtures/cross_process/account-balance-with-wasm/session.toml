@@ -13,19 +13,19 @@
 version = 1
 
 [[trace]]
-recording_id = "0b339997-fed1-459f-ba61-c2c41b5565f3"
+recording_id = "018f0000-0000-7000-8000-frontendjs01"
 path = "./frontend.ct"
 role = "frontend-js"
 default_thread_prefix = "fe"
 
 [[trace]]
-recording_id = "fb9bf528-7658-459f-8a08-93f059880ecb"
+recording_id = "018f0000-0000-7000-8000-frontendwsm1"
 path = "./frontend-wasm.ct"
 role = "frontend-wasm"
 default_thread_prefix = "wasm"
 
 [[trace]]
-recording_id = "dce0d271-e02d-4efd-a973-d49c2f342939"
+recording_id = "018f0000-0000-7000-8000-backendnode1"
 path = "./backend.ct"
 role = "backend"
 default_thread_prefix = "be"

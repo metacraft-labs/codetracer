@@ -692,6 +692,27 @@ type
           "visual replay (MCR backend only)."
       .}: bool
 
+      # The recorded program is a long-lived server rather than a run that
+      # ends on its own.  This is a FLAG on `record` rather than a new
+      # subcommand on purpose: the unit of work is still "make one recording
+      # of one process", and everything else on `ct record` (-o, --lang,
+      # --backend, --upload, --with-diff, --export) applies unchanged.  A
+      # separate subcommand would have to duplicate all of it.  `run` and
+      # `host` are the wrong homes for the opposite reasons: `run` records a
+      # program that terminates and then opens the desktop GUI on the
+      # finished recording, and `host` serves an ALREADY-recorded trace over
+      # HTTP.  Neither one records a process that outlives the command.
+      #
+      # See src/ct/trace/recorder_dispatch.nim's ServerSupport for what the
+      # flag changes per language.
+      recordServer* {.
+        name: "server",
+        defaultValue: false,
+        desc: "Record a long-lived server. The recording stays readable " &
+          "while it runs, so `ct replay -t <folder>` in another terminal " &
+          "shows requests arriving live; stop it with Ctrl-C."
+      .}: bool
+
       recordProgram* {.
         argument
         desc: "Program to record"

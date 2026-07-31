@@ -2,6 +2,11 @@
   pkgs,
   rustPkgs ? null,
 }:
+let
+  # Anything inside a committed `.ct` container directory: the payload
+  # a recorder wrote, plus the source snapshot it copied alongside.
+  recordedTraceArtifacts = "\\.ct/";
+in
 {
   # Exclude third-party and generated files from all hooks
   excludes = [
@@ -105,8 +110,23 @@
     };
 
     # General hooks
-    trim-trailing-whitespace.enable = true;
-    end-of-file-fixer.enable = true;
+    #
+    # Committed recordings are recorder *output*, not source, and must
+    # stay byte-for-byte what the recorder wrote — that is the whole
+    # basis on which a fixture recording can be trusted as evidence.
+    # Whitespace hooks would silently edit them: `end-of-file-fixer`
+    # appends a newline the writer did not emit, so a regenerated
+    # recording never matches the committed one; and
+    # `trim-trailing-whitespace` would corrupt any trace carrying a
+    # recorded string value that ends in a space.
+    trim-trailing-whitespace = {
+      enable = true;
+      excludes = [ recordedTraceArtifacts ];
+    };
+    end-of-file-fixer = {
+      enable = true;
+      excludes = [ recordedTraceArtifacts ];
+    };
     check-yaml.enable = true;
     check-added-large-files = {
       enable = true;

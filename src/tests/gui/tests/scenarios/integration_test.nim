@@ -696,3 +696,106 @@ suite "Integration: all ViewModel commands are valid DAP commands":
         check cmd.command.isValidDapCommand
 
       dispose()
+
+  test "the Event Log boundary-chip jump sends only valid DAP commands":
+    ## M49 regression. The §5.3 gesture — click a marker row's boundary
+    ## chip — is the one place the Event Log resolves a correlation
+    ## across recordings, and every command on that path was unmapped:
+    ## `ct/pairIndexLookup` had no `CtEventKind` at all, and
+    ## `ct/goto-ticks` had one neither in the mapping nor in this
+    ## module's authoritative set. `dapCommandToEventKind` raises on an
+    ## unmapped string, so in the product the click issued nothing and
+    ## rotated nothing — a dead control that looked wired.
+    ##
+    ## The sibling cases above never reached it because the chip has no
+    ## auto-load effect behind it: nothing sends these commands until a
+    ## user clicks, so a test that only drives effects and steps cannot
+    ## see them.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let app = createAppViewModel(mock.toBackendService())
+      let vm = app.session.eventLogVM
+      drain()
+
+      # The counterpart the lookup resolves to: a `recv` firing of the
+      # same boundary + key, recorded in a *sibling* recording. Only a
+      # counterpart carries a `recordingId`, which is what makes the
+      # jump a process switch rather than a local seek.
+      mock.expect("ct/pairIndexLookup", %*{
+        "counterparts": [{
+          "recordingId": "rec-backend",
+          "stepId": 48,
+          "sourcePath": "backend/server.js",
+          "sourceLine": 64,
+          "markerId": 0,
+          "boundaryId": "account-balance",
+          "direction": "recv",
+          "keyText": "key",
+          "keyValue": "req-0001",
+          "showValue": "620",
+        }],
+      })
+
+      var switchedTo = ""
+      vm.onSwitchProcessProc = proc(recordingId: string) =
+        switchedTo = recordingId
+
+      mock.clearReceivedCommands()
+      vm.jumpToCounterpartOf(MarkerEventRow(
+        eventIndex: 0,
+        markerId: 0,
+        boundaryId: "account-balance",
+        direction: mdSend,
+        keyText: "key",
+        keyValue: "req-0001",
+        showValue: "620",
+        sourcePath: "frontend/app.js",
+        sourceLine: 43,
+        stepId: 17,
+      ))
+      drain()
+
+      check mock.findCommand("ct/pairIndexLookup").isSome
+      check mock.findCommand("ct/goto-ticks").isSome
+      check mock.receivedCommands.len >= 2
+      for cmd in mock.receivedCommands:
+        check cmd.command.isValidDapCommand
+
+      # And the gesture's whole point: the session rotates to the
+      # recording the counterpart lives in.
+      check switchedTo == "rec-backend"
+
+      dispose()
+
+  test "a boundary chip with no counterpart rotates nothing":
+    ## The complement of the case above: an unmatched marker — one
+    ## whose boundary no sibling recording declared — must leave the
+    ## active recording alone rather than switch to an empty string.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let app = createAppViewModel(mock.toBackendService())
+      let vm = app.session.eventLogVM
+      drain()
+
+      mock.expect("ct/pairIndexLookup", %*{"counterparts": []})
+
+      var switchCalls = 0
+      vm.onSwitchProcessProc = proc(recordingId: string) =
+        switchCalls += 1
+
+      vm.jumpToCounterpartOf(MarkerEventRow(
+        boundaryId: "orphan-boundary",
+        direction: mdSend,
+        keyText: "key",
+        keyValue: "k1",
+        sourcePath: "frontend/app.js",
+        sourceLine: 43,
+        stepId: 17,
+      ))
+      drain()
+
+      check mock.findCommand("ct/pairIndexLookup").isSome
+      check mock.findCommand("ct/goto-ticks").isNone
+      check switchCalls == 0
+
+      dispose()

@@ -109,6 +109,28 @@ type
     # §RS-M3 and codetracer-specs/GUI/Core-Panes/Request-Panel.md.
     CtLoadRequestSpansSince,
     CtUpdatedHttpRequests,
+    # Multi-process sessions (M29 §5.2 / M42 §14.8). `ct/listProcesses`
+    # is unusual in that the backend speaks it in BOTH directions: as a
+    # request the frontend may issue, and as an unsolicited event
+    # dispatched once per session load
+    # (`db-backend/src/dap_server.rs::dispatch_session_load_event`).
+    # Both carry the same body shape, so both route to this kind and
+    # `SessionViewModel.applyListProcessesResponse` decodes either.
+    CtListProcesses,
+    CtListProcessesResponse,
+    # M25b §5.3 / M49 — Event Log correlation-marker counterpart lookup.
+    # The boundary chip's jump resolves a marker's counterpart through
+    # this request; without a kind here `dapCommandToEventKind` raises
+    # and the request is never written to the wire, so the click
+    # resolved nothing and rotated nothing.
+    CtPairIndexLookup,
+    CtPairIndexLookupResponse,
+    # M25b §5.3 / M49 — seek the active recording's timeline to a
+    # marker firing's step. `EventLogVM.jumpToCounterpart` has always
+    # named this command; it had no kind, so the send raised and the
+    # jump landed wherever the process switch happened to leave the
+    # cursor instead of on the correlated step.
+    CtGotoTicks,
 
 when defined(js):
   import std / jsffi

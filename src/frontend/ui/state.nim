@@ -271,6 +271,22 @@ proc tryMountOriginSidePanel*() =
   when defined(js):
     renderOriginSidePanelDomReactive()
 
+proc releaseOriginSidePanelEffect*() =
+  ## Forget the installed render effect so the next
+  ## ``tryMountOriginSidePanel`` installs a fresh one.
+  ##
+  ## Needed because the effect captures its reactive dependencies from
+  ## whichever ``OriginChainVM`` existed when it first ran. Startup
+  ## creates a stub-backed VM during ``register()`` and then *replaces*
+  ## it with the shared-store VM in ``initStateVMWithStore``; without
+  ## this reset the effect stays subscribed to the discarded stub's
+  ## ``sidePanelOpen`` / ``activeChain`` signals, so the real VM's
+  ## chain arrives and the panel never re-renders — the side panel is
+  ## drawn exactly once, empty, and stays that way for the whole
+  ## session.
+  when defined(js):
+    originSidePanelEffectInstalled = false
+
 proc wireOriginChainBridges(stateVM: StateVM; originVM: OriginChainVM) =
   ## Wire the StateVM → OriginChainVM bridges so the State Pane's
   ## inline origin badge click handler dispatches the same
@@ -305,6 +321,13 @@ proc wireOriginChainBridges(stateVM: StateVM; originVM: OriginChainVM) =
   # StateVM mirror is read by the row renderer.
   stateVM.originPreferences.val = originVM.preferences.val
 
+proc activeStateVM*(): StateVM =
+  ## M42 §14.8 — expose the module-local `StateVM` so the bootstrap
+  ## code path (`ui_js.nim`) can install the multi-process bridges the
+  ## "Switch process" context-menu entry needs. Returns ``nil`` until
+  ## the VM has been created.
+  stateVMInstance
+
 proc activeOriginChainVM*(): OriginChainVM =
   ## M29 §14.8 — expose the module-local `OriginChainVM` so the
   ## bootstrap code path (`ui_js.nim`) can attach it to the active
@@ -332,6 +355,9 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   # §3.2.3).
   originChainVMInstance = createOriginChainVM(store)
   wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+  # The VM this replaces may already own the side panel's render
+  # effect; drop it so the panel re-binds to the new VM's signals.
+  releaseOriginSidePanelEffect()
   # Publish the VM through the shared runtime so other surfaces
   # (history popover in ``ui/value.nim``, omniscience-flow overlay in
   # ``ui/flow.nim``, scratchpad chain cards) can enqueue placeholder

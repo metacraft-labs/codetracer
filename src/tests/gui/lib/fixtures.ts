@@ -1911,7 +1911,36 @@ export function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Wait for the entry point to be ready (location path clickable). */
+/** Wait for the entry point to be ready (location path clickable).
+ *
+ * `.location-path` is the status bar's `path:line#ticks` readout.  The
+ * frontend renders it only once `StatusBaseModel.locationText` is non-empty
+ * (`StatusComponent.statusBaseModel` in `src/frontend/ui/status.nim` fills it
+ * from `displayLocation()` — the component's tracked debug location, or the
+ * matching C location when a Nim trace is in target-source view), so a
+ * *visible* `.location-path` means the session opened a trace, the debugger
+ * reported an entry location and the footer is laid out and hit-testable.
+ * That is the readiness contract
+ * every Electron spec depends on, and it is deliberately a visibility wait
+ * rather than an attachment wait: the element is in the DOM with the right
+ * `title` long before it has a box, so `state: "attached"` /
+ * `toBeAttached()` would report readiness for a status bar that never
+ * renders.
+ *
+ * Is the hidden `.location-path` intended?  No — asked and answered while
+ * fixing M43 (`codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`).
+ * Commit b27da3947 ("feat: Redesign of the status bar") added
+ * `#status #status-base > *:not(#auto-hide-bottom-strip) { display: none !important }`
+ * to `src/frontend/styles/components/status_bar.styl`, which hid this
+ * element (and the copy-path button, the language/encoding readout, and the
+ * auto-hide collapsed-icon zone) suite-wide.  That contradicts
+ * `Auto-Hide-Panes.md` §3.1, which specifies that the footer keeps its
+ * existing right-hand content (language, encoding, cursor location) while
+ * hosting the bottom tab strip, and §10.3, which puts the icon zone in the
+ * same bar.  The blanket rule was removed rather than worked around here;
+ * the styl file carries the full rationale.  Keep this wait as a visibility
+ * wait so a repeat of that regression fails loudly instead of silently.
+ */
 export async function readyOnEntryTest(p: Page): Promise<void> {
   await p.locator(".location-path").waitFor({ state: "visible", timeout: 15_000 });
   await p.locator(".location-path").click();

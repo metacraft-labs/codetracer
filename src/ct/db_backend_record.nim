@@ -6,6 +6,7 @@ import std/[ os, osproc, strutils, strformat, sequtils, json ],
   cli/[ logging, help ],
   globals,
   trace/storage_and_import,
+  trace/recorder_dispatch,
   trace/shell
 
 
@@ -191,122 +192,137 @@ proc recordNim(
 # rr patches for ruby/other vm-s: not supported now, instead
 # in db backend support only direct traces
 
+proc recordNativeServer(
+    program: string, args: seq[string], traceFolder: string,
+    recordingId: string): Trace =
+  ## ``ct record --server`` for the native family.
+  ##
+  ## A native server has no middleware seam — nginx does not know what a
+  ## CodeTracer request span is — so codetracer-native-recorder ships a
+  ## separate supervisor, ``ct_server_record`` (installed as
+  ## ``codetracer-native-recorder``), which drives ``ct-mcr`` for the
+  ## long-running process, time-slices the result and then DISCOVERS the
+  ## request spans from the recording's own syscall payloads.  That is the
+  ## flow `just demo-request-panel native` runs by hand; this is the same
+  ## flow behind the flag.
+  if nativeServerRecorderExe.len == 0:
+    errorMessage "error: the native server recorder `codetracer-native-recorder` " &
+      "was not found, so `ct record --server` cannot record this program."
+    errorMessage "help: set CODETRACER_NATIVE_SERVER_RECORDER_PATH=/path/to/it, or"
+    errorMessage "help:   build it with `cd ../codetracer-native-recorder && just build`;"
+    errorMessage "help:   it produces ct_server_record/codetracer-native-recorder."
+    quit(1)
+
+  createDir(traceFolder)
+  for line in serverGuidance(LangC, traceFolder):
+    echo "codetracer: " & line
+  flushFile(stdout)
+
+  let process = startProcess(
+    nativeServerRecorderExe,
+    args = @["--out-dir", traceFolder, "--", program].concat(args),
+    workingDir = getCurrentDir(),
+    options = {poParentStreams})
+  let recordPid = process.processId
+  let exitCode = waitForExit(process)
+  # 130/143 are the shell conventions for SIGINT / SIGTERM, which is how a
+  # server recording is normally stopped.
+  if exitCode notin [0, 130, 143]:
+    echo fmt"error: the native server recorder exited with {exitCode}"
+    quit(1)
+
+  importTrace(traceFolder, recordingId, recordPid, LangUnknown,
+              DB_SELF_CONTAINED_DEFAULT, traceKind = "rr")
+
+proc requireRecorder(lang: Lang) =
+  ## Fail with a precise, actionable message when a language's recording
+  ## toolchain is not installed — never fall through to a different backend
+  ## and never spawn the empty string.
+  ##
+  ## Before this check the recorder path was resolved out of ``paths.nim``
+  ## and passed straight to ``startProcess``.  When the lookup failed the exe
+  ## was ``""``, ``startProcess`` raised, ``record``'s ``except
+  ## CatchableError`` swallowed it, and ``ct`` registered a trace for a
+  ## recording that never ran.  The Python arm in ``src/ct/trace/record.nim``
+  ## already modelled the right behaviour (``checkPythonRecorder`` → "install
+  ## it with …"); this brings every other language up to that bar, using the
+  ## per-language remedy table in ``trace/recorder_dispatch.nim``.
+  let missing = missingArtifacts(lang)
+  let tool = recorderToolFor(lang)
+  if tool.supported and missing.len == 0:
+    return
+  for line in missingRecorderMessage(lang, missing):
+    errorMessage line
+  quit(1)
+
 proc recordDb(
-    lang: Lang, vmExe: string,
+    lang: Lang,
     program: string, args: seq[string],
     backend: string, traceFolder: string, stylusTrace: string,
     # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
     recordingId: string, pythonActivationPath: string = "",
-    pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
+    pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
+    server: bool = false): Trace =
+
+  requireRecorder(lang)
+  if lang == LangNoir and backend.len > 0 and backend != "plonky2":
+    echo fmt"error: unsupported backend: {backend}"
+    quit(1)
 
   createDir(traceFolder)
-  if lang == LangNoir and vmExe.len == 0:
-    echo fmt"error: CODETRACER_NOIR_EXE_PATH is not set in the env variables"
-    quit(1)
   # Materialized traces are CTFS-only; the recorders write a single
   # `<program>.ct` container into ``traceFolder`` directly, so we no longer
   # need to set CODETRACER_DB_TRACE_PATH (which used to point recorders at
   # the legacy ``trace.json`` sidecar).
 
-  var startArgs: seq[string]
-  case lang:
-    of LangRubyDb:
-      startArgs = @[rubyRecorderPath, "--out-dir", fmt"{traceFolder}", program]
-    of LangRustWasm, LangCppWasm:
-      var vmArgs = @["run"]
-      if stylusTrace.len > 0:
-        vmArgs.add("-stylus")
-        vmArgs.add(stylusTrace)
-      vmArgs = vmArgs.concat(@["--out-dir", traceFolder, program])
-      startArgs = vmArgs
-    of LangNoir:
-      let backendArgs = if backend == "plonky2":
-          @["--trace-plonky2"]
-        elif backend.len > 0:
-          echo fmt"error: unsupported backend: {backend}"
-          quit(1)
-        else:
-          @[]
+  # The whole per-language argv/env table lives in trace/recorder_dispatch.nim
+  # so it can be asserted by a test without recording anything.  See that
+  # module's header for why it is not inlined here any more.
+  let invocation = recorderInvocation(
+    lang, program, traceFolder,
+    RecorderOptions(
+      backend: backend,
+      stylusTrace: stylusTrace,
+      pythonActivationPath: pythonActivationPath,
+      pythonTestFramework: pythonTestFramework,
+      pythonTestArgs: pythonTestArgs,
+      server: server))
 
-      startArgs = @["trace", "--out-dir", traceFolder].concat(backendArgs)
-    of LangPythonDb:
-      # The Python recorder selects its trace format from the recorder's
-      # own configuration; ct must not pass --format (the recorder rejects
-      # it after the recorder convention compliance work).
-      var recorderArgs = @["--out-dir", traceFolder]
-      if pythonActivationPath.len > 0:
-        recorderArgs.add("--activation-path")
-        recorderArgs.add(pythonActivationPath)
-      # Handle test framework mode (pytest/unittest)
-      if pythonTestFramework.len > 0:
-        recorderArgs.add("--" & pythonTestFramework)
-        recorderArgs = recorderArgs.concat(pythonTestArgs)
-      else:
-        recorderArgs.add(program)
-      startArgs = recorderArgs
-    of LangBash:
-      startArgs = @["--out-dir", traceFolder, program]
-    of LangZsh:
-      startArgs = @["--out-dir", traceFolder, program]
-    of LangJavascript:
-      startArgs = @["record", "--out-dir", traceFolder, program]
-    of LangMasm, LangMove, LangSolana, LangSway, LangCairo, LangCircom,
-       LangLeo, LangPolkavm, LangTolk, LangAiken, LangCadence, LangSolidity:
-      # All blockchain/VM recorders use the same interface:
-      #   <recorder-binary> record --out-dir <traceFolder> <program>
-      startArgs = @["record", "--out-dir", traceFolder, program]
-    else:
-      echo fmt"error: lang {lang} not supported for recordDb"
-      quit(1)
+  if invocation.exe.len == 0:
+    # Unreachable via ``requireRecorder`` above; kept as a hard stop so a
+    # future language added to the Lang enum but not to the dispatch table
+    # fails loudly instead of spawning "".
+    errorMessage fmt"error: no recorder invocation is defined for {lang.toName}."
+    errorMessage "help: add it to src/ct/trace/recorder_dispatch.nim."
+    quit(1)
 
-  var programDir = program.parentDir
-  if lang == LangNoir:
-    if dirExists(program):
-      # for noir, we run nargo inside `programDir`,
-      # so it's sufficient to just pass a folder
-      # that is inside the noir traced program
-      # crate/package directory, i think
-      #
-      # here we just make sure it's the folder itself
-      # if passed directly to `ct record`, for files
-      # we take their folder as in the default case
-      # with `parentDir`
-      programDir = program
+  if server:
+    for line in serverGuidance(lang, traceFolder):
+      echo "codetracer: " & line
+    flushFile(stdout)
 
-  if lang == LangNoir:
-    if vmExe.len == 0:
-      echo "error: expected a path in `CODETRACER_NOIR_EXE_PATH`: please fill this env var"
-      quit(1)
+  for (name, value) in invocation.env:
+    putEnv(name, value)
 
-  if lang in {LangRustWasm, LangCppWasm}:
-    if vmExe.len == 0:
-      echo "error: expected a path in `CODETRACER_WASM_VM_PATH`: please fill this env var"
-      quit(1)
-
-  # echo vmExe, " ", startArgs.concat(args), " ", programDir
-  # noir: call directly its local exe as a simple workaround for now:
-  # (noirExe from src/common/paths.nim)
-  #   we should try to not always depend on env var paths though
-  # echo "codetracer: starting language tracer with:"
-  let workdir = if lang == LangNoir:
-        # for noir, we must start in the noir project directory
-        # for the trace command to work
-        programDir
-      else:
-        # for other languages, we must start in the real inherited
-        # work dir
-        getCurrentDir()
+  let workdir = if invocation.workdir.len > 0: invocation.workdir
+                else: getCurrentDir()
 
   let process = startProcess(
-    vmExe,
-    args = startArgs.concat(args),
+    invocation.exe,
+    args = invocation.args.concat(args),
     workingDir = workdir,
     options = {poParentStreams}) # add poEchoCmd if you want to debug and see how the cmd might look
   let recordPid = process.processId
   let exitCode = waitForExit(process)
   if exitCode != 0:
-    echo fmt"error: recorder exited with {exitCode} for {lang}"
-    quit(1)
+    # A recorded SERVER is normally stopped with Ctrl-C or SIGTERM, so the
+    # shell-convention exit codes for those (128 + SIGINT / 128 + SIGTERM)
+    # are how a successful `ct record --server` ends.  Treating them as
+    # failures would make the flag unusable.
+    const SignalStopCodes = [130, 143]
+    if not (server and exitCode in SignalStopCodes):
+      echo fmt"error: recorder exited with {exitCode} for {lang}"
+      quit(1)
 
   result = importTrace(traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
@@ -321,7 +337,8 @@ proc record(
     traceIDRecord: string = NO_RECORDING_ID, customPath: string = "", outputFolderArg: string = "",
     traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
-    pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
+    pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
+    server: bool = false): Trace =
   var traceID: string
   if traceIDRecord == NO_RECORDING_ID:
     traceID = trace_index.newID(test)
@@ -376,78 +393,34 @@ proc record(
       errorMessage fmt"error: {lang} not supported currently with db: maybe you need a rr trace for it?"
       quit(1)
 
-  let (executableDir, executableFile, executableExt) = executable.splitFile
-  discard executableDir
-  discard executableExt
+  # Every arm below either returns a Trace or quits: the recorders themselves
+  # register the recording (``importTrace``), so there is no longer a
+  # fall-through ``trace_index.recordTrace`` tail here.  That tail used to be
+  # reached only when the ``except`` swallowed a recorder failure, which is
+  # exactly the silent-success bug this dispatch rework removes; with the
+  # except now fatal, the locals it consumed (exitCode / calltrace /
+  # sourceFolders / shellID / calltraceMode / traceDir / env) are dead too.
 
-  let traceDir = outputFolder
-
-  var exitCode = 0
-
-  var calltrace = false
-
-  var sourceFolders: seq[string] = @[]
-  var sourceFoldersText = ""
-  let shellID = if basic: getEnv("CODETRACER_SHELL_ID", "-1").parseInt else: -1
-
-  let defaultRawCalltraceMode = if not lang.usesMaterializedTraces:
-    "RawRecordNoValues"
-  else:
-    "FullRecord"
-
-  # here we have different default for rr/gdb backend from loadCalltraceMode:
-  #   RawRecordNoValues: for new traces
-  #   `loadCalltraceMode` can be used for older traces which don't originally have this column
-  #   so there the default for rr/gdb is NoInstrumentation to be more conservative
-  let calltraceMode = loadCalltraceMode(getEnv("CODETRACER_CALLTRACE_MODE", defaultRawCalltraceMode), lang)
+  if server and serverSupport(lang) == ssUnsupported:
+    for line in serverUnsupportedMessage(lang):
+      errorMessage line
+    quit(1)
 
   try:
-    if lang == LangRubyDb:
-      return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, "", traceId)
-    elif lang in {LangNoir, LangRustWasm, LangCppWasm}:
+    if lang in {LangNoir, LangRustWasm, LangCppWasm}:
       if lang == LangNoir:
         # TODO: base the first arg: source folder for record symbols on
         #   debuginfo or the CTFS meta.dat paths block
         # for noir for now "executable" is the noir folder
         recordSymbols(executable, outputFolder, lang)
-      var vmPath = ""
-      if lang in {LangRustWasm, LangCppWasm}:
-        vmPath = wazeroExe
-      else:
-        vmPath = noirExe
-      return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
-    elif lang == LangBash:
-      return recordDb(LangBash, bashRecorderExe, executable, args, backend, outputFolder, "", traceId)
-    elif lang == LangZsh:
-      return recordDb(LangZsh, zshRecorderExe, executable, args, backend, outputFolder, "", traceId)
-    elif lang == LangJavascript:
-      return recordDb(LangJavascript, jsRecorderExe, executable, args, backend, outputFolder, "", traceId)
+      return recordDb(lang, executable, args, backend, outputFolder,
+                      stylusTrace, traceId, server = server)
     elif lang == LangNim:
       # ``.nim`` / ``.nims`` files dispatch into recordNim, which decides
       # between the MCR native-binary flow and the M-nim VM tracer based on
       # the source extension.  See src/ct/db_backend_record.nim:recordNim.
+      requireRecorder(LangNim)
       return recordNim(executable, args, outputFolder, traceId)
-    elif lang in {LangMasm, LangMove, LangSolana, LangSway, LangCairo, LangCircom,
-                   LangLeo, LangPolkavm, LangTolk, LangAiken, LangCadence, LangSolidity}:
-      # Blockchain/VM recorders: each has a dedicated external binary
-      let recorderExe = case lang
-        of LangMasm: midenRecorderExe
-        of LangMove: moveRecorderExe
-        of LangSolana: solanaRecorderExe
-        of LangSway: fuelRecorderExe
-        of LangCairo: cairoRecorderExe
-        of LangCircom: circomRecorderExe
-        of LangLeo: leoRecorderExe
-        of LangPolkavm: polkavmRecorderExe
-        of LangTolk: tonRecorderExe
-        of LangAiken: cardanoRecorderExe
-        of LangCadence: flowRecorderExe
-        of LangSolidity: evmRecorderExe
-        else: "" # unreachable
-      if recorderExe.len == 0:
-        echo fmt"error: recorder binary not found for {lang}. Set the corresponding CODETRACER_*_RECORDER_PATH env var or ensure the binary is on PATH."
-        quit(1)
-      return recordDb(lang, recorderExe, executable, args, backend, outputFolder, stylusTrace, traceId)
     elif lang == LangPythonDb:
       var activationPathResolved = pythonActivationPath
       if activationPathResolved.len > 0:
@@ -458,7 +431,6 @@ proc record(
 
       return recordDb(
         LangPythonDb,
-        pythonRecorderExe,
         executable,
         args,
         backend,
@@ -467,8 +439,21 @@ proc record(
         traceId,
         pythonActivationPath = activationPathResolved,
         pythonTestFramework = pythonTestFramework,
-        pythonTestArgs = pythonTestArgs)
+        pythonTestArgs = pythonTestArgs,
+        server = server)
+    elif recorderToolFor(lang).supported:
+      # Every remaining materialized-trace language goes through the one
+      # dispatch table in trace/recorder_dispatch.nim: Ruby, JavaScript, PHP,
+      # Elixir, Erlang, bash, zsh and the twelve blockchain / VM recorders.
+      # PHP, Elixir and Erlang had no arm here at all before this change even
+      # though language detection produced them and they are marked
+      # ``usesMaterializedTraces``, so `ct record app.php` fell through to
+      # "ERROR: unsupported trace kind db" and exited 0.
+      return recordDb(lang, executable, args, backend, outputFolder,
+                      stylusTrace, traceId, server = server)
     elif traceKind == "rr" or traceKind == "ttd":
+      if server:
+        return recordNativeServer(executable, args, outputFolder, traceId)
       return recordWithCtRrSupport(
         rrSupportPath,
         executable,
@@ -478,30 +463,21 @@ proc record(
         traceKind,
         backend)
     else:
-      echo fmt"ERROR: unsupported trace kind {traceKind}"
+      # ``lang`` is a language CodeTracer knows about but has no recorder
+      # for (or an explicitly-requested retired backend such as
+      # ``--lang ruby``).  Say which one and what to do instead, rather than
+      # blaming the trace kind — "ERROR: unsupported trace kind db" was the
+      # message `ct record app.php` used to print, and it named neither the
+      # language nor a remedy.
+      for line in missingRecorderMessage(lang, missingArtifacts(lang)):
+        errorMessage line
       quit(1)
-  except CatchableError:
-    exitCode = -1
-  # echo "record trace from db_backend_record with pid ", rrPid
-  result = trace_index.recordTrace(
-    traceID,
-    program = executable,
-    args = args,
-    compileCommand = compileCommand,
-    env = env,
-    workdir = getCurrentDir(),
-    lang = lang,
-    sourceFolders = sourceFoldersText,
-    lowLevelFolder = "",
-    outputFolder = outputFolder,
-    test = test,
-    imported = false,
-    shellID = shellID,
-    rrPid = rrPid,
-    exitCode = exitCode,
-    calltrace = calltrace,
-    calltraceMode = calltraceMode)
-
+  except CatchableError as recordError:
+    # Never fall through to ``recordTrace`` on an exception: that registered a
+    # trace for a recording that never happened, and `ct record` then printed
+    # a recordingId and exited 0.  Surface the failure instead.
+    errorMessage fmt"error: recording {lang.toName} program '{executable}' failed: {recordError.msg}"
+    quit(1)
 
 proc exportRecord(
     program: string,
@@ -581,6 +557,7 @@ proc main*(): Trace =
   var pythonInterpreter = ""
   var traceKind = "db" # by default
   var rrSupportPath = ""
+  var server = false
   var pythonTestFramework = ""
   var pythonTestArgs: seq[string] = @[]
 
@@ -607,6 +584,12 @@ proc main*(): Trace =
       i += 2
     elif arg == "-c" or arg == "--cleanup-output-folder":
       cleanupOutputFolder = true
+      i += 1
+    elif arg == "--server":
+      # `ct record --server`: the recorded program is a long-lived server.
+      # See trace/recorder_dispatch.nim's ServerSupport for what this changes
+      # per language.
+      server = true
       i += 1
     elif arg == "--lang":
       if args.len < i + 2:
@@ -770,7 +753,8 @@ proc main*(): Trace =
       traceKind=traceKind, rrSupportPath=rrSupportPath,
       pythonInterpreter=pythonInterpreter,
       pythonTestFramework=pythonTestFramework,
-      pythonTestArgs=pythonTestArgs)
+      pythonTestArgs=pythonTestArgs,
+      server=server)
     traceId = trace.recordingId
     outputFolder = trace.outputFolder
 

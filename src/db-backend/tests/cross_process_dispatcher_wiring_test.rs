@@ -196,7 +196,7 @@ fn test_omniscient_dispatcher_extends_chain_with_cross_process_hops() {
     // Count resolver invocations so the assertion below confirms the
     // composer actually drove the sibling-side path.
     let mut resolver_calls: u32 = 0;
-    let mut resolver = |sibling_id: &str, step: i64, _display: &str| -> Option<SiblingContinuation> {
+    let mut resolver = |sibling_id: &str, step: i64, _display: Option<&str>| -> Option<SiblingContinuation> {
         resolver_calls += 1;
         assert_eq!(sibling_id, BE_RECORDING, "composer must dispatch to the sibling trace");
         assert_eq!(step, be_step, "composer must use the matched Send marker's step");

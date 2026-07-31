@@ -2,6 +2,7 @@ import
   std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets, strtabs ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
+  session_import,
   ctfs_sources,
   source_paths,
   ../utilities/language_detection,
@@ -326,14 +327,49 @@ proc importCtFile(ctFilePath: string): string =
   result = trace.recordingId
 
 
+proc importSessionFolder(manifestPath: string): string =
+  ## M41: register a multi-recording ``session.toml`` and return the
+  ## UUIDv7 recording-id of the *session* row.
+  ##
+  ## The individual ``[[trace]]`` members keep the ids the manifest gives
+  ## them; the replay engine resolves them from the manifest at launch.
+  ## See ``session_import`` for why the session is registered in place
+  ## rather than copied into the recording store.
+  var trace: Trace = nil
+  try:
+    trace = importSessionManifest(
+      manifestPath,
+      proc (message: string) = echo "ct host: ", message)
+  except SessionManifestError as e:
+    emitReplayProblemForHostFailure(e.msg)
+    echo "ct host: error: ", e.msg
+    quit(1)
+  except CatchableError as e:
+    emitReplayProblemForHostFailure(e.msg)
+    echo "ct host: error: failed to open session manifest ", manifestPath,
+      ": ", e.msg
+    quit(1)
+  if trace.isNil:
+    echo "ct host: error: failed to register session ", manifestPath
+    quit(1)
+  echo "ct host: opened session ", manifestPath
+  result = trace.recordingId
+
 proc importTraceFolder(traceFolderPath: string): string =
   ## M-REC-2: returns the UUIDv7 recording-id assigned by importTrace.
   ## Import a trace folder into the database.
   ##
-  ## M-REC-1.5: the folder must contain a `.ct` CTFS container; metadata
-  ## comes from its internal `meta.dat`.  Legacy sidecar JSONs
-  ## (`trace_metadata.json` / `trace_db_metadata.json` / `trace_paths.json`)
-  ## are no longer accepted.
+  ## Three folder shapes are accepted, in this order (see
+  ## ``trace/trace_container``):
+  ##
+  ## * a ``session.toml`` multi-recording session manifest — the folder
+  ##   describes several recordings, so opening any single one of them
+  ##   would silently show a fraction of the program (M41);
+  ## * a `.ct` CTFS container; metadata comes from its internal
+  ##   `meta.dat` (M-REC-1.5 — the `trace_db_metadata.json` sidecar that
+  ##   used to duplicate it is not accepted);
+  ## * a materialized `runtime_tracing` directory (`trace.json` /
+  ##   `trace.bin` plus its sidecars) as written by ``ct record-web``.
   ##
   ## If the folder contains an MCR trace (.ct file with CTFS magic),
   ## enrichment via `ct-mcr export --portable` is attempted first
@@ -342,6 +378,10 @@ proc importTraceFolder(traceFolderPath: string): string =
   ## Returns the assigned trace ID.
   let fullPath = expandFilename(expandTilde(traceFolderPath))
 
+  let shape = detectTraceFolderShape(fullPath)
+  if shape.kind == TraceShapeSession:
+    return importSessionFolder(shape.path)
+
   # Attempt MCR trace enrichment before import. This adds binaries and
   # debug symbols to the .ct container in-place. Best-effort: if ct-mcr
   # is not found or the folder has no MCR trace, this is a no-op.
@@ -349,18 +389,22 @@ proc importTraceFolder(traceFolderPath: string): string =
   if enriched:
     echo "ct host: MCR trace enriched with portable binaries/symbols"
 
-  # CTFS materialization writes `paths.json` for the frontend; the new
-  # importTrace path reads metadata fields directly from `meta.dat`.
-  let ctPath = findCtFileInFolder(fullPath)
-  if ctPath.len == 0:
-    echo "ct host: error: trace folder missing `.ct` CTFS container: ",
-      traceFolderPath
+  case shape.kind
+  of TraceShapeCtfs:
+    # CTFS materialization writes `paths.json` for the frontend; the
+    # importTrace path reads metadata fields directly from `meta.dat`.
+    discard materializeCtfsSources(shape.path, fullPath)
+  of TraceShapeMaterialized:
+    # The materialized shape ships its own `trace_paths.json`; there is
+    # no container to extract sources from.
+    discard
+  else:
+    echo "ct host: error: ", describeMissingTraceContainer(fullPath)
     quit(1)
-  discard materializeCtfsSources(ctPath, fullPath)
 
-  normalizeImportedTracePaths(fullPath)
+  if shape.kind != TraceShapeMaterialized:
+    normalizeImportedTracePaths(fullPath)
 
-  # All freshly-imported folders now follow the CTFS-only path.
   let trace = importTrace(
     fullPath,
     NO_RECORDING_ID,
@@ -370,6 +414,18 @@ proc importTraceFolder(traceFolderPath: string): string =
   if trace.isNil:
     echo "ct host: error: failed to import trace from folder ", traceFolderPath
     quit(1)
+
+  if shape.kind == TraceShapeMaterialized:
+    # Normalize the *copy* in the recording store rather than the source
+    # folder.  `normalizeImportedTracePaths` rewrites `paths.json` /
+    # `trace_paths.json` and copies sources into `files/`; doing that in
+    # place would mutate the recorder's (or a committed fixture's)
+    # output as a side effect of merely opening it.  The CTFS branch
+    # keeps its historical in-place behaviour, which `materializeCtfsSources`
+    # already relies on.
+    let importedFolder = $trace.outputFolder
+    if importedFolder.len > 0 and importedFolder != fullPath:
+      normalizeImportedTracePaths(importedFolder)
 
   result = trace.recordingId
 
@@ -1203,7 +1259,17 @@ proc hostCommand*(
       quit(1)
   elif tracePath.len > 0:
     # --trace-path provided: auto-import the trace before hosting.
-    if fileExists(tracePath) and tracePath.endsWith(".ct"):
+    #
+    # M41: a `session.toml` names several recordings that are opened as
+    # one session, so it is checked before the single-recording shapes —
+    # both when passed directly and when it sits in the folder the
+    # caller passed.  `findSessionManifest` accepts either spelling.
+    let sessionManifest = findSessionManifest(tracePath)
+    if sessionManifest.len > 0:
+      echo "ct host: importing session manifest: ", sessionManifest
+      traceId = importSessionFolder(sessionManifest)
+      echo "ct host: imported as trace id ", traceId
+    elif fileExists(tracePath) and tracePath.endsWith(".ct"):
       echo "ct host: importing .ct file: ", tracePath
       traceId = importCtFile(tracePath)
       echo "ct host: imported as trace id ", traceId

@@ -53,6 +53,7 @@ _ct_try_workspace_root() {
 	if [ -d "$candidate/codetracer-native-backend" ] ||
 		[ -d "$candidate/codetracer-rr-backend" ] ||
 		[ -d "$candidate/codetracer-python-recorder" ] ||
+		[ -d "$candidate/codetracer-php-recorder" ] ||
 		[ -d "$candidate/codetracer-ruby-recorder" ] ||
 		[ -d "$candidate/codetracer-js-recorder" ] ||
 		[ -d "$candidate/codetracer-beam-recorder" ] ||
@@ -189,9 +190,24 @@ elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native
 	# MCR replay, three-trace-types, mcr_enrichment portable traces) will
 	# otherwise fail with a confusing "ct-mcr binary not found" deep
 	# inside the replay worker.
+	#
+	# NOTE: this branch must stay attached to the ct_cli test above, not to
+	# the ct_server_record test below.  The two artifacts are built by
+	# different recipes and are independently present or absent, so chaining
+	# them would report "ct_cli not built" on a workspace whose ct_cli IS
+	# built and whose ct_server_record merely is not.
 	echo "  WARNING: codetracer-native-recorder present but ct_cli not built." >&2
 	echo "    Run: cd $_CT_WORKSPACE_ROOT/codetracer-native-recorder && just build-ct-mcr" >&2
 	_ct_detect_summary "codetracer-native-recorder (repo present, ct_cli not built)"
+fi
+# The same repo also builds `ct_server_record`, installed as
+# `codetracer-native-recorder`: the supervisor that records a long-running
+# native SERVER (time-sliced containers + `requests`/`discover` span
+# extraction) rather than one program run.  `ct record --server` uses it for
+# the native family; see src/ct/db_backend_record.nim's recordNativeServer.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_server_record/codetracer-native-recorder" ]; then
+	export CODETRACER_NATIVE_SERVER_RECORDER_PATH="$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_server_record/codetracer-native-recorder"
+	_ct_detect_summary "codetracer-native-recorder (ct_server_record available)"
 fi
 
 # --- codetracer-native-test-programs ---
@@ -243,6 +259,45 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-ruby-rec
 		echo "    Run: cd $_CT_WORKSPACE_ROOT/codetracer-ruby-recorder && just build-extension" >&2
 		_ct_detect_summary "codetracer-ruby-recorder (gems present, not built)"
 	fi
+fi
+
+# --- codetracer-php-recorder ---
+# Unlike every other recorder, this one ships NO executable: the recorder is
+# the Zend extension `ext/modules/codetracer.so`, which `ct record app.php`
+# loads by running `php -d extension=<so>` itself (the same thing that repo's
+# scripts/run_with_tracing.sh does).  There is therefore nothing to put on
+# PATH — the path of the built .so has to be named explicitly, which is what
+# CODETRACER_PHP_RECORDER_EXTENSION does (read by src/common/paths.nim's
+# `phpRecorderExtension`, and by the table in
+# src/ct/trace/recorder_dispatch.nim).
+#
+# CODETRACER_PHP_RECORDER_PATH exposes the repo itself, matching the
+# CODETRACER_BEAM_RECORDER_PATH / _BIN pair below: the repo path is what
+# `just demo-request-panel php` and the request-panel fixture recipes need,
+# the artifact path is what `ct` needs.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-php-recorder" ]; then
+	export CODETRACER_PHP_RECORDER_PATH="$_CT_WORKSPACE_ROOT/codetracer-php-recorder"
+	_ct_php_ext=""
+	for _ct_php_candidate in \
+		"$CODETRACER_PHP_RECORDER_PATH/ext/modules/codetracer.so" \
+		"$CODETRACER_PHP_RECORDER_PATH/ext/.libs/codetracer.so"; do
+		if [ -f "$_ct_php_candidate" ]; then
+			_ct_php_ext="$_ct_php_candidate"
+			break
+		fi
+	done
+	if [ -n "$_ct_php_ext" ]; then
+		export CODETRACER_PHP_RECORDER_EXTENSION="$_ct_php_ext"
+		_ct_detect_summary "codetracer-php-recorder (codetracer.so available)"
+	else
+		# Same loud-hint convention as the ruby / js / native blocks: the repo
+		# being present but unbuilt is the case that otherwise fails deep
+		# inside `ct record` with a confusing php error.
+		echo "  WARNING: codetracer-php-recorder present but codetracer.so not built." >&2
+		echo "    Run: cd $CODETRACER_PHP_RECORDER_PATH && just build" >&2
+		_ct_detect_summary "codetracer-php-recorder (repo present, extension not built)"
+	fi
+	unset _ct_php_ext _ct_php_candidate
 fi
 
 # --- codetracer-js-recorder ---

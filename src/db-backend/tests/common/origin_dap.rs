@@ -274,6 +274,79 @@ fn resolve_breakpoint_source(recording: &TestRecording, source_path: &Path, lang
 /// `step_id`, and `frame_id` come from the breakpoint's [`Location`]
 /// (we use `step_id` from the location and `frame_id = -1` to mean
 /// "topmost frame", which is exactly what the spec calls out for V1).
+/// Public wrapper over [`send_origin_chain_request`] for callers that
+/// drive the client themselves (multi-recording sessions, which have no
+/// single `TestRecording` to hand to the usual entry points).
+pub fn send_origin_chain_request_public(
+    client: &mut DapStdioTestClient,
+    variable_name: &str,
+    location: &Location,
+    max_hops: Option<u32>,
+) -> Result<OriginChain, String> {
+    send_origin_chain_request(client, variable_name, location, max_hops)
+}
+
+/// Issue `ct/originChain` against a **specific recording** of a
+/// multi-recording session.
+///
+/// The session router selects the trace from a camelCase `threadId` in
+/// the raw request arguments. Omitting it silently answers about slot 0,
+/// which for a three-recording session means querying the wrong program
+/// and getting an empty chain that looks like a missing feature.
+pub fn send_origin_chain_request_on_thread(
+    client: &mut DapStdioTestClient,
+    variable_name: &str,
+    step_id: i64,
+    thread_id: i64,
+    max_hops: Option<u32>,
+) -> Result<OriginChain, String> {
+    let args = CtOriginChainArguments {
+        variable_name: variable_name.to_string(),
+        variable_path: Vec::new(),
+        frame_id: -1,
+        step_id,
+        thread_id,
+        max_hops: max_hops.unwrap_or(DEFAULT_ORIGIN_MAX_HOPS),
+        lazy: false,
+        continuation_token: None,
+        session_id: String::new(),
+        classify_source: true,
+    };
+    let mut value = serde_json::to_value(&args).map_err(|e| format!("failed to serialise args: {}", e))?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("threadId".to_string(), serde_json::json!(thread_id));
+    }
+    let req = client.dap_client_mut().request("ct/originChain", value);
+    client.send_message(&req)?;
+    let response = client.read_until_response_msg("ct/originChain", Duration::from_secs(60))?;
+    decode_origin_chain_response(&response)
+}
+
+/// The composed thread id the session advertises for `role`.
+pub fn thread_id_for_role(client: &mut DapStdioTestClient, role: &str) -> Result<i64, String> {
+    let req = client
+        .dap_client_mut()
+        .request("ct/listProcesses", serde_json::json!({}));
+    client.send_message(&req)?;
+    let response = client.read_until_response_msg("ct/listProcesses", Duration::from_secs(30))?;
+    let body = match response {
+        db_backend::dap::DapMessage::Response(r) if r.success => r.body,
+        other => return Err(format!("ct/listProcesses failed: {other:?}")),
+    };
+    body.get("processes")
+        .and_then(|p| p.as_array())
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|e| e.get("role").and_then(|r| r.as_str()) == Some(role))
+        })
+        .and_then(|e| e.get("threadIds"))
+        .and_then(|t| t.as_array())
+        .and_then(|t| t.first())
+        .and_then(|t| t.as_i64())
+        .ok_or_else(|| format!("no thread id advertised for role `{role}`"))
+}
+
 fn send_origin_chain_request(
     client: &mut DapStdioTestClient,
     variable_name: &str,

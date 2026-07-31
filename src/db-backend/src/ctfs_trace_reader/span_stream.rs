@@ -264,10 +264,7 @@ impl SpanRecord {
     /// building a map per record — and it preserves the "first wins" semantics
     /// a duplicated key would otherwise resolve arbitrarily.
     pub fn metadata_value(&self, key: &str) -> Option<&str> {
-        self.metadata
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
+        self.metadata.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
     }
 }
 
@@ -299,7 +296,8 @@ fn decode_varint(data: &[u8], pos: &mut usize) -> Result<u64, String> {
 /// `what` names the field so a malformed record says which one broke.
 fn read_varint_str(data: &[u8], pos: &mut usize, what: &str) -> Result<String, String> {
     let len_u64 = decode_varint(data, pos)?;
-    let len = usize::try_from(len_u64).map_err(|_| format!("span record: {what} length {len_u64} does not fit in usize"))?;
+    let len =
+        usize::try_from(len_u64).map_err(|_| format!("span record: {what} length {len_u64} does not fit in usize"))?;
     if data.len() - *pos < len {
         return Err(format!("span record: {what} extends past end of record"));
     }
@@ -461,11 +459,8 @@ fn decode_zstd_chunk(compressed: &[u8]) -> Result<Vec<u8>, String> {
 /// a native-only surface.
 #[cfg(not(target_arch = "wasm32"))]
 fn first_frame_compressed_size(data: &[u8]) -> Result<usize, String> {
-    zstd_safe::find_frame_compressed_size(data).map_err(|code| {
-        format!(
-            "spans.dat: cannot determine span chunk frame size (zstd error code {code})"
-        )
-    })
+    zstd_safe::find_frame_compressed_size(data)
+        .map_err(|code| format!("spans.dat: cannot determine span chunk frame size (zstd error code {code})"))
 }
 
 #[cfg(target_arch = "wasm32")]

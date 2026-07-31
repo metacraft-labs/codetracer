@@ -129,14 +129,14 @@ test.describe("Live MCR debug controls StoryBook", () => {
     await expect(page.locator("#debug-toolbar-mode")).toContainText("Live MCR");
     await expect(page.locator("#recording-head-indicator")).toContainText("Head: 400");
     await expect(page.locator("#jump-to-live-debug")).toBeHidden();
-    await expect(page.locator("#reverse-continue-debug")).toBeDisabled();
+    await expect(page.locator("#reverse-continue-image")).toBeDisabled();
 
     const commandLog = page.locator("#live-mcr-command-log");
     await expect.poll(async () => JSON.parse((await commandLog.textContent()) || "[]")).toEqual([
       { command: "ct/mcr-get-recording-head", args: {} },
     ]);
 
-    await page.locator("#next-debug").click();
+    await page.locator("#next-image").click();
     await expect
       .poll(async () => JSON.parse((await commandLog.textContent()) || "[]"))
       .toContainEqual({

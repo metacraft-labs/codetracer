@@ -51,8 +51,6 @@ const fixture = prepareFixture();
 test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
 test("test_tracepoints_type_error: Verifies no TypeError occurs with tracepoints", async ({ ctPage }) => {
-  // Inject style override to bypass the redesigned status bar's hidden location-path
-  await ctPage.addStyleTag({ content: '#status #status-base > *:not(#auto-hide-bottom-strip) { display: inline-block !important; }' });
   await readyOnEntryTest(ctPage);
 
   // If traceDir wasn't created (e.g. no recorder), just pass the test to avoid spurious failures locally.

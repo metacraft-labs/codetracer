@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeTracer — host-supplied WASM state demo</title>
+  </head>
+  <body>
+    <h1>Ledger settlement (WebAssembly, host-supplied calldata)</h1>
+    <p>Status: <span id="status">running</span></p>
+    <script>
+      // The `record-web` daemon's port is chosen by the harness, so the
+      // page takes it from the URL rather than baking one in. Both
+      // recorder runtimes resolve their endpoint once, at construction,
+      // from this global — so it has to be set before any module loads.
+      const wsPort = new URLSearchParams(location.search).get("ws") || "9230";
+      globalThis.__codetracer_endpoint = `ws://127.0.0.1:${wsPort}/ct-stream`;
+    </script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -84,7 +84,11 @@ fn expected_stage(stage: usize) -> Vec<ExpectedSpan> {
             ExpectedSpan {
                 span_id: v.get("span_id").and_then(Value::as_u64).expect("span_id"),
                 is_open: v.get("is_open").and_then(Value::as_bool).expect("is_open"),
-                span_type: v.get("span_type").and_then(Value::as_str).expect("span_type").to_string(),
+                span_type: v
+                    .get("span_type")
+                    .and_then(Value::as_str)
+                    .expect("span_type")
+                    .to_string(),
                 status_code: meta_str("http.status_code").parse::<i64>().unwrap_or(0),
                 url: meta_str("http.url"),
             }
@@ -210,10 +214,7 @@ fn tail_fixture_stages_form_an_append_only_prefix_chain() {
             previous[..],
             "stage {stage} re-partitioned chunks the previous stage had already sealed"
         );
-        assert!(
-            occupancy.len() > previous.len(),
-            "stage {stage} did not add any chunk"
-        );
+        assert!(occupancy.len() > previous.len(), "stage {stage} did not add any chunk");
         previous = occupancy;
     }
     assert_eq!(previous.iter().sum::<u64>(), 17, "the session holds 17 raw records");
@@ -445,7 +446,11 @@ fn a_process_span_is_never_a_request_row() {
         "span 1 is the process descriptor and must not be a request row"
     );
     // Ground truth carries it; the delta must not.
-    assert!(expected_stage(4).iter().any(|s| s.span_id == 1 && s.span_type == "process"));
+    assert!(
+        expected_stage(4)
+            .iter()
+            .any(|s| s.span_id == 1 && s.span_type == "process")
+    );
 }
 
 // ── Invalidation ────────────────────────────────────────────────────────

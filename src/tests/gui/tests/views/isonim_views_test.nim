@@ -2229,13 +2229,41 @@ suite "IsoNim Debug Controls Panel — button states":
 
       dispose()
 
-  test "step-backward disabled at start of timeline":
+  test "step-backward enabled at start of a completed replay":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      # debugger at rrTicks=0, minRRTicks=0 => canStepBackward = false
+      # A fresh store is a ``completedReplay`` (the zero value of
+      # ``DebugSessionMode``) sitting at rrTicks=0 == minRRTicks.  Backward
+      # navigation is still available: a recorded trace is inherently
+      # time-travellable, so the toolbar does not wait for the
+      # ``supportsStepBack`` capability (which can lose a race with session-VM
+      # creation) or for rr ticks (which DB traces never populate).  This test
+      # asserted the opposite until ``c5be0b990`` deliberately changed it.
+      let panel = renderDebugControlsPanel(r, vm)
+
+      let stepBwd = findByClass(panel, "step-backward")
+      check stepBwd.attributes.getOrDefault("disabled", "") == ""
+
+      dispose()
+
+  test "step-backward disabled at start of a live recording":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      let r = MockRenderer()
+
+      # The invariant the previous version of the test above was really
+      # protecting: while the recording head is still moving there is no
+      # recorded past to step into, so backward navigation stays disabled.
+      # ``completedReplay`` being the enum's zero value is what made the old
+      # assertion look like it covered this case when it never did.
+      var session = store.session.val
+      session.debugSessionMode = liveMcr
+      store.session.val = session
+
       let panel = renderDebugControlsPanel(r, vm)
 
       let stepBwd = findByClass(panel, "step-backward")
@@ -2326,7 +2354,7 @@ suite "IsoNim Debug Controls Panel — actions":
 
       dispose()
 
-  test "click step-backward is no-op at start":
+  test "click step-backward steps a completed replay at start":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
@@ -2340,7 +2368,33 @@ suite "IsoNim Debug Controls Panel — actions":
       stepBwd.fireEvent("click")
       drain()
 
-      # No command should have been sent (canStepBackward is false)
+      # Counterpart to the enabled-state test above: a completed replay is
+      # time-travellable from its first step, so the click dispatches rather
+      # than being swallowed.
+      check mock.receivedCommands.len == beforeCount + 1
+
+      dispose()
+
+  test "click step-backward is a no-op on a live recording":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      let r = MockRenderer()
+
+      var session = store.session.val
+      session.debugSessionMode = liveMcr
+      store.session.val = session
+
+      let panel = renderDebugControlsPanel(r, vm)
+
+      let stepBwd = findByClass(panel, "step-backward")
+      let beforeCount = mock.receivedCommands.len
+
+      stepBwd.fireEvent("click")
+      drain()
+
+      # The click-side half of the live invariant: no recorded past yet, so
+      # the disabled button must not dispatch.
       check mock.receivedCommands.len == beforeCount
 
       dispose()

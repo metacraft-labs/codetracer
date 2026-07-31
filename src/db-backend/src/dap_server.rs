@@ -404,12 +404,15 @@ fn setup(
     // differently:
     //   - `trace_folder` itself may be a .ct file (ct-dap-client test runner)
     //   - `trace_path` (trace_folder / trace_file) may be the .ct file
+    //   - `trace_folder` may be a *directory* holding the container, which
+    //     is what recorders emitting a trace bundle produce (the JS
+    //     recorder writes `<program>.ct` next to a `files/` source tree)
     let ctfs_candidate = if trace_folder.is_file() && is_codetracer_ctfs_file(trace_folder) {
         Some(trace_folder.to_path_buf())
     } else if trace_path.exists() && is_codetracer_ctfs_file(&trace_path) {
         Some(trace_path.clone())
     } else {
-        None
+        find_ctfs_container_in_dir(trace_folder)
     };
 
     if let Some(ctfs_path) = ctfs_candidate {
@@ -712,6 +715,11 @@ fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
     }
 }
 
+/// File name of a multi-recording session manifest. Mirrored on the Nim
+/// side by `ct/src/ct/trace/trace_container.nim::SESSION_MANIFEST_FILE`.
+/// Spec: `codetracer-specs/Trace-Files/Session-Manifest.md` §5.
+pub const SESSION_MANIFEST_FILE: &str = "session.toml";
+
 /// Returns true when the launch's `trace_folder`/`trace_file` resolves
 /// to a `session.toml` manifest. The check is path-shaped — we accept
 /// the manifest either as `trace_folder` itself (the typical CLI
@@ -726,7 +734,48 @@ fn is_session_manifest_path(path: &Path) -> bool {
         && path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "session.toml")
+            .is_some_and(|name| name == SESSION_MANIFEST_FILE)
+}
+
+/// Resolve a `launch` request's effective `trace_file` from its
+/// `trace_folder` and its optional explicit `trace_file`.
+///
+/// There are two `launch` handlers — the initial one in
+/// `handle_message` and the one the stable thread runs for re-launches —
+/// and they must agree exactly, or a session opens as a session on one
+/// path and as one of its members on the other. This is the single
+/// implementation both call.
+///
+/// Resolution order:
+///
+/// 1. an explicit `trace_file` always wins;
+/// 2. a `trace_folder` that *is* a `session.toml` needs no trace file —
+///    the manifest declares its own trace list (M24);
+/// 3. a `trace_folder` that *contains* a `session.toml` is a session:
+///    naming the manifest routes the launch through `setup_session`
+///    (M41). Auto-detecting a single trace file here instead would open
+///    one arbitrary member and silently show a fraction of the program;
+/// 4. otherwise auto-detect, preferring CTFS containers but keeping
+///    legacy materialized `trace.json` / `trace.bin` fixtures loadable;
+/// 5. failing that, default to `trace.ct` so `setup`'s error message
+///    points at the canonical name.
+fn resolve_launch_trace_file(folder: &Path, explicit: Option<&PathBuf>) -> PathBuf {
+    if let Some(trace_file) = explicit {
+        return trace_file.clone();
+    }
+    if is_session_manifest_path(folder) {
+        return PathBuf::new();
+    }
+    if is_session_manifest_path(&folder.join(SESSION_MANIFEST_FILE)) {
+        return SESSION_MANIFEST_FILE.into();
+    }
+    match auto_detect_materialized_trace_file(folder) {
+        Some(trace_path) => trace_path
+            .strip_prefix(folder)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path)),
+        None => "trace.ct".into(),
+    }
 }
 
 /// Resolve the path the launch's `trace_folder` + `trace_file` point
@@ -863,6 +912,50 @@ fn build_session_threads_response(session: &SessionHandler) -> Result<Vec<crate:
             name: t.name,
         })
         .collect())
+}
+/// M49 — answer `ct/pairIndexLookup` from the session-wide pair index.
+///
+/// Mirrors `Handler::pair_index_lookup`'s response shape exactly (a
+/// `{"counterparts": [...]}` object of `PairIndexCounterpart`) so the
+/// frontend's single row-mapper works whether the request was served by
+/// a single-trace launch or by a session; the only difference is the
+/// index it reads, which here spans every loaded recording.
+fn build_session_pair_index_lookup_response(
+    session: &mut SessionHandler,
+    req: &dap::Request,
+) -> Result<Value, Box<dyn Error>> {
+    let args: crate::dap_handler::PairIndexLookupArguments = req.load_args()?;
+    let direction =
+        crate::correlation_markers::MarkerDirection::parse(&args.direction).ok_or_else(|| -> Box<dyn Error> {
+            format!(
+                "ct/pairIndexLookup: unknown direction `{}` (expected `send` or `recv`)",
+                args.direction
+            )
+            .into()
+        })?;
+
+    let index = session.pair_index();
+    let counterparts: Vec<crate::dap_handler::PairIndexCounterpart> = index
+        .get(&args.boundary_id, direction.opposite())
+        .iter()
+        .filter(|view| view.payload.key_value == args.key_value)
+        .map(|view| crate::dap_handler::PairIndexCounterpart {
+            recording_id: view.recording_id.clone(),
+            step_id: view.step_id,
+            source_path: view.source_path.clone(),
+            source_line: view.source_line,
+            marker_id: view.payload.marker_id,
+            boundary_id: view.payload.boundary_id.clone(),
+            direction: view.payload.direction.as_str().to_string(),
+            key_text: view.payload.key_text.clone(),
+            key_value: view.payload.key_value.clone(),
+            show_text: view.payload.show_text.clone(),
+            show_value: view.payload.show_value.clone(),
+            format: view.payload.format.clone(),
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "counterparts": counterparts }))
 }
 
 /// Build the `ct/listProcesses` payload. Each entry carries the
@@ -1005,6 +1098,34 @@ fn handle_request_via_session(
         sender.send(response)?;
         return Ok(());
     }
+    // M49 — `ct/pairIndexLookup` is a *cross-trace* question and must
+    // be answered from the session-wide pair index.
+    //
+    // The per-trace `Handler::pair_index_lookup` walks
+    // `build_local_pair_index`, which sees only its own recording's
+    // marker firings. That is the right answer for a single-trace
+    // launch and the wrong one for a session: a correlation marker's
+    // whole purpose is that its counterpart is in *another* process,
+    // so routing the lookup down to one trace guarantees an empty
+    // result for precisely the case the feature exists to serve. The
+    // Event Log's boundary chip is the user-visible consequence —
+    // clicking it resolved no counterpart and so rotated nothing.
+    if req.command == "ct/pairIndexLookup" {
+        let body = build_session_pair_index_lookup_response(session, &req)?;
+        let response = dap::DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: 0,
+                type_: "response".to_string(),
+            },
+            request_seq: req.base.seq,
+            success: true,
+            command: req.command.clone(),
+            message: None,
+            body,
+        });
+        sender.send(response)?;
+        return Ok(());
+    }
     // `threads` is special: the single-trace `Handler::threads` only
     // knows about its own trace; for sessions we want the aggregated
     // list. We answer at the session layer rather than per-trace.
@@ -1041,10 +1162,231 @@ fn handle_request_via_session(
         )
         .into());
     }
+    // M29 §14.3 — `ct/originChain` is the one *per-trace* request the
+    // session layer must post-process: after the owning trace's
+    // single-trace walk finishes, the chain may end on a receive marker
+    // whose matching send lives in a sibling recording. Only the session
+    // layer can see the sibling handlers, so the composer runs here.
+    //
+    // Sessions with a single trace fall through to the plain per-trace
+    // path so the single-recording behaviour stays bit-identical.
+    if req.command == "ct/originChain" && session.trace_count() > 1 {
+        return handle_origin_chain_via_session(session, slot, req, sender);
+    }
     let handler = session
         .handler_for_thread_id_mut(thread_id)
         .ok_or_else(|| -> Box<dyn Error> { "session router: handler lookup failed".into() })?;
     handle_request(handler, req, sender)
+}
+
+/// Session-scoped `ct/originChain` dispatch — the production wiring of
+/// the M29 cross-process composer (spec §14.3).
+///
+/// Flow:
+///
+/// 1. Run the owning trace's ordinary single-trace origin walk through
+///    [`Handler::compute_origin_chain`] — the exact same code path a
+///    single-recording session takes.
+/// 2. Snapshot the session-wide [`PairIndex`] from every loaded trace's
+///    marker firings ([`SessionHandler::pair_index`]).
+/// 3. Hand both to [`cross_process_origin::apply_cross_process_clause`]
+///    along with a resolver that runs step 1 again on whichever sibling
+///    trace the matched send marker names. The composer recurses, so a
+///    three-recording chain (backend → frontend-js → frontend-wasm)
+///    resolves in one request.
+/// 4. Respond with the (possibly extended) chain through the owning
+///    trace's handler so the wire shape — including the companion
+///    `ct/updated-origin-chain` event — is unchanged.
+///
+/// The resolver deliberately reuses `compute_origin_chain`: a sibling
+/// hop sequence is then *by construction* identical to what a direct
+/// query against that sibling would return, which is what makes the
+/// per-hop assertions in the cross-process tests meaningful.
+fn handle_origin_chain_via_session(
+    session: &mut SessionHandler,
+    slot: TraceSlot,
+    req: dap::Request,
+    sender: Sender<DapMessage>,
+) -> Result<(), Box<dyn Error>> {
+    use crate::cross_process_origin::{
+        CrossProcessExtension, CrossProcessOutcome, SiblingContinuation, TraceIdentity, apply_cross_process_clause,
+    };
+
+    let args = req.load_args::<crate::task::CtOriginChainArguments>()?;
+
+    // The identity of the trace the query targets. Both fields come
+    // from the manifest so the spans the composer emits carry exactly
+    // the recording ids and roles `ct/listProcesses` advertises.
+    let current_identity = {
+        let loaded = session
+            .trace(slot)
+            .ok_or_else(|| -> Box<dyn Error> { "origin-chain router: unknown trace slot".into() })?;
+        TraceIdentity::new(loaded.entry.recording_id.0.clone(), loaded.entry.role.clone())
+    };
+
+    // Step 1 — the owning trace's single-trace chain.
+    let base_result = {
+        let handler = session
+            .handler_for_slot_mut(slot)
+            .ok_or_else(|| -> Box<dyn Error> { "origin-chain router: handler lookup failed".into() })?;
+        handler.compute_origin_chain(&args)
+    };
+
+    // Step 2 — owned snapshot of the session-wide pair index. Owning it
+    // (rather than borrowing through `session`) is what frees the
+    // resolver closure below to take `&mut session`.
+    let pair_index = session.pair_index();
+
+    // Step 3 — compose. The closure borrows `session` mutably for the
+    // duration of the walk, so it lives in its own scope; the borrow
+    // must end before we can re-borrow a handler to answer the request.
+    let composed = {
+        let session_ref = &mut *session;
+        let mut resolver =
+            |sibling_recording_id: &str, step_id: i64, display_variable: Option<&str>| -> Option<SiblingContinuation> {
+                let recording = crate::session_manifest::RecordingId(sibling_recording_id.to_string());
+                let sibling_slot = session_ref.slot_for_recording_id(&recording)?;
+                let sibling_identity = {
+                    let loaded = session_ref.trace(sibling_slot)?;
+                    TraceIdentity::new(loaded.entry.recording_id.0.clone(), loaded.entry.role.clone())
+                };
+                // M36b — the send marker named no binding (no `show=`
+                // declaration, and none synthesised by the recorder). There
+                // is nothing to walk in the sibling, and inventing a name
+                // would turn "the sender did not say" into "CodeTracer
+                // looked for X and did not find it". Report the identity so
+                // the composer can still show which recording the value came
+                // from, and no hops; the composer supplies the terminator.
+                let Some(display_variable) = display_variable else {
+                    return Some(SiblingContinuation {
+                        sibling_identity,
+                        sibling_hops: Vec::new(),
+                        sibling_terminator: crate::task::Terminator::new(crate::task::TerminatorKind::UnknownSource),
+                        sibling_truncated: false,
+                    });
+                };
+                // Continue on the send-side display variable at the marker's
+                // step — the marker's `show=` text, i.e. the name of the
+                // sibling-side binding that carried the value across the
+                // boundary.
+                let sibling_args = crate::task::CtOriginChainArguments {
+                    variable_name: display_variable.to_string(),
+                    step_id,
+                    // A fresh query on the sibling: no frame pin, no
+                    // continuation cursor, and the caller's hop budget.
+                    frame_id: -1,
+                    continuation_token: None,
+                    ..args.clone()
+                };
+                let sibling_handler = session_ref.handler_for_slot_mut(sibling_slot)?;
+                match sibling_handler.compute_origin_chain(&sibling_args) {
+                    Ok(sibling_chain) => {
+                        if sibling_chain.hops.is_empty() {
+                            // The boundary matched but the sibling had nothing
+                            // to say. Almost always this means the marker named
+                            // a binding that does not exist at that step in the
+                            // sending recording — a mismatch between the
+                            // marker's `show` name and the program's actual
+                            // variable. Worth saying out loud: the resulting
+                            // chain still renders a boundary hop, so from the
+                            // UI it looks like the feature half-worked.
+                            eprintln!(
+                                "[cross-process origin] sibling `{sibling_recording_id}` returned no hops \
+                             for `{display_variable}` @step {step_id} — does that binding exist there?"
+                            );
+                        }
+                        Some(SiblingContinuation {
+                            sibling_identity,
+                            sibling_hops: sibling_chain.hops,
+                            sibling_terminator: sibling_chain.terminator,
+                            sibling_truncated: sibling_chain.truncated,
+                        })
+                    }
+                    // A sibling-side failure is not a request-level failure:
+                    // the composer treats `None` as "missing correlation" and
+                    // terminates the chain cleanly at the boundary, which is
+                    // the spec §14.3 behaviour for an unresolvable sibling.
+                    Err(err) => {
+                        warn!(
+                            "cross-process origin: sibling `{}` chain for `{}` @ step {} failed: {:?}",
+                            sibling_recording_id, display_variable, step_id, err
+                        );
+                        None
+                    }
+                }
+            };
+        match base_result {
+            Ok(chain) => {
+                let extension = CrossProcessExtension {
+                    current_identity: current_identity.clone(),
+                    pair_index: &pair_index,
+                    resolver: &mut resolver,
+                };
+                let (chain, outcome) = apply_cross_process_clause(
+                    chain,
+                    &extension.current_identity,
+                    extension.pair_index,
+                    extension.resolver,
+                );
+                match outcome {
+                    CrossProcessOutcome::NoBoundaryFound => {
+                        // The chain stayed inside one recording. That is
+                        // normal for a value with no cross-process history,
+                        // but it is also what a *misconfigured* boundary
+                        // looks like, and the two are indistinguishable
+                        // from the outside. Log enough to tell them apart:
+                        // where the walk ended, and which receive markers
+                        // were available to match against.
+                        let tail = chain
+                            .hops
+                            .last()
+                            .map(|h| format!("{}:{} @step {}", h.location.path, h.location.line, h.step_id))
+                            .unwrap_or_else(|| "<no hops>".to_string());
+                        let recv_markers: Vec<String> = pair_index
+                            .buckets()
+                            .filter(|((_, direction), _)| {
+                                *direction == crate::correlation_markers::MarkerDirection::Recv
+                            })
+                            .flat_map(|((boundary, _), events)| {
+                                events.iter().map(move |e| {
+                                    format!(
+                                        "{boundary}@{}:{} step {} in {}",
+                                        e.source_path, e.source_line, e.step_id, e.recording_id
+                                    )
+                                })
+                            })
+                            .collect();
+                        // Deliberately on stderr, not just the log file:
+                        // this is the diagnostic an operator needs when a
+                        // cross-process chain mysteriously stops, and the
+                        // log file lives under a per-run temp dir that is
+                        // awkward to find after the fact. Only reachable
+                        // for multi-recording sessions, so it does not
+                        // add noise to ordinary single-trace debugging.
+                        eprintln!(
+                            "[cross-process origin] no boundary crossed. chain tail {tail}; \
+                             receive markers visible: [{}]",
+                            recv_markers.join(", ")
+                        );
+                    }
+                    other => {
+                        debug!(
+                            "cross-process origin: outcome {other:?} across {} span(s)",
+                            chain.cross_process_spans.len()
+                        );
+                    }
+                }
+                Ok(chain)
+            }
+            Err(err) => Err(err),
+        }
+    };
+
+    // Step 4 — respond through the owning trace's handler.
+    let handler = session
+        .handler_for_slot_mut(slot)
+        .ok_or_else(|| -> Box<dyn Error> { "origin-chain router: handler lookup failed".into() })?;
+    handler.respond_origin_chain(req, composed, sender)
 }
 
 fn default_live_recording_dir(program: &Path, thread_name: &str) -> PathBuf {
@@ -1531,6 +1873,40 @@ fn is_codetracer_ctfs_file(path: &Path) -> bool {
         return false;
     }
     reader.has_file("steps.dat") || reader.has_file("events.log")
+}
+
+/// Find the single CTFS container inside a trace *directory*.
+///
+/// Several recorders emit a bundle rather than a bare file: a directory
+/// holding `<program>.ct` alongside a `files/` copy of the recorded
+/// sources. Users — and `session.toml` manifests — naturally name the
+/// directory, so the loader has to look inside it.
+///
+/// Only an unambiguous match counts. A directory containing several
+/// containers is a multi-thread native bundle, which belongs to the
+/// replay-worker path further down; picking one arbitrarily would load a
+/// fragment of a recording and present it as the whole thing.
+fn find_ctfs_container_in_dir(dir: &Path) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+    let mut found: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()? {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "ct") {
+            continue;
+        }
+        if !is_codetracer_ctfs_file(&path) {
+            continue;
+        }
+        if found.is_some() {
+            // Ambiguous — leave it to the replay-worker path.
+            return None;
+        }
+        found = Some(path);
+    }
+    found
 }
 
 fn load_materialized_origin_metadata_decoder_from_path(
@@ -2102,31 +2478,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.launch_program_args.clear();
                 ctx.launch_cwd = None;
                 ctx.launch_live_recording_dir = None;
-                if let Some(trace_file) = &args.trace_file {
-                    ctx.launch_trace_file = trace_file.clone();
-                } else if is_session_manifest_path(folder) {
-                    // M24 session.toml — the manifest declares its own
-                    // trace list, so there is no per-launch trace_file
-                    // to resolve.
-                    ctx.launch_trace_file = PathBuf::new();
-                } else {
-                    // Auto-detect the trace file. Prefer CTFS containers, but
-                    // keep legacy materialized `trace.json` / `trace.bin`
-                    // fixtures loadable until the fixture catalogue is fully
-                    // migrated.
-                    if let Some(trace_path) = auto_detect_materialized_trace_file(folder) {
-                        let rel_path = trace_path
-                            .strip_prefix(folder)
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path));
-                        ctx.launch_trace_file = rel_path;
-                    } else {
-                        // No materialized trace file found; default to
-                        // "trace.ct" so the error message in setup() points
-                        // at the canonical name.
-                        ctx.launch_trace_file = "trace.ct".into();
-                    }
-                }
+                ctx.launch_trace_file = resolve_launch_trace_file(folder, args.trace_file.as_ref());
 
                 // TODO: log this when logging logic is properly abstracted
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
@@ -2342,6 +2694,28 @@ pub fn handle_message_browser(
             // VFS-aware lookups. Materialized traces are CTFS-only.
             {
                 let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
+
+                // A multi-recording session must never degrade into one of
+                // its members. `setup_from_vfs` has no session branch, and
+                // the VFS probe below would happily latch onto a
+                // `trace.ct`/`trace.json` sitting beside the manifest and
+                // open a fraction of the program with no error at all —
+                // the exact silent failure the native launch path was
+                // fixed for. Refuse loudly instead.
+                let session_vfs_path = if folder.is_empty() {
+                    SESSION_MANIFEST_FILE.to_string()
+                } else {
+                    format!("{}/{}", folder.trim_end_matches('/'), SESSION_MANIFEST_FILE)
+                };
+                if crate::vfs::vfs_exists(&session_vfs_path) {
+                    return Err(format!(
+                        "{session_vfs_path} is a multi-recording session manifest; \
+                         browser replay opens a single recording only. Launch one \
+                         of the manifest's `[[trace]]` paths directly."
+                    )
+                    .into());
+                }
+
                 // `trace.ct` is the canonical CTFS container; `trace.json`
                 // is the legacy `runtime_tracing` materialized layout still
                 // emitted by some recorders (e.g. `nargo trace`).  Probe
@@ -2575,25 +2949,7 @@ fn task_thread(
             let args = request.load_args::<dap::LaunchRequestArguments>()?;
             if let Some(folder) = &args.trace_folder {
                 let launch_trace_folder = folder.clone();
-                let launch_trace_file = if let Some(trace_file) = &args.trace_file {
-                    trace_file.clone()
-                } else if is_session_manifest_path(folder) {
-                    // M24 — session.toml carries its own trace list, so
-                    // there is no per-launch `trace_file` to resolve.
-                    PathBuf::new()
-                } else {
-                    // Prefer CTFS containers, but keep legacy materialized
-                    // `trace.json` / `trace.bin` fixtures loadable until the
-                    // fixture catalogue is fully migrated.
-                    if let Some(trace_path) = auto_detect_materialized_trace_file(folder) {
-                        trace_path
-                            .strip_prefix(folder)
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|_| trace_path.file_name().map(PathBuf::from).unwrap_or(trace_path))
-                    } else {
-                        "trace.ct".into()
-                    }
-                };
+                let launch_trace_file = resolve_launch_trace_file(folder, args.trace_file.as_ref());
 
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
@@ -3153,5 +3509,142 @@ mod tests {
             !is_mcr_ctfs_container(&mut ctfs),
             "corrupt meta.dat must be treated as not-MCR so the typed error surfaces later",
         );
+    }
+
+    // ── Launch trace-file resolution ───────────────────────────────────
+    //
+    // `launch` is handled in more than one place: `handle_message`
+    // stores the resolution on `Ctx` (which the flow and tracepoint
+    // worker threads then replay through their cached launch), and
+    // `task_thread` re-resolves it from the request arguments for the
+    // stable thread. If the two disagree about what a *folder holding a
+    // `session.toml`* means, the failure is silent: the stable thread
+    // opens the whole session while the workers open one member, or
+    // vice versa, and nothing errors.
+    //
+    // `cross_process_three_trace_dap_test::a_session_folder_launches_as_the_whole_session`
+    // covers the `task_thread` side end to end against the real fixture.
+    // The tests below cover the shared resolver and, specifically, the
+    // `handle_message` side — which that integration test does *not*
+    // exercise, as reverting it alone leaves the suite green.
+
+    /// Minimal on-disk session: a `session.toml` next to a member that
+    /// would auto-detect as a single trace if the manifest were ignored.
+    fn write_session_fixture(dir: &Path) {
+        std::fs::write(dir.join(SESSION_MANIFEST_FILE), "version = 1\n").unwrap();
+        std::fs::write(dir.join("trace.json"), "[]").unwrap();
+    }
+
+    /// Build a DAP `launch` request naming `folder` as `traceFolder`,
+    /// exactly as `src/frontend/middleware.nim` sends it.
+    fn launch_request_for_folder(folder: &Path) -> dap::Request {
+        dap::Request {
+            base: ProtocolMessage {
+                seq: 1,
+                type_: "request".to_string(),
+            },
+            command: "launch".to_string(),
+            arguments: json!({ "traceFolder": folder }),
+        }
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_prefers_a_session_manifest_over_a_member() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), None),
+            PathBuf::from(SESSION_MANIFEST_FILE),
+            "a folder carrying a session.toml must launch as the session, not as the trace.json beside it",
+        );
+        assert!(
+            resolve_session_manifest_path(dir.path(), Path::new(SESSION_MANIFEST_FILE)).is_some(),
+            "the resolved pair must route through setup_session",
+        );
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_accepts_the_manifest_path_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+        let manifest = dir.path().join(SESSION_MANIFEST_FILE);
+        assert_eq!(
+            resolve_launch_trace_file(&manifest, None),
+            PathBuf::new(),
+            "a traceFolder that IS the manifest needs no per-launch trace file",
+        );
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_honours_an_explicit_trace_file() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+        let explicit = PathBuf::from("other.ct");
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), Some(&explicit)),
+            explicit,
+            "an explicit trace_file always wins",
+        );
+    }
+
+    #[test]
+    fn resolve_launch_trace_file_auto_detects_a_single_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+        assert_eq!(resolve_launch_trace_file(dir.path(), None), PathBuf::from("trace.json"),);
+
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_launch_trace_file(empty.path(), None),
+            PathBuf::from("trace.ct"),
+            "with nothing to detect, fall back to the canonical name so setup()'s error names it",
+        );
+    }
+
+    /// The `handle_message` launch handler must reach the same
+    /// conclusion the stable thread does. Reverting it to a plain
+    /// auto-detect leaves `a_session_folder_launches_as_the_whole_session`
+    /// green, so this is the only guard on that half.
+    #[test]
+    fn handle_message_launch_resolves_a_session_folder_to_its_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_fixture(dir.path());
+
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        let mut ctx = Ctx::default();
+        let request = launch_request_for_folder(dir.path());
+        handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
+
+        assert_eq!(
+            ctx.launch_trace_file,
+            PathBuf::from(SESSION_MANIFEST_FILE),
+            "handle_message must store the manifest, not an auto-detected member",
+        );
+        assert!(
+            resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_some(),
+            "the stored launch must route the cached-launch worker threads through setup_session",
+        );
+        assert_eq!(
+            ctx.recreator_exe,
+            PathBuf::new(),
+            "a session resolves its replay-worker exe per member, so the session-level value stays unset",
+        );
+    }
+
+    /// The same handler must keep resolving an ordinary single
+    /// recording, so the session branch cannot be "fixed" by making
+    /// every folder look like a session.
+    #[test]
+    fn handle_message_launch_still_auto_detects_a_single_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        let mut ctx = Ctx::default();
+        let request = launch_request_for_folder(dir.path());
+        handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
+
+        assert_eq!(ctx.launch_trace_file, PathBuf::from("trace.json"));
+        assert!(resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_none(),);
     }
 }
