@@ -425,8 +425,7 @@ pub fn load_request_spans(trace_path: &Path) -> Result<Option<RequestSpans>, Str
     };
 
     if let Some(ct_path) = find_ct_container(trace_path) {
-        let mut ctfs =
-            CtfsReader::open(&ct_path).map_err(|e| format!("failed to open {}: {e}", ct_path.display()))?;
+        let mut ctfs = CtfsReader::open(&ct_path).map_err(|e| format!("failed to open {}: {e}", ct_path.display()))?;
         if let Some(mut reader) = SpanStreamReader::open_from_ctfs(&mut ctfs)? {
             let spans = reader.settled_spans()?;
             return Ok(Some(RequestSpans {
@@ -1073,7 +1072,11 @@ mod tests {
         SpanRecord {
             span_id,
             span_type: SPAN_TYPE_WEB_REQUEST.to_string(),
-            status: if status >= 400 { SpanStatus::Error } else { SpanStatus::Ok },
+            status: if status >= 400 {
+                SpanStatus::Error
+            } else {
+                SpanStatus::Ok
+            },
             start_step: span_id * 10,
             end_step: span_id * 10 + 9,
             metadata: vec![

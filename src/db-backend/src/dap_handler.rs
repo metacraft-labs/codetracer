@@ -4327,8 +4327,14 @@ impl Handler {
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        info!("trace_jump: received request with event direct_location_rr_ticks = {}", event.direct_location_rr_ticks);
-        eprintln!("[RUST_DIAG] trace_jump: event.direct_location_rr_ticks = {}", event.direct_location_rr_ticks);
+        info!(
+            "trace_jump: received request with event direct_location_rr_ticks = {}",
+            event.direct_location_rr_ticks
+        );
+        eprintln!(
+            "[RUST_DIAG] trace_jump: event.direct_location_rr_ticks = {}",
+            event.direct_location_rr_ticks
+        );
         self.replay.tracepoint_jump(&event)?;
         // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         _ = self.replay.load_location(&mut self.expr_loader)?;

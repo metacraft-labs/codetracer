@@ -44,12 +44,10 @@ use std::path::{Path, PathBuf};
 use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::meta_dat::{FLAG_HAS_SPAN_STREAM, parse_meta_dat};
 use db_backend::ctfs_trace_reader::span_stream::{
-    SPAN_TYPE_PROCESS, SPAN_TYPE_WEB_REQUEST, SpanRecord, SpanStreamReader, read_span_type_namespace,
-    span_ids_of_type,
+    SPAN_TYPE_PROCESS, SPAN_TYPE_WEB_REQUEST, SpanRecord, SpanStreamReader, read_span_type_namespace, span_ids_of_type,
 };
 use db_backend::request_spans::{
-    LoadRequestSpansArguments, RequestRecord, RequestSpanFilters, RequestSpanSource, RequestSpans,
-    load_request_spans,
+    LoadRequestSpansArguments, RequestRecord, RequestSpanFilters, RequestSpanSource, RequestSpans, load_request_spans,
 };
 use serde_json::Value;
 
@@ -252,7 +250,12 @@ fn load_request_spans_from_recorded_container() {
     let expected = load_expected("web_session.expected.jsonl");
     assert_eq!(settled.len(), expected.len(), "settled span count");
     for (got, want) in settled.iter().zip(expected.iter()) {
-        assert_eq!(&as_expected(got), want, "span {} differs from ground truth", want.span_id);
+        assert_eq!(
+            &as_expected(got),
+            want,
+            "span {} differs from ground truth",
+            want.span_id
+        );
     }
 
     // Last-record-wins: span 9 was appended OPEN first and completed later,
@@ -309,7 +312,10 @@ fn load_request_spans_from_recorded_container() {
     // status but no code, so the two are not interchangeable.
     assert_eq!(record_by_id(&response.requests, 2).status, "ok");
     assert_eq!(record_by_id(&response.requests, 7).status, "error");
-    assert!(response.requests.iter().all(|r| !r.is_open), "nothing is still in flight");
+    assert!(
+        response.requests.iter().all(|r| !r.is_open),
+        "nothing is still in flight"
+    );
 
     // --- The external binding resolves to an openable container. ---------
     let external = record_by_id(&response.requests, 10);
@@ -373,7 +379,12 @@ fn load_request_spans_pagination_and_filters() {
     assert_eq!(expected.len(), 200);
     assert_eq!(spans.spans.len(), 200);
     for (got, want) in spans.spans.iter().zip(expected.iter()) {
-        assert_eq!(&as_expected(got), want, "span {} differs from ground truth", want.span_id);
+        assert_eq!(
+            &as_expected(got),
+            want,
+            "span {} differs from ground truth",
+            want.span_id
+        );
     }
 
     let no_filter = RequestSpanFilters::default();
@@ -444,7 +455,10 @@ fn load_request_spans_pagination_and_filters() {
         // Every filter case must be meaningfully populated (except the one
         // deliberately chosen to be empty), otherwise the case proves nothing.
         if name != "a filter that matches nothing" {
-            assert!(!reference.is_empty(), "filter case {name:?} matched nothing — fixture drift?");
+            assert!(
+                !reference.is_empty(),
+                "filter case {name:?} matched nothing — fixture drift?"
+            );
             assert!(
                 reference.len() < 200 || name == "unfiltered",
                 "filter case {name:?} narrowed nothing"
@@ -456,7 +470,10 @@ fn load_request_spans_pagination_and_filters() {
             filters: Some(filters.clone()),
             ..Default::default()
         });
-        assert_eq!(whole.requests, reference, "{name}: unpaged result differs from full scan");
+        assert_eq!(
+            whole.requests, reference,
+            "{name}: unpaged result differs from full scan"
+        );
         assert_eq!(whole.total, reference.len(), "{name}: total");
         assert_eq!(whole.next_span_id, None, "{name}: an unlimited page is never continued");
 
@@ -583,7 +600,10 @@ fn legacy_jsonl_session_still_opens() {
         // Every sidecar entry named a `trace_dir`, which the shim models as the
         // external binding the spec says it replaces.
         assert!(
-            legacy_spans.spans.iter().all(|s| s.is_external && !s.external_path.is_empty()),
+            legacy_spans
+                .spans
+                .iter()
+                .all(|s| s.is_external && !s.external_path.is_empty()),
             "{sidecar_name}: every sidecar row carries a trace_dir external binding"
         );
 
@@ -600,7 +620,10 @@ fn legacy_jsonl_session_still_opens() {
         });
         assert!(filtered.requests.iter().all(|r| r.http_method == "GET"));
         assert!(filtered.requests.len() <= 2);
-        assert_eq!(filtered.total, stream_rows.iter().filter(|r| r.http_method == "GET").count());
+        assert_eq!(
+            filtered.total,
+            stream_rows.iter().filter(|r| r.http_method == "GET").count()
+        );
     }
 }
 
@@ -623,7 +646,9 @@ fn container_without_span_stream_opens_unchanged() {
     assert!(!ctfs.has_file("spantype.ns"));
 
     assert!(
-        SpanStreamReader::open_from_ctfs(&mut ctfs).expect("must not error").is_none(),
+        SpanStreamReader::open_from_ctfs(&mut ctfs)
+            .expect("must not error")
+            .is_none(),
         "no bit 13 means no span stream, not an error"
     );
     assert!(
@@ -684,12 +709,11 @@ fn nim_written_metadata_survives_the_rust_reader_in_order() {
 
     // The process descriptor carries the fields the dead `meta.json` process
     // table used to hold (RS-M1b).
-    let process = settled.iter().find(|s| s.span_type == SPAN_TYPE_PROCESS).expect("process span");
-    let by_key: BTreeMap<&str, &str> = process
-        .metadata
+    let process = settled
         .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
+        .find(|s| s.span_type == SPAN_TYPE_PROCESS)
+        .expect("process span");
+    let by_key: BTreeMap<&str, &str> = process.metadata.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     assert_eq!(by_key.get("process.pid"), Some(&"4242"));
     assert_eq!(by_key.get("process.exe"), Some(&"/usr/bin/php-fpm"));
     assert_eq!(by_key.get("process.has_execed"), Some(&"false"));
