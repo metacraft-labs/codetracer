@@ -43,6 +43,112 @@ const
     "src/tests/gui/tests/editor/editor_vm_test.nim",
     "src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim",
     "src/tests/gui/tests/views/isonim_views_test.nim",
+    # RS-M3: the Request Panel's live span-delta path.  Registered here
+    # because this array IS the CI gate — a ViewModel test that exists but
+    # is not listed runs nowhere (a gap this campaign found repeatedly).
+    "src/tests/gui/tests/request-panel/request_panel_live_vm_test.nim",
+    # RS-M4: the GUI demo launch path.  `demo_recipe_produces_populated_session`
+    # runs `just demo-request-panel`'s container-production step headlessly and
+    # asserts meta.dat bit 13 plus the rendered rows, so the recipe cannot rot
+    # unnoticed.  Native-only (real container bytes through a zstd FFI), hence
+    # excluded from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim",
+    # RS-M5: the Python row of the language matrix.  `vm_python_request_panel_rows`
+    # drives the panel from a container the Python recorder produced while a real
+    # Flask app served real HTTP requests, and asserts the rows, the status
+    # colouring and the double-click seek into the handler.  Native-only (real
+    # container bytes through a zstd FFI), hence excluded from `just test-vm-js`
+    # and listed here.
+    "src/tests/gui/tests/request-panel/python_request_panel_vm_test.nim",
+    # RS-M6: the Ruby row of the language matrix.  `vm_ruby_request_panel_rows`
+    # drives the panel from a container the Ruby recorder produced while a real
+    # Sinatra app served real HTTP requests through the Rack middleware, and
+    # asserts the rows, the status colouring and the double-click seek into the
+    # handler.  Native-only (real container bytes through a zstd FFI), hence
+    # excluded from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/ruby_request_panel_vm_test.nim",
+    # RS-M7: the PHP row of the language matrix.
+    # `vm_php_request_panel_rows_and_seek` drives the panel from a container the
+    # PHP recorder produced while a real `php -S` process served real HTTP
+    # requests, and asserts the rows plus that activating a row seeks into that
+    # request's own step range.  PHP is the milestone that moved the writer from
+    # per-request to per-worker lifetime, so this is also the GUI-side guard that
+    # eight requests are eight intervals of ONE recording.  Native-only (real
+    # container bytes through a zstd FFI), hence excluded from `just test-vm-js`
+    # and listed here.
+    "src/tests/gui/tests/request-panel/php_request_panel_vm_test.nim",
+    # RS-M8: the Elixir/Erlang row of the language matrix.
+    # `vm_elixir_request_panel_rows` drives the panel from a container the BEAM
+    # recorder produced while a real Cowboy listener served real HTTP requests
+    # to a real `Plug.Router`.  It is the row where a request is a *thread* of
+    # the recording rather than a slice of one thread's timeline — Cowboy
+    # serves each request on its own BEAM process — so this is also the
+    # GUI-side guard that concurrent, genuinely overlapping requests still
+    # render as twelve distinct rows with twelve distinct seek targets.
+    # Native-only (real container bytes through a zstd FFI), hence excluded
+    # from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/elixir_request_panel_vm_test.nim",
+    # RS-M9: the JavaScript/Node row of the language matrix.
+    # `vm_js_request_panel_rows` drives the panel from a container the JS
+    # recorder produced while a real Express app on a real `http.Server`
+    # served real HTTP requests over loopback.  Node is the row where a
+    # request is a slice of ONE event loop, so this is the GUI-side guard
+    # that `contiguous_on_one_thread` is measured rather than declared: the
+    # handlers that never yield are contiguous, the POST (whose body parser
+    # awaits) and the `await`ing handler are not, and the fixture requires
+    # both values to appear.  It also asserts that every row's step range
+    # covers ITS OWN handler's lines, which is what makes a double-click
+    # land in the source rather than merely at a distinct coordinate.
+    # Native-only (real container bytes through a zstd FFI), hence excluded
+    # from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/js_request_panel_vm_test.nim",
+    # RS-M10: the native/MCR row of the language matrix.
+    # `vm_native_request_panel_rows` drives the panel from a container
+    # `ct-mcr record` produced while a real nginx served real HTTP requests
+    # over loopback.  It is the row where NOTHING in the recorded program
+    # knows what a request is — nginx has no middleware seam and the recorder
+    # records syscalls — so the spans are DISCOVERED from the recording's own
+    # `recv` / `writev` payloads and appended to the container afterwards.
+    # That makes this the GUI-side guard for two things no other row covers:
+    # that a post-pass stamps `meta.dat` bit 13 on an already-closed
+    # container, and that a stream of settled-only records (no open/settled
+    # pair, because a post-pass has no in-flight moment) still renders.
+    # Native-only (real container bytes through a zstd FFI), hence excluded
+    # from `just test-vm-js` and listed here.
+    "src/tests/gui/tests/request-panel/native_request_panel_vm_test.nim",
+    # RS-M11: the remote row.  `vm_remote_request_panel_rows` drives the panel
+    # from the payloads the production remote tail emitted over a real HTTP
+    # socket while a growing container was served with byte-range requests
+    # (captured by `src/db-backend/tests/remote_span_tail_http_test.rs`, which
+    # re-derives and re-checks the capture on every run).  It is the GUI-side
+    # guard for the milestone's central claim — that a remote live session
+    # needs NO new protocol, so the panel renders it with no remote code path
+    # at all.  Excluded from `just test-vm-js` because it reads the capture and
+    # the span-stream ground truth from disk, which `std/os` cannot do on the
+    # `nim js` backend.
+    "src/tests/gui/tests/request-panel/remote_request_panel_vm_test.nim",
+    # RS-M12: the CROSS-language row.  `request_span_conformance_all_languages`
+    # runs ONE assertion set over all six recorded fixtures — Python, Ruby,
+    # PHP, Elixir, JavaScript and native — and asserts it against a per-
+    # language capability declaration (`request_span_languages.nim`).  The six
+    # tests above each know their own session by heart, which is what makes
+    # them good regression tests and also what made them blind to a recorder
+    # drifting away from the others: nothing forced the six to agree.  This is
+    # that agreement, and it fails per language naming the field, so one run
+    # says WHICH recorder broke and WHICH key it broke on.  The declaration is
+    # what keeps it honest: the genuine differences (native publishes no open
+    # records and has no step stream, Elixir's step ranges hold no application
+    # source position, `contiguous_on_one_thread` legitimately varies) are
+    # asserted as declared values rather than waived, so an unintended change
+    # in any of them still fails.  Native-only (real container bytes through a
+    # zstd FFI), hence excluded from `just test-vm-js` and listed here.
+    #
+    # The milestone's other required test,
+    # `no_recorder_writes_sidecar_manifests`, is deliberately NOT here: it
+    # drives a real recording per language through the recorder siblings, so
+    # it belongs in the sibling-gated `just test-no-sidecar-manifests` lane
+    # rather than in this toolchain-free one.
+    "src/tests/gui/tests/request-panel/request_span_conformance_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

@@ -304,6 +304,66 @@ fn read_exact_at(source: &dyn BlockSource, offset: u64, buf: &mut [u8], context:
     Ok(())
 }
 
+/// Parse Block 0's root file directory through a [`BlockSource`].
+///
+/// Shared by [`CtfsReader::from_source`] and [`CtfsReader::refresh`] so an open
+/// and a re-observation can never disagree about how the directory is read.
+///
+/// **One positional read, not `max_root_entries` of them.**  The entry region is
+/// a contiguous `max_root_entries * FILE_ENTRY_SIZE` byte span (744 bytes at the
+/// default 31 entries), so reading it whole is free for a local source and turns
+/// a remote refresh from 31 HTTP range requests into ONE — which matters a great
+/// deal for the RS-M11 remote live tail, whose poll loop re-parses this
+/// directory on every poll to observe `spans.idx`'s committed growth.  The
+/// per-entry decode below is byte-for-byte what the previous per-entry read did,
+/// including stopping at the first entry that would run past `total`.
+fn parse_root_directory(
+    source: &dyn BlockSource,
+    total: u64,
+    max_root_entries: usize,
+) -> Result<HashMap<String, FileEntry>, CtfsError> {
+    let entry_start = (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64;
+    // How many whole entries are actually backed by the observable container.
+    let available = total.saturating_sub(entry_start) / FILE_ENTRY_SIZE as u64;
+    let entry_count = usize::try_from(available).unwrap_or(usize::MAX).min(max_root_entries);
+
+    let mut files = HashMap::new();
+    if entry_count == 0 {
+        return Ok(files);
+    }
+
+    let mut region = vec![0u8; entry_count * FILE_ENTRY_SIZE];
+    read_exact_at(source, entry_start, &mut region, "file entry")?;
+
+    for i in 0..entry_count {
+        let entry_buf = &region[i * FILE_ENTRY_SIZE..(i + 1) * FILE_ENTRY_SIZE];
+        let size = u64::from_le_bytes(
+            entry_buf[0..8]
+                .try_into()
+                .map_err(|_| CtfsError::Corrupt("file entry size slice".to_string()))?,
+        );
+        let map_block = u64::from_le_bytes(
+            entry_buf[8..16]
+                .try_into()
+                .map_err(|_| CtfsError::Corrupt("file entry map_block slice".to_string()))?,
+        );
+        let name_encoded = u64::from_le_bytes(
+            entry_buf[16..24]
+                .try_into()
+                .map_err(|_| CtfsError::Corrupt("file entry name slice".to_string()))?,
+        );
+
+        // Skip empty entries (size=0, map_block=0, name=0)
+        if name_encoded == 0 {
+            continue;
+        }
+
+        let name = base40_decode(name_encoded);
+        files.insert(name.clone(), FileEntry { name, size, map_block });
+    }
+    Ok(files)
+}
+
 /// A `BlockSource` backed by the whole container loaded into a `Vec<u8>`.
 ///
 /// This preserves the exact pre-M0 behaviour: `CtfsReader` historically held
@@ -699,45 +759,7 @@ impl CtfsReader {
 
         let entries_per_block = block_size / 8;
 
-        // Parse file entries
-        let entry_start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
-        let mut files = HashMap::new();
-
-        for i in 0..max_root_entries {
-            let offset = (entry_start + i * FILE_ENTRY_SIZE) as u64;
-            // Stop at the first entry that would run past the end of the
-            // container.  Matches the prior `break` on the in-memory bounds.
-            if offset + FILE_ENTRY_SIZE as u64 > total {
-                break;
-            }
-
-            let mut entry_buf = [0u8; FILE_ENTRY_SIZE];
-            read_exact_at(source.as_ref(), offset, &mut entry_buf, "file entry")?;
-
-            let size = u64::from_le_bytes(
-                entry_buf[0..8]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("file entry size slice".to_string()))?,
-            );
-            let map_block = u64::from_le_bytes(
-                entry_buf[8..16]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("file entry map_block slice".to_string()))?,
-            );
-            let name_encoded = u64::from_le_bytes(
-                entry_buf[16..24]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("file entry name slice".to_string()))?,
-            );
-
-            // Skip empty entries (size=0, map_block=0, name=0)
-            if name_encoded == 0 {
-                continue;
-            }
-
-            let name = base40_decode(name_encoded);
-            files.insert(name.clone(), FileEntry { name, size, map_block });
-        }
+        let files = parse_root_directory(source.as_ref(), total, max_root_entries)?;
 
         Ok(CtfsReader {
             source,
@@ -777,41 +799,7 @@ impl CtfsReader {
     pub fn refresh(&mut self) -> Result<(), CtfsError> {
         self.source.refresh()?;
         let total = self.source.current_size();
-        let entry_start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
-        let mut files = HashMap::new();
-
-        for i in 0..self.max_root_entries {
-            let offset = (entry_start + i * FILE_ENTRY_SIZE) as u64;
-            if offset + FILE_ENTRY_SIZE as u64 > total {
-                break;
-            }
-            let mut entry_buf = [0u8; FILE_ENTRY_SIZE];
-            read_exact_at(self.source.as_ref(), offset, &mut entry_buf, "file entry")?;
-
-            let size = u64::from_le_bytes(
-                entry_buf[0..8]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("file entry size slice".to_string()))?,
-            );
-            let map_block = u64::from_le_bytes(
-                entry_buf[8..16]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("file entry map_block slice".to_string()))?,
-            );
-            let name_encoded = u64::from_le_bytes(
-                entry_buf[16..24]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("file entry name slice".to_string()))?,
-            );
-
-            if name_encoded == 0 {
-                continue;
-            }
-
-            let name = base40_decode(name_encoded);
-            files.insert(name.clone(), FileEntry { name, size, map_block });
-        }
-        self.files = files;
+        self.files = parse_root_directory(self.source.as_ref(), total, self.max_root_entries)?;
         Ok(())
     }
 
@@ -837,34 +825,135 @@ impl CtfsReader {
             )));
         }
 
-        let mut result = Vec::with_capacity(entry.size as usize);
-        let total_data_blocks = (entry.size as usize).div_ceil(self.block_size);
+        self.read_file_range(name, 0, entry.size)
+    }
 
-        // Read data blocks by walking the mapping hierarchy.
-        for block_index in 0..total_data_blocks {
-            let data_block_num = self.resolve_block(entry.map_block, block_index)?;
+    /// The directory-declared byte size of a named internal file, or `None`
+    /// when the container has no such entry.
+    ///
+    /// This is the writer's *committed* size — the number the writer published
+    /// in Block 0 — and is therefore the growth signal a live consumer watches.
+    /// It is deliberately NOT the container's own file length: a `.ct` is
+    /// block-padded, so a container can gain a whole chunk without its length
+    /// changing by a single byte (all four RS-M3 tail fixtures are exactly
+    /// 155 648 bytes), which is precisely why a remote tail cannot use
+    /// `Content-Length` to detect growth.
+    pub fn file_size(&self, name: &str) -> Option<u64> {
+        self.files.get(name).map(|e| e.size)
+    }
+
+    /// Read `len` bytes at logical `offset` within a named internal file,
+    /// touching ONLY the data blocks that range actually covers.
+    ///
+    /// This is the primitive that makes a remote reader affordable: over an
+    /// [`HttpRangeSource`](super::http_range_source::HttpRangeSource) it costs
+    /// one bounded `Range:` request per covered block instead of one per block
+    /// of the whole file. A request that runs past the file's declared size, or
+    /// past bytes the container actually carries, is a
+    /// [`CtfsError::Corrupt`] — never a short or zero-padded result.
+    pub fn read_file_range(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>, CtfsError> {
+        let got = self.read_file_range_available(name, offset, len)?;
+        if got.len() as u64 != len {
+            return Err(CtfsError::Corrupt(format!(
+                "file '{name}': range [{offset}, {}) is not fully backed ({} of {len} bytes present)",
+                offset.saturating_add(len),
+                got.len()
+            )));
+        }
+        Ok(got)
+    }
+
+    /// Read AT MOST `len` bytes at logical `offset` within a named internal
+    /// file, stopping at the first block the container does not actually carry.
+    ///
+    /// # Why a tolerant read exists at all
+    ///
+    /// A container that is still being written — or one whose upload was cut
+    /// short — has a Block 0 directory that promises more bytes than the file
+    /// currently holds: the writer publishes a `FileEntry.Size` and the bytes
+    /// land after it, and an interrupted transfer keeps the (leading) directory
+    /// while losing the tail. The append-only stream formats are designed so
+    /// that such a file is a **valid prefix** (CTFS-Request-Span-Streams.md
+    /// design goal 4), but only a reader that can say "these bytes are here and
+    /// those are not" can exploit that; the strict whole-file
+    /// [`CtfsReader::read_file`] can only fail.
+    ///
+    /// This returns the longest backed prefix of the requested range. It NEVER
+    /// zero-pads and never returns bytes it did not read: a caller receiving
+    /// fewer bytes than it asked for knows exactly how many are real. Deciding
+    /// whether a short read is benign (a writer mid-append) or fatal (a torn
+    /// record) is the caller's job — see
+    /// [`crate::remote_request_spans`], which resolves it at chunk granularity.
+    pub fn read_file_range_available(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>, CtfsError> {
+        let entry = self
+            .files
+            .get(name)
+            .ok_or_else(|| CtfsError::FileNotFound(name.to_string()))?
+            .clone();
+
+        let end = offset
+            .checked_add(len)
+            .ok_or_else(|| CtfsError::Corrupt(format!("file '{name}': range offset overflow")))?;
+        if end > entry.size {
+            return Err(CtfsError::Corrupt(format!(
+                "file '{name}': range [{offset}, {end}) extends past the declared size {}",
+                entry.size
+            )));
+        }
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        if entry.map_block == 0 {
+            return Err(CtfsError::Corrupt(format!(
+                "file '{name}' has non-zero size ({}) but map_block is 0",
+                entry.size
+            )));
+        }
+
+        let block_size = self.block_size as u64;
+        let first_block = offset / block_size;
+        let last_block = (end - 1) / block_size;
+
+        let mut result = Vec::with_capacity(len as usize);
+        for block_index in first_block..=last_block {
+            let logical = usize::try_from(block_index)
+                .map_err(|_| CtfsError::Corrupt(format!("file '{name}': block index does not fit in usize")))?;
+            let data_block_num = self.resolve_block(entry.map_block, logical)?;
             if data_block_num == 0 {
                 return Err(CtfsError::Corrupt(format!(
-                    "file '{name}': unallocated block at index {block_index}"
+                    "file '{name}': unallocated block at index {logical}"
                 )));
             }
 
-            let block_offset = data_block_num * self.block_size as u64;
-            let remaining = entry.size as usize - result.len();
-            let to_read = remaining.min(self.block_size);
+            // The slice of THIS block that intersects the requested range.
+            let block_start = block_index * block_size;
+            let want_from = offset.max(block_start) - block_start;
+            let want_to = (end.min(block_start + block_size)) - block_start;
+            let to_read = (want_to - want_from) as usize;
 
-            // Read this block's bytes through the BlockSource.  `read_exact_at`
-            // bounds-checks against the source's current size, mirroring the
-            // prior whole-file `block_offset + to_read > self.data.len()` guard
-            // (and reporting the same "extends beyond end of container" error).
-            let start = result.len();
-            result.resize(start + to_read, 0);
-            read_exact_at(
-                self.source.as_ref(),
-                block_offset,
-                &mut result[start..start + to_read],
-                &format!("file '{name}': block {data_block_num}"),
-            )?;
+            let src_offset = data_block_num * block_size + want_from;
+            // The prefix boundary, decided in the ONE place it can be decided:
+            // how many of these bytes the container actually carries. Clamping
+            // to the available count rather than dropping the whole block keeps
+            // the boundary BYTE-granular — a 2 KB stream that lives inside a
+            // single 4 KB block still yields its landed prefix, which a
+            // block-granular rule would throw away entirely.
+            let available = self.source.current_size().saturating_sub(src_offset);
+            let readable = (to_read as u64).min(available) as usize;
+            if readable > 0 {
+                let start = result.len();
+                result.resize(start + readable, 0);
+                read_exact_at(
+                    self.source.as_ref(),
+                    src_offset,
+                    &mut result[start..start + readable],
+                    &format!("file '{name}': block {data_block_num}"),
+                )?;
+            }
+            if readable < to_read {
+                // This block ran out; nothing after it can be contiguous.
+                break;
+            }
         }
 
         Ok(result)

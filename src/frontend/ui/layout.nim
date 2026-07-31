@@ -909,8 +909,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # ``requestPanelComponent-{id}`` container, and reactive
         # effects keep it in sync. No direct-DOM redraw hook is needed here.
         # The legacy ``RequestPanelComponent``
-        # remains as the event-bus carrier (M6 will subscribe to
-        # ``CtUpdatedHttpRequests``) and its mutators feed the VM via
+        # remains as the event-bus carrier (its ``register`` subscribes to
+        # ``CtUpdatedHttpRequests`` — RS-M3) and its mutators feed the VM via
         # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
         # any rows already accumulated when the panel becomes visible.
         if state.content == Content.RequestPanel:

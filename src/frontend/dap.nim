@@ -144,6 +144,12 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtSetActiveSourceViewResponse: "",
   CtInstallSourceView: "ct/install-source-view",
   CtInstallSourceViewResponse: "",
+  # Request Panel live sessions (RS-M3).  Both directions are registered here
+  # so ``DAP_TO_EVENT_KIND_MAPPING`` (derived below) resolves the request name
+  # for ``dapCommandToEventKind`` and the event name for
+  # ``dapEventToCtEventKind`` without any further wiring.
+  CtLoadRequestSpansSince: "ct/load-request-spans-since",
+  CtUpdatedHttpRequests: "ct/updated-http-requests",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}

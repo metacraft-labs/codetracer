@@ -1,0 +1,9 @@
+{"trace_dir":"requests/req-0002","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"ok","metadata":{"http.method":"GET","http.url":"/api/users","http.status_code":"200","http.duration_ms":"12"}}
+{"trace_dir":"requests/req-0003","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"ok","metadata":{"http.method":"POST","http.url":"/api/users","http.status_code":"201","http.duration_ms":"31"}}
+{"trace_dir":"requests/req-0004","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"ok","metadata":{"http.method":"GET","http.url":"/api/users/42","http.status_code":"200","http.duration_ms":"8"}}
+{"trace_dir":"requests/req-0005","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"ok","metadata":{"http.method":"GET","http.url":"/static/app.css","http.status_code":"304","http.duration_ms":"1"}}
+{"trace_dir":"requests/req-0006","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"error","metadata":{"http.method":"DELETE","http.url":"/api/users/42","http.status_code":"404","http.duration_ms":"5"}}
+{"trace_dir":"requests/req-0007","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"error","metadata":{"http.method":"PUT","http.url":"/api/orders/7","http.status_code":"500","http.duration_ms":"220"}}
+{"trace_dir":"requests/req-0008","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"ok","metadata":{"http.method":"GET","http.url":"/health","http.status_code":"200","http.duration_ms":"1"}}
+{"trace_dir":"requests/req-0009","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"ok","metadata":{"http.method":"GET","http.url":"/api/reports/slow","http.status_code":"200","http.duration_ms":"940"}}
+{"trace_dir":"requests/req-0010.ct","span_type":"web-request","timestamp":"2026-07-29T12:00:00Z","status":"error","metadata":{"http.method":"POST","http.url":"/api/orders","http.status_code":"502","http.duration_ms":"1200"}}

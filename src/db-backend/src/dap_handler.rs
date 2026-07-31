@@ -278,6 +278,27 @@ pub struct Handler {
     /// every individual step request — the runner consults
     /// the active path at dispatch time.
     pub active_source_view_path: Option<String>,
+
+    /// RS-M2 — the recording's directory, recorded at trace-open time by
+    /// [`Handler::set_trace_folder`] so `ct/load-request-spans` can find the
+    /// `.ct` container (and, for a pre-cutover session, the legacy sidecar next
+    /// to it).
+    ///
+    /// A path and nothing more: opening a trace deliberately does NOT touch the
+    /// span stream. See `set_trace_folder` for why. `None` when the session was
+    /// opened without a filesystem path (WASM / VFS replay), in which case
+    /// `ct/load-request-spans` reports the absence rather than guessing.
+    pub trace_folder: Option<std::path::PathBuf>,
+
+    /// RS-M3 — the live Request-panel tail, held across `ct/load-request-spans-since`
+    /// calls so a poll decodes only the span chunks sealed since the last one.
+    ///
+    /// `None` until the first delta poll (opening a trace must not touch the
+    /// span stream — see `set_trace_folder`), and re-created whenever
+    /// [`Handler::trace_folder`] names a different recording, because a cursor
+    /// is meaningless against a different container. Everything else the tail
+    /// invalidates itself; see [`crate::request_spans::RequestSpanTail`].
+    pub request_span_tail: Option<crate::request_spans::RequestSpanTail>,
 }
 
 /// M25b — Event-Log marker row returned by `ct/event-load`. The
@@ -510,6 +531,8 @@ impl Handler {
             marker_decode_calls: std::sync::atomic::AtomicUsize::new(0),
             cached_marker_rows: None,
             active_source_view_path: None,
+            trace_folder: None,
+            request_span_tail: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -2146,6 +2169,108 @@ impl Handler {
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender.clone())?;
         self.respond_dap(request, restored, sender)
+    }
+
+    /// Record the recording's directory so the request-span surface can find
+    /// the container (and any legacy sidecar next to it) later.
+    ///
+    /// Called at trace-open time alongside the other per-trace loaders. It
+    /// stores a path and nothing else: unlike `load_sourcemaps` /
+    /// `load_source_views`, opening a trace must NOT read the span stream. RS-M1
+    /// shipped a reader that decoded every chunk at open and it cost 20–210 ms
+    /// on realistic streams; the `spans.idx` v2 cumulative column exists so the
+    /// stream can be opened index-only, and RS-M3's live panel re-opens a
+    /// growing container on every poll. Deferring all of it to the first
+    /// `ct/load-request-spans` keeps trace-open free for the overwhelming
+    /// majority of recordings, which have no spans at all.
+    pub fn set_trace_folder(&mut self, trace_dir: &Path) {
+        self.trace_folder = Some(trace_dir.to_path_buf());
+    }
+
+    /// RS-M2 — dispatch handler for `ct/load-request-spans`.
+    ///
+    /// Returns a page of the recording's HTTP requests, shaped for the
+    /// frontend's `RequestRecord`, from the container's span stream when it has
+    /// one and from a legacy sidecar otherwise. See
+    /// [`crate::request_spans`] for the source-selection rules and
+    /// [`crate::request_spans::RequestSpans::page`] for why filtering happens
+    /// before paging.
+    ///
+    /// A recording with neither source is not an error: it answers with an
+    /// empty list, because "this program served no HTTP requests" is the
+    /// ordinary case for almost every recording.
+    pub fn load_request_spans(
+        &mut self,
+        request: dap::Request,
+        args: crate::request_spans::LoadRequestSpansArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let Some(trace_folder) = self.trace_folder.clone() else {
+            return Err("ct/load-request-spans: the session has no trace folder".into());
+        };
+        let response = match crate::request_spans::load_request_spans(&trace_folder)? {
+            Some(spans) => spans.page(&args),
+            None => crate::request_spans::LoadRequestSpansResponse {
+                requests: Vec::new(),
+                total: 0,
+                next_span_id: None,
+                source: "none".to_string(),
+                skipped_lines: 0,
+            },
+        };
+        self.respond_dap(request, response, sender)
+    }
+
+    /// RS-M3 — dispatch handler for `ct/load-request-spans-since`.
+    ///
+    /// The tailing counterpart of `ct/load-request-spans`: instead of decoding
+    /// the whole stream, it returns only what was appended after the client's
+    /// cursor, by holding a [`crate::request_spans::RequestSpanTail`] across
+    /// calls. A poll costs the chunks the recording GAINED, not the chunks it
+    /// has.
+    ///
+    /// Answers on two channels, matching `ct/originChain` /
+    /// `ct/updated-origin-chain`: the DAP response (for a caller that awaits
+    /// it) and a `ct/updated-http-requests` event (for the event-driven panel).
+    /// The event is suppressed when the delta carries nothing and demands
+    /// nothing — an idle poll loop must not push an event per tick.
+    ///
+    /// Deltas are deliberately UNFILTERED. `ct/load-request-spans`' filters are
+    /// per-record predicates, so they would apply cleanly to a batch; but a
+    /// filtered tail can strand the client, because a row that matched while
+    /// open (status `0`) may not match once completed (status `404` against a
+    /// `2xx` filter), and the completion that would have superseded it never
+    /// arrives. The panel filters its own list instead — it already does, via
+    /// `RequestPanelVM.filteredRequests`.
+    pub fn load_request_spans_since(
+        &mut self,
+        request: dap::Request,
+        args: crate::request_spans::LoadRequestSpansSinceArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let Some(trace_folder) = self.trace_folder.clone() else {
+            return Err("ct/load-request-spans-since: the session has no trace folder".into());
+        };
+        // A cursor only means something against the container it was issued
+        // for, so a trace change drops the tail rather than reusing it.
+        if self
+            .request_span_tail
+            .as_ref()
+            .is_none_or(|tail| tail.trace_path() != trace_folder)
+        {
+            self.request_span_tail = Some(crate::request_spans::RequestSpanTail::new(&trace_folder));
+        }
+        let tail = self
+            .request_span_tail
+            .as_mut()
+            .ok_or("ct/load-request-spans-since: request span tail missing right after construction")?;
+        let delta = tail.poll(args.cursor.unwrap_or(0))?;
+
+        if !delta.spans.is_empty() || delta.reset {
+            let raw_event = self.dap_client.updated_http_requests_event(&delta)?;
+            sender.send(raw_event)?;
+        }
+        self.respond_dap(request, &delta, sender)
     }
 
     /// Ensure program events are loaded and cached.

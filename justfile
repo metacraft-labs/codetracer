@@ -546,6 +546,20 @@ test-rust:
     fi
   popd
 
+# Exercise `ct print` end to end against the built `ct` binary.
+#
+# Covers the JSONL span-manifest path and, since RS-M2, the CTFS span-stream
+# path: `ct print` reads a recording's HTTP requests out of the container's
+# `spans.dat` and only falls back to a `session_manifest.jsonl` /
+# `codetracer_spans.jsonl` sidecar when the container has no stream.  The
+# script skips (exit 0) when `src/build-debug/bin/ct` has not been built, so it
+# is safe to run in a bare dev shell; run `just build-once` first for real
+# coverage.
+test-ct-print:
+  #!/usr/bin/env bash
+  set -e
+  ./tests/test_ct_print.sh
+
 # Run all non-GUI tests.
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.
@@ -1311,6 +1325,424 @@ demo-cross-tracer:
   echo "[demo] Launching CodeTracer GUI with session manifest: $session"
   exec ct replay -t "$session"
 
+# RS-M4 — one-command "watch HTTP requests arrive in CodeTracer".
+#
+# ############################################################################
+# # THE SPANS ARE SYNTHESISED.  THE PANEL PATH IS REAL.                      #
+# ############################################################################
+#
+# No language recorder emits `span_type: "web-request"` records yet — per
+# language emission is RS-M5..RS-M9 (Python, Ruby, PHP, Elixir, JS), every one
+# of which depends on RS-M4.  So this recipe cannot record a real server; it
+# produces the container with the CANONICAL Nim writer instead
+# (`codetracer-trace-format-nim`'s multi_stream_writer + span_stream, the same
+# writer the recorders link and the same path
+# `src/db-backend/tests/fixtures/span_stream/gen_span_fixtures.nim` uses).
+#
+# EVERYTHING DOWNSTREAM OF THE CONTAINER IS PRODUCTION CODE: `ct replay` opens
+# it, the db-backend's Rust span reader decodes spans.dat/spans.idx, meta.dat
+# bit 13 gates it, `ct/load-request-spans-since` tails it, and the Request
+# Panel's ViewModel merges the deltas and renders the rows.
+#
+# RS-M5+ replaces the synthetic producer with a real server under its
+# language's recorder and adds `just demo-request-panel <that lang>`.  Nothing
+# else in this recipe changes: only who writes the span records.
+#
+# LANG selects the producer:
+#
+#   synthetic — the RS-M4 producer described above (no server, real container).
+#   python    — RS-M5: a REAL Flask app served over real HTTP by a real recorded
+#               process, whose middleware writes the span records itself.  The
+#               container production lives in the sibling
+#               `codetracer-python-recorder` repo (only it can record Python);
+#               this recipe delegates to its
+#               `just demo-request-panel-python` and then opens the result.
+#   ruby      — RS-M6: the same, with a REAL Sinatra app and the Rack
+#               middleware, produced by the sibling `codetracer-ruby-recorder`
+#               repo's `just demo-request-panel-ruby`.
+#   php       — RS-M7: a REAL `php -S` worker, one continuous recording whose
+#               timeline is partitioned by the requests it served.
+#   elixir    — RS-M8: a REAL Cowboy listener serving a real `Plug.Router`,
+#               where each request is its own BEAM process and so its own
+#               container thread.
+#   js        — RS-M9: a REAL Express app on a real `http.Server`, where every
+#               request is a slice of ONE event loop.  CODETRACER_DEMO_SCHEDULE
+#               picks `sequential` (the default) or `concurrent`, which
+#               interleaves the handlers so their step ranges overlap.
+#   native    — RS-M10: a REAL nginx recorded by `ct-mcr`, where NOTHING in the
+#               recorded program knows what a request is.  There is no
+#               middleware seam in nginx and the recorder records syscalls, so
+#               the spans are DISCOVERED afterwards from the recording's own
+#               `recv` / `writev` payloads and appended to the container.
+#
+# Each language milestone adds its own value the same way.  See the "Trying it" section of
+# codetracer-specs/GUI/Core-Panes/Request-Panel.md.
+demo-request-panel LANG="synthetic":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== Request Panel demo — {{LANG}} ==="
+
+  if [ "{{LANG}}" = "python" ]; then
+    # RS-M5.  The recorder sibling records the demo app into $CODETRACER_DEMO_DIR
+    # and prints the spans it wrote; the GUI half stays here so every language
+    # opens the session exactly the same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-python}"
+    recorder_repo="${CODETRACER_PYTHON_RECORDER_DIR:-$(pwd)/../codetracer-python-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-python-recorder checkout at $recorder_repo."
+        echo "The Python demo records a real Flask app with that recorder, so the"
+        echo "sibling repo has to be present (override with"
+        echo "CODETRACER_PYTHON_RECORDER_DIR=/path/to/codetracer-python-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the Flask demo app with the Python recorder"
+    # Its own dev shell: the recorder needs its Rust/maturin toolchain and its
+    # uv environment, neither of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-python flask
+    )
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$demo_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$demo_dir"
+  fi
+
+  if [ "{{LANG}}" = "ruby" ]; then
+    # RS-M6.  Same shape as the Python arm above: the recorder sibling records
+    # the demo app into $CODETRACER_DEMO_DIR and prints the spans it wrote; the
+    # GUI half stays here so every language opens the session the same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-ruby}"
+    recorder_repo="${CODETRACER_RUBY_RECORDER_DIR:-$(pwd)/../codetracer-ruby-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-ruby-recorder checkout at $recorder_repo."
+        echo "The Ruby demo records a real Sinatra app with that recorder, so the"
+        echo "sibling repo has to be present (override with"
+        echo "CODETRACER_RUBY_RECORDER_DIR=/path/to/codetracer-ruby-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the Sinatra demo app with the Ruby recorder"
+    # Its own dev shell: the recorder needs its Rust toolchain and a Ruby with
+    # Sinatra and Rails, none of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-ruby sinatra
+    )
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$demo_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$demo_dir"
+  fi
+
+  if [ "{{LANG}}" = "php" ]; then
+    # RS-M7.  Same shape as the Python and Ruby arms: the recorder sibling
+    # records the demo app into $CODETRACER_DEMO_DIR and prints the spans it
+    # wrote; the GUI half stays here so every language opens the session the
+    # same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-php}"
+    recorder_repo="${CODETRACER_PHP_RECORDER_DIR:-$(pwd)/../codetracer-php-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-php-recorder checkout at $recorder_repo."
+        echo "The PHP demo records a real \`php -S\` server with that recorder, so"
+        echo "the sibling repo has to be present (override with"
+        echo "CODETRACER_PHP_RECORDER_DIR=/path/to/codetracer-php-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the PHP demo app with the PHP recorder"
+    # Its own dev shell: the recorder needs php with development headers and
+    # phpize to build its C extension, neither of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-php builtin
+    )
+    # A PHP worker owns its recording, so the container lives under
+    # $demo_dir/worker_<pid>/; the recipe leaves the path it used in a marker
+    # file rather than making this side guess the worker's pid.
+    worker_dir="$(cat "$demo_dir/.worker_dir")"
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$worker_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$worker_dir"
+  fi
+
+  if [ "{{LANG}}" = "elixir" ]; then
+    # RS-M8.  Same shape as the Python, Ruby and PHP arms: the recorder sibling
+    # records the demo app into $CODETRACER_DEMO_DIR and prints the spans it
+    # wrote; the GUI half stays here so every language opens the session the
+    # same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-elixir}"
+    recorder_repo="${CODETRACER_BEAM_RECORDER_DIR:-$(pwd)/../codetracer-beam-recorder}"
+    framework="${CODETRACER_DEMO_FRAMEWORK:-plug}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-beam-recorder checkout at $recorder_repo."
+        echo "The Elixir demo records a real Cowboy listener with that recorder,"
+        echo "so the sibling repo has to be present (override with"
+        echo "CODETRACER_BEAM_RECORDER_DIR=/path/to/codetracer-beam-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the Elixir demo app with the BEAM recorder ($framework)"
+    # Its own dev shell: the recorder needs erlang, elixir, rebar3 and a cargo
+    # toolchain, none of which are in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-elixir "$framework"
+    )
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$demo_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$demo_dir"
+  fi
+
+  if [ "{{LANG}}" = "js" ]; then
+    # RS-M9.  Same shape as the Python, Ruby, PHP and Elixir arms: the recorder
+    # sibling records the demo app into $CODETRACER_DEMO_DIR and prints the
+    # spans it wrote; the GUI half stays here so every language opens the
+    # session the same way.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-js}"
+    recorder_repo="${CODETRACER_JS_RECORDER_DIR:-$(pwd)/../codetracer-js-recorder}"
+    schedule="${CODETRACER_DEMO_SCHEDULE:-sequential}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-js-recorder checkout at $recorder_repo."
+        echo "The JS demo records a real Express server with that recorder, so"
+        echo "the sibling repo has to be present (override with"
+        echo "CODETRACER_JS_RECORDER_DIR=/path/to/codetracer-js-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording the Express demo app with the JS recorder ($schedule)"
+    # Its own dev shell: the recorder needs node, npm and a cargo toolchain to
+    # build its napi-rs addon, none of which is in codetracer's shell.
+    # CODETRACER_DEMO_RECORD_ONLY keeps the sibling recipe from opening its own
+    # GUI: `ct` is on PATH inside this shell, and two replays of one session is
+    # not what the demo promises.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
+        direnv exec . just demo-request-panel-js "$schedule"
+    )
+    # The recorder writes `<out>/trace-<n>/`; the recipe leaves the path it
+    # used in a marker file rather than making this side guess the handle.
+    trace_dir="$(cat "$demo_dir/.trace_dir")"
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$trace_dir" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    exec ct replay -t "$trace_dir"
+  fi
+
+  if [ "{{LANG}}" = "native" ]; then
+    # RS-M10.  Same shape as the arms above, with one difference that is the
+    # whole point of the milestone: the recorder sibling does not instrument
+    # the server at all.  It records a real nginx with `ct-mcr`, then reads
+    # that container's own OS events back and writes the request spans it
+    # discovers into the same container.
+    demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-native}"
+    recorder_repo="${CODETRACER_NATIVE_RECORDER_DIR:-$(pwd)/../codetracer-native-recorder}"
+    if [ ! -f "$recorder_repo/Justfile" ]; then
+      {
+        echo "ERROR: no codetracer-native-recorder checkout at $recorder_repo."
+        echo "The native demo records a real nginx with ct-mcr, so the sibling"
+        echo "repo has to be present (override with"
+        echo "CODETRACER_NATIVE_RECORDER_DIR=/path/to/codetracer-native-recorder)."
+      } >&2
+      exit 1
+    fi
+    echo "[demo] recording nginx with ct-mcr"
+    # Its own dev shell: the recorder needs its Nim/Rust toolchain and ships
+    # the nginx the recording runs, neither of which is in codetracer's shell.
+    (
+      cd "$recorder_repo"
+      CODETRACER_DEMO_DIR="$demo_dir" direnv exec . just demo-request-panel-native
+    )
+    # ct-mcr writes ONE container per recording; the recipe leaves the path it
+    # used in a marker file rather than making this side guess the name.
+    trace_file="$(cat "$demo_dir/.trace_file")"
+    # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
+    # render in the GUI stays distinguishable from a failure to record.
+    ct print -f http "$trace_file" || true
+    echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+    echo "[demo] first delta arrives (bottom edge strip if you close it)."
+    # `-t` names the trace DIRECTORY, which `importTrace` then searches for the
+    # `.ct` container — the same thing every other arm above passes.  Handing it
+    # the container file instead fails in `importTrace` with "no `.ct` CTFS
+    # container found in <file>" before the GUI is ever reached.  `ct print`
+    # above is the one that takes the container path itself.
+    exec ct replay -t "$demo_dir"
+  fi
+
+  if [ "{{LANG}}" != "synthetic" ]; then
+    {
+      echo "ERROR: no recorder emits web-request spans for '{{LANG}}' yet."
+      echo
+      echo "Today:  just demo-request-panel synthetic"
+      echo "        just demo-request-panel python"
+      echo "        just demo-request-panel ruby"
+      echo "        just demo-request-panel php"
+      echo "        just demo-request-panel elixir      # CODETRACER_DEMO_FRAMEWORK=plug|phoenix"
+      echo "        just demo-request-panel js          # CODETRACER_DEMO_SCHEDULE=sequential|concurrent"
+      echo "        just demo-request-panel native      # nginx under ct-mcr; spans are DISCOVERED"
+    } >&2
+    exit 1
+  fi
+
+  demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel}"
+  work="${TMPDIR:-/tmp}/ct-demo-request-panel"
+  mkdir -p "$work"
+
+  if ! command -v nim >/dev/null 2>&1; then
+    {
+      echo "ERROR: no 'nim' on PATH.  The demo container is written by the"
+      echo "canonical Nim writer, so this recipe needs the dev shell:"
+      echo "  direnv exec . just demo-request-panel {{LANG}}"
+    } >&2
+    exit 1
+  fi
+
+  echo "[demo] compiling the container producer (canonical Nim writer)"
+  nim c -d:release --hints:off --warnings:off \
+    --out:"$work/demo_request_session" \
+    src/tools/demo_request_session.nim
+
+  echo "[demo] producing the demo container in $demo_dir"
+  rm -rf "$demo_dir"
+  container=$("$work/demo_request_session" "$demo_dir")
+  echo "[demo] wrote $container"
+
+  # Show what the panel is about to display, straight out of the container,
+  # so a failure to render in the GUI is distinguishable from a failure to
+  # record.  `ct print -f http` reads spans.dat through the Nim reader.
+  ct print -f http "$demo_dir" || true
+
+  echo "[demo] launching the GUI; the REQUESTS panel docks itself once the"
+  echo "[demo] first delta arrives (bottom edge strip if you close it)."
+  exec ct replay -t "$demo_dir"
+
+# RS-M4 — the same demo, but the container GROWS while the GUI watches it, so
+# rows appear live and one request is seen in flight before it settles.
+#
+# The in-flight row is a real observation, not a figure of speech.  One stage
+# (`--through=6 --open-only`) stops INSIDE request 6: its open span record is
+# published, its completion is not.  That stage has to exist as its own step,
+# because a stage that published the open record and its completion together
+# would be one atomic rename, and the backend applies `resolve_spans` WITHIN a
+# delta — the panel would only ever see the settled row.  With the extra step
+# the panel shows request 6 greyed and status-less for one interval, then
+# settles it.
+#
+# Read the header of `demo-request-panel` first: the spans are synthesised the
+# same way here.  One extra caveat is specific to this recipe:
+# `MultiStreamTraceWriter` builds its container IN MEMORY and serialises at
+# close (see `flushSpans`' own docs in
+# codetracer-trace-format-nim/src/codetracer_trace_writer/multi_stream_writer.nim),
+# so the grower rewrites the whole image and renames it into place rather than
+# appending to a live file.  Every stage nonetheless re-seals its earlier chunks
+# to the SAME bytes — seal points and record contents are both derived from the
+# request index, never from the stage count — so each stage's span stream is a
+# strict CHUNK PREFIX of the next, which is exactly what the backend's
+# chunk-count cursor requires.  The whole reader half is therefore genuinely
+# exercised: held reader, per-poll delta, `reset` only on the first poll,
+# client-side last-record-wins across deltas.  True in-place append needs the
+# writer built on `createCtfsStreaming(path)`; that is a writer change, not a
+# panel change.
+#
+# Both properties are asserted headlessly by
+# src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim, over the same stage
+# sequence the loop below walks.
+demo-request-panel-live LANG="synthetic" INTERVAL="2":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== RS-M4 Request Panel demo (live session) — {{LANG}} ==="
+
+  if [ "{{LANG}}" != "synthetic" ]; then
+    echo "ERROR: only 'synthetic' exists today; see just demo-request-panel." >&2
+    exit 1
+  fi
+
+  demo_dir="${CODETRACER_DEMO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/codetracer/demos/request-panel-live}"
+  work="${TMPDIR:-/tmp}/ct-demo-request-panel"
+  mkdir -p "$work"
+
+  if ! command -v nim >/dev/null 2>&1; then
+    echo "ERROR: no 'nim' on PATH; run under 'direnv exec .'." >&2
+    exit 1
+  fi
+
+  echo "[demo] compiling the container producer"
+  nim c -d:release --hints:off --warnings:off \
+    --out:"$work/demo_request_session" \
+    src/tools/demo_request_session.nim
+
+  echo "[demo] seeding the session with its first request"
+  rm -rf "$demo_dir"
+  "$work/demo_request_session" "$demo_dir" --through=1 >/dev/null
+
+  # Grow the session in the background while the GUI tails it.  The GUI polls
+  # `ct/load-request-spans-since` every 500 ms, so a 2 s stage interval makes
+  # each new row visibly arrive on its own.
+  #
+  # The `--open-only` element is the in-flight step: it adds request 6's open
+  # record and nothing else, so the panel renders it as in flight until the next
+  # stage — one interval later — appends the completion.
+  stages=(
+    "--through=2"
+    "--through=3"
+    "--through=4"
+    "--through=5"
+    "--through=6 --open-only"
+    "--through=6"
+    "--through=7"
+    "--through=8"
+  )
+  (
+    for stage in "${stages[@]}"; do
+      sleep "{{INTERVAL}}"
+      # Unquoted on purpose: an element may carry two flags.
+      "$work/demo_request_session" "$demo_dir" $stage >/dev/null
+      echo "[demo] session grew: $stage"
+    done
+    echo "[demo] session complete (8 requests)"
+  ) &
+
+  # `ct replay` execv()s into Electron on POSIX, so this shell is replaced and
+  # never reaches a `wait`.  The grower is already a detached child and keeps
+  # feeding the container; it exits on its own after the eighth stage.
+  echo "[demo] launching the GUI — watch rows appear in the REQUESTS panel"
+  exec ct replay -t "$demo_dir"
+
 # Elixir materialized trace DAP flow integration test (DB-based, no rr required).
 # Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
 # (legacy CODETRACER_ELIXIR_RECORDER_PATH still honored during the BEAM rename
@@ -1747,6 +2179,7 @@ test-vm-native: vm-test-prereqs
     ! -path '*/integration/language_smoke_test.nim' \
     ! -path '*/multi-replay/*' \
     ! -path '*/noir-space-ship/*' \
+    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-native-$name"
@@ -1777,6 +2210,24 @@ test-vm-native: vm-test-prereqs
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
+# Also skips request-panel/demo_recipe_vm_test.nim (RS-M4),
+# request-panel/python_request_panel_vm_test.nim (RS-M5),
+# request-panel/ruby_request_panel_vm_test.nim (RS-M6),
+# request-panel/php_request_panel_vm_test.nim (RS-M7),
+# request-panel/elixir_request_panel_vm_test.nim (RS-M8),
+# request-panel/js_request_panel_vm_test.nim (RS-M9),
+# request-panel/native_request_panel_vm_test.nim (RS-M10),
+# request-panel/remote_request_panel_vm_test.nim (RS-M11) and
+# request-panel/request_span_conformance_test.nim (RS-M12, which reads all six
+# of those containers at once): the first writes a
+# real `.ct` container with the canonical Nim writer, the next six read one
+# recorded by the Python, Ruby, PHP, BEAM and JS recorders and by `ct-mcr`,
+# and all seven link zstd through a C FFI that has no `nim js` equivalent.
+# RS-M11's is excluded for a different reason: it replays a delta capture and
+# the span-stream ground truth from disk, and `std/os` file reads are not
+# available on the `nim js` backend.
+# They run in test-vm-native and are registered in release_gate.nim's
+# CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
   set -e
@@ -1792,6 +2243,16 @@ test-vm-js: vm-test-prereqs
     ! -path '*/multi-replay/*' \
     ! -path '*/noir-space-ship/*' \
     ! -path '*/agentic-coding/*' \
+    ! -path '*/request-panel/demo_recipe_vm_test.nim' \
+    ! -path '*/request-panel/python_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/ruby_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/php_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/elixir_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/js_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/native_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/remote_request_panel_vm_test.nim' \
+    ! -path '*/request-panel/request_span_conformance_test.nim' \
+    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"
@@ -1829,6 +2290,38 @@ test-vm-js: vm-test-prereqs
 
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
+
+# RS-M12: assert no recorder writes a sidecar manifest any more.
+#
+# `src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim` runs each
+# recorder sibling's own `record-request-panel-fixture` recipe — the same real
+# recording run that produced the checked-in fixtures — into a scratch
+# directory, with `CODETRACER_SPAN_MANIFEST` deliberately SET, and requires
+# that no `session_manifest.jsonl` / `codetracer_spans.jsonl` appears anywhere
+# the run could have written one.  Setting the retired opt-in is what makes it
+# a proof that the write path is GONE rather than a snapshot of today's
+# defaults.
+#
+# It is excluded from `test-vm-native` / `test-vm-js` because it needs six
+# recorder toolchains, which is exactly what the checked-in fixtures exist to
+# spare that lane.  A sibling that is not checked out is reported through the
+# same `MISSING-RECORDER SKIP:` marker `test-vm-recorder-gated` uses, and the
+# test's own zero-test guard fails an all-skipped run so a sibling-less
+# environment cannot masquerade as a pass.
+test-no-sidecar-manifests: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-no-sidecar-manifests.log) 2>&1
+  echo "=== RS-M12 sidecar retirement (real recording per language) ==="
+  f=src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim
+  name=$(basename "$f" .nim)
+  cache="/tmp/ct-nim-cache/vm-native-$name"
+  nim c -r --hints:off \
+    --path:src/frontend/viewmodel \
+    --nimcache:"$cache" \
+    -o:"$cache/$name" \
+    "$f"
 
 # Compile + run the recorder-gated ViewModel headless tests that live under
 # src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /

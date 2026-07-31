@@ -155,6 +155,13 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   )
   dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
   dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
+  # RS-M3 — the HTTP Request panel's live tail.  The body is a span delta
+  # (`spans` / `cursor` / `reset` / `source`), forwarded raw so
+  # `RequestPanelComponent.register`'s subscription can hand it to the
+  # ReplayDataStore without a typed intermediate that would have to be kept
+  # in sync with the backend's serde shape.
+  dapApi.on(CtUpdatedHttpRequests, proc(kind: CtEventKind, value: JsObject) =
+    viewsApi.emit(CtUpdatedHttpRequests, value))
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     cerror "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
       $value.location.rrTicks &

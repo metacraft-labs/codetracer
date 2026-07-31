@@ -88,13 +88,24 @@ const StatusBucketOptions*: array[4, tuple[value: string; label: string]] = [
 # Reactive helpers used inside DSL expressions
 # ---------------------------------------------------------------------------
 
-proc rowClass*(selected: bool): string =
-  ## Outer ``.request-row`` modifier for the selected row.  Mirrors
-  ## the legacy ``"request-row selected"`` concatenation.
+const InFlightPlaceholder* = "—"
+  ## Text rendered in the Status and Duration columns of an in-flight row.
+  ## The pane spec (GUI/Core-Panes/Request-Panel.md § Live Sessions) says an
+  ## in-flight row is "rendered distinctly, with no status or duration" — a
+  ## placeholder keeps the column grid aligned while saying "not yet known",
+  ## which a literal empty cell would not.
+
+proc rowClass*(selected: bool; isOpen: bool = false): string =
+  ## Outer ``.request-row`` modifier string.  ``selected`` mirrors the legacy
+  ## ``"request-row selected"`` concatenation; ``isOpen`` adds the RS-M3
+  ## in-flight modifier so CSS can grey the row while its completion is still
+  ## outstanding.  Both modifiers can apply at once — an in-flight row is
+  ## selectable like any other.
+  result = "request-row"
   if selected:
-    "request-row selected"
-  else:
-    "request-row"
+    result &= " selected"
+  if isOpen:
+    result &= " request-row-open"
 
 proc countText*(filtered, total: int): string =
   ## "<filtered>/<total> requests" badge text.  Matches the legacy
@@ -108,8 +119,38 @@ proc countText*(vm: RequestPanelVM): string =
   ## the resulting text node updates whenever either signal changes
   ## without rebuilding the surrounding span (the test fixtures grab
   ## the span by class once and re-check ``textContent``).
-  let total = vm.requests.val.len
-  $total & " requests"
+  ##
+  ## Both counts are shown: with a filter active, "how many of how many"
+  ## is the question the badge answers, and a live session makes the
+  ## unfiltered total move on its own.
+  countText(vm.filteredRequests.val.len, vm.requests.val.len)
+
+proc statusText*(req: RequestRecord): string =
+  ## Status-column text.  An in-flight row has no status code yet (the open
+  ## record carries ``statusCode == 0``), so it renders the placeholder
+  ## rather than a misleading ``0``.
+  if req.isOpen:
+    InFlightPlaceholder
+  else:
+    $req.statusCode
+
+proc statusCellClass*(req: RequestRecord): string =
+  ## Status-column span class.  In flight the span's own status byte is
+  ## ``"unknown"``, which is exactly the ``request-status-unknown`` bucket
+  ## ``statusClass(0)`` already yields — spelled out here so the intent
+  ## survives any future change to the bucket ranges.
+  if req.isOpen:
+    "request-status-unknown"
+  else:
+    statusClass(req.statusCode)
+
+proc durationText*(req: RequestRecord): string =
+  ## Duration-column text; the placeholder while in flight, since the
+  ## wall-clock duration is only known at completion.
+  if req.isOpen:
+    InFlightPlaceholder
+  else:
+    formatDuration(req.durationMs)
 
 proc methodBadgeClass*(httpMethod: string): string =
   ## Returns the full CSS class string for the per-method badge:
@@ -145,10 +186,10 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
   ## CSS rules colour both independently.
   let onClick = onRowClick(vm, index)
   let onDblClick = onRowDoubleClick(vm, index)
-  let statusCls = statusClass(req.statusCode)
+  let statusCls = statusCellClass(req)
   let badgeCls = methodBadgeClass(req.httpMethod)
   let row = ui(r):
-    tdiv(class = rowClass(selected),
+    tdiv(class = rowClass(selected, req.isOpen),
          onclick = onClick,
          ondblclick = onDblClick):
       tdiv(class = "request-col-id"):
@@ -160,9 +201,9 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
         text req.url
       tdiv(class = "request-col-status"):
         span(class = statusCls):
-          text $req.statusCode
+          text statusText(req)
       tdiv(class = "request-col-duration"):
-        text formatDuration(req.durationMs)
+        text durationText(req)
       tdiv(class = "request-col-size"):
         text formatSize(req.responseSize)
   row
@@ -188,10 +229,10 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
   let panel = ui(r):
     tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
       # Title bar: "Requests  N requests  [Clear]"
-      tdiv(class = "request-panel-title-bar"):
+      tdiv(class = "request-panel-title-bar request-panel-header"):
         span(class = "request-panel-title"):
           text "Requests"
-        span(class = "request-panel-count-badge"):
+        span(class = "request-panel-count-badge request-panel-count-text"):
           text countText(vm)
         span(ref = clearBtnEl, class = "request-panel-clear-btn"):
           text "Clear"
@@ -316,7 +357,7 @@ when defined(js):
     ## Build a request row in the real DOM.  Same shape as the Mock
     ## variant; click / dblclick handlers wired imperatively via
     ## ``addEventListener``.
-    let row = createWebElement("div", rowClass(selected))
+    let row = createWebElement("div", rowClass(selected, req.isOpen))
 
     let idDiv = createWebTextElement("div", $req.id, "request-col-id")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(idDiv))
@@ -333,14 +374,14 @@ when defined(js):
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(urlDiv))
 
     let statusDiv = createWebElement("div", "request-col-status")
-    let statusSpan = createWebTextElement("span", $req.statusCode,
-                                           statusClass(req.statusCode))
+    let statusSpan = createWebTextElement("span", statusText(req),
+                                           statusCellClass(req))
     isonim_dom.appendChild(isonim_dom.Node(statusDiv),
                            isonim_dom.Node(statusSpan))
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(statusDiv))
 
     let durationDiv = createWebTextElement("div",
-                                            formatDuration(req.durationMs),
+                                            durationText(req),
                                             "request-col-duration")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(durationDiv))
 
@@ -370,10 +411,10 @@ when defined(js):
     let panel = ui(r):
       tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
         # Title bar: "Requests  N requests  [Clear]"
-        tdiv(class = "request-panel-title-bar"):
+        tdiv(class = "request-panel-title-bar request-panel-header"):
           span(class = "request-panel-title"):
             text "Requests"
-          span(class = "request-panel-count-badge"):
+          span(class = "request-panel-count-badge request-panel-count-text"):
             text countText(vm)
           span(ref = clearBtnEl, class = "request-panel-clear-btn"):
             text "Clear"

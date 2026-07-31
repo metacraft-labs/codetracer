@@ -101,6 +101,14 @@ type
     CtSetActiveSourceViewResponse,
     CtInstallSourceView,
     CtInstallSourceViewResponse,
+    # Request Panel live sessions (RS-M3). ``CtLoadRequestSpansSince`` is the
+    # frontend-initiated poll that carries the opaque cursor; the backend
+    # answers with a delta body AND emits ``CtUpdatedHttpRequests`` carrying an
+    # identically-shaped body so a panel that never polls still grows.  See
+    # codetracer-specs/Planned-Features/Request-Panel-Live-Sessions.milestones.org
+    # §RS-M3 and codetracer-specs/GUI/Core-Panes/Request-Panel.md.
+    CtLoadRequestSpansSince,
+    CtUpdatedHttpRequests,
 
 when defined(js):
   import std / jsffi

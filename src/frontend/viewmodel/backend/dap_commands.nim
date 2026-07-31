@@ -92,6 +92,13 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   # the `ct/originChain` / `ct/originSummary` arms).
   "ct/originChain",
   "ct/originSummary",
+  # Request Panel live sessions (RS-M3). `ct/load-request-spans-since` is
+  # sent from `ReplayDataStore.requestRequestSpansSince`, which is exactly
+  # the class of caller this set exists to validate; the backend answers it
+  # with a delta and emits `ct/updated-http-requests` carrying the same
+  # body.
+  "ct/load-request-spans-since",
+  "ct/updated-http-requests",
 ]
 
 let VALID_DAP_COMMANDS*: HashSet[string] = VALID_DAP_COMMANDS_SEQ.toHashSet

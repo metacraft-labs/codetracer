@@ -197,6 +197,23 @@ tree-sitter-tolk = { path = "../../libs/tree-sitter-tolk", optional = true }
 tree-sitter-masm = { path = "../../libs/tree-sitter-masm/bindings/rust", optional = true }
 tree-sitter-cadence = { path = "../../libs/tree-sitter-cadence/bindings/rust", optional = true }
 
+# RS-M2 — the CTFS span stream (`spans.dat`) is a §9c chunked-compressed
+# table, so the reader in `ctfs_trace_reader::span_stream` must decompress a
+# single Zstd frame on demand and (per
+# `codetracer-specs/Trace-Files/CTFS-Request-Span-Streams.md`) derive the last
+# indexed chunk's frame length rather than trusting the file size.  We mirror
+# the split the sibling `codetracer_trace_reader` crate already uses: the C
+# `zstd` bindings natively, the pure-Rust `ruzstd` decoder for
+# wasm32-unknown-unknown (where the C grammar cannot be cross-compiled).  Both
+# versions are already in the transitive graph via `codetracer_ctfs` /
+# `codetracer_trace_reader`, so this adds no new crate version to the lock.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+zstd = "0.13"
+zstd-safe = "7.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ruzstd = "0.8.1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59.0", features = [
   "Win32_Foundation",
@@ -227,6 +244,13 @@ required-features = ["io-transport"]
 [dev-dependencies]
 ct-dap-client = { path = "../../libs/ct-dap-client" }
 tempfile = "3"
+# RS-M3 — tests/request_span_tail_test.rs publishes successive snapshots of a
+# growing container and needs each snapshot to carry a strictly later mtime.
+# A `.ct` container is block-padded, so two stages routinely have the SAME
+# file length and mtime is the only signal the tail's staleness check can use;
+# setting it explicitly keeps the test deterministic instead of racing the
+# filesystem clock. Already in the lock file transitively.
+filetime = "0.2"
 # Performance + E2E Coverage campaign P4.6 / P9.2: the
 # tracepoint_interpreter Criterion bench at benches/tracepoint_interpreter.rs.
 # default-features = false drops criterion's `rayon` + `plotters`
