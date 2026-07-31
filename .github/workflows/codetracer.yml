@@ -1241,7 +1241,11 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-js-recorder
-          ref: main
+          # `dev` is that repo's default branch; `main` trails it (15 commits
+          # behind when this was corrected), so the recorder-gated ViewModel
+          # suites and the `ct record` dispatch tests below were exercising a
+          # stale recorder while reporting green.
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
