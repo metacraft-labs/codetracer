@@ -1,28 +1,31 @@
-# Build output. The artefacts the fixture needs are copied out of it by
-# `regenerate.sh` (`module/ledger_settle.wasm.zst` and the instrumented
-# pair under `page/`), so nothing here has to be committed.
+# Everything `regenerate.sh` produces.
+#
+# `ledger-settle.ct` and the module it describes are NOT committed. They
+# used to be, and the reasoning for committing them was sound as far as it
+# went: `boundary_state.json` records the absolute linear-memory address
+# `rust-lld` gave the `LEDGER` symbol, so the recording and *that exact
+# binary* are one artefact — a module rebuilt by a different toolchain
+# diverges at the first host call (measured).
+#
+# What that argument missed is that producing the two *together* keeps
+# them one artefact just as well, and keeps them a description of the
+# pipeline that exists rather than of the one that existed when they were
+# committed. `scripts/materialize-recording.sh` records both in one run
+# into the gitignored `target/test-recordings/`, keyed on this fixture's
+# sources and on the content of `ct-instrument` and the browser recorder,
+# so either of those moving re-records instead of going unnoticed. The
+# 500 KB commit cap that forced the module to be zstd'd no longer applies
+# to anything, and `verify.sh` no longer expands a compressed module.
+ledger-settle.ct/
+module/
+
+# Build output.
 wasm-src/target/
 
-# The original module is committed as `module/ledger_settle.wasm.zst`, and
-# the expanded form is a local convenience the repo root's blanket
-# `*.wasm` already ignores. `verify.sh` expands into a temp directory and
-# never writes here.
-#
-# It is committed at all — unlike the sibling `account-balance-with-wasm`
-# fixture, which rebuilds — because it has to be *this* build.
-# `boundary_state.json` records absolute linear-memory offsets: the host
-# staged its calldata at the address `rust-lld` gave the `LEDGER` symbol.
-# A module compiled by a different toolchain puts `LEDGER` somewhere else,
-# and the committed recording no longer describes it. Measured: a rebuild
-# from this same source diverges at the first host call. The recording and
-# that exact binary are one artefact.
-#
-# It is committed *compressed* because the repo caps a committed file at
-# 500 KB and the raw module is ~1.5 MB — almost entirely DWARF, which is
-# the part the replay turns into per-line steps and locals and so cannot
-# be stripped. zstd takes it to ~270 KB.
-#
-# `page/ledger_settle.instrumented.wasm` is deliberately not committed in
-# any form. It is only needed to *re-record*, and `regenerate.sh` builds
-# it together with a fresh recording, so those two cannot drift apart the
-# way the original and the committed recording could.
+# `page/ledger_settle.instrumented.wasm` is what the browser loads, so it
+# is written beside the page that serves it. It is only needed to record,
+# and `regenerate.sh` builds it in the same run as the recording, so the
+# two cannot drift apart. The repo root's blanket `*.wasm` already ignores
+# it; this is the statement of intent.
+page/*.instrumented.wasm
+page/*.instrumented.wasm.manifest.json

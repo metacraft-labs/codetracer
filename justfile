@@ -1255,6 +1255,34 @@ test-origin-dap:
   #!/usr/bin/env bash
   exec ./scripts/test-origin-dap.sh
 
+# The WebAssembly boundary-recording checks: record each demo from this
+# tree and replay it.
+#
+# These three fixtures — the imported-memory calldata demo (spec §3.3/§3.4),
+# the M52 NaN-payload demo, and the M45 four-module parity corpus — each
+# ship a `verify.sh` that was reachable only by knowing it existed. Nothing
+# ran them, which is how one of them came to pass vacuously: its negative
+# control edited the host state in the `boundary_state.json` sidecar only,
+# and once the recorder started carrying the same state in the event stream
+# too the replayer began refusing the edited recording outright instead of
+# diverging. The control kept printing `ok` about a code path it had
+# stopped reaching. A committed recording is what let that sit — it
+# predated the in-stream carrier, so the edit still produced the old shape.
+#
+# Each script now records from the current tree (~40 s per fixture, cached
+# by `scripts/materialize-recording.sh` and re-recorded when any recorder
+# binary changes) and fails loudly rather than skipping.
+#
+# Needs the wazero replayer built (`just build` in codetracer-wasm-recorder).
+verify-wasm-recordings:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  for fixture in wasm-memory-calldata wasm-nan-payloads wasm-parity-corpus; do
+    echo "=== $fixture ==="
+    ./src/db-backend/tests/fixtures/$fixture/verify.sh
+  done
+  echo "=== all WebAssembly boundary-recording checks passed ==="
+
 # M29 cross-process value-origin envelope, per
 # `GUI/Test-Scenarios/Cross-Process-Origin-E2E-Test-Design.md` §6 — the
 # canonical entrypoint consumed by CI for the cross-process matrix.
@@ -1267,11 +1295,15 @@ test-origin-dap:
 # `cross-tracer-three-recording.spec.ts` +
 # `event-log-correlation-markers-three-trace.spec.ts` when present.
 #
-# The three-trace fixture is committed test data. The required gate fails
-# closed when any fixture payload, the executable recovery regenerator, either
-# Playwright spec, the built frontend, or a display provider is absent. It
-# validates exact Rust and Playwright manifests/counts and rejects every skip
-# sentinel; missing coverage can never produce a successful CI result.
+# The three recordings are PRODUCED by the gate from the tree under test
+# (`scripts/materialize-recording.sh`), not committed: a container written by
+# today's recorder and replayed by today's replayer keeps passing after the
+# recorder changes underneath it, which is the failure this suite exists to
+# catch. The required gate fails closed when the pipeline cannot run, when a
+# produced payload is incomplete, or when either Playwright spec, the built
+# frontend or a display provider is absent. It validates exact Rust and
+# Playwright manifests/counts and rejects every skip sentinel; missing coverage
+# can never produce a successful CI result.
 test-cross-process:
   #!/usr/bin/env bash
   exec ./scripts/test-cross-process.sh
@@ -1279,15 +1311,14 @@ test-cross-process:
 # M29 — one-command demo launcher for the three-trace
 # `account-balance-with-wasm` cross-tracer fixture.
 #
-# This recipe materialises the fixture if absent (delegating to
-# `regenerate.sh`, which is honestly gated on wasm-pack + the wasm32
-# rustup target + codetracer-python-recorder + codetracer-js-recorder
-# + browser_stream_receiver + Playwright) and then hands the
-# `session.toml` manifest to `ct replay -t` so the GUI opens the
-# three-trace session for manual chain-walking. Mirrors the
-# `test-cross-process` envelope's prereq probe but skips the cargo
-# / Playwright stages — the goal here is interactive inspection,
-# not regression coverage.
+# This recipe records the demo (through `scripts/materialize-recording.sh`,
+# which is honestly gated on the wasm32 rustup target + ct-instrument +
+# codetracer-js-recorder + session-manager + Playwright, and caches the
+# result keyed on all of them) and then hands the `session.toml` manifest
+# to `ct replay -t` so the GUI opens the three-trace session for manual
+# chain-walking. Same production as the `test-cross-process` envelope,
+# without the cargo / Playwright stages — the goal here is interactive
+# inspection, not regression coverage.
 #
 # Doc page: docs/book/src/usage_guide/cross-tracer-demo.md.
 demo-cross-tracer:
@@ -1295,91 +1326,15 @@ demo-cross-tracer:
   set -euo pipefail
   echo "=== M29 cross-tracer demo — account-balance-with-wasm ==="
 
-  fixture_dir="src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm"
-  regenerate_script="$fixture_dir/regenerate.sh"
-  template="$fixture_dir/session.toml.template"
-  session="$fixture_dir/session.toml"
-
-  fixture_ready=1
-  for ct in frontend.ct frontend-wasm.ct backend.ct; do
-    if [ ! -e "$fixture_dir/$ct" ]; then
-      fixture_ready=0
-      break
-    fi
-  done
-
-  if [ "$fixture_ready" -eq 0 ]; then
-    if [ ! -x "$regenerate_script" ]; then
-      echo "ERROR: regenerate script missing or not executable: $regenerate_script" >&2
-      exit 1
-    fi
-    echo "[demo] Three-trace fixture not materialised; invoking regenerate.sh"
-    set +e
-    bash "$regenerate_script"
-    rc=$?
-    set -e
-    if [ "$rc" -eq 75 ]; then
-      {
-        echo "ERROR: cross-tracer demo prerequisites are missing."
-        echo
-        echo "To materialise the three-trace fixture you need ALL of:"
-        echo "  - wasm-pack + 'rustup target add wasm32-unknown-unknown'"
-        echo "  - codetracer Python recorder ('codetracer_python_recorder'"
-        echo "    importable from python3; ships with the dev shell)"
-        echo "  - codetracer-js-recorder host ('browser_stream_receiver' on"
-        echo "    PATH; produced by 'just build-once' or the dev shell)"
-        echo "  - Playwright ('npm install playwright' in the fixture's"
-        echo "    frontend/ dir)"
-        echo
-        echo "Re-run 'just demo-cross-tracer' once the gaps above are filled."
-        echo "The regenerator's stderr above lists each missing dependency"
-        echo "individually."
-      } >&2
-      exit 1
-    elif [ "$rc" -ne 0 ]; then
-      echo "ERROR: regenerate.sh exited with status $rc; cannot launch demo." >&2
-      exit "$rc"
-    fi
-  else
-    echo "[demo] Three-trace fixture already materialised; skipping regenerate.sh."
-  fi
-
-  # Step 4 of the task: ensure session.toml carries real UUIDv7s, even
-  # if regenerate.sh's stamp step was bypassed by a partial fixture
-  # refresh. When session.toml is missing or still contains the
-  # double-curly placeholders from the template we re-stamp it using
-  # the same generator regenerate.sh uses (`ct uuid7`, falling back
-  # to python3's uuid module).
-  needs_stamp=0
-  if [ ! -f "$session" ]; then
-    needs_stamp=1
-  elif grep -qE '\{\{[^}]+\}\}' "$session"; then
-    needs_stamp=1
-  fi
-  if [ "$needs_stamp" -eq 1 ]; then
-    if [ ! -f "$template" ]; then
-      echo "ERROR: session.toml.template missing at $template" >&2
-      exit 1
-    fi
-    gen_uuid7() {
-      if ct uuid7 2>/dev/null; then
-        return 0
-      fi
-      python3 -c 'import uuid; print(uuid.uuid4())'
-    }
-    fe_js_id=$(gen_uuid7)
-    fe_wasm_id=$(gen_uuid7)
-    be_id=$(gen_uuid7)
-    placeholder_fe_js='{'"{"'frontend_js_recording_id}'"}"
-    placeholder_fe_wasm='{'"{"'frontend_wasm_recording_id}'"}"
-    placeholder_be='{'"{"'backend_recording_id}'"}"
-    sed \
-      -e "s|$placeholder_fe_js|$fe_js_id|" \
-      -e "s|$placeholder_fe_wasm|$fe_wasm_id|" \
-      -e "s|$placeholder_be|$be_id|" \
-      "$template" >"$session"
-    echo "[demo] Stamped fresh recording-ids into $session"
-  fi
+  # The recordings are produced, not committed. `materialize-recording.sh`
+  # runs the five-stage pipeline the first time and serves its cache
+  # afterwards, and re-runs it whenever the demo's sources or any of the
+  # recorder binaries change — so what the GUI opens is always a recording
+  # of the tree you are standing in.
+  echo "[demo] Recording the three-tier demo from this tree (cached after the first run)"
+  recordings="$(./scripts/materialize-recording.sh cross-process-three-trace)"
+  session="$recordings/session.toml"
+  [ -f "$session" ] || { echo "ERROR: no session manifest at $session" >&2; exit 1; }
 
   echo "[demo] Launching CodeTracer GUI with session manifest: $session"
   exec ct replay -t "$session"

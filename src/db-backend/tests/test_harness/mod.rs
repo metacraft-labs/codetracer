@@ -4961,3 +4961,111 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
     println!("\nTest completed successfully!");
     Ok(())
 }
+
+// ===========================================================================
+// Recordings produced from the current tree
+// ===========================================================================
+
+/// Produce a fixture's recordings from the tree this test was built
+/// from, and return the directory they landed in.
+///
+/// # Why tests record instead of reading a committed artefact
+///
+/// These recordings used to be committed, and every one of them was
+/// made by the *current* pipeline. That arrangement looks like a golden
+/// test but has none of its value: a container written by today's
+/// recorder and replayed by today's replayer proves only that the two
+/// agree with each other, and it goes on proving that after the
+/// recorder changes underneath it. The staleness is invisible precisely
+/// when it matters most — the recorder moved, the fixture did not, and
+/// the suite stayed green about a pipeline that no longer exists.
+///
+/// A recording is worth committing only when it was made by a version
+/// that can no longer be built. That is a real category (see
+/// `codetracer-wasm-recorder`'s `legacy-encoding.ct`, produced by a
+/// pre-M52 `ct-instrument`) and it is not this one.
+///
+/// # Cost
+///
+/// `scripts/materialize-recording.sh` caches under
+/// `target/test-recordings/`, keyed on the fixture sources *and the
+/// content of every recorder binary involved*, and serialises
+/// production with `flock`. So the five tests in this binary, a
+/// Playwright worker and a Nim ViewModel test can all ask at once and
+/// the pipeline runs once — but a rebuilt `ct-instrument` or
+/// `session-manager` moves the key and it runs again, which is the
+/// whole point.
+///
+/// # Failure
+///
+/// Panics with the materialiser's diagnostic if the recording cannot be
+/// produced. There is deliberately no variant that returns `None` for a
+/// caller to turn into a skip: a suite that cannot record has nothing to
+/// report, and this campaign has repeatedly found skip sentinels hiding
+/// coverage that had stopped running.
+pub fn materialized_recording(fixture: &str) -> PathBuf {
+    use std::sync::{Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Held across the subprocess call on purpose. The script is safe
+    // under concurrency, but a test binary that runs its cases in
+    // parallel would otherwise start N identical productions and have
+    // N-1 of them block on the file lock anyway; one in-process wait is
+    // cheaper and gives a single line of output.
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(path) = guard.get(fixture) {
+        return path.clone();
+    }
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("resolve the repository root from the db-backend manifest directory");
+    let script = repo_root.join("scripts/materialize-recording.sh");
+
+    let output = Command::new(&script)
+        .arg(fixture)
+        .current_dir(&repo_root)
+        // Inherit stderr: production takes tens of seconds and the
+        // progress it prints is the only sign the suite has not hung.
+        .stderr(Stdio::inherit())
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {}: {e}", script.display()));
+
+    assert!(
+        output.status.success(),
+        "could not produce the `{fixture}` recording from this tree ({}); \
+         the diagnostic above says what is missing. These recordings are not \
+         committed — there is nothing to fall back to, and a test that ran \
+         against no recording would prove nothing.",
+        output.status
+    );
+
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    assert!(
+        path.is_dir(),
+        "{} reported `{}` for `{fixture}`, which is not a directory",
+        script.display(),
+        path.display()
+    );
+
+    guard.insert(fixture.to_string(), path.clone());
+    path
+}
+
+/// The three-recording cross-process demo: `frontend.ct`,
+/// `frontend-wasm.ct`, `backend.ct` and the `session.toml` binding them
+/// into one session.
+pub fn three_trace_recordings() -> PathBuf {
+    materialized_recording("cross-process-three-trace")
+}
+
+/// The demo's *sources*, which stay in the repository: the recorded
+/// server, the browser entry point and the Rust module. Tests resolve
+/// breakpoints against these, and the recordings name them at these
+/// exact paths because that is where they were executed from.
+pub fn three_trace_sources() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cross_process/account-balance-with-wasm")
+}

@@ -1783,6 +1783,58 @@ struct FunctionRecordOnDisk {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Recordings produced from the current tree for the tests below.
+///
+/// The demo recordings this crate's tests read are no longer committed:
+/// they were written by *this* code, so a committed copy could only ever
+/// confirm that the writer still agrees with its own past output, and
+/// would keep confirming it after the writer changed. See
+/// `scripts/materialize-recording.sh` for the cache and its key.
+#[cfg(test)]
+mod tests_support {
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+    use std::sync::{Mutex, OnceLock};
+
+    /// Absolute path of a directory holding `frontend.ct`,
+    /// `frontend-wasm.ct` and `backend.ct`, recording them first if this
+    /// tree has not produced them yet.
+    ///
+    /// Panics — never returns an "unavailable" the caller could turn
+    /// into a skip — if the pipeline cannot run. A framing test with no
+    /// real records to frame has nothing to say.
+    pub fn materialized_three_trace_recordings() -> PathBuf {
+        static CACHE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new(None));
+        let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(path) = guard.as_ref() {
+            return path.clone();
+        }
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("resolve the repository root from the backend-manager manifest directory");
+        let script = repo_root.join("scripts/materialize-recording.sh");
+        let output = Command::new(&script)
+            .arg("cross-process-three-trace")
+            .current_dir(&repo_root)
+            .stderr(Stdio::inherit())
+            .output()
+            .unwrap_or_else(|e| panic!("could not run {}: {e}", script.display()));
+        assert!(
+            output.status.success(),
+            "could not record the cross-process demo from this tree ({}); the \
+             diagnostic above says what is missing",
+            output.status
+        );
+        let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        assert!(path.is_dir(), "materialiser reported a non-directory: {}", path.display());
+        *guard = Some(path.clone());
+        path
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2091,20 +2143,26 @@ mod tests {
     /// bytes any *committed* consumer actually reads.
     ///
     /// This one takes the real `frontend-wasm.ct/trace.json` from the
-    /// cross-process demo fixture — produced by the single-shot writer,
-    /// committed, and pinned by `codetracer-wasm-recorder`'s
+    /// cross-process demo — written by the single-shot writer during a
+    /// browser run this test triggers, and pinned by
+    /// `codetracer-wasm-recorder`'s
     /// `TestBuilderReproducesTheCommittedBrowserRecording` — splits it into
     /// its top-level records *as literal byte ranges of that file* (no
     /// re-serialisation anywhere), and pushes each through
-    /// [`RecordStream`]. The result must equal the committed file exactly.
-    /// Real records, real escapes, and an oracle that predates the change.
+    /// [`RecordStream`]. The result must equal that file exactly.
+    /// Real records, real escapes, and an oracle the change cannot reach:
+    /// the file is produced by the *single-shot* writer and re-framed by
+    /// the *incremental* one, so neither side is the other's echo.
+    ///
+    /// The recording is produced rather than committed. A committed one
+    /// would have been made by the very writer under test, so it would
+    /// go on matching after that writer changed — the round trip would
+    /// still close, over bytes nothing in the product emits any more.
     #[test]
-    fn verify_reframing_the_committed_browser_recording_reproduces_it_byte_for_byte() {
+    fn verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte() {
+        let recordings = super::tests_support::materialized_three_trace_recordings();
         for fixture in ["frontend-wasm.ct", "frontend.ct"] {
-            let committed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../db-backend/tests/fixtures/cross_process/account-balance-with-wasm")
-                .join(fixture)
-                .join("trace.json");
+            let committed = recordings.join(fixture).join("trace.json");
             let original = std::fs::read(&committed)
                 .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
 
@@ -2129,7 +2187,7 @@ mod tests {
                 String::from_utf8_lossy(&reframed),
                 String::from_utf8_lossy(&original),
                 "reframing {fixture}'s records one at a time must reproduce the \
-                 committed bytes exactly",
+                 recorded bytes exactly",
             );
         }
     }

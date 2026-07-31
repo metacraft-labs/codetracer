@@ -415,13 +415,20 @@ fn step_out_from_a_frameless_step_matches_step_out_from_an_outermost_frame() {
     );
 }
 
-// ── End-to-end reproduction against the committed recording ─────────────────
+// ── End-to-end reproduction against a freshly recorded server ───────────────
 
-/// The fixture `backend.ct` is a real `codetracer-js-recorder` trace of
-/// `backend/server.js`, committed alongside the source so replaying it
-/// needs no recorder.
+/// A real `codetracer-js-recorder` trace of the demo's
+/// `backend/server.js`, recorded from this tree when the test runs.
+///
+/// It used to be committed. That made this reproduction a check that
+/// today's stepper agrees with a recorder that might have been replaced
+/// since — and the stall this test pins lives at the seam between what
+/// the recorder emits for a module's top level and what the stepper
+/// does with it, which is exactly the seam a frozen recording hides.
+/// `scripts/materialize-recording.sh` produces it once per build and
+/// re-produces it whenever the recorder's bytes change.
 fn backend_recording() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cross_process/account-balance-with-wasm/backend.ct")
+    test_harness::three_trace_recordings().join("backend.ct")
 }
 
 /// `server.js:108` is `idleTimer.unref();` — the last top-level
@@ -471,7 +478,8 @@ fn step_over_advances_past_the_last_top_level_statement() {
     let recording = backend_recording();
     assert!(
         recording.join("server.ct").exists(),
-        "committed fixture missing at {} — the checkout is incomplete",
+        "the recorder produced {} without a CTFS container — the JS recorder \
+         changed shape and this test no longer has an input",
         recording.display()
     );
 

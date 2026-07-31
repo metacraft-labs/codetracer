@@ -35,6 +35,16 @@ cd "$FIXTURE_DIR"
 WASM_INSTRUMENTER="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
 
+# Where the recording lands. Nothing here is committed: the recording and
+# the ORIGINAL module the offline replay is driven against (spec §6.1)
+# are produced together, so they cannot describe different builds — and a
+# change in `ct-instrument` or the browser recorder re-makes both instead
+# of being replayed against a frozen pair that no longer represents the
+# pipeline.
+OUT_DIR="${CT_RECORDING_OUT_DIR:-$FIXTURE_DIR}"
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+
 PREVIEW_PORT="${DEMO_PREVIEW_PORT:-4182}"
 RECORD_WEB_PORT="${DEMO_RECORD_WEB_PORT:-9233}"
 
@@ -51,7 +61,6 @@ require_bin() {
 
 require_bin cargo "the Rust toolchain builds the WASM tier"
 require_bin node "runs the static server and the headless driver"
-require_bin zstd "compresses the pinned module under the repo's file-size cap"
 
 if ! rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
 	missing+=("- rustc cannot target wasm32-unknown-unknown")
@@ -143,8 +152,8 @@ for port in "$PREVIEW_PORT" "$RECORD_WEB_PORT"; do
 done
 
 # Everything checked; only now is anything removed.
-rm -rf "$FIXTURE_DIR/nan-payloads.ct" \
-	"$FIXTURE_DIR/module/nan_payloads.wasm.zst" \
+rm -rf "$OUT_DIR/nan-payloads.ct" \
+	"$OUT_DIR/module/nan_payloads.wasm" \
 	"$FIXTURE_DIR/page/nan_payloads.instrumented.wasm" \
 	"$FIXTURE_DIR/page/nan_payloads.instrumented.wasm.manifest.json"
 
@@ -163,12 +172,12 @@ RAW_WASM="$FIXTURE_DIR/wasm-src/target/wasm32-unknown-unknown/debug/nan_payloads
 }
 
 # The ORIGINAL module is what the offline replay runs (spec §6.1) and it
-# has to be *this* build, so it is committed alongside the recording
-# rather than left in `target/`.  Compressed because the repo caps a
-# committed file at 500 KB and a debug-built `.wasm` is mostly DWARF —
-# which is exactly the part the replay needs.
-mkdir -p "$FIXTURE_DIR/module"
-zstd -19 -q -f -o "$FIXTURE_DIR/module/nan_payloads.wasm.zst" "$RAW_WASM"
+# has to be *this* build, so it is copied out beside the recording it
+# belongs to.  Uncompressed: the zstd step existed only to fit a
+# *committed* file under the repo's 500 KB cap, and nothing here is
+# committed.
+mkdir -p "$OUT_DIR/module"
+cp -f "$RAW_WASM" "$OUT_DIR/module/nan_payloads.wasm"
 
 echo "[regenerate]     instrumenting with ct-instrument"
 "$CT_INSTRUMENT_BIN" "$RAW_WASM" \
@@ -212,8 +221,8 @@ if [ ! -d "$RECORD_WEB_OUT/nan-payloads.ct" ]; then
 	ls -la "$RECORD_WEB_OUT" >&2 || true
 	exit 1
 fi
-cp -R "$RECORD_WEB_OUT/nan-payloads.ct" "$FIXTURE_DIR/nan-payloads.ct"
+cp -R "$RECORD_WEB_OUT/nan-payloads.ct" "$OUT_DIR/nan-payloads.ct"
 
 echo
-echo "[regenerate] wrote $FIXTURE_DIR/nan-payloads.ct"
+echo "[regenerate] wrote $OUT_DIR/nan-payloads.ct"
 echo "[regenerate] run ./verify.sh to replay it and check the bit patterns"

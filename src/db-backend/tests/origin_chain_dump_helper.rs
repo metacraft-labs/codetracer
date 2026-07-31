@@ -125,22 +125,13 @@ fn dump_cross_process_scenario() -> Result<(), String> {
     fs::create_dir_all(&out_dir).map_err(|e| format!("create out dir: {}", e))?;
 
     let scenario = "cross_process_three_trace";
-    let fixture_root =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cross_process/account-balance-with-wasm");
-    let manifest = fixture_root.join("session.toml");
-    let server_source = fixture_root.join("backend/server.js");
-
-    if !manifest.is_file() {
-        let reason = format!(
-            "{} is missing — run {}/regenerate.sh (see that directory's README.md)",
-            manifest.display(),
-            fixture_root.display()
-        );
-        fs::write(out_dir.join(format!("{scenario}.skipped")), &reason)
-            .map_err(|e| format!("write skipped marker: {}", e))?;
-        eprintln!("SKIPPED: {scenario}: {reason}");
-        return Ok(());
-    }
+    // Recorded from this tree. The skip that used to guard a missing
+    // committed manifest is gone with the committed manifest: production
+    // either succeeds or fails loudly, and a dump helper that quietly
+    // wrote a `.skipped` marker is how the Nim ViewModel test downstream
+    // came to assert nothing at all.
+    let manifest = test_harness::three_trace_recordings().join("session.toml");
+    let server_source = test_harness::three_trace_sources().join("backend/server.js");
 
     let source = fs::read_to_string(&server_source).map_err(|e| format!("read server source: {}", e))?;
     let line = source

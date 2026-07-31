@@ -73,16 +73,16 @@ what §3.3 describes.
 | Path | What it is |
 | --- | --- |
 | `wasm-src/` | The Rust module. Built with `-C link-arg=--import-memory`, which is what makes `env.memory` an import. |
-| `module/ledger_settle.wasm.zst` | The **original, uninstrumented** module. This is what the replay runs (spec §6.1); handing it the instrumented one is refused. It has to be *this* build — see below — and is committed compressed to stay under the repo's 500 KB per-file cap. `verify.sh` expands it into a temp directory. |
+| `<recording dir>/module/ledger_settle.wasm` | The **original, uninstrumented** module. This is what the replay runs (spec §6.1); handing it the instrumented one is refused. It has to be *this* build — see below — so it is produced in the same run as the recording, not committed. |
 | `page/` | The page: plain ES modules, no bundler. Loads `browser_session.js` straight out of the instrumenter checkout, so the recording is made by the working tree's producer. |
-| `page/ledger_settle.instrumented.wasm` | What the browser loaded. **Not committed**: it is only needed to re-record, and `regenerate.sh` rebuilds it together with a fresh recording, so the two cannot drift. Its `.manifest.json` *is* committed, because the manifest is what names the boundary edges. |
-| `ledger-settle.ct/` | The committed recording, including `boundary_state.json`. |
-| `expected-totals.json` | The three running totals the page observed. Ground truth for the replay check. |
+| `page/ledger_settle.instrumented.wasm` | What the browser loaded, written beside the page that serves it. Not committed: `regenerate.sh` builds it together with a fresh recording, so the two cannot drift. |
+| `<recording dir>/ledger-settle.ct/` | The recording, including `boundary_state.json`. Produced by `scripts/materialize-recording.sh wasm-memory-calldata` into the gitignored `target/test-recordings/`. |
+| `expected-totals.json` | The three running totals the demo must produce. A **committed, hand-reviewed oracle** the replay is checked against — deliberately not written by the driver, which reports what it saw into `observed-totals.json` beside the recording instead. A driver that overwrote this file would move the answer and the check together. |
 | `serve.mjs`, `drive.mjs` | Static server and headless driver. |
 | `regenerate.sh` | Re-records everything. Checks prerequisites **before** deleting anything. |
-| `verify.sh` | Replays the committed recording and proves the two divergences. Rebuilds nothing. |
+| `verify.sh` | Records from the current tree (cached) and replays it, proving the two divergences. Reachable as `just verify-wasm-recordings`. |
 
-## Why the module is pinned and not rebuilt
+## Why the module is produced with the recording, not committed
 
 The sibling fixture `cross_process/account-balance-with-wasm` commits no
 `.wasm` at all — its `balance_calc` is a pure function of its scalar
@@ -91,20 +91,29 @@ arguments, so any build of it satisfies the recording.
 This one cannot do that. `boundary_state.json` records **absolute**
 linear-memory offsets, because the host staged its calldata at whatever
 address `rust-lld` gave the `LEDGER` symbol. A module compiled by a
-different toolchain puts `LEDGER` somewhere else and the committed
-recording stops describing it. Measured: rebuilding from this same
-`wasm-src/` moves the block and the replay diverges at the first host
-call, reading `principal` where `account_id` should be.
+different toolchain puts `LEDGER` somewhere else and the recording stops
+describing it. Measured: rebuilding from this same `wasm-src/` moves the
+block and the replay diverges at the first host call, reading `principal`
+where `account_id` should be.
 
-So the recording and that exact binary are one artefact, and the binary is
-committed. It is committed compressed because the repo caps a file at
-500 KB and a debug build is ~1.5 MB — 1.5 MB of DWARF, which is precisely
-what the replay turns into per-line steps and locals, so stripping it
-would remove the thing this fixture exists to prove.
+So the recording and that exact binary are **one artefact**. Both used to
+be committed, which is one way to keep them together — and a way that also
+kept them together with an instrumenter and a browser recorder that had
+since moved on, so the replay went on succeeding about a pipeline that no
+longer existed. Producing them in the same run keeps them together for the
+right reason: `regenerate.sh` writes the module beside the recording it
+belongs to, and `scripts/materialize-recording.sh` re-runs it whenever
+`ct-instrument` or the `record-web` binary changes.
+
+It is written uncompressed. The zstd step existed only to squeeze a
+~1.5 MB debug build under the repo's 500 KB cap on a *committed* file, and
+that cap no longer applies to anything here. The DWARF is what the replay
+turns into per-line steps and locals, so stripping it was never an
+option.
 
 ## The recording
 
-`ledger-settle.ct/boundary_state.json`, in the schema
+The recording's `boundary_state.json`, in the schema
 `codetracer-wasm-recorder/internal/boundarylog/hoststate.go` reads:
 
 ```json
@@ -145,8 +154,8 @@ Three things are worth reading off it.
 ## Running the checks
 
 ```bash
-./verify.sh          # replays the committed recording; rebuilds nothing
-./regenerate.sh      # re-records from scratch (needs a headless Chromium)
+./verify.sh          # records from this tree (cached) and replays it
+./regenerate.sh      # re-record unconditionally, beside these sources
 ```
 
 `verify.sh` prints, among other things:

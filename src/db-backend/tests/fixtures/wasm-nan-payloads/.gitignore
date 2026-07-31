@@ -1,25 +1,31 @@
-# Build output. The artefacts the fixture needs are copied out of it by
-# `regenerate.sh` (`module/nan_payloads.wasm.zst` and the instrumented
-# pair under `page/`), so nothing here has to be committed.
+# Everything `regenerate.sh` produces.
+#
+# `nan-payloads.ct` and the ORIGINAL module the offline replay is driven
+# against (spec §6.1) are NOT committed. They were, on the grounds that
+# the replay runs the uninstrumented module and so needs *that* build —
+# which is true, and is satisfied better by producing both in one run
+# than by freezing both.
+#
+# It matters more here than anywhere else in the campaign that the
+# recording is fresh: what the checks assert is the bit patterns the
+# *browser producer* wrote (`f32:0x7f800001` and friends), so a stored
+# recording would only ever confirm that some past producer agreed with
+# itself. `scripts/materialize-recording.sh` keys the cache on
+# `ct-instrument` and the browser recorder by content, so a change in
+# either re-records.
+#
+# The genuine counter-example is in the sibling repo:
+# `codetracer-wasm-recorder/.../nan-payloads/legacy-encoding.ct` was made
+# by a `ct-instrument` built before M52 and cannot be produced from any
+# current tree. That one stays committed, and must never be regenerated.
+nan-payloads.ct/
+module/
+
+# Build output.
 wasm-src/target/
 
-# The original module is committed as `module/nan_payloads.wasm.zst`; the
-# expanded form is a local convenience the repo root's blanket `*.wasm`
-# already ignores. `verify.sh` expands into a temp directory and never
-# writes here.
-#
-# It is committed at all because it has to be *this* build: the offline
-# replay runs the ORIGINAL, uninstrumented module (spec §6.1) and checks
-# every recorded crossing against it, so a module compiled by a different
-# toolchain — with different import indices or a different boundary
-# signature — no longer matches the recording.
-#
-# It is committed *compressed* because the repo caps a committed file at
-# 500 KB and the raw module is ~1.5 MB, almost entirely DWARF, which is
-# the part the replay turns into per-line steps and locals and so cannot
-# be stripped.
-#
-# `page/nan_payloads.instrumented.wasm` is deliberately not committed in
-# any form. It is only needed to *re-record*, and `regenerate.sh` builds
-# it together with a fresh recording, so those two cannot drift apart the
-# way the original and the committed recording could.
+# What the browser loads, written beside the page that serves it, built in
+# the same run as the recording. The repo root's blanket `*.wasm` already
+# ignores it; this is the statement of intent.
+page/*.instrumented.wasm
+page/*.instrumented.wasm.manifest.json

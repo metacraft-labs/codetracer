@@ -41,18 +41,26 @@ import { getCurrentLine } from "../../lib/column-aware-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { OriginChainPanePageObject } from "../../page-objects/originChainPane";
 import {
-  threeTraceFixtureRoot,
   threeTraceFixtureSkipReason,
+  threeTraceRecordingRoot,
+  threeTraceSourceRoot,
 } from "../../lib/value-origin-fixtures";
 
 /**
- * The fixture root holds three materialised `.ct` containers + a
- * `session.toml.template`. The harness `launchMode: "trace-folder"`
- * path uses `ct host --trace-path <folder>` which inspects the
- * folder for any `.ct` file — when CI regenerates the fixture the
- * three containers land here, and Electron opens the session.
+ * The recordings, produced from this tree when the spec loads. The
+ * harness `launchMode: "trace-folder"` path uses
+ * `ct host --trace-path <folder>`, which finds the three `.ct`
+ * containers and the `session.toml` beside them and opens the session.
+ *
+ * This is the campaign's headline end-to-end result, so it matters most
+ * here that the recordings are the current pipeline's: a committed copy
+ * would let the whole chain keep rendering after the recorder that
+ * produced it had been replaced.
  */
-const fixtureRoot = threeTraceFixtureRoot();
+const recordingRoot = threeTraceRecordingRoot();
+
+/** The demo's sources, which stay in the repository. */
+const sourceRoot = threeTraceSourceRoot();
 
 /**
  * 1-based line of `const balance = payload.balance;` in the demo
@@ -65,7 +73,7 @@ const fixtureRoot = threeTraceFixtureRoot();
  * silently pointing one of them at the wrong statement.
  */
 function balanceBindingLine(): number {
-  const serverSource = path.join(fixtureRoot, "backend", "server.js");
+  const serverSource = path.join(sourceRoot, "backend", "server.js");
   const index = fs
     .readFileSync(serverSource, "utf8")
     .split(/\r?\n/)
@@ -80,7 +88,7 @@ function balanceBindingLine(): number {
   return index + 1;
 }
 
-test.use({ sourcePath: fixtureRoot, launchMode: "trace-folder" });
+test.use({ sourcePath: recordingRoot, launchMode: "trace-folder" });
 test.setTimeout(240_000);
 
 test.beforeAll(() => {

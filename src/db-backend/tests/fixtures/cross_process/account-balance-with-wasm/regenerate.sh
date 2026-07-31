@@ -36,8 +36,23 @@ BACKEND_PORT="${DEMO_BACKEND_PORT:-8080}"
 PREVIEW_PORT="${DEMO_PREVIEW_PORT:-4173}"
 RECORD_WEB_PORT="${DEMO_RECORD_WEB_PORT:-9230}"
 
+# Where the recordings land. Nothing here is committed any more — the
+# tests produce their input by running this script through
+# `scripts/materialize-recording.sh`, which passes a cache directory.
+# Running the script by hand with no `CT_RECORDING_OUT_DIR` still writes
+# beside the sources, which is what a person poking at the demo wants.
+#
+# Build intermediates stay under `$FIXTURE_DIR` either way: `wasm-src/`
+# needs its `target/`, the Vite build needs `node_modules/`, and the
+# recorded server has to be the file at its real path so the recording
+# names a source the tests can open.
+OUT_DIR="${CT_RECORDING_OUT_DIR:-$FIXTURE_DIR}"
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+
 echo "[regenerate] cross-process origin demo"
 echo "[regenerate] fixture:    $FIXTURE_DIR"
+echo "[regenerate] output:     $OUT_DIR"
 echo "[regenerate] js-recorder: $JS_RECORDER"
 echo "[regenerate] instrumenter: $WASM_INSTRUMENTER"
 echo
@@ -123,15 +138,19 @@ echo
 # Checked HERE, before the clean slate below, and not later beside the
 # other runtime setup: everything from this point on is destructive, and
 # a port collision is the single most likely way for a first run to
-# fail. Deleting the committed recordings and *then* discovering the
-# port is taken would leave the checkout worse than it was found — the
-# tests would start failing on a fixture the operator never meant to
-# touch, for a reason with nothing to do with the recordings.
+# fail. Discovering it only after the output directory has been emptied
+# would leave a half-built directory behind for the next run to trip
+# over, for a reason with nothing to do with the recordings.
+#
+# `materialize-recording.sh` hands this script three ports the kernel
+# has just told it are free, so under the test harness this check is a
+# belt-and-braces guard against a racing peer rather than the common
+# case; run by hand it is the whole story.
 if (exec 3<>"/dev/tcp/127.0.0.1/$BACKEND_PORT") 2>/dev/null; then
 	exec 3<&- 3>&-
 	echo "[regenerate] 127.0.0.1:$BACKEND_PORT is already in use." >&2
 	echo "[regenerate] Stop the process holding it (or set DEMO_BACKEND_PORT) and re-run." >&2
-	echo "[regenerate] Nothing was deleted; the committed recordings are untouched." >&2
+	echo "[regenerate] Nothing was written or deleted." >&2
 	exit 1
 fi
 
@@ -139,8 +158,8 @@ fi
 # Clean slate. Partial recordings from an interrupted run would be worse
 # than none, since the tests gate on the directories existing.
 # ---------------------------------------------------------------------------
-rm -rf "$FIXTURE_DIR/frontend.ct" "$FIXTURE_DIR/frontend-wasm.ct" \
-	"$FIXTURE_DIR/backend.ct" "$FIXTURE_DIR/session.toml" \
+rm -rf "$OUT_DIR/frontend.ct" "$OUT_DIR/frontend-wasm.ct" \
+	"$OUT_DIR/backend.ct" "$OUT_DIR/session.toml" \
 	"$FIXTURE_DIR/frontend/balance_calc.wasm" \
 	"$FIXTURE_DIR/frontend/balance_calc.wasm.manifest.json"
 
@@ -265,7 +284,7 @@ for name in frontend frontend-wasm; do
 		ls -la "$RECORD_WEB_OUT" >&2 || true
 		exit 1
 	fi
-	cp -R "$RECORD_WEB_OUT/$name.ct" "$FIXTURE_DIR/$name.ct"
+	cp -R "$RECORD_WEB_OUT/$name.ct" "$OUT_DIR/$name.ct"
 done
 rm -rf "$RECORD_WEB_OUT"
 
@@ -275,7 +294,7 @@ if [ -z "$backend_trace" ]; then
 	ls -la "$BACKEND_OUT" >&2 || true
 	exit 1
 fi
-cp -R "$backend_trace" "$FIXTURE_DIR/backend.ct"
+cp -R "$backend_trace" "$OUT_DIR/backend.ct"
 rm -rf "$BACKEND_OUT"
 
 # Recording ids are stable per fixture so the committed ANSWERS.md and the
@@ -285,11 +304,11 @@ sed \
 	-e "s|{{frontend_js_recording_id}}|018f0000-0000-7000-8000-frontendjs01|" \
 	-e "s|{{frontend_wasm_recording_id}}|018f0000-0000-7000-8000-frontendwsm1|" \
 	-e "s|{{backend_recording_id}}|018f0000-0000-7000-8000-backendnode1|" \
-	"$FIXTURE_DIR/session.toml.template" >"$FIXTURE_DIR/session.toml"
+	"$FIXTURE_DIR/session.toml.template" >"$OUT_DIR/session.toml"
 
 echo
 echo "[regenerate] done:"
-echo "    $FIXTURE_DIR/frontend.ct"
-echo "    $FIXTURE_DIR/frontend-wasm.ct"
-echo "    $FIXTURE_DIR/backend.ct"
-echo "    $FIXTURE_DIR/session.toml"
+echo "    $OUT_DIR/frontend.ct"
+echo "    $OUT_DIR/frontend-wasm.ct"
+echo "    $OUT_DIR/backend.ct"
+echo "    $OUT_DIR/session.toml"

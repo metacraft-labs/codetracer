@@ -282,23 +282,28 @@ export function cRrSpecSkipReason(): string | null {
 }
 
 /**
- * TCT-M5 — cross-tracer three-recording fixture probe.
+ * TCT-M5 — the cross-tracer three-recording demo.
  *
- * The `account-balance-with-wasm/` fixture under
- * `src/db-backend/tests/fixtures/cross_process/` ships sources + a
- * `session.toml.template` but **no** materialised `.ct` containers
- * (`frontend.ct` / `frontend-wasm.ct` / `backend.ct`). Materialisation
- * goes through `regenerate.sh` which is honestly gated on
- * `wasm-pack` + the wasm32 rustup target + `codetracer-js-recorder` +
- * `codetracer-python-recorder` + `browser_stream_receiver` + Playwright.
+ * Two directories, deliberately distinct:
  *
- * The GUI E2E spec MUST skip cleanly with a precise sentinel — mirror
- * of the headless-DAP test pattern at
- * `src/db-backend/tests/cross_process_origin_test.rs::test_origin_three_trace_chain_balance_to_frontend_expression`.
- * Returning null means all three containers are on disk + `ct` is
- * built; otherwise the returned string is the test.skip() reason.
+ * - `threeTraceSourceRoot()` — the demo's *sources*, in the repository:
+ *   `backend/server.js`, `frontend/app.js`, `wasm-src/lib.rs`. Specs
+ *   open breakpoints against these, and the recordings name them at
+ *   these paths because that is where the code ran.
+ * - `threeTraceRecordingRoot()` — the *recordings*, produced from the
+ *   current tree by `scripts/materialize-recording.sh` and cached under
+ *   the gitignored `target/test-recordings/`. This is what the Electron
+ *   launch is pointed at.
+ *
+ * They used to be one directory, because the recordings were committed
+ * next to the sources. That made this spec — the campaign's headline
+ * end-to-end result — a check that today's GUI agrees with a recorder
+ * that might have been replaced since, and the agreement would have
+ * survived the replacement. The recorders are cheap to re-run (~40 s,
+ * once per build) and the key includes their binaries, so a recorder
+ * change re-records rather than being papered over.
  */
-export function threeTraceFixtureRoot(): string {
+export function threeTraceSourceRoot(): string {
   return path.join(
     repoRoot,
     "src",
@@ -310,6 +315,64 @@ export function threeTraceFixtureRoot(): string {
   );
 }
 
+/**
+ * Produce the three recordings and return where they landed.
+ *
+ * Throws — never returns a skip reason — when the pipeline cannot run.
+ * The recordings are not committed, so there is nothing to fall back
+ * to, and a spec that launched CodeTracer on an empty folder would
+ * report a green run about nothing. The materialiser's stderr names
+ * every missing prerequisite.
+ *
+ * Recording takes ~40 s on a cold cache and is serialised across
+ * workers by a file lock, so the generous timeout below is a wait for a
+ * peer, not for this call's own work.
+ */
+let memoizedThreeTraceRecordingRoot: string | null = null;
+
+export function threeTraceRecordingRoot(): string {
+  if (memoizedThreeTraceRecordingRoot !== null) {
+    return memoizedThreeTraceRecordingRoot;
+  }
+  const script = path.join(repoRoot, "scripts", "materialize-recording.sh");
+  const result = childProcess.spawnSync(script, ["cross-process-three-trace"], {
+    cwd: repoRoot,
+    encoding: "utf-8",
+    timeout: 30 * 60_000,
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  if (result.error) {
+    throw new Error(`could not run ${script}: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `could not record the cross-process demo from this tree ` +
+        `(${script} exited ${result.status}). The diagnostic above names what is ` +
+        `missing. These recordings are produced, not committed, so there is no ` +
+        `stale copy to fall back to.`,
+    );
+  }
+  const dir = (result.stdout ?? "").trim();
+  if (!dir || !fs.existsSync(dir)) {
+    throw new Error(`${script} reported "${dir}", which does not exist`);
+  }
+  memoizedThreeTraceRecordingRoot = dir;
+  return dir;
+}
+
+/**
+ * @deprecated Name kept only so a stray caller fails to compile rather
+ * than silently pointing the Electron launch at the source directory.
+ * Use `threeTraceSourceRoot()` or `threeTraceRecordingRoot()`.
+ */
+export function threeTraceFixtureRoot(): string {
+  throw new Error(
+    "threeTraceFixtureRoot() is gone: sources and recordings are now separate. " +
+      "Use threeTraceSourceRoot() for backend/server.js and friends, and " +
+      "threeTraceRecordingRoot() for the .ct containers and session.toml.",
+  );
+}
+
 export function threeTraceFixtureSkipReason(): string | null {
   // The Electron build is a genuine environment prerequisite: it is not
   // committed and takes minutes to produce, so a machine without it
@@ -318,20 +381,10 @@ export function threeTraceFixtureSkipReason(): string | null {
     return "ct binary missing at " + ctBinaryPath() +
       " — run `just build-once` to produce the Electron build the GUI specs drive";
   }
-  // The recordings, by contrast, ARE committed. A missing one means a
-  // broken checkout, not an under-provisioned machine — so it throws
-  // rather than skipping. Treating it as a skip is what previously let
-  // this spec report success indefinitely without ever opening a trace.
-  const root = threeTraceFixtureRoot();
-  for (const name of ["frontend.ct", "frontend-wasm.ct", "backend.ct", "session.toml"]) {
-    const candidate = path.join(root, name);
-    if (!fs.existsSync(candidate)) {
-      throw new Error(
-        `cross-process fixture is incomplete: ${candidate} is missing. ` +
-          `These recordings are committed; run ${root}/regenerate.sh to ` +
-          `rebuild them (see that directory's README.md).`,
-      );
-    }
-  }
+  // The recordings are produced by `threeTraceRecordingRoot()`, which
+  // throws rather than returning a reason. Nothing here can become a
+  // skip: treating a missing recording as an environment gap is what
+  // previously let this spec report success indefinitely without ever
+  // opening a trace.
   return null;
 }
