@@ -52,19 +52,20 @@ suite "the gh-pages publish output has the expected shape":
     check html.contains("<html")
     check html.toLowerAscii.contains("codetracer")
 
-  test "all 50 rendered pages are present as clean-route index.html files":
+  test "all 60 rendered pages are present as clean-route index.html files":
     # The SSG emits every content page at `<route>/index.html`; the count must
     # match the ported content set exactly (46 M1 pages + the M5
     # `getting_started/introduction` article split out of the old root
     # `index.md` when it became the WebFlow-parity landing + the three
-    # WebFlow-parity utility pages faq/support/sign-in = 50).
+    # WebFlow-parity utility pages faq/support/sign-in = 50, + the nine
+    # live-request-tracking pages + the `sign-up` page = 60).
     var pageCount = 0
     for path in walkDirRec(pub, yieldFilter = {pcFile}):
       if path.lastPathPart == "index.html":
         inc pageCount
-    check pageCount == 50
+    check pageCount == 60
     # Cross-check against the content source of truth.
-    check loadContentEntries(contentDir()).len == 50
+    check loadContentEntries(contentDir()).len == 60
 
   test "a representative page from every top-level section is present":
     let pages = [

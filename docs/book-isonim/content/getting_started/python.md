@@ -66,3 +66,18 @@ You can explore the recording immediately in the UI or later on:
   ```
 
 All three commands replay the same trace artefacts `ct record` produced.
+
+## Recording a web application
+
+Flask, Django, FastAPI and any other WSGI/ASGI application are recorded as a
+running server rather than a single script, and each HTTP request appears in
+the Request Panel as it arrives. That has its own guide:
+[Live requests — Python](/usage_guide/live-requests-python).
+
+In short:
+
+```bash
+ct record --server --lang python -o ./trace -- flask --app app run --port 8000
+```
+
+Then `ct replay -t ./trace` in another terminal shows the requests live.

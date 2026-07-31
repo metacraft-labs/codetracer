@@ -92,13 +92,57 @@ try:
       else:
         discard
 
+  # `ct record` launches ANOTHER program, and that program's flags are not
+  # ct's.  confutils parses every dash-prefixed token it sees, so before this
+  # split `ct record php -S localhost:8000 -t public/` -- the canonical PHP
+  # dev-server command -- died with "Unrecognized option 'S'".  The silent
+  # case was worse: a child flag colliding with one of ct's own was ACCEPTED,
+  # so `ct record php --version` printed CodeTracer's version, recorded
+  # nothing, and exited 0.
+  #
+  # `{.restOfArgs.}` is the natural fix and cannot be used: confutils rejects
+  # it in any command that also declares flags (see the note on `recordArgs`
+  # in codetracerconf.nim).  So POSIX `--` is honoured here instead, before
+  # confutils sees argv -- the same interception `ct-complete` above uses for
+  # the same reason.  Everything left of the first `--` is ct's; everything
+  # right of it is the child's, verbatim.
+  const RecordChildProgramPlaceholder = "\0ct-record-child-program"
+  var childProgram = ""
+  var childArgs: seq[string] = @[]
+  # `ctArgv` is what confutils parses.  It defaults to the real argv so the
+  # no-`--` path behaves exactly as before; only a `record ... -- ...` line
+  # trims it.  (`cmdLine` defaults to `commandLineParams()`, so it must never
+  # be passed an empty seq -- that would parse nothing at all.)
+  var ctArgv: seq[string] = @[]
+  when not defined(js):
+    ctArgv = commandLineParams()
+    let sep = ctArgv.find("--")
+    if sep >= 0 and ctArgv.len > 0 and ctArgv[0] == "record":
+      let rest = ctArgv[sep + 1 .. ^1]
+      ctArgv = ctArgv[0 ..< sep]
+      if rest.len > 0:
+        childProgram = rest[0]
+        childArgs = rest[1 .. ^1]
+        # `recordProgram` is a required argument, and it lives to the RIGHT of
+        # `--` where confutils can no longer see it.  Stand in a placeholder
+        # so the parse succeeds, then overwrite it below with the real name.
+        # A placeholder rather than `childProgram` itself: a program whose
+        # name begins with `-` would be read back as a flag.
+        ctArgv.add(RecordChildProgramPlaceholder)
+
   # TODO: When confutils gets updated with nim 2 make sure to improve on the copyright banner, as newer versions
   # support having prefix and postfix banners. The banner here is only a prefix banner
-  let conf = CodetracerConf.load(
+  var conf = CodetracerConf.load(
     version = "CodeTracer version: " & version.CodeTracerVersionStr & (
         when defined(debug): "(debug)" else: ""),
-    copyrightBanner = "CodeTracer - the user-friendly time-travelling debugger"
+    copyrightBanner = "CodeTracer - the user-friendly time-travelling debugger",
+    cmdLine = ctArgv
   )
+  if childProgram.len > 0:
+    # The program named after `--` wins over anything confutils parsed, and
+    # its argv is passed through untouched.
+    conf.recordProgram = childProgram
+    conf.recordArgs = childArgs
   customValidateConfig(conf)
   runInitial(conf)
 except CatchableError as ex:
