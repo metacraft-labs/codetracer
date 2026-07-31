@@ -206,3 +206,5 @@ materialised
 synthesises
 maintester
 dwarfwarn
+cdylib
+testdata
