@@ -5,8 +5,9 @@
 ## docs.codetracer.com -- has the shape GitHub Pages must serve:
 ##
 ##   * the real home page `index.html` (a rendered page, NOT a redirect stub),
-##   * all 46 rendered section pages (one `<route>/index.html` per content
-##     page), incl. a representative spread across every top-level section,
+##   * all 49 rendered section/utility pages (one `<route>/index.html` per
+##     content page), incl. a representative spread across every top-level
+##     section and the WebFlow-parity faq/support/sign-in utility pages,
 ##   * the hashed, cache-busted theme stylesheet under `assets/` plus the
 ##     `assets/{fonts,img}` the CSS and content reference,
 ##   * the hashed `search-index.*.json` client search payload,
@@ -51,18 +52,19 @@ suite "the gh-pages publish output has the expected shape":
     check html.contains("<html")
     check html.toLowerAscii.contains("codetracer")
 
-  test "all 47 rendered pages are present as clean-route index.html files":
+  test "all 50 rendered pages are present as clean-route index.html files":
     # The SSG emits every content page at `<route>/index.html`; the count must
     # match the ported content set exactly (46 M1 pages + the M5
     # `getting_started/introduction` article split out of the old root
-    # `index.md` when it became the WebFlow-parity landing = 47).
+    # `index.md` when it became the WebFlow-parity landing + the three
+    # WebFlow-parity utility pages faq/support/sign-in = 50).
     var pageCount = 0
     for path in walkDirRec(pub, yieldFilter = {pcFile}):
       if path.lastPathPart == "index.html":
         inc pageCount
-    check pageCount == 47
+    check pageCount == 50
     # Cross-check against the content source of truth.
-    check loadContentEntries(contentDir()).len == 47
+    check loadContentEntries(contentDir()).len == 50
 
   test "a representative page from every top-level section is present":
     let pages = [
@@ -77,6 +79,11 @@ suite "the gh-pages publish output has the expected shape":
     ]
     for rel in pages:
       check fileExists(pub / rel)
+
+  test "the WebFlow-parity utility pages (faq/support/sign-in) ship as clean routes":
+    for rel in ["faq/index.html", "support/index.html", "sign-in/index.html"]:
+      check fileExists(pub / rel)
+      check not isMetaRefresh(readFile(pub / rel))
 
   test "the hashed theme stylesheet + its asset dirs ship under assets/":
     let styles = globOne(pub / "assets", "style.*.css")

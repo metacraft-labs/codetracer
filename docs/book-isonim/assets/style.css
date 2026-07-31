@@ -1588,3 +1588,224 @@ h6.docs-md-heading {
     filter: invert(1);
   }
 }
+
+/* ============================================================================
+ * FAQ / Support / Sign-In pages (WebFlow faq.html / support.html / sign-in.html)
+ *
+ * These opt into two framework capabilities added alongside the book:
+ *   * the `:::form` semantic form directive (WebFlow `.support-form` /
+ *     `.user-form`), styled here as `.docs-md-form*`;
+ *   * the minimal-chrome page layout (`layout: minimal` front matter), styled
+ *     here as `.docs-frame--minimal` + `.docs-minimal-*` (WebFlow
+ *     `.section-fullpage` sign-in).
+ * Every rule keys on one of those new classes, so ordinary article/landing
+ * pages stay byte-for-byte unchanged.
+ * ==========================================================================*/
+
+/* --- :::form semantic form (WebFlow `.form-input` / `.form-label`) --------- */
+.docs-md-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-4);
+  width: 100%;
+  max-width: 32rem;
+  margin: var(--docs-space-5) 0;
+}
+
+.docs-md-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-2);
+}
+
+.docs-md-form-label {
+  font-weight: 500;
+  font-size: var(--docs-font-size-sm);
+  color: var(--docs-fg);
+}
+
+/* WebFlow `.form-input`: light field with a `--shade-40` border, generous
+ * padding, that flips to the raised dark surface via the inverting tokens. */
+.docs-md-form-input {
+  width: 100%;
+  min-height: 3rem;
+  padding: var(--docs-space-2) var(--docs-space-3);
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-sm);
+  background: var(--docs-input-bg);
+  color: var(--docs-fg);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.docs-md-form-input::placeholder {
+  color: var(--docs-fg-muted);
+}
+
+.docs-md-form-input:focus-visible {
+  outline: 3px solid var(--docs-focus-ring);
+  outline-offset: 1px;
+  border-color: var(--docs-fg-muted);
+}
+
+/* WebFlow `.form-input-area` (textarea): taller, top-aligned, resizable. */
+.docs-md-form-textarea {
+  min-height: 8rem;
+  padding-top: var(--docs-space-3);
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.docs-md-form-select {
+  appearance: none;
+  cursor: pointer;
+}
+
+/* WebFlow `.w-checkbox`: inline box + label, no column stacking. */
+.docs-md-form-row-checkbox {
+  flex-direction: row;
+}
+
+.docs-md-form-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--docs-space-2);
+  cursor: pointer;
+}
+
+.docs-md-form-check-input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--docs-fg);
+}
+
+/* WebFlow submit `.button`: the form's submit reuses the shared `.docs-md-button`
+ * token, laid out as a full-width block action at the foot of the form. */
+.docs-md-form-submit {
+  width: 100%;
+  margin-top: var(--docs-space-2);
+  cursor: pointer;
+}
+
+/* --- FAQ accordion (WebFlow `.faq-item`) ---------------------------------- */
+.docs-md-faq {
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-3);
+  margin: var(--docs-space-5) 0;
+}
+
+.docs-md-faq-item {
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-md);
+  background: var(--docs-bg-raised);
+  padding: var(--docs-space-3) var(--docs-space-4);
+}
+
+.docs-md-faq-question {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--docs-space-3);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--docs-fg);
+  list-style: none;
+}
+
+.docs-md-faq-question::-webkit-details-marker {
+  display: none;
+}
+
+/* WebFlow `.icon__plus` disclosure glyph, rotating to a minus when open. */
+.docs-md-faq-question::after {
+  content: "+";
+  font-weight: 400;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--docs-fg-muted);
+  transition: transform 0.2s ease;
+}
+
+.docs-md-faq-item[open] .docs-md-faq-question::after {
+  content: "\2013"; /* en dash */
+}
+
+.docs-md-faq-answer {
+  margin-top: var(--docs-space-3);
+  color: var(--docs-fg-muted);
+}
+
+.docs-md-faq-answer p {
+  margin: 0;
+}
+
+/* --- minimal-chrome (auth) page layout (WebFlow `.section-fullpage`) ------- */
+/* The minimal frame drops the three-column grid for a centered, full-height
+ * column: a logo-only top bar, then a vertically + horizontally centered card. */
+.docs-frame.docs-frame--minimal {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* WebFlow `.nav.nav-secondary`: just the brand logo, left-aligned, slim. */
+.docs-minimal-nav {
+  display: flex;
+  align-items: center;
+  padding: var(--docs-space-4) var(--docs-space-6);
+}
+
+.docs-minimal-nav .docs-logo-link {
+  flex: 0 0 auto;
+  padding-left: 0;
+}
+
+/* WebFlow `.container-center`: the card sits in the middle of the viewport. */
+.docs-main.docs-main--minimal {
+  grid-column: auto;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: none;
+  padding: var(--docs-space-8) var(--docs-space-5);
+}
+
+/* WebFlow `.user-form-block`: a compact, bordered, raised auth card. */
+.docs-minimal-card {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--docs-space-4);
+  padding: var(--docs-space-8);
+  border: 1px solid var(--docs-border);
+  border-radius: var(--docs-radius-md);
+  background: var(--docs-bg-raised);
+}
+
+.docs-minimal-card > .docs-md-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--docs-fg);
+}
+
+/* The card's lead paragraph (WebFlow `.body-s` subtitle) sits tight under the
+ * title; the form + sign-up link fill the rest of the card at full width. */
+.docs-minimal-card .docs-md-body > .docs-md-paragraph:first-child {
+  margin-top: 0;
+  color: var(--docs-fg-muted);
+  font-size: var(--docs-font-size-sm);
+}
+
+.docs-minimal-card .docs-md-form {
+  max-width: none;
+  margin: var(--docs-space-2) 0 0;
+}

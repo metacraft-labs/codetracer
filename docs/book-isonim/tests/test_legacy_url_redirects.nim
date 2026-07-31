@@ -75,12 +75,12 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
 
   test "the real generated site is present (build ran)":
     # The redirect stubs are ADDITIONAL to the real pages (46 M1 pages + the M5
-    # `getting_started/introduction` split = 47); the framework output must
-    # still be intact.
+    # `getting_started/introduction` split + the three WebFlow utility pages
+    # faq/support/sign-in = 50); the framework output must still be intact.
     check dirExists(publicDir())
     check fileExists(publicDir() / "index.html")
     let entries = loadContentEntries(contentDir())
-    check entries.len == 47
+    check entries.len == 50
 
   test "no legacy URL is left without a redirect":
     # Build the set of clean routes the real site actually serves, so we can
