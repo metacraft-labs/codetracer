@@ -25,8 +25,9 @@ suite "book nav matches the WebFlow 3-section organization":
   test "every page survives the fold (nothing dropped)":
     # 46 folded pages + the M5 `getting_started/introduction` article the home
     # landing links to (the Introduction prose lifted out of the old root
-    # `index.md` when it became the WebFlow-parity landing).
-    check entries.len == 47
+    # `index.md` when it became the WebFlow-parity landing) + the three
+    # WebFlow-parity utility pages (faq / support / sign-in) = 50.
+    check entries.len == 50
 
   test "content collapses to exactly the three WebFlow sections":
     var sections: seq[string] = @[]
