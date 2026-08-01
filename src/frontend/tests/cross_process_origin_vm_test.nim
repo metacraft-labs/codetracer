@@ -69,23 +69,20 @@ proc runDumpHelper(outDir: string): tuple[ok: bool, output: string] =
 
 suite "Cross-process origin — ViewModel":
   var chainJson: JsonNode = nil
-  var skipReason = ""
+  var failReason = ""
 
   setup:
-    if chainJson.isNil and skipReason.len == 0:
+    if chainJson.isNil and failReason.len == 0:
       let outDir = getTempDir() / "ct-cross-process-vm-" & $getCurrentProcessId()
       createDir(outDir)
       let (ok, output) = runDumpHelper(outDir)
       let jsonPath = outDir / (ScenarioName & ".json")
-      let skipPath = outDir / (ScenarioName & ".skipped")
       if fileExists(jsonPath):
         chainJson = parseFile(jsonPath)
-      elif fileExists(skipPath):
-        skipReason = readFile(skipPath)
       elif not ok:
-        skipReason = "the origin-chain dump helper failed:\n" & output
+        failReason = "the origin-chain dump helper failed:\n" & output
       else:
-        skipReason = "the dump helper produced neither a chain nor a skip marker"
+        failReason = "the dump helper produced no chain and reported success"
 
   test "the process tree lists all three recordings":
     # Independent of the chain dump: this is the session shape the
@@ -116,9 +113,15 @@ suite "Cross-process origin — ViewModel":
       check session.activeProcessRecordingId.val == "fe-js"
 
   test "the real chain carries one span per recording it visits":
-    if skipReason.len > 0:
-      echo "SKIPPED: " & skipReason
-      skip()
+    # No skip. The demo is RECORDED by the dump helper when it runs
+    # (`scripts/materialize-recording.sh`), so a helper that could not
+    # deliver a chain means the recording pipeline is broken, not that
+    # this machine is under-provisioned. Skipping here is what let this
+    # counterpart assert nothing at all while the GUI spec it localises
+    # went on being the campaign's only real evidence.
+    if failReason.len > 0:
+      checkpoint(failReason)
+      fail()
     else:
       let chain = parseOriginChain(chainJson)
       check chain.crossProcessSpans.len >= 2
@@ -130,9 +133,15 @@ suite "Cross-process origin — ViewModel":
       check "frontend-js" in roles
 
   test "every span indexes a valid hop range or is a marked placeholder":
-    if skipReason.len > 0:
-      echo "SKIPPED: " & skipReason
-      skip()
+    # No skip. The demo is RECORDED by the dump helper when it runs
+    # (`scripts/materialize-recording.sh`), so a helper that could not
+    # deliver a chain means the recording pipeline is broken, not that
+    # this machine is under-provisioned. Skipping here is what let this
+    # counterpart assert nothing at all while the GUI spec it localises
+    # went on being the campaign's only real evidence.
+    if failReason.len > 0:
+      checkpoint(failReason)
+      fail()
     else:
       let chain = parseOriginChain(chainJson)
       # A span whose hop range is inverted or runs off the end of the
@@ -155,9 +164,15 @@ suite "Cross-process origin — ViewModel":
           check span.lastHopIndex.int < chain.hops.len
 
   test "clicking a sibling hop rotates the active recording":
-    if skipReason.len > 0:
-      echo "SKIPPED: " & skipReason
-      skip()
+    # No skip. The demo is RECORDED by the dump helper when it runs
+    # (`scripts/materialize-recording.sh`), so a helper that could not
+    # deliver a chain means the recording pipeline is broken, not that
+    # this machine is under-provisioned. Skipping here is what let this
+    # counterpart assert nothing at all while the GUI spec it localises
+    # went on being the campaign's only real evidence.
+    if failReason.len > 0:
+      checkpoint(failReason)
+      fail()
     else:
       createRoot proc(dispose: proc()) =
         let chain = parseOriginChain(chainJson)

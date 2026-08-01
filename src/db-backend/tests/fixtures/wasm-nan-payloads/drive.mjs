@@ -125,12 +125,18 @@ try {
   }
   console.log(`[drive] page reported: ${status}`);
   // The bit patterns the page asked the module for, in the recording's
-  // own spelling. This is the ground truth the replay is checked
-  // against, and it comes out of the run rather than out of a
-  // hand-maintained table.
+  // own spelling, written beside the recording it belongs to.
+  //
+  // Deliberately NOT into `HERE`. `expected-bits.json` beside these
+  // sources is the committed, hand-reviewed oracle: those four patterns
+  // are the whole point of M52, and they must be a statement a reviewer
+  // made, not one the run made about itself. A driver that overwrote it
+  // would silently adopt whatever the producer had regressed to.
   const expected = await page.evaluate(() => globalThis.__demoExpected);
+  const outDir = process.env.CT_RECORDING_OUT_DIR || HERE;
+  fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(
-    path.join(HERE, "expected-bits.json"),
+    path.join(outDir, "observed-bits.json"),
     `${JSON.stringify(expected, null, 2)}\n`,
   );
   // Give the WebSocket frames a moment to reach the daemon before the

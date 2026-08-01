@@ -55,7 +55,7 @@ the consumer-side README at
 
 ```
 regenerate.sh          re-records everything (needs a headless Chromium)
-verify.sh              replays the committed recordings; rebuilds nothing
+verify.sh              records from this tree (cached) and replays
 serve.mjs              static server; mounts the instrumenter's
                        recorder-runtime/ from the checkout
 drive.mjs              headless driver
@@ -66,20 +66,17 @@ modules/<name>/
     wrap.s                       pair_stats only
     page/app.js                  the page's own tier
     page/<name>.instrumented.wasm(+.manifest.json)
-                                 what the browser loaded (the .wasm is not
-                                 committed; the manifest is)
-    module/<name>.wasm.zst       the ORIGINAL, uninstrumented module
+                                 what the browser loaded; built beside the
+                                 page that serves it, not committed
+
+produced into the gitignored target/test-recordings/, not committed:
+modules/<name>/
+    module/<name>.wasm           the ORIGINAL, uninstrumented module
     <program>.ct/                the browser recording
     expected.json                what the page observed
 ```
 
-`regenerate.sh` also copies the recording, the original module, the
-manifest and `expected.json` into
-`codetracer-wasm-recorder/cmd/wazero/testdata/boundary-log/parity-corpus/`,
-where the parity tests read them. That copy step is part of the script so
-the two sides cannot drift.
-
-## Why the modules are pinned and not rebuilt
+## Why each module is produced with its recording, not committed
 
 The offline replay runs the **original, uninstrumented** module (spec
 §6.1) and checks every recorded crossing against it, so a module compiled
@@ -88,21 +85,39 @@ indices, or (for `vault_apply`, whose `boundary_state.json` records
 **absolute** linear-memory offsets) a different address for its `VAULT`
 block — no longer describes the recording.
 
-They are committed compressed because the repo caps a committed file at
-500 KB and each debug build is ~0.6 MB, almost entirely the DWARF the
-replay turns into per-line steps and locals. `verify.sh` expands them into
-a temp directory.
+Each module and its recording are therefore **one artefact**. Both used to
+be committed, which keeps them together — and also kept them together with
+an instrumenter and a browser recorder that had since moved on, so the
+replay went on succeeding about a pipeline that no longer existed.
+`regenerate.sh` now writes each module beside the recording it belongs to,
+and `scripts/materialize-recording.sh wasm-parity-corpus` re-runs it
+whenever `ct-instrument` or the `record-web` binary changes.
 
-The *instrumented* modules are not committed in any form: they are only
-needed to re-record, and `regenerate.sh` builds them together with a fresh
-recording, so those two cannot drift apart the way the original and the
-recording could.
+They are written uncompressed: the zstd step existed only to squeeze each
+~0.6 MB debug build under the repo's 500 KB cap on a *committed* file.
+
+## The sibling repo's copies are captures, not a sync
+
+`regenerate.sh` used to end by copying each fresh recording, module,
+manifest and `expected.json` into
+`codetracer-wasm-recorder/cmd/wazero/testdata/boundary-log/parity-corpus/`.
+That stage is **gone**. It made the two repos agree by construction, and
+the agreement then held after the producer changed, because the last sync
+had frozen it — nothing ever asked whether the copies still described what
+the pipeline emits.
+
+That repo replays recordings it does not make, so it keeps its corpus as a
+deliberately captured vector set (its Go suite must stand alone). What
+checks the capture is now an explicit comparison there:
+`just verify-vectors`, which records these four demos from *this* tree and
+compares every crossing, value and format witness against the committed
+vectors.
 
 ## Running
 
 ```bash
-./verify.sh          # replays the committed recordings; rebuilds nothing
-./regenerate.sh      # re-records from scratch (needs a headless Chromium)
+./verify.sh          # record from this tree (cached) and replay
+./regenerate.sh      # re-record unconditionally (needs a headless Chromium)
 ./regenerate.sh vault_apply    # one module
 ```
 

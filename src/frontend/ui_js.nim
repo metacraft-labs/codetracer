@@ -1583,11 +1583,11 @@ when not defined(ctInExtension):
     data.dapApi.ipc = data.ipc
 
     data.dapApi.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
-      cerror "[PIPELINE] DapInitializeResponse: received response"
+      cdebug "[PIPELINE] DapInitializeResponse: received response"
       var supportsStepBack = false
       if not response.isNil and not jsMissing(response["supportsStepBack"]):
         supportsStepBack = response["supportsStepBack"].to(bool)
-      cerror "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
+      cdebug "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
       # Remember the capability so it survives even when the response beats the
       # `activeSessionVM` creation below; apply immediately when the VM already
       # exists (e.g. a per-trace re-initialize after load).
@@ -1636,8 +1636,7 @@ when not defined(ctInExtension):
       )
       activeSessionVM.collabCore.installFrontEndAdapterProjection(
         activeCollabFrontEndAdapter)
-      cerror "[PIPELINE] configureMiddleware: SessionVM created"
-      cerror "[PIPELINE] configureMiddleware: RealBackendService created"
+      cdebug "[PIPELINE] configureMiddleware: SessionVM + RealBackendService created"
       clog "SessionViewModel: created with real DapApi backend"
       if pendingCollabJoinBootstrapRaw.len > 0:
         discard activateCollabJoinBootstrap(pendingCollabJoinBootstrapRaw)
@@ -1650,9 +1649,15 @@ when not defined(ctInExtension):
       # created fresh with the real backend.
       template initPanelVM(label: string; body: untyped) =
         try:
-          cerror "[PIPELINE] configureMiddleware: calling " & label
+          cdebug "[PIPELINE] configureMiddleware: calling " & label
           body
         except CatchableError as e:
+          # Stays at ERROR: this is a real failure, not progress.  A panel
+          # VM that threw during construction leaves its panel wired to a
+          # stub (or to nothing), and every later symptom — an empty
+          # calltrace, a state panel that never fills — is downstream of
+          # this line.  It must survive the M51 demotion of the surrounding
+          # `[PIPELINE]` progress traces.
           cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
 
       initPanelVM("initStateVMWithStore"):
@@ -1858,23 +1863,23 @@ when not defined(ctInExtension):
       # routing between early-registered components and viewsApi is
       # order-dependent and can miss events).
       # -----------------------------------------------------------------
-      cerror "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
+      cdebug "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
       data.viewsApi.subscribe(CtUpdatedCalltrace,
         proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
-          cerror ("[PIPELINE] viewsApi.CtUpdatedCalltrace: received " &
+          cdebug ("[PIPELINE] viewsApi.CtUpdatedCalltrace: received " &
             $response.callLines.len & " lines, totalCalls=" &
             $response.totalCallsCount)
           calltrace.syncCalltraceData(response))
 
       data.viewsApi.subscribe(CtLoadLocalsResponse,
         proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-          cerror ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
+          cdebug ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
             $response.locals.len & " variables")
           state.syncStoreLocals(response.locals))
 
       data.viewsApi.subscribe(CtCompleteMove,
         proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-          cerror ("[PIPELINE] viewsApi.CtCompleteMove: rrTicks=" &
+          cdebug ("[PIPELINE] viewsApi.CtCompleteMove: rrTicks=" &
             $response.location.rrTicks & " file=" & $response.location.path &
             " line=" & $response.location.line)
           # Batch the calltrace + state store writes so the parallel
@@ -1910,13 +1915,30 @@ when not defined(ctInExtension):
               activeSessionVM.store.updateCurrentGeid(geid)
 
           if not data.ui.status.isNil:
-            cerror "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
+            cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
             data.ui.status.stopSignal = response.stopSignal
             data.ui.status.location = response.location
             data.ui.status.state.stableBusy = false
             inc data.ui.status.completeMoveId
             data.ui.status.redraw()
           else:
+            # Stays at ERROR (M51 review).  The "it just arrived early"
+            # reading of this branch does not survive checking: the only
+            # thing that registers this subscription is
+            # `configureMiddleware`, and both of its call sites
+            # (`onTraceLoaded`, `onNoTrace`) run strictly after
+            # `createUIComponents`, which constructs `data.ui.status`
+            # unconditionally.  So a `CtCompleteMove` cannot reach this
+            # handler before the status bar exists on the ordinary path,
+            # and a clean trace open reaches this branch ZERO times
+            # (measured off the `CODETRACER_TEST_CONSOLE_DUMP_PATH` dump).
+            #
+            # It therefore costs no log noise to keep, and what it would
+            # report is real: `data.ui` was rebuilt without its status
+            # component (`renderer.resetLayoutState` replaces `data.ui`
+            # wholesale) or a session switch left a session's chrome
+            # unbuilt.  The symptom is a status bar frozen on a stale
+            # location with nothing else in the log to say why.
             cerror "[PIPELINE] viewsApi.CtCompleteMove: status component is nil")
 
       # The standalone isonim_app shell remains disabled here because it would
@@ -1943,14 +1965,14 @@ when not defined(ctInExtension):
     if not activeSessionVM.isNil:
       # Immediate replay: catches the case where CtCompleteMove already
       # fired and lastCompleteMove is set in the middleware.
-      cerror "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)"
+      cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)"
       data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
       # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
       # typically arrives 1-5 seconds after configureMiddleware.  This
       # retry ensures VMs learn the position even when the backend
       # responds after the immediate replay above found nothing.
       discard windowSetTimeout(proc() =
-        cerror "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
+        cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
         data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
       , 3_000)
 

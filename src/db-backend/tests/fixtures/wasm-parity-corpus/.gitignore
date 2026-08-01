@@ -1,26 +1,29 @@
-# Build output. `regenerate.sh` copies what the fixture needs out of it
-# (`modules/*/module/*.wasm.zst` and the instrumented pair under
-# `modules/*/page/`), so nothing here has to be committed.
+# Everything `regenerate.sh` produces.
+#
+# The four recordings, the four ORIGINAL modules the offline replay is
+# driven against (spec §6.1), and the `expected.json` answers the page
+# observed are NOT committed. The modules were, on the grounds that a
+# recording pins export names, import indices and — for `vault_apply` —
+# the absolute address of its `VAULT` block, so a module built by a
+# different toolchain no longer describes the recording. Producing each
+# module in the same run as its recording satisfies that properly, and
+# additionally keeps the pair a description of the current instrumenter
+# rather than of whichever one last ran.
+#
+# `scripts/materialize-recording.sh` records all four into the gitignored
+# `target/test-recordings/`, keyed on this fixture's sources and on the
+# content of `ct-instrument` and the browser recorder. The zstd step that
+# squeezed each ~0.6 MB debug module under the repo's 500 KB commit cap is
+# gone with the commit.
+modules/*/*.ct/
+modules/*/module/
+modules/*/expected.json
+
+# Build output.
 modules/*/build/
 
-# The instrumented modules are deliberately not committed in any form.
-# They are only needed to *re-record*, and `regenerate.sh` builds them
-# together with a fresh recording, so those two cannot drift apart the
-# way the original module and the committed recording could. The repo
-# root's blanket `*.wasm` already ignores them; this is the statement of
-# intent.
+# What the browser loads, written beside the page that serves it, built in
+# the same run as the recording. The repo root's blanket `*.wasm` already
+# ignores it; this is the statement of intent.
 modules/*/page/*.instrumented.wasm
-
-# The ORIGINAL modules are committed as `modules/*/module/*.wasm.zst`.
-#
-# They are committed at all because they have to be *these* builds: the
-# offline replay runs the ORIGINAL, uninstrumented module (spec §6.1) and
-# checks every recorded crossing against it, so a module compiled by a
-# different toolchain — with different export names, import indices or
-# (for `vault_apply`) a different address for its `VAULT` block — no
-# longer matches the recording.
-#
-# They are committed *compressed* because the repo caps a committed file
-# at 500 KB and the raw modules are ~0.6 MB, almost entirely DWARF, which
-# is the part the replay turns into per-line steps and locals and so
-# cannot be stripped. `verify.sh` expands them into a temp directory.
+modules/*/page/*.instrumented.wasm.manifest.json

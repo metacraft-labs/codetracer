@@ -303,5 +303,60 @@ test.describe("status bar render stability", () => {
       statusRenderLogs,
       "the status bar must not log at ERROR on the happy path",
     ).toEqual([]);
+
+    // ------------------------------------------------------------------
+    // M51: the whole ERROR bucket, not two known substrings.
+    //
+    // The two assertions above are M48's, and they could only ever be
+    // written as substring filters because a clean trace open used to emit
+    // 713 ERROR lines — 705 of them progress traces ("creating store",
+    // "mounting now", "mount COMPLETE", "synced N locals") logged through
+    // `cerror` across NINE renderer modules, plus three the harness itself
+    // emitted at ERROR while reporting a healthy page.  M51 demoted them,
+    // leaving 3.  The bucket can now be asserted whole: an ERROR line that
+    // survives here is one that MEANS something.
+    //
+    // Do not add to ALLOWED_STARTUP_ERRORS to make a red run green.  Each
+    // entry is a genuine startup error that is filed and outlives this
+    // milestone; the allowlist exists so that those do not mask the next
+    // real regression, not so that regressions can be waved through.
+    const ALLOWED_STARTUP_ERRORS: { match: string; why: string }[] = [
+      {
+        // Thrown by monaco-languageclient's `workerFactory.js` when
+        // monaco's TypeScript language mode asks for a web worker and no
+        // `MonacoEnvironment.getWorker` is configured for the Electron
+        // file:// renderer.  A genuine unhandled rejection, filed against
+        // M51; it degrades TS language features in the editor and is not
+        // caused by anything under test here.  Fixing it means configuring
+        // monaco's worker environment, which is not a logging change.
+        match: "Unimplemented worker javascript (workerMain.js)",
+        why: "monaco language-client worker is unconfigured in the Electron renderer — filed by M51",
+      },
+    ];
+
+    // Restrict to the error-level entries before asserting.  The bucket is
+    // normally error-only, but `CODETRACER_TEST_LOG_ALL_CONSOLE=1` — the
+    // switch someone debugging a failure here would reach for first — also
+    // pushes `[console.log]` / `[console.debug]` lines into it, and without
+    // this filter that switch would drown the assertion in ~3000 lines of
+    // the very progress traces M51 demoted.  `[console.error]` and
+    // `[pageerror]` are the two prefixes `attachErrorCollectors` uses for
+    // genuine faults, so this is exactly the ERROR bucket and nothing less.
+    const errorLevel = consoleErrors.filter(
+      (line) =>
+        line.startsWith("[console.error]") || line.startsWith("[pageerror]"),
+    );
+    const unexplained = errorLevel.filter(
+      (line) => !ALLOWED_STARTUP_ERRORS.some((a) => line.includes(a.match)),
+    );
+    expect(
+      unexplained,
+      "opening a trace must produce an EMPTY renderer ERROR bucket apart " +
+        "from the explicitly justified entries in ALLOWED_STARTUP_ERRORS " +
+        "(see M51).  An ERROR line here is either a real fault worth " +
+        "fixing, or a progress trace that belongs at `cdebug` — decide " +
+        "which and do that, rather than widening the allowlist.\n" +
+        `allowlist: ${ALLOWED_STARTUP_ERRORS.map((a) => `${a.match} (${a.why})`).join("; ")}`,
+    ).toEqual([]);
   });
 });

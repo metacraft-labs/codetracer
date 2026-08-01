@@ -131,8 +131,17 @@ try {
   // What the page observed is the ground truth the replay is checked
   // against, so it goes where the harness can read it.
   const answers = await page.evaluate(() => globalThis.__corpusAnswers);
+  // `expected.json` is a *product* of this run — the answers the module
+  // actually returned — so it lands beside the recording it describes,
+  // not in the source tree.
+  const answersDir = path.join(
+    process.env.CT_RECORDING_OUT_DIR || HERE,
+    "modules",
+    MODULE_NAME,
+  );
+  fs.mkdirSync(answersDir, { recursive: true });
   fs.writeFileSync(
-    path.join(HERE, "modules", MODULE_NAME, "expected.json"),
+    path.join(answersDir, "expected.json"),
     `${JSON.stringify(answers)}\n`,
   );
   // Give the WebSocket frames a moment to reach the daemon before the

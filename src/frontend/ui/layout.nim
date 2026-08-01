@@ -534,7 +534,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
 
-    cerror "[EDITOR_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
+    cdebug "[EDITOR_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
 
     # Clean up the transient reparenting property from state so it is not saved to the layout database.
     {.emit: """
@@ -544,14 +544,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     """.}
 
     if isReparenting:
-      cerror "[EDITOR_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
+      cdebug "[EDITOR_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
       element.innerHTML = cstring""
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
-      cerror "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      cdebug "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
       dispatchLayoutUpdated()
     else:
-      cerror "[EDITOR_REG] Regular mount (non-reparenting)"
+      cdebug "[EDITOR_REG] Regular mount (non-reparenting)"
       element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
 
     container.on(cstring"tab") do (tab: GoldenTab):
@@ -678,7 +678,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
 
-    cerror "[GENERIC_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
+    cdebug "[GENERIC_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
 
     # Clean up the transient reparenting property from state so it is not saved to the layout database.
     {.emit: """
@@ -688,11 +688,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     """.}
 
     if isReparenting:
-      cerror "[GENERIC_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
+      cdebug "[GENERIC_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
       element.innerHTML = cstring""
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
-      cerror "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      cdebug "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
 
       # Clean up the panel from autoHideState.panels list now that it is reparented
       if not autoHideState.isNil:
@@ -702,7 +702,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       dispatchLayoutUpdated()
     else:
-      cerror "[GENERIC_REG] Regular mount (non-reparenting)"
+      cdebug "[GENERIC_REG] Regular mount (non-reparenting)"
       element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
 
     container.on(cstring"tab") do (tab: GoldenTab):

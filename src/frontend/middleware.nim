@@ -163,18 +163,34 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedHttpRequests, proc(kind: CtEventKind, value: JsObject) =
     viewsApi.emit(CtUpdatedHttpRequests, value))
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-    cerror "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
+    cdebug "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
       $value.location.rrTicks &
       ", emitting to viewsApi"
     when not defined(ctInExtension):
       if not data.ui.isNil and not data.ui.status.isNil:
-        cerror "[PIPELINE] middleware.CtCompleteMove: refreshing status before viewsApi fan-out"
+        cdebug "[PIPELINE] middleware.CtCompleteMove: refreshing status before viewsApi fan-out"
         data.ui.status.stopSignal = value.stopSignal
         data.ui.status.location = value.location
         data.ui.status.state.stableBusy = false
         inc data.ui.status.completeMoveId
         data.ui.status.redraw()
       else:
+        # Stays at ERROR (M51 review), for the same reason as the twin
+        # branch in `ui_js.configureMiddleware`.  This handler is installed
+        # by `setupMiddlewareApis`, whose sole caller is
+        # `configureMiddleware`, whose own two call sites both run after
+        # `createUIComponents` has unconditionally built the status
+        # component — so "the event beat the status bar into existence" is
+        # not a state the ordinary startup path can be in, and a clean
+        # trace open reaches this branch ZERO times (measured off the
+        # `CODETRACER_TEST_CONSOLE_DUMP_PATH` dump).
+        #
+        # Keeping it at ERROR therefore adds no noise, and the condition it
+        # would report — `data.ui` rebuilt without its chrome, e.g. by
+        # `renderer.resetLayoutState`, or an unbuilt session's components —
+        # otherwise shows up only as a status bar stuck on a stale
+        # location.  The fan-out below still reaches every subscriber; it
+        # is the status bar specifically that goes stale.
         cerror "[PIPELINE] middleware.CtCompleteMove: status unavailable before fan-out"
     # Wrap the entire CtCompleteMove fan-out in a single isonim batch.
     # Subscribers (the legacy CalltraceComponent / StateComponent
@@ -307,7 +323,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       else:
         "[PIPELINE] middleware.InternalLastCompleteMove: lastCompleteMove=SET (rrTicks=" &
           $lastCompleteMove.location.rrTicks & ")"
-    cerror message
+    cdebug message
     if not lastCompleteMove.isNil:
       viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
   )

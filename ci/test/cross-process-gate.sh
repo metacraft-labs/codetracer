@@ -55,8 +55,8 @@ fi
 # existed. The checks above could not see it: they assert the spec's
 # *shape*, and its shape was correct throughout.
 require_source_line "$EVENT_LOG_SPEC" \
-	'threeTraceFixtureRoot()' \
-	"event-log spec must resolve its fixture through the shared helper"
+	'threeTraceRecordingRoot()' \
+	"event-log spec must obtain its recordings from the shared materialiser helper"
 # `^[^/*]*` keeps the match off comment lines, so the spec can keep
 # documenting the climb it used to have without tripping its own gate.
 if grep -Eq '^[^/*]*(path\.)?(resolve|join)\([[:space:]]*__dirname' "$EVENT_LOG_SPEC"; then
@@ -117,29 +117,51 @@ fake_root="$tmp_dir/repo"
 fake_bin="$tmp_dir/bin"
 stage_log="$tmp_dir/stages.log"
 fixture="$fake_root/src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm"
+# Where the fake materialiser reports its recordings. Separate from the
+# fixture directory on purpose: the real materialiser writes to a cache
+# under `target/`, and a self-test that let the two coincide would keep
+# passing if the gate regressed to reading recordings out of the source
+# tree.
+recordings="$tmp_dir/recordings"
 mkdir -p \
 	"$fake_bin" \
 	"$fake_root/src/build-debug/bin" \
 	"$fake_root/src/db-backend" \
+	"$fake_root/scripts" \
 	"$fake_root/src/tests/gui/tests/value-origin" \
 	"$fake_root/ci/test" \
-	"$fixture"
+	"$fixture/backend" \
+	"$recordings"
 
-# Mirror the real fixture's shape: the two browser tiers write the
+# Mirror what the recorders produce: the two browser tiers write the
 # three-file JSON layout, the server tier writes a CTFS container.
 for container in frontend.ct frontend-wasm.ct; do
-	mkdir -p "$fixture/$container"
+	mkdir -p "$recordings/$container"
 	for payload in trace.json trace_metadata.json trace_paths.json; do
-		printf '{}\n' >"$fixture/$container/$payload"
+		printf '{}\n' >"$recordings/$container/$payload"
 	done
 done
-mkdir -p "$fixture/backend.ct"
-printf 'ctfs\n' >"$fixture/backend.ct/server.ct"
-printf '[[trace]]\n' >"$fixture/session.toml"
+mkdir -p "$recordings/backend.ct"
+printf 'ctfs\n' >"$recordings/backend.ct/server.ct"
+printf '[[trace]]\n' >"$recordings/session.toml"
+
+# The demo's sources stay in the tree; only the recordings move.
 printf '[[trace]]\n' >"$fixture/session.toml.template"
 printf '# fixture\n' >"$fixture/README.md"
+printf 'const balance = payload.balance;\n' >"$fixture/backend/server.js"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture/regenerate.sh"
 chmod +x "$fixture/regenerate.sh"
+
+# The gate must RECORD, not read. A materialiser that prints a directory
+# is the whole contract; making it print somewhere the fixture directory
+# is not proves the gate honours it.
+cat >"$fake_root/scripts/materialize-recording.sh" <<FAKE_MATERIALIZER
+#!/usr/bin/env bash
+set -euo pipefail
+[ "\${1:-}" = "cross-process-three-trace" ] || { echo "unexpected fixture \${1:-}" >&2; exit 1; }
+printf '%s\\n' "$recordings"
+FAKE_MATERIALIZER
+chmod +x "$fake_root/scripts/materialize-recording.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_root/src/build-debug/bin/ct"
 chmod +x "$fake_root/src/build-debug/bin/ct"
 for spec in \
@@ -322,9 +344,27 @@ actual_stages="$(cat "$stage_log")"
 [ "$actual_stages" = "$expected_stages" ] ||
 	fail "required stage order/arguments drifted; got: $actual_stages"
 
-mv "$fixture/frontend.ct/trace.json" "$fixture/frontend.ct/trace.json.off"
-expect_failure "missing fixture payload" "required trace payload is missing or empty" run_gate
-mv "$fixture/frontend.ct/trace.json.off" "$fixture/frontend.ct/trace.json"
+mv "$recordings/frontend.ct/trace.json" "$recordings/frontend.ct/trace.json.off"
+expect_failure "incomplete recording" "required trace payload is missing or empty" run_gate
+mv "$recordings/frontend.ct/trace.json.off" "$recordings/frontend.ct/trace.json"
+
+# The gate must fail when the pipeline itself cannot run. Before the
+# recordings were produced this case did not exist — a broken recorder
+# simply meant the committed containers were replayed again.
+mv "$fake_root/scripts/materialize-recording.sh" "$fake_root/scripts/materialize-recording.sh.off"
+expect_failure "absent materialiser" "recording materialiser is missing" run_gate
+mv "$fake_root/scripts/materialize-recording.sh.off" "$fake_root/scripts/materialize-recording.sh"
+
+printf '#!/usr/bin/env bash\nexit 3\n' >"$fake_root/scripts/materialize-recording.sh"
+chmod +x "$fake_root/scripts/materialize-recording.sh"
+expect_failure "failed recording" "could not record the three-tier demo" run_gate
+cat >"$fake_root/scripts/materialize-recording.sh" <<FAKE_MATERIALIZER
+#!/usr/bin/env bash
+set -euo pipefail
+[ "\${1:-}" = "cross-process-three-trace" ] || { echo "unexpected fixture \${1:-}" >&2; exit 1; }
+printf '%s\\n' "$recordings"
+FAKE_MATERIALIZER
+chmod +x "$fake_root/scripts/materialize-recording.sh"
 
 mv "$fake_root/src/build-debug/bin/ct" "$fake_root/src/build-debug/bin/ct.off"
 expect_failure "missing CodeTracer executable" "built CodeTracer executable is missing" run_gate

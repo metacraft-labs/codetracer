@@ -257,21 +257,20 @@ const HTTP_BOUNDARY_ID: &str = "account-balance";
 
 #[test]
 fn test_dap_launch_legacy_three_trace_fixture_returns_marker_rows() {
-    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("cross_process")
-        .join("account-balance-with-wasm");
-    let trace_dir = fixture_root.join("frontend.ct");
+    // Recorded from this tree when the test runs, not read back from a
+    // committed copy: the marker rows below are what the *browser
+    // recorder* emitted, so a frozen container would let this suite keep
+    // describing markers the recorder had stopped producing.
+    let trace_dir = test_harness::three_trace_recordings().join("frontend.ct");
     assert!(
         trace_dir.join("trace.json").is_file(),
-        "expected legacy materialized frontend trace at {}",
+        "the browser recorder produced {} without a trace.json",
         trace_dir.display()
     );
 
     let recording = TestRecording {
         trace_dir: trace_dir.clone(),
-        source_path: fixture_root.join("frontend").join("app.js"),
+        source_path: test_harness::three_trace_sources().join("frontend").join("app.js"),
         binary_path: PathBuf::new(),
         temp_dir: PathBuf::new(),
         language: Language::JavaScript,

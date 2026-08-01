@@ -28,8 +28,8 @@ import {
   test,
 } from "../../lib/fixtures";
 import {
-  threeTraceFixtureRoot,
   threeTraceFixtureSkipReason,
+  threeTraceRecordingRoot,
 } from "../../lib/value-origin-fixtures";
 
 // Shared with the sibling TCT-M5 spec rather than recomputed here. The
@@ -38,7 +38,12 @@ import {
 // needs five levels, not four, to reach the repo root — so `fixtureDir`
 // pointed at `<repo>/src/src/db-backend/...`, every container looked
 // missing, and the spec skipped on every run instead of ever launching.
-const fixtureDir = threeTraceFixtureRoot();
+//
+// The recordings are no longer committed: this call runs the demo
+// through the real recorders and returns the cache directory they landed
+// in, so the marker rows asserted below are the ones today's browser
+// recorder emits rather than the ones some earlier build emitted.
+const fixtureDir = threeTraceRecordingRoot();
 
 // The HTTP boundary token the fixture's `frontend/app.js` passes to
 // `__ct.markCorrelation` (`const BOUNDARY_HTTP = "account-balance";`),

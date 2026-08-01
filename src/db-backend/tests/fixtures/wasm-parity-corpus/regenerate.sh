@@ -5,17 +5,21 @@
 # it writes
 #
 #   modules/<name>/<program>.ct/          the browser recording
-#   modules/<name>/module/<name>.wasm.zst the ORIGINAL, uninstrumented
+#   modules/<name>/module/<name>.wasm     the ORIGINAL, uninstrumented
 #                                         module — what the offline
 #                                         replay is driven against
 #                                         (spec §6.1)
 #   modules/<name>/expected.json          what the page observed
-#   modules/<name>/page/<name>.instrumented.wasm(+.manifest.json)
-#                                         what the browser loaded
 #
-# and then copies the recording, the original module and the manifest
-# into `codetracer-wasm-recorder`'s testdata, where the §10 parity test
-# consumes them.
+# under `$CT_RECORDING_OUT_DIR` (the fixture directory when run by hand),
+# plus `modules/<name>/page/<name>.instrumented.wasm(+.manifest.json)` —
+# what the browser loaded — which stays beside the sources because the
+# page is served from there.
+#
+# Nothing is committed. This script used to end by copying each fresh
+# recording into `codetracer-wasm-recorder`'s testdata; that stage is
+# gone, because it made the two repos agree by construction and kept them
+# agreeing after the producer had moved.
 #
 # Nothing here fabricates trace content. If a prerequisite is missing the
 # script fails loudly rather than emitting a placeholder: a plausible
@@ -39,8 +43,15 @@ cd "$FIXTURE_DIR"
 
 WASM_INSTRUMENTER="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
-WASM_RECORDER="${CODETRACER_WASM_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-recorder}"
-RECORDER_TESTDATA="$WASM_RECORDER/cmd/wazero/testdata/boundary-log/parity-corpus"
+
+# Where the four recordings land. Nothing here is committed: each
+# recording and the ORIGINAL module the offline replay drives it against
+# are produced in the same run, so they cannot describe different builds,
+# and a change in `ct-instrument` or the browser recorder re-makes both.
+OUT_DIR="${CT_RECORDING_OUT_DIR:-$FIXTURE_DIR}"
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+export CT_RECORDING_OUT_DIR="$OUT_DIR"
 
 PREVIEW_PORT="${CORPUS_PREVIEW_PORT:-4182}"
 RECORD_WEB_PORT="${CORPUS_RECORD_WEB_PORT:-9232}"
@@ -66,7 +77,6 @@ MODULES=("$@")
 echo "[regenerate] WASM parity corpus"
 echo "[regenerate] fixture:      $FIXTURE_DIR"
 echo "[regenerate] instrumenter: $WASM_INSTRUMENTER"
-echo "[regenerate] recorder:     $WASM_RECORDER"
 echo "[regenerate] modules:      ${MODULES[*]}"
 echo
 
@@ -83,7 +93,6 @@ require_bin() {
 require_bin rustc "builds the corpus modules"
 require_bin clang "assembles pair_stats' multi-value wrapper"
 require_bin node "runs the static server and the headless driver"
-require_bin zstd "compresses the pinned modules under the repo's file-size cap"
 
 if ! rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
 	missing+=("- rustc cannot target wasm32-unknown-unknown")
@@ -145,13 +154,56 @@ echo "[regenerate] using record-web:    $RECORD_WEB_BIN"
 echo
 
 cleanup_pids=()
+
+# Drop an already-reaped pid, so the exit trap cannot later signal a
+# *recycled* process group that happens to have been given the same number.
+forget_pid() {
+	local target="$1" pid
+	local kept=()
+	for pid in "${cleanup_pids[@]:-}"; do
+		[ -n "$pid" ] || continue
+		[ "$pid" = "$target" ] || kept+=("$pid")
+	done
+	cleanup_pids=("${kept[@]:-}")
+}
+
 cleanup() {
 	for pid in "${cleanup_pids[@]:-}"; do
 		[ -n "$pid" ] || continue
 		kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
 	done
+	cleanup_pids=()
+}
+
+# Everything started below is `setsid`-detached, so it sits in its own
+# session where no terminal SIGHUP and no `kill -- -<our pgid>` can reach
+# it. This trap is therefore the only reaper in the system, and it is worth
+# being explicit about when it runs.
+#
+# Naming INT/TERM/HUP is deliberate but is *not* what fixes the orphaned
+# daemons, and it would be misleading to imply otherwise: bash already runs
+# an `EXIT` trap when the shell dies on an untrapped SIGTERM, including
+# while it is blocked in a foreground command. This was measured, not
+# assumed. What the explicit traps buy is that the reaping no longer
+# depends on that subtlety, and that a signalled run exits 128+signo
+# instead of whatever the default disposition produces.
+#
+# The real gap is SIGKILL — a CI step timeout, `timeout(1)` escalation, an
+# OOM kill — where no trap of any kind can run. That is why `record-web`
+# also stands itself down after an idle period (`--idle-timeout`, default
+# 10 minutes), which is the only defence that survives this script being
+# killed outright.
+on_signal() {
+	trap - EXIT
+	cleanup
+	# Conventional 128+signo, so a caller can tell a signalled run from a
+	# failed one.
+	exit "$1"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 wait_for_port() {
 	local port="$1" label="$2"
@@ -262,15 +314,17 @@ record_module() {
 	local program
 	program="$(program_of "$name")"
 	local dir="$FIXTURE_DIR/modules/$name"
+	local out_dir="$OUT_DIR/modules/$name"
+	mkdir -p "$out_dir"
 
 	echo "[regenerate] === $name ($program) ==="
 
 	# Everything checked; only now is anything removed.
-	rm -rf "$dir/$program.ct" \
-		"$dir/module/$name.wasm.zst" \
+	rm -rf "$out_dir/$program.ct" \
+		"$out_dir/module/$name.wasm" \
+		"$out_dir/expected.json" \
 		"$dir/page/$name.instrumented.wasm" \
-		"$dir/page/$name.instrumented.wasm.manifest.json" \
-		"$dir/expected.json"
+		"$dir/page/$name.instrumented.wasm.manifest.json"
 
 	echo "[regenerate]   1/4 building lib.rs -> wasm32-unknown-unknown"
 	build_module "$name"
@@ -280,11 +334,11 @@ record_module() {
 	# and it has to be *this* build: the recording pins export names,
 	# import indices and — for `vault_apply` — absolute linear-memory
 	# offsets, so a module compiled by a different toolchain no longer
-	# describes it. It is committed compressed because the repo caps a
-	# committed file at 500 KB and a debug build is ~0.6 MB, almost all
-	# of it the DWARF the replay needs.
-	mkdir -p "$dir/module"
-	zstd -19 -q -f -o "$dir/module/$name.wasm.zst" "$raw"
+	# describes it. Producing it in the same run as the recording is what
+	# guarantees that, and removes the zstd step that only existed to fit
+	# a *committed* module under the repo's 500 KB cap.
+	mkdir -p "$out_dir/module"
+	cp -f "$raw" "$out_dir/module/$name.wasm"
 
 	echo "[regenerate]   2/4 instrumenting with ct-instrument"
 	"$CT_INSTRUMENT_BIN" "$raw" \
@@ -312,8 +366,10 @@ record_module() {
 
 	kill -INT "$daemon" >/dev/null 2>&1 || true
 	wait "$daemon" 2>/dev/null || true
+	forget_pid "$daemon"
 	kill "$serve" >/dev/null 2>&1 || true
 	wait "$serve" 2>/dev/null || true
+	forget_pid "$serve"
 	wait_for_port_free "$RECORD_WEB_PORT" || exit 1
 	wait_for_port_free "$PREVIEW_PORT" || exit 1
 
@@ -322,34 +378,27 @@ record_module() {
 		ls -la "$out" >&2 || true
 		exit 1
 	fi
-	cp -R "$out/$program.ct" "$dir/$program.ct"
+	cp -R "$out/$program.ct" "$out_dir/$program.ct"
 	rm -rf "$out"
 
-	if [ "$name" = "vault_apply" ] && [ ! -f "$dir/$program.ct/boundary_state.json" ]; then
+	if [ "$name" = "vault_apply" ] && [ ! -f "$out_dir/$program.ct/boundary_state.json" ]; then
 		echo "[regenerate] $program.ct carries no boundary_state.json." >&2
 		echo "[regenerate] vault_apply exists to exercise spec §3.3/§3.4;" >&2
 		echo "[regenerate] a recording without the sidecar is not one." >&2
 		exit 1
 	fi
 
-	echo "[regenerate]   4/4 syncing to $RECORDER_TESTDATA/$name"
-	mkdir -p "$RECORDER_TESTDATA/$name"
-	rm -rf "${RECORDER_TESTDATA:?}/$name/$program.ct"
-	cp -R "$dir/$program.ct" "$RECORDER_TESTDATA/$name/$program.ct"
-	# Uncompressed on the recorder side: that repo has no blanket
-	# `*.wasm` ignore rule and no per-file size cap, and its Go tests
-	# hand the path straight to the CLI.
-	zstd -d -q -f -o "$RECORDER_TESTDATA/$name/$name.wasm" "$dir/module/$name.wasm.zst"
-	cp "$dir/page/$name.instrumented.wasm.manifest.json" \
-		"$RECORDER_TESTDATA/$name/$name.wasm.manifest.json"
-	cp "$dir/lib.rs" "$RECORDER_TESTDATA/$name/lib.rs"
-	cp "$dir/expected.json" "$RECORDER_TESTDATA/$name/expected.json"
-	if [ "$name" = "pair_stats" ]; then
-		# The multi-value half of the module is as much of its source as
-		# `lib.rs` is, and the recorder-side reader needs both to make
-		# sense of the boundary.
-		cp "$dir/wrap.s" "$RECORDER_TESTDATA/$name/wrap.s"
-	fi
+	# There used to be a fourth stage here that copied each fresh
+	# recording, module, manifest and source into
+	# `codetracer-wasm-recorder/cmd/wazero/testdata/boundary-log/`.
+	# That is the mechanism this work removes. It turned that repo's
+	# committed corpus into a *cache of this pipeline's output*: the two
+	# repos then agreed by construction, and the agreement kept holding
+	# after the producer changed, because the last sync had frozen it.
+	# The recorder repo now keeps its corpus as a deliberately captured
+	# vector set and checks it against this pipeline with an explicit
+	# cross-repo comparison — see that repo's
+	# `scripts/verify-vectors-against-producer.sh`.
 
 	echo
 }

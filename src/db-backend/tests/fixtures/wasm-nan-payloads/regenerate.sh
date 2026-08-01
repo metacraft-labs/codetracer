@@ -35,6 +35,16 @@ cd "$FIXTURE_DIR"
 WASM_INSTRUMENTER="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
 
+# Where the recording lands. Nothing here is committed: the recording and
+# the ORIGINAL module the offline replay is driven against (spec §6.1)
+# are produced together, so they cannot describe different builds — and a
+# change in `ct-instrument` or the browser recorder re-makes both instead
+# of being replayed against a frozen pair that no longer represents the
+# pipeline.
+OUT_DIR="${CT_RECORDING_OUT_DIR:-$FIXTURE_DIR}"
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+
 PREVIEW_PORT="${DEMO_PREVIEW_PORT:-4182}"
 RECORD_WEB_PORT="${DEMO_RECORD_WEB_PORT:-9233}"
 
@@ -51,7 +61,6 @@ require_bin() {
 
 require_bin cargo "the Rust toolchain builds the WASM tier"
 require_bin node "runs the static server and the headless driver"
-require_bin zstd "compresses the pinned module under the repo's file-size cap"
 
 if ! rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
 	missing+=("- rustc cannot target wasm32-unknown-unknown")
@@ -113,13 +122,56 @@ echo "[regenerate] using record-web:    $RECORD_WEB_BIN"
 echo
 
 cleanup_pids=()
+
+# Drop an already-reaped pid, so the exit trap cannot later signal a
+# *recycled* process group that happens to have been given the same number.
+forget_pid() {
+	local target="$1" pid
+	local kept=()
+	for pid in "${cleanup_pids[@]:-}"; do
+		[ -n "$pid" ] || continue
+		[ "$pid" = "$target" ] || kept+=("$pid")
+	done
+	cleanup_pids=("${kept[@]:-}")
+}
+
 cleanup() {
 	for pid in "${cleanup_pids[@]:-}"; do
 		[ -n "$pid" ] || continue
 		kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
 	done
+	cleanup_pids=()
+}
+
+# Everything started below is `setsid`-detached, so it sits in its own
+# session where no terminal SIGHUP and no `kill -- -<our pgid>` can reach
+# it. This trap is therefore the only reaper in the system, and it is worth
+# being explicit about when it runs.
+#
+# Naming INT/TERM/HUP is deliberate but is *not* what fixes the orphaned
+# daemons, and it would be misleading to imply otherwise: bash already runs
+# an `EXIT` trap when the shell dies on an untrapped SIGTERM, including
+# while it is blocked in a foreground command. This was measured, not
+# assumed. What the explicit traps buy is that the reaping no longer
+# depends on that subtlety, and that a signalled run exits 128+signo
+# instead of whatever the default disposition produces.
+#
+# The real gap is SIGKILL — a CI step timeout, `timeout(1)` escalation, an
+# OOM kill — where no trap of any kind can run. That is why `record-web`
+# also stands itself down after an idle period (`--idle-timeout`, default
+# 10 minutes), which is the only defence that survives this script being
+# killed outright.
+on_signal() {
+	trap - EXIT
+	cleanup
+	# Conventional 128+signo, so a caller can tell a signalled run from a
+	# failed one.
+	exit "$1"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 wait_for_port() {
 	local port="$1" label="$2"
@@ -143,8 +195,8 @@ for port in "$PREVIEW_PORT" "$RECORD_WEB_PORT"; do
 done
 
 # Everything checked; only now is anything removed.
-rm -rf "$FIXTURE_DIR/nan-payloads.ct" \
-	"$FIXTURE_DIR/module/nan_payloads.wasm.zst" \
+rm -rf "$OUT_DIR/nan-payloads.ct" \
+	"$OUT_DIR/module/nan_payloads.wasm" \
 	"$FIXTURE_DIR/page/nan_payloads.instrumented.wasm" \
 	"$FIXTURE_DIR/page/nan_payloads.instrumented.wasm.manifest.json"
 
@@ -163,12 +215,12 @@ RAW_WASM="$FIXTURE_DIR/wasm-src/target/wasm32-unknown-unknown/debug/nan_payloads
 }
 
 # The ORIGINAL module is what the offline replay runs (spec §6.1) and it
-# has to be *this* build, so it is committed alongside the recording
-# rather than left in `target/`.  Compressed because the repo caps a
-# committed file at 500 KB and a debug-built `.wasm` is mostly DWARF —
-# which is exactly the part the replay needs.
-mkdir -p "$FIXTURE_DIR/module"
-zstd -19 -q -f -o "$FIXTURE_DIR/module/nan_payloads.wasm.zst" "$RAW_WASM"
+# has to be *this* build, so it is copied out beside the recording it
+# belongs to.  Uncompressed: the zstd step existed only to fit a
+# *committed* file under the repo's 500 KB cap, and nothing here is
+# committed.
+mkdir -p "$OUT_DIR/module"
+cp -f "$RAW_WASM" "$OUT_DIR/module/nan_payloads.wasm"
 
 echo "[regenerate]     instrumenting with ct-instrument"
 "$CT_INSTRUMENT_BIN" "$RAW_WASM" \
@@ -206,14 +258,15 @@ node "$FIXTURE_DIR/drive.mjs" "$PREVIEW_PORT" "$RECORD_WEB_PORT"
 echo "[regenerate] 4/4 finalising"
 kill -INT "$RECORD_WEB_PID" >/dev/null 2>&1 || true
 wait "$RECORD_WEB_PID" 2>/dev/null || true
+forget_pid "$RECORD_WEB_PID"
 
 if [ ! -d "$RECORD_WEB_OUT/nan-payloads.ct" ]; then
 	echo "[regenerate] record-web did not produce nan-payloads.ct" >&2
 	ls -la "$RECORD_WEB_OUT" >&2 || true
 	exit 1
 fi
-cp -R "$RECORD_WEB_OUT/nan-payloads.ct" "$FIXTURE_DIR/nan-payloads.ct"
+cp -R "$RECORD_WEB_OUT/nan-payloads.ct" "$OUT_DIR/nan-payloads.ct"
 
 echo
-echo "[regenerate] wrote $FIXTURE_DIR/nan-payloads.ct"
+echo "[regenerate] wrote $OUT_DIR/nan-payloads.ct"
 echo "[regenerate] run ./verify.sh to replay it and check the bit patterns"

@@ -36,7 +36,6 @@ cd "$FIXTURE_DIR"
 WASM_RECORDER="${CODETRACER_WASM_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-recorder}"
 
 missing=()
-command -v zstd >/dev/null 2>&1 || missing+=("- zstd not on PATH (expands the pinned modules)")
 
 WAZERO_BIN="${CODETRACER_WAZERO_BIN:-}"
 if [ -z "$WAZERO_BIN" ] && [ -x "$WASM_RECORDER/wazero" ]; then
@@ -57,18 +56,32 @@ CASES=(
 	"tick_ledger:tick-ledger:24:tail_checksum"
 )
 
-for entry in "${CASES[@]}"; do
-	IFS=':' read -r name program _calls _helper <<<"$entry"
-	[ -d "$FIXTURE_DIR/modules/$name/$program.ct" ] ||
-		missing+=("- modules/$name/$program.ct is absent (run ./regenerate.sh)")
-	[ -f "$FIXTURE_DIR/modules/$name/module/$name.wasm.zst" ] ||
-		missing+=("- modules/$name/module/$name.wasm.zst is absent (run ./regenerate.sh)")
-done
-
 if [ ${#missing[@]} -gt 0 ]; then
 	echo "[verify] missing prerequisites:"
 	printf '    %s\n' "${missing[@]}"
 	exit 75
+fi
+
+# The four recordings and the four ORIGINAL modules they are replayed
+# against are produced together, from this tree. Each pair pins export
+# names, import indices and — for `vault_apply` — absolute linear-memory
+# offsets, so making them in one run is the only thing that keeps them
+# describing the same program; a stored pair would keep replaying cleanly
+# long after the instrumenter that produced it had been replaced.
+MATERIALIZED="$("$CODETRACER_ROOT/scripts/materialize-recording.sh" wasm-parity-corpus)"
+
+for entry in "${CASES[@]}"; do
+	IFS=':' read -r name program _calls _helper <<<"$entry"
+	[ -d "$MATERIALIZED/modules/$name/$program.ct" ] ||
+		missing+=("- the pipeline produced no modules/$name/$program.ct")
+	[ -f "$MATERIALIZED/modules/$name/module/$name.wasm" ] ||
+		missing+=("- the pipeline produced no modules/$name/module/$name.wasm")
+done
+
+if [ ${#missing[@]} -gt 0 ]; then
+	echo "[verify] the recording pipeline did not produce what it claims to:"
+	printf '    %s\n' "${missing[@]}"
+	exit 1
 fi
 
 WORK="$(mktemp -d)"
@@ -77,15 +90,13 @@ failed=0
 
 for entry in "${CASES[@]}"; do
 	IFS=':' read -r name program calls helper <<<"$entry"
-	dir="$FIXTURE_DIR/modules/$name"
+	dir="$MATERIALIZED/modules/$name"
 	echo "[verify] === $name ==="
-
-	zstd -d -q -f -o "$WORK/$name.wasm" "$dir/module/$name.wasm.zst"
 
 	if ! "$WAZERO_BIN" run \
 		--boundary-log="$dir/$program.ct" \
 		--out-dir="$WORK/$name-trace" \
-		"$WORK/$name.wasm" >"$WORK/$name.out" 2>"$WORK/$name.err"; then
+		"$dir/module/$name.wasm" >"$WORK/$name.out" 2>"$WORK/$name.err"; then
 		echo "[verify]     FAIL: the replay diverged:" >&2
 		cat "$WORK/$name.err" >&2
 		failed=1
