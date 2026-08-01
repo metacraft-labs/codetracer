@@ -415,7 +415,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
     inc storeIdCounter
     let assignedId = storeIdCounter
     when defined(js):
-      cerror "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
+      cdebug "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
     let store = ReplayDataStore(
       storeId: assignedId,
       # -- top-level state --
@@ -606,7 +606,7 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # handled by RequestTracker, not here.
   let current = store.debugger.val
   when defined(js):
-    cerror "[PIPELINE] updateDebuggerPosition: storeId=" &
+    cdebug "[PIPELINE] updateDebuggerPosition: storeId=" &
       $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
       $current.rrTicks & ") file=" & file & " line=" & $line
   # Construct a NEW object — on JS backend, var = signal.val gets a
@@ -641,7 +641,7 @@ proc updateLocals*(store: ReplayDataStore;
   ## Used by legacy UI code to mirror locals responses into the
   ## ViewModel layer.
   when defined(js):
-    cerror "[PIPELINE] updateLocals: setting " & $variables.len & " variables"
+    cdebug "[PIPELINE] updateLocals: setting " & $variables.len & " variables"
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
 
@@ -659,7 +659,7 @@ proc updateCodeStateLine*(store: ReplayDataStore;
     if sourceCode.len == 0: ""
     else: $line & " | " & sourceCode
   when defined(js):
-    cerror "[PIPELINE] updateCodeStateLine: storeId=" &
+    cdebug "[PIPELINE] updateCodeStateLine: storeId=" &
       $store.storeId & " line=" & $line & " has_source=" &
       $(sourceCode.len > 0)
   store.locals.codeStateLine.val = formatted
@@ -693,7 +693,7 @@ proc updateCalltraceSection*(store: ReplayDataStore;
   ## carry args (notably ``syncCalltraceData`` in
   ## ``frontend/ui/calltrace.nim``) pass the parsed map alongside lines.
   when defined(js):
-    cerror "[PIPELINE] updateCalltraceSection: storeId=" &
+    cdebug "[PIPELINE] updateCalltraceSection: storeId=" &
       $store.storeId & " setting " & $lines.len & " lines (was " &
       $store.calltrace.lines.val.len & "), startIndex=" & $startIndex &
       " totalCount=" & $totalCount

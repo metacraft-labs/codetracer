@@ -126,8 +126,17 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
   let container = dom_api.getElementById(dom_api.document, data.key)
   if dom_api.isNodeNil(dom_api.Node(container)):
     if data.retryCount mod 10 == 0:
-      cerror "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $data.retryCount
+      # Legitimate, hence DEBUG (M51).  `tryMountIsoNimStatePanel` is
+      # called before GoldenLayout has necessarily created the panel's
+      # container, so polling for it is the design, not a fault.  Only
+      # exhausting the retry budget below is a failure.
+      cdebug "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $data.retryCount
     if data.retryCount > 200:
+      # Stays at ERROR: giving up here means the state panel is never
+      # mounted for the rest of the session — the container did not appear
+      # within ~2s.  Unlike the `retry #` line above (which is expected
+      # while GoldenLayout is still building the DOM), reaching the cap is
+      # a terminal failure with a permanently blank panel as its symptom.
       cerror "[PIPELINE] tryMountIsoNimStatePanel: not ready after 200 retries, giving up"
       return
     setTimeoutWithArg(doMountStatePanel, 10, data)
@@ -137,10 +146,10 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
   while not dom_api.isNodeNil(containerNode.firstChild):
     discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-  cerror "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
+  cdebug "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
   isoNimStateMounted = true
   mountIsoNimStatePanel(container, stateVMInstance)
-  cerror "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
+  cdebug "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
 
   let panelContainer = container
   createEffect proc() =
@@ -169,9 +178,9 @@ proc tryMountIsoNimStatePanel() =
   ##   reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
-  cerror "[PIPELINE] tryMountIsoNimStatePanel: called, isoNimStateMounted=" & $isoNimStateMounted & " vmIsNil=" & $stateVMInstance.isNil
+  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, isoNimStateMounted=" & $isoNimStateMounted & " vmIsNil=" & $stateVMInstance.isNil
   if isoNimStateMounted or stateVMInstance.isNil:
-    cerror "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
+    cdebug "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
     return
 
   let mountData = StateMountData(
@@ -364,7 +373,7 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   # tokens into the same lazy-fill batch (spec §3.2.3).
   setOriginChainVM(originChainVMInstance)
   tryMountOriginSidePanel()
-  cerror "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
+  cdebug "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
   clog "StateVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimStatePanel()
 
@@ -519,7 +528,7 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
       children = toVariableChildren(v.value),
     ))
   stateVMStore.updateLocals(vmLocals)
-  cerror fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
+  cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
 
 proc lookupSourceLine(path: cstring; line: int): string =
   ## Look up the source code at `<path>:<line>` from the editor cache.
@@ -613,7 +622,7 @@ proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int;
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
   syncStoreCodeStateLine(path, line)
-  cerror fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
+  cdebug fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
 
 proc jsObjectToJson(raw: JsObject): cstring {.importjs: "JSON.stringify(#)".}
   ## Round-trip a JS object to its JSON serialisation. Used by the

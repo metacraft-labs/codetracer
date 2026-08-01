@@ -638,6 +638,27 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+  // M51: turn HMR off for ordinary GUI tests.
+  //
+  // `just build-once` compiles the renderer with `-d:ctHmr`, and
+  // `hmr_runtime.isHmrRequested()` defaults to ON when CT_HMR is unset.  So
+  // every test launch tried to reach the LiveReload daemon at
+  // ws://localhost:35729, which is not running under the test harness, and
+  // Chromium logged `WebSocket connection ... failed: ERR_CONNECTION_REFUSED`
+  // as a console *error*.  That line is emitted by the network stack, not by
+  // page JS, so it cannot be demoted at the source — the only way to not log
+  // it is to not attempt the connection.
+  //
+  // Disabling HMR here is right on its own merits, independently of the log
+  // line: a test run has no file watcher, and a bundle swapped underneath a
+  // running spec is a source of nondeterminism, not a feature.
+  //
+  // The HMR suite is unaffected: `tests/hmr/hmr_views_and_styles.spec.ts`
+  // builds its launch environment with its own `makeHmrEnv()`, which starts
+  // from `process.env` (untouched here — `env` is a local copy) and
+  // explicitly `delete`s CT_HMR to opt back in against a daemon it starts
+  // itself.
+  env.CT_HMR = "0";
   env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
   // Bypass the Electron single-instance lock so that concurrent test runs
   // (or stale Electron processes from previous runs) do not prevent this
@@ -1031,9 +1052,16 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
     try {
       ctPrefix = (window as any).require("process").env.CODETRACER_PREFIX ?? "(undefined)";
     } catch { /* renderer may not have Node integration */ }
-    console.error(`[diag] scripts: ${info.join("; ")}`);
-    console.error(`[diag] globals: ${JSON.stringify(globals)}`);
-    console.error(`[diag] CODETRACER_PREFIX: ${ctPrefix}`);
+    // `console.info`, not `console.error` (M51).  These three lines are the
+    // harness describing a healthy page, not the page reporting a fault —
+    // and emitting them at ERROR put the collector's own output into the
+    // very bucket `verify_clean_console_on_trace_open` asserts is empty.
+    // They are still captured: `CODETRACER_TEST_CONSOLE_DUMP_PATH` and
+    // `CODETRACER_TEST_LOG_ALL_CONSOLE=1` record every console level, and
+    // the failure dump attaches the whole bucket.
+    console.info(`[diag] scripts: ${info.join("; ")}`);
+    console.info(`[diag] globals: ${JSON.stringify(globals)}`);
+    console.info(`[diag] CODETRACER_PREFIX: ${ctPrefix}`);
   }).catch(() => { /* page may be closed */ });
 }
 
