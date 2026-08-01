@@ -30,14 +30,14 @@
 (dap-register-debug-provider
  "rust"
  (lambda (conf)
-   (plist-put conf :dap-server-path "/home/alexander92/codetracer/src/build-debug/bin/db-backend")
+   (plist-put conf :dap-server-path "/home/user/codetracer/src/build-debug/bin/db-backend")
    conf))
 
 (dap-register-debug-template "CodeTracer db-backend rust"
                              (list :type "rust"
                                    :request "launch"
                                    :args "--stdio"
-                                   :traceFolder "/home/alexander92/.local/share/codetracer/trace-414/"
+                                   :traceFolder "/home/user/.local/share/codetracer/trace-414/"
                                    :name "CodeTracer db-backend rust"))
 
 (toggle-debug-on-error)

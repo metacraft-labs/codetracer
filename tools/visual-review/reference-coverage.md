@@ -1,6 +1,6 @@
 # Storybook Reference Coverage
 
-<!-- cspell:ignore Karax karax worktree zahary isonim viewmodel -->
+<!-- cspell:ignore Karax karax worktree isonim viewmodel -->
 <!-- cspell:ignore deepreview capturable -->
 
 This file tracks Karax reference captures used for IsoNim visual parity work.
@@ -8,14 +8,21 @@ Generated screenshots, HTML dumps, and computed-style dumps are intentionally
 kept out of this repository; the rows below point to the local reference
 worktree artifacts that agents should compare against.
 
+Paths are given relative to the reference-dump root, written below as
+`$CT_REFERENCE_DUMPS`. It defaults to `ui-tests/reference-dumps/` inside the
+checkout and can be pointed at a local capture worktree instead — the same
+variable `src/tests/gui/tests/session-chrome/new-trace-caption-chrome.spec.ts`
+reads. The captures themselves are not distributed with the repository, so an
+unset root simply means the reference-fact diagnostics stay empty.
+
 ## Reference Sets
 
 - Full default/scratchpad/terminal baseline:
-  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T155511Z/`
+  `$CT_REFERENCE_DUMPS/isonim-karax-reference-20260504T155511Z/`
 - Expanded panel baseline:
-  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T220906Z/`
+  `$CT_REFERENCE_DUMPS/isonim-karax-reference-20260504T220906Z/`
 - Expanded panel baseline with isolated layout config:
-  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T222307Z/`
+  `$CT_REFERENCE_DUMPS/isonim-karax-reference-20260504T222307Z/`
 
 Some old Karax panels were less developed than current IsoNim surfaces. Use
 these references for mature shell, Golden Layout, design-system class, and

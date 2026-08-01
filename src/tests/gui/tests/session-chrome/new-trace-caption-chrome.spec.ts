@@ -3,9 +3,17 @@ import { retry, retryAction } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import type { Page, TestInfo } from "@playwright/test";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
+// The Karax reference dumps are deliberately kept out of the repository
+// (see tools/visual-review/reference-coverage.md).  Resolve them relative to
+// the checkout rather than to one contributor's home directory, and allow an
+// explicit override for whoever holds a local capture worktree.  Every read
+// below is guarded by `fs.existsSync`, so an absent directory simply yields
+// no reference facts — the diagnostics are optional, never required.
 const ReferenceDumpRoot =
-  "/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps";
+  process.env.CT_REFERENCE_DUMPS ??
+  path.resolve(__dirname, "../../../../..", "ui-tests/reference-dumps");
 const ReferenceMenuDump =
   `${ReferenceDumpRoot}/isonim-karax-reference-20260504T220906Z/20260504T220925Z_noir-menu-view-open.html`;
 const ReferenceCommandPaletteDump =

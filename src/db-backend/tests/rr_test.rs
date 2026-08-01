@@ -53,7 +53,7 @@
 //         session_id: None,
 //         // TODO: env var, or taking from $PATH, or from local or test config?
 //         recreator_exe: Some(PathBuf::from(
-//             "/home/nedy/codetracer-native-backend/src/build-debug/bin/ct-rr-worker",
+//             "/home/user/codetracer-native-backend/src/build-debug/bin/ct-rr-worker",
 //         )),
 //     };
 //     let launch = client.launch(launch_args).unwrap();

@@ -129,7 +129,7 @@ in
         binaries that pass the basename + ownership checks. Leave empty if you
         always pass an explicit path (the build graph does).
       '';
-      example = "/home/zahary/metacraft/codetracer";
+      example = "/home/myuser/metacraft/codetracer";
     };
   };
 
