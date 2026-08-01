@@ -1,9 +1,16 @@
 /**
  * Auto-hide panes E2E tests.
  *
- * Verifies the pin-to-edge workflow: pinning panels to edge strips,
- * opening overlays via strip tabs, unpinning back to the GL layout,
- * and dismissing overlays via Escape / backdrop click.
+ * Verifies the pin-to-edge workflow: pinning panels to edge strips, docking
+ * a panel by clicking its strip tab, previewing it in the slide-in overlay by
+ * hovering the tab, unpinning back to the GL layout, and dismissing the
+ * overlay via Escape / backdrop click.
+ *
+ * **Click docks, hover previews.**  Every test below that opens
+ * `#auto-hide-overlay` does so by *hovering* a strip tab.  A click reparents
+ * the panel into `#auto-hide-docked-<edge>-content` instead and never touches
+ * the overlay — see the contract note in `page-objects/auto-hide-strip.ts`
+ * for why (commit `03b787734`).
  *
  * DOM elements under test (defined in index.html and rendered by
  * auto_hide.nim / auto_hide_overlay.nim):
@@ -15,22 +22,43 @@
  *                                  redesign wrapper element is retired —
  *                                  see page-objects/auto-hide-strip.ts)
  *   .auto-hide-strip-tab         — individual tab within a strip
- *   #auto-hide-overlay           — slide-in overlay container
- *   #auto-hide-overlay-title     — title text inside overlay header
- *   #auto-hide-overlay-unpin-btn — "Unpin" button in overlay header
- *   #auto-hide-overlay-close-btn — close button in overlay header
+ *   #auto-hide-docked-bottom     — inline docked container a tab CLICK opens
+ *   #auto-hide-overlay           — slide-in overlay container a tab HOVER opens
+ *   #auto-hide-overlay-title     — title text inside the (hidden) overlay
+ *                                  header; readable in the DOM, never painted
+ *   #context-menu-container      — right-click menu on a strip tab; its
+ *                                  "Unpin" item is the ONLY unpin affordance
+ *                                  left (the overlay header is display:none
+ *                                  since a6151510e, and the per-tab buttons
+ *                                  that replaced it were deleted in 1af471302)
  *   #auto-hide-backdrop          — click-to-dismiss backdrop behind overlay
  *   .layout-buttons-container    — GL stack header dropdown toggle
  *   .layout-dropdown-node        — individual item inside the dropdown
+ *
+ * No mocks: a real JavaScript recording opened by the real Electron app.
+ * The strip/overlay DOM is built by `layout.nim` the same way for every
+ * recorded language — see `lib/js-trace-fixture.ts`
+ * `recordChromeTraceFixture`.
  */
 
-import { test, expect, wait } from "../../lib/fixtures";
+import { test, expect } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
 import {
   DEFAULT_BOTTOM_TAB_COUNT,
+  DOCKED_OPEN_CLASS,
+  OVERLAY_BACKDROP_SELECTOR,
+  OVERLAY_CONTENT_SELECTOR,
+  OVERLAY_SELECTOR,
+  OVERLAY_TITLE_SELECTOR,
   allStripTabs,
   bottomStripTab,
   bottomStripTabs,
+  dockedContainer,
+  dockedContent,
+  openDockedPanelFromTab,
+  openOverlayFromTab,
+  unpinFromStripTabContextMenu,
   waitForDefaultBottomTabs,
 } from "../../page-objects/auto-hide-strip";
 
@@ -136,9 +164,11 @@ async function pinToEdge(
 // Test suite
 // ---------------------------------------------------------------------------
 
+const fixture = recordChromeTraceFixture("auto-hide-panes");
+
 test.describe("Auto-hide panes", () => {
   test.setTimeout(120_000);
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
   test("strip tabs hidden when no panels pinned", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
@@ -208,7 +238,7 @@ test.describe("Auto-hide panes", () => {
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
   });
 
-  test("strip tab click shows overlay", async ({ ctPage }) => {
+  test("strip tab click docks the panel", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
@@ -218,24 +248,61 @@ test.describe("Auto-hide panes", () => {
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
-    // Click the strip tab matching the pinned panel.
+    // Click the strip tab matching the pinned panel.  A click DOCKS: the
+    // panel's live element is reparented into the inline bottom container,
+    // which expands and takes space from GoldenLayout.  (Before commit
+    // 03b787734 a click opened the floating overlay instead; this test used
+    // to assert that, and could not have passed since.)
     const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await expect(stripTab).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
+    await openDockedPanelFromTab(ctPage, stripTab, "bottom", WAIT_TIMEOUT_MS);
+
+    // The pinned panel's live element now lives in the docked content host.
+    await expect(
+      dockedContent(ctPage, "bottom").locator("> *"),
+    ).toHaveCount(1, { timeout: WAIT_TIMEOUT_MS });
+
+    // And the floating overlay is NOT what a click produces.
+    await expect(ctPage.locator(OVERLAY_SELECTOR)).not.toHaveClass(/\bvisible\b/);
+
+    // Clicking the same tab again toggles the docked panel closed.
     await stripTab.click();
-
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    const overlayTitle = ctPage.locator("#auto-hide-overlay-title");
-
-    await expect(async () => {
-      // The overlay should become visible (has the "visible" CSS class).
-      await expect(overlay).toHaveClass(/visible/, { timeout: 1000 });
-
-      // The overlay title should match the pinned panel.
-      await expect(overlayTitle).toHaveText(pinnedTitle, { timeout: 1000 });
-    }).toPass({ timeout: WAIT_TIMEOUT_MS });
+    await expect(dockedContainer(ctPage, "bottom")).not.toHaveClass(
+      new RegExp(`\\b${DOCKED_OPEN_CLASS}\\b`),
+      { timeout: WAIT_TIMEOUT_MS },
+    );
   });
 
-  test("overlay unpin restores panel", async ({ ctPage }) => {
+  test("strip tab hover shows overlay", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForBaseComponentsLoaded();
+    await layout.waitForTraceLoaded();
+
+    // Wait for default bottom tabs to appear.
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+
+    const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
+
+    // Hover the strip tab matching the pinned panel.  Hovering is what opens
+    // the slide-in overlay of Auto-Hide-Panes.md §3.3.
+    const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
+    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
+
+    // The overlay title should match the previewed panel, and the panel's
+    // live element should have been reparented into the overlay body.
+    await expect(ctPage.locator(OVERLAY_TITLE_SELECTOR)).toHaveText(pinnedTitle, {
+      timeout: WAIT_TIMEOUT_MS,
+    });
+    await expect(
+      ctPage.locator(`${OVERLAY_CONTENT_SELECTOR} > *`),
+    ).toHaveCount(1, { timeout: WAIT_TIMEOUT_MS });
+
+    await ctPage.keyboard.press("Escape");
+    await expect(ctPage.locator(OVERLAY_SELECTOR)).not.toHaveClass(/\bvisible\b/, {
+      timeout: WAIT_TIMEOUT_MS,
+    });
+  });
+
+  test("unpin from an open overlay restores the panel", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
@@ -246,29 +313,25 @@ test.describe("Auto-hide panes", () => {
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
-    // Open the overlay by clicking the strip tab for the pinned panel.
+    // Open the overlay by hovering the strip tab for the pinned panel.
     const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await stripTab.click();
+    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
 
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(async () => {
-      await expect(overlay).toHaveClass(/visible/, { timeout: 1000 });
-    }).toPass({ timeout: WAIT_TIMEOUT_MS });
+    const overlay = ctPage.locator(OVERLAY_SELECTOR);
 
-    // Click "Unpin" to restore the panel back into GL.
-    const unpinBtn = ctPage.locator("#auto-hide-overlay-unpin-btn");
-    await expect(unpinBtn).toBeVisible();
-
+    // Unpin to restore the panel back into GL.  This used to click
+    // `#auto-hide-overlay-unpin-btn`; the overlay header row has been
+    // `display: none !important` since commit a6151510e, which moved the
+    // close/unpin affordances onto the strip tab itself.  The bottom strip's
+    // tabs carry no buttons, so its unpin affordance is the tab context menu
+    // — the same `hideOverlay(); hideDockedPanel(); unpinPanel(...)` handler.
     const layoutUpdatedPromise = ctPage.evaluate(() => {
       return new Promise<void>((resolve) => {
         window.addEventListener('ct:layoutUpdated', () => resolve(), { once: true });
       });
     });
 
-    await ctPage.evaluate(() => {
-      const btn = document.getElementById("auto-hide-overlay-unpin-btn");
-      if (btn) btn.click();
-    });
+    await unpinFromStripTabContextMenu(ctPage, stripTab, WAIT_TIMEOUT_MS);
 
     await layoutUpdatedPromise;
 
@@ -300,16 +363,14 @@ test.describe("Auto-hide panes", () => {
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
-    // Open the overlay by clicking the pinned panel's strip tab.
+    // Open the overlay by hovering the pinned panel's strip tab.
     const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await stripTab.click();
+    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
 
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(async () => {
-      await expect(overlay).toHaveClass(/visible/, { timeout: 1000 });
-    }).toPass({ timeout: WAIT_TIMEOUT_MS });
+    const overlay = ctPage.locator(OVERLAY_SELECTOR);
 
-    // Press Escape to dismiss.
+    // Press Escape to dismiss.  The pointer stays on the tab, so nothing
+    // else can be dismissing the overlay at this moment.
     await ctPage.keyboard.press("Escape");
 
     await expect(async () => {
@@ -334,17 +395,18 @@ test.describe("Auto-hide panes", () => {
 
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
-    // Open the overlay by clicking the pinned panel's strip tab.
+    // Open the overlay by hovering the pinned panel's strip tab.  The panel
+    // is on the BOTTOM edge, and `setupMouseLeaveDismissal` arms its
+    // mouse-leave timer only on the overlay and the two SIDE strips — so
+    // moving the pointer to the backdrop below cannot itself dismiss the
+    // overlay, and the assertion still measures the backdrop click.
     const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await stripTab.click();
+    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
 
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(async () => {
-      await expect(overlay).toHaveClass(/visible/, { timeout: 1000 });
-    }).toPass({ timeout: WAIT_TIMEOUT_MS });
+    const overlay = ctPage.locator(OVERLAY_SELECTOR);
 
     // Click the backdrop to dismiss.
-    const backdrop = ctPage.locator("#auto-hide-backdrop");
+    const backdrop = ctPage.locator(OVERLAY_BACKDROP_SELECTOR);
     // The backdrop may be zero-sized when not shown; force the click
     // at a known position to ensure the event fires.
     await backdrop.click({ force: true });
@@ -506,7 +568,7 @@ test.describe("Auto-hide panes", () => {
       hasText: editorTitle,
     });
     const leftTabs = ctPage.locator("#auto-hide-strip-left .auto-hide-strip-tab");
-    const overlay = ctPage.locator("#auto-hide-overlay");
+    const overlay = ctPage.locator(OVERLAY_SELECTOR);
 
     await expect(async () => {
       // The editor tab should no longer be visible in the GL layout.
@@ -516,25 +578,26 @@ test.describe("Auto-hide panes", () => {
       await expect(leftTabs).toHaveCount(1, { timeout: 1000 });
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
 
-    // Click the left strip tab to open the overlay.
-    await leftTabs.first().click();
+    // Hover the left strip tab to open the overlay (a click would dock the
+    // editor inline instead — see page-objects/auto-hide-strip.ts).
+    await openOverlayFromTab(ctPage, leftTabs.first(), WAIT_TIMEOUT_MS);
 
-    await expect(async () => {
-      // Overlay should be visible.
-      await expect(overlay).toHaveClass(/visible/, { timeout: 1000 });
-    }).toPass({ timeout: WAIT_TIMEOUT_MS });
-
-    // Click "Unpin" button in the overlay header.
-    const unpinBtn = ctPage.locator("#auto-hide-overlay-unpin-btn");
-    await expect(unpinBtn).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
-
+    // Unpin through the tab's context menu.  This used to click
+    // `#auto-hide-overlay-unpin-btn`; a6151510e hid the overlay header row
+    // outright ("the active strip tab acts as the panel header") and moved the
+    // buttons onto the tab, then 1af471302 deleted those buttons too, leaving
+    // the context menu f214d703b had just added as the only unpin affordance.
+    // Right-clicking keeps the pointer inside the left strip, so the 300 ms
+    // mouse-leave dismissal `auto_hide_overlay.nim` arms on strip exit is
+    // never started and the "overlay hidden" assertion below still measures
+    // the unpin rather than an auto-dismiss.
     const layoutUpdatedPromise = ctPage.evaluate(() => {
       return new Promise<void>((resolve) => {
         window.addEventListener('ct:layoutUpdated', () => resolve(), { once: true });
       });
     });
 
-    await unpinBtn.click();
+    await unpinFromStripTabContextMenu(ctPage, leftTabs.first(), WAIT_TIMEOUT_MS);
 
     await layoutUpdatedPromise;
 

@@ -22,12 +22,29 @@
 ##      captures the live DOM element from the GL container, and stores
 ##      both the element reference and serialised config in `AutoHideState`.
 ##   3. A thin strip tab appears on the chosen edge.
-##   4. Clicking the strip tab calls `showOverlay` which reparents the
-##      LIVE DOM element into the overlay container — content is visible
-##      immediately with full state preserved.
-##   5. The overlay has an "Unpin" button (`unpinPanel`) that re-adds
-##      the component to GL via `addItem`, then swaps the new container's
-##      content with the preserved live DOM element.
+##   4. The strip tab has TWO gestures with two different results, and
+##      this is the step most often misremembered (see the strip
+##      callbacks' `onSelect` / `onHoverEnter` below):
+##        - **Click** calls `showDockedPanel`, which reparents the LIVE
+##          DOM element into `#auto-hide-docked-<edge>-content`, marks
+##          the container `docked-open` and resizes GoldenLayout so the
+##          panel takes space rather than floating. Clicking the same
+##          tab again collapses it. `#auto-hide-overlay` is not involved.
+##        - **Hover** (after `HOVER_PREVIEW_DELAY_MS`) calls
+##          `showOverlayPreview` -> `showOverlay`, which reparents the
+##          same live element into the floating overlay instead.
+##      Either way content is visible immediately with full state
+##      preserved. Before 2026-07 a click opened the overlay; a good
+##      deal of the GUI suite still assumed that long after it stopped
+##      being true, so do not restore the old wording without checking
+##      `onSelect`.
+##   5. Unpinning (`unpinPanel`) re-adds the component to GL via
+##      `addItem`, then swaps the new container's content with the
+##      preserved live DOM element. It is reached from the strip tab's
+##      right-click context menu; the overlay header's own Unpin/Close
+##      buttons are styled `display: none !important` and the per-tab
+##      close/unpin buttons were removed, so the context menu is the
+##      only affordance.
 ##
 ## Persistence: auto-hide state is saved alongside the GL layout config
 ## via `serializeAutoHideState` / `restoreAutoHideState`. Restored panels

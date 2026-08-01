@@ -3,22 +3,35 @@
  *
  * Verifies:
  * - BUILD, PROBLEMS, and SEARCH RESULTS tabs are present as auto-hide bottom tabs
- * - Clicking the BUILD tab opens the overlay with the build panel and its header
+ * - Clicking the BUILD tab docks the build panel and renders its header
  * - Clicking the PROBLEMS tab shows the problems panel (empty state)
+ *
+ * Clicking a strip tab DOCKS the panel into `#auto-hide-docked-bottom`; it
+ * does not open `#auto-hide-overlay`, which is the hover-preview surface.
+ * See the contract note in `page-objects/auto-hide-strip.ts`.
+ *
+ * No mocks: a real JavaScript recording opened by the real Electron app.  The
+ * bottom strip and its standalone panes are built by `layout.nim` identically
+ * for every recorded language — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   BOTTOM_STRIP_TAB_SELECTOR,
+  DOCKED_BOTTOM_CONTENT_SELECTOR,
+  openBottomPanel,
   waitForDefaultBottomTabs,
 } from "../../page-objects/auto-hide-strip";
 
+const fixture = recordChromeTraceFixture("build-panel-e2e");
+
 test.describe("Build panel tabs as auto-hide bottom tabs", () => {
   test.setTimeout(120_000);
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
   test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
   test.afterAll(() => restoreUserLayout());
@@ -82,19 +95,12 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     // Wait for auto-hide bottom tabs to appear.
     await waitForDefaultBottomTabs(ctPage);
 
-    // Click the BUILD auto-hide tab to open the overlay.
-    const buildTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
-      hasText: "BUILD",
-    });
-    await buildTab.click();
-    await wait(500);
+    // Click the BUILD auto-hide tab to dock the build panel.
+    await openBottomPanel(ctPage, "BUILD");
 
-    // The overlay should become visible.
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
-
-    // After clicking, the build panel (#build) should be visible inside the overlay.
-    const buildPanel = ctPage.locator("#auto-hide-overlay-content #build");
+    // After clicking, the build panel (#build) should be visible inside the
+    // docked bottom container.
+    const buildPanel = ctPage.locator(`${DOCKED_BOTTOM_CONTENT_SELECTOR} #build`);
     const visible = await retry(
       async () => {
         if ((await buildPanel.count()) === 0) return false;
@@ -106,7 +112,9 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     expect(visible).toBe(true);
 
     // The build panel should contain the header controls area.
-    const header = ctPage.locator("#auto-hide-overlay-content .build-header-controls");
+    const header = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} .build-header-controls`,
+    );
     const headerPresent = (await header.count()) > 0;
     expect(headerPresent).toBe(true);
   });
@@ -119,19 +127,13 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     // Wait for auto-hide bottom tabs to appear.
     await waitForDefaultBottomTabs(ctPage);
 
-    // Click the PROBLEMS auto-hide tab to open the overlay.
-    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
-      hasText: "PROBLEMS",
-    });
-    await problemsTab.click();
-    await wait(500);
+    // Click the PROBLEMS auto-hide tab to dock the problems panel.
+    await openBottomPanel(ctPage, "PROBLEMS");
 
-    // The overlay should become visible.
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
-
-    // The problems panel should become visible inside the overlay.
-    const errorsContainer = ctPage.locator("#auto-hide-overlay-content #errorsComponent-0");
+    // The problems panel should become visible inside the docked container.
+    const errorsContainer = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} #errorsComponent-0`,
+    );
     const containerVisible = await retry(
       async () => {
         if ((await errorsContainer.count()) === 0) return false;
@@ -142,11 +144,13 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
 
     expect(containerVisible).toBe(true);
 
-    // For py_console_logs (a simple Python trace), there should be no
-    // build errors. If the Karax renderer has populated the container,
-    // verify the empty state; otherwise the container being visible is
-    // sufficient since the component initialises lazily.
-    const problemsPanel = ctPage.locator("#auto-hide-overlay-content .problems-panel");
+    // The fixture recording involves no build step, so there should be no
+    // build errors. If the renderer has populated the container, verify the
+    // empty state; otherwise the container being visible is sufficient since
+    // the component initialises lazily.
+    const problemsPanel = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} .problems-panel`,
+    );
     if ((await problemsPanel.count()) > 0) {
       const rows = problemsPanel.locator(".problems-row");
       const rowCount = await rows.count();

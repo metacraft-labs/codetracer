@@ -97,3 +97,34 @@ export function recordJsTraceFixture(
   fs.renameSync(path.join(recorderOut, traceSubdir.name), traceDir);
   return { traceDir, sourcePath };
 }
+
+/**
+ * A few statements over three lines — enough for the app to open a trace,
+ * mount an editor, and populate the status bar, and nothing more.
+ */
+const CHROME_FIXTURE_PROGRAM =
+  "var a = 1;\nvar b = a + 1;\nconsole.log(a, b);\n";
+
+/**
+ * Record the standard "any real trace will do" fixture.
+ *
+ * Specs about the app's *chrome* — the auto-hide strips, the docked panels
+ * and the slide-in overlay, the BUILD / PROBLEMS / SEARCH RESULTS panes, the
+ * status bar — assert on DOM that `ui/layout.nim` and `ui/auto_hide.nim`
+ * build identically for every recorded language.  Pinning them to a Python
+ * program made them silently unrunnable wherever the Python recorder is not
+ * installed (`codetracer_python_recorder` is a PyO3/maturin extension, not a
+ * pure-Python package), which is how eight of them went unexecuted long
+ * enough to accumulate a suite-wide dead selector and a retired click
+ * contract.  The JavaScript recorder is the cheapest real recorder in the dev
+ * shell — no virtualenv, no native extension — so these specs record through
+ * it and stay runnable by default.
+ *
+ * This is not a reduction in language coverage: Python trace-open coverage
+ * lives in the specs that are actually *about* Python (`tests/languages/**`,
+ * `tests/integration/real_backend.nim`) and in the other `py_console_logs`
+ * users, none of which this helper touches.
+ */
+export function recordChromeTraceFixture(name: string): JsTraceFixture {
+  return recordJsTraceFixture(name, CHROME_FIXTURE_PROGRAM);
+}

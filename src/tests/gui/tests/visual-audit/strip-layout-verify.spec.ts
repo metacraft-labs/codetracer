@@ -3,8 +3,13 @@
  *   1. Left strip is BESIDE GL (GL content starts after the strip, no overlap)
  *   2. Bottom labels are IN the status bar footer (not a separate strip)
  *   3. GL container shrinks when strips have tabs
+ *
+ * No mocks: a real JavaScript recording opened by the real Electron app.  The
+ * strips and their standalone panes are built by `layout.nim` identically for
+ * every recorded language — see `lib/js-trace-fixture.ts`.
  */
 import { test, expect } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
 import {
   BOTTOM_STRIP_IN_FOOTER_SELECTOR,
@@ -44,19 +49,18 @@ async function pinToEdge(
   await wait(1500);
 }
 
+const fixture = recordChromeTraceFixture("strip-layout-verify");
+
 test.describe("Strip layout verification", () => {
   test.setTimeout(120_000);
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
-  // FAILING: 2026-05-01 — same root cause as
-  // comprehensive-v2.spec.ts "Screen 6: Auto-hide left overlay".
-  // After `pinToEdge("Left", 0)` the auto-hide strip's `has-tabs`
-  // class is set but the strip is empty / zero-width, so the
-  // `expect(leftStripBox!.width).toBeGreaterThanOrEqual(20)`
-  // assertion fails (width is 0).
-  // TODO: see comprehensive-v2.spec.ts "Screen 6" TODO. Fix the
-  // auto-hide pin → strip-tab rendering path; this test will pass
-  // automatically.
+  // Was marked FAILING (2026-05-01) with "after `pinToEdge(\"Left\", 0)` the
+  // strip's `has-tabs` class is set but the strip is empty / zero-width".
+  // That note is retired: this test passes.  It could not have been observed
+  // failing for that reason after the status-bar redesign, because the file
+  // could not run at all — it recorded `py_console_logs/main.py` and needed
+  // the Python recorder.  It now records through `lib/js-trace-fixture.ts`.
   test("strips tile with GL, bottom tabs in status bar", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();

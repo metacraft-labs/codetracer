@@ -1,8 +1,18 @@
 ## Auto-hide overlay: the slide-in panel that appears when the user
-## clicks a strip tab.
+## HOVERS a strip tab.
+##
+## Hover, not click: a click docks the panel inline instead (see
+## `auto_hide.nim`'s usage-flow note and the strip callbacks' `onSelect`
+## vs `onHoverEnter`). A click opened this overlay until 2026-07, and
+## much of the GUI suite went on asserting that for a month afterwards,
+## so the distinction is worth keeping in the first sentence.
 ##
 ## This module provides the overlay rendering logic and header controls
-## (title, unpin button, close button). The overlay is an absolutely
+## (title, unpin button, close button). **The header row is currently
+## styled `display: none !important`** — the active strip tab acts as
+## the panel header and unpin/close are reached from its right-click
+## context menu — so the header controls below are rendered but never
+## painted. The overlay is an absolutely
 ## positioned container that slides in from the pinned edge with a CSS
 ## transition.
 ##
