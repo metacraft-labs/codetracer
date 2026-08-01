@@ -28,6 +28,28 @@ build-docs:
 capture-docs-visual-screenshots:
   bash scripts/docs/capture-visual-recording-screenshots.sh
 
+# Regenerate the isonim book's checked-in screenshots.
+#
+# `docs/book-isonim/static/img/visual_recordings/*.png` were placeholders with
+# a PLACEHOLDERS.txt admitting the capture step was never wired: the capture
+# script existed but only ever wrote into the OLD mdBook's generated/ tree,
+# which is not checked in and which the new book does not read. The images the
+# published book actually serves were therefore the only ones nothing could
+# reproduce.
+#
+# The script already takes its destination from the environment, so wiring is
+# a matter of pointing it at the new book rather than new capture code.
+#
+# It needs a built `ct_gfx_player` (codetracer-visual-replay) and a built
+# `ct_cli` (codetracer-native-recorder), and it FAILS with a named remedy and
+# a non-zero status when either is missing -- it does not quietly leave the
+# stale images in place.
+capture-book-assets:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  CODETRACER_BOOK_SCREENSHOT_DIR="$(pwd)/docs/book-isonim/static/img/visual_recordings" \
+    bash scripts/docs/capture-visual-recording-screenshots.sh
+
 capture-docs-visual-page:
   #!/usr/bin/env bash
   set -euo pipefail

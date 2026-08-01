@@ -1381,3 +1381,24 @@ package codeTracer:
         extraInputsValue = @[bookDir & "/nim.cfg"],
         afterValue = @[bookNimCfg])
       target("docs-book", bookSite)
+
+      # Regenerating the book's screenshots is a SEPARATE target, deliberately
+      # not a dependency of `docs-book`.  The capture drives a real GL trace
+      # through the real visual-replay player, so it needs a GPU-capable
+      # player and two recorder siblings; making the doc build depend on that
+      # would make the docs unpublishable whenever the capture environment is
+      # unavailable.  The images are therefore checked in, and this is the
+      # documented way to refresh them.
+      #
+      # The images cannot silently rot: the book's own suite resolves every
+      # `/assets/...` link against the static tree, so a page may only
+      # reference an image that exists.
+      let bookAssets = ctShell(
+        actionIdValue = "docs-book-assets",
+        commandValue = "CODETRACER_BOOK_SCREENSHOT_DIR=$PWD/" & bookDir &
+          "/static/img/visual_recordings " &
+          "bash scripts/docs/capture-visual-recording-screenshots.sh",
+        extraInputsValue =
+          @["scripts/docs/capture-visual-recording-screenshots.sh"],
+        cacheableValue = false)
+      target("docs-book-assets", bookAssets)

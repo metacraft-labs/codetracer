@@ -1,5 +1,0 @@
-Placeholder screenshots for usage_guide/visual_recordings.
-The real captures are produced by the Playwright screenshot suite into
-codetracer/docs/book/src/generated/visual_recordings/ (not checked in).
-Replace these three PNGs with the generated captures when wiring the
-capture step; the content references /assets/img/visual_recordings/*.png.
