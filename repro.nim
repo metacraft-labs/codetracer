@@ -1316,3 +1316,68 @@ package codeTracer:
       after = @[buildCDir])
     target("c-sudoku-object-with-generated-header",
       cSudokuObjectWithGeneratedHeader)
+
+    # ---------------------------------------------------------------------
+    # Documentation (docs/book-isonim) as build-graph edges.
+    #
+    # The book is an isonim-docs SSG site whose build needs eight sibling
+    # source trees on the Nim path.  `ci/deploy/docs.sh` discovers those and
+    # writes a `nim.cfg` immediately before building, then deletes it -- which
+    # means the path set exists only for the duration of that script and
+    # nothing else (an editor, a test run, a developer typing `just build`)
+    # can reproduce it.  Declaring it here makes the same set a tracked
+    # graph input instead of a side effect of one shell script.
+    #
+    # Editing a single `content/*.md` re-runs the SSG and the two suites that
+    # need a rendered `public/`, and nothing else -- which is the property
+    # that makes regenerable documentation assets practical rather than a
+    # thing everyone skips.
+    #
+    # The book is SKIPPED rather than failed when its siblings are absent:
+    # isonim-docs is a recent addition to the codetracer project manifest, so
+    # a workspace synced before that lands has no checkout to build against.
+    block docsBookIsonim:
+      let bookDir = "docs/book-isonim"
+      if not dirExists(projectRoot / bookDir):
+        break docsBookIsonim
+      let ws = codeTracerWorkspaceRoot(projectRoot)
+      if ws.len == 0:
+        break docsBookIsonim
+
+      # The eight paths ci/deploy/docs.sh writes, in its order.  A missing
+      # sibling aborts the whole block: half a path set produces a confusing
+      # "cannot open file" deep inside the SSG rather than an honest skip.
+      const BookSiblingPaths = [
+        ("isonim-docs", "src"), ("isonim", "src"),
+        ("nim-everywhere", "src"), ("nim-faststreams", ""),
+        ("nim-stew", ""), ("isonim", "vendor/chronicles"),
+        ("isonim", "vendor/serialization"),
+        ("isonim", "vendor/json_serialization")]
+      var cfgLines: seq[string] = @[]
+      var missingSibling = false
+      for (repoName, subPath) in BookSiblingPaths:
+        let repoRoot = siblingPath(ws, repoName)
+        if repoRoot.len == 0:
+          missingSibling = true
+          break
+        let full = if subPath.len > 0: repoRoot / subPath else: repoRoot
+        cfgLines.add("--path:\"" & full & "\"")
+      if missingSibling:
+        break docsBookIsonim
+
+      let bookNimCfg = fs.writeText(
+        output = bookDir & "/nim.cfg",
+        text = cfgLines.join("\n") & "\n")
+      target("docs-book-nim-cfg", bookNimCfg)
+
+      # `src/build.nim` shells out to a nested `nim js` for the client bundle,
+      # and that child inherits the path set only through nim.cfg -- which is
+      # why the config has to be a real file on disk rather than -p: flags on
+      # this command line.
+      let bookSite = ctShell(
+        actionIdValue = "docs-book-build",
+        commandValue = "cd " & bookDir & " && nim c -r --hints:off " &
+          "-o:build/build src/build.nim",
+        extraInputsValue = @[bookDir & "/nim.cfg"],
+        afterValue = @[bookNimCfg])
+      target("docs-book", bookSite)
