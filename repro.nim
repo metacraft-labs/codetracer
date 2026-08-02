@@ -1338,9 +1338,9 @@ package codeTracer:
     # a workspace synced before that lands has no checkout to build against.
     block docsBookIsonim:
       let bookDir = "docs/book-isonim"
-      if not dirExists(projectRoot / bookDir):
+      if not dirExists(projectRootPath / bookDir):
         break docsBookIsonim
-      let ws = codeTracerWorkspaceRoot(projectRoot)
+      let ws = codeTracerWorkspaceRoot(projectRootPath)
       if ws.len == 0:
         break docsBookIsonim
 
