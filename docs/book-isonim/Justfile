@@ -1,7 +1,10 @@
 # codetracer/docs/book-isonim -- task entry points.
 #
-# Every recipe assumes the IsoNim dev shell is active. From a clean checkout:
-#   nix develop ../../../isonim -c just --justfile docs/book-isonim/Justfile --working-directory docs/book-isonim build
+# Every recipe runs inside THIS book's own dev shell. With direnv the shell is
+# already active (see ./.envrc -- it reuses the isonim-docs framework's
+# self-contained dev shell, which declares isonim as its dependency). Without
+# direnv, prefix a recipe with the framework's flake -- never isonim's:
+#   nix develop path:../../../isonim-docs -c just --justfile docs/book-isonim/Justfile --working-directory docs/book-isonim build
 
 test:
     nim c -r tests/test_nav_order_matches_summary.nim
