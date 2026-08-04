@@ -35,12 +35,32 @@ type
     onContextMenu*: proc(index: int; x: int; y: int)
 
 const
+  ## Semantic class the status-bar shell gives the host
+  ## (`isonim_status_view.BottomStripClass`).  Repeated here because
+  ## `renderAutoHideBottomStripInto` rewrites the host's `class` attribute
+  ## and must not drop it: before this, every strip mount replaced
+  ## `class="auto-hide-bottom-strip"` with `class="has-tabs"` (or ""), and
+  ## every status-bar render put it back, so the host's class flip-flopped
+  ## and `.auto-hide-bottom-strip` matched or did not match depending on
+  ## which render ran last.
+  AutoHideBottomStripHostClass* = "auto-hide-bottom-strip"
   ## Class applied to #auto-hide-bottom-strip when it contains at least one tab.
   AutoHideBottomStripHasTabsClass* = "has-tabs"
   ## Shared tab classes — same as side strip so button/label CSS is reused.
   AutoHideBottomStripTabClass*         = "auto-hide-strip-tab"
   AutoHideBottomStripTabActiveClass*   = "auto-hide-strip-tab active"
   AutoHideBottomStripTabLabelClass*    = "auto-hide-strip-tab-label"
+  ## The three button classes below have **no producer**.  This file used to
+  ## render inline close / unpin buttons on every tab; `1af471302` deleted them
+  ## here and from `isonim_auto_hide_side_strip_view` in the same commit, in
+  ## favour of the tab context menu `f214d703b` had added earlier that day.  So
+  ## `renderBottomStripTab` emits only the label span, and a bottom tab's close
+  ## and unpin affordances live in the right-click menu that
+  ## `auto_hide.requestAutoHideBottomStripRender` builds.  The names are kept
+  ## because `auto_hide.styl` still carries the matching
+  ## `#auto-hide-bottom-strip .auto-hide-strip-tab-buttons` override and must
+  ## stay in step if inline buttons ever return; do not read them as evidence
+  ## that the bottom tabs have buttons today.
   AutoHideBottomStripTabButtonsClass*  = "auto-hide-strip-tab-buttons"
   AutoHideBottomStripTabCloseBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-close"
   AutoHideBottomStripTabUnpinBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-unpin"
@@ -148,7 +168,11 @@ when defined(js):
     isonim_dom.setAttribute(
       container,
       cstring"class",
-      cstring(if tabs.len > 0: AutoHideBottomStripHasTabsClass else: ""))
+      cstring(
+        if tabs.len > 0:
+          AutoHideBottomStripHostClass & " " & AutoHideBottomStripHasTabsClass
+        else:
+          AutoHideBottomStripHostClass))
 
     let panel = renderAutoHideBottomStripPanel(r, tabs, cb)
     let panelNode = isonim_dom.Node(panel)

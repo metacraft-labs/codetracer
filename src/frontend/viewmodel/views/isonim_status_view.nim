@@ -105,6 +105,59 @@ proc copyTooltipClass(active: bool): string =
   else:
     "custom-tooltip "
 
+proc notificationSignature(notification: StatusNotificationRecord): string =
+  ## Everything about one notification record that decides its DOM shape.
+  ## Notification text is included even though it is "just text": the
+  ## notification list is rebuilt wholesale when it changes, so there is no
+  ## in-place update path for it and no benefit in distinguishing the cases.
+  result = $notification.index & "\x1f" & notification.kindClass & "\x1f" &
+    notification.variantClass & "\x1f" & notification.text & "\x1f" &
+    (if notification.dismissible: "1" else: "0")
+  for action in notification.actions:
+    result.add("\x1f" & action.label)
+
+proc statusStructureSignature*(model: StatusShellModel): string =
+  ## A digest of everything in `model` that changes the *shape* of the status
+  ## bar's DOM, as opposed to the text/class values carried by nodes that
+  ## already exist.
+  ##
+  ## `renderStatusInto` uses it as a cheap "can I patch instead of rebuild?"
+  ## test.  Deliberately excluded — and therefore patched in place — are
+  ## `language`, `encoding`, `processClass`, `processText`,
+  ## `testMovementText`, `disconnectedText`, `disconnectedTitle`,
+  ## `locationText`, `locationTitle` and `copyTooltipActive`.  Those are
+  ## exactly the fields that change on every debugger step, and keeping their
+  ## nodes alive across a step is what makes `.location-path` a stable element
+  ## rather than a new one 60+ times per trace open (Value-Origin-Tracking
+  ## milestone M46).
+  ##
+  ## EVERY field of `StatusShellModel` must appear either here or in
+  ## `patchStatusValues`.  A field in neither renders once and then never
+  ## updates again, which is a silent staleness bug rather than a loud one —
+  ## `disconnectedText` was in neither when this split was introduced, and
+  ## escaped notice only because it is currently a constant.
+  ##
+  ## `locationText` participates only through `locationText.len > 0`, because
+  ## an empty location renders no `.location-path` element at all while a
+  ## non-empty one always renders the same three nodes.
+  result = "v1"
+  result.add("|tm:" & (if model.base.showTestMovement: "1" else: "0"))
+  result.add("|dc:" & (if model.base.showDisconnected: "1" else: "0"))
+  result.add("|fi:" & (if model.base.showFinished: "1" else: "0"))
+  result.add("|lo:" & (if model.base.locationText.len > 0: "1" else: "0"))
+  result.add("|nh:" & (if model.showNotifications: "1" else: "0"))
+  result.add("|br:" & (if model.showBugReport: "1" else: "0"))
+  result.add("|op:" & (if model.hasOperationNotification: "1" else: "0"))
+  if model.hasOperationNotification:
+    result.add("\x1e" & notificationSignature(model.operationNotification))
+  result.add("|an:" & $model.activeNotifications.len)
+  for notification in model.activeNotifications:
+    result.add("\x1e" & notificationSignature(notification))
+  if model.showNotifications:
+    result.add("|hi:" & $model.notificationHistory.len)
+    for notification in model.notificationHistory:
+      result.add("\x1e" & notificationSignature(notification))
+
 template renderStatusShellImpl(
     r: untyped;
     model: StatusShellModel;
@@ -314,12 +367,94 @@ when defined(js):
         isonim_dom.Element =
     renderStatusShellImpl(r, model, callbacks)
 
+  proc querySelectorIn(
+      root: isonim_dom.Element;
+      selector: cstring): isonim_dom.Element {.importjs: "#.querySelector(#)".}
+
+  proc patchText(
+      root: isonim_dom.Element; selector: cstring; value: string) =
+    ## Replace the text of an existing node without touching the node itself.
+    let node = root.querySelectorIn(selector)
+    if isonim_dom.isNodeNil(isonim_dom.Node(node)):
+      return
+    let next = cstring(value)
+    # Skip the write when nothing changed: assigning `textContent` discards
+    # and recreates the child text node even for an identical string, and
+    # the status bar is asked to re-render far more often than its text
+    # actually moves.
+    if isonim_dom.Node(node).textContent != next:
+      isonim_dom.Node(node).textContent = next
+
+  proc patchAttribute(
+      root: isonim_dom.Element; selector, name: cstring; value: string) =
+    let node = root.querySelectorIn(selector)
+    if isonim_dom.isNodeNil(isonim_dom.Node(node)):
+      return
+    let next = cstring(value)
+    if isonim_dom.getAttribute(node, name) != next:
+      isonim_dom.setAttribute(node, name, next)
+
+  proc patchStatusValues(
+      container: isonim_dom.Element; model: StatusShellModel) =
+    ## Update every value-carrying node the structure signature deliberately
+    ## ignores, leaving the elements — and therefore any locator or reference
+    ## already resolved against them — in place.
+    container.patchText(cstring".file-info-status-language", model.base.language)
+    container.patchText(cstring".file-info-status-encoding", model.base.encoding)
+    container.patchText(cstring"#stable-status", model.base.processText)
+    container.patchAttribute(
+      cstring"#stable-status", cstring"class", model.base.processClass)
+    if model.base.showTestMovement:
+      container.patchText(cstring".test-movement", model.base.testMovementText)
+    if model.base.showDisconnected:
+      container.patchText(
+        cstring".disconnected-status", model.base.disconnectedText)
+      container.patchAttribute(
+        cstring".disconnected-status", cstring"title",
+        model.base.disconnectedTitle)
+    if not model.base.showFinished and model.base.locationText.len > 0:
+      container.patchText(cstring".location-path", model.base.locationText)
+      container.patchAttribute(
+        cstring".location-path", cstring"title", model.base.locationTitle)
+      container.patchAttribute(
+        cstring"#location-status .custom-tooltip", cstring"class",
+        copyTooltipClass(model.base.copyTooltipActive))
+
+  const
+    ## Attribute stamped on the host so a later render can tell whether the
+    ## DOM it finds was built from a structurally identical model.  Kept on
+    ## the host rather than in a module-level `var` because the host is the
+    ## thing whose children we are reasoning about: if anything else clears
+    ## it, the attribute goes with it and we correctly fall back to a rebuild.
+    StatusStructureAttr* = cstring"data-status-structure"
+
   proc renderStatusInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
       model: StatusShellModel;
-      callbacks: StatusShellCallbacks = StatusShellCallbacks()) =
+      callbacks: StatusShellCallbacks = StatusShellCallbacks()): bool
+      {.discardable.} =
+    ## Render `model` into the status host, reusing the existing DOM whenever
+    ## the model's *structure* is unchanged.  Returns `true` when the subtree
+    ## was rebuilt from scratch, so callers can re-mount anything they own
+    ## inside it (the bottom strip and collapsed icon-zone hosts) exactly when
+    ## those hosts are actually new.
+    ##
+    ## Why this is not an unconditional rebuild any more: the previous version
+    ## removed every child of `#status` and re-created the whole subtree on
+    ## each of the 60+ redraws a single trace open triggers, so `.location-path`,
+    ## `#copy-path-image`, `#file-info-status` and both auto-hide hosts were
+    ## destroyed and re-created dozens of times per second while the app was
+    ## still loading.  See Value-Origin-Tracking milestone M46.
     let containerNode = isonim_dom.Node(container)
+    let signature = cstring(statusStructureSignature(model))
+    let previous = isonim_dom.getAttribute(container, StatusStructureAttr)
+
+    if not isonim_dom.isNodeNil(containerNode.firstChild) and
+       not previous.isNil and previous == signature:
+      container.patchStatusValues(model)
+      return false
+
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
@@ -328,6 +463,8 @@ when defined(js):
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)
 
+    isonim_dom.setAttribute(container, StatusStructureAttr, signature)
+
     if model.showBugReport:
       let button = isonim_dom.getElementById(
         isonim_dom.document,
@@ -335,3 +472,5 @@ when defined(js):
       if not button.isNil:
         button.onclick = proc() = sendBugReportFromDom(callbacks)
       wireBugReportShortcuts(callbacks)
+
+    true

@@ -4,16 +4,32 @@
  * Verifies:
  * - The search results panel renders when its auto-hide bottom tab is clicked
  * - The empty state is shown when no search has been performed
+ *
+ * Clicking a strip tab DOCKS the panel into `#auto-hide-docked-bottom`; it
+ * does not open `#auto-hide-overlay`, which is the hover-preview surface.
+ * See the contract note in `page-objects/auto-hide-strip.ts`.
+ *
+ * No mocks: a real JavaScript recording opened by the real Electron app.  The
+ * search-results pane is a standalone auto-hide pane `layout.nim` registers
+ * for every recorded language — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  DOCKED_BOTTOM_CONTENT_SELECTOR,
+  openBottomPanel,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
+
+const fixture = recordChromeTraceFixture("search-results-e2e");
 
 test.describe("Search Results Panel", () => {
   test.setTimeout(120_000);
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
   test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
   test.afterAll(() => restoreUserLayout());
@@ -24,27 +40,23 @@ test.describe("Search Results Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
-    // Click the SEARCH RESULTS auto-hide tab to open the overlay.
-    const searchTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "SEARCH RESULTS",
-    });
-    await searchTab.click();
-    await wait(500);
-
-    // The overlay should become visible.
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
+    // Click the SEARCH RESULTS auto-hide tab to dock the panel.
+    await openBottomPanel(ctPage, "SEARCH RESULTS");
 
     // The search results panel renders `.search-results` inside
     // `#searchResultsComponent-0`. The `.search-results` element has
     // `display: none` via `.search-results-non-active` until a search
     // is performed. Check the container element visibility instead,
     // which proves the auto-hide tab was activated and the panel was
-    // rendered into the overlay.
-    const searchContainer = ctPage.locator("#auto-hide-overlay-content #searchResultsComponent-0");
-    const searchPanel = ctPage.locator("#auto-hide-overlay-content .search-results");
+    // docked.
+    const searchContainer = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} #searchResultsComponent-0`,
+    );
+    const searchPanel = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} .search-results`,
+    );
     const visible = await retry(
       async () => {
         // Check the outer container first — it is always visible when
@@ -69,25 +81,21 @@ test.describe("Search Results Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
-    // Click the SEARCH RESULTS auto-hide tab to open the overlay.
-    const searchTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "SEARCH RESULTS",
-    });
-    await searchTab.click();
-    await wait(500);
+    // Click the SEARCH RESULTS auto-hide tab to dock the panel.
+    await openBottomPanel(ctPage, "SEARCH RESULTS");
 
-    // The overlay should become visible.
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
-
-    // Wait for the panel container to be visible inside the overlay.
+    // Wait for the panel container to be visible inside the docked panel.
     // The `.search-results` element has `display: none` via
     // `.search-results-non-active` until a search is performed, so
     // check the outer container first.
-    const searchContainer = ctPage.locator("#auto-hide-overlay-content #searchResultsComponent-0");
-    const searchPanel = ctPage.locator("#auto-hide-overlay-content .search-results");
+    const searchContainer = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} #searchResultsComponent-0`,
+    );
+    const searchPanel = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} .search-results`,
+    );
     const containerVisible = await retry(
       async () => {
         if ((await searchContainer.count()) > 0) {

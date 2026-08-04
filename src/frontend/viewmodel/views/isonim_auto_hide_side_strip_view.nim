@@ -35,6 +35,13 @@ const
   AutoHideSideStripTabClass* = "auto-hide-strip-tab"
   AutoHideSideStripTabActiveClass* = "auto-hide-strip-tab active"
   AutoHideSideStripTabLabelClass* = "auto-hide-strip-tab-label"
+  ## The four button classes below have **no producer**.  `f214d703b` added
+  ## the tab context menu and `1af471302` then removed the inline close /
+  ## unpin buttons from `renderSideStripTab`, so a strip tab is now just its
+  ## label span and the context menu is the only close/unpin affordance on
+  ## any strip, side or bottom.  They are kept because `auto_hide.styl` still
+  ## carries the matching rules and the names must stay in step if the inline
+  ## buttons ever return; do not read them as evidence that tabs have buttons.
   AutoHideSideStripTabButtonsClass* = "auto-hide-strip-tab-buttons"
   AutoHideSideStripTabBtnClass* = "auto-hide-strip-tab-btn"
   AutoHideSideStripTabCloseBtnClass* = "auto-hide-strip-tab-btn auto-hide-strip-tab-close"

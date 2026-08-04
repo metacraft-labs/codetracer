@@ -29,13 +29,6 @@ FIXTURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 CODETRACER_ROOT="$(cd "$FIXTURE_DIR/../../../../.." && pwd -P)"
 WORKSPACE_ROOT="$(cd "$CODETRACER_ROOT/.." && pwd -P)"
 
-RECORDING="$FIXTURE_DIR/ledger-settle.ct"
-# The module is committed compressed; see this directory's `.gitignore` for
-# why it is committed at all and README.md for why it is compressed. It is
-# expanded into the work directory below, so the fixture directory stays
-# exactly as checked out.
-MODULE_ZST="$FIXTURE_DIR/module/ledger_settle.wasm.zst"
-
 WAZERO_BIN="${CODETRACER_WAZERO_BIN:-}"
 if [ -z "$WAZERO_BIN" ]; then
 	for candidate in \
@@ -51,15 +44,26 @@ fi
 # `node` and `strings` are as much a prerequisite as wazero. Without this
 # a missing `node` surfaced as "the sidecar is malformed", which names the
 # wrong thing entirely.
-for tool in node strings zstd; do
+for tool in node strings; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "[verify] $tool is not on PATH; run this inside the dev shell" >&2
 		exit 75
 	}
 done
-for required in "$RECORDING/trace.json" "$RECORDING/boundary_state.json" "$MODULE_ZST"; do
+# The recording and the module it describes are produced together from
+# this tree, not committed. `boundary_state.json` records the absolute
+# address `rust-lld` gave `LEDGER`, so the two are one artefact; the
+# materialiser keeps them one artefact by making them in the same run,
+# and re-makes them whenever the instrumenter or the browser recorder
+# changes. Replaying a stored recording against a stored module would
+# have gone on succeeding after either of those moved.
+MATERIALIZED="$("$CODETRACER_ROOT/scripts/materialize-recording.sh" wasm-memory-calldata)"
+RECORDING="$MATERIALIZED/ledger-settle.ct"
+MODULE="$MATERIALIZED/module/ledger_settle.wasm"
+
+for required in "$RECORDING/trace.json" "$RECORDING/boundary_state.json" "$MODULE"; do
 	if [ ! -e "$required" ]; then
-		echo "[verify] missing $required — run ./regenerate.sh" >&2
+		echo "[verify] the recording pipeline produced no $required" >&2
 		exit 1
 	fi
 done
@@ -70,9 +74,6 @@ echo
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-
-MODULE="$WORK/ledger_settle.wasm"
-zstd -dq -o "$MODULE" "$MODULE_ZST"
 
 fail() {
 	echo "[verify] FAILED: $1" >&2
@@ -221,19 +222,97 @@ NODE
 
 # ---------------------------------------------------------------------------
 # 3 / 4 — withholding either record must DIVERGE, not produce a plausible
-#         trace. The recording is copied and edited; the committed one is
+#         trace. The recording is copied and edited; the produced one is
 #         never touched.
+#
+# The host state rides in TWO carriers, and withholding it means
+# withholding it from both:
+#
+#   * `boundary_state.json`, the sidecar; and
+#   * the `wasm-host-state` events in `trace.json`, added when the browser
+#     recorder learned to carry host state in the event stream, which is
+#     the only carrier a *streaming* consumer can read.
+#
+# Editing only the sidecar makes the two disagree, and the replayer
+# refuses that outright (spec §8: the sidecar is a rendering of the
+# stream, so a difference means the producer wrote two descriptions of one
+# program) — a refusal, not a divergence, so the check below would be
+# proving something else entirely.
+#
+# This is exactly what a committed recording hid. The recording predated
+# the in-stream carrier, so it had only a sidecar to edit and the control
+# went on reporting `ok` while quietly no longer exercising the divergence
+# path it names. It surfaced the first time the recording was produced
+# from the current tree instead of read back.
 # ---------------------------------------------------------------------------
 withhold() {
 	local label="$1" filter="$2" dest="$WORK/$3"
 	cp -R "$RECORDING" "$dest"
 	node -e "
 const fs = require('node:fs');
-const p = process.argv[1];
-const doc = JSON.parse(fs.readFileSync(p, 'utf8'));
-($filter)(doc);
-fs.writeFileSync(p, JSON.stringify(doc));
-" "$dest/boundary_state.json"
+const filter = ($filter);
+
+// The sidecar.
+const sidecarPath = process.argv[1];
+const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+filter(sidecar);
+fs.writeFileSync(sidecarPath, JSON.stringify(sidecar));
+
+// The same state as it rides in the event stream, one record per
+// fragment: an \`initial\` record carrying the sidecar's \`initial\`
+// object, and one \`mutation\` record per entry of its \`mutations\`
+// array. The sidecar filter is applied to a reconstructed view of each
+// fragment and the result read back, so a filter written against the
+// sidecar cannot silently no-op here.
+const streamPath = process.argv[2];
+const records = JSON.parse(fs.readFileSync(streamPath, 'utf8'));
+const kept = [];
+let touched = 0;
+for (const record of records) {
+  const meta = record?.Event?.metadata;
+  if (typeof meta !== 'string' || !meta.includes('wasm-host-state')) {
+    kept.push(record);
+    continue;
+  }
+  const doc = JSON.parse(meta);
+  if (doc.boundary_id !== 'wasm-host-state') {
+    kept.push(record);
+    continue;
+  }
+  touched += 1;
+  if (doc.record === 'initial') {
+    const view = { initial: doc.initial, mutations: [] };
+    filter(view);
+    doc.initial = view.initial;
+    record.Event.metadata = JSON.stringify(doc);
+    kept.push(record);
+  } else if (doc.record === 'mutation') {
+    const view = { initial: { memories: [], globals: [], tables: [] }, mutations: [doc.mutation] };
+    filter(view);
+    // A filter that emptied the mutation list withholds the record
+    // entirely — a \`mutation\` event with no mutation in it is not a
+    // shape the producer can emit, and feeding the replayer one would
+    // test its parser rather than its divergence check.
+    if (view.mutations.length === 1) {
+      doc.mutation = view.mutations[0];
+      record.Event.metadata = JSON.stringify(doc);
+      kept.push(record);
+    }
+  } else {
+    kept.push(record);
+  }
+}
+if (touched === 0) {
+  // Not a soft warning: a recording with no in-stream host state at all
+  // is one the current producer did not make, and the control below
+  // would then be exercising a carrier the product no longer uses alone.
+  console.error('[verify] the recording carries no wasm-host-state records; ' +
+    'the producer stopped writing the in-stream carrier, or this reader no ' +
+    'longer recognises it');
+  process.exit(1);
+}
+fs.writeFileSync(streamPath, JSON.stringify(kept));
+" "$dest/boundary_state.json" "$dest/trace.json"
 	local out="$WORK/$3.log"
 	if "$WAZERO_BIN" run --boundary-log "$dest" --out-dir "$WORK/$3-out" \
 		"$MODULE" >"$out" 2>&1; then

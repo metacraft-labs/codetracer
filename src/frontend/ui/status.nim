@@ -244,24 +244,93 @@ when defined(js):
       onSendBugReport: proc(title: string; description: string) =
         self.sendBugReport(title, description))
 
-  proc requestStatusRender*(self: StatusComponent) =
-    ## Refresh the shared status bar through IsoNim direct DOM.
+  # ---------------------------------------------------------------------
+  # Render bookkeeping
+  #
+  # A single trace open asks the status bar to redraw 60+ times. The
+  # sources are all legitimate on their own and there is no one place to
+  # fix them:
+  #
+  #   * `CtCompleteMove` — one per debugger step, plus the burst the
+  #     replay backend emits while it settles on the entry location;
+  #   * `InternalStatusUpdate` — one per `newOperationHandler` call in
+  #     `middleware.nim`, i.e. one per queued operation;
+  #   * `ui_js.nim::refreshStatusFromDebugger` — a deliberate 10x/500ms
+  #     poll that re-pushes the debugger's last known location into the
+  #     status component during startup;
+  #   * `layout.nim`'s `autoHideState.onChanged` — every pin/unpin/dock;
+  #   * notification arrival, dismissal and auto-dismiss timers.
+  #
+  # So the redraws are coalesced here instead: callers keep signalling
+  # freely, and at most one render pass runs per task turn. The counters
+  # are read by
+  # `src/tests/gui/tests/status-bar/status-bar-render-stability.spec.ts`.
+  # ---------------------------------------------------------------------
+  var statusRenderRequests = 0
+  var statusRenderPasses = 0
+  var statusShellRebuilds = 0
+  var statusRenderScheduled = false
+
+  proc renderStatusNow(self: StatusComponent) =
+    ## Perform one coalesced render pass. Never call this directly from
+    ## event handlers — use `requestStatusRender`.
     let container = dom_api.getElementById(dom_api.document, cstring"status")
     if dom_api.isNodeNil(dom_api.Node(container)):
       cerror "status: #status container missing during render"
       return
 
     try:
+      inc statusRenderPasses
       let model = self.statusShellModel()
-      cerror "status: rendering status bar location=" & model.base.locationText
       let r = WebRenderer()
-      renderStatusInto(r, container, model, self.statusShellCallbacks())
-      discard windowSetTimeout(proc() =
-        requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
-        requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
-      , 0)
+      let rebuilt = renderStatusInto(
+        r, container, model, self.statusShellCallbacks())
+      if rebuilt:
+        inc statusShellRebuilds
+        # The collapsed icon zone and the bottom strip are hosts *inside*
+        # the shell, so they only need re-mounting when the shell itself
+        # was re-created. While the shell is only being patched their
+        # contents are owned by `auto_hide.nim` / `layout.nim`, which
+        # re-render them directly whenever the auto-hide state changes.
+        # Deferring by a task turn keeps the previous ordering guarantee:
+        # the hosts exist before anything mounts into them.
+        discard windowSetTimeout(proc() =
+          requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+          requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
+        , 0)
     except CatchableError as e:
       cerror "status: render failed: " & e.msg
+
+  proc requestStatusRender*(self: StatusComponent) =
+    ## Ask for the shared status bar to be refreshed.
+    ##
+    ## Coalescing: repeated requests inside one task turn collapse into a
+    ## single render pass on the next turn. Every reader of the status bar
+    ## in the test suite polls (`expect.poll`, `toHaveText`, `StatusBar`'s
+    ## own retry loop), so a one-turn delay is not observable, while the
+    ## burst of identical renders it removes is.
+    inc statusRenderRequests
+    if statusRenderScheduled:
+      return
+    statusRenderScheduled = true
+    discard windowSetTimeout(proc() =
+      statusRenderScheduled = false
+      self.renderStatusNow()
+    , 0)
+
+  proc statusRenderStats*(): JsObject =
+    ## Render bookkeeping for the GUI stability spec (see above).
+    js{
+      requests: statusRenderRequests,
+      passes: statusRenderPasses,
+      rebuilds: statusShellRebuilds
+    }
+
+  {.emit: """
+    window.__ctStatusRenderStats = function() {
+      return `statusRenderStats`();
+    };
+  """.}
 
   method redraw*(self: StatusComponent) =
     self.requestStatusRender()

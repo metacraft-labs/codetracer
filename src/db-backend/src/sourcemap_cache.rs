@@ -464,7 +464,7 @@ impl SourcemapCache {
     /// ## File-key matching
     ///
     /// The recorded path string is often an absolute path
-    /// (e.g. `/home/me/proj/lodash.min.js`) while the user-facing
+    /// (e.g. `/home/user/proj/lodash.min.js`) while the user-facing
     /// rename list keys off the bundle name as the user wrote it
     /// (e.g. `lodash.min.js`).  The resolver tries the recorded path
     /// verbatim first, then the file's basename — that way both

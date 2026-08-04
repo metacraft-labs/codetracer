@@ -291,6 +291,14 @@ interface CodetracerFixtures {
   ctPage: Page;
   /** The Electron app handle (null in web mode). */
   electronApp: ElectronApplication | null;
+  /**
+   * Renderer console errors collected since the page was created, in order.
+   *
+   * The same live array the failure diagnostics dump — so it covers the
+   * whole launch, not just the part of it that happened after the test body
+   * started.  Depends on `ctPage`, so requesting it launches the app.
+   */
+  consoleErrors: string[];
 }
 
 interface CodetracerWorkerFixtures {
@@ -630,6 +638,27 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+  // M51: turn HMR off for ordinary GUI tests.
+  //
+  // `just build-once` compiles the renderer with `-d:ctHmr`, and
+  // `hmr_runtime.isHmrRequested()` defaults to ON when CT_HMR is unset.  So
+  // every test launch tried to reach the LiveReload daemon at
+  // ws://localhost:35729, which is not running under the test harness, and
+  // Chromium logged `WebSocket connection ... failed: ERR_CONNECTION_REFUSED`
+  // as a console *error*.  That line is emitted by the network stack, not by
+  // page JS, so it cannot be demoted at the source — the only way to not log
+  // it is to not attempt the connection.
+  //
+  // Disabling HMR here is right on its own merits, independently of the log
+  // line: a test run has no file watcher, and a bundle swapped underneath a
+  // running spec is a source of nondeterminism, not a feature.
+  //
+  // The HMR suite is unaffected: `tests/hmr/hmr_views_and_styles.spec.ts`
+  // builds its launch environment with its own `makeHmrEnv()`, which starts
+  // from `process.env` (untouched here — `env` is a local copy) and
+  // explicitly `delete`s CT_HMR to opt back in against a daemon it starts
+  // itself.
+  env.CT_HMR = "0";
   env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
   // Bypass the Electron single-instance lock so that concurrent test runs
   // (or stale Electron processes from previous runs) do not prevent this
@@ -880,7 +909,18 @@ function attachMainProcessCapture(
  * Attach console/page-error listeners to collect renderer-side JS errors.
  * Also probes the page for any errors that occurred before attachment.
  */
+/**
+ * The console-error bucket attached to each page, so the `consoleErrors`
+ * fixture can hand a spec the *same* live array the launcher fills and the
+ * failure diagnostics dump.  A WeakMap rather than a field on `LaunchResult`
+ * because every launch mode builds its own result object, and a spec asking
+ * for the errors should not have to know which mode it is running under.
+ */
+const pageConsoleErrors = new WeakMap<Page, string[]>();
+
 function attachErrorCollectors(page: Page, bucket: string[]): void {
+  pageConsoleErrors.set(page, bucket);
+
   const initScript = () => {
     const handleErr = (error: any, type: string) => {
       const visited = new Set();
@@ -1012,9 +1052,16 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
     try {
       ctPrefix = (window as any).require("process").env.CODETRACER_PREFIX ?? "(undefined)";
     } catch { /* renderer may not have Node integration */ }
-    console.error(`[diag] scripts: ${info.join("; ")}`);
-    console.error(`[diag] globals: ${JSON.stringify(globals)}`);
-    console.error(`[diag] CODETRACER_PREFIX: ${ctPrefix}`);
+    // `console.info`, not `console.error` (M51).  These three lines are the
+    // harness describing a healthy page, not the page reporting a fault —
+    // and emitting them at ERROR put the collector's own output into the
+    // very bucket `verify_clean_console_on_trace_open` asserts is empty.
+    // They are still captured: `CODETRACER_TEST_CONSOLE_DUMP_PATH` and
+    // `CODETRACER_TEST_LOG_ALL_CONSOLE=1` record every console level, and
+    // the failure dump attaches the whole bucket.
+    console.info(`[diag] scripts: ${info.join("; ")}`);
+    console.info(`[diag] globals: ${JSON.stringify(globals)}`);
+    console.info(`[diag] CODETRACER_PREFIX: ${ctPrefix}`);
   }).catch(() => { /* page may be closed */ });
 }
 
@@ -1708,6 +1755,20 @@ export const test = base.extend<
     { scope: "test" },
   ],
 
+  consoleErrors: [
+    async ({ ctPage }, use) => {
+      const bucket = pageConsoleErrors.get(ctPage);
+      if (bucket === undefined) {
+        throw new Error(
+          "no console-error collector is attached to this page — every " +
+            "launch mode must call attachErrorCollectors()",
+        );
+      }
+      await use(bucket);
+    },
+    { scope: "test" },
+  ],
+
   ctPage: [
     async (
       {
@@ -1942,8 +2003,175 @@ export function wait(ms: number): Promise<void> {
  * wait so a repeat of that regression fails loudly instead of silently.
  */
 export async function readyOnEntryTest(p: Page): Promise<void> {
-  await p.locator(".location-path").waitFor({ state: "visible", timeout: 15_000 });
+  // Two attempts with a FRESH locator each, not one long wait.
+  //
+  // This is not leniency: the state asserted (`visible`) and the selector are
+  // unchanged from the single 15s wait this replaces.  What it defeats is a harness
+  // failure mode that was measured, not guessed.  When this wait times out,
+  // the diagnosis below repeatedly reports `.location-path` present, ~415x24,
+  // `display:block`, `visibility:visible`, `isConnected:true`, in the page
+  // Playwright holds, with animation frames running at ~60/s — and a fresh
+  // locator for the SAME selector on the SAME page then resolves in tens of
+  // milliseconds (44ms, observed).  Playwright's poll for the first locator
+  // simply stops making progress; nothing about the app is wrong, and no
+  // amount of extra time on that locator helps, because it is not looking.
+  //
+  // An app that genuinely never reaches an entry location still fails.
+  //
+  // The per-attempt budget stays at the 15s the single wait used, rather than
+  // halving it to keep the total the same.  Splitting 15s into two 8s attempts
+  // was measurably worse: it defeats a stalled poll but no longer tolerates a
+  // *slow* launch, and on a loaded host (load average >100 observed here) the
+  // launch is exactly what runs long.  Two attempts of the original length
+  // defeats both, and costs extra wall-clock only on a run that was going to
+  // fail anyway.  See Value-Origin-Tracking milestone M46.
+  const attemptBudgetMs = 15_000;
+  let lastFailure: Error | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await p
+        .locator(".location-path")
+        .waitFor({ state: "visible", timeout: attemptBudgetMs });
+      lastFailure = undefined;
+      break;
+    } catch (timeout) {
+      lastFailure = timeout as Error;
+    }
+  }
+  if (lastFailure !== undefined) {
+    throw new CodetracerTestError(
+      `${lastFailure.message}\n\n${await readinessDiagnosis(p)}`,
+    );
+  }
   await p.locator(".location-path").click();
+}
+
+/**
+ * Explain a `readyOnEntryTest` timeout.
+ *
+ * The wait itself is unchanged and still strict — this only runs after it has
+ * already failed, and it exists because the failure it reports is ambiguous
+ * on its own.  When this flake was investigated (Value-Origin-Tracking
+ * milestone M46) the Playwright call log contained no `locator resolved to …`
+ * line at all, while the DOM captured moments later held `.location-path`
+ * with the correct `path:line#ticks` text, in the same page whose console the
+ * run had been capturing all along.  "The app did not load", "the element is
+ * there but has no box", and "the page never ran the poll that would have
+ * found it" are three different defects and the bare timeout distinguishes
+ * none of them.
+ *
+ * `page.evaluate` reaches the renderer through a direct CDP evaluation rather
+ * than through the animation-frame-driven poll a locator uses, so it can
+ * still answer while that poll is starved — which is exactly the case that
+ * needs telling apart from the others.
+ */
+async function readinessDiagnosis(p: Page): Promise<string> {
+  try {
+    const dom = await p.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll(".location-path"));
+      return {
+        url: location.href,
+        title: document.title,
+        visibilityState: document.visibilityState,
+        hidden: document.hidden,
+        hasStatusHost: document.getElementById("status") !== null,
+        statusStructure: document
+          .getElementById("status")
+          ?.getAttribute("data-status-structure") ?? null,
+        matches: nodes.map((node) => {
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return {
+            text: (node.textContent ?? "").slice(0, 120),
+            width: rect.width,
+            height: rect.height,
+            display: style.display,
+            visibility: style.visibility,
+            opacity: style.opacity,
+            connected: node.isConnected,
+          };
+        }),
+      };
+    });
+
+    // Animation-frame liveness. Chromium stops servicing
+    // `requestAnimationFrame` for a document it considers hidden, and
+    // Playwright's locator poll is driven from animation frames — so zero
+    // frames here, with the element present above, would be the signature of
+    // a starved poll rather than of a missing element.  In practice the
+    // observed failures do NOT look like that: frames run at ~60/s while the
+    // wait times out, and it is the `fresh locator retry` below that
+    // distinguishes the cases.  Kept because "frames stopped" and "the poll
+    // is stuck with frames running" want different responses.
+    const frames = await p.evaluate(() => {
+      return new Promise<number>((resolve) => {
+        let count = 0;
+        const started = performance.now();
+        const tick = () => {
+          count += 1;
+          if (performance.now() - started < 500) {
+            requestAnimationFrame(tick);
+          } else {
+            resolve(count);
+          }
+        };
+        requestAnimationFrame(tick);
+        // Resolve anyway if no frame ever arrives, so the diagnosis itself
+        // cannot hang.
+        setTimeout(() => resolve(count), 1500);
+      });
+    });
+
+    // Does a *fresh* locator resolve? The original wait polled the same
+    // selector for 15s without one `locator resolved to …` line. If a new
+    // one succeeds immediately against the same page, the element was
+    // findable all along and the first poll was stuck rather than looking at
+    // a different DOM.
+    let retryResolvedMs: number | null = null;
+    const retry = await (async () => {
+      const started = Date.now();
+      try {
+        await p
+          .locator(".location-path")
+          .waitFor({ state: "visible", timeout: 3_000 });
+        retryResolvedMs = Date.now() - started;
+        return `resolved in ${retryResolvedMs}ms`;
+      } catch (again) {
+        return `still unresolved after ${Date.now() - started}ms: ${
+          (again as Error).message.split("\n")[0]
+        }`;
+      }
+    })();
+
+    return [
+      "readyOnEntry diagnosis:",
+      `  fresh locator retry: ${retry}`,
+      `  page: ${dom.title} <${dom.url}>`,
+      `  document.visibilityState=${dom.visibilityState} hidden=${dom.hidden}`,
+      `  #status present=${dom.hasStatusHost} structure=${dom.statusStructure}`,
+      `  .location-path matches=${dom.matches.length} ` +
+        JSON.stringify(dom.matches),
+      `  animation frames in 500ms=${frames}`,
+      dom.matches.length === 0
+        ? "  => the element is genuinely absent from this page: the app did " +
+          "not reach an entry location (or ctPage is bound to another window)."
+        : retryResolvedMs !== null && retryResolvedMs < 1_000
+          ? "  => HARNESS, NOT APP. The element is present and visible in the " +
+            "page Playwright holds, and a FRESH locator for the same selector " +
+            `resolved in ${retryResolvedMs}ms right after the 15s wait on it ` +
+            "expired. The original poll was stuck; re-running this spec is the " +
+            "correct response. (Observed with animation frames running " +
+            "normally, so this is not rAF starvation.)"
+          : frames === 0
+            ? "  => the element IS in the page Playwright holds and no " +
+              "animation frame ran: the locator poll was starved, not the app."
+            : "  => the element is present and frames are running, but a fresh " +
+              "locator did not resolve either: this is NOT the known harness " +
+              "stall — check the box/visibility values above.",
+    ].join("\n");
+  } catch (diagnosisFailure) {
+    return `readyOnEntry diagnosis unavailable: ${String(diagnosisFailure)}`;
+  }
 }
 
 /** Wait for the event log footer to be populated.

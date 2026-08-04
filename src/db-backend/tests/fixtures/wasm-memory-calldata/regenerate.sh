@@ -38,6 +38,18 @@ cd "$FIXTURE_DIR"
 WASM_INSTRUMENTER="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
 
+# Where the recording lands. Nothing here is committed any more: the
+# recording and the module it describes are produced together, which is
+# what makes the pairing sound — `boundary_state.json` records the
+# absolute address `rust-lld` gave `LEDGER`, so a recording and a module
+# from different builds describe different programs. Committing both was
+# an attempt to freeze that pairing; producing them together removes the
+# need to, and removes the way the pair could silently go stale against a
+# changed recorder.
+OUT_DIR="${CT_RECORDING_OUT_DIR:-$FIXTURE_DIR}"
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+
 PREVIEW_PORT="${DEMO_PREVIEW_PORT:-4180}"
 RECORD_WEB_PORT="${DEMO_RECORD_WEB_PORT:-9231}"
 
@@ -58,7 +70,6 @@ require_bin() {
 
 require_bin cargo "the Rust toolchain builds the WASM tier"
 require_bin node "runs the static server and the headless driver"
-require_bin zstd "compresses the pinned module under the repo's file-size cap"
 
 if ! rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
 	missing+=("- rustc cannot target wasm32-unknown-unknown")
@@ -120,13 +131,56 @@ echo "[regenerate] using record-web:    $RECORD_WEB_BIN"
 echo
 
 cleanup_pids=()
+
+# Drop an already-reaped pid, so the exit trap cannot later signal a
+# *recycled* process group that happens to have been given the same number.
+forget_pid() {
+	local target="$1" pid
+	local kept=()
+	for pid in "${cleanup_pids[@]:-}"; do
+		[ -n "$pid" ] || continue
+		[ "$pid" = "$target" ] || kept+=("$pid")
+	done
+	cleanup_pids=("${kept[@]:-}")
+}
+
 cleanup() {
 	for pid in "${cleanup_pids[@]:-}"; do
 		[ -n "$pid" ] || continue
 		kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
 	done
+	cleanup_pids=()
+}
+
+# Everything started below is `setsid`-detached, so it sits in its own
+# session where no terminal SIGHUP and no `kill -- -<our pgid>` can reach
+# it. This trap is therefore the only reaper in the system, and it is worth
+# being explicit about when it runs.
+#
+# Naming INT/TERM/HUP is deliberate but is *not* what fixes the orphaned
+# daemons, and it would be misleading to imply otherwise: bash already runs
+# an `EXIT` trap when the shell dies on an untrapped SIGTERM, including
+# while it is blocked in a foreground command. This was measured, not
+# assumed. What the explicit traps buy is that the reaping no longer
+# depends on that subtlety, and that a signalled run exits 128+signo
+# instead of whatever the default disposition produces.
+#
+# The real gap is SIGKILL — a CI step timeout, `timeout(1)` escalation, an
+# OOM kill — where no trap of any kind can run. That is why `record-web`
+# also stands itself down after an idle period (`--idle-timeout`, default
+# 10 minutes), which is the only defence that survives this script being
+# killed outright.
+on_signal() {
+	trap - EXIT
+	cleanup
+	# Conventional 128+signo, so a caller can tell a signalled run from a
+	# failed one.
+	exit "$1"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 wait_for_port() {
 	local port="$1" label="$2"
@@ -150,8 +204,8 @@ for port in "$PREVIEW_PORT" "$RECORD_WEB_PORT"; do
 done
 
 # Everything checked; only now is anything removed.
-rm -rf "$FIXTURE_DIR/ledger-settle.ct" \
-	"$FIXTURE_DIR/module/ledger_settle.wasm.zst" \
+rm -rf "$OUT_DIR/ledger-settle.ct" \
+	"$OUT_DIR/module/ledger_settle.wasm" \
 	"$FIXTURE_DIR/page/ledger_settle.instrumented.wasm" \
 	"$FIXTURE_DIR/page/ledger_settle.instrumented.wasm.manifest.json"
 
@@ -177,16 +231,16 @@ RAW_WASM="$FIXTURE_DIR/wasm-src/target/wasm32-unknown-unknown/debug/ledger_settl
 # has to be *this* build: `boundary_state.json` records absolute
 # linear-memory offsets, so a module compiled by a different toolchain puts
 # `LEDGER` at a different address and the recording no longer describes it
-# (measured: a rebuild diverges at the first host call). So it is committed
-# alongside the recording rather than left in `target/`.
+# (measured: a rebuild diverges at the first host call). It is therefore
+# copied out beside the recording it belongs to — one artefact, produced
+# in one run.
 #
-# Compressed, because the repo caps a committed file at 500 KB and a
-# debug-built `.wasm` is ~1.5 MB of DWARF — which is exactly the part the
-# replay needs. zstd takes it to ~270 KB; `verify.sh` expands it into a
-# temp directory.
-mkdir -p "$FIXTURE_DIR/module"
-rm -f "$FIXTURE_DIR/module/ledger_settle.wasm"
-zstd -19 -q -f -o "$FIXTURE_DIR/module/ledger_settle.wasm.zst" "$RAW_WASM"
+# Uncompressed. It used to be zstd'd to ~270 KB because the repo caps a
+# *committed* file at 500 KB and a debug `.wasm` is ~1.5 MB of DWARF; with
+# nothing committed the cap does not apply and `verify.sh` no longer has
+# to expand anything.
+mkdir -p "$OUT_DIR/module"
+cp -f "$RAW_WASM" "$OUT_DIR/module/ledger_settle.wasm"
 
 echo "[regenerate]     instrumenting with ct-instrument"
 "$CT_INSTRUMENT_BIN" "$RAW_WASM" \
@@ -224,16 +278,17 @@ node "$FIXTURE_DIR/drive.mjs" "$PREVIEW_PORT" "$RECORD_WEB_PORT"
 echo "[regenerate] 4/4 finalising"
 kill -INT "$RECORD_WEB_PID" >/dev/null 2>&1 || true
 wait "$RECORD_WEB_PID" 2>/dev/null || true
+forget_pid "$RECORD_WEB_PID"
 
 if [ ! -d "$RECORD_WEB_OUT/ledger-settle.ct" ]; then
 	echo "[regenerate] record-web did not produce ledger-settle.ct" >&2
 	ls -la "$RECORD_WEB_OUT" >&2 || true
 	exit 1
 fi
-cp -R "$RECORD_WEB_OUT/ledger-settle.ct" "$FIXTURE_DIR/ledger-settle.ct"
+cp -R "$RECORD_WEB_OUT/ledger-settle.ct" "$OUT_DIR/ledger-settle.ct"
 rm -rf "$RECORD_WEB_OUT"
 
-if [ ! -f "$FIXTURE_DIR/ledger-settle.ct/boundary_state.json" ]; then
+if [ ! -f "$OUT_DIR/ledger-settle.ct/boundary_state.json" ]; then
 	echo "[regenerate] the recording carries no boundary_state.json." >&2
 	echo "[regenerate] This fixture exists to demonstrate spec §3.3/§3.4;" >&2
 	echo "[regenerate] a recording without the sidecar is not one." >&2
@@ -242,7 +297,7 @@ fi
 
 echo
 echo "[regenerate] done:"
-echo "    $FIXTURE_DIR/ledger-settle.ct"
-echo "    $FIXTURE_DIR/module/ledger_settle.wasm.zst"
+echo "    $OUT_DIR/ledger-settle.ct"
+echo "    $OUT_DIR/module/ledger_settle.wasm"
 echo
 echo "[regenerate] now run ./verify.sh to replay it."

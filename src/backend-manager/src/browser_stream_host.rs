@@ -122,7 +122,9 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -194,6 +196,134 @@ pub struct BrowserStreamHostConfig {
     /// Optional §2 streaming-consumer wiring.  Defaults to
     /// [`StreamConsumerConfig::default`], which spawns nothing.
     pub stream_consumer: StreamConsumerConfig,
+    /// Exit by itself once no browser has been connected for this long.
+    /// `None` disables the watchdog and the host runs until signalled.
+    ///
+    /// This is what stops the daemon outliving whatever started it.  See
+    /// [`DEFAULT_IDLE_TIMEOUT`] for why the host has to reap itself rather
+    /// than trusting its launcher to do it.
+    pub idle_timeout: Option<Duration>,
+}
+
+/// How long the host tolerates having no connected browser before it
+/// concludes it has been abandoned and exits.
+///
+/// # Why the host reaps itself
+///
+/// Every caller detaches this process — the fixture regenerators run it
+/// under `setsid(1)` so the recorded page is not in the launcher's process
+/// group.  That is deliberate (the recorded server must not receive the
+/// launcher's signals), but it also means the daemon is unreachable by
+/// every mechanism a supervisor would normally use: it is in its own
+/// session, so no terminal SIGHUP reaches it, and a `kill -- -<pgid>` of
+/// the launcher's group misses it.  The launcher's `trap ... EXIT` is
+/// therefore the only thing in the system that ever reaps it — and an
+/// `EXIT` trap does not run when the launcher is `SIGKILL`ed, which is
+/// exactly how CI step timeouts, `timeout(1)` escalation and OOM kills end
+/// a run.  Measured consequence: 22 orphaned hosts on one developer box,
+/// the oldest 47 hours old and one of them spinning a CPU for 34 of them.
+///
+/// A self-imposed deadline is the only fix that holds, because it is the
+/// only one that survives its launcher dying in a way the launcher cannot
+/// observe.  It is also the only one that is safe under concurrency: the
+/// host reasons *solely about its own accepted connections*, so it can
+/// never take down a peer that another run is legitimately using — unlike
+/// an external sweep over `pgrep`-matched command lines, which cannot tell
+/// a leaked host from a busy one.
+///
+/// # Why ten minutes
+///
+/// The window being bounded is "host started, browser has not connected
+/// yet": the caller still has to start the recorded backend and launch
+/// headless Chromium.  A whole recording run is ~40 s, so ten minutes is
+/// an order of magnitude of headroom for a heavily loaded machine, while
+/// still turning a two-day orphan into a ten-minute one.  The clock is
+/// reset by every connection and every disconnection, so it can never
+/// interrupt work in progress, however long the recording runs.
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Longest gap between two idle checks.  The watchdog wakes at
+/// `min(idle_timeout / 4, IDLE_POLL_MAX)` so a short timeout (tests use
+/// hundreds of milliseconds) is still honoured promptly, while a
+/// production-length one costs a handful of wakeups per minute.
+const IDLE_POLL_MAX: Duration = Duration::from_secs(5);
+
+/// Live-connection count plus the instant the host was last busy, shared
+/// between the accept loop and every spawned connection task.
+///
+/// "Busy" deliberately means *a connection existed*, not *bytes arrived*:
+/// a browser that has connected and is mid-recording may legitimately send
+/// nothing for a long time while the page computes, and the host must not
+/// mistake that for abandonment.  While `live > 0` the host never times
+/// out at all; the timer only runs once the last connection has gone.
+#[derive(Clone)]
+struct IdleState {
+    live: Arc<AtomicUsize>,
+    last_active: Arc<Mutex<Instant>>,
+}
+
+impl IdleState {
+    fn new() -> Self {
+        Self {
+            live: Arc::new(AtomicUsize::new(0)),
+            last_active: Arc::new(Mutex::new(Instant::now())),
+        }
+    }
+
+    /// Reset the abandonment clock.  A poisoned lock is recovered from
+    /// rather than propagated: losing this timestamp must never take down
+    /// a host that is recording.
+    fn touch(&self) {
+        let mut slot = self
+            .last_active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *slot = Instant::now();
+    }
+
+    fn live_connections(&self) -> usize {
+        self.live.load(Ordering::SeqCst)
+    }
+
+    fn idle_for(&self) -> Duration {
+        self.last_active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .elapsed()
+    }
+
+    /// True when nothing is connected and nothing has been for `timeout`.
+    fn abandoned_for(&self, timeout: Duration) -> bool {
+        self.live_connections() == 0 && self.idle_for() >= timeout
+    }
+}
+
+/// RAII counter for one accepted connection.  A guard rather than manual
+/// increment/decrement so the count is still correct when
+/// `handle_connection` returns early through `?`, panics, or is dropped
+/// mid-await at shutdown — any of which would otherwise pin the count
+/// above zero and disable the watchdog permanently.
+struct ConnectionGuard {
+    state: IdleState,
+}
+
+impl ConnectionGuard {
+    fn enter(state: &IdleState) -> Self {
+        state.live.fetch_add(1, Ordering::SeqCst);
+        state.touch();
+        Self {
+            state: state.clone(),
+        }
+    }
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.state.live.fetch_sub(1, Ordering::SeqCst);
+        // Stamp on the way out too, so the timeout is measured from the
+        // end of the last recording rather than from its start.
+        self.state.touch();
+    }
 }
 
 impl BrowserStreamHostConfig {
@@ -209,6 +339,7 @@ impl BrowserStreamHostConfig {
             out_dir,
             workdir,
             stream_consumer: StreamConsumerConfig::default(),
+            idle_timeout: Some(DEFAULT_IDLE_TIMEOUT),
         }
     }
 }
@@ -236,11 +367,13 @@ impl BrowserStreamHost {
         let listener = TcpListener::bind(self.config.bind).await?;
         let local_addr = listener.local_addr()?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let (idle_tx, idle_rx) = oneshot::channel::<()>();
         let config = self.config.clone();
-        let join = tokio::spawn(accept_loop(listener, config, shutdown_rx));
+        let join = tokio::spawn(accept_loop(listener, config, shutdown_rx, idle_tx));
         Ok(RunningHost {
             local_addr,
             shutdown_tx: Some(shutdown_tx),
+            idle_rx: Some(idle_rx),
             join: Some(join),
         })
     }
@@ -252,10 +385,29 @@ impl BrowserStreamHost {
 pub struct RunningHost {
     pub local_addr: SocketAddr,
     shutdown_tx: Option<oneshot::Sender<()>>,
+    idle_rx: Option<oneshot::Receiver<()>>,
     join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl RunningHost {
+    /// Resolves when the accept loop has stopped *itself* because the host
+    /// sat idle for [`BrowserStreamHostConfig::idle_timeout`].
+    ///
+    /// Never resolves when the watchdog is disabled, or when the loop ends
+    /// for any other reason — so a caller can `select!` this against its
+    /// signal handler and treat resolution as "we were abandoned", with no
+    /// risk of a spurious wakeup racing the ordinary shutdown path.
+    pub async fn idle_shutdown(&mut self) {
+        if let Some(rx) = self.idle_rx.take()
+            && rx.await.is_ok()
+        {
+            return;
+        }
+        // Sender dropped without firing (ordinary shutdown), or already
+        // observed: this future must simply never complete.
+        std::future::pending::<()>().await
+    }
+
     /// Send the shutdown signal and await the accept loop's exit.
     pub async fn stop(mut self) -> io::Result<()> {
         if let Some(tx) = self.shutdown_tx.take() {
@@ -286,7 +438,17 @@ async fn accept_loop(
     listener: TcpListener,
     config: BrowserStreamHostConfig,
     mut shutdown_rx: oneshot::Receiver<()>,
+    idle_tx: oneshot::Sender<()>,
 ) {
+    let idle_state = IdleState::new();
+    let idle_timeout = config.idle_timeout;
+    // Poll far more often than the deadline so the check is prompt for the
+    // sub-second timeouts the tests use, and cheap for production ones.
+    let poll_every = idle_timeout
+        .map(|t| (t / 4).clamp(Duration::from_millis(10), IDLE_POLL_MAX))
+        .unwrap_or(IDLE_POLL_MAX);
+    let mut idle_tx = Some(idle_tx);
+
     loop {
         tokio::select! {
             biased;
@@ -294,12 +456,43 @@ async fn accept_loop(
                 log::info!("browser-stream host shutting down");
                 return;
             }
+            // Only armed when a timeout is configured; a disabled watchdog
+            // must not even wake the loop.
+            _ = tokio::time::sleep(poll_every), if idle_timeout.is_some() => {
+                let timeout = match idle_timeout {
+                    Some(t) => t,
+                    None => continue,
+                };
+                if idle_state.abandoned_for(timeout) {
+                    // Say why on stderr as well as in the log: the usual
+                    // reader of this line is someone wondering where their
+                    // recording daemon went, and the fixture scripts do not
+                    // enable the logger.
+                    let secs = timeout.as_secs_f64();
+                    log::info!(
+                        "browser-stream host: no browser connected for {secs:.1}s — exiting"
+                    );
+                    eprintln!(
+                        "codetracer browser-stream host: no browser connected for {secs:.1}s; \
+                         exiting so this daemon does not outlive whatever started it"
+                    );
+                    if let Some(tx) = idle_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    return;
+                }
+            }
             accept = listener.accept() => {
                 match accept {
                     Ok((stream, peer)) => {
                         log::info!("browser-stream host: accepted connection from {peer}");
                         let cfg = config.clone();
+                        // Counted *here*, before the task is spawned, so
+                        // there is no window in which an accepted browser
+                        // is invisible to the watchdog.
+                        let guard = ConnectionGuard::enter(&idle_state);
                         tokio::spawn(async move {
+                            let _guard = guard;
                             if let Err(err) = handle_connection(stream, cfg).await {
                                 log::warn!("browser-stream host: connection from {peer} failed: {err}");
                             }
@@ -309,7 +502,7 @@ async fn accept_loop(
                         log::error!("browser-stream host: accept failed: {err}");
                         // Brief backoff to avoid a tight error loop if the
                         // listener is wedged (e.g. fd exhaustion).
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
                     }
                 }
             }
@@ -499,6 +692,47 @@ const HOST_STATE_FILE_NAME: &str = "boundary_state.json";
 /// that a missing input produces a divergence later, at a point unrelated
 /// to the cause.  Bumping this therefore means bumping it there too.
 const HOST_STATE_VERSION: u32 = 1;
+
+/// `boundary_id` of the in-stream spec §3.3 / §3.4 records (M44b).
+///
+/// Deliberately not `js-wasm-realm`: a reader of the realm markers must
+/// not have to tell these apart from a crossing marker, and the consumer's
+/// `parseRealmMarker` rejects this one on the `boundary_id` check alone.
+///
+/// Must match `hostStateBoundary` in
+/// `codetracer-wasm-recorder/internal/boundarylog/hoststate.go`.
+const HOST_STATE_BOUNDARY_ID: &str = "wasm-host-state";
+
+/// The two in-stream record kinds.  Must match `hostStateRecordInitial` /
+/// `hostStateRecordMutation` in the consumer.
+const HOST_STATE_RECORD_INITIAL: &str = "initial";
+const HOST_STATE_RECORD_MUTATION: &str = "mutation";
+
+/// Render one in-stream host-state record's `metadata` document.
+///
+/// The payload rides in `metadata` as a nested JSON string, which is the
+/// shape the realm and correlation markers on this path already use: it is
+/// the only field of `RecordEvent` a producer can put structure into
+/// without inventing a record type every existing reader would have to
+/// learn.
+///
+/// `field` is the key the payload lands under (`initial` or `mutation`),
+/// so the consumer can decode straight into its own schema types rather
+/// than into a variant wrapper.
+fn host_state_marker_metadata<T: Serialize>(
+    record: &str,
+    field: &str,
+    payload: &T,
+) -> io::Result<String> {
+    let document = serde_json::json!({
+        "boundary_id": HOST_STATE_BOUNDARY_ID,
+        "version": HOST_STATE_VERSION,
+        "record": record,
+        field: payload,
+    });
+    serde_json::to_string(&document)
+        .map_err(|e| io::Error::other(format!("host state marker serialisation: {e}")))
+}
 
 /// `boundary_state.json` as it is written.
 ///
@@ -1024,19 +1258,52 @@ impl JsonFileCtfsWriter {
             // --- spec §3.3 / §3.4: host-supplied state ------------------
             //
             // These describe the module's *starting state* and what the
-            // host did to it during a host call.  Neither is something
-            // that happened at a step, so neither becomes a
-            // `TraceLowLevelEvent`: emitting one would put a record into
-            // `trace.json` that the boundary-log assembler would then have
-            // to learn to skip, and would shift nothing but risk.  They go
-            // into the `boundary_state.json` sidecar instead.
+            // host did to it during a host call.  They are written twice,
+            // and the two carriers are for two different consumers:
+            //
+            //   * the `boundary_state.json` sidecar, which a **batch**
+            //     replay of a finished recording reads at startup.  This
+            //     is what M44 built and it is unchanged.
+            //   * one `Event` record apiece, appended to `trace.json` at
+            //     the moment the record arrives, which is the only thing
+            //     a **streaming** consumer can use (M44b).
+            //
+            // The second was originally left out on the reasoning that it
+            // "would put a record into `trace.json` that the boundary-log
+            // assembler would then have to learn to skip".  That is true
+            // and it is the wrong trade: `--boundary-stream` reads
+            // `LoadRecordingMetadata` once, at startup, and the sidecar
+            // cannot exist then — §3.3 is only known at the first exported
+            // call, which happens after the daemon opened the stream and
+            // spawned its consumer.  The consequence was that the whole
+            // streaming pipeline refused every module whose linear memory
+            // is imported: every Stylus contract, every `wasm-bindgen`
+            // glue layer.
+            //
+            // A re-read protocol would not have fixed it either, and not
+            // merely because it is late: `write_host_state` calls
+            // `open_stream`, and `open_stream` is what *spawns* the
+            // consumer, so the consumer's first read races the sidecar's
+            // first write.  Carrying the record in the stream has no such
+            // window, and puts §3.3 in the one place where its position
+            // relative to the first call is unambiguous.
+            //
+            // Nothing downstream had to learn anything: `Event` is an open
+            // extension point on this path (`parseRealmMarker` in
+            // `internal/boundarylog/recording.go` returns "not mine" for a
+            // `boundary_id` it does not know, and the JS recorder already
+            // puts HTTP and other domain markers into its recordings), so
+            // an older `wazero`, `ct-print` and the db-backend all skip
+            // these records.
             BrowserEvent::HostInitialState { memories, globals } => {
                 if self.host_state.initial_seen {
                     // The producer emits this once, immediately before the
                     // first exported call.  A second one would mean two
                     // recordings were spliced together; keeping the first
                     // is the only reading that stays true to the calls
-                    // already written.
+                    // already written.  Nothing is emitted into the stream
+                    // either, so the stream and the sidecar keep saying
+                    // the same thing — the consumer cross-checks them.
                     log::warn!(
                         "browser-stream writer: ignoring a second HostInitialState event; \
                          spec §3.3 state is the state before the FIRST exported call"
@@ -1045,6 +1312,16 @@ impl JsonFileCtfsWriter {
                     self.host_state.initial_seen = true;
                     self.host_state.initial.memories = memories.clone();
                     self.host_state.initial.globals = globals.clone();
+                    let metadata = host_state_marker_metadata(
+                        HOST_STATE_RECORD_INITIAL,
+                        "initial",
+                        &self.host_state.initial,
+                    )?;
+                    self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                        kind: EVENT_KIND_TRACE_LOG_EVENT,
+                        metadata,
+                        content: String::new(),
+                    }))?;
                 }
                 self.write_host_state()?;
             }
@@ -1053,11 +1330,23 @@ impl JsonFileCtfsWriter {
                 memory_writes,
                 global_sets,
             } => {
-                self.host_state.mutations.push(HostMutationRecord {
+                let record = HostMutationRecord {
                     after_crossing: *after_crossing,
                     memory_writes: memory_writes.clone(),
                     global_sets: global_sets.clone(),
-                });
+                };
+                let metadata =
+                    host_state_marker_metadata(HOST_STATE_RECORD_MUTATION, "mutation", &record)?;
+                // Emitted BEFORE the sidecar is rewritten, and before the
+                // import's own `LEAVE` realm marker reaches the stream, so
+                // a streaming consumer has the write in hand at the moment
+                // it services the crossing the write is anchored to.
+                self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                    kind: EVENT_KIND_TRACE_LOG_EVENT,
+                    metadata,
+                    content: String::new(),
+                }))?;
+                self.host_state.mutations.push(record);
                 self.write_host_state()?;
             }
             // Lifecycle events are handled in the trait impls below.
@@ -1687,6 +1976,62 @@ struct FunctionRecordOnDisk {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Recordings produced from the current tree for the tests below.
+///
+/// The demo recordings this crate's tests read are no longer committed:
+/// they were written by *this* code, so a committed copy could only ever
+/// confirm that the writer still agrees with its own past output, and
+/// would keep confirming it after the writer changed. See
+/// `scripts/materialize-recording.sh` for the cache and its key.
+#[cfg(test)]
+mod tests_support {
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+    use std::sync::{Mutex, OnceLock};
+
+    /// Absolute path of a directory holding `frontend.ct`,
+    /// `frontend-wasm.ct` and `backend.ct`, recording them first if this
+    /// tree has not produced them yet.
+    ///
+    /// Panics — never returns an "unavailable" the caller could turn
+    /// into a skip — if the pipeline cannot run. A framing test with no
+    /// real records to frame has nothing to say.
+    pub fn materialized_three_trace_recordings() -> PathBuf {
+        static CACHE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new(None));
+        let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(path) = guard.as_ref() {
+            return path.clone();
+        }
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("resolve the repository root from the backend-manager manifest directory");
+        let script = repo_root.join("scripts/materialize-recording.sh");
+        let output = Command::new(&script)
+            .arg("cross-process-three-trace")
+            .current_dir(&repo_root)
+            .stderr(Stdio::inherit())
+            .output()
+            .unwrap_or_else(|e| panic!("could not run {}: {e}", script.display()));
+        assert!(
+            output.status.success(),
+            "could not record the cross-process demo from this tree ({}); the \
+             diagnostic above says what is missing",
+            output.status
+        );
+        let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        assert!(
+            path.is_dir(),
+            "materialiser reported a non-directory: {}",
+            path.display()
+        );
+        *guard = Some(path.clone());
+        path
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1995,20 +2340,26 @@ mod tests {
     /// bytes any *committed* consumer actually reads.
     ///
     /// This one takes the real `frontend-wasm.ct/trace.json` from the
-    /// cross-process demo fixture — produced by the single-shot writer,
-    /// committed, and pinned by `codetracer-wasm-recorder`'s
+    /// cross-process demo — written by the single-shot writer during a
+    /// browser run this test triggers, and pinned by
+    /// `codetracer-wasm-recorder`'s
     /// `TestBuilderReproducesTheCommittedBrowserRecording` — splits it into
     /// its top-level records *as literal byte ranges of that file* (no
     /// re-serialisation anywhere), and pushes each through
-    /// [`RecordStream`]. The result must equal the committed file exactly.
-    /// Real records, real escapes, and an oracle that predates the change.
+    /// [`RecordStream`]. The result must equal that file exactly.
+    /// Real records, real escapes, and an oracle the change cannot reach:
+    /// the file is produced by the *single-shot* writer and re-framed by
+    /// the *incremental* one, so neither side is the other's echo.
+    ///
+    /// The recording is produced rather than committed. A committed one
+    /// would have been made by the very writer under test, so it would
+    /// go on matching after that writer changed — the round trip would
+    /// still close, over bytes nothing in the product emits any more.
     #[test]
-    fn verify_reframing_the_committed_browser_recording_reproduces_it_byte_for_byte() {
+    fn verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte() {
+        let recordings = super::tests_support::materialized_three_trace_recordings();
         for fixture in ["frontend-wasm.ct", "frontend.ct"] {
-            let committed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../db-backend/tests/fixtures/cross_process/account-balance-with-wasm")
-                .join(fixture)
-                .join("trace.json");
+            let committed = recordings.join(fixture).join("trace.json");
             let original = std::fs::read(&committed)
                 .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
 
@@ -2033,7 +2384,7 @@ mod tests {
                 String::from_utf8_lossy(&reframed),
                 String::from_utf8_lossy(&original),
                 "reframing {fixture}'s records one at a time must reproduce the \
-                 committed bytes exactly",
+                 recorded bytes exactly",
             );
         }
     }
@@ -2045,7 +2396,7 @@ mod tests {
     /// Deliberately dumb and self-contained: its whole job is to hand
     /// [`RecordStream`] the *original file's* bytes rather than anything
     /// this crate re-rendered.
-    fn split_top_level_records(bytes: &[u8]) -> Vec<&[u8]> {
+    pub(super) fn split_top_level_records(bytes: &[u8]) -> Vec<&[u8]> {
         assert_eq!(bytes.first(), Some(&b'['), "not a JSON array");
         assert_eq!(bytes.last(), Some(&b']'), "unterminated JSON array");
         let mut records = Vec::new();
@@ -2252,9 +2603,10 @@ mod tests {
         assert_eq!(of_kind("Function").len(), 2, "one Function record each");
         // And the paths file agrees with the Path records' positions,
         // because a Step's `path_id` indexes it.
-        let paths: Vec<String> =
-            serde_json::from_str(&std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap())
-                .unwrap();
+        let paths: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(paths, vec!["a.js".to_string(), "b.js".to_string()]);
     }
 
@@ -2306,10 +2658,9 @@ mod tests {
 
         // The paths file must list every interned path, in order, and
         // nothing else — the early write must not have left a short list.
-        let recorded: Vec<serde_json::Value> = serde_json::from_str(
-            &std::fs::read_to_string(trace_dir.join("trace.json")).unwrap(),
-        )
-        .unwrap();
+        let recorded: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(trace_dir.join("trace.json")).unwrap())
+                .unwrap();
         let path_records: Vec<String> = recorded
             .iter()
             .filter_map(|r| r.get("Path")?.as_str().map(str::to_string))
@@ -2321,10 +2672,8 @@ mod tests {
         assert_eq!(paths_file, path_records);
         assert_eq!(
             paths_file,
-            serde_json::from_str::<Vec<String>>(
-                &serde_json::to_string(&path_records).unwrap()
-            )
-            .unwrap(),
+            serde_json::from_str::<Vec<String>>(&serde_json::to_string(&path_records).unwrap())
+                .unwrap(),
         );
     }
 
@@ -2418,8 +2767,7 @@ mod tests {
     #[test]
     fn verify_the_stream_done_marker_is_opt_in_and_lands_last() {
         let tmp = TempDir::new().expect("create tempdir");
-        let mut plain =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
+        let mut plain = JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
         plain.session_start("plain", &[]).unwrap();
         let plain_dir = plain.session_end().unwrap();
         assert!(!plain_dir.join(".complete").exists(), "marker is opt-in");
@@ -2558,6 +2906,9 @@ mod tests {
             out_dir: tmp.path().to_path_buf(),
             workdir: tmp.path().to_path_buf(),
             stream_consumer: StreamConsumerConfig::default(),
+            // Not under test here, and a watchdog firing mid-handshake
+            // would make this smoke test flaky for an unrelated reason.
+            idle_timeout: None,
         };
         let host = BrowserStreamHost::new(config);
         let running = host.bind().await.expect("bind");
@@ -2741,37 +3092,128 @@ mod host_state_tests {
     }
 
     #[test]
-    fn host_state_events_add_nothing_to_the_trace_stream() {
-        // The sidecar describes the module's starting state, not a step.
-        // A record in `trace.json` would have to be skipped by the
-        // boundary-log assembler, and every `Function` / `VariableName` /
-        // `Path` index downstream of it is positional.
+    fn host_state_events_ride_in_the_trace_stream_and_disturb_nothing_else() {
+        // M44b. This test replaces `host_state_events_add_nothing_to_the_
+        // trace_stream`, which asserted the opposite — that a host-state
+        // event changed `trace.json` by not one byte.
+        //
+        // That was the right call under M44's assumptions and the wrong
+        // one overall. The sidecar it left as the only carrier is a file,
+        // and a file is exactly what a streaming consumer cannot use:
+        // `--boundary-stream` reads its metadata once, at startup, and
+        // §3.3 state is only known at the module's first exported call —
+        // after the daemon opened the stream and spawned the consumer. The
+        // whole streaming pipeline therefore refused every module whose
+        // linear memory is imported.
+        //
+        // The concern behind the old test was real and is preserved here
+        // in the form that actually states it: the reason a new record was
+        // risky is that `Function` / `VariableName` / `Path` are POSITIONAL
+        // tables, so anything that renumbers them silently breaks every
+        // lookup downstream. An `Event` record joins none of those tables,
+        // and the second assertion below proves it rather than assuming
+        // it — remove the host-state records from the new document and the
+        // remaining bytes are the old document, exactly.
         let tmp = TempDir::new().unwrap();
         let mut writer = writer_in(&tmp);
         writer.session_start("frontend-wasm", &[]).unwrap();
         writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        let dir = {
-            writer
-                .event(&parse_event_line(INITIAL_LINE).unwrap())
-                .unwrap();
-            writer
-                .event(&parse_event_line(MUTATION_LINE).unwrap())
-                .unwrap();
-            writer.session_end().unwrap()
-        };
+        writer
+            .event(&parse_event_line(INITIAL_LINE).unwrap())
+            .unwrap();
+        writer
+            .event(&parse_event_line(MUTATION_LINE).unwrap())
+            .unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let dir = writer.session_end().unwrap();
         let with_state = std::fs::read_to_string(dir.join("trace.json")).unwrap();
 
+        // (1) The records are there, in order, in the consumer's schema.
+        let records: Vec<serde_json::Value> = serde_json::from_str(&with_state).unwrap();
+        let host_state: Vec<&serde_json::Value> = records
+            .iter()
+            .filter(|r| {
+                r.get("Event")
+                    .and_then(|e| e.get("metadata"))
+                    .and_then(|m| m.as_str())
+                    .is_some_and(|m| m.contains(HOST_STATE_BOUNDARY_ID))
+            })
+            .collect();
+        assert_eq!(
+            host_state.len(),
+            2,
+            "one Event per host-state message, no more and no fewer"
+        );
+
+        let initial: serde_json::Value =
+            serde_json::from_str(host_state[0]["Event"]["metadata"].as_str().unwrap()).unwrap();
+        assert_eq!(initial["boundary_id"], HOST_STATE_BOUNDARY_ID);
+        assert_eq!(initial["version"], HOST_STATE_VERSION);
+        assert_eq!(initial["record"], HOST_STATE_RECORD_INITIAL);
+        // The payload is the sidecar's `initial` document, field for field
+        // — the consumer decodes both into the same `InitialState`.
+        assert_eq!(initial["initial"]["memories"][0]["name"], "memory");
+        assert_eq!(initial["initial"]["memories"][0]["minPages"], 17);
+        assert_eq!(
+            initial["initial"]["memories"][0]["data"][0]["bytesB64"],
+            "BwAAAGQ="
+        );
+        assert_eq!(initial["initial"]["globals"][0]["value"], "25");
+        assert_eq!(initial["initial"]["tables"], serde_json::json!([]));
+
+        let mutation: serde_json::Value =
+            serde_json::from_str(host_state[1]["Event"]["metadata"].as_str().unwrap()).unwrap();
+        assert_eq!(mutation["record"], HOST_STATE_RECORD_MUTATION);
+        assert_eq!(mutation["mutation"]["afterCrossing"], 1);
+        assert_eq!(mutation["mutation"]["memoryWrites"][0]["bytesB64"], "+g==");
+        assert_eq!(mutation["mutation"]["globalSets"][0]["value"], "250");
+
+        // (2) Nothing else moved. The same session without the host-state
+        // events must be exactly what remains after the host-state records
+        // are removed — same records, same order, same bytes.
         let tmp2 = TempDir::new().unwrap();
         let mut plain = writer_in(&tmp2);
         plain.session_start("frontend-wasm", &[]).unwrap();
         plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
         let dir2 = plain.session_end().unwrap();
         let without_state = std::fs::read_to_string(dir2.join("trace.json")).unwrap();
 
-        assert_eq!(
-            with_state, without_state,
-            "host-state events must not change trace.json by one byte"
+        // Compared as the ORIGINAL bytes, not as re-serialised values:
+        // `serde_json::Value` is a sorted map, so a round trip through it
+        // would normalise key order and hide exactly the kind of change
+        // this assertion exists to catch.
+        let raw_records = super::tests::split_top_level_records(with_state.as_bytes());
+        let kept: Vec<&[u8]> = raw_records
+            .into_iter()
+            .filter(|r| {
+                !std::str::from_utf8(r)
+                    .unwrap()
+                    .contains(HOST_STATE_BOUNDARY_ID)
+            })
+            .collect();
+        let rejoined = format!(
+            "[{}]",
+            kept.iter()
+                .map(|r| std::str::from_utf8(r).unwrap())
+                .collect::<Vec<_>>()
+                .join(",")
         );
+        assert_eq!(
+            rejoined, without_state,
+            "removing the host-state records must leave the document a \
+             recording without host state produces, byte for byte"
+        );
+
+        // (3) And the sidecar still says the same thing, because it is a
+        // rendering of these records rather than a second source of truth.
+        // The consumer refuses a recording whose two carriers disagree.
+        let sidecar: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar["initial"], initial["initial"]);
+        assert_eq!(sidecar["mutations"][0], mutation["mutation"]);
     }
 
     #[test]
@@ -2877,5 +3319,139 @@ mod host_state_tests {
         )
         .unwrap();
         assert_eq!(doc["initial"]["memories"][0]["minPages"], 17);
+    }
+}
+
+/// Idle-watchdog tests.
+///
+/// These pin the property the watchdog exists for: a `record-web` host
+/// must outlive its work but never outlive its usefulness.  Every caller
+/// detaches it with `setsid(1)`, so when the launcher is `SIGKILL`ed there
+/// is nothing left in the system able to reap it — the measured result was
+/// 22 orphans on one machine, the oldest 47 hours old.  The host therefore
+/// has to notice by itself.
+///
+/// No mocking: these bind a real listener on `127.0.0.1:0` and drive it
+/// with a real WebSocket client, because the thing under test is precisely
+/// the interaction between the accept loop and live connections.  Only the
+/// timeout is scaled down, from ten minutes to a few hundred milliseconds.
+#[cfg(test)]
+mod idle_watchdog_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Short enough to keep the suite fast, long enough that a loaded CI
+    /// machine does not trip the "stays alive" assertions spuriously.
+    const TEST_IDLE: Duration = Duration::from_millis(400);
+
+    fn config(tmp: &TempDir, idle_timeout: Option<Duration>) -> BrowserStreamHostConfig {
+        BrowserStreamHostConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            out_dir: tmp.path().to_path_buf(),
+            workdir: tmp.path().to_path_buf(),
+            stream_consumer: StreamConsumerConfig::default(),
+            idle_timeout,
+        }
+    }
+
+    /// The leak, reproduced at the level of the daemon: the launcher dies
+    /// without ever driving a page, and nothing connects.  The host must
+    /// stand itself down.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_host_nobody_ever_connects_to_exits_by_itself() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+
+        tokio::time::timeout(TEST_IDLE * 8, running.idle_shutdown())
+            .await
+            .expect("an abandoned host must exit on its own, not run forever");
+    }
+
+    /// The property that makes the watchdog safe to enable by default: a
+    /// recording in progress is never interrupted, however quiet it is.
+    /// A page that connects and then computes for a long time without
+    /// sending anything must not be mistaken for an abandoned daemon.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connected_browser_keeps_the_host_alive_past_the_deadline() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+        let url = format!("ws://{}/ct-stream", running.local_addr);
+
+        let (_ws, _resp) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect");
+
+        // Hold the socket open across several deadlines while sending
+        // nothing at all.
+        let verdict = tokio::time::timeout(TEST_IDLE * 4, running.idle_shutdown()).await;
+        assert!(
+            verdict.is_err(),
+            "the host timed out while a browser was still connected — a long, \
+             quiet recording would be killed mid-flight"
+        );
+    }
+
+    /// Once the last browser has gone the clock starts again, so a host
+    /// that finished its work and was then never signalled still exits.
+    /// This is the shape a `SIGKILL`ed launcher leaves behind *after* a
+    /// successful recording.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_host_exits_after_the_last_browser_disconnects() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+        let url = format!("ws://{}/ct-stream", running.local_addr);
+
+        {
+            let (ws, _resp) = tokio_tungstenite::connect_async(&url)
+                .await
+                .expect("connect");
+            drop(ws);
+        }
+
+        tokio::time::timeout(TEST_IDLE * 8, running.idle_shutdown())
+            .await
+            .expect("the host must exit once its last browser has disconnected");
+    }
+
+    /// `--idle-timeout off` genuinely disables the watchdog, so a human
+    /// supervising a host by hand is not stood down underneath them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_disabled_watchdog_never_fires() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, None));
+        let mut running = host.bind().await.expect("bind");
+
+        let verdict = tokio::time::timeout(TEST_IDLE * 4, running.idle_shutdown()).await;
+        assert!(
+            verdict.is_err(),
+            "a host configured with no idle timeout must never stand itself down"
+        );
+    }
+
+    /// The counter has to survive a connection ending abnormally, or one
+    /// failed handshake would pin it above zero and silently disable the
+    /// watchdog for the life of the process — reintroducing the leak in a
+    /// form that looks like the fix is present.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connection_that_never_completes_the_handshake_still_releases_its_slot() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(config(&tmp, Some(TEST_IDLE)));
+        let mut running = host.bind().await.expect("bind");
+
+        // A raw TCP connect that never speaks WebSocket: `accept_async`
+        // fails, so `handle_connection` returns `Err`.
+        {
+            let stream = tokio::net::TcpStream::connect(running.local_addr)
+                .await
+                .expect("tcp connect");
+            drop(stream);
+        }
+
+        tokio::time::timeout(TEST_IDLE * 8, running.idle_shutdown())
+            .await
+            .expect("a failed handshake must not leak a connection slot");
     }
 }

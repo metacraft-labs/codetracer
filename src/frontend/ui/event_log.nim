@@ -30,6 +30,17 @@ var eventLogVMInstance: EventLogVM
 var eventLogVMStore: ReplayDataStore
 var isoNimEventLogMounted*: bool = false
 
+const eventLogMaxReloadRetries* = 8
+  ## How many times `onUpdatedTable` will re-request the first page while
+  ## the backend still answers with zero records.
+  ##
+  ## An empty first page is the normal ordering on a trace open — the
+  ## debugger reports its entry location before `ct/event-load` returns —
+  ## so the retries are the designed response and are logged at DEBUG.
+  ## Running the budget out is not normal: nothing reloads the table
+  ## afterwards, so the Event Log stays empty for the session. That case is
+  ## logged at ERROR, in the `elif` next to the retry itself.
+
 # Reference to the EventLogComponent instance so that the IsoNim mount
 # callback can trigger DataTables initialisation via events().
 var eventLogComponentRef: EventLogComponent
@@ -391,12 +402,12 @@ proc tryMountIsoNimEventLogPanel() =
   ##   data through the DataTables API; IsoNim effects can also react
   ##
   ## Safe to call multiple times — mounts only once.
-  cerror "tryMountIsoNimEventLogPanel: called, isoNimEventLogMounted=" & $isoNimEventLogMounted & " vmIsNil=" & $eventLogVMInstance.isNil & " compRefIsNil=" & $eventLogComponentRef.isNil
+  cdebug "tryMountIsoNimEventLogPanel: called, isoNimEventLogMounted=" & $isoNimEventLogMounted & " vmIsNil=" & $eventLogVMInstance.isNil & " compRefIsNil=" & $eventLogComponentRef.isNil
   if isoNimEventLogMounted or eventLogVMInstance.isNil:
-    cerror "tryMountIsoNimEventLogPanel: skipping (already mounted or VM nil)"
+    cdebug "tryMountIsoNimEventLogPanel: skipping (already mounted or VM nil)"
     return
   if eventLogComponentRef.isNil:
-    cerror "tryMountIsoNimEventLogPanel: skipping (eventLogComponentRef is nil)"
+    cdebug "tryMountIsoNimEventLogPanel: skipping (eventLogComponentRef is nil)"
     return
 
   # Wait for the DOM container to exist. GoldenLayout creates it when
@@ -440,7 +451,7 @@ proc tryMountIsoNimEventLogPanel() =
           comp.redrawColumns = true
           comp.eventLogAfterRedraws()
       )
-      cerror "tryMountIsoNimEventLogPanel: mount COMPLETE in #eventLogComponent-0"
+      cdebug "tryMountIsoNimEventLogPanel: mount COMPLETE in #eventLogComponent-0"
 
     except:
       cerror "tryMountIsoNimEventLogPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
@@ -1405,16 +1416,44 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
     # maximum number of attempts to avoid infinite spinning.
     if response.data.recordsTotal == 0 and self.started and
        self.liveDebugRows.len == 0 and
-       not self.receivedUpdates and self.pendingReloadRetries < 8:
+       not self.receivedUpdates and
+       self.pendingReloadRetries < eventLogMaxReloadRetries:
       self.pendingReloadRetries += 1
       let delay = 250 * self.pendingReloadRetries  # 250, 500, 750, ... ms
-      cerror "[PIPELINE] event_log: onUpdatedTable got 0 records, scheduling reload retry " &
+      # Legitimate, hence DEBUG (M51).  The comment above says it: an empty
+      # first page means `ct/event-load` is still in flight, which is the
+      # normal ordering on every trace open.  The retry below is the
+      # designed response, and it is bounded, so the condition is expected
+      # and already handled — it is not an error.  Exhausting the budget
+      # IS, and the `elif` below is what reports it: demoting this line
+      # without adding that would have left the failing case with no
+      # signal at any level.
+      cdebug "[PIPELINE] event_log: onUpdatedTable got 0 records, scheduling reload retry " &
              $self.pendingReloadRetries & " in " & $delay & "ms"
       setTimeoutWithArg(proc(comp: EventLogComponent) {.cdecl.} =
         if not comp.receivedUpdates and
            not comp.denseTable.isNil and not comp.denseTable.context.isNil:
           comp.denseTable.context.ajax.reload(nil, false)
       , delay, component)
+    elif response.data.recordsTotal == 0 and self.started and
+         self.liveDebugRows.len == 0 and
+         not self.receivedUpdates and
+         self.pendingReloadRetries == eventLogMaxReloadRetries:
+      # Terminal, hence ERROR.  The retry budget above is gone and
+      # `ct/event-load` still has not delivered a single record, so nothing
+      # will reload the table again: the Event Log stays empty for the rest
+      # of the session with no other trace of why.  This is the same
+      # distinction the mount helpers in `ui/state.nim` and
+      # `ui/calltrace.nim` draw between their `retry #` lines (progress)
+      # and their "giving up" lines (failure).
+      #
+      # Counted past the cap so a later `onUpdatedTable` — the table is
+      # reloaded by search, paging and every `CtCompleteMove` — cannot
+      # repeat it and turn a one-off failure back into a stream.
+      self.pendingReloadRetries += 1
+      cerror "[PIPELINE] event_log: still 0 records after " &
+             $eventLogMaxReloadRetries &
+             " reload retries, giving up — the Event Log stays empty"
 
 method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.} =
   if response.firstUpdate or response.refreshEventLog or
@@ -1704,7 +1743,7 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
         setTimeoutWithArg(proc(comp: EventLogComponent) {.cdecl.} =
           let dTable = comp.denseTable
           if not dTable.isNil and not dTable.context.isNil:
-            cerror "[PIPELINE] event_log: first/revision CtCompleteMove, reloading DataTables ajax"
+            cdebug "[PIPELINE] event_log: first/revision CtCompleteMove, reloading DataTables ajax"
             dTable.context.ajax.reload(nil, false)
         , 500, component)
   )

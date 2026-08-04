@@ -491,7 +491,7 @@ function installStorybookEditorFixture(mount) {
   const host = mount.querySelector(".code-editor");
   if (!host || host.querySelector(".ct-storybook-editor-fixture")) return;
   host.id = "editorComponent-0";
-  host.dataset.label = "/home/zahary/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr";
+  host.dataset.label = "/home/user/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr";
 
   const editor = document.createElement("div");
   editor.className =
@@ -1225,7 +1225,7 @@ function createKaraxReferenceShell(container, variant) {
   const locationPath = document.createElement("span");
   locationPath.className = "location-path status-inline";
   locationPath.textContent =
-    "/home/zahary/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr:13#0";
+    "/home/user/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr:13#0";
   location.appendChild(locationPath);
   const copyPath = document.createElement("button");
   copyPath.id = "copy-path-image";

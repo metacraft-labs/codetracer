@@ -38,8 +38,13 @@ DEMO_BACKEND_PORT=8137 "$FIXTURE/regenerate.sh"
 ./src/build-debug/bin/ct print --filter markers "$FIXTURE/frontend.ct"
 ```
 
-Step 1 is optional: the three `.ct` directories and `session.toml` are
-**committed**, so steps 2 and 3 work on a fresh checkout.
+Step 1 is not optional on a fresh checkout — the recordings are not
+committed. It is also usually unnecessary to run by hand: the tests
+produce them for themselves through
+[`scripts/materialize-recording.sh`](../../../../../../scripts/materialize-recording.sh),
+which caches under the gitignored `target/test-recordings/` and re-records
+whenever any recorder binary changes. Run it here when you want the
+recordings beside the sources to poke at.
 
 | I want to… | Go to |
 | --- | --- |
@@ -95,7 +100,7 @@ wasm-src/lib.rs          the WebAssembly tier (Rust cdylib, no wasm-bindgen)
 regenerate.sh            the whole recording pipeline, one command
 stream-snapshots-demo.sh the live-streaming check (see below)
 session.toml[.template]  the three-recording session manifest
-ANSWERS.md               what the committed recordings actually contain
+ANSWERS.md               what the recordings actually contain
 ```
 
 ---
@@ -246,14 +251,15 @@ Watch the exchange in the browser's Network tab: one `POST /balance` with
 `{"requestId":"req-0001","balance":620}`, answered with
 `{"stored":true,"balance":620}`.
 
-> **Before you commit an edit.** The committed recordings reference the
-> exact source lines of these files, and the tests assert against them —
+> **After you edit one of these files.** The recordings reference the
+> exact source lines, and the tests assert against them —
 > `cross-tracer-three-recording.spec.ts` and
 > `cross_process_three_trace_dap_test.rs` both locate
 > `const balance = payload.balance` by searching `backend/server.js`
 > rather than hard-coding its line, so an edit moves them silently.
-> Re-run `regenerate.sh`, refresh `ANSWERS.md`, and commit the recordings
-> alongside the source change.
+> The recordings themselves need no action: an edit changes the
+> cache key of `materialize-recording.sh` and the next test run records again. Refresh
+> [`ANSWERS.md`](ANSWERS.md), which is prose and cannot re-derive itself.
 
 ---
 
@@ -344,9 +350,10 @@ sed -e "s|{{frontend_js_recording_id}}|$(uuidgen)|" \
 ```
 
 `session.toml`'s `path` entries are relative, so any directory holding the
-three `.ct`s plus the manifest is a valid session. (The committed
-`session.toml` pins fixed recording ids instead of fresh UUIDs, so
-`ANSWERS.md` and the tests can name them.)
+three `.ct`s plus the manifest is a valid session — which is what lets the
+recordings live in the `materialize-recording.sh` cache while the sources stay here.
+(`regenerate.sh` stamps fixed recording ids into `session.toml` rather than
+fresh UUIDs, so `ANSWERS.md` and the tests can name them.)
 
 ### Recording through the dev server: works, but loses source lines
 
@@ -405,7 +412,7 @@ A port collision is checked **before** anything is deleted:
 ```
 [regenerate] 127.0.0.1:8080 is already in use.
 [regenerate] Stop the process holding it (or set DEMO_BACKEND_PORT) and re-run.
-[regenerate] Nothing was deleted; the committed recordings are untouched.
+[regenerate] Nothing was written or deleted.
 ```
 
 Useful overrides:
@@ -425,8 +432,9 @@ Useful overrides:
 ### What re-recording changes
 
 `frontend.ct` and `frontend-wasm.ct` are **byte-identical** across runs —
-both the scripted run and the hand-driven one of section 3 reproduce the
-committed files exactly. A diff there means something really changed.
+the scripted run and the hand-driven one of section 3 produce the same
+bytes. A diff between two runs of the same tree means something really
+changed.
 
 `backend.ct` is not byte-stable, and that is not a defect. It has two
 sources of per-run variation, neither of which means anything changed:
@@ -510,7 +518,7 @@ Once the window is up:
    active process; the chain panel is owned by the session and survives
    the switch.
 
-The chain you should see, read back from the committed recordings:
+The chain you should see, read back from a fresh recording:
 
 ```
 spans:  backend        hops 0..1
@@ -556,11 +564,12 @@ DEMO_BACKEND_PORT=8137 \
 It starts `record-web` with `--snapshot-consumer`, so each recording's
 `trace.json` bytes are teed into a spawned `wazero-snapshots run
 --boundary-stream -`, then drives a page that calls `compute_balance`
-eight times, two seconds apart. (The committed page calls it once, and one
+eight times, two seconds apart. (The demo page calls it once, and one
 call is one quiescent point — a slice can only be *sealed* when the next
 point opens, so a one-call workload has no intermediate slice to time. The
-extra calls are patched into a **scratch copy**; nothing committed is
-touched, and the recorders' flush policy is left at its shipped defaults.)
+extra calls are patched into a **scratch copy**; the fixture's own sources
+are untouched, and the recorders' flush policy is left at its shipped
+defaults.)
 
 Real output from a run on this machine:
 
@@ -783,19 +792,37 @@ should be discarded rather than committed.
 
 ---
 
-## What is committed
+## What is committed, and what is not
 
-The three `.ct` directories and `session.toml` are committed, so the tests
-run without a browser or Rust toolchain. Build intermediates
-(`frontend/node_modules`, `frontend/dist`, `frontend/package-lock.json`,
-`wasm-src/target`, the instrumented `.wasm` and its manifest) are ignored
-— see [`.gitignore`](.gitignore).
+**Only the sources.** The three `.ct` directories and `session.toml` are
+not committed; nor is anything the build produces (`frontend/node_modules`,
+`frontend/dist`, `frontend/package-lock.json`, `wasm-src/target`, the
+instrumented `.wasm` and its manifest) — see [`.gitignore`](.gitignore).
 
-Re-run `regenerate.sh` after changing any of the demo's source files, and
-commit the refreshed recordings alongside the change: the tests assert
-against the source lines these recordings reference, so the two have to
-move together. [`ANSWERS.md`](ANSWERS.md) records what the current
-recordings contain and should be refreshed with them.
+They used to be, on the reasoning that re-recording on every CI run would
+make the suite depend on a browser and a Rust toolchain. It does, and that
+is the price of the tests meaning anything. A recording written by the
+current recorders and replayed by the current replayer proves the two agree
+with each other, and keeps proving it after a recorder changes underneath
+it — the suite goes green about a pipeline that no longer exists. A
+recording is worth committing only when it was made by a version that can
+no longer be built, which is true of exactly one artefact in this
+workspace and is not true of these.
+
+So the tests record instead:
+[`scripts/materialize-recording.sh`](../../../../../../scripts/materialize-recording.sh)
+runs this directory's `regenerate.sh` once per build (~40 s) into the
+gitignored `target/test-recordings/`, under a file lock so every consumer
+shares one production, keyed on this fixture's sources **and on the content
+of `ct-instrument`, the `record-web` binary, the instrumenter's
+`recorder-runtime/` and the JS recorder's built packages**. Rebuild any of
+them and the key moves and the demo is recorded again. There is no outcome
+that means "skip": a missing prerequisite is a hard failure listing every
+gap.
+
+Editing a demo source therefore needs no recording step — the key moves and
+the next run records. [`ANSWERS.md`](ANSWERS.md) is prose about what the
+recordings contain and does need refreshing by hand.
 
 ---
 
@@ -803,7 +830,8 @@ recordings contain and should be refreshed with them.
 
 Two newer WebAssembly fixtures sit beside `cross_process/`, under
 `src/db-backend/tests/fixtures/`. Each has its own `README.md` and a
-`verify.sh` that replays the committed recording and checks the result.
+`verify.sh` that records from the current tree and replays the result;
+`just verify-wasm-recordings` runs all of them.
 They cover module shapes this demo deliberately cannot:
 
 - [`../../wasm-memory-calldata/`](../../wasm-memory-calldata/) —

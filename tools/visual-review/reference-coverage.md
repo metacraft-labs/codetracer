@@ -1,6 +1,6 @@
 # Storybook Reference Coverage
 
-<!-- cspell:ignore Karax karax worktree zahary isonim viewmodel -->
+<!-- cspell:ignore Karax karax worktree isonim viewmodel -->
 <!-- cspell:ignore deepreview capturable -->
 
 This file tracks Karax reference captures used for IsoNim visual parity work.
@@ -8,14 +8,21 @@ Generated screenshots, HTML dumps, and computed-style dumps are intentionally
 kept out of this repository; the rows below point to the local reference
 worktree artifacts that agents should compare against.
 
+Paths are given relative to the reference-dump root, written below as
+`$CT_REFERENCE_DUMPS`. It defaults to `ui-tests/reference-dumps/` inside the
+checkout and can be pointed at a local capture worktree instead — the same
+variable `src/tests/gui/tests/session-chrome/new-trace-caption-chrome.spec.ts`
+reads. The captures themselves are not distributed with the repository, so an
+unset root simply means the reference-fact diagnostics stay empty.
+
 ## Reference Sets
 
 - Full default/scratchpad/terminal baseline:
-  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T155511Z/`
+  `$CT_REFERENCE_DUMPS/isonim-karax-reference-20260504T155511Z/`
 - Expanded panel baseline:
-  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T220906Z/`
+  `$CT_REFERENCE_DUMPS/isonim-karax-reference-20260504T220906Z/`
 - Expanded panel baseline with isolated layout config:
-  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T222307Z/`
+  `$CT_REFERENCE_DUMPS/isonim-karax-reference-20260504T222307Z/`
 
 Some old Karax panels were less developed than current IsoNim surfaces. Use
 these references for mature shell, Golden Layout, design-system class, and
@@ -53,7 +60,7 @@ Representative partial/missing-reference surfaces were captured successfully at
 | Build errors | `errors` | confirmed current IsoNim problems/build-errors panel, `tools/visual-review/reports/errors-laptop.json`; `noir-build-open` also confirms the panel tab in a default layout |
 | Deep review panel | `deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/deepreview-laptop.json` |
 | Agent activity deep review | `agent-activity-deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/agent-activity-deepreview-laptop.json` |
-| Auto-hide bottom tabs | `auto-hide-bottom-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-bottom-tabs-laptop.json` |
+| Auto-hide bottom strip | `auto-hide-bottom-strip` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-bottom-strip-laptop.json` |
 | Auto-hide collapsed icons | `auto-hide-collapsed-icons` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-collapsed-icons-laptop.json` |
 | Auto-hide overlay tabs | `auto-hide-overlay-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-overlay-tabs-laptop.json` |
 | Auto-hide side strip | `auto-hide-side-strip` and `auto-hide-side-strip-collapsed` | confirmed populated and collapsed current IsoNim variants |

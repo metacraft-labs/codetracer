@@ -186,6 +186,19 @@ mkdir -p "$PAGE" "$RECORD_WEB_OUT" "$SLICE_ROOT"
 echo "[stream-demo] scratch: $SCRATCH"
 
 cleanup_pids=()
+
+# Drop an already-reaped pid, so the exit trap cannot later signal a
+# *recycled* process group that happens to have been given the same number.
+forget_pid() {
+	local target="$1" pid
+	local kept=()
+	for pid in "${cleanup_pids[@]:-}"; do
+		[ -n "$pid" ] || continue
+		[ "$pid" = "$target" ] || kept+=("$pid")
+	done
+	cleanup_pids=("${kept[@]:-}")
+}
+
 cleanup() {
 	for pid in "${cleanup_pids[@]:-}"; do
 		[ -n "$pid" ] || continue
@@ -194,8 +207,34 @@ cleanup() {
 		# recorded server holding its port.
 		kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
 	done
+	cleanup_pids=()
+}
+
+# Everything started below is `setsid`-detached — deliberately, so the
+# recorded server does not receive signals aimed at this script's process
+# group — which also means nothing else in the system will ever reap it.
+# This trap is the only reaper, and it is worth being explicit about when
+# it runs. This daemon additionally owns a `--snapshot-consumer` child per
+# recording, so an unreaped host leaks a replayer alongside it.
+#
+# Naming INT/TERM/HUP is deliberate but is *not* what fixes the orphaned
+# daemons: bash already runs an `EXIT` trap when the shell dies on an
+# untrapped SIGTERM, including while blocked in a foreground command. That
+# was measured, not assumed. The explicit traps buy independence from that
+# subtlety and a 128+signo exit status.
+#
+# The real gap is SIGKILL, where no trap can run, which is why `record-web`
+# also stands itself down after an idle period (`--idle-timeout`, default
+# 10 minutes).
+on_signal() {
+	trap - EXIT
+	cleanup
+	exit "$1"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 wait_for_port() {
 	local port="$1" label="$2"
@@ -348,8 +387,10 @@ wait_for_port "$BACKEND_PORT" "the backend" || exit 1
 echo "[stream-demo] 5/5 driving the page in headless Chromium"
 (cd "$PAGE" && DEMO_PREVIEW_PORT="$PREVIEW_PORT" DEMO_BACKEND_PORT="$BACKEND_PORT" node ./drive.mjs)
 wait "$BACKEND_PID" 2>/dev/null || true
+forget_pid "$BACKEND_PID"
 kill -INT "$RECORD_WEB_PID" >/dev/null 2>&1 || true
 wait "$RECORD_WEB_PID" 2>/dev/null || true
+forget_pid "$RECORD_WEB_PID"
 
 echo
 echo "[stream-demo] consumer stdout:"

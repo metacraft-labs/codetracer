@@ -277,9 +277,9 @@ proc tryMountIsoNimCalltrace() =
   ##   store, and IsoNim's reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
-  cerror "[PIPELINE] tryMountIsoNimCalltrace: called, isoNimCalltraceMounted=" & $isoNimCalltraceMounted & " vmIsNil=" & $calltraceVMInstance.isNil
+  cdebug "[PIPELINE] tryMountIsoNimCalltrace: called, isoNimCalltraceMounted=" & $isoNimCalltraceMounted & " vmIsNil=" & $calltraceVMInstance.isNil
   if isoNimCalltraceMounted or calltraceVMInstance.isNil:
-    cerror "[PIPELINE] tryMountIsoNimCalltrace: skipping (already mounted or VM nil)"
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: skipping (already mounted or VM nil)"
     return
 
   # Wait for the DOM container to exist. GoldenLayout creates it when
@@ -293,9 +293,17 @@ proc tryMountIsoNimCalltrace() =
     let container = dom_api.getElementById(dom_api.document, key)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if calltraceRetryCount mod 10 == 0:
-        cerror "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &
+        # Legitimate, hence DEBUG (M51): polling for a container
+        # GoldenLayout has not created yet is the design.  Only exhausting
+        # the budget below is a failure.
+        cdebug "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &
           ", container=nil"
       if calltraceRetryCount > 200:
+        # Stays at ERROR, for the same reason as the state panel's cap in
+        # `ui/state.nim`: reaching it means the calltrace panel is never
+        # mounted for the rest of the session.  The `retry #` line above is
+        # ordinary progress while GoldenLayout builds the DOM; this one is
+        # terminal.
         cerror "[PIPELINE] tryMountIsoNimCalltrace: not ready after 200 retries, giving up"
         return
       discard setTimeout(proc() = doMount(), 10)
@@ -305,10 +313,10 @@ proc tryMountIsoNimCalltrace() =
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    cerror "[PIPELINE] tryMountIsoNimCalltrace: container found, mounting now"
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: container found, mounting now"
     isoNimCalltraceMounted = true
     mountIsoNimCalltrace(container, calltraceVMInstance)
-    cerror "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
 
   doMount()
 
@@ -331,7 +339,7 @@ proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   # request that was sent through the old stub backend.
   store.requestTracker.markComplete("load-calltrace")
   calltraceVMInstance = createCalltraceVM(store)
-  cerror "[PIPELINE] initCalltraceVMWithStore: storeId=" & $store.storeId
+  cdebug "[PIPELINE] initCalltraceVMWithStore: storeId=" & $store.storeId
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimCalltrace()
 
@@ -362,7 +370,7 @@ proc initCalltraceVM() =
 
   calltraceVMStore = createReplayDataStore(stubBackend)
   calltraceVMInstance = createCalltraceVM(calltraceVMStore)
-  cerror "[PIPELINE] initCalltraceVM (stub): storeId=" & $calltraceVMStore.storeId
+  cdebug "[PIPELINE] initCalltraceVM (stub): storeId=" & $calltraceVMStore.storeId
   clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimCalltrace()
 
@@ -370,11 +378,17 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
   ## so the CalltraceVM's visibleLines memo sees the same data.
   let diagSyncStoreId = if calltraceVMStore.isNil: -1 else: calltraceVMStore.storeId
-  cerror "[PIPELINE] syncCalltraceData: CALLED storeId=" &
-    $diagSyncStoreId & " lines=" & $results.callLines.len &
-    " totalCalls=" & $results.totalCallsCount
-  cerror fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={isoNimCalltraceMounted}"
+  # One progress line, not two: the previous pair logged `storeId`, the
+  # line count and `totalCalls` twice, the first being a strict subset of
+  # the second.
+  cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={isoNimCalltraceMounted}"
   if calltraceVMStore.isNil:
+    # Stays at ERROR: this silently DROPS a backend calltrace response.
+    # The store is created by `initCalltraceVMWithStore` (or the stub
+    # `initCalltraceVM`) before `configureMiddleware` registers the
+    # `CtUpdatedCalltrace` subscription that calls us, so a nil store here
+    # is an initialisation-ordering defect, not a benign race — and its
+    # symptom is a permanently empty calltrace panel with no other trace.
     cerror "[PIPELINE] syncCalltraceData: store is nil, returning early"
     return
 
@@ -505,7 +519,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
     totalCount = cast[uint64](results.totalCallsCount),
     args = vmArgs,
   )
-  cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store ({vmArgs.len} arg entries), startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
+  cdebug fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store ({vmArgs.len} arg entries), startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
 
 proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int;
                                     sourceGeneration: int = 0;
@@ -538,7 +552,7 @@ proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int;
       file = $path,
       line = line,
     )
-  cerror fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
+  cdebug fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
 
 method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
   self.totalCallsCount = results.totalCallsCount

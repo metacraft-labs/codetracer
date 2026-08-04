@@ -1,0 +1,29 @@
+# Everything `regenerate.sh` produces.
+#
+# The four recordings, the four ORIGINAL modules the offline replay is
+# driven against (spec §6.1), and the `expected.json` answers the page
+# observed are NOT committed. The modules were, on the grounds that a
+# recording pins export names, import indices and — for `vault_apply` —
+# the absolute address of its `VAULT` block, so a module built by a
+# different toolchain no longer describes the recording. Producing each
+# module in the same run as its recording satisfies that properly, and
+# additionally keeps the pair a description of the current instrumenter
+# rather than of whichever one last ran.
+#
+# `scripts/materialize-recording.sh` records all four into the gitignored
+# `target/test-recordings/`, keyed on this fixture's sources and on the
+# content of `ct-instrument` and the browser recorder. The zstd step that
+# squeezed each ~0.6 MB debug module under the repo's 500 KB commit cap is
+# gone with the commit.
+modules/*/*.ct/
+modules/*/module/
+modules/*/expected.json
+
+# Build output.
+modules/*/build/
+
+# What the browser loads, written beside the page that serves it, built in
+# the same run as the recording. The repo root's blanket `*.wasm` already
+# ignores it; this is the statement of intent.
+modules/*/page/*.instrumented.wasm
+modules/*/page/*.instrumented.wasm.manifest.json

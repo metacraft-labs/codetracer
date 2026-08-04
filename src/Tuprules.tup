@@ -199,12 +199,26 @@ endif
 # `-d:ctHmr` activates the codetracer hot-module-reload integration
 # (`src/frontend/hmr_runtime.nim`). It transitively enables
 # `-d:isonimHmr` so isonim's `{.uiComponent.}` pragmas register slots
-# and `mountUiHot` boundaries listen for swaps. The HMR transport is
-# *only* installed when the renderer's environment also has CT_HMR=1,
-# so a binary built with these flags behaves like a non-HMR binary
-# until the developer opts in at launch time. Production builds go
-# through the nix flake's release path which does not include these
-# flags.
+# and `mountUiHot` boundaries listen for swaps.
+#
+# The transport is opt-OUT at runtime, not opt-in: `hmr_runtime.
+# isHmrRequested()` returns true when CT_HMR is unset and only
+# CT_HMR=0/false/off suppresses it. So a binary built with these flags
+# dials ws://localhost:35729 on every launch, and when no LiveReload
+# daemon is listening Chromium logs a console error from its network
+# stack that no page-level code can demote. Set CT_HMR=0 for launches
+# that have no daemon — the GUI test harness does this in
+# `makeCleanEnv`.
+#
+# (This comment used to claim the opposite — that the transport is
+# installed "only when the renderer's environment also has CT_HMR=1".
+# It never matched the implementation; it is corrected here rather than
+# by flipping the default, which would change every developer's
+# `just build` workflow.)
+#
+# Production builds go through the nix flake's release path, which does
+# not include these flags, so `installCtHmrTransport` there is the
+# no-op stub and no connection is attempted.
 #
 # Note: `--hotCodeReloading:on` is intentionally NOT set here.
 # Nim's JS HCR wraps each module's init in a `if (loaded == undefined)`

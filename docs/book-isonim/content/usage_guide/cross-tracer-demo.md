@@ -52,21 +52,22 @@ From the repository root:
 just demo-cross-tracer
 ```
 
-The recipe is idempotent:
+The recipe records the demo before it launches:
 
-- If the three `.ct` containers are already present, it skips the
-  recorder pipeline and launches the GUI immediately.
-- If any container is missing, it invokes
-  `src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/regenerate.sh`,
-  which materialises all three traces in place. The regenerator is
-  honestly gated on its prerequisites (see below) and exits cleanly
-  with an actionable diagnostic when any are missing — the recipe
-  surfaces the same message.
-- If `session.toml` is missing or still carries
-  `{{frontend_js_recording_id}}`-style placeholders (e.g. after a
-  partial fixture refresh), the recipe stamps fresh UUIDv7s into it
-  from `session.toml.template` before launching, mirroring what
-  `regenerate.sh` does in its final step.
+- The three `.ct` containers and `session.toml` are **not committed**.
+  They are produced by `scripts/materialize-recording.sh`, which runs
+  `src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/regenerate.sh`
+  and caches the result under the gitignored `target/test-recordings/`.
+  So what the GUI opens is always a recording of the tree you are
+  standing in — not a copy made by whichever recorder happened to be
+  current when someone last committed one.
+- The cache is keyed on the demo's sources **and on the content of every
+  recorder binary involved** (`ct-instrument`, the `record-web` binary,
+  the instrumenter's `recorder-runtime/`, the JS recorder's built
+  packages), so a second run is instant and a rebuilt recorder re-records.
+- The pipeline is honestly gated on its prerequisites (see below) and
+  fails with an actionable, consolidated diagnostic when any are missing.
+  There is no outcome that quietly launches on nothing.
 
 The launch is `ct replay -t <fixture-dir>/session.toml`, which hands
 the manifest to the same DAP session loader the M24 process-tree flow
@@ -79,20 +80,22 @@ The recorder pipeline requires every component below. The recipe
 exits with a single consolidated report when any are missing, so the
 operator can fill the gaps one by one and re-run:
 
-- `wasm-pack` plus `rustup target add wasm32-unknown-unknown`
-- The CodeTracer Python recorder
-  (`codetracer_python_recorder` importable from `python3` — shipped
-  by the dev shell)
-- `browser_stream_receiver` on `PATH` (the codetracer-js-recorder
-  host, produced by `just build-once` or the dev shell)
+- `rustup target add wasm32-unknown-unknown`
+- `ct-instrument`, built in the `codetracer-wasm-instrumenter` sibling
+- The `record-web` daemon — i.e. a built `session-manager`
+  (`cargo build` in `src/backend-manager`, or `just build-once`)
+- The `codetracer-js-recorder` sibling, built (`just build` there)
 - Playwright in the fixture's `frontend/` directory
   (`npm install playwright`)
 - A built `ct` binary (`just build-once`)
 
-These are the same prerequisites
-`src/tests/gui/lib/value-origin-fixtures.ts::threeTraceFixtureSkipReason()`
-probes for when the Playwright spec
-`cross-tracer-three-recording.spec.ts` decides whether to run.
+These are the same prerequisites the Playwright spec
+`cross-tracer-three-recording.spec.ts` depends on: it calls
+`src/tests/gui/lib/value-origin-fixtures.ts::threeTraceRecordingRoot()`,
+which runs the same materialiser and **throws** rather than skipping when
+it cannot record. Only the missing `ct` binary is treated as an
+environment gap the spec may skip on, because that one genuinely means
+the machine cannot run a GUI test at all.
 
 ## What to expect in the GUI
 

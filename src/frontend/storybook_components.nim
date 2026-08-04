@@ -57,7 +57,7 @@ import viewmodel/views/[
   isonim_agent_activity_deepreview_view,
   isonim_agent_activity_view,
   isonim_agent_workspace_view,
-  isonim_auto_hide_bottom_tabs_view,
+  isonim_auto_hide_bottom_strip_view,
   isonim_auto_hide_collapsed_icons_view,
   isonim_auto_hide_overlay_tabs_view,
   isonim_auto_hide_side_strip_view,
@@ -1569,11 +1569,28 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
     ))
   of "debug-shell":
     appendRendered(container, renderDebugChromePanel(r, 3))
-  of "auto-hide-bottom-tabs":
-    appendRendered(container, renderAutoHideBottomTabsPanel(r, @[
-      AutoHideBottomTabRecord(title: "Terminal Output"),
-      AutoHideBottomTabRecord(title: "Build"),
-    ]))
+  of "auto-hide-bottom-strip":
+    # The fixture renders the *live* bottom-strip view. It used to render
+    # `isonim_auto_hide_bottom_tabs_view`, a second bottom-tabs renderer that
+    # nothing but storybook imported — so storybook was showing a component
+    # the app had stopped emitting, which is how ~48 spec locators against
+    # its wrapper class stayed plausible while matching nothing. That module
+    # has been retired (Value-Origin-Tracking milestone M47).
+    #
+    # Mounted through `renderAutoHideBottomStripInto` on a host carrying the
+    # real `#auto-hide-bottom-strip` id, exactly as `ui/auto_hide.nim` does
+    # it in the app — NOT by appending the bare panel. Every bottom-specific
+    # rule in `styles/components/auto_hide.styl` is id-scoped
+    # (`#auto-hide-bottom-strip .auto-hide-strip-tab`, `… -label`,
+    # `… .active:first-child::before`), so a panel rendered without the id
+    # inherits only the vertical side-strip styles and the story would show
+    # something users never see — the same class of drift that made this
+    # fixture worth fixing in the first place.
+    let stripHost = createHost(container, "div", BottomStripHostId)
+    renderAutoHideBottomStripInto(r, stripHost, @[
+      AutoHideBottomStripRecord(title: "Terminal Output", active: true),
+      AutoHideBottomStripRecord(title: "Build", active: false),
+    ])
   of "auto-hide-collapsed-icons":
     appendRendered(container, renderAutoHideCollapsedIconsPanel(r, @[
       AutoHideCollapsedIconRecord(title: "Calltrace", icon: "C"),

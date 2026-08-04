@@ -15,13 +15,27 @@
  *   frontend listens to.  Injecting output directly into `data.build`
  *   exercises the same rendering and parsing code paths without depending
  *   on specific toolchains being installed on the test machine.
+ *
+ * Clicking a strip tab DOCKS the panel into `#auto-hide-docked-bottom`; it
+ * does not open `#auto-hide-overlay`, which is the hover-preview surface.
+ * See the contract note in `page-objects/auto-hide-strip.ts`.
+ *
+ * No mocks beyond the injected compiler text described above: a real
+ * JavaScript recording opened by the real Electron app supplies the running
+ * instance — see `lib/js-trace-fixture.ts`.
  */
 
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  DOCKED_BOTTOM_CONTENT_SELECTOR,
+  openBottomPanel,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
 
 // ---------------------------------------------------------------------------
 // Realistic compiler output fixtures
@@ -210,11 +224,13 @@ async function injectBuildProblems(
 // Tests
 // ---------------------------------------------------------------------------
 
+const fixture = recordChromeTraceFixture("real-compiler-errors");
+
 test.describe("Real compiler errors in build panels", () => {
   test.setTimeout(120_000);
-  // Use a simple Python trace to get a working CodeTracer instance.
-  // We do not need a real build -- we inject the output programmatically.
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  // Any real recording gives a working CodeTracer instance; we do not need
+  // a real build -- the output is injected programmatically.
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
   test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
   test.afterAll(() => restoreUserLayout());
@@ -228,19 +244,15 @@ test.describe("Real compiler errors in build panels", () => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
     // Activate the BUILD tab.
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "BUILD",
-    });
-    await retry(
-      async () => (await buildTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await buildTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "BUILD");
 
-    // Wait for the build panel to be present inside the overlay.
+    // Wait for the build panel to be present inside the docked container.
     await retry(
-      async () => (await ctPage.locator("#auto-hide-overlay-content #buildComponent-0, #build").count()) > 0,
+      async () =>
+        (await ctPage
+          .locator(`${DOCKED_BOTTOM_CONTENT_SELECTOR} #buildComponent-0`)
+          .count()) > 0,
       { maxAttempts: 20, delayMs: 500 },
     );
     // Force render the build panel to ensure content is up-to-date.
@@ -271,15 +283,8 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "BUILD",
-    });
-    await retry(
-      async () => (await buildTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await buildTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "BUILD");
 
     await retry(
       async () => (await ctPage.locator("#build").count()) > 0,
@@ -310,15 +315,8 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "BUILD",
-    });
-    await retry(
-      async () => (await buildTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await buildTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "BUILD");
 
     await retry(
       async () => (await ctPage.locator("#build").count()) > 0,
@@ -352,15 +350,8 @@ test.describe("Real compiler errors in build panels", () => {
   test("Build failure header shows exit code", async ({ ctPage }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "BUILD",
-    });
-    await retry(
-      async () => (await buildTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await buildTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "BUILD");
 
     await retry(
       async () => (await ctPage.locator(".build-panel").count()) > 0,
@@ -407,15 +398,8 @@ test.describe("Real compiler errors in build panels", () => {
     ]);
 
     // Click the PROBLEMS tab to activate it.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "PROBLEMS",
-    });
-    await retry(
-      async () => (await problemsTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await problemsTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "PROBLEMS");
     // Force render the problems panel.
     await ctPage.evaluate(() => {
       if ((window as any).__ctRenderPanel) (window as any).__ctRenderPanel(21);
@@ -485,15 +469,8 @@ test.describe("Real compiler errors in build panels", () => {
     ]);
 
     // Activate the PROBLEMS tab.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "PROBLEMS",
-    });
-    await retry(
-      async () => (await problemsTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await problemsTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "PROBLEMS");
     // Force render the problems panel.
     await ctPage.evaluate(() => {
       if ((window as any).__ctRenderPanel) (window as any).__ctRenderPanel(21);
@@ -564,15 +541,8 @@ test.describe("Real compiler errors in build panels", () => {
       },
     ]);
 
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "PROBLEMS",
-    });
-    await retry(
-      async () => (await problemsTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await problemsTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "PROBLEMS");
     // Force render the problems panel.
     await ctPage.evaluate(() => {
       if ((window as any).__ctRenderPanel) (window as any).__ctRenderPanel(21);
@@ -648,15 +618,8 @@ test.describe("Real compiler errors in build panels", () => {
       },
     ]);
 
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "PROBLEMS",
-    });
-    await retry(
-      async () => (await problemsTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await problemsTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "PROBLEMS");
     // Force render the problems panel.
     await ctPage.evaluate(() => {
       if ((window as any).__ctRenderPanel) (window as any).__ctRenderPanel(21);
@@ -702,15 +665,8 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "BUILD",
-    });
-    await retry(
-      async () => (await buildTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await buildTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "BUILD");
 
     await retry(
       async () => (await ctPage.locator("#build").count()) > 0,
@@ -751,15 +707,8 @@ test.describe("Real compiler errors in build panels", () => {
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
 
-    const buildTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "BUILD",
-    });
-    await retry(
-      async () => (await buildTab.count()) > 0,
-      { maxAttempts: 30, delayMs: 1_000 },
-    );
-    await buildTab.first().click();
-    await ctPage.waitForSelector("#auto-hide-overlay.visible", { timeout: 5_000 }).catch(() => {});
+    await waitForDefaultBottomTabs(ctPage);
+    await openBottomPanel(ctPage, "BUILD");
 
     await retry(
       async () => (await ctPage.locator("#build").count()) > 0,

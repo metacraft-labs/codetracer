@@ -277,11 +277,18 @@ proc createCalltraceVM*(store: ReplayDataStore;
   ## 2. Derived memos for visibleLines, hasMore*, highlightedMatches, isLoading
   ## 3. An auto-load effect that requests calltrace data when scroll/viewport changes
   when defined(js):
-    cerror "[PIPELINE] createCalltraceVM: using store id=" & $store.storeId
+    cdebug "[PIPELINE] createCalltraceVM: using store id=" & $store.storeId
   withViewModel proc(dispose: proc()): CalltraceVM =
     let wrappedDispose = proc() =
       when defined(js):
-        cerror "[PIPELINE] CalltraceVM DISPOSED! This should only happen on cleanup."
+        # Legitimate, hence DEBUG (M51).  This is the dispose path itself:
+        # it runs on session teardown and whenever a stub-backed VM is
+        # replaced by a real-backend one during `configureMiddleware`.
+        # Both are ordinary lifecycle events.  The shouting was a leftover
+        # from debugging an unexpected early disposal; the fact that
+        # disposal happened is worth tracing, but it is not an error.
+        cdebug "[PIPELINE] CalltraceVM disposed (session teardown or " &
+          "stub-to-real-backend VM replacement)"
       dispose()
 
     let scrollPosition = createSignal(0'i64)
@@ -302,14 +309,14 @@ proc createCalltraceVM*(store: ReplayDataStore;
       let vpHeight = viewportHeight.val
 
       when defined(js):
-        cerror "[PIPELINE] visibleLines memo: storeId=" &
+        cdebug "[PIPELINE] visibleLines memo: storeId=" &
           $store.storeId & " lines.len=" & $lines.len & " storeStart=" &
           $storeStart & " scrollPos=" & $scrollPos & " vpHeight=" &
           $vpHeight
 
       if lines.len == 0:
         when defined(js):
-          cerror "[PIPELINE] visibleLines memo: returning empty (no lines in store)"
+          cdebug "[PIPELINE] visibleLines memo: returning empty (no lines in store)"
         return newSeq[CallLine]()
 
       # When viewport height is not yet known (e.g. before the resize
@@ -335,7 +342,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       for index in sliceStart .. sliceEnd:
         result.add(lines[index])
       when defined(js):
-        cerror "[PIPELINE] visibleLines memo: returning " &
+        cdebug "[PIPELINE] visibleLines memo: returning " &
           $result.len & " lines (slice " & $sliceStart & ".." &
           $sliceEnd & ")"
 
@@ -405,7 +412,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       let dbg = store.debugger.val
       let patterns = rawIgnorePatterns.val
       when defined(js):
-        cerror "[PIPELINE] CalltraceVM.autoLoad: storeId=" &
+        cdebug "[PIPELINE] CalltraceVM.autoLoad: storeId=" &
           $store.storeId & " rrTicks=" & $dbg.rrTicks & " vpHeight=" &
           $vpHeight & " scrollPos=" & $scrollPos & " depth=" & $depth
       # No rrTicks guard — DB-based traces always have rrTicks=0.

@@ -6499,7 +6499,7 @@ mod tests {
             return;
         }
         let path = &PathBuf::from(raw_path);
-        // (&PathBuf::from("/home/alexander92/codetracer-desktop/src/db-backend/example-trace/")
+        // (&PathBuf::from("/home/user/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);
         let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
 

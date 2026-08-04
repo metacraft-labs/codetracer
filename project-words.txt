@@ -239,3 +239,7 @@ maintester
 dwarfwarn
 cdylib
 testdata
+contentless
+debuginfo
+summarised
+TEMPFAIL

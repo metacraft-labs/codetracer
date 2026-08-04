@@ -3,7 +3,7 @@
   "args": [
     "PROGRAM_NAME_PLACEHOLDER"
   ],
-  "workdir": "/home/stan/code/repos/codetracer-desktop",
+  "workdir": "/home/user/code/repos/codetracer-desktop",
   "calls": [
     {
       "key": 0,

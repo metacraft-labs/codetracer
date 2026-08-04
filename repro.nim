@@ -1316,3 +1316,96 @@ package codeTracer:
       after = @[buildCDir])
     target("c-sudoku-object-with-generated-header",
       cSudokuObjectWithGeneratedHeader)
+
+    # ---------------------------------------------------------------------
+    # Documentation (docs/book-isonim) as build-graph edges.
+    #
+    # The book is an isonim-docs SSG site whose build needs eight sibling
+    # source trees on the Nim path.  `ci/deploy/docs.sh` discovers those and
+    # writes a `nim.cfg` immediately before building, then deletes it -- which
+    # means the path set exists only for the duration of that script and
+    # nothing else (an editor, a test run, a developer typing `just build`)
+    # can reproduce it.  Declaring it here makes the same set a tracked
+    # graph input instead of a side effect of one shell script.
+    #
+    # Editing a single `content/*.md` re-runs the SSG and the two suites that
+    # need a rendered `public/`, and nothing else -- which is the property
+    # that makes regenerable documentation assets practical rather than a
+    # thing everyone skips.
+    #
+    # The book is SKIPPED rather than failed when its siblings are absent:
+    # isonim-docs is a recent addition to the codetracer project manifest, so
+    # a workspace synced before that lands has no checkout to build against.
+    block docsBookIsonim:
+      let bookDir = "docs/book-isonim"
+      # Use `projectRootPath`, not `projectRoot`.  `projectRoot` is a `let`
+      # local to the devEnv activity block above and is NOT in scope here in
+      # `build:`; the file-level `projectRootPath`
+      # (`parentDir(currentSourcePath())`) is the same directory and is what the
+      # rest of the recipe uses outside that block.  Reaching for the shorter
+      # name here is a compile error, and an easy one to reintroduce because
+      # the two names denote the same path.
+      if not dirExists(projectRootPath / bookDir):
+        break docsBookIsonim
+      let ws = codeTracerWorkspaceRoot(projectRootPath)
+      if ws.len == 0:
+        break docsBookIsonim
+
+      # The eight paths ci/deploy/docs.sh writes, in its order.  A missing
+      # sibling aborts the whole block: half a path set produces a confusing
+      # "cannot open file" deep inside the SSG rather than an honest skip.
+      const BookSiblingPaths = [
+        ("isonim-docs", "src"), ("isonim", "src"),
+        ("nim-everywhere", "src"), ("nim-faststreams", ""),
+        ("nim-stew", ""), ("isonim", "vendor/chronicles"),
+        ("isonim", "vendor/serialization"),
+        ("isonim", "vendor/json_serialization")]
+      var cfgLines: seq[string] = @[]
+      var missingSibling = false
+      for (repoName, subPath) in BookSiblingPaths:
+        let repoRoot = siblingPath(ws, repoName)
+        if repoRoot.len == 0:
+          missingSibling = true
+          break
+        let full = if subPath.len > 0: repoRoot / subPath else: repoRoot
+        cfgLines.add("--path:\"" & full & "\"")
+      if missingSibling:
+        break docsBookIsonim
+
+      let bookNimCfg = fs.writeText(
+        output = bookDir & "/nim.cfg",
+        text = cfgLines.join("\n") & "\n")
+      target("docs-book-nim-cfg", bookNimCfg)
+
+      # `src/build.nim` shells out to a nested `nim js` for the client bundle,
+      # and that child inherits the path set only through nim.cfg -- which is
+      # why the config has to be a real file on disk rather than -p: flags on
+      # this command line.
+      let bookSite = ctShell(
+        actionIdValue = "docs-book-build",
+        commandValue = "cd " & bookDir & " && nim c -r --hints:off " &
+          "-o:build/build src/build.nim",
+        extraInputsValue = @[bookDir & "/nim.cfg"],
+        afterValue = @[bookNimCfg])
+      target("docs-book", bookSite)
+
+      # Regenerating the book's screenshots is a SEPARATE target, deliberately
+      # not a dependency of `docs-book`.  The capture drives a real GL trace
+      # through the real visual-replay player, so it needs a GPU-capable
+      # player and two recorder siblings; making the doc build depend on that
+      # would make the docs unpublishable whenever the capture environment is
+      # unavailable.  The images are therefore checked in, and this is the
+      # documented way to refresh them.
+      #
+      # The images cannot silently rot: the book's own suite resolves every
+      # `/assets/...` link against the static tree, so a page may only
+      # reference an image that exists.
+      let bookAssets = ctShell(
+        actionIdValue = "docs-book-assets",
+        commandValue = "CODETRACER_BOOK_SCREENSHOT_DIR=$PWD/" & bookDir &
+          "/static/img/visual_recordings " &
+          "bash scripts/docs/capture-visual-recording-screenshots.sh",
+        extraInputsValue =
+          @["scripts/docs/capture-visual-recording-screenshots.sh"],
+        cacheableValue = false)
+      target("docs-book-assets", bookAssets)

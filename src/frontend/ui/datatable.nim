@@ -287,6 +287,42 @@ proc resizeTable*(self: DataTableComponent) =
       self.updateTableFooter()
 
 proc scrollTable*(table: DataTableComponent, position: cstring) =
+  ## Scroll the virtual table so the row at `position` (a row index rendered
+  ## as text) is in view.
+  ##
+  ## `table.context` is the live jQuery-DataTables instance
+  ## (https://datatables.net/reference/api/) and is legitimately nil in two
+  ## windows on the *normal* startup path, not just in error cases:
+  ##
+  ##   * before ``EventLogComponent.updateTable`` has constructed the dense
+  ##     and detailed tables — that only happens once the event log's
+  ##     server-side ajax round-trip returns, while the debugger reports its
+  ##     entry location (and therefore fires ``onCompleteMove`` →
+  ##     ``scrollOnMove`` → here) as soon as the trace opens; and
+  ##   * between ``EventLogComponent.restart`` clearing ``context`` and the
+  ##     rebuilt table replacing it.
+  ##
+  ## A scroll request in either window is DROPPED, and that is the behaviour
+  ## this guard preserves rather than one it introduces: the dereference used
+  ## to raise, the blanket ``except`` below swallowed it, and no scroll
+  ## happened either way.  ``DataTableComponent.activeRowIndex`` looks like it
+  ## would carry the intent forward, but it is written and never read back —
+  ## nothing re-applies it once the table exists — so do not rely on it here.
+  ## Whether an early scroll request should instead be REPLAYED when
+  ## ``updateTable`` finishes is a real question about the event log's startup
+  ## behaviour; it is deliberately out of scope for the log-noise fix, and
+  ## changing it here would silently alter where the event log lands on open.
+  ##
+  ## Guarding here rather than relying on the ``except`` below is what makes
+  ## the log readable.  Dereferencing ``table.context.scroller`` with a nil
+  ## context raised ``Cannot read properties of null (reading 'scroller')``
+  ## four times on *every* trace open, and the blanket handler reported each
+  ## one at ERROR — an unconditional error on the happy path that trains
+  ## readers to ignore the console (Value-Origin-Tracking milestone M48).
+  ## The handler is kept for genuine DataTables failures.
+  if table.isNil or table.context.isNil:
+    return
+
   try:
     let startRow = parseInt($position)
 
@@ -303,7 +339,10 @@ proc scrollTable*(table: DataTableComponent, position: cstring) =
         table.updateTableRows()
 
   except:
-    cerror getCurrentExceptionMsg()
+    # Reaching here now means a real DataTables/Scroller failure, so say
+    # which operation failed instead of logging a bare message.
+    cerror "datatable: scrollTable(" & $position & ") failed: " &
+      getCurrentExceptionMsg()
 
 proc appendFooterText(parent: Node, value: cstring) =
   parent.appendChild(document.createTextNode(value))

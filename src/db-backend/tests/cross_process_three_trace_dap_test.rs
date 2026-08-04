@@ -8,8 +8,11 @@
 //!
 //! Everything below the test is production code:
 //!
-//! * the three `.ct` containers are written by the actual recorders
-//!   (`regenerate.sh` — see the fixture's README), not hand-authored;
+//! * the three `.ct` containers are written by the actual recorders,
+//!   from this tree, when the test runs (`regenerate.sh`, driven by
+//!   `scripts/materialize-recording.sh`) — not hand-authored, and not
+//!   read back from a committed copy whose producer may since have
+//!   changed;
 //! * the session is loaded through the production `session.toml` loader
 //!   by launching `db-backend` exactly the way `ct replay` does;
 //! * the correlation index is derived by `SessionHandler::pair_index()`
@@ -52,32 +55,25 @@ use db_backend::session_manifest::{ROLE_BACKEND, ROLE_FRONTEND_JS, ROLE_FRONTEND
 use db_backend::task::{CtOriginChainArguments, OriginChain};
 use test_harness::DapStdioTestClient;
 
-/// Fixture root, resolved against the crate manifest so the test does
-/// not depend on the caller's working directory.
-fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cross_process/account-balance-with-wasm")
+/// The three recordings, produced from this tree by the recorders this
+/// build contains.
+///
+/// They used to be committed, which made this suite a check that
+/// today's replayer agrees with a recorder that may have been replaced
+/// since. Producing them here is what makes the agreement mean
+/// something: change the instrumenter, the browser recorder or the JS
+/// recorder and the cache key moves, the demo is recorded again, and
+/// the assertions below are about the pipeline that actually exists.
+/// See `scripts/materialize-recording.sh`.
+fn recording_root() -> PathBuf {
+    test_harness::three_trace_recordings()
 }
 
-/// Report the first missing piece of the fixture, if any.
-///
-/// The recordings are committed, so a missing one means the checkout is
-/// incomplete rather than the environment being under-provisioned — the
-/// caller turns this into a hard failure, not a skip. Silently skipping
-/// here is what let the previous generation of this test report success
-/// for months without ever loading a trace.
-fn missing_fixture_piece() -> Option<String> {
-    let root = fixture_root();
-    for name in ["frontend.ct", "frontend-wasm.ct", "backend.ct", "session.toml"] {
-        let candidate = root.join(name);
-        if !candidate.exists() {
-            return Some(format!(
-                "{} is missing — run {}/regenerate.sh (see that directory's README.md)",
-                candidate.display(),
-                root.display()
-            ));
-        }
-    }
-    None
+/// The demo's sources, which are still in the repository. The
+/// recordings name these paths because that is where the code ran, so
+/// breakpoints resolve against them.
+fn source_root() -> PathBuf {
+    test_harness::three_trace_sources()
 }
 
 /// Issue `ct/originChain` for `variable_name` at the current position.
@@ -165,10 +161,7 @@ fn thread_id_for_role(entries: &[serde_json::Value], role: &str) -> i64 {
 /// origin dispatcher never consults sibling traces at all.
 #[test]
 fn three_recordings_load_as_one_session_with_canonical_roles() {
-    if let Some(missing) = missing_fixture_piece() {
-        panic!("fixture incomplete: {missing}");
-    }
-    let manifest = fixture_root().join("session.toml");
+    let manifest = recording_root().join("session.toml");
 
     let mut client = DapStdioTestClient::start().expect("start db-backend");
     client
@@ -207,10 +200,7 @@ fn three_recordings_load_as_one_session_with_canonical_roles() {
 /// the user a third of their program with no error at all.
 #[test]
 fn a_session_folder_launches_as_the_whole_session() {
-    if let Some(missing) = missing_fixture_piece() {
-        panic!("fixture incomplete: {missing}");
-    }
-    let folder = fixture_root();
+    let folder = recording_root();
 
     let mut client = DapStdioTestClient::start().expect("start db-backend");
     client
@@ -250,12 +240,8 @@ fn a_session_folder_launches_as_the_whole_session() {
 /// two process boundaries to the browser code that produced it.
 #[test]
 fn origin_of_the_server_balance_reaches_the_browser_recordings() {
-    if let Some(missing) = missing_fixture_piece() {
-        panic!("fixture incomplete: {missing}");
-    }
-    let root = fixture_root();
-    let manifest = root.join("session.toml");
-    let server_source = root.join("backend/server.js");
+    let manifest = recording_root().join("session.toml");
+    let server_source = source_root().join("backend/server.js");
 
     let mut client = DapStdioTestClient::start().expect("start db-backend");
     client
@@ -431,12 +417,8 @@ fn origin_of_the_server_balance_reaches_the_browser_recordings() {
 /// something to say.
 #[test]
 fn the_chain_terminates_in_the_wasm_recording_rather_than_on_a_name_no_marker_used() {
-    if let Some(missing) = missing_fixture_piece() {
-        panic!("fixture incomplete: {missing}");
-    }
-    let root = fixture_root();
-    let manifest = root.join("session.toml");
-    let server_source = root.join("backend/server.js");
+    let manifest = recording_root().join("session.toml");
+    let server_source = source_root().join("backend/server.js");
 
     let mut client = DapStdioTestClient::start().expect("start db-backend");
     client
@@ -538,10 +520,7 @@ fn the_chain_terminates_in_the_wasm_recording_rather_than_on_a_name_no_marker_us
 /// holds the `recv`, and the only `send` is in `frontend.ct`.
 #[test]
 fn a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording() {
-    if let Some(missing) = missing_fixture_piece() {
-        panic!("fixture incomplete: {missing}");
-    }
-    let manifest = fixture_root().join("session.toml");
+    let manifest = recording_root().join("session.toml");
 
     let mut client = DapStdioTestClient::start().expect("start db-backend");
     client

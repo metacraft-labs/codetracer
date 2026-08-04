@@ -534,7 +534,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
 
-    cerror "[EDITOR_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
+    cdebug "[EDITOR_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
 
     # Clean up the transient reparenting property from state so it is not saved to the layout database.
     {.emit: """
@@ -544,14 +544,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     """.}
 
     if isReparenting:
-      cerror "[EDITOR_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
+      cdebug "[EDITOR_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
       element.innerHTML = cstring""
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
-      cerror "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      cdebug "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
       dispatchLayoutUpdated()
     else:
-      cerror "[EDITOR_REG] Regular mount (non-reparenting)"
+      cdebug "[EDITOR_REG] Regular mount (non-reparenting)"
       element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
 
     container.on(cstring"tab") do (tab: GoldenTab):
@@ -678,7 +678,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
 
-    cerror "[GENERIC_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
+    cdebug "[GENERIC_REG] label=" & $state.label & " content=" & $state.content & " id=" & $state.id & " panelIsNil=" & $(panel.isNil) & " liveElIsNil=" & $(if panel.isNil: true else: panel.liveElement.isNil) & " uiIsRep=" & $(data.ui.isReparenting) & " stateIsRep=" & $(state.isReparenting) & " isReparenting=" & $isReparenting
 
     # Clean up the transient reparenting property from state so it is not saved to the layout database.
     {.emit: """
@@ -688,11 +688,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     """.}
 
     if isReparenting:
-      cerror "[GENERIC_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
+      cdebug "[GENERIC_REG] Reparenting: liveElement childNodes.len=" & $(panel.liveElement.childNodes.len)
       element.innerHTML = cstring""
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
-      cerror "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      cdebug "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
 
       # Clean up the panel from autoHideState.panels list now that it is reparented
       if not autoHideState.isNil:
@@ -702,7 +702,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       dispatchLayoutUpdated()
     else:
-      cerror "[GENERIC_REG] Regular mount (non-reparenting)"
+      cdebug "[GENERIC_REG] Regular mount (non-reparenting)"
       element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
 
     container.on(cstring"tab") do (tab: GoldenTab):
@@ -1153,8 +1153,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     requestAutoHideSideStripRender(
       cstring"auto-hide-strip-right",
       AutoHideEdge.Right)
-    # Bottom strip lives in #status-base. Re-render status first so the
-    # #auto-hide-bottom-strip host exists, then mount the strip into it.
+    # The bottom strip lives in #status-base. Ask the status bar to refresh
+    # so the #auto-hide-bottom-strip host exists, then mount the strip into
+    # it. Once the host exists the status render no longer destroys it (it
+    # patches values in place — see `ui/status.nim`), so the mount below is
+    # what actually updates the tabs; when the host is still missing the
+    # mount is a no-op and the status render's own rebuild path re-mounts
+    # the strip as soon as it has created the host.
     if not data.ui.status.isNil:
       data.ui.status.requestStatusRender()
     requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
@@ -1170,10 +1175,18 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Wire overlay header buttons and dismissal handlers.
   setupAutoHideOverlay(layout)
 
-  # Register BUILD, PROBLEMS, and SEARCH RESULTS as standalone auto-hide
-  # bottom panes. These panels are not part of the GL layout — they live
-  # exclusively in the auto-hide state and appear as clickable labels in
-  # the status bar footer.
+  # Register the standalone auto-hide bottom panes — BUILD, PROBLEMS,
+  # SEARCH RESULTS and REQUESTS. These panels are not part of the GL layout
+  # — they live exclusively in the auto-hide state and appear as clickable
+  # labels in the status bar footer.
+  #
+  # `standaloneAutoHidePanels` below is the single source of this set, and
+  # its LENGTH is an observable contract: it is the tab count every
+  # auto-hide GUI spec measures a pin against, mirrored in
+  # `src/tests/gui/page-objects/auto-hide-strip.ts` as
+  # `DEFAULT_BOTTOM_TAB_TITLES`. Adding or removing an entry here must be
+  # mirrored there, or those specs fail on the count rather than on what
+  # they meant to test.
   #
   # We use a short timeout to run after GL has finished creating all
   # component containers from the layout config. This lets us detect
@@ -1253,8 +1266,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not host.isNil:
         host.appendChild(wrapper)
 
-      # All three standalone auto-hide panels (Build, BuildErrors,
-      # SearchResults) are now IsoNim views.  Each mounts itself
+      # Every standalone auto-hide panel (Build, BuildErrors,
+      # SearchResults, RequestPanel) is an IsoNim view.  Each mounts itself
       # against the inner div the next time its ``tryMountIsoNim*``
       # runs; the reactive root keeps the DOM in sync automatically.
       if panelDef.content == Content.Build:

@@ -2,11 +2,18 @@
 
 # Required M29 cross-process value-origin CI envelope.
 #
-# The three-trace fixture is committed test data. CI must therefore fail when
-# the fixture, its recovery tool, a required test spec, or a display provider
-# is missing; accepting a recorder-dependent skip would turn this gate into a
-# false success. The shell contract is exercised hermetically by
-# ci/test/cross-process-gate.sh before the real Rust and Playwright stages run.
+# The three-trace recordings are PRODUCED by this gate, from the tree under
+# test, before any stage runs — they are not committed. A committed recording
+# made by the current recorder and replayed by the current replayer proves only
+# that the two agree with each other, and keeps proving it after the recorder
+# changes; recording here is what makes the twenty Rust assertions and two
+# Playwright specs below statements about the pipeline that actually exists.
+#
+# CI must therefore fail when the demo sources, the recording pipeline, a
+# required test spec, or a display provider is missing; accepting a
+# recorder-dependent skip would turn this gate into a false success. The shell
+# contract is exercised hermetically by ci/test/cross-process-gate.sh before the
+# real Rust and Playwright stages run.
 
 set -euo pipefail
 
@@ -93,32 +100,50 @@ require_file() {
 	[ -s "$path" ] || die "$description is missing or empty: $path"
 }
 
-require_fixture() {
+# Record the three-tier demo from the tree under test, and prove the
+# recorders actually produced what the stages below will read.
+#
+# `RECORDING_DIR` is exported so the Rust and Playwright stages share the
+# one production rather than each paying for their own; the materialiser
+# would serve them from its cache anyway, but recording *here* means a
+# pipeline failure is reported by the gate, before twenty tests fail for
+# a reason none of them can explain.
+record_fixture() {
 	local container payload
-	[ -d "$FIXTURE_DIR" ] || die "three-trace fixture directory is missing: $FIXTURE_DIR"
+	[ -d "$FIXTURE_DIR" ] || die "three-trace demo sources are missing: $FIXTURE_DIR"
 
 	local regenerator="$FIXTURE_DIR/regenerate.sh"
 	[ -f "$regenerator" ] || die "fixture regenerator is missing: $regenerator"
 	[ -x "$regenerator" ] || die "fixture regenerator is not executable: $regenerator"
+	require_file "$FIXTURE_DIR/README.md" "fixture README"
+	require_file "$FIXTURE_DIR/session.toml.template" "three-trace session manifest template"
+	require_file "$FIXTURE_DIR/backend/server.js" "demo backend source"
+
+	local materializer="$REPO_ROOT/scripts/materialize-recording.sh"
+	[ -x "$materializer" ] || die "recording materialiser is missing: $materializer"
+
+	echo "[cross-process] Recording the three-tier demo from this tree"
+	RECORDING_DIR="$("$materializer" cross-process-three-trace)" ||
+		die "could not record the three-tier demo; nothing downstream would mean anything"
+	[ -n "$RECORDING_DIR" ] && [ -d "$RECORDING_DIR" ] ||
+		die "the materialiser reported '$RECORDING_DIR', which is not a directory"
+	export RECORDING_DIR
 
 	# The browser tiers write the three-file JSON shape; the server tier
 	# writes a CTFS container. Checking the actual payloads (rather than
-	# just the directory) is what stops an interrupted regenerate.sh from
-	# looking like a complete fixture.
+	# just the directory) is what stops an interrupted pipeline from
+	# looking like a complete recording.
 	for container in frontend.ct frontend-wasm.ct; do
-		[ -d "$FIXTURE_DIR/$container" ] ||
-			die "required trace container is missing: $FIXTURE_DIR/$container"
+		[ -d "$RECORDING_DIR/$container" ] ||
+			die "required trace container is missing: $RECORDING_DIR/$container"
 		for payload in trace.json trace_metadata.json trace_paths.json; do
-			require_file "$FIXTURE_DIR/$container/$payload" "required trace payload"
+			require_file "$RECORDING_DIR/$container/$payload" "required trace payload"
 		done
 	done
-	[ -d "$FIXTURE_DIR/backend.ct" ] ||
-		die "required trace container is missing: $FIXTURE_DIR/backend.ct"
-	require_file "$FIXTURE_DIR/backend.ct/server.ct" "required CTFS trace payload"
-	require_file "$FIXTURE_DIR/README.md" "fixture README"
-
-	require_file "$FIXTURE_DIR/session.toml" "materialized three-trace session manifest"
-	require_file "$FIXTURE_DIR/session.toml.template" "three-trace session manifest template"
+	[ -d "$RECORDING_DIR/backend.ct" ] ||
+		die "required trace container is missing: $RECORDING_DIR/backend.ct"
+	require_file "$RECORDING_DIR/backend.ct/server.ct" "required CTFS trace payload"
+	require_file "$RECORDING_DIR/session.toml" "recorded three-trace session manifest"
 
 	local ct_bin="$REPO_ROOT/src/build-debug/bin/ct"
 	[ -x "$ct_bin" ] || die "built CodeTracer executable is missing: $ct_bin"
@@ -266,7 +291,7 @@ main() {
 		"$REPO_ROOT/ci/test/cross-process-gate.sh"
 	fi
 
-	require_fixture
+	record_fixture
 	require_specs
 	gui_recipe="$(select_gui_recipe)"
 	cargo_bin="$(resolve_command "${CROSS_PROCESS_CARGO_BIN:-cargo}" "cargo")"

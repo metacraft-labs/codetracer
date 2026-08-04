@@ -8,7 +8,7 @@
     {"VariableName":"root"},
     {"Type":{"kind":7,"lang_type":"u8","specific_info":{"kind":"None"}}},
     {"VariableName":"offset"},
-    {"Path":"/home/zahary/metacraft/codetracer/test-programs/stylus_fund_tracker/src/lib.rs"},
+    {"Path":"test-programs/stylus_fund_tracker/src/lib.rs"},
     {"Function":{"name":"new","path_id":0,"line":38}},
     {"Call":{"function_id":0,"args":[{"variable_id":0,"value":{"kind":"BigInt","b":"AA==","negative":false,"type_id":2}},{"variable_id":1,"value":{"kind":"Int","i":0,"type_id":3}}]}},
     {"Step":{"path_id":0,"line":49}},

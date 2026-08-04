@@ -1,5 +1,5 @@
 [
-    {"Path":"/home/alexander92/wazero/test_code/rust_struct_test.rs"},
+    {"Path":"test_code/rust_struct_test.rs"},
     {"Function":{"name":"main","path_id":0,"line":18}},
     {"Call":{"function_id":0,"args":[]}},
     {"Step":{"path_id":0,"line":18}},

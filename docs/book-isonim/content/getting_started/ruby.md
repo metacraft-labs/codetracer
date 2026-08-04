@@ -23,4 +23,24 @@ Recording ruby on macOS requires you to install ruby through [homebrew](https://
 Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
 :::
 
-## Note: Ruby on rails programs are currently not supported.
+## Recording a web application
+
+Rack applications — including Ruby on Rails and Sinatra — are recorded as a
+running server rather than a single script, and each HTTP request shows up
+in the Request Panel. That has its own guide:
+[Live requests — Ruby](/usage_guide/live-requests-ruby).
+
+In short:
+
+```bash
+ct record --server --lang ruby -o ./trace -- rails server --port 3000
+```
+
+Then `ct replay -t ./trace` in another terminal shows requests as they
+arrive.
+
+:::note
+Rails support is recent. If you tried Rails with CodeTracer some time ago and
+it hung during boot, that was a recorder bug in integer conversion on large
+values; it is fixed.
+:::

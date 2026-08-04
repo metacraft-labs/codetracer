@@ -1,0 +1,195 @@
+name: Request Panel — sidecar retirement (all recorders)
+
+# RS-M12's proof that no recorder writes a sidecar manifest any more.
+#
+# `just test-no-sidecar-manifests` runs each of the six recorder siblings'
+# own `record-request-panel-fixture` recipe — a real web server recorded over
+# real HTTP — with `CODETRACER_SPAN_MANIFEST` deliberately SET, and requires
+# that no `session_manifest.jsonl` / `codetracer_spans.jsonl` appears anywhere
+# the run could have written one. Setting the retired opt-in is what makes it
+# a proof that the write path is GONE rather than a snapshot of today's
+# defaults.
+#
+# It lives in its own workflow rather than joining `viewmodel-tests` or
+# `cross-repo-tests` for two reasons:
+#
+#   * it needs six recorder toolchains and six live web sessions, which is
+#     exactly what the checked-in fixtures exist to spare the toolchain-free
+#     ViewModel lane; and
+#   * `cross-repo-tests.yml` filters its triggers on `src/db-backend/**`, so
+#     hosting this job there would either never fire on recorder changes or
+#     would drag the rr-backend and shell-recorder jobs into every
+#     request-panel edit.
+#
+# Until this existed the recipe was wired into no workflow at all — a required
+# test that only ran when a human typed the command, which is the failure mode
+# RS-M12 deleted three PHP files to prevent.
+
+on:
+  pull_request:
+    paths:
+      - 'src/tests/gui/tests/request-panel/**'
+      - 'src/frontend/viewmodel/**'
+      - 'justfile'
+      - '.github/workflows/request-panel-sidecar-retirement.yml'
+  push:
+    branches: [main, dev, stable]
+    paths:
+      - 'src/tests/gui/tests/request-panel/**'
+      - 'src/frontend/viewmodel/**'
+      - 'justfile'
+      - '.github/workflows/request-panel-sidecar-retirement.yml'
+  # The recorders are separate repos: a sidecar write path can come back
+  # through a recorder commit that touches nothing here, and no path filter on
+  # this repo can see that. The nightly run is what catches it.
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sidecar-retirement:
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    name: No recorder writes sidecar manifests (6 recorders, 6 live servers)
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup isonim siblings
+        # `test-no-sidecar-manifests` depends on `vm-test-prereqs`, which runs
+        # scripts/build-tailwind.sh against isonim's style extractor.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # The six recorder siblings, cloned into the workspace-sibling layout
+      # `workspaceRoot() / lang.recorderRepo` resolves (see
+      # src/tests/gui/tests/request-panel/request_span_languages.nim).
+      #
+      # Each `ref` is that repo's own default branch, which is NOT uniform
+      # across the six: python is `stable`, beam is `main`, the rest are
+      # `dev`. Pinning the wrong one silently tests a stale recorder.
+      - name: Clone codetracer-python-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-python-recorder
+          ref: stable
+          path: ${{ github.workspace }}/../codetracer-python-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-ruby-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-ruby-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-ruby-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-php-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-php-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-php-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-beam-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-beam-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-beam-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-js-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-native-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Allow direnv in the cloned recorder siblings
+        # `runRecipe` drives each sibling through `direnv exec . just
+        # record-request-panel-fixture`, so every recorder runs in its OWN
+        # pinned dev shell rather than codetracer's. A fresh clone's .envrc is
+        # in direnv's "blocked" state and would refuse to run, which would
+        # surface as six recipe FAILURES (not skips) and a red job for an
+        # environmental reason.
+        run: |
+          set -euo pipefail
+          for repo in codetracer-python-recorder codetracer-ruby-recorder \
+                      codetracer-php-recorder codetracer-beam-recorder \
+                      codetracer-js-recorder codetracer-native-recorder; do
+            dir="$(pwd)/../$repo"
+            echo "direnv allow $dir"
+            nix develop . --command direnv allow "$dir"
+          done
+
+      - name: Assert all six recorder siblings are present
+        # The test reports an absent sibling as `MISSING-RECORDER SKIP:` and
+        # its zero-test guard only fails an ALL-skipped run. In this job every
+        # sibling is cloned above, so a partial set means a clone silently
+        # failed -- and five-of-six would otherwise pass. Fail here instead.
+        run: |
+          set -euo pipefail
+          missing=0
+          for repo in codetracer-python-recorder codetracer-ruby-recorder \
+                      codetracer-php-recorder codetracer-beam-recorder \
+                      codetracer-js-recorder codetracer-native-recorder; do
+            if [ ! -d "$(pwd)/../$repo" ]; then
+              echo "MISSING SIBLING: $repo"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || {
+            echo "One or more recorder siblings failed to clone; the sidecar" \
+                 "retirement proof would silently cover only the rest."
+            exit 1
+          }
+
+      - name: Run the sidecar-retirement proof
+        run: nix develop .#devShells.x86_64-linux.default --command just test-no-sidecar-manifests
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: request-panel-sidecar-retirement-logs
+          path: test-logs/
+          retention-days: 30

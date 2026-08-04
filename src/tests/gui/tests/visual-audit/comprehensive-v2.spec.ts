@@ -14,6 +14,18 @@
  *   Build         = 11
  *   BuildErrors   = 21
  *   SearchResults = 20
+ *
+ * Two different panel surfaces are captured here, because a strip tab has two
+ * gestures: a CLICK docks the panel into `#auto-hide-docked-<edge>` (Screens
+ * 2-5) and a HOVER opens the floating `#auto-hide-overlay` (Screen 6, which
+ * is explicitly about the overlay).  See the contract note in
+ * `page-objects/auto-hide-strip.ts`.
+ *
+ * No mocks beyond the injected panel data described above: a real JavaScript
+ * recording opened by the real Electron app supplies the running instance —
+ * see `lib/js-trace-fixture.ts`.  Nothing in these screens is
+ * language-specific, and no committed reference images are compared against,
+ * so the recorded program only has to be real.
  */
 
 import * as path from "node:path";
@@ -23,11 +35,19 @@ import {
   wait,
   codetracerInstallDir,
 } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
 import {
   ensureDefaultLayout,
   restoreUserLayout,
 } from "../../lib/layout-reset";
+import {
+  DOCKED_OPEN_CLASS,
+  OVERLAY_SELECTOR,
+  bottomStripTab,
+  dockedContainer,
+  openOverlayFromTab,
+} from "../../page-objects/auto-hide-strip";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -85,45 +105,76 @@ const BUILD_UNHAPPY_OUTPUT: Array<[string, boolean]> = [
 // ---------------------------------------------------------------------------
 
 /**
- * Click an auto-hide bottom tab by its label text (e.g. "BUILD").
- * These tabs are .auto-hide-strip-tab elements inside .auto-hide-bottom-tabs
- * rendered inside #status-base.
+ * Locate an auto-hide bottom tab by its label text (e.g. "BUILD").
+ *
+ * The tabs are `.auto-hide-strip-tab` elements rendered as direct children
+ * of `#auto-hide-bottom-strip` inside `#status-base` — see
+ * `page-objects/auto-hide-strip.ts` for why this selector moved.
  */
-async function clickBottomAutoHideTab(
+async function bottomAutoHideTab(
+  page: import("@playwright/test").Page,
+  label: string,
+): Promise<import("@playwright/test").Locator> {
+  const tab = bottomStripTab(page, label);
+  // A panel is only in the bottom strip while it is pinned to the bottom
+  // edge; when it lives on a side strip instead, fall back to any strip tab
+  // carrying the label.  Until the bottom selector was corrected this
+  // fallback was not a fallback at all — the bottom locator matched nothing
+  // on every call, so every click in this file went through it.
+  if ((await tab.count()) > 0) return tab.first();
+  return page.locator(".auto-hide-strip-tab", { hasText: label }).first();
+}
+
+/**
+ * Click an auto-hide bottom tab and wait for its panel to dock.
+ *
+ * A click docks; it does not open the floating overlay.  Waiting for
+ * `docked-open` rather than sleeping means the screenshot below is taken
+ * against a settled panel.
+ */
+async function openBottomAutoHideTab(
   page: import("@playwright/test").Page,
   label: string,
 ): Promise<void> {
-  const tab = page.locator(
-    "#status-base .auto-hide-bottom-tabs .auto-hide-strip-tab",
-    { hasText: label },
+  const tab = await bottomAutoHideTab(page, label);
+  await expect(tab).toBeVisible({ timeout: 10_000 });
+  await tab.click();
+  await expect(dockedContainer(page, "bottom")).toHaveClass(
+    new RegExp(`\\b${DOCKED_OPEN_CLASS}\\b`),
+    { timeout: 10_000 },
   );
-  // The bottom auto-hide tabs may not exist if the panel is in GL instead.
-  // In that case, fall back to any .auto-hide-strip-tab with the label.
-  const fallback = page.locator(".auto-hide-strip-tab", { hasText: label });
-  const target = (await tab.count()) > 0 ? tab : fallback;
-  await expect(target.first()).toBeVisible({ timeout: 10_000 });
-  await target.first().click();
   await wait(OVERLAY_SETTLE_MS);
 }
 
 /**
- * Dismiss the auto-hide overlay via Escape.
+ * Collapse the docked bottom panel by clicking its tab again.
+ *
+ * `showDockedPanel` toggles; Escape only dismisses the *overlay* and would
+ * leave the docked panel open for the next screen's screenshot.
+ */
+async function closeBottomAutoHideTab(
+  page: import("@playwright/test").Page,
+  label: string,
+): Promise<void> {
+  await (await bottomAutoHideTab(page, label)).click();
+  await expect(dockedContainer(page, "bottom")).not.toHaveClass(
+    new RegExp(`\\b${DOCKED_OPEN_CLASS}\\b`),
+    { timeout: 10_000 },
+  );
+  await wait(500);
+}
+
+/**
+ * Dismiss the floating auto-hide overlay via Escape.
  */
 async function dismissOverlay(
   page: import("@playwright/test").Page,
 ): Promise<void> {
   await page.keyboard.press("Escape");
+  await expect(page.locator(OVERLAY_SELECTOR)).not.toHaveClass(/\bvisible\b/, {
+    timeout: 10_000,
+  });
   await wait(500);
-}
-
-/**
- * Wait for the auto-hide overlay to be visible.
- */
-async function waitForOverlay(
-  page: import("@playwright/test").Page,
-): Promise<void> {
-  const overlay = page.locator("#auto-hide-overlay");
-  await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
 }
 
 /**
@@ -307,12 +358,14 @@ async function pinToEdge(
 }
 
 // ---------------------------------------------------------------------------
-// Test suite: Screens 1-7 (trace mode with py_console_logs)
+// Test suite: Screens 1-7 (trace mode)
 // ---------------------------------------------------------------------------
+
+const fixture = recordChromeTraceFixture("comprehensive-v2");
 
 test.describe("Visual Audit v2 — Trace Mode Screens", () => {
   test.setTimeout(180_000);
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
   // Ensure the bundled default layout is used, not the user's custom one.
   test.beforeAll(() => {
@@ -356,8 +409,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(1000);
 
     // Click the BUILD auto-hide bottom tab in the status bar.
-    await clickBottomAutoHideTab(ctPage, "BUILD");
-    await waitForOverlay(ctPage);
+    await openBottomAutoHideTab(ctPage, "BUILD");
 
     // Inject data AND render in a single evaluate to avoid serialization
     // issues with Nim tuple format {Field0, Field1} across Playwright's
@@ -382,7 +434,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(500);
 
     await ctPage.screenshot({ path: `${DIR}/02-build-happy.png` });
-    await dismissOverlay(ctPage);
+    await closeBottomAutoHideTab(ctPage, "BUILD");
   });
 
   test("Screen 3: BUILD unhappy path", async ({ ctPage }) => {
@@ -392,8 +444,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(1000);
 
     // Click BUILD label.
-    await clickBottomAutoHideTab(ctPage, "BUILD");
-    await waitForOverlay(ctPage);
+    await openBottomAutoHideTab(ctPage, "BUILD");
 
     // Inject data AND render in a single evaluate to avoid serialization
     // issues with Nim tuple format {Field0, Field1}.
@@ -424,7 +475,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(500);
 
     await ctPage.screenshot({ path: `${DIR}/03-build-unhappy.png` });
-    await dismissOverlay(ctPage);
+    await closeBottomAutoHideTab(ctPage, "BUILD");
   });
 
   test("Screen 4: PROBLEMS", async ({ ctPage }) => {
@@ -455,8 +506,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(300);
 
     // Click PROBLEMS auto-hide bottom tab.
-    await clickBottomAutoHideTab(ctPage, "PROBLEMS");
-    await waitForOverlay(ctPage);
+    await openBottomAutoHideTab(ctPage, "PROBLEMS");
 
     // Re-render the errors panel now that the overlay is visible.
     await ctPage.evaluate(() => {
@@ -465,7 +515,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(500);
 
     await ctPage.screenshot({ path: `${DIR}/04-problems.png` });
-    await dismissOverlay(ctPage);
+    await closeBottomAutoHideTab(ctPage, "PROBLEMS");
   });
 
   test("Screen 5: SEARCH RESULTS", async ({ ctPage }) => {
@@ -505,8 +555,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(300);
 
     // Click SEARCH RESULTS auto-hide bottom tab.
-    await clickBottomAutoHideTab(ctPage, "SEARCH RESULTS");
-    await waitForOverlay(ctPage);
+    await openBottomAutoHideTab(ctPage, "SEARCH RESULTS");
 
     // Re-render the search results panel now that the overlay is visible.
     await ctPage.evaluate(() => {
@@ -515,22 +564,17 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(500);
 
     await ctPage.screenshot({ path: `${DIR}/05-search-results.png` });
-    await dismissOverlay(ctPage);
+    await closeBottomAutoHideTab(ctPage, "SEARCH RESULTS");
   });
 
-  // FAILING: 2026-05-01 — `#auto-hide-strip-left .auto-hide-strip-tab`
-  // never becomes visible. The pin-to-left helper succeeds (the
-  // `__ctPinPanel` IPC returns true), but the strip never receives a
-  // child tab — so the auto-hide-strip's `has-tabs` class is set
-  // (the previous `expect(leftStrip).toHaveClass(/has-tabs/)`
-  // assertion passes) yet `.auto-hide-strip-tab` is empty.
-  // TODO: investigate the auto-hide pin → strip-tab rendering path.
-  // Likely a regression in the auto-hide strip view that lays out the
-  // class but skips the tab DOM. Check
-  // `src/frontend/ui/auto_hide_strip*.nim` (or similar) for a render
-  // proc that reads from the same component-mapping the helper just
-  // pinned to. The other 7 screens of this Visual Audit suite pass,
-  // so the rest of the layout pipeline works.
+  // Was marked FAILING (2026-05-01) with "`#auto-hide-strip-left
+  // .auto-hide-strip-tab` never becomes visible".  That note is retired: the
+  // tab appears and this screen passes.  The file could not run at all after
+  // the status-bar redesign — it recorded `py_console_logs/main.py` and
+  // needed the Python recorder — so the claim could not have been re-checked.
+  // What WAS wrong here is that the screen clicked the tab and waited for
+  // `#auto-hide-overlay.visible`; a click docks, it does not open the
+  // overlay.  This screen is about the overlay, so it hovers instead.
   test("Screen 6: Auto-hide left overlay (FILESYSTEM)", async ({
     ctPage,
   }) => {
@@ -607,15 +651,14 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     const leftStrip = ctPage.locator("#auto-hide-strip-left");
     await expect(leftStrip).toHaveClass(/has-tabs/, { timeout: 5_000 });
 
-    // Click the left strip tab to open the overlay.
+    // Hover the left strip tab to open the slide-in overlay.  A CLICK would
+    // dock the panel inline instead — this screen is specifically the
+    // floating overlay of Auto-Hide-Panes.md §3.3.
     const leftTab = ctPage
       .locator("#auto-hide-strip-left .auto-hide-strip-tab")
       .first();
-    await expect(leftTab).toBeVisible({ timeout: 5_000 });
-    await leftTab.click();
+    await openOverlayFromTab(ctPage, leftTab, 10_000);
     await wait(OVERLAY_SETTLE_MS);
-
-    await waitForOverlay(ctPage);
 
     await ctPage.screenshot({ path: `${DIR}/06-left-overlay.png` });
     await dismissOverlay(ctPage);
@@ -664,21 +707,10 @@ test.describe("Visual Audit v2 — DeepReview", () => {
   );
   test.use({ launchMode: "deepreview", deepreviewJsonPath: reviewPath });
 
-  // FAILING: 2026-05-01 — `waitForSelector` for either
-  // `.deepreview-file-item` or `div[id^="filesystemComponent"]`
-  // exhausts its 30s budget. The DeepReview launchMode does load
-  // (`# launching deepreview mode` is logged) but neither the
-  // filesystem panel nor any deepreview file items render in the
-  // headless harness. Targeted reruns of the deepreview/* suite all
-  // pass — that suite uses fixture-injected review JSON in the
-  // standard ctPage flow. The visual-audit launch path goes through
-  // a different bootstrap.
-  // TODO: trace the deepreview-mode launch path in
-  // `src/frontend/index.nim` to find why the filesystem component
-  // does not mount when entered via `launchMode: "deepreview"`. The
-  // deepreview-gui.spec.ts suite (113 passing tests) uses the same
-  // fixture JSON, so the difference is in how comprehensive-v2 boots
-  // Electron in deepreview mode.
+  // Was marked FAILING (2026-05-01) against the older selector pair
+  // (`.deepreview-file-item, div[id^="filesystemComponent"]`).  The selector
+  // below — `.deepreview-container`, the same ready signal the 113-test
+  // deepreview-gui.spec.ts suite uses — passes; the note is retired.
   test("Screen 8: DeepReview layout", async ({ ctPage }) => {
     // The standard DeepReview ready signal is the `.deepreview-container`
     // element — that's what `DeepReviewPage.waitForReady` (used by the

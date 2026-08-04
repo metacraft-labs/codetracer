@@ -73,9 +73,9 @@ proc tryMountIsoNimDebugControls() =
   ## This div lives outside Karax's VDOM tree, so direct DOM manipulation
   ## is safe and won't be overwritten by Karax redraw cycles.
   ## Safe to call multiple times — mounts only once.
-  cerror "tryMountIsoNimDebugControls: called, isoNimDebugMounted=" & $isoNimDebugMounted & " vmIsNil=" & $debugControlsVMInstance.isNil
+  cdebug "tryMountIsoNimDebugControls: called, isoNimDebugMounted=" & $isoNimDebugMounted & " vmIsNil=" & $debugControlsVMInstance.isNil
   if isoNimDebugMounted or debugControlsVMInstance.isNil:
-    cerror "tryMountIsoNimDebugControls: skipping (already mounted or VM nil)"
+    cdebug "tryMountIsoNimDebugControls: skipping (already mounted or VM nil)"
     return
 
   # Try to mount synchronously. If the container doesn't exist yet,
@@ -99,10 +99,10 @@ proc tryMountIsoNimDebugControls() =
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    cerror "tryMountIsoNimDebugControls: container found, mounting now"
+    cdebug "tryMountIsoNimDebugControls: container found, mounting now"
     isoNimDebugMounted = true
     mountIsoNimDebugControls(container, debugControlsVMInstance)
-    cerror "tryMountIsoNimDebugControls: mount COMPLETE"
+    cdebug "tryMountIsoNimDebugControls: mount COMPLETE"
     # The legacy Karax `#debug` div is hidden on next Karax redraw
     # cycle — see the `isoNimDebugMounted` check at the top of
     # `DebugComponent.render`.
@@ -143,6 +143,29 @@ proc requestDebugControlsRender*(self: DebugComponent) =
     cstring"isonim-debug-controls")
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
+  # M51 finding — this repair path runs FAR more often than "occasionally
+  # after a menu redraw" suggests.  Measured on one clean trace open:
+  # `tryMountIsoNimDebugControls` is entered 46 times and mounts 45 of
+  # them, i.e. the whole IsoNim control tree is cleared and rebuilt ~45
+  # times before the user has touched anything.  A second, independent
+  # launch of the same recording gave 37 entries and 36 mounts, so the
+  # absolute count varies with how many menu redraws a launch happens to
+  # do; what is stable is the ratio — the "skipping (already mounted or VM
+  # nil)" branch fired ZERO times in both, so every single entry rebuilt
+  # the tree.
+  #
+  # The counts above are measured.  The EXPLANATION below is inferred and
+  # was not directly observed, so confirm it before acting on it: menu
+  # redraws (see `ui/menu.nim`, which calls us) are documented to replace
+  # this kind of host — `requestDebugShellRender` just below says so in as
+  # many words — which would leave `firstChild` legitimately nil on every
+  # call, making the guard miss and the rebuild the correct repair rather
+  # than a bug.
+  #
+  # If that is right, the guard below is not at fault and this path is
+  # what keeps the toolbar alive; the thing worth chasing is the other
+  # side, namely why the menu redraws dozens of times during a single
+  # open.  Deliberately not changed by M51, which was a logging milestone.
   if isoNimDebugMounted and not dom_api.isNodeNil(dom_api.Node(container).firstChild):
     return
   isoNimDebugMounted = false

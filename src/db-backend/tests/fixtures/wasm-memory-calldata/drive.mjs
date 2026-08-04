@@ -124,11 +124,18 @@ try {
     throw new Error(`the page did not settle: ${status}`);
   }
   console.log(`[drive] page reported: ${status}`);
-  // The totals the page observed are the ground truth the replay is
-  // checked against, so they go where the harness can read them.
+  // What the page observed, written beside the recording it belongs to.
+  //
+  // Deliberately NOT into `HERE`. `expected-totals.json` beside these
+  // sources is the committed, hand-reviewed oracle `verify.sh` checks
+  // the recording against; a driver that overwrote it would rewrite the
+  // answer whenever the answer changed, and the check would pass on the
+  // new one without anyone seeing it move.
   const totals = await page.evaluate(() => globalThis.__demoTotals);
+  const outDir = process.env.CT_RECORDING_OUT_DIR || HERE;
+  fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(
-    path.join(HERE, "expected-totals.json"),
+    path.join(outDir, "observed-totals.json"),
     `${JSON.stringify(totals)}\n`,
   );
   // Give the WebSocket frames a moment to reach the daemon before the

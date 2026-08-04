@@ -35,13 +35,15 @@ import { expect, readyOnEntryTest as readyOnEntry, test } from "../../lib/fixtur
 import { LayoutPage } from "../../page-objects/layout-page";
 import { OriginChainPanePageObject } from "../../page-objects/originChainPane";
 import {
-  threeTraceFixtureRoot,
   threeTraceFixtureSkipReason,
+  threeTraceRecordingRoot,
 } from "../../lib/value-origin-fixtures";
 
-const fixtureRoot = threeTraceFixtureRoot();
+// Produced from this tree rather than read from a committed copy — see
+// `scripts/materialize-recording.sh`.
+const recordingRoot = threeTraceRecordingRoot();
 
-test.use({ sourcePath: fixtureRoot, launchMode: "trace-folder" });
+test.use({ sourcePath: recordingRoot, launchMode: "trace-folder" });
 test.setTimeout(240_000);
 
 test.beforeAll(() => {

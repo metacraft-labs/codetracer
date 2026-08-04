@@ -38,12 +38,32 @@ drive.mjs            headless-Chromium driver (playwright from the
                      codetracer checkout's own node_modules)
 regenerate.sh        the pipeline
 verify.sh            replays the recording and checks the bit patterns
+expected-bits.json   the four bit patterns this fixture exists for, as a
+                     committed, hand-reviewed oracle. verify.sh reads them
+                     from here and checks BOTH that the page asked for
+                     them and that the recording carries them
+
+produced into the gitignored target/test-recordings/, not committed:
 nan-payloads.ct/     the recording
-module/*.wasm.zst    the ORIGINAL module, compressed (the repo caps a
-                     committed file at 500 KB; a debug .wasm is ~1.5 MB
-                     of DWARF, which is the part replay needs)
-expected-bits.json   written by drive.mjs from the run itself
+module/*.wasm        the ORIGINAL module the offline replay runs
+observed-bits.json   what the page actually asked for, this run
 ```
+
+Neither the recording nor the module is committed. They are one artefact —
+the replay drives the *original, uninstrumented* module (spec §6.1), so it
+has to be that build — and producing them in the same run is what keeps
+them one. It matters more here than in any sibling fixture: what the checks
+assert is the bit patterns the **browser producer** wrote, so a stored
+recording could only ever confirm that some past producer agreed with
+itself. `scripts/materialize-recording.sh wasm-nan-payloads` keys its cache
+on `ct-instrument` and the `record-web` binary by content, so a change in
+either re-records.
+
+The genuine counter-example lives in the sibling repo:
+`codetracer-wasm-recorder/.../nan-payloads/legacy-encoding.ct` was made by
+a `ct-instrument` built **before** M52 and cannot be produced from any
+current tree. That one is committed for the right reason, and must never
+be regenerated.
 
 ## The page never touches a float
 
@@ -56,8 +76,8 @@ M52 worked.
 ## Running it
 
 ```bash
-./regenerate.sh   # rebuild, re-instrument, re-record  (exit 75 = prerequisite missing)
-./verify.sh       # replay the committed recording and check the bits
+./verify.sh       # record from this tree (cached) and check the bits
+./regenerate.sh   # re-record unconditionally  (exit 75 = prerequisite missing)
 ```
 
 The assertions that gate CI live in the recorder, next to the replayer

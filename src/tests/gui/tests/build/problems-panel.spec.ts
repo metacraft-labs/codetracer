@@ -5,17 +5,34 @@
  * - The Problems panel is present as an auto-hide bottom tab
  * - Parsed build errors appear as structured problem rows
  * - Clicking a filter button changes the visible problems
+ *
+ * Clicking a strip tab DOCKS the panel into `#auto-hide-docked-bottom`; it
+ * does not open `#auto-hide-overlay`, which is the hover-preview surface.
+ * See the contract note in `page-objects/auto-hide-strip.ts`.
+ *
+ * No mocks: a real JavaScript recording opened by the real Electron app.  The
+ * problems pane is a standalone auto-hide pane `layout.nim` registers for
+ * every recorded language — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import {
+  BOTTOM_STRIP_TAB_SELECTOR,
+  DOCKED_BOTTOM_CONTENT_SELECTOR,
+  openBottomPanel,
+  waitForDefaultBottomTabs,
+} from "../../page-objects/auto-hide-strip";
+
+const fixture = recordChromeTraceFixture("problems-panel");
 
 test.describe("Problems Panel", () => {
   test.setTimeout(120_000);
-  test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
   test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
   test.afterAll(() => restoreUserLayout());
@@ -26,10 +43,10 @@ test.describe("Problems Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
     // The PROBLEMS tab should be present among auto-hide bottom tabs.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
+    const problemsTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
       hasText: "PROBLEMS",
     });
     await expect(problemsTab).toHaveCount(1);
@@ -43,47 +60,35 @@ test.describe("Problems Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
-    // Click the PROBLEMS auto-hide tab to open the overlay.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "PROBLEMS",
-    });
-    await problemsTab.click();
-    await wait(500);
+    // Click the PROBLEMS auto-hide tab to dock the problems panel.
+    await openBottomPanel(ctPage, "PROBLEMS");
 
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
-
-    // For py_console_logs (a Python trace), there is no build step and
-    // no compiler errors. The problems panel should be empty.
+    // The fixture recording involves no build step and no compiler errors,
+    // so the problems panel should be empty.
     const problemsPane = new ProblemsPane(ctPage);
 
-    // Wait for the component container to exist inside the overlay.
-    const errorsContainer = ctPage.locator("#auto-hide-overlay-content #errorsComponent-0");
-    const containerExists = await retry(
+    // Wait for the component container to exist inside the docked container.
+    const errorsContainer = ctPage.locator(
+      `${DOCKED_BOTTOM_CONTENT_SELECTOR} #errorsComponent-0`,
+    );
+    await retry(
       async () => (await errorsContainer.count()) > 0,
       { maxAttempts: 30, delayMs: 1_000 },
-    ).then(() => true as const).catch(() => false);
+    );
 
-    if (!containerExists) {
-      test.skip(true, "Problems panel container not rendered in overlay");
-      return;
-    }
+    // Docking the panel mounts its IsoNim view, so the panel itself must be
+    // present — this used to be a `test.skip` branch for "renderer not
+    // initialized (background tab)", which could never be reached or falsified
+    // while the click contract the spec assumed did not exist.
+    expect(
+      await problemsPane.isPresent(),
+      "docking PROBLEMS must mount the problems panel",
+    ).toBe(true);
 
-    // Check if the Karax renderer has populated the panel.
-    if (await problemsPane.isPresent()) {
-      // Panel rendered — verify no problems for this clean trace.
-      const rowCount = await problemsPane.rows().count();
-      if (rowCount === 0) {
-        const emptyCount = await problemsPane.emptyMessage().count();
-        expect(emptyCount > 0 || rowCount === 0).toBe(true);
-      }
-    } else {
-      // Karax renderer hasn't fired for this background tab.
-      // The container exists (verified above) so the component is registered.
-      test.skip(true, "Problems panel Karax renderer not initialized (background tab)");
-    }
+    // No build ran, so there must be no problem rows.
+    await expect(problemsPane.rows()).toHaveCount(0);
   });
 
   test("filter buttons change visible problems", async ({ ctPage }) => {
@@ -92,17 +97,10 @@ test.describe("Problems Panel", () => {
     await layout.waitForTraceLoaded();
 
     // Wait for auto-hide bottom tabs to appear.
-    await ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab").first().waitFor({ timeout: 10_000 });
+    await waitForDefaultBottomTabs(ctPage);
 
-    // Click the PROBLEMS auto-hide tab to open the overlay.
-    const problemsTab = ctPage.locator(".auto-hide-bottom-tabs .auto-hide-strip-tab", {
-      hasText: "PROBLEMS",
-    });
-    await problemsTab.click();
-    await wait(500);
-
-    const overlay = ctPage.locator("#auto-hide-overlay");
-    await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
+    // Click the PROBLEMS auto-hide tab to dock the problems panel.
+    await openBottomPanel(ctPage, "PROBLEMS");
 
     const problemsPane = new ProblemsPane(ctPage);
 
