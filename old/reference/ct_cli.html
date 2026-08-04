@@ -1,0 +1,457 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>ct CLI Reference - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h2 id="ct-cli-reference"><a class="header" href="#ct-cli-reference">ct CLI Reference</a></h2>
+<p>The <code>ct</code> command is the main CodeTracer CLI. It records program executions, replays traces, and manages the CodeTracer environment.</p>
+<h3 id="synopsis"><a class="header" href="#synopsis">Synopsis</a></h3>
+<pre><code>ct &lt;command&gt; [options] [&lt;program&gt;] [&lt;args&gt;]
+</code></pre>
+<h3 id="commands"><a class="header" href="#commands">Commands</a></h3>
+<h4 id="recording-and-replay"><a class="header" href="#recording-and-replay">Recording and Replay</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>ct run &lt;program&gt; [args]</code></td><td>Record and immediately open in the GUI</td></tr>
+<tr><td><code>ct record &lt;program&gt; [args]</code></td><td>Record a trace to disk</td></tr>
+<tr><td><code>ct replay</code></td><td>Open a trace in the GUI</td></tr>
+<tr><td><code>ct import &lt;trace-folder&gt;</code></td><td>Import a trace from a folder</td></tr>
+<tr><td><code>ct trace extract-gfx -o &lt;dir&gt; &lt;trace&gt;</code></td><td>Extract the graphics stream from a <code>.ct</code> container</td></tr>
+<tr><td><code>ct trace export --portable -o &lt;out&gt; &lt;trace&gt;</code></td><td>Export a portable trace (embeds binaries and debug symbols)</td></tr>
+<tr><td><code>ct gfx-replay --gfx-stream &lt;dir&gt;</code></td><td>Replay an extracted graphics stream (used by the visual replay GUI)</td></tr>
+</tbody></table>
+</div>
+<h4 id="stylus--evm"><a class="header" href="#stylus--evm">Stylus / EVM</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>ct arb deploy</code></td><td>Deploy a Stylus contract to a local devnode</td></tr>
+<tr><td><code>ct arb explorer</code></td><td>Open the transaction explorer for recorded traces</td></tr>
+<tr><td><code>ct arb record</code></td><td>Record a Stylus contract execution</td></tr>
+<tr><td><code>ct arb replay</code></td><td>Replay a Stylus trace</td></tr>
+</tbody></table>
+</div>
+<h4 id="ci-integration"><a class="header" href="#ci-integration">CI Integration</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>ct ci start</code></td><td>Start a CI recording session</td></tr>
+<tr><td><code>ct ci attach</code></td><td>Attach to a running CI session</td></tr>
+<tr><td><code>ct ci exec</code></td><td>Execute a command within a CI session</td></tr>
+<tr><td><code>ct ci finish</code></td><td>Finalize a CI session</td></tr>
+<tr><td><code>ct ci run</code></td><td>Run a command with CI recording</td></tr>
+<tr><td><code>ct ci log</code></td><td>View CI session logs</td></tr>
+<tr><td><code>ct ci status</code></td><td>Check CI session status</td></tr>
+<tr><td><code>ct ci cancel</code></td><td>Cancel a CI session</td></tr>
+</tbody></table>
+</div>
+<h4 id="utility"><a class="header" href="#utility">Utility</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>ct install</code></td><td>Install the CLI tools</td></tr>
+<tr><td><code>ct version</code></td><td>Print the CodeTracer version</td></tr>
+<tr><td><code>ct help</code></td><td>Display help information</td></tr>
+<tr><td><code>ct list</code></td><td>List recorded traces</td></tr>
+<tr><td><code>ct console</code></td><td>Open the interactive console</td></tr>
+<tr><td><code>ct doctor &lt;lang&gt;</code></td><td>Probe recorder-readiness for a language (currently <code>python</code>; more languages soon)</td></tr>
+</tbody></table>
+</div>
+<h4 id="online-sharing"><a class="header" href="#online-sharing">Online Sharing</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>ct upload</code></td><td>Upload a trace</td></tr>
+<tr><td><code>ct download</code></td><td>Download a trace</td></tr>
+<tr><td><code>ct login</code></td><td>Authenticate with the sharing service</td></tr>
+</tbody></table>
+</div>
+<h3 id="ct-record"><a class="header" href="#ct-record">ct record</a></h3>
+<p>Records the execution of a program into a trace.</p>
+<pre><code>ct record [options] &lt;program&gt; [-- &lt;program-args&gt;]
+</code></pre>
+<p><strong>Options:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--lang &lt;LANG&gt;</code></td><td>Override language detection (e.g., <code>noir</code>, <code>python</code>, <code>ruby</code>)</td></tr>
+<tr><td><code>-o, --output-folder &lt;DIR&gt;</code></td><td>Output directory for trace files</td></tr>
+<tr><td><code>--backend &lt;BACKEND&gt;</code></td><td>Recording backend (e.g., <code>plonky2</code> for Noir)</td></tr>
+<tr><td><code>-e, --export &lt;ZIP&gt;</code></td><td>Export trace as a zip archive</td></tr>
+<tr><td><code>-c, --cleanup-output-folder</code></td><td>Remove the output folder after export</td></tr>
+<tr><td><code>--trace-kind &lt;KIND&gt;</code></td><td>Trace kind: <code>db</code> (default), <code>rr</code>, or <code>ttd</code></td></tr>
+<tr><td><code>--rr-support-path &lt;PATH&gt;</code></td><td>(internal) Override path for the RR-backend DAP binary</td></tr>
+<tr><td><code>--python-interpreter &lt;PATH&gt;</code></td><td>Path to the Python interpreter to use</td></tr>
+<tr><td><code>--pytest [ARGS]</code></td><td>Run pytest with the given arguments</td></tr>
+<tr><td><code>--unittest [ARGS]</code></td><td>Run unittest with the given arguments</td></tr>
+<tr><td><code>-t, --stylus-trace &lt;PATH&gt;</code></td><td>Path to a Stylus trace file</td></tr>
+<tr><td><code>-a, --address &lt;ADDR&gt;</code></td><td>Contract address (Stylus)</td></tr>
+<tr><td><code>--socket &lt;PATH&gt;</code></td><td>Unix socket path for event reporting</td></tr>
+<tr><td><code>--use-interpose</code></td><td>Record graphics API calls for visual replay (MCR backend only)</td></tr>
+</tbody></table>
+</div>
+<p><strong>Language detection:</strong> When <code>--lang</code> is not provided, <code>ct</code> detects the language from the file extension or project structure:</p>
+<div class="table-wrapper"><table><thead><tr><th>Extension / Marker</th><th>Language</th></tr></thead><tbody>
+<tr><td><code>.py</code></td><td>Python</td></tr>
+<tr><td><code>.rb</code></td><td>Ruby</td></tr>
+<tr><td><code>.nr</code> or <code>Nargo.toml</code></td><td>Noir</td></tr>
+<tr><td><code>.wasm</code></td><td>WASM</td></tr>
+<tr><td><code>.small</code></td><td>Small</td></tr>
+<tr><td><code>Cargo.toml</code> with wasm32 target</td><td>Rust WASM</td></tr>
+<tr><td><code>Cargo.toml</code></td><td>Rust (native, via rr/TTD)</td></tr>
+</tbody></table>
+</div>
+<blockquote>
+<p><strong>Note:</strong> Blockchain-specific languages (Circom, Cairo, Aiken, Cadence, Move, Sway, Miden, PolkaVM, Leo, Tolk) use their own recorder binaries. See the <a href="../getting_started/overview.html">Getting Started</a> guides for each language.</p>
+</blockquote>
+<blockquote>
+<p><strong>Note:</strong> Visual recordings for native graphics programs are MCR <code>.ct</code> traces produced with <code>ct record --use-interpose</code>. CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See <a href="../usage_guide/visual_recordings.html">Visual recordings</a>.</p>
+</blockquote>
+<h3 id="ct-replay"><a class="header" href="#ct-replay">ct replay</a></h3>
+<p>Opens a previously recorded trace in the CodeTracer GUI.</p>
+<pre><code>ct replay [options] [&lt;program-name&gt;]
+</code></pre>
+<p><strong>Options:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;program-name&gt;</code></td><td>Open the most recent trace for this program</td></tr>
+<tr><td><code>--id=&lt;TRACE_ID&gt;</code></td><td>Open a trace by its numeric ID</td></tr>
+<tr><td><code>--trace-folder=&lt;DIR&gt;</code></td><td>Open a trace from a specific directory</td></tr>
+</tbody></table>
+</div>
+<p>When called without arguments, <code>ct replay</code> opens an interactive dialog to choose from recent traces.</p>
+<h3 id="ct-run"><a class="header" href="#ct-run">ct run</a></h3>
+<p>Records a program and immediately opens the trace in the GUI. Equivalent to <code>ct record</code> followed by <code>ct replay</code>.</p>
+<pre><code>ct run [options] &lt;program&gt; [-- &lt;program-args&gt;]
+</code></pre>
+<p>Accepts the same options as <code>ct record</code>.</p>
+<h3 id="ct-trace-origin"><a class="header" href="#ct-trace-origin">ct trace origin</a></h3>
+<p>Prints the backward dataflow chain (an "origin chain") for a variable.
+Walks assignments / parameter passes / return captures / field-or-index
+accesses backward from the queried <code>(variable, step, frame)</code> until a
+terminator (computational expression, literal, parameter at the
+recording boundary, etc.) is reached. Drives the same <code>ct/originChain</code>
+DAP request as the <code>Trace.value_origin(...)</code> Python binding and the
+<code>get_value_origin</code> MCP tool.</p>
+<pre><code>ct trace origin &lt;trace-path&gt; --variable &lt;NAME&gt; [options]
+</code></pre>
+<p><strong>Options:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;trace-path&gt;</code></td><td>Path to the trace directory (required positional argument).</td></tr>
+<tr><td><code>--variable &lt;NAME&gt;</code></td><td>Variable identifier to query. V1 is identifier-only; dotted paths are reserved. <strong>Required.</strong></td></tr>
+<tr><td><code>--step &lt;N&gt;</code></td><td>Step id at which to query. Defaults to the trace's current execution point.</td></tr>
+<tr><td><code>--frame &lt;N&gt;</code></td><td>DAP frame id at which to query. Defaults to the topmost frame.</td></tr>
+<tr><td><code>--max-hops &lt;N&gt;</code></td><td>Maximum hops in this batch. Default: <code>16</code>.</td></tr>
+<tr><td><code>--format &lt;json|markdown|text&gt;</code></td><td>Output renderer. Default: <code>text</code>.</td></tr>
+<tr><td><code>--lazy</code></td><td>Allow the backend to return a <code>continuationToken</code> instead of walking the full chain in one shot.</td></tr>
+</tbody></table>
+</div>
+<p><strong>Formats:</strong></p>
+<ul>
+<li><code>text</code> — ASCII layout matching spec §3.2 (newest hop first, terminator
+at the bottom, frame-transition glyphs inline). Good for terminal
+copy-paste.</li>
+<li><code>markdown</code> — fenced chain with classification badges and a per-hop
+table. Paste straight into a bug report.</li>
+<li><code>json</code> — canonical <code>OriginChain</code> wire schema, pretty-printed. Use for
+scripting or downstream tooling.</li>
+</ul>
+<p><strong>Example:</strong></p>
+<pre><code class="language-bash">ct trace origin /traces/my-bug.ct --variable total --step 137 --format text
+</code></pre>
+<p>For multi-step agent workflows that need to compose origin lookups with
+locals/history/breakpoints, prefer <code>ct trace exec --script &lt;file.py&gt; &lt;trace-path&gt;</code> and call <code>trace.value_origin(...)</code> inside the script — the
+trace stays loaded across calls and the classifier's pattern cache is
+reused.</p>
+<p>See <a href="../usage_guide/value-origin-tracking.html">Value Origin Tracking</a> for
+the user-facing walkthrough.</p>
+<h3 id="ct-trace-extract-gfx"><a class="header" href="#ct-trace-extract-gfx">ct trace extract-gfx</a></h3>
+<p>Extracts the graphics stream from a <code>.ct</code> trace container into a directory the visual replay player can consume.</p>
+<pre><code>ct trace extract-gfx -o &lt;output-dir&gt; &lt;trace&gt;
+</code></pre>
+<p><strong>Options:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;trace&gt;</code></td><td>Path to the <code>.ct</code> trace container to extract (required positional).</td></tr>
+<tr><td><code>-o, --output-dir &lt;DIR&gt;</code></td><td>Directory to extract the graphics stream into. Required.</td></tr>
+</tbody></table>
+</div>
+<p>See <a href="../usage_guide/visual_recordings.html">Visual recordings</a> for the full workflow.</p>
+<h3 id="ct-trace-export"><a class="header" href="#ct-trace-export">ct trace export</a></h3>
+<p>Exports a recorded trace to a single file, optionally producing a portable bundle with embedded binaries and debug symbols.</p>
+<pre><code>ct trace export [--portable] -o &lt;output&gt; &lt;trace&gt;
+</code></pre>
+<p><strong>Options:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;trace&gt;</code></td><td>Path to the source trace to export (required positional).</td></tr>
+<tr><td><code>--portable</code></td><td>Produce a portable export with embedded binaries and debug symbols.</td></tr>
+<tr><td><code>-o, --output &lt;PATH&gt;</code></td><td>Output path for the exported trace (required).</td></tr>
+</tbody></table>
+</div>
+<h3 id="ct-gfx-replay"><a class="header" href="#ct-gfx-replay">ct gfx-replay</a></h3>
+<p>Replays an extracted graphics stream. The CodeTracer GUI launches this automatically when opening a visual <code>.ct</code> trace; running it directly is useful for diagnostics.</p>
+<pre><code>ct gfx-replay --gfx-stream &lt;dir&gt; [--http --port &lt;N&gt;] [--backend &lt;BACKEND&gt;]
+</code></pre>
+<p><strong>Options:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--gfx-stream &lt;DIR&gt;</code></td><td>Path to the extracted graphics-stream directory (required).</td></tr>
+<tr><td><code>--http</code></td><td>Start the player as an HTTP server (used by the GUI).</td></tr>
+<tr><td><code>--port &lt;N&gt;</code></td><td>Port for the HTTP player (only meaningful with <code>--http</code>).</td></tr>
+<tr><td><code>--backend &lt;BACKEND&gt;</code></td><td>Rendering backend selector — e.g. <code>software</code> or <code>hardware</code>.</td></tr>
+</tbody></table>
+</div>
+<h3 id="ct-doctor"><a class="header" href="#ct-doctor">ct doctor</a></h3>
+<p>Probes recorder-readiness for a language: reports the interpreter or runtime that would be used and whether the matching recorder package is installed and importable.</p>
+<pre><code>ct doctor &lt;language&gt;
+</code></pre>
+<p><strong>Arguments:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;language&gt;</code></td><td>Recorder to probe. Currently <code>python</code> is wired; more recorders will land in future releases.</td></tr>
+</tbody></table>
+</div>
+<p>Run this when <code>ct record</code> fails with a recorder import error to confirm which interpreter <code>ct</code> is targeting and whether the recorder package is present.</p>
+<h3 id="ct-trace-exec"><a class="header" href="#ct-trace-exec">ct trace exec</a></h3>
+<p>Runs a Python replay-script against a recording. The script body is the
+same one consumed by the MCP <code>exec_script</code> tool, so the same logic runs
+from a terminal session and from an agent workflow.</p>
+<pre><code>ct trace exec --script &lt;file.py&gt; &lt;trace-path&gt;
+</code></pre>
+<p>Inside the script a <code>trace</code> object is pre-bound to the loaded recording.
+Methods include <code>trace.locals()</code>, <code>trace.history()</code>, navigation
+(<code>trace.step_over()</code> etc.), and <code>trace.value_origin(...)</code> for origin
+chains. See the
+<a href="https://github.com/metacraft-labs/codetracer/tree/main/python-api">Python API reference</a>
+for the full surface.</p>
+<h3 id="environment-variables"><a class="header" href="#environment-variables">Environment Variables</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>CODETRACER_PYTHON_INTERPRETER</code></td><td>Path to the Python interpreter for recording</td></tr>
+<tr><td><code>CODETRACER_NOIR_EXE_PATH</code></td><td>Path to the Noir tracer binary</td></tr>
+<tr><td><code>CODETRACER_WASM_VM_PATH</code></td><td>Path to the WASM VM binary (wazero)</td></tr>
+<tr><td><code>CODETRACER_RECORDING</code></td><td>Set to <code>1</code> during recording</td></tr>
+<tr><td><code>CODETRACER_CALLTRACE_MODE</code></td><td>Call trace mode: <code>FullRecord</code>, <code>RawRecordNoValues</code>, <code>NoInstrumentation</code></td></tr>
+<tr><td><code>CODETRACER_SHELL_ID</code></td><td>Shell session ID (for CodeTracer Shell)</td></tr>
+<tr><td><code>CODETRACER_CT_MCR_CMD</code></td><td>Override the internal MCR binary that <code>ct trace extract-gfx</code> invokes</td></tr>
+<tr><td><code>CODETRACER_CT_GFX_PLAYER_CMD</code></td><td>Override the internal player binary that <code>ct gfx-replay</code> launches</td></tr>
+<tr><td><code>CODETRACER_CT_GFX_PLAYER_BACKEND</code></td><td>Default backend for <code>ct gfx-replay</code> (equivalent to <code>--backend</code>), for example <code>software</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="output-format"><a class="header" href="#output-format">Output Format</a></h3>
+<p>All recordings produce a trace directory containing:</p>
+<div class="table-wrapper"><table><thead><tr><th>File</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>trace.bin</code> or <code>trace.json</code></td><td>The trace data (binary or JSON format)</td></tr>
+<tr><td><code>trace_metadata.json</code></td><td>Metadata about the trace (language, program, timestamp)</td></tr>
+<tr><td><code>trace_paths.json</code></td><td>Source file paths referenced in the trace</td></tr>
+<tr><td><code>symbols.json</code></td><td>Extracted symbols (for Noir and some languages)</td></tr>
+</tbody></table>
+</div>
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../usage_guide/gui-ops-latency-bench.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../reference/mcp-tools.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../usage_guide/gui-ops-latency-bench.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../reference/mcp-tools.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,317 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Origin Kinds Reference - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="origin-kinds-reference"><a class="header" href="#origin-kinds-reference">Origin Kinds Reference</a></h1>
+<p>This page enumerates the three closed enums that classify the rows of
+an <strong>origin chain</strong>: <code>OriginKind</code> (per-hop classification),
+<code>TerminatorKind</code> (why the backward walk stopped), and
+<code>FrameTransitionKind</code> (the direction of a function-boundary crossing
+on a hop). All three are part of the wire shape defined in spec §4.1
+and travel verbatim across the DAP / MCP / CLI surfaces.</p>
+<p>The canonical Rust definitions live in
+<code>codetracer/src/db-backend/src/task.rs</code>; the Python mirror lives in
+<code>python-api/codetracer/origin.py</code>.</p>
+<p>For the user-facing walkthrough see
+<a href="../usage_guide/value-origin-tracking.html">Value Origin Tracking</a>.</p>
+<h2 id="originkind"><a class="header" href="#originkind"><code>OriginKind</code></a></h2>
+<p>Carried on every <code>OriginHop</code>. The classifier emits the variant that
+best explains the dataflow step from the <em>previous</em> hop to <em>this</em> hop.</p>
+<div class="table-wrapper"><table><thead><tr><th>Variant</th><th>Meaning</th><th>Typical hop</th></tr></thead><tbody>
+<tr><td><code>TrivialCopy</code></td><td>Source-level assignment that moves a value verbatim — <code>b = a</code>, <code>let y = x;</code>, <code>b := a</code>. Rendered de-emphasised in the chain.</td><td><code>b = a</code></td></tr>
+<tr><td><code>FieldAccess</code></td><td>RHS reads a field of a struct/object/record — <code>x = obj.field</code>.</td><td><code>x = obj.field</code></td></tr>
+<tr><td><code>IndexAccess</code></td><td>RHS reads an element by index/key — <code>x = arr[i]</code>, <code>x = m["k"]</code>.</td><td><code>x = arr[i]</code></td></tr>
+<tr><td><code>Computational</code></td><td>RHS is an <em>expression</em> whose value derives from multiple sources — <code>r = a + b</code>, <code>s = fmt!("{x}+{y}", ...)</code>. Highlighted hop.</td><td><code>r = a + b</code></td></tr>
+<tr><td><code>FunctionCall</code></td><td>RHS invokes a function whose return value is captured — <code>y = foo(...)</code>. When the chain <em>descends</em> into the callee, see below.</td><td><code>y = foo()</code></td></tr>
+<tr><td><code>Literal</code></td><td>RHS is a literal value — <code>x = 10</code>, <code>name = "alice"</code>, <code>xs = []</code>.</td><td><code>x = 10</code></td></tr>
+<tr><td><code>ReturnCapture</code></td><td>Hop captures the result of a function return (<code>await</code> / explicit return). Pairs with a <code>FrameTransitionKind::ReturnCapture</code>.</td><td><code>y = foo()</code> after <code>foo</code> returned</td></tr>
+<tr><td><code>FunctionReturn</code></td><td>Reserved alias of <code>ReturnCapture</code> re-emitted on the callee side so future renderers can style the two halves separately.</td><td>(callee-side mirror)</td></tr>
+<tr><td><code>ParameterPass</code></td><td>Hop crosses <em>into</em> a callee through a parameter binding. Pairs with a <code>FrameTransitionKind::ParameterPass</code>.</td><td><code>def helper(a): ...</code> receiving the caller's argument</td></tr>
+<tr><td><code>CrossThreadCopy</code></td><td>RR/MCR backends — the write that produced the value happened on a thread other than the querying thread. Confidence ≈ 0.6.</td><td>Tagged with the cross-thread icon in the chain panel</td></tr>
+<tr><td><code>Unknown</code></td><td>The classifier could not parse the source line into a known shape. Treated as opaque; the chain typically terminates shortly.</td><td>Garbled / preprocessed line</td></tr>
+</tbody></table>
+</div>
+<p>Notes:</p>
+<ul>
+<li><code>Computational</code> is the <strong>classification of the hop</strong>, not the
+reason the chain stopped. A computational hop can sit in the middle
+of a chain (the chain may keep walking the operands' own origins);
+it does not by itself end the walk. The chain ends when the walker
+produces a <code>Terminator</code> row — see below.</li>
+<li><code>ParameterPass</code> / <code>ReturnCapture</code> hops are the only ones that carry
+a populated <code>FrameTransition</code>. All other hops have <code>frameTransition</code>
+set to <code>null</code>.</li>
+<li>The classifier returns <code>Unknown</code> (<code>confidence &lt; 0.5</code>) for any line
+it cannot parse; the chain terminates with <code>TerminatorKind::UnknownSource</code>.</li>
+</ul>
+<h2 id="terminatorkind"><a class="header" href="#terminatorkind"><code>TerminatorKind</code></a></h2>
+<p>The bottom row of every chain is a <code>Terminator</code>, not a hop. Its
+<code>kind</code> is one of the variants below; the <code>expression</code> field carries
+the terminator's source text and the <code>function</code> field carries the
+containing function when known.</p>
+<div class="table-wrapper"><table><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>Literal</code></td><td>Walked back to a literal RHS — <code>x = 10</code>, <code>x = "alice"</code>, <code>xs = []</code>. The chain's ultimate source is a constant inside the recording.</td></tr>
+<tr><td><code>Computational</code></td><td>Walked back to a computational expression whose operands are themselves terminal (literals, parameters, externals). The expression is the chain's "root cause" in user-code.</td></tr>
+<tr><td><code>ParameterAtRecordStart</code></td><td>Walked back to a parameter binding at the recording boundary — the value entered the trace as a function argument, with no recorded caller. Common when recording starts mid-execution.</td></tr>
+<tr><td><code>ReadFromExternal</code></td><td>Walked back to a read from outside the recording — a system call, file I/O, network response, environment variable, randomness source.</td></tr>
+<tr><td><code>RecordingStart</code></td><td>The backward walk reached the start of the trace without finding an earlier write. Typical for partial recordings.</td></tr>
+<tr><td><code>UnknownSource</code></td><td>The classifier could not parse the source line (e.g. macro-expanded, preprocessor output, missing source).</td></tr>
+<tr><td><code>UnknownVariable</code></td><td>The queried variable could not be resolved at the requested step (e.g. typo, out-of-scope).</td></tr>
+<tr><td><code>DepthLimit</code></td><td>The walker hit the per-request <code>max_hops</code> cap before reaching a natural terminator. Use <code>--lazy</code> + <code>continuationToken</code> to resume.</td></tr>
+<tr><td><code>OutOfBudget</code></td><td>The walker exhausted a backend-specific wall-clock or per-hop budget. Common on release-mode native traces where the assignment was elided by the optimiser. Often paired with <code>truncated: true</code>.</td></tr>
+</tbody></table>
+</div>
+<p>The terminator's SVG icon in the GUI maps one-to-one to these
+variants (see spec §3.2.2 for the icon-set table).</p>
+<h2 id="frametransitionkind"><a class="header" href="#frametransitionkind"><code>FrameTransitionKind</code></a></h2>
+<p>When an <code>OriginHop</code> crosses a function boundary the
+<code>frameTransition</code> field is populated with one of:</p>
+<div class="table-wrapper"><table><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>ParameterPass</code></td><td>Chain descends <em>into</em> a callee. Rendered with the <code>↘</code> glyph on the hop's header line.</td></tr>
+<tr><td><code>ReturnCapture</code></td><td>Chain ascends <em>back into</em> the caller. Rendered with the <code>↗</code> glyph on the hop's header line.</td></tr>
+</tbody></table>
+</div>
+<p>Hops on the same <code>OriginKind</code> axis usually pair one-for-one:
+<code>OriginKind::ParameterPass</code> carries <code>FrameTransitionKind::ParameterPass</code>;
+<code>OriginKind::ReturnCapture</code> / <code>FunctionReturn</code> carry
+<code>FrameTransitionKind::ReturnCapture</code>. Other hops carry no
+<code>frameTransition</code>.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li><a href="../usage_guide/value-origin-tracking.html">Value Origin Tracking</a> —
+user-facing walkthrough across all four surfaces (GUI, VS Code,
+CLI, MCP).</li>
+<li><a href="./mcp-tools.html">MCP tool reference</a> — <code>get_value_origin</code> /
+<code>resolve_variable_step</code> schemas (the same enums appear on the
+wire).</li>
+<li><a href="./ct_cli.html#ct-trace-origin"><code>ct</code> CLI reference</a> — <code>--format json</code>
+emits the canonical wire shape with these enum values.</li>
+<li><code>codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md</code>
+§4.1 — the authoritative wire-schema definition.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../reference/mcp-tools.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../reference/recorders.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../reference/mcp-tools.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../reference/recorders.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

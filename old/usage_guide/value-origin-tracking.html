@@ -1,0 +1,603 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Value Origin Tracking - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="value-origin-tracking"><a class="header" href="#value-origin-tracking">Value Origin Tracking</a></h1>
+<p><strong>Value Origin Tracking</strong> answers the question "where did this value come
+from?" by walking backward through the recorded execution. Starting from
+a variable at a chosen step, CodeTracer follows assignments, parameter
+passes, return captures, and field/index accesses until it reaches a
+<strong>terminator</strong> — a computational expression (e.g. <code>a + b</code>), a literal, a
+function parameter at the recording boundary, an external read, or one
+of a handful of other well-defined stopping conditions. The result is an
+<strong>origin chain</strong>: an ordered list of <strong>hops</strong>, each classified by the
+kind of dataflow step it represents, ending in a terminator that
+explains why the search stopped.</p>
+<p>This is distinct from value <em>history</em> (which lists the prior values a
+variable held). History tells you "what values has this variable had?";
+origin tracking tells you "what computation produced this particular
+value?". The two compose well — pinning a historic value and then asking
+for its origin is one of the canonical workflows.</p>
+<p>This chapter describes the user-facing surfaces of value-origin tracking.</p>
+<h2 id="when-to-use-it"><a class="header" href="#when-to-use-it">When to use it</a></h2>
+<p>Origin tracking is most useful when:</p>
+<ul>
+<li>A variable has an unexpected value and you want to know which
+assignment line produced it, not just "what step set it last".</li>
+<li>A bug appears far from its root cause and you want to walk back across
+function boundaries without manually stepping out frame-by-frame.</li>
+<li>You are reviewing data flowing across a wrapper / forwarder /
+serialisation boundary and want to skip the trivial copies that
+shuttle the value around.</li>
+<li>An agent or replay script needs to programmatically explain how a
+value was computed.</li>
+</ul>
+<p>If you only need "what was the previous value of this variable", the
+value-history popover is faster. Origin tracking is the right tool when
+you specifically care about the <strong>source-level computation</strong> that
+produced the value, not the sequence of prior values.</p>
+<h2 id="in-the-codetracer-gui"><a class="header" href="#in-the-codetracer-gui">In the CodeTracer GUI</a></h2>
+<h3 id="the-inline-origin-badge"><a class="header" href="#the-inline-origin-badge">The inline origin badge</a></h3>
+<p>Every row in the Variable State Pane carries a compact <strong>inline origin
+badge</strong> to the right of the value. The badge shows a small icon for the
+terminator kind (literal, computational expression, parameter at entry,
+external read, etc.) and a truncated label with the terminator's source
+expression:</p>
+<pre><code>total       137    [◎ a + b]
+items       [..]   [◎ list literal]
+ctx         {..}   [◎ param at entry]
+</code></pre>
+<p>The badge is pre-fetched together with the locals — no user gesture is
+required to see it. When the backend deferred the chain (e.g. for
+off-screen history rows), the badge renders as a low-contrast <code>[?]</code>
+pill; clicking it issues a lazy lookup and replaces the placeholder in
+place.</p>
+<h3 id="expanding-the-chain-in-place"><a class="header" href="#expanding-the-chain-in-place">Expanding the chain in place</a></h3>
+<p>Clicking the badge expands the row to show the full hop chain inline,
+newest hop first, ending in the terminator. Each hop renders on two
+short lines:</p>
+<ul>
+<li>a header line with a small pie-chart timeline indicator,
+<code>filename:line</code>, and one or two SVG icons (classification icon plus an
+optional <code>↘</code>/<code>↗</code> frame-transition arrow);</li>
+<li>the source line of the assignment, monospace.</li>
+</ul>
+<p>Trivial-copy hops are de-emphasised; the computational origin hop is
+highlighted with a subtle accent background. For computational hops a
+chevron expands a per-operand snapshot table (<code>name = value</code> rows).</p>
+<p>Clicking the badge again collapses the chain.</p>
+<h3 id="reading-an-origin-chain"><a class="header" href="#reading-an-origin-chain">Reading an origin chain</a></h3>
+<p>Three concepts cover everything you see in the panel:</p>
+<ul>
+<li><strong>Hops</strong> — each row represents one dataflow step. The
+classification icon names <em>what kind</em> of step it was: a trivial copy
+(<code>b = a</code>), a field or index access (<code>x.field</code>, <code>arr[i]</code>), a return
+capture (<code>y = foo()</code>), a parameter pass (the callee receives the
+caller's argument), an explicit computation (<code>r = a + b</code>), or — on
+RR/MCR backends — a cross-thread copy. The full enum is in the
+<a href="../reference/origin-kinds.html">Origin kinds reference</a>.</li>
+<li><strong>Frame transitions</strong> — the inline <code>↘</code>/<code>↗</code> glyphs mark the hops
+where the chain crosses a function boundary: <code>↘</code> when the chain
+steps <em>into</em> a callee through a <code>ParameterPass</code>, <code>↗</code> when it returns
+<em>up</em> into the caller through a <code>ReturnCapture</code>. The chain seeks to
+the right frame automatically when you click such a hop.</li>
+<li><strong>Terminator</strong> — the bottom row is not a regular hop. It explains
+<em>why the backward walk stopped</em>. The terminator kind is the closed
+enum <code>TerminatorKind</code> — for example <code>Literal</code> (a literal expression
+bottomed out the chain), <code>Computational</code> (the chain ended at an
+expression like <code>a + b</code>), <code>ParameterAtRecordStart</code> (the value was
+already in a parameter when recording began), <code>RecordingStart</code>
+(walked off the beginning of the trace), <code>DepthLimit</code> /
+<code>OutOfBudget</code> (the walker stopped under a configured cap), or
+<code>UnknownSource</code> / <code>UnknownVariable</code> (the classifier could not parse
+the line). The full enum lives in the
+<a href="../reference/origin-kinds.html">Origin kinds reference</a>.</li>
+</ul>
+<p>The order is always newest-first: the topmost hop is the most recent
+assignment to the queried value, and the terminator at the bottom is
+the original source of the data.</p>
+<h3 id="pinning-breadcrumbs-and-copying"><a class="header" href="#pinning-breadcrumbs-and-copying">Pinning, breadcrumbs, and copying</a></h3>
+<p>Inside the side panel a few small navigation aids accumulate as you
+work:</p>
+<ul>
+<li><strong>Breadcrumbs at the top of the panel</strong> record the
+<code>(variable, step)</code> pairs you have already inspected in this session.
+Clicking a breadcrumb jumps back to that query without re-issuing the
+backend round-trip. These breadcrumbs are <em>session-local</em> — they
+reflect <em>your navigation path</em> through chains, not anything intrinsic
+to the trace. (Under the hood this is the <code>breadcrumbStack</code> signal in
+<code>OriginChainVM</code>.)</li>
+<li><strong>Pinning</strong> a hop or a full chain copies it into the <strong>Scratchpad
+Pane</strong> as a folded card. Pin two chains side-by-side and CodeTracer
+renders a unified hop diff — useful for "why is iteration 17
+different from iteration 16?". Right-click a hop or the chain header
+to access pin actions.</li>
+<li><strong>Copy as markdown</strong> (right-click the chain header) serialises the
+chain to a markdown fragment with the per-hop table, ready to paste
+into a bug report. The same renderer is exposed as the <code>markdown</code>
+format on the <code>ct trace origin</code> CLI.</li>
+</ul>
+<blockquote>
+<p><strong>Note:</strong> The breadcrumb chips described above are distinct from
+the <em>cross-trace</em> <code>CrossProcessSpan</code> boundary chips covered below
+in <a href="#cross-tracer-sessions">Cross-tracer sessions</a> — those chips
+reflect the chain crossing recording boundaries, not your navigation
+history.</p>
+</blockquote>
+<h3 id="the-dedicated-side-panel"><a class="header" href="#the-dedicated-side-panel">The dedicated side panel</a></h3>
+<p>For deeper chains that crowd the narrow State Pane, right-clicking a
+variable row exposes the <strong>"Show value origin"</strong> action. This opens the
+same chain in a dedicated <strong>Origin Chain Side Panel</strong> with richer
+layout: full file paths, taller per-hop rows, operand tables, and
+breadcrumbs across previously-queried <code>(variable, step)</code> pairs.</p>
+<p>The same panel can be opened directly from the keyboard with
+<code>Ctrl+Shift+O</code> on Linux/Windows or <code>Cmd+Shift+O</code> on macOS (the default
+binding for <code>codetracer.showValueOrigin</code>; rebind it through the
+standard keybinding settings).</p>
+<p>Inside the side panel you can:</p>
+<ul>
+<li><strong>Click a hop</strong> to seek to that step (the editor pane scrolls and the
+call-trace pane opens the relevant frame).</li>
+<li><strong>Cmd/Ctrl-click a hop</strong> to open the file at <code>(path, line)</code> in a new
+tab without changing the active step.</li>
+<li><strong>Click an operand</strong> in an expanded computational hop to recursively
+query its origin at the origin step.</li>
+<li><strong>Right-click a hop → "Pin to scratchpad"</strong> to drop the hop into the
+Scratchpad Pane for later comparison.</li>
+<li><strong>Right-click the chain → "Copy as markdown"</strong> to serialise the chain
+for a bug report.</li>
+</ul>
+<h3 id="editor-and-scratchpad-integration"><a class="header" href="#editor-and-scratchpad-integration">Editor and scratchpad integration</a></h3>
+<p>While a chain is active a subtle gutter glyph appears on every editor
+line that participates in the chain; hovering the glyph shows a hop
+summary. Pinned chains in the Scratchpad Pane render as folded cards,
+and pinning two chains side-by-side renders a unified diff of the hop
+sequences (useful for "why is iteration 17 different from iteration
+16?").</p>
+<blockquote>
+<p><strong>Note:</strong> The Origin Chain Side Panel screenshot for this section is
+pending — the Playwright capture suite runs end-to-end on
+recorder-equipped CI runners but SKIPs cleanly in dev shells without
+the Python recorder installed.</p>
+</blockquote>
+<h2 id="in-vs-code"><a class="header" href="#in-vs-code">In VS Code</a></h2>
+<p>The CodeTracer VS Code extension embeds the same Origin Chain Panel
+inside a webview. The same gestures apply:</p>
+<ul>
+<li>Inline origin badges render on every row of the embedded State Pane.</li>
+<li><code>Ctrl+Shift+O</code> / <code>Cmd+Shift+O</code> invokes the
+<code>ct-vscode.showValueOrigin</code> command and opens the embedded panel.</li>
+<li>Right-clicking a variable row in the State Pane exposes the
+<strong>"Show value origin"</strong> entry.</li>
+<li>Clicking a hop dispatches an <code>OriginChainVM.onSeekToHop</code> event which
+the extension translates into a <code>ct/history-jump</code> followed by a VS
+Code editor reveal, so the active editor scrolls to the hop's
+<code>(path, line)</code>.</li>
+</ul>
+<blockquote>
+<p><strong>Note:</strong> The animated screencast of the VS Code experience is pending
+— see the M7 verification entries for capture status.</p>
+</blockquote>
+<h3 id="vs-code-event-log-marker-chips"><a class="header" href="#vs-code-event-log-marker-chips">VS Code Event Log marker chips</a></h3>
+<p>When a session has correlation markers (see the M25 docs in the spec),
+the VS Code Event Log gains a row per marker firing with:</p>
+<ul>
+<li>a <strong>direction icon</strong> — <code>↑</code> for a <code>Send</code> (the marker recorded a
+value crossing <em>out</em> of the recording at this boundary) and <code>↓</code> for
+a <code>Recv</code> (the value crossing <em>in</em>);</li>
+<li>a <strong>boundary chip</strong> — the marker's <code>boundary_id</code> (for example
+<code>http</code>, <code>js-wasm-realm</code>) rendered as a small filled badge;</li>
+<li>the marker's <strong><code>show_value</code></strong> — the expression value the marker
+declaration captured at that firing, formatted per the marker's
+<code>format</code> field (default <code>summary:80</code>, middle-ellipsis-truncated).</li>
+</ul>
+<p>Clicking the chip on a marker row <strong>jumps to the counterpart row</strong>:
+when the counterpart is in a sibling recording the active process
+switches first (via <code>ct/listProcesses</code> + <code>ct/goto-ticks</code>), then the
+timeline seeks to the counterpart's step, then the Event Log scrolls
+to highlight the counterpart row. While markers are still loading the
+panel shows a <code>loading correlation markers… X / Y firings</code> banner;
+jump buttons defer until both endpoints of a pair are loaded.</p>
+<p>The same chips + jump targets render in the CodeTracer Electron GUI's
+Event Log pane — both surfaces drive the same <code>EventLogVM</code>.</p>
+<h2 id="cross-tracer-sessions"><a class="header" href="#cross-tracer-sessions">Cross-tracer sessions</a></h2>
+<p>When CodeTracer opens a multi-recording session via <code>session.toml</code>,
+the same Origin Chain Side Panel additionally renders
+<strong><code>CrossProcessSpan</code> boundary chips</strong> at every cross-recording hop.
+A chip shows which recording the next hop range belongs to (one chip
+per process the chain visits — JS frontend, WASM module, Python
+backend, etc.) and clicking it switches the active recording and
+seeks to the matched boundary step.</p>
+<p>This is distinct from the session-local breadcrumbs described above:
+breadcrumbs reflect <em>your navigation history</em> through prior queries,
+while <code>CrossProcessSpan</code> chips are an intrinsic property of the
+returned chain — they tell you "the next K hops happen inside
+recording R" and they survive switching the active recording.</p>
+<p>The canonical user-facing walkthrough for cross-tracer chain walking
+lives in <a href="./cross-tracer-demo.html">Cross-Tracer Demo</a>, which boots the
+three-trace <code>account-balance-with-wasm</code> fixture so you can right-click
+<code>balance</code> in the backend, watch the chain render its <code>CrossProcessSpan</code>
+chips, and click through into the JS frontend and the WASM module
+without leaving the GUI.</p>
+<h2 id="from-a-python-replay-script"><a class="header" href="#from-a-python-replay-script">From a Python replay script</a></h2>
+<p>The Python replay-script API exposes value origin through
+<code>trace.value_origin(...)</code>. The same script body runs through the MCP
+<code>exec_script</code> tool and the <code>ct trace exec --script</code> CLI subcommand, so
+agents and CLI users share a single workflow:</p>
+<pre><code class="language-python"># example.py — passed through `ct trace exec --script example.py &lt;trace&gt;`
+chain = trace.value_origin("c", step=42, max_hops=8)
+
+# Inspect the terminator
+print(chain.terminator.kind)        # e.g. "Computational"
+print(chain.terminator.expression)  # e.g. "a + b"
+
+# Walk the hops (newest first)
+for hop in chain.hops:
+    print(hop.kind, hop.location.path, hop.location.line)
+
+# Render it as plain text or markdown
+print(chain.to_text())
+print(chain.to_markdown())
+</code></pre>
+<p><code>value_origin</code> returns a <code>codetracer.origin.OriginChain</code> dataclass that
+mirrors the wire shape from spec §4.1 one-for-one
+(<code>OriginHop</code>, <code>OperandSnapshot</code>, <code>Terminator</code>, <code>FrameTransition</code>,
+<code>OriginMetrics</code>, plus the closed-enum types <code>OriginKind</code>,
+<code>TerminatorKind</code>, <code>FrameTransitionKind</code>). The full signature is:</p>
+<pre><code class="language-python">trace.value_origin(
+    expression: str,
+    *,
+    step: int | None = None,
+    frame: int | None = None,
+    max_hops: int = 16,
+    lazy: bool = False,
+    continuation_token: str | None = None,
+) -&gt; OriginChain
+</code></pre>
+<p>When <code>lazy=True</code> the backend may return early with a
+<code>continuation_token</code>; pass it back on the next call to resume the walk.</p>
+<p>The binding is implemented in <code>python-api/codetracer/trace.py</code> and the
+dataclasses live in <code>python-api/codetracer/origin.py</code>.</p>
+<h2 id="from-the-cli"><a class="header" href="#from-the-cli">From the CLI</a></h2>
+<p>For one-shot queries from the terminal use <code>ct trace origin</code>:</p>
+<pre><code class="language-bash">ct trace origin &lt;trace-path&gt; --variable c --format text
+</code></pre>
+<p>Common flags:</p>
+<ul>
+<li><code>--variable &lt;NAME&gt;</code> (required) — the identifier to query.</li>
+<li><code>--step &lt;N&gt;</code> — query at a specific step id (defaults to current).</li>
+<li><code>--frame &lt;N&gt;</code> — query within a specific DAP frame (defaults to the
+topmost frame).</li>
+<li><code>--max-hops &lt;N&gt;</code> — limit the walk (default 16).</li>
+<li><code>--format &lt;json|markdown|text&gt;</code> — choose the renderer (default
+<code>text</code>).</li>
+<li><code>--lazy</code> — allow the backend to return a continuation token instead
+of walking the full chain.</li>
+</ul>
+<p>The text renderer matches the ASCII layout from spec §3.2 (newest hop
+first, terminator at the bottom, frame-transition glyphs inline). The
+markdown renderer emits a fenced chain with a per-hop table — paste it
+straight into a bug report. The JSON renderer pretty-prints the
+canonical <code>OriginChain</code> wire shape so other tools can parse it.</p>
+<p>For longer agent workflows that need to compose origin lookups with
+locals/history/breakpoints, prefer
+<code>ct trace exec --script &lt;file.py&gt; &lt;trace-path&gt;</code> and call
+<code>trace.value_origin(...)</code> inside the script — the trace stays loaded
+across multiple calls, and the classifier's pattern cache is reused.</p>
+<p>See the <a href="../reference/ct_cli.html#ct-trace-origin"><code>ct</code> CLI reference</a> for
+the full flag table.</p>
+<h2 id="from-an-mcp-capable-agent"><a class="header" href="#from-an-mcp-capable-agent">From an MCP-capable agent</a></h2>
+<p>The CodeTracer MCP server registers two tools that surface origin
+tracking to LLM agents directly:</p>
+<ul>
+<li><strong><code>get_value_origin</code></strong> — one-shot lookup. Returns the canonical
+<code>OriginChain</code> JSON for <code>variable</code> at <code>step</code>/<code>frame</code>. Use this when you
+only need a single chain without authoring a script.</li>
+<li><strong><code>resolve_variable_step</code></strong> — helper that maps a variable name to the
+most recent step at which it was assigned. Pair it with
+<code>get_value_origin</code> when you want the chain at the assignment site
+rather than the current step.</li>
+</ul>
+<p>The <strong>preferred</strong> multi-step path is to send a Python script through the
+existing <code>exec_script</code> MCP tool and call <code>trace.value_origin(...)</code>
+inside it — that composes with <code>trace.locals()</code>, <code>trace.history()</code>,
+breakpoints, and watchpoints, and reuses the loaded trace + pattern
+cache across calls.</p>
+<p>See the <a href="../reference/mcp-tools.html">MCP tool reference</a> for the full
+input/output schemas.</p>
+<h2 id="per-language-coverage"><a class="header" href="#per-language-coverage">Per-language coverage</a></h2>
+<p>Backward-walk support is rolled out per language and per recording
+backend:</p>
+<div class="table-wrapper"><table><thead><tr><th>Backend / Language</th><th>Status</th></tr></thead><tbody>
+<tr><td>Materialized DB — Python (<code>codetracer-python-recorder</code>)</td><td>Supported.</td></tr>
+<tr><td>Materialized DB — Ruby (<code>codetracer-ruby-recorder</code>)</td><td>Supported.</td></tr>
+<tr><td>Materialized DB — JavaScript (<code>codetracer-js-recorder</code>)</td><td>Supported (with the granularity caveat from spec §6.1.4).</td></tr>
+<tr><td>RR-driver — C / C++ / Rust / Nim / Go / D</td><td>Planned (M11). Uses watchpoint + reverse-continue against <code>codetracer-native-backend</code>.</td></tr>
+<tr><td>MCR — hybrid backend</td><td>Planned (M14). Uses the omniscient undo-map for the last mile and breakpoints for deeper prefixes.</td></tr>
+<tr><td>MCR — omniscient acceleration</td><td>Planned (M21, gated on the M10d–e omniscient DB).</td></tr>
+</tbody></table>
+</div>
+<p>Origin chains across all backends produce the same response shape; only
+the realistic maximum hop depth, the quality of <code>kind</code> classification,
+and the recording-boundary behaviour differ between backends.</p>
+<h2 id="customising-classification"><a class="header" href="#customising-classification">Customising classification</a></h2>
+<p>CodeTracer ships with a built-in catalogue of language-specific patterns
+that identify trivial copies, forwarders, and field/index accesses.
+Projects can extend or override the catalogue without touching CodeTracer
+itself.</p>
+<p>Patterns live in TOML files. The classifier evaluates them in this
+<strong>precedence order</strong>, first match wins:</p>
+<ol>
+<li><strong>Trace-local overrides</strong> — <code>meta_dat/origin-patterns/_overrides.toml</code>
+inside the trace folder. The recorder never writes this file; create
+it explicitly when you want to override an embedded library default
+for a specific trace.</li>
+<li><strong>User-personal overrides</strong> —
+<code>~/.config/codetracer/origin-patterns.toml</code>. Use this for judgement
+calls you want applied across every trace you replay.</li>
+<li><strong>Embedded library patterns</strong> — <code>meta_dat/origin-patterns/</code> inside the
+trace, populated automatically by the recorder from each library's
+<code>.codetracer/origin-patterns.toml</code>.</li>
+<li><strong>Built-in catalogue</strong> — the language-specific default patterns that
+ship with CodeTracer.</li>
+</ol>
+<p>A typical project authors <code>.codetracer/origin-patterns.toml</code> at the
+project root; the recorder picks it up and embeds it under
+<code>meta_dat/origin-patterns/</code> so the patterns travel with the trace and
+remain reproducible on any machine that opens it.</p>
+<p>Pattern files use a single TOML schema across all four levels. See spec
+§7.4 for the full schema reference. A common case is marking a wrapper
+constructor as a trivial copy so the chain skips it:</p>
+<pre><code class="language-toml">[[trivial_copy]]
+# Skip Wrapper.into() — it just unboxes the inner value.
+language = "rust"
+call_pattern = "Wrapper::into"
+continuation = "self.inner"
+</code></pre>
+<p>All four surfaces above — the GUI, the VS Code embedded panel, the MCP
+tools, and the CLI subcommand — honour the same precedence stack, so a
+pattern added at any level applies uniformly to every caller.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li><a href="../reference/ct_cli.html#ct-trace-origin"><code>ct</code> CLI reference</a> — full
+flag table for <code>ct trace origin</code>.</li>
+<li><a href="../reference/mcp-tools.html">MCP tool reference</a> — input/output
+schemas for <code>get_value_origin</code> and <code>resolve_variable_step</code>.</li>
+<li><a href="../reference/origin-kinds.html">Origin kinds reference</a> — the closed
+<code>OriginKind</code>, <code>TerminatorKind</code>, and <code>FrameTransitionKind</code> enums with
+per-variant guidance.</li>
+<li><a href="./cross-tracer-demo.html">Cross-Tracer Demo</a> — interactive launcher
+for the three-trace cross-process chain-walking scenario.</li>
+<li><code>codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md</code> —
+the authoritative feature spec (UI layout, wire schemas, algorithm
+contracts, per-language semantics).</li>
+<li><code>codetracer-specs/Planned-Features/Value-Origin-Campaign-Closeout.md</code>
+— campaign close-out memo enumerating the milestone set that lands
+the four user-facing surfaces described in this chapter.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../usage_guide/incremental-testing.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../usage_guide/cross-tracer-demo.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../usage_guide/incremental-testing.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../usage_guide/cross-tracer-demo.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

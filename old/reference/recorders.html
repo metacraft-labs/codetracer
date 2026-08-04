@@ -1,0 +1,599 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Recorder CLI Reference - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h2 id="recorder-cli-reference"><a class="header" href="#recorder-cli-reference">Recorder CLI Reference</a></h2>
+<p>Each supported blockchain language has its own recorder binary that produces trace files in CodeTracer's format. This page provides a comprehensive reference for all recorder CLIs.</p>
+<p>All recorders share common conventions:</p>
+<ul>
+<li>Output directory: <code>-o, --out-dir &lt;DIR&gt;</code> (default: <code>./ct-traces/</code>)</li>
+<li>Output format: <code>-f, --format &lt;FMT&gt;</code> (<code>binary</code> or <code>json</code>, default: <code>binary</code>)</li>
+<li>Version: <code>version</code> subcommand</li>
+<li>Output files: <code>trace.bin</code> (or <code>trace.json</code>), <code>trace_metadata.json</code>, <code>trace_paths.json</code></li>
+</ul>
+<p>After recording, open the trace with <code>ct replay --trace-folder &lt;DIR&gt;</code>.</p>
+<hr />
+<h3 id="codetracer-evm-recorder"><a class="header" href="#codetracer-evm-recorder">codetracer-evm-recorder</a></h3>
+<p>Traces Solidity smart contracts on the EVM.</p>
+<pre><code>codetracer-evm-recorder record &lt;solidity-file&gt; [options]
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;solidity-file&gt;</code></td><td>Path to the <code>.sol</code> source file</td></tr>
+<tr><td><code>--trace-dir &lt;DIR&gt;</code></td><td>Output directory for trace files</td></tr>
+<tr><td><code>--function &lt;NAME&gt;</code></td><td>Function to call (default: <code>run</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-circom-recorder"><a class="header" href="#codetracer-circom-recorder">codetracer-circom-recorder</a></h3>
+<p>Traces Circom zero-knowledge circuits during witness generation.</p>
+<pre><code>codetracer-circom-recorder record &lt;circom-file&gt; [options]
+codetracer-circom-recorder version
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;circom-file&gt;</code></td><td>Path to the <code>.circom</code> source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+<tr><td><code>-b, --backend &lt;BE&gt;</code></td><td>Witness generator: <code>wasm</code> or <code>cpp</code> (default: <code>wasm</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-cairo-recorder"><a class="header" href="#codetracer-cairo-recorder">codetracer-cairo-recorder</a></h3>
+<p>Traces Cairo programs and StarkNet contracts.</p>
+<pre><code>codetracer-cairo-recorder record &lt;cairo-file&gt; [options]
+codetracer-cairo-recorder trace-starknet &lt;trace-file&gt; [options]
+codetracer-cairo-recorder replay [options]
+codetracer-cairo-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a standalone Cairo program.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;cairo-file&gt;</code></td><td>Path to the <code>.cairo</code> source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>trace-starknet</strong> — Convert an snforge trace JSON.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;trace-file&gt;</code></td><td>Path to snforge trace JSON</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain StarkNet transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--tx-hash &lt;HASH&gt;</code></td><td>Transaction hash (e.g., <code>0x04a3c...</code>)</td></tr>
+<tr><td><code>--rpc-url &lt;URL&gt;</code></td><td>StarkNet JSON-RPC endpoint</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Directory with contract source code</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-cardano-recorder"><a class="header" href="#codetracer-cardano-recorder">codetracer-cardano-recorder</a></h3>
+<p>Traces Aiken smart contracts on Cardano (UPLC CEK machine).</p>
+<pre><code>codetracer-cardano-recorder record &lt;aiken-file&gt; [options]
+codetracer-cardano-recorder replay [options]
+codetracer-cardano-recorder version
+</code></pre>
+<p><strong>record</strong> — Record an Aiken source file.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;aiken-file&gt;</code></td><td>Path to the <code>.ak</code> source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain Cardano transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--tx-hash &lt;HASH&gt;</code></td><td>Transaction hash (64 hex characters)</td></tr>
+<tr><td><code>--blockfrost-key &lt;KEY&gt;</code></td><td>Blockfrost API key (or <code>BLOCKFROST_API_KEY</code> env var)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-flow-recorder"><a class="header" href="#codetracer-flow-recorder">codetracer-flow-recorder</a></h3>
+<p>Traces Cadence smart contracts on the Flow blockchain.</p>
+<pre><code>codetracer-flow-recorder record &lt;cdc-file&gt; [options]
+codetracer-flow-recorder replay [options]
+codetracer-flow-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a Cadence source file.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;cdc-file&gt;</code></td><td>Path to the <code>.cdc</code> source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain Flow transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--tx-hash &lt;HASH&gt;</code></td><td>Flow transaction hash</td></tr>
+<tr><td><code>--access-node &lt;URL&gt;</code></td><td>Flow Access Node gRPC endpoint</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Directory with Cadence source files</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-solana-recorder"><a class="header" href="#codetracer-solana-recorder">codetracer-solana-recorder</a></h3>
+<p>Traces Solana programs (SBF virtual machine).</p>
+<pre><code>codetracer-solana-recorder record &lt;elf-file&gt; [options]
+codetracer-solana-recorder replay [options]
+codetracer-solana-recorder version
+</code></pre>
+<p><strong>record</strong> — Record from a compiled Solana program.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;elf-file&gt;</code></td><td>Path to the compiled <code>.so</code> ELF file</td></tr>
+<tr><td><code>--regs &lt;FILE&gt;</code></td><td>Pre-generated register trace (<code>.regs</code> binary)</td></tr>
+<tr><td><code>--elf &lt;PATH&gt;</code></td><td>Unstripped ELF for DWARF source mapping</td></tr>
+<tr><td><code>--idl &lt;FILE&gt;</code></td><td>Anchor IDL JSON for account data decoding</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay a Solana transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--signature &lt;SIG&gt;</code></td><td>Transaction signature (base-58)</td></tr>
+<tr><td><code>--rpc-url &lt;URL&gt;</code></td><td>Solana JSON-RPC endpoint (default: <code>http://localhost:8899</code>)</td></tr>
+<tr><td><code>--program-dir &lt;PATH&gt;</code></td><td>Directory with compiled <code>.so</code> files (default: <code>target/deploy/</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-move-recorder"><a class="header" href="#codetracer-move-recorder">codetracer-move-recorder</a></h3>
+<p>Traces Move smart contracts on Sui and Aptos.</p>
+<pre><code>codetracer-move-recorder record &lt;trace-file&gt; [options]
+codetracer-move-recorder replay [options]
+codetracer-move-recorder aptosreplay [options]
+codetracer-move-recorder version
+</code></pre>
+<p><strong>record</strong> — Convert a Move trace file to CodeTracer format.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;trace-file&gt;</code></td><td>Trace file (<code>.json</code> or <code>.json.zst</code>)</td></tr>
+<tr><td><code>-s, --source &lt;FILE&gt;</code></td><td>Move source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay a Sui transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--digest &lt;DIGEST&gt;</code></td><td>Sui transaction digest</td></tr>
+<tr><td><code>--rpc-url &lt;URL&gt;</code></td><td>Sui RPC endpoint (default: <code>http://localhost:9000</code>)</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Directory with Move source files</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>aptosreplay</strong> — Replay an Aptos transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--txn-version &lt;N&gt;</code></td><td>Transaction version (ledger version)</td></tr>
+<tr><td><code>--node-url &lt;URL&gt;</code></td><td>Aptos REST API (default: <code>https://fullnode.mainnet.aptoslabs.com/v1</code>)</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Directory with Move source files</td></tr>
+<tr><td><code>--profile-gas</code></td><td>Run gas profiling (default: <code>true</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-fuel-recorder"><a class="header" href="#codetracer-fuel-recorder">codetracer-fuel-recorder</a></h3>
+<p>Traces Sway smart contracts on FuelVM.</p>
+<pre><code>codetracer-fuel-recorder record [project-dir] [options]
+codetracer-fuel-recorder replay [options]
+codetracer-fuel-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a Sway project.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>[project-dir]</code></td><td>Path to Sway project (must contain <code>Forc.toml</code>)</td></tr>
+<tr><td><code>--bytecode &lt;FILE&gt;</code></td><td>Raw FuelVM bytecode file</td></tr>
+<tr><td><code>--abi &lt;FILE&gt;</code></td><td>Sway ABI JSON for variable enrichment</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain Fuel transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--tx-id &lt;ID&gt;</code></td><td>Transaction ID (hex with <code>0x</code> prefix)</td></tr>
+<tr><td><code>--rpc-url &lt;URL&gt;</code></td><td>fuel-core GraphQL endpoint (default: <code>http://localhost:4000/v1/graphql</code>)</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Directory with forc build output</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-miden-recorder"><a class="header" href="#codetracer-miden-recorder">codetracer-miden-recorder</a></h3>
+<p>Traces Miden VM programs and contracts.</p>
+<pre><code>codetracer-miden-recorder record &lt;program&gt; [options]
+codetracer-miden-recorder contract [options]
+codetracer-miden-recorder replay [options]
+codetracer-miden-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a MASM program.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;program&gt;</code></td><td>Path to MASM source (<code>.masm</code>) or package (<code>.masp</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>contract</strong> — Record a MockChain contract simulation.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--wallet-id &lt;ID&gt;</code></td><td>Account ID for wallet (hex, default: <code>0x1000</code>)</td></tr>
+<tr><td><code>--faucet-id &lt;ID&gt;</code></td><td>Account ID for faucet (hex, default: <code>0x2000</code>)</td></tr>
+<tr><td><code>--symbol &lt;SYM&gt;</code></td><td>Faucet token symbol (default: <code>TEST</code>)</td></tr>
+<tr><td><code>--debug</code></td><td>Enable debug mode (default: <code>true</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain Miden transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--node-url &lt;URL&gt;</code></td><td>Miden node RPC endpoint</td></tr>
+<tr><td><code>--account-id &lt;ID&gt;</code></td><td>Account ID (hex)</td></tr>
+<tr><td><code>--transaction-id &lt;ID&gt;</code></td><td>Transaction ID (hex)</td></tr>
+<tr><td><code>--captured-inputs &lt;FILE&gt;</code></td><td>Path to captured TransactionInputs JSON</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-polkavm-recorder"><a class="header" href="#codetracer-polkavm-recorder">codetracer-polkavm-recorder</a></h3>
+<p>Traces PolkaVM programs and ink! smart contracts.</p>
+<pre><code>codetracer-polkavm-recorder record &lt;program&gt; [options]
+codetracer-polkavm-recorder trace-ink [options]
+codetracer-polkavm-recorder replay [options]
+codetracer-polkavm-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a PolkaVM program.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;program&gt;</code></td><td>Path to PolkaVM program blob (<code>.polkavm</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>trace-ink</strong> — Record an ink! contract execution.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--contract &lt;PATH&gt;</code></td><td>ink! contract (<code>.polkavm</code> blob or <code>.contract</code>)</td></tr>
+<tr><td><code>--constructor &lt;NAME&gt;</code></td><td>Constructor to call (e.g., <code>new</code>, <code>default</code>)</td></tr>
+<tr><td><code>--message &lt;NAME&gt;</code></td><td>ink! message name (e.g., <code>flip</code>, <code>get</code>)</td></tr>
+<tr><td><code>--arg &lt;VALUE&gt;</code></td><td>Message arguments (repeatable, hex-encoded SCALE)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain contract.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--address &lt;ADDR&gt;</code></td><td>Contract address (SS58 or hex)</td></tr>
+<tr><td><code>--selector &lt;NAME&gt;</code></td><td>ink! message selector name</td></tr>
+<tr><td><code>--calldata &lt;HEX&gt;</code></td><td>Hex-encoded calldata (default: empty)</td></tr>
+<tr><td><code>--endpoint &lt;URL&gt;</code></td><td>Substrate RPC endpoint (default: <code>ws://127.0.0.1:9944</code>)</td></tr>
+<tr><td><code>--block &lt;HASH&gt;</code></td><td>Block hash for state fetch (latest if omitted)</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Contract source directory</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-leo-recorder"><a class="header" href="#codetracer-leo-recorder">codetracer-leo-recorder</a></h3>
+<p>Traces Leo smart contracts on Aleo.</p>
+<pre><code>codetracer-leo-recorder record &lt;leo-file&gt; [options]
+codetracer-leo-recorder replay [options]
+codetracer-leo-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a Leo source file.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;leo-file&gt;</code></td><td>Path to the <code>.leo</code> source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain Aleo program.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--program-id &lt;ID&gt;</code></td><td>On-chain program ID (e.g., <code>credits.aleo</code>)</td></tr>
+<tr><td><code>--function &lt;NAME&gt;</code></td><td>Function to execute</td></tr>
+<tr><td><code>--input &lt;VALUE&gt;</code></td><td>Input values (repeatable, e.g., <code>--input 10u32</code>)</td></tr>
+<tr><td><code>--endpoint &lt;URL&gt;</code></td><td>Aleo node REST API (default: <code>https://api.explorer.aleo.org/v1</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-ton-recorder"><a class="header" href="#codetracer-ton-recorder">codetracer-ton-recorder</a></h3>
+<p>Traces Tolk/FunC smart contracts on TON.</p>
+<pre><code>codetracer-ton-recorder record &lt;tolk-file&gt; [options]
+codetracer-ton-recorder trace-sandbox [options]
+codetracer-ton-recorder replay [options]
+codetracer-ton-recorder version
+</code></pre>
+<p><strong>record</strong> — Record a Tolk source file.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;tolk-file&gt;</code></td><td>Path to the <code>.tolk</code> source file</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>-f, --format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code> (default: <code>binary</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>trace-sandbox</strong> — Convert <code>@ton/sandbox</code> VM log output.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--vm-log &lt;FILE&gt;</code></td><td>Path to vm_logs_full output</td></tr>
+<tr><td><code>--source &lt;FILE&gt;</code></td><td>Path to Tolk source file (default: <code>contract.tolk</code>)</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<p><strong>replay</strong> — Replay an on-chain TON transaction.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>--tx-hash &lt;HASH&gt;</code></td><td>Transaction hash (hex-encoded)</td></tr>
+<tr><td><code>--address &lt;ADDR&gt;</code></td><td>Contract address</td></tr>
+<tr><td><code>--endpoint &lt;URL&gt;</code></td><td>Liteserver endpoint (default: <code>https://ton.org/global-config.json</code>)</td></tr>
+<tr><td><code>--source-dir &lt;PATH&gt;</code></td><td>Contract source directory</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./ct-traces/</code>)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="codetracer-js-recorder"><a class="header" href="#codetracer-js-recorder">codetracer-js-recorder</a></h3>
+<p>Traces JavaScript and TypeScript programs.</p>
+<pre><code>codetracer-js-recorder record &lt;file&gt; [options] [-- app-args]
+codetracer-js-recorder instrument &lt;src&gt; --out &lt;dir&gt; [options]
+</code></pre>
+<p><strong>record</strong> — Record a JS/TS program.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;file&gt;</code></td><td>Entry file or directory</td></tr>
+<tr><td><code>--out-dir &lt;DIR&gt;</code></td><td>Trace output directory (default: <code>./ct-traces/</code>)</td></tr>
+<tr><td><code>--format &lt;FMT&gt;</code></td><td><code>json</code> or <code>binary</code> (default: <code>json</code>)</td></tr>
+<tr><td><code>--include &lt;GLOB&gt;</code></td><td>Include glob pattern (repeatable)</td></tr>
+<tr><td><code>--exclude &lt;GLOB&gt;</code></td><td>Exclude glob pattern (repeatable)</td></tr>
+<tr><td><code>-- &lt;args&gt;</code></td><td>Arguments passed to the instrumented program</td></tr>
+</tbody></table>
+</div>
+<p><strong>instrument</strong> — Instrument source files without executing.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;src&gt;</code></td><td>Source file or directory</td></tr>
+<tr><td><code>--out &lt;DIR&gt;</code></td><td>Output directory (required)</td></tr>
+<tr><td><code>--source-maps</code></td><td>Emit source maps</td></tr>
+<tr><td><code>--include &lt;GLOB&gt;</code></td><td>Include glob pattern (repeatable)</td></tr>
+<tr><td><code>--exclude &lt;GLOB&gt;</code></td><td>Exclude glob pattern (repeatable)</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="python-recorder"><a class="header" href="#python-recorder">Python Recorder</a></h3>
+<p>The Python recorder is a pip-installable package, not a standalone binary.</p>
+<pre><code>python -m codetracer_python_recorder [options] &lt;script&gt; [-- args]
+python -m codetracer_python_recorder --pytest [pytest-args]
+python -m codetracer_python_recorder --unittest [unittest-args]
+</code></pre>
+<p>Usually invoked automatically via <code>ct record script.py</code>. See the <a href="../getting_started/python.html">Python Getting Started</a> guide.</p>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>&lt;script&gt;</code></td><td>Python script to trace</td></tr>
+<tr><td><code>-o, --out-dir &lt;DIR&gt;</code></td><td>Output directory (default: <code>./trace-out/</code>)</td></tr>
+<tr><td><code>--format &lt;FMT&gt;</code></td><td><code>binary</code> or <code>json</code></td></tr>
+<tr><td><code>--pytest [ARGS]</code></td><td>Run pytest with arguments</td></tr>
+<tr><td><code>--unittest [ARGS]</code></td><td>Run unittest with arguments</td></tr>
+<tr><td><code>--activation-path &lt;PATH&gt;</code></td><td>Gate tracing to specific path</td></tr>
+<tr><td><code>--trace-filter &lt;PATH&gt;</code></td><td>Trace filter file path (repeatable)</td></tr>
+<tr><td><code>--io-capture &lt;MODE&gt;</code></td><td>Stdout/stderr capture: <code>off</code>, <code>proxies</code>, <code>proxies+fd</code></td></tr>
+<tr><td><code>--on-recorder-error &lt;ACT&gt;</code></td><td>Response to errors: <code>abort</code> or <code>disable</code></td></tr>
+<tr><td><code>--require-trace</code></td><td>Exit 1 if no trace produced</td></tr>
+<tr><td><code>--keep-partial-trace</code></td><td>Preserve partial traces on failure</td></tr>
+<tr><td><code>--log-level &lt;LEVEL&gt;</code></td><td>Log verbosity (e.g., <code>info</code>, <code>debug</code>)</td></tr>
+<tr><td><code>--log-file &lt;PATH&gt;</code></td><td>Write logs to file instead of stderr</td></tr>
+<tr><td><code>--json-errors</code></td><td>Emit JSON error trailers on stderr</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h3 id="ruby-recorder"><a class="header" href="#ruby-recorder">Ruby Recorder</a></h3>
+<p>The Ruby recorder is a gem installed alongside your Ruby environment.</p>
+<pre><code>codetracer-ruby-recorder &lt;script.rb&gt; [args]
+</code></pre>
+<p>Usually invoked automatically via <code>ct record script.rb</code>. See the <a href="../getting_started/ruby.html">Ruby Getting Started</a> guide.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../reference/origin-kinds.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../building_and_packaging/build_systems.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../reference/origin-kinds.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../building_and_packaging/build_systems.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,425 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Tracepoints - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h2 id="what-are-tracepoints"><a class="header" href="#what-are-tracepoints">What are tracepoints?</a></h2>
+<p>Tracepoints are a type of breakpoint that allows you to run arbitrary code every time this breakpoint is hit. In most
+debuggers that support tracepoints they allow for efficient debugging of complex scenarios, like really deep recursion,
+or complex control flow.</p>
+<p>In CodeTracer, however, they can also unlock a number of strategies for additional debugging, specifically in the realm
+of hotspot debugging.</p>
+<h2 id="tracepoints-usage-guide"><a class="header" href="#tracepoints-usage-guide">Tracepoints usage guide</a></h2>
+<p>From the GUI:</p>
+<ol>
+<li>Right-click on a line</li>
+<li>Click on "Add tracepoint"</li>
+<li>The tracepoints popup should appear</li>
+<li>Write your tracepoint code in the text editor in the tracepoints popup</li>
+<li>Press "CTRL + Enter" to run the trace</li>
+<li>After running the trace, the output of your tracepoint will be listed in the tracepoint popup, and in the event log</li>
+</ol>
+<p>From the TUI: Coming soon!</p>
+<p>From the REPL: Coming soon!</p>
+<h2 id="tracepoints-language"><a class="header" href="#tracepoints-language">Tracepoints language</a></h2>
+<h3 id="syntax"><a class="header" href="#syntax">Syntax</a></h3>
+<p>The syntax of the language is similar to Noir/Rust (and therefore most C-like languages). However it doesn't use semicolons.</p>
+<p>In the future it is possible to add language-specific features or dialects of the tracepoint language.</p>
+<h4 id="literals"><a class="header" href="#literals">Literals</a></h4>
+<p>Integer (<code>1</code>, <code>23</code>, <code>12</code>), Float (<code>1.23</code>, <code>.234</code>, <code>123.</code>), Bool (<code>true</code>, <code>false</code>) and String (<code>"some text"</code>) literals
+are supported.</p>
+<h3 id="log"><a class="header" href="#log"><code>log()</code></a></h3>
+<p>The <code>log()</code> statement is used to evaluate the argument expression and add it as output from the current tracepoint.
+The <code>log()</code> statement suppors multiple values that are comma-separated: <code>log(v1, v2, v3)</code>.</p>
+<h4 id="example"><a class="header" href="#example">Example</a></h4>
+<pre><code class="language-rs">fn test() {
+  let mut sum = 0;
+
+  for i in 0..3 {
+    sum += i;
+    --------------------------------------------------------------------------------
+    |  log("I'm in the loop", i)
+    |
+    --------------------------------------------------------------------------------
+    // Output:
+    --------------------------------------------------------------------------------
+    |  "I'm in the loop" i=0
+    |  "I'm in the loop" i=1
+    |  "I'm in the loop" i=2
+    --------------------------------------------------------------------------------
+  }
+</code></pre>
+<h3 id="accessing-variables"><a class="header" href="#accessing-variables">Accessing variables</a></h3>
+<p>The tracepoint for has access to all the variables, that are defined when the line on which the tracepoint is added is
+evaluated. You can reference them just by using their names in the expressions.</p>
+<h4 id="example-1"><a class="header" href="#example-1">Example</a></h4>
+<pre><code class="language-rs">fn add(a: i32, b: i32) -&gt; i32 {
+  a + b
+  --------------------------------------------------------------------------------
+  |  log(a)
+  |  log(b)
+  --------------------------------------------------------------------------------
+  // Output:
+  --------------------------------------------------------------------------------
+  |  a=3 b=5
+  --------------------------------------------------------------------------------
+}
+</code></pre>
+<h3 id="comparison"><a class="header" href="#comparison">Comparison</a></h3>
+<h4 id="-and-"><a class="header" href="#-and-"><code>==</code> and <code>!=</code></a></h4>
+<p>Two values are considered eqial iff their types are the same and their values are the same. <strong>Exception</strong> to this rule is
+comparing <strong>Int</strong> and <strong>Float</strong>, which are compared by their values, despite them being different type.</p>
+<h4 id="---"><a class="header" href="#---"><code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code></a></h4>
+<p>These operators work <strong>only with numerical values</strong> (e.g Int and Float). If at least one of the values is of non-numerical
+type, then an Error is raised.</p>
+<h4 id="example-2"><a class="header" href="#example-2">Example</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Expression</th><th>Value</th></tr></thead><tbody>
+<tr><td>1 == 1</td><td>true</td></tr>
+<tr><td>1 != 1</td><td>false</td></tr>
+<tr><td>1 == 2</td><td>false</td></tr>
+<tr><td>1 != 2</td><td>true</td></tr>
+<tr><td>"banana" == "banana"</td><td>true</td></tr>
+<tr><td>"banana" != "banana"</td><td>false</td></tr>
+<tr><td>"banana" == "apple"</td><td>false</td></tr>
+<tr><td>"banana" != "apple"</td><td>true</td></tr>
+<tr><td>"banana" == 1</td><td>false</td></tr>
+<tr><td>"banana" != 1</td><td>true</td></tr>
+<tr><td></td><td></td></tr>
+<tr><td><strong>1.0 == 1</strong></td><td><strong>true</strong></td></tr>
+<tr><td><strong>1.0 != 1</strong></td><td><strong>false</strong></td></tr>
+<tr><td><strong>2.0 == 1</strong></td><td><strong>false</strong></td></tr>
+<tr><td><strong>2.0 != 1</strong></td><td><strong>true</strong></td></tr>
+<tr><td><strong>"1" == 1</strong></td><td><strong>false</strong></td></tr>
+<tr><td><strong>"1" != 1</strong></td><td><strong>true</strong></td></tr>
+<tr><td></td><td></td></tr>
+<tr><td>1 &lt; 2</td><td>true</td></tr>
+<tr><td>1 &lt;= 2</td><td>true</td></tr>
+<tr><td>1 &gt; 2</td><td>false</td></tr>
+<tr><td>1 &gt;= 2</td><td>false</td></tr>
+<tr><td>1 &lt; 2.2</td><td>true</td></tr>
+<tr><td>1.1 &lt;= 2</td><td>true</td></tr>
+<tr><td>1 &gt; 2.2</td><td>false</td></tr>
+<tr><td>1.1 &gt;= 2</td><td>false</td></tr>
+<tr><td></td><td></td></tr>
+<tr><td><strong>1 &lt; "2"</strong></td><td><strong>ERROR</strong></td></tr>
+<tr><td><strong>"0" &lt; 1</strong></td><td><strong>ERROR</strong></td></tr>
+<tr><td><strong>"1" &gt;= "2"</strong></td><td><strong>ERROR</strong></td></tr>
+</tbody></table>
+</div>
+<h3 id="arithmetic-operations"><a class="header" href="#arithmetic-operations">Arithmetic operations</a></h3>
+<p>The supported arithmetic operations are addition (<code>+</code>), subtraction (<code>-</code>), multiplication (<code>*</code>), division (<code>/</code>) and
+remainder (<code>%</code>). They work only with numerical types (Int and Float).</p>
+<p>When both arguments are Integer values, then the result is an Integer (for <code>/</code> the result is rounded toward 0). If at
+least one of the arguments is a Float, then the result is a Float.</p>
+<h4 id="example-3"><a class="header" href="#example-3">Example</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Expression</th><th>Value</th></tr></thead><tbody>
+<tr><td>2 + 3</td><td>5</td></tr>
+<tr><td>2 + 3.0</td><td>5.0</td></tr>
+<tr><td>2.2 + 3.3</td><td>5.5</td></tr>
+<tr><td>2 - 3</td><td>-1</td></tr>
+<tr><td>2 - 3.0</td><td>-1.0</td></tr>
+<tr><td>2.2 - 3.3</td><td>-1.1</td></tr>
+<tr><td>2 * 3</td><td>6</td></tr>
+<tr><td>2 * 3.0</td><td>6.0</td></tr>
+<tr><td>2.2 * 3.3</td><td>7.26</td></tr>
+<tr><td><strong>7 / 3</strong></td><td><strong>2</strong></td></tr>
+<tr><td>7 / 3.0</td><td>2.3333333</td></tr>
+<tr><td>7.7 / 3.3</td><td>2.3333333</td></tr>
+<tr><td>7 % 3</td><td>1</td></tr>
+<tr><td>7 % 3.0</td><td>1.0</td></tr>
+<tr><td>7.7 % 3.3</td><td>1.1</td></tr>
+</tbody></table>
+</div>
+<h3 id="conditional-branching-if-else"><a class="header" href="#conditional-branching-if-else">Conditional branching (<code>if</code>-<code>else</code>)</a></h3>
+<p>The tracepoint language also supports conditional evaluation and branching. If the condition expression doesn't
+evaluate to a boolean value, then an error is raised.</p>
+<h4 id="example-4"><a class="header" href="#example-4">Example</a></h4>
+<pre><code class="language-rs">fn test() {
+  let mut sum = 0;
+
+  for i in 0..4 {
+    sum += i;
+    --------------------------------------------------------------------------------
+    |  log(i)
+    |  if i % 2 == 0 {
+    |    log("even")
+    |  } else if i % 3 == 0 {
+    |    log("div 3")
+    |  } else {
+    |    log("odd")
+    |  }
+    --------------------------------------------------------------------------------
+    // Output:
+    --------------------------------------------------------------------------------
+    |  i=0 even
+    |  i=1 odd
+    |  i=2 even
+    |  i=3 div 3
+    --------------------------------------------------------------------------------
+  }
+}
+</code></pre>
+<h3 id="array-indexing"><a class="header" href="#array-indexing">Array indexing</a></h3>
+<p>If a value is an array, you can index it using the <code>[]</code> operators. Indices are 0-based.</p>
+<h4 id="example-5"><a class="header" href="#example-5">Example</a></h4>
+<pre><code class="language-rs">fn arr(a: i32, b: i32) -&gt; i32 {
+  let a = [1, 2, 3, 4, 5];
+  let b = a[2];
+  --------------------------------------------------------------------------------
+  |  log(a)
+  |  log(a[0])
+  |  log(a[1])
+  |  log(a[4])
+  --------------------------------------------------------------------------------
+  // Output:
+  --------------------------------------------------------------------------------
+  |  a=[1, 2, 3, 4, 5] a[0]=1 a[1]=2 a[4]=5
+  --------------------------------------------------------------------------------
+}
+</code></pre>
+<h3 id="errors"><a class="header" href="#errors">Errors</a></h3>
+<p>When an error occurs, the evaluation of the tracepoint stops.</p>
+<h4 id="example-6"><a class="header" href="#example-6">Example</a></h4>
+<pre><code class="language-rs">fn arr(a: i32, b: i32) -&gt; i32 {
+  let a = [1, 2, 3, 4, 5];
+  let b = a[2];
+  --------------------------------------------------------------------------------
+  |  log(a[0])
+  |  if a[1] { // This will cause error
+  |    log("banana")
+  |  }
+  |  log(a[2]) // This won't be evaluated
+  --------------------------------------------------------------------------------
+  // Output:
+  --------------------------------------------------------------------------------
+  |  a[0]=1 Error=Non-boolean value on conditional jump
+  --------------------------------------------------------------------------------
+}
+</code></pre>
+<h3 id="rust-specific-extensions"><a class="header" href="#rust-specific-extensions">Rust-specific extensions</a></h3>
+<p>We have some language-specific extensions in mind, but nothing concrete yet.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../usage_guide/visual_recordings.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../usage_guide/incremental-testing.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../usage_guide/visual_recordings.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../usage_guide/incremental-testing.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>
