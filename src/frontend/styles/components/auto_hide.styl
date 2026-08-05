@@ -342,7 +342,7 @@
   text-orientation: mixed
   transform: none
   padding-left: 0
-  padding-right: 0.38em
+  padding-right: 0
   max-height: none
   align-self: stretch  // fill full tab height instead of centering the line box
   display: flex        // flex container so text node becomes a flex item
@@ -370,7 +370,7 @@
 .auto-hide-strip-tab
   font-family: "SpaceGrotesk"
   font-size: inherit
-  font-weight: 600
+  // font-weight: 600
   letter-spacing: -0.14px
   color: colors-ui-text-primary-disabled
   background-color: colors-ui-surface-panel
@@ -503,10 +503,11 @@
   text-orientation: mixed
   transform: none
 
-// Right strip: text reads top-to-bottom.
+// Right strip: text reads bottom-to-top (mirrored from left).
 #auto-hide-strip-right .auto-hide-strip-tab-label
   writing-mode: vertical-rl
   text-orientation: mixed
+  transform: rotate(180deg)
 
 // ---------------------------------------------------------------------------
 // Tab button group — close and unpin, always visible at the top of each tab.
@@ -682,7 +683,7 @@
   background-color: colors-ui-surface-panel
   border-radius: 0.36em
   overflow: hidden
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45)
+  box-shadow: none
 
 // Use margin (not padding) to separate the body from the resize handle.
 // margin shrinks the body element itself, placing the handle visually OUTSIDE

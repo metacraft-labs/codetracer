@@ -312,14 +312,15 @@ when defined(js):
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
   let branchName = branch
+  let isActive = branchName == vm.currentBranch.val
+  let itemClass = if isActive: "ct-menu-item ct-menu-item--active"
+                  else: "ct-menu-item"
   ui(r):
-    tdiv(class = "vcs-branch-option",
+    tdiv(class = itemClass,
          onclick = proc() =
            callbacks.invokeCheckoutBranch(branchName)):
-      if branchName == vm.currentBranch.val:
-        span(class = "vcs-branch-active-marker"):
-          text "* "
-      text branchName
+      span(class = "ct-menu-item-label"):
+        text branchName
 
 # ---------------------------------------------------------------------------
 # Commit header click with modifier-key detection
