@@ -45,9 +45,13 @@
 
   .command-input-placeholder
     position: absolute
-    left: 4.6em
+    left: 1.875em
     right: 1em
+    top: 0
+    line-height: 2.875em
     pointer-events: none
+    font-size: 0.875rem
+    font-family: "SpaceGrotesk", sans-serif
     color: colors-ui-text-primary-body
     opacity: 0.45
     white-space: nowrap
@@ -78,7 +82,6 @@
     color: colors-ui-text-primary-body-subtle
     background: colors-ui-surface-base-raised
     font-family: "SpaceGrotesk"
-    font-size: 0.875em
     border: 0.0625em solid #4f4f4f
     border-top: 0
     border-radius: 0 0 0.5em 0.5em
@@ -131,7 +134,6 @@
 
   .command-result
     gap: 0.75em
-    font-size: 0.875em
     position: relative
     overflow: hidden
 
@@ -282,8 +284,12 @@
     .command-input-placeholder
       // Must match .ct-input-search-image padding-left (1.875em !important) so
       // the ghost-text starts at the same x-position as the real input text.
+      // line-height matches .command-input-row height in this context (1.75rem)
+      // so text centers exactly as the native <input> element does.
       left: 1.875em
       right: 0.75rem
+      top: 0
+      line-height: 1.75rem
 
     .command-results,
     .command-empty-overlay

@@ -463,14 +463,14 @@ var arg: js
 const
   CLICK_DELAY_TIMER = 5
   EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
-    "std streams:",
-    "read events:",
-    "write events:",
-    "network:",
-    "trace:",
-    "file:",
-    "errors:",
-    "evm events:"
+    "std streams",
+    "read events",
+    "write events",
+    "network",
+    "trace",
+    "file",
+    "errors",
+    "evm events"
   ]
 
   EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [

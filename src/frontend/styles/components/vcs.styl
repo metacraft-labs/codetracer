@@ -48,7 +48,7 @@
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  padding: 0.25em
+  padding: 0em 0.25em 0.25em 0.25em
   background: colors-ui-surface-base-panel
 
 // Styled to match .ct-input-small — consistent with other panel input fields.
@@ -98,26 +98,9 @@
   background: colors-ui-surface-primary-default
   border: 0.03125em solid colors-ui-border-primary
   border-radius: 0.375rem
+  padding: 0.25em
   max-height: 12.5em
   overflow-y: auto
-
-.vcs-branch-option
-  padding: 0.3125em 0.5em
-  cursor: pointer
-  white-space: nowrap
-  overflow: hidden
-  text-overflow: ellipsis
-  font-family: "SpaceGrotesk"
-  font-size: 0.875rem
-  color: colors-ui-text-primary-label
-
-  &:hover
-    background: colors-ui-surface-primary-secondary-hover
-    color: colors-ui-text-primary-body
-
-.vcs-branch-active-marker
-  color: #4ec9b0
-  font-weight: bold
 
 // ---------------------------------------------------------------------------
 // Section headers
@@ -380,7 +363,8 @@
   flex-shrink: 0
 
 // Diff button shown on hover at the far right of a commit row.
-// Hidden by default; the parent .vcs-commit-header:hover reveals it.
+// No horizontal margin so the button's right edge aligns with the timestamp
+// right edge on adjacent (non-hovered) rows.
 .vcs-commit-diff-btn
   display: none
   flex-shrink: 0
@@ -388,7 +372,6 @@
   cursor: pointer
   width: 0.6875em
   height: 0.8125em
-  margin: 0 0.25em
   background-image: url("../../public/resources/shared/vc-open-diff.svg")
   background-repeat: no-repeat
   background-size: contain
@@ -797,10 +780,11 @@
   display: none
   flex-shrink: 0
   position: relative
+  order: 2
   cursor: pointer
-  width: 0.6875em
-  height: 0.8125em
-  margin: 0 0.25em
+  width: 0.6875rem
+  height: 0.8125rem
+  margin-right: 0.167em
   background-image: url("../../public/resources/shared/vc-open-diff.svg")
   background-repeat: no-repeat
   background-size: contain

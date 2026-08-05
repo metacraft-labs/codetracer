@@ -150,6 +150,11 @@ var autoHideLayout*: GoldenLayout = nil
 ## Cancelled when the mouse leaves the tab before 200ms elapses.
 var hoverPreviewTimerId: int = -1
 
+## Set when the user explicitly closes a docked panel (tab toggle / close button).
+## Prevents the hover preview from immediately re-opening while the mouse is
+## still over the tab.  Cleared on the next mouseleave from that tab.
+var suppressHoverAfterClose: bool = false
+
 ## Delay before a hover opens the overlay as a preview (ms).
 const HOVER_PREVIEW_DELAY_MS* = 300
 
@@ -554,6 +559,7 @@ proc hideDockedPanel*() =
 
   autoHideState.dockedPanel = nil
   autoHideState.dockedVisible = false
+  suppressHoverAfterClose = true
 
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
@@ -1139,6 +1145,10 @@ when defined(js):
           # Don't show a hover preview for the panel that's already docked.
           if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
             return
+          # Suppress re-open if the panel was just explicitly closed; wait for
+          # the mouse to leave and re-enter before allowing the hover preview.
+          if suppressHoverAfterClose:
+            return
           cancelHoverPreview()
           let capturedPanel = panels[index]
           hoverPreviewTimerId = windowSetTimeout(proc() =
@@ -1146,6 +1156,7 @@ when defined(js):
             showOverlayPreview(capturedPanel)
           , HOVER_PREVIEW_DELAY_MS),
       onHoverLeave: proc(index: int) =
+        suppressHoverAfterClose = false
         cancelHoverPreview(),
       onContextMenu: proc(index: int; x: int; y: int) =
         if index >= 0 and index < panels.len:
@@ -1222,6 +1233,8 @@ when defined(js):
         if index >= 0 and index < panels.len:
           if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
             return
+          if suppressHoverAfterClose:
+            return
           cancelHoverPreview()
           let capturedPanel = panels[index]
           hoverPreviewTimerId = windowSetTimeout(proc() =
@@ -1229,6 +1242,7 @@ when defined(js):
             showOverlayPreview(capturedPanel)
           , HOVER_PREVIEW_DELAY_MS),
       onHoverLeave: proc(index: int) =
+        suppressHoverAfterClose = false
         cancelHoverPreview(),
       onContextMenu: proc(index: int; x: int; y: int) =
         if index >= 0 and index < panels.len:
