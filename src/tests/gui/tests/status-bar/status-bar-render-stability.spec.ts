@@ -14,21 +14,34 @@
  * times per second while the app was still loading, and each pass also
  * emitted an ERROR-level log line.
  *
- * The failure that motivated this is worth recording, because the obvious
- * story about it is wrong.  When `readyOnEntryTest` timed out waiting for
- * `.location-path`, the captured DOM showed the element present, in the
- * page Playwright held (the same page whose console the run captured),
- * carrying the correct `path:line#ticks` text — and Playwright's call log
- * contained no `locator resolved to …` line at all.  A poll cannot land
- * "between children removed and children re-appended": the renderer is
- * single-threaded and `renderStatusInto` tore down and rebuilt inside one
- * task.  What it can do is never run — Playwright's locator poll is driven
- * from the page, and during the open the renderer was executing hundreds of
- * status rebuilds and 700+ `console.error` round-trips in a few seconds.
- * So the fix is to stop generating the work, not to wait more leniently:
- * the shell is now patched in place unless its *structure* changes, the
- * redraws are coalesced to one pass per task turn, and the per-render ERROR
- * log is gone.
+ * The failure that motivated this is worth recording, together with what
+ * later turned out to be wrong about it.  When `readyOnEntryTest` timed out
+ * waiting for `.location-path`, the captured DOM showed the element present,
+ * in the page Playwright held (the same page whose console the run
+ * captured), carrying the correct `path:line#ticks` text — and Playwright's
+ * call log contained no `locator resolved to …` line at all.  That was read
+ * as "the locator poll never ran, starved by hundreds of status rebuilds and
+ * 700+ `console.error` round-trips in a few seconds".
+ *
+ * **That reading is withdrawn.**  A call log holding nothing but
+ * `waiting for locator(...)` is simply what Playwright writes for a selector
+ * matching zero elements: the injected predicate in
+ * `server/frames.js::Frame.waitForSelector` sets its `log` field only when it
+ * finds something, and the caller guards with `if (log)`.  So it is the
+ * normal shape of a timeout on an element that was not there, not evidence
+ * about whether the poll ran — and `DEBUG=pw:protocol` on a reproduced
+ * failure shows the poll issuing and answering iterations throughout.  The
+ * readiness timeout is a slow launch overrunning its budget; see
+ * `lib/fixtures.ts::readyOnEntryTest` and Value-Origin-Tracking M46 for the
+ * measurement and for the part of the old evidence that is still unexplained.
+ *
+ * The churn fix stands on its own merits either way, and this file is its
+ * evidence.  Rebuilding the whole `#status` subtree on each of 60+ redraws,
+ * each with an ERROR-level log line, is work the renderer should not be doing
+ * while the app is still loading — and renderer time during the open is
+ * exactly what the readiness budget is spent on.  The shell is now patched in
+ * place unless its *structure* changes, the redraws are coalesced to one pass
+ * per task turn, and the per-render ERROR log is gone.
  *
  * **M47.**  The strip's tabs are direct children of
  * `#auto-hide-bottom-strip`.  This file is the runnable evidence for that

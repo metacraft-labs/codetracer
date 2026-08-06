@@ -1972,6 +1972,13 @@ export function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Wall-clock budget for a launch to reach its entry location.
+ *
+ * Derived from measurement — see the comment inside `readyOnEntryTest` and
+ * Value-Origin-Tracking milestone M46.
+ */
+export const READY_ON_ENTRY_BUDGET_MS = 30_000;
+
 /** Wait for the entry point to be ready (location path clickable).
  *
  * `.location-path` is the status bar's `path:line#ticks` readout.  The
@@ -2003,45 +2010,65 @@ export function wait(ms: number): Promise<void> {
  * wait so a repeat of that regression fails loudly instead of silently.
  */
 export async function readyOnEntryTest(p: Page): Promise<void> {
-  // Two attempts with a FRESH locator each, not one long wait.
+  // One wait, with a budget taken from the measured launch time.
   //
-  // This is not leniency: the state asserted (`visible`) and the selector are
-  // unchanged from the single 15s wait this replaces.  What it defeats is a harness
-  // failure mode that was measured, not guessed.  When this wait times out,
-  // the diagnosis below repeatedly reports `.location-path` present, ~415x24,
-  // `display:block`, `visibility:visible`, `isConnected:true`, in the page
-  // Playwright holds, with animation frames running at ~60/s — and a fresh
-  // locator for the SAME selector on the SAME page then resolves in tens of
-  // milliseconds (44ms, observed).  Playwright's poll for the first locator
-  // simply stops making progress; nothing about the app is wrong, and no
-  // amount of extra time on that locator helps, because it is not looking.
+  // WHAT THIS WAIT COSTS, MEASURED.  `.location-path` does not exist in the
+  // DOM until the frontend has loaded its bundle, built its view models,
+  // driven DAP to the entry location and rendered the status bar — the
+  // element is rendered only when `locationText` is non-empty, so its
+  // appearance IS the end of the launch.  Sampled over 40 consecutive
+  // launches of `statement_step*` on this host at load average 25-49 on 32
+  // cores: min 6.93s, median 8.04s, p90 10.60s, max 13.71s.  A single 15s
+  // budget therefore sat about 1.1x above the observed maximum, which is why
+  // roughly one launch in twelve used to time out here.
   //
-  // An app that genuinely never reaches an entry location still fails.
+  // The budget is per-launch wall clock, not CPU, and it degrades with
+  // contention rather than with core count: pinning a run to 8 of the 32
+  // cores changed nothing (7.0-9.1s), while pinning it to 4 cores that were
+  // also carrying 12 spinners pushed every one of 8 launches past 15s, with
+  // launch-to-entry totals of 17.3s to 29.6s.  The box this suite runs on
+  // carries the developer's own CI and has been observed at load average
+  // 185.  So 30s is not padding: it is roughly 3.7x the median and 1.0-1.7x
+  // the worst case actually reproduced under contention.
   //
-  // The per-attempt budget stays at the 15s the single wait used, rather than
-  // halving it to keep the total the same.  Splitting 15s into two 8s attempts
-  // was measurably worse: it defeats a stalled poll but no longer tolerates a
-  // *slow* launch, and on a loaded host (load average >100 observed here) the
-  // launch is exactly what runs long.  Two attempts of the original length
-  // defeats both, and costs extra wall-clock only on a run that was going to
-  // fail anyway.  See Value-Origin-Tracking milestone M46.
-  const attemptBudgetMs = 15_000;
-  let lastFailure: Error | undefined;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await p
-        .locator(".location-path")
-        .waitFor({ state: "visible", timeout: attemptBudgetMs });
-      lastFailure = undefined;
-      break;
-    } catch (timeout) {
-      lastFailure = timeout as Error;
-    }
-  }
-  if (lastFailure !== undefined) {
+  // WHAT IT IS NOT.  Until 2026-08-06 this was two 15s attempts with a
+  // "fresh" locator, on the theory that Playwright's poll stalls and a new
+  // locator unsticks it.  Both halves of that were wrong and the evidence is
+  // in Value-Origin-Tracking milestone M46: a `Locator` holds nothing but its
+  // frame and selector (`client/locator.ts`), so a fresh one is the identical
+  // call, and `DEBUG=pw:protocol` on a reproduced failure shows the poll
+  // running normally throughout — 8-12 `Runtime.callFunctionOn` iterations
+  // issued AND answered inside the 15s, every one returning
+  // `{log: "", visible: false, attached: false}`.  The absent
+  // `locator resolved to ...` line that the stall theory rested on is simply
+  // what Playwright logs for a selector matching zero elements: the injected
+  // predicate sets `log` only when it finds something.  A passing launch has
+  // exactly the same call log for 8-13s before it resolves.
+  //
+  // This is still a strict visibility wait on the same selector.  An app that
+  // never reaches an entry location still fails, and the extra wall clock is
+  // spent only on a run that was already going to fail.
+  const started = Date.now();
+  try {
+    await p
+      .locator(".location-path")
+      .waitFor({ state: "visible", timeout: READY_ON_ENTRY_BUDGET_MS });
+  } catch (timeout) {
     throw new CodetracerTestError(
-      `${lastFailure.message}\n\n${await readinessDiagnosis(p)}`,
+      `${(timeout as Error).message}\n\n${await readinessDiagnosis(p)}`,
     );
+  }
+  // Report the margin on every launch, so the budget above stays checkable
+  // instead of drifting back into the mystery it came from.
+  const waitedMs = Date.now() - started;
+  const percent = Math.round((waitedMs / READY_ON_ENTRY_BUDGET_MS) * 100);
+  const line =
+    `# timing: ready on entry (.location-path visible): ` +
+    `${waitedMs}ms / ${READY_ON_ENTRY_BUDGET_MS}ms (${percent}%)`;
+  if (waitedMs * 2 > READY_ON_ENTRY_BUDGET_MS) {
+    console.warn(`${line} [over half the budget]`);
+  } else {
+    console.log(`${line} [ok]`);
   }
   await p.locator(".location-path").click();
 }
@@ -2050,20 +2077,28 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
  * Explain a `readyOnEntryTest` timeout.
  *
  * The wait itself is unchanged and still strict — this only runs after it has
- * already failed, and it exists because the failure it reports is ambiguous
- * on its own.  When this flake was investigated (Value-Origin-Tracking
- * milestone M46) the Playwright call log contained no `locator resolved to …`
- * line at all, while the DOM captured moments later held `.location-path`
- * with the correct `path:line#ticks` text, in the same page whose console the
- * run had been capturing all along.  "The app did not load", "the element is
- * there but has no box", and "the page never ran the poll that would have
- * found it" are three different defects and the bare timeout distinguishes
- * none of them.
+ * already failed, and it exists because the bare timeout does not say which of
+ * three things happened: the launch overran the budget and the element arrived
+ * just too late; the launch is genuinely wedged and the element is nowhere; or
+ * the element is in the DOM but has no box.  Those want different responses.
  *
- * `page.evaluate` reaches the renderer through a direct CDP evaluation rather
- * than through the animation-frame-driven poll a locator uses, so it can
- * still answer while that poll is starved — which is exactly the case that
- * needs telling apart from the others.
+ * Read the output with Playwright's logging convention in mind
+ * (Value-Origin-Tracking milestone M46, where misreading it cost this
+ * milestone two wrong diagnoses): the wait's own call log carries a
+ * `locator resolved to …` line only for a selector that MATCHED.  A call log
+ * holding nothing but `waiting for locator('.location-path') to be visible`
+ * therefore means every poll found zero elements — it is the normal shape of
+ * a timeout on an element that was never there, not evidence that the poll
+ * failed to run.  `DEBUG=pw:protocol` shows the poll iterations being issued
+ * and answered throughout such a wait.
+ *
+ * `page.evaluate` and the locator poll run in different JavaScript contexts —
+ * the main world and Playwright's utility world — but against the *same*
+ * document, because isolated worlds share the DOM.  They therefore cannot
+ * disagree about what the page holds; they can only observe it at different
+ * moments, which is exactly what happens while a launch is still building the
+ * status bar.  That is why the retry below is reported with its full call log
+ * rather than assumed to agree with the DOM snapshot taken just before it.
  */
 async function readinessDiagnosis(p: Page): Promise<string> {
   try {
@@ -2094,15 +2129,13 @@ async function readinessDiagnosis(p: Page): Promise<string> {
       };
     });
 
-    // Animation-frame liveness. Chromium stops servicing
-    // `requestAnimationFrame` for a document it considers hidden, and
-    // Playwright's locator poll is driven from animation frames — so zero
-    // frames here, with the element present above, would be the signature of
-    // a starved poll rather than of a missing element.  In practice the
-    // observed failures do NOT look like that: frames run at ~60/s while the
-    // wait times out, and it is the `fresh locator retry` below that
-    // distinguishes the cases.  Kept because "frames stopped" and "the poll
-    // is stuck with frames running" want different responses.
+    // Renderer liveness, as frames serviced per 500ms.  This does NOT gate
+    // the locator poll — `waitForSelector` is a driver-side retry loop over
+    // `Runtime.callFunctionOn`, not a `requestAnimationFrame` loop — but it
+    // is a good proxy for how starved the renderer is, and starvation is what
+    // makes a launch overrun its budget.  A healthy idle host reports ~30
+    // (60fps); the failures captured while the host was carrying its own CI
+    // reported 1-5, i.e. 2-10fps.
     const frames = await p.evaluate(() => {
       return new Promise<number>((resolve) => {
         let count = 0;
@@ -2122,11 +2155,13 @@ async function readinessDiagnosis(p: Page): Promise<string> {
       });
     });
 
-    // Does a *fresh* locator resolve? The original wait polled the same
-    // selector for 15s without one `locator resolved to …` line. If a new
-    // one succeeds immediately against the same page, the element was
-    // findable all along and the first poll was stuck rather than looking at
-    // a different DOM.
+    // Ask the same question the wait asked, once more, and keep the whole
+    // answer.  A quick `resolved` means the launch finished just past the
+    // budget.  `still unresolved` while `matches` above is non-empty is the
+    // interesting case, and the retry's OWN call log is the only thing that
+    // says why — a `locator resolved to hidden …` line, a strict mode
+    // violation and a `waiting for … navigation to finish` block all look
+    // identical from the outside — so it is not truncated here.
     let retryResolvedMs: number | null = null;
     const retry = await (async () => {
       const started = Date.now();
@@ -2138,10 +2173,27 @@ async function readinessDiagnosis(p: Page): Promise<string> {
         return `resolved in ${retryResolvedMs}ms`;
       } catch (again) {
         return `still unresolved after ${Date.now() - started}ms: ${
-          (again as Error).message.split("\n")[0]
+          (again as Error).message.replace(/\n/g, "\n    ")
         }`;
       }
     })();
+
+    // Is every match invisible by its own box or computed style?  Playwright
+    // treats an element as visible when it has a non-empty bounding box and is
+    // not `visibility:hidden`, so a match with a zero box or `display:none`
+    // explains the timeout on its own — nothing about the poll or the two
+    // JavaScript worlds needs to be invoked.  This is the exact shape of the
+    // b27da3947 status-bar regression (`display: none !important` on every
+    // `#status-base` child), which is the regression this wait is documented
+    // to catch, so it gets a verdict that names it instead of being folded
+    // into the "the worlds disagree" case and read as a harness oddity.
+    const invisibleByStyle = dom.matches.filter(
+      (match) =>
+        match.display === "none" ||
+        match.visibility === "hidden" ||
+        match.width === 0 ||
+        match.height === 0,
+    );
 
     return [
       "readyOnEntry diagnosis:",
@@ -2152,22 +2204,35 @@ async function readinessDiagnosis(p: Page): Promise<string> {
       `  .location-path matches=${dom.matches.length} ` +
         JSON.stringify(dom.matches),
       `  animation frames in 500ms=${frames}`,
+      `  budget: ${READY_ON_ENTRY_BUDGET_MS}ms`,
       dom.matches.length === 0
-        ? "  => the element is genuinely absent from this page: the app did " +
-          "not reach an entry location (or ctPage is bound to another window)."
-        : retryResolvedMs !== null && retryResolvedMs < 1_000
-          ? "  => HARNESS, NOT APP. The element is present and visible in the " +
-            "page Playwright holds, and a FRESH locator for the same selector " +
-            `resolved in ${retryResolvedMs}ms right after the 15s wait on it ` +
-            "expired. The original poll was stuck; re-running this spec is the " +
-            "correct response. (Observed with animation frames running " +
-            "normally, so this is not rAF starvation.)"
-          : frames === 0
-            ? "  => the element IS in the page Playwright holds and no " +
-              "animation frame ran: the locator poll was starved, not the app."
-            : "  => the element is present and frames are running, but a fresh " +
-              "locator did not resolve either: this is NOT the known harness " +
-              "stall — check the box/visibility values above.",
+        ? "  => the element is absent from this page: the app had not reached " +
+          "an entry location when the budget ran out. Frames above at 1-5/500ms " +
+          "means a starved renderer and a launch that was still running; ~30 " +
+          "means a renderer with nothing to do, i.e. a launch that is wedged " +
+          "rather than slow (or ctPage bound to another window). See M46."
+        : retryResolvedMs !== null
+          ? "  => the launch overran its budget: the element was not in the DOM " +
+            "for any poll of the wait, and arrived " +
+            `${retryResolvedMs}ms into the retry that ran right after it. ` +
+            "Raise the budget only against a fresh measurement of the launch " +
+            "time (readyOnEntryTest carries the last one)."
+          : invisibleByStyle.length === dom.matches.length
+            ? "  => .location-path IS in the DOM but has no box: " +
+              `${JSON.stringify(invisibleByStyle[0])}. The wait is correctly ` +
+              "refusing to call this ready — the status bar rendered a " +
+              "location the user cannot see. This is the shape of the " +
+              "b27da3947 regression (a blanket `display: none !important` on " +
+              "`#status-base` children); check " +
+              "`src/frontend/styles/components/status_bar.styl` and the " +
+              "`#status` structure above. Do NOT raise the budget for this."
+            : "  => .location-path is in the DOM with a real box, yet the retry " +
+              "still did not resolve within 3s. The snapshot above and the " +
+              "retry ran at different moments of a launch that is still " +
+              "changing, so read the retry's call log above (printed " +
+              "untruncated for this case): a strict-mode violation, a " +
+              "`locator resolved to hidden` line and a blocked navigation " +
+              "check all look like a plain timeout once truncated.",
     ].join("\n");
   } catch (diagnosisFailure) {
     return `readyOnEntry diagnosis unavailable: ${String(diagnosisFailure)}`;
