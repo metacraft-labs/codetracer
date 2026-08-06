@@ -646,6 +646,21 @@ fn build_wasm32(private_build: &PrivateEmulatorBuild) {
         wasm_c_dir.display()
     );
 
+    // Minimal libc stubs for POSIX process primitives (getpid) that have no
+    // provider on wasm32-unknown-unknown. They belong to the db-backend's
+    // trimmed wasm libc surface (the wasm-sysroot), so they live and compile
+    // alongside it rather than in the recorder's emulator sources. Without a
+    // definition wasm-ld leaves getpid an undefined symbol and rejects the
+    // link (see wasm-sysroot/src/wasm_libc_stubs.c for the rationale).
+    let wasm_libc_stubs = manifest_dir.join("wasm-sysroot/src/wasm_libc_stubs.c");
+    assert!(
+        wasm_libc_stubs.exists(),
+        "expected wasm libc stubs at {}",
+        wasm_libc_stubs.display()
+    );
+    println!("cargo:rerun-if-changed={}", wasm_libc_stubs.display());
+    sources.push(wasm_libc_stubs);
+
     let mut build = cc::Build::new();
     build
         .target("wasm32-unknown-unknown")
