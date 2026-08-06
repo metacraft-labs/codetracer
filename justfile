@@ -2413,6 +2413,63 @@ test-ct-trace-units:
   fi
   [ "$failed" -eq 0 ]
 
+# Compile + run the `ct upload` MCR-enrichment unit suites
+# (src/ct/online_sharing).
+#
+# Registered by NAME rather than by a directory glob on purpose: the two other
+# `*_test.nim` files in that directory are a wire-format suite and a live
+# upload/download/delete round-trip against the sharing service, and the latter
+# says so in its own header ("not part of any automated test runner").  Globbing
+# the directory would drag a network test into a unit lane.
+#
+# Before this recipe existed, `src/ct/online_sharing/test_mcr_enrichment.nim`
+# was run by nothing at all — 34 assertions that could not fail a build.  The
+# member-check suite added alongside it pins that `ct upload` does not replace
+# the user's recording with a lossier export just because the exporter exited 0
+# (CTFS-Binary-Format.md §5d, M61).
+test-mcr-enrichment-units:
+  #!/usr/bin/env bash
+  set -e
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-mcr-enrichment-units.log) 2>&1
+  echo "=== ct upload MCR-enrichment unit tests ==="
+  failed=0
+  passed=0
+  total_oks=0
+  for f in src/ct/online_sharing/test_mcr_enrichment.nim \
+           src/ct/online_sharing/mcr_enrichment_member_check_test.nim; do
+    name=$(basename "$f" .nim)
+    cache="/tmp/ct-nim-cache/mcr-enrichment-$name"
+    echo -n "  $f ... "
+    output=$(nim c -r --hints:off \
+      --nimcache:"$cache" \
+      -o:"$cache/$name" \
+      "$f" 2>&1) || true
+    oks=$(echo "$output" | grep -c '\[OK\]' || true)
+    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
+    total_oks=$((total_oks + oks))
+    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
+      echo "COMPILE ERROR"
+      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ]; then
+      echo "PARTIAL ($oks OK, $fails FAILED)"
+      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    else
+      echo "OK ($oks case(s))"
+      passed=$((passed + 1))
+    fi
+  done
+  echo ""
+  echo "mcr enrichment units: $passed file(s) passed, $failed failed, $total_oks case(s)"
+  # Guard against a vacuous pass, the same way test-ct-trace-units does.
+  if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
+    echo "ERROR: no MCR-enrichment test cases ran"
+    exit 1
+  fi
+  [ "$failed" -eq 0 ]
+
 # Compile + run the recorder-gated ViewModel headless tests that live under
 # src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /
 # statement-step suites).  These are NOT covered by `test-vm` above, which

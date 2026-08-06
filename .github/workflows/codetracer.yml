@@ -1227,6 +1227,15 @@ jobs:
         # ran nowhere.  Pure Nim, no recorder sibling, no display.
         run: nix develop .#devShells.x86_64-linux.default --command just test-ct-trace-units
 
+      - name: Run ct upload MCR-enrichment unit tests
+        # src/ct/online_sharing/test_mcr_enrichment.nim was matched by no
+        # runner at all — 34 assertions that could not fail a build — and the
+        # member-check suite alongside it pins that `ct upload` does not
+        # replace the user's recording with a lossier export just because the
+        # exporter exited 0.  Pure Nim, no recorder sibling, no display, so it
+        # belongs in the same job as the trace-layer units above.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
+
       - name: Clone codetracer-js-recorder sibling
         # The recorder-gated ViewModel tests
         # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
