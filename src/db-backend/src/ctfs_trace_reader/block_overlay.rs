@@ -212,10 +212,27 @@ impl CtfsBlockOverlay {
         }
 
         // The backing image is laid out as a whole number of blocks; the next
-        // free block is the count of blocks currently present. `current_size`
-        // is block-aligned for a well-formed container, but tolerate a partial
-        // trailing region (a still-growing follow source) by rounding up.
-        let next_free_block = total.div_ceil(block_size as u64);
+        // free block is the count of WHOLE blocks currently present.
+        //
+        // `current_size` is block-aligned for a well-formed container, and this
+        // tolerates a partial trailing region — a still-growing follow source,
+        // or the fragment a crash inside an append's tail write leaves — by
+        // **flooring**. It used to round up, which is the one arithmetic
+        // `CTFS-Binary-Format.md` §5d forbids: rounding up makes the incomplete
+        // final block addressable, and the block counter then names a block the
+        // backing source will (correctly) refuse to read, so the counter and the
+        // readable range disagree by one.
+        //
+        // Flooring instead means the fragment is unaddressable and the next
+        // allocation reclaims it, which is what §5d's reader rule says happens
+        // to bytes past the last whole block. It cannot lose referenced data:
+        // §6's writer protocol flushes a data or mapping block in full before
+        // the `FileEntry.Size` store that publishes it, so any block a reader
+        // can legitimately reach is already whole on disk and therefore below
+        // this floor. Anything at or above it is either unreferenced waste or a
+        // truncation, and in both cases `read_block`'s bound against
+        // `current_size` refuses it rather than serving a short read.
+        let next_free_block = total / block_size as u64;
 
         Ok(CtfsBlockOverlay {
             backing,
@@ -854,5 +871,123 @@ mod tests {
             raw_after, raw_before,
             "read-only backing must stay byte-for-byte unchanged"
         );
+    }
+
+    /// Seal a container holding one stream, then append `extra` unreferenced
+    /// bytes so its length is no longer a block multiple — byte-for-byte the
+    /// state a crash *inside* an append's tail write leaves (block 0 is the
+    /// previous complete one, every pointer in it is below the previous EOF).
+    fn partial_tail_container(path: &Path, extra: usize) -> Vec<u8> {
+        let steps: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
+        write_minimal_ctfs(path, &[("steps.dat", &steps)]).unwrap();
+        let sealed = std::fs::read(path).unwrap();
+        assert_eq!(
+            sealed.len() % BLOCK_SIZE,
+            0,
+            "the sealed fixture is already {} bytes, not a block multiple; it cannot \
+             isolate the partial tail",
+            sealed.len()
+        );
+        let mut torn = sealed;
+        torn.extend((0..extra).map(|i| (i % 251) as u8));
+        std::fs::write(path, &torn).unwrap();
+        steps
+    }
+
+    /// M58: `next_free_block` must FLOOR, not round up.
+    ///
+    /// `CtfsBlockOverlay::new` used to compute `total.div_ceil(block_size)` —
+    /// the one arithmetic `CTFS-Binary-Format.md` §5d forbids, because it makes
+    /// the incomplete final block addressable. Nothing in this crate consulted
+    /// the counter as a validity bound and every read path bounds against
+    /// `current_size()`, so the rounding never produced wrong bytes; what it
+    /// produced was a counter one block ahead of the readable range, and a next
+    /// allocation that skipped over the fragment and stranded it as a hole
+    /// inside the addressable range. Restore `div_ceil` and this goes red.
+    #[test]
+    fn test_overlay_next_free_block_floors_a_partial_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("torn.ct");
+        // One whole block plus a fragment: the shape a dying tail write leaves,
+        // rather than a bare few bytes.
+        partial_tail_container(&path, BLOCK_SIZE + 777);
+
+        let total = std::fs::metadata(&path).unwrap().len();
+        assert_ne!(total % BLOCK_SIZE as u64, 0, "the fixture is block-aligned");
+        let whole_blocks = total / BLOCK_SIZE as u64;
+
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::InMemory).unwrap();
+
+        assert_eq!(
+            overlay.next_free_block(),
+            whole_blocks,
+            "next_free_block is {}; §5d requires floor(length / block_size) = {} so the \
+             incomplete final block stays unaddressable",
+            overlay.next_free_block(),
+            whole_blocks
+        );
+        assert_eq!(
+            overlay.alloc_block(),
+            whole_blocks,
+            "the next allocation must reclaim the unreferenced fragment rather than \
+             skipping past it and stranding it as a hole"
+        );
+    }
+
+    /// The bound the acceptance rests on, and the M57 lesson applied here:
+    /// tolerating a non-block-multiple length is only safe while nothing can
+    /// resolve bytes out of the partial region.
+    ///
+    /// **The read bound here is not a single site, and that was measured rather
+    /// than assumed.** Three independent layers refuse the incomplete block:
+    /// `BlockSource::read_block`'s `end > current_size()` check, its short-read
+    /// check, and each source's own `read_at` (`LocalFileSource` uses
+    /// `read_exact_at`, `InMemoryBlockSource` bounds its slice). Disabling the
+    /// first two together leaves this test green because the third still
+    /// refuses — which is exactly why §5d recorded this reader's exposure as
+    /// allocation-side only. What DOES redden here is
+    /// `next_free_block` rounding up: the last assertion pairs the counter with
+    /// the readable range, so restoring `div_ceil` makes the block the counter
+    /// says exists unreadable, and the pair disagree.
+    #[test]
+    fn test_overlay_never_reads_out_of_the_partial_region() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("torn.ct");
+        let steps = partial_tail_container(&path, 777);
+
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let overlay = CtfsBlockOverlay::new(backing, OverlayMode::InMemory).unwrap();
+        let partial = overlay.next_free_block();
+
+        // The incomplete final block is not readable…
+        assert!(
+            overlay.read_block(partial).is_err(),
+            "block {partial} lies in the partial region but was read successfully; a \
+             short read there can be served as content"
+        );
+        // …nor is anything past it.
+        assert!(overlay.read_block(partial + 1).is_err(), "a block past EOF was readable");
+
+        // …and the counter agrees with the readable range exactly: every block
+        // below `next_free_block` reads, and the one AT it does not. Under
+        // `div_ceil` the counter claims a block the source refuses, so the two
+        // disagree by one and this fails.
+        assert!(
+            overlay.read_block(partial - 1).is_ok(),
+            "the last WHOLE block must be readable; next_free_block ({partial}) and the \
+             readable range must agree exactly, and they do not"
+        );
+
+        // …while the pre-existing stream is completely unaffected: accepting the
+        // partial tail must cost the container nothing.
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(
+            reader.read_file("steps.dat").unwrap(),
+            steps,
+            "a partial tail changed what a pre-existing stream reads back as"
+        );
+        assert_eq!(overlay.file_names().unwrap(), vec!["steps.dat".to_string()],
+            "the unreferenced partial tail surfaced as an internal file");
     }
 }

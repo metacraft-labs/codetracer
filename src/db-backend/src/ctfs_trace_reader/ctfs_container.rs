@@ -852,7 +852,7 @@ impl CtfsReader {
     /// past bytes the container actually carries, is a
     /// [`CtfsError::Corrupt`] — never a short or zero-padded result.
     pub fn read_file_range(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>, CtfsError> {
-        let got = self.read_file_range_available(name, offset, len)?;
+        let got = self.read_range_inner(name, offset, len, /* whole_blocks_only */ true)?;
         if got.len() as u64 != len {
             return Err(CtfsError::Corrupt(format!(
                 "file '{name}': range [{offset}, {}) is not fully backed ({} of {len} bytes present)",
@@ -885,6 +885,45 @@ impl CtfsReader {
     /// record) is the caller's job — see
     /// [`crate::remote_request_spans`], which resolves it at chunk granularity.
     pub fn read_file_range_available(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>, CtfsError> {
+        self.read_range_inner(name, offset, len, /* whole_blocks_only */ false)
+    }
+
+    /// The one range-read implementation behind both the strict and the
+    /// tolerant entry point above. `whole_blocks_only` is the difference, and
+    /// it is the whole of `CTFS-Binary-Format.md` §5d's reader bound.
+    ///
+    /// # Why the two callers want different bounds
+    ///
+    /// §5d says a container's addressable blocks are the WHOLE blocks it
+    /// carries: `floor(length / block_size)`, never rounded up. Bytes past the
+    /// last whole block are the fragment a crash inside an append's tail write
+    /// leaves, or the block a live producer has not finished, and a data block
+    /// resolved there must be an error rather than content. The other two
+    /// readers of this format in the workspace enforce exactly that (the Go
+    /// reader's `resolveDataBlock`, the Nim `readInternalFile`), and before
+    /// M58 this reader did not: on a truncated container it read a stream's
+    /// last, short data block straight out of the partial region and reported
+    /// success, so the three implementations gave different answers about the
+    /// same bytes.
+    ///
+    /// But bounding is only right for the reader that is claiming the range is
+    /// *intact*. The tolerant reader exists precisely to serve the longest
+    /// backed prefix of a container whose tail has not landed yet, and its
+    /// boundary is deliberately BYTE-granular (see its doc comment): a 2 KB
+    /// stream living inside a half-uploaded 4 KB block still yields its landed
+    /// prefix, which a whole-block rule would throw away. It never claims the
+    /// range is complete — the caller is told exactly how many bytes are real
+    /// — so it is not the reader §5d's rule is about.
+    ///
+    /// So: the strict path refuses a block outside the container's whole
+    /// blocks; the tolerant path stops there and reports the prefix.
+    fn read_range_inner(
+        &mut self,
+        name: &str,
+        offset: u64,
+        len: u64,
+        whole_blocks_only: bool,
+    ) -> Result<Vec<u8>, CtfsError> {
         let entry = self
             .files
             .get(name)
@@ -923,6 +962,20 @@ impl CtfsReader {
                 return Err(CtfsError::Corrupt(format!(
                     "file '{name}': unallocated block at index {logical}"
                 )));
+            }
+            // §5d's bound, applied to the DATA block — the path that is easy to
+            // miss, because the last block's slice is clamped to the requested
+            // range and so a short read out of the partial region succeeds.
+            if whole_blocks_only {
+                let whole_blocks = self.source.current_size() / block_size;
+                if data_block_num >= whole_blocks {
+                    return Err(CtfsError::Corrupt(format!(
+                        "file '{name}': data block {logical} is container block \
+                         {data_block_num}, which is outside the {whole_blocks} whole \
+                         {block_size}-byte blocks the container carries; it is truncated \
+                         or its tail write was interrupted"
+                    )));
+                }
             }
 
             // The slice of THIS block that intersects the requested range.
@@ -1738,5 +1791,75 @@ mod tests {
                 "byte mismatch in block {block_index}"
             );
         }
+    }
+    /// M58: `CTFS-Binary-Format.md` §5d's bound on the DATA-block path.
+    ///
+    /// A container is cut so one stream's last, short data block becomes the
+    /// first *partial* block, with exactly its own bytes present — so the read
+    /// the strict path would issue is fully satisfiable out of bytes the
+    /// container does not own. Before the bound, `read_file` returned all
+    /// 12 388 bytes and reported success, while the workspace's other two
+    /// readers of this format refused the same stream by name. Measured on the
+    /// same file, produced by the Nim writer, during M58.
+    ///
+    /// Delete the `whole_blocks_only` check in `read_range_inner` and this goes
+    /// red.
+    #[test]
+    fn test_strict_read_refuses_a_data_block_in_the_partial_region() {
+        const BS: usize = 4096;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cut.ct");
+
+        let survivor: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
+        // A size whose last data block carries only 100 bytes.
+        let lost: Vec<u8> = (0..(3 * BS + 100) as u32).map(|i| ((i + 7) % 251) as u8).collect();
+        // `z.dat` is written last, so its blocks sit at the end of the image
+        // and cutting there cannot also damage `meta.dat`.
+        write_minimal_ctfs(&path, &[("meta.dat", &survivor), ("z.dat", &lost)]).unwrap();
+
+        let full = std::fs::read(&path).unwrap();
+        assert_eq!(full.len() % BS, 0, "the fixture is not block-aligned to begin with");
+        let cut = full.len() - BS + 100;
+        std::fs::write(&path, &full[..cut]).unwrap();
+
+        let mut r = CtfsReader::open(&path).unwrap();
+
+        // The survivor is untouched: the bound costs the container only what it
+        // actually lost, which is the point of bounding rather than refusing
+        // the whole file at `open`.
+        assert_eq!(
+            r.read_file("meta.dat").unwrap(),
+            survivor,
+            "a truncation that lost z.dat also cost meta.dat"
+        );
+
+        // `assert!` rather than a `match` arm that panics: `clippy::panic` is
+        // denied repo-wide (`cargo clippy --all-targets -- -D warnings` in CI),
+        // and it does not distinguish a test's deliberate abort from a
+        // production one.
+        let got = r.read_file("z.dat");
+        assert!(
+            got.is_err(),
+            "read_file returned {} bytes with no error for a stream whose last data \
+             block lies outside the container's whole blocks; the partial region was \
+             served as content",
+            got.as_ref().map(Vec::len).unwrap_or(0)
+        );
+        let msg = got.unwrap_err().to_string();
+        assert!(
+            msg.contains("truncated") && msg.contains("whole"),
+            "the refusal does not name the truncation: {msg}"
+        );
+
+        // The TOLERANT reader keeps its designed byte-granular behaviour: it
+        // reports the landed prefix rather than refusing, and never claims the
+        // range is complete. Bounding that one at block granularity would throw
+        // away a partly-landed block, which RS-M3's remote tail depends on.
+        let prefix = r.read_file_range_available("z.dat", 0, lost.len() as u64).unwrap();
+        assert_eq!(
+            prefix.len(),
+            lost.len(),
+            "the tolerant reader must still return every byte that is physically present"
+        );
     }
 }
