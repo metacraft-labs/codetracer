@@ -967,7 +967,10 @@ mod tests {
              short read there can be served as content"
         );
         // …nor is anything past it.
-        assert!(overlay.read_block(partial + 1).is_err(), "a block past EOF was readable");
+        assert!(
+            overlay.read_block(partial + 1).is_err(),
+            "a block past EOF was readable"
+        );
 
         // …and the counter agrees with the readable range exactly: every block
         // below `next_free_block` reads, and the one AT it does not. Under
@@ -987,7 +990,10 @@ mod tests {
             steps,
             "a partial tail changed what a pre-existing stream reads back as"
         );
-        assert_eq!(overlay.file_names().unwrap(), vec!["steps.dat".to_string()],
-            "the unreferenced partial tail surfaced as an internal file");
+        assert_eq!(
+            overlay.file_names().unwrap(),
+            vec!["steps.dat".to_string()],
+            "the unreferenced partial tail surfaced as an internal file"
+        );
     }
 }
