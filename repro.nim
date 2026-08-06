@@ -1338,9 +1338,16 @@ package codeTracer:
     # a workspace synced before that lands has no checkout to build against.
     block docsBookIsonim:
       let bookDir = "docs/book-isonim"
-      if not dirExists(projectRoot / bookDir):
+      # Use `projectRootPath`, not `projectRoot`.  `projectRoot` is a `let`
+      # local to the devEnv activity block above and is NOT in scope here in
+      # `build:`; the file-level `projectRootPath`
+      # (`parentDir(currentSourcePath())`) is the same directory and is what the
+      # rest of the recipe uses outside that block.  Reaching for the shorter
+      # name here is a compile error, and an easy one to reintroduce because
+      # the two names denote the same path.
+      if not dirExists(projectRootPath / bookDir):
         break docsBookIsonim
-      let ws = codeTracerWorkspaceRoot(projectRoot)
+      let ws = codeTracerWorkspaceRoot(projectRootPath)
       if ws.len == 0:
         break docsBookIsonim
 

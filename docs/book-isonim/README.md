@@ -8,19 +8,31 @@ This is the **CodeTracer documentation site** (published at
 
 ## Prerequisites
 
-Every task runs inside the **IsoNim Nix dev shell** (provides `nim`, `just`,
-`node`). Either enter it once…
+Every task runs inside **this book's own dev shell** (provides `nim`, `just`,
+`node`). The book consumes the [isonim-docs](../../../isonim-docs) static-site
+framework, so it reuses that framework's self-contained dev shell — which
+declares **isonim as its dependency** and reuses isonim's toolchain (Nim 2.2.4,
+node, `just`). Nobody has to `nix develop ../../../isonim`.
+
+With **direnv** the shell activates automatically on `cd` (see `./.envrc`):
 
 ```bash
 cd codetracer/docs/book-isonim
-nix develop ../../../isonim          # drops you in the dev shell
-just dev-docs                        # then run recipes normally
+just dev-docs
+```
+
+Without direnv, enter the framework's dev shell once…
+
+```bash
+cd codetracer/docs/book-isonim
+nix develop path:../../../isonim-docs      # the framework shell (isonim is its dep)
+just dev-docs
 ```
 
 …or prefix a single recipe with it:
 
 ```bash
-nix develop ../../../isonim -c just dev-docs
+nix develop path:../../../isonim-docs -c just dev-docs
 ```
 
 All commands below assume you are in `codetracer/docs/book-isonim/` and in the
