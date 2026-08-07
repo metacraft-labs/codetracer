@@ -18,7 +18,7 @@
   // effective gap between the omnibox and the "+" button down to 0.25em.
   margin-left calc(0.25em - 0.5em)
   z-index 21  // Above #menu (z-index 20) so tabs are clickable
-  -webkit-app-region no-drag
+  -webkit-app-region drag  // Empty bar area is draggable; child tabs/buttons override with no-drag
   overflow hidden
   box-sizing border-box
 

@@ -1444,9 +1444,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   # Check on initial load and on window resize/maximize.
   discard windowSetTimeout(proc() = updateCollapsedMode(), 1000)
+
+  proc requestMenuRenderAfterResize() =
+    if not data.ui.menu.isNil:
+      data.ui.menu.requestMenuRender()
+
   {.emit: """
     window.addEventListener('resize', function() {
       `updateCollapsedMode`();
+      `requestMenuRenderAfterResize`();
     });
   """.}
 
