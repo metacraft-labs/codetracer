@@ -117,6 +117,15 @@
     align-items: center
     justify-content: center
 
+    // No visual feedback on hover, active, or focus — the logo button is
+    // purely decorative/functional with no interactive state highlight.
+    &:hover:not(:disabled)
+      background-color: colors-ui-surface-primary-default !important
+    &:active
+      background-color: colors-ui-surface-primary-default !important
+    &:focus-visible:not(:disabled)
+      box-shadow: none !important
+
     #menu-logo-img
       width: 1.25em
       height: 1.25em

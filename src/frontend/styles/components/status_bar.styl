@@ -191,6 +191,11 @@
     display: flex
     align-items: stretch
     overflow: visible   // allow tab curve pseudo-elements to bleed above the bar
+
+    // Show only the auto-hide tab strip; hide legacy status content
+    // (file-info, location-path, stable:ready, BUILD/PROBLEMS tabs, etc.).
+    > *:not(#auto-hide-bottom-strip)
+      display: none !important
     padding-top: 0.25em    // breathing room so curves are visible above the tabs
     padding-bottom: 0.25em // mirrors side-strip padding-left/right: 0.25em
 
