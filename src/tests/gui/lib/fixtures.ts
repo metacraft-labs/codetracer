@@ -2008,6 +2008,17 @@ export const READY_ON_ENTRY_BUDGET_MS = 30_000;
  * same bar.  The blanket rule was removed rather than worked around here;
  * the styl file carries the full rationale.  Keep this wait as a visibility
  * wait so a repeat of that regression fails loudly instead of silently.
+ *
+ * It did repeat.  `51a3e820e "fix: UI regressions"` wrote the same rule back
+ * one nesting level down (milestone M66) and this wait failed loudly exactly
+ * as intended, with the diagnosis below naming the cause.  What that round
+ * added is a guard that does not depend on this wait, because this wait
+ * cannot see every way of hiding the footer: Playwright's visibility
+ * predicate is box-and-`visibility`, so an `opacity: 0` status bar would
+ * pass here while being just as invisible to the user.
+ * `tests/status-bar/footer-visibility-css-guard.spec.ts` measures the built
+ * stylesheet directly and folds in effective opacity.  That guard is not
+ * licence to relax this one — they catch different things.
  */
 export async function readyOnEntryTest(p: Page): Promise<void> {
   // One wait, with a budget taken from the measured launch time.

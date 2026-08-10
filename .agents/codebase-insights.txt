@@ -502,6 +502,68 @@ and a correlation marker's counterpart is by definition in another process.
 - 2026-07-31 (WASM host state now rides in the event stream — M44b): `browser_stream_host.rs` writes the spec §3.3/§3.4 records TWICE — into `boundary_state.json` as before, and as `Event` records under `boundary_id: "wasm-host-state"` inside `trace.json`. The second is the only carrier a *streaming* consumer can use: `--boundary-stream` reads its metadata once at startup, §3.3 is only known at the module's first exported call, and — the deciding detail — `write_host_state` calls `open_stream`, which is what SPAWNS the `--snapshot-consumer` process, so a "re-read the sidecar" protocol races the sidecar's first write rather than merely arriving late. Consequence for anyone touching that translate arm: emit the `Event` through `self.emit(...)` (so the batch mirror stays byte-identical) and emit it only when the state actually CHANGED — a duplicate `HostInitialState` is ignored, and emitting for it would make the stream and the sidecar disagree, which `LoadRecording` now refuses outright rather than resolving. The test that used to assert host-state events changed `trace.json` by not one byte was replaced by one that proves the safe part of that claim directly: remove the host-state records from the produced document, as ORIGINAL byte ranges (not values round-tripped through `serde_json::Value`, which sorts keys), and what remains must equal a recording made without host state.
 - 2026-07-31 (rustc cannot emit a multi-value wasm export): measured — `extern "C" fn(u32) -> (u32, u32)` compiles to `(i32,i32,i32) -> ()` on wasm32-unknown-unknown (hidden sret pointer), and `-C target-feature=+multivalue` does not change it. `src/db-backend/tests/fixtures/wasm-parity-corpus/modules/pair_stats/` gets one by assembling a nine-instruction wrapper from LLVM wasm assembly (`wrap.s`, `clang --target=wasm32-unknown-unknown -mmultivalue`) that calls the Rust half. Two traps: (1) `rustc --print link-args` shows a bare two-token `"--export" "<sym>"` for EVERY `#[no_mangle]` item and there is no flag to stop it — not dropping `pub`, not `.hidden` in the assembly, not `--no-export-dynamic` (all measured) — which matters because `ct-instrument` instruments an exported function's *body*, so an exported helper called from another export is recorded as a nested export crossing and refused by spec §8; the fixture links through `lld-explicit-exports`, which drops those pairs. (2) C is not an alternative: the recorder's DWARF stepping filter (`isUserRustSourcePath`) requires a `.rs` suffix, so a C module would carry DWARF and emit no steps.
 - 2026-07-31 (the status bar patches, it no longer rebuilds — M46): `renderStatusInto` (`viewmodel/views/isonim_status_view.nim`) is now conditional. It stamps `statusStructureSignature(model)` on the `#status` host as `data-status-structure`; if the next model produces the same signature it PATCHES text/titles/classes in place and returns `false`, and only a structural change (location appears/disappears, FINISHED, disconnected, notification set, bug report) tears the subtree down and returns `true`. Two consequences to respect when adding a field to `StatusShellModel`: a field that only changes a node's text/class must stay OUT of the signature and gain a line in `patchStatusValues`, or it will render once and then never update; a field that adds or removes an element must go INTO the signature, or it will never appear. `requestStatusRender` also coalesces to one pass per task turn (six independent callers redraw the bar 60+ times per trace open, enumerated in the comment there), and the strip / icon-zone remount now runs only when the shell was actually rebuilt. `window.__ctStatusRenderStats()` exposes requests/passes/rebuilds; a clean open is ~66/11/2.
+- 2026-08-10 (the tabs-only footer rule came back, and a guard nobody runs is
+  not a guard — M66): `51a3e820e "fix: UI regressions"` re-added the exact rule
+  M43 removed from `src/frontend/styles/components/status_bar.styl`, written
+  one nesting level in so the `.styl` source reads differently while compiling
+  to the same `#status #status-base > *:not(#auto-hide-bottom-strip)
+  { display: none !important }`, and the whole Electron suite went red at
+  `readyOnEntryTest` again. Three things to carry forward. (a) BEFORE hiding
+  anything in `#status-base`, know that it renders exactly five children and
+  four of them are required by `Auto-Hide-Panes.md` §3.1/§10.3 — the fifth,
+  `.test-movement`, is gated on `data.startOptions.inTest` and never renders in
+  production. There is no legacy residue to hide; a quieter footer means
+  restyling or amending the design doc. (b) The reason M43's contract spec did
+  not catch it is that it never ran: every GUI job in `Codetracer CI`
+  (`test-ui-tests` nixos/macos and `test-ui-tests-rr`) aborts in `Setup dev env`
+  with `No repo-workspaces workspace lock for codetracer` and every later step
+  is `skipped`. Measured over 160 `dev` runs back to 2026-06-17: the Playwright
+  step has NEVER had conclusion `success` in that window, and last executed at
+  all (failing) on 2026-07-22 — 130 commits, 17 merges and 28 frontend-touching
+  commits have landed since with no GUI lane able to look at them. Before
+  concluding a regression "passed CI", check that the lane got as far as running
+  a test. The missing locks are REPO-side, not an action regression: the
+  lock-creating repo-workspaces `pre-push` hook was overwritten by pre-commit.com
+  on 2026-07-29 (it survives as `.git/hooks/pre-push.legacy`), and there is no
+  `.repo/` workspace above this checkout at all, so ordinary pushes create no
+  lock either — `git push --no-verify` skips the hook too, and adds to the
+  problem, but is not its cause. (c) The effect-based guard is
+  `src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts` +
+  `src/tests/gui/page-objects/status-footer-contract.ts`: it applies the BUILT
+  theme CSS to the footer's markup in a plain Chromium page and asks whether
+  each region has a box. It costs ~7 s, needs no `ct`/trace/recorder, and —
+  measured — runs under both `CODETRACER_DB_TESTS_ONLY=1` and
+  `CODETRACER_RR_TESTS_ONLY=1`, whereas `status-bar-footer-contract.spec.ts` and
+  `status-bar-render-stability.spec.ts` are skipped outright by the RR lane.
+  KNOW ITS EDGE — it does not trip on "any spelling", and an early draft of this
+  note said so wrongly. Measured over 28 spellings: it catches everything that
+  removes the BOX (`display`, `visibility`, `opacity`, `transform: scale(0)`,
+  `content-visibility`, `font-size: 0`, zero width/height, flex collapse, and
+  all of those on an ancestor, under any selector syntax including `@media` and
+  `:has()`), and misses everything that keeps the box and only changes the
+  PAINTING — off-screen (`position: absolute; left: -9999px`,
+  `translateX(-9999px)`, legacy `clip`), `clip-path`, `filter: opacity(0)` (yes,
+  while bare `opacity: 0` is caught), opacity `0.001`, `color: transparent`, and
+  occlusion by an overlay. `readyOnEntryTest` and Playwright's `toBeVisible` are
+  box+`visibility` predicates and miss that family too — Playwright calls an
+  off-screen `.location-path` "visible, enabled and stable" — so nothing guards
+  it today. Also: the guard reads whatever is in `src/build-debug`, so editing
+  `status_bar.styl` and running `just test-gui-prebuilt` WITHOUT `just
+  build-once` reports green against the old build; a MISSING build fails loudly,
+  a STALE one does not. Add new hiding spellings to `BLANKET_HIDE_SPELLINGS`
+  rather than rewriting it.
+- 2026-08-10 (a `resize` handler that re-renders the menu is a render storm —
+  M66 review): `ui/menu.nim::requestMenuRender` is NOT coalesced — it clears and
+  rebuilds `#menu` wholesale (61 elements) and cascades into the session tab
+  bar, debug shell, command palette and debug controls, and rebuilding `#menu`
+  destroys the command-palette input's DOM focus and caret. `51a3e820e` called it
+  straight from `window.resize`; the handler in `ui/layout.nim` now throttles to
+  one render per 50 ms with the flag at MODULE level, because `initLayout` runs
+  once per session and its `resize` listener is never removed, so N sessions mean
+  N listeners. The two patterns to copy for anything else on `resize` are
+  `ui/session_tabs.nim::installResizeRender` (50 ms throttle) and
+  `ui/status.nim::requestStatusRender` (one pass per task turn). Related and
+  still true: `.agents` note of 2026-08-06 on M51's debug-controls rebuild loop.
 - 2026-08-06 (a readyOnEntry timeout means a SLOW LAUNCH, and the old 'stalled locator' note here was wrong — M46): `lib/fixtures.ts::readyOnEntryTest` is ONE strict visibility wait on `.location-path` with `READY_ON_ENTRY_BUDGET_MS = 30_000`, and it prints `# timing: ready on entry ...: Xms / 30000ms (N%)` on EVERY launch, passing or not — that line is the measurement, use it before touching the budget. `.location-path` is rendered only when `locationText` is non-empty, so its appearance IS the end of the launch: median ~8-11s, observed max ~14.7s on a 32-core host at load average 33-82, and 17.4s for a three-recording session launch. THE PREVIOUS NOTE HERE IS WITHDRAWN. It claimed two fresh-locator attempts defeated a Playwright poll that 'stops making progress'. A `Locator` stores only `_frame` and `_selector` and `waitFor` is a plain `frame._channel.waitForSelector(...)`, so a fresh locator is a byte-identical call; and the missing `locator resolved to ...` line it rested on is just what Playwright logs for a selector matching ZERO elements (the injected predicate in `server/frames.js` sets `log` only on a match, and the caller guards with `if (log)`) — verified directly: a page with no `.location-path` logs only the `waiting for` line for 30s, while a page with a `display:none` one logs `62 x locator resolved to hidden ...`. Still true and still worth keeping: removing the status bar's per-redraw DOM churn did not change the flake rate (2/22 before, 4/54 after, same host), so do not expect a frontend churn fix to cure a readiness timeout. What IS unexplained: in the pre-churn-fix artefacts (`test-diagnostics/2026-07-30T01-*`) the status bar logged a non-empty location 57-66 times INSIDE the failing 15s window, which no 'element was absent' story covers; see the M46 completion note.
 - 2026-08-01 (test recordings are PRODUCED, never committed — M53): no `.ct` is
   committed anywhere in this repo any more. `scripts/materialize-recording.sh

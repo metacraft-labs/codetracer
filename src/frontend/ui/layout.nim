@@ -378,6 +378,16 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
 # search-results footer placeholder is static and no longer has a Karax stub.
 var sharedRenderersInitialised = false
 
+# Coalescing state for the `window.resize` -> menu re-render below.
+#
+# MODULE level, deliberately, not per `initLayout` call: `initLayout` runs
+# once per session (`ui_js.nim` on load, `session_switch.nim` on first
+# activation of each new session) and the `resize` listener it installs is
+# never removed, so a workspace with N sessions has N listeners.  Holding the
+# throttle here means those N listeners still collapse to a single menu
+# render per window, instead of N renders per resize event.
+var menuResizeRenderPending = false
+
 proc ensureSharedRenderers() =
   ## Set up the shared global chrome elements that live outside individual
   ## session GL containers. Safe to call multiple times — it only acts on the
@@ -1446,8 +1456,32 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   discard windowSetTimeout(proc() = updateCollapsedMode(), 1000)
 
   proc requestMenuRenderAfterResize() =
-    if not data.ui.menu.isNil:
-      data.ui.menu.requestMenuRender()
+    ## Refresh the caption bar after a resize, at most once per 50 ms.
+    ##
+    ## The menu has to be re-rendered on resize because `model.maximized` is
+    ## recomputed only at render time (`ui/menu.nim`'s
+    ## `isWindowMaximizedForMenu`), so the maximize/restore glyph goes stale
+    ## otherwise.
+    ##
+    ## THROTTLED, because `requestMenuRender` is not cheap and not coalesced
+    ## itself: each call clears and rebuilds `#menu` wholesale and then
+    ## cascades into the session tab bar, the debug shell, the command
+    ## palette and the debug controls.  A drag-resize emits `resize`
+    ## continuously, so calling it per event rebuilds the entire caption
+    ## chrome dozens of times a second and destroys the command-palette
+    ## input's focus and caret along with it.
+    ##
+    ## 50 ms mirrors `ui/session_tabs.nim`'s `installResizeRender`, which
+    ## throttles the tab bar against the same event for the same reason;
+    ## `ui/status.nim`'s `requestStatusRender` is the other precedent.
+    if menuResizeRenderPending:
+      return
+    menuResizeRenderPending = true
+    discard windowSetTimeout(proc() =
+      menuResizeRenderPending = false
+      if not data.ui.menu.isNil:
+        data.ui.menu.requestMenuRender(),
+      50)
 
   {.emit: """
     window.addEventListener('resize', function() {

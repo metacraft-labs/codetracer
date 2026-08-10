@@ -160,10 +160,22 @@
     // ... and §10.3, which places the collapsed-strip icon zone
     // (`#auto-hide-collapsed-icon-zone`) in the same bar.
     //
-    // A `> *:not(#auto-hide-bottom-strip) { display: none !important }` rule
-    // used to live here (added by b27da3947 "feat: Redesign of the status bar")
-    // and made the bar tabs-only.  It was removed because it silently deleted
-    // three surfaces that no other part of the UI provides:
+    // DO NOT hide `#status-base`'s children as a group.  A
+    // `> *:not(#auto-hide-bottom-strip) { display: none !important }` rule has
+    // been written here twice — b27da3947 "feat: Redesign of the status bar"
+    // and, after it was removed, 51a3e820e "fix: UI regressions" — and both
+    // times it made the bar tabs-only.  The wish behind it is reasonable: a
+    // quieter footer.  The blanket form cannot deliver it, because every child
+    // of this bar is either required by the design or invisible in production
+    // already (enumerated on a live launch: `#auto-hide-collapsed-icon-zone`,
+    // `#file-info-status`, `#auto-hide-bottom-strip`, `.test-movement` — which
+    // renders only under `data.startOptions.inTest` — and `.status-right`).
+    // There is no "legacy" residue left to hide; hiding the group means hiding
+    // the design.  A quieter footer has to come from restyling or from removing
+    // a specific readout in the design doc first.
+    //
+    // Concretely, the rule silently deletes three surfaces that no other part
+    // of the UI provides:
     //
     //   * `.location-path` + `#copy-path-image` — the only place the current
     //     debug location (`path:line#ticks`) is displayed at all; nothing else
@@ -181,6 +193,26 @@
     // icon zone and `#file-info-status` on the left, the tab strip taking the
     // slack (`#auto-hide-bottom-strip { flex: 1 }`), `.status-right` (location
     // + copy button) pinned to the right edge.
+    //
+    // The constraint is checked against the BUILT stylesheet, on effect rather
+    // than on wording, by
+    // `src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts`:
+    // it lays out this bar in a browser with the compiled theme CSS applied and
+    // fails if any required region computes to no box.  Any spelling that
+    // removes the box trips it, however the selector is written — `:not()`,
+    // `:where()`, `:has()`, an enumerated list, `@media`, `display`,
+    // `visibility`, `opacity`, `transform: scale(0)`, or the same applied to an
+    // ancestor.  `status-bar-footer-contract.spec.ts` pins the same contract
+    // against the real Electron app.
+    //
+    // What it does NOT catch, so you know what you are not covered against:
+    // rules that keep the box and only change the painting — moving the bar
+    // off-screen, `clip-path`, `filter: opacity(0)`, or drawing text in the
+    // background colour.  Those pass both guards.  Run the app and look at the
+    // footer before shipping anything in that family.
+    //
+    // NOTE the guard reads the COMPILED theme, so it only sees an edit to this
+    // file after `just build-once`.
     bottom: 0
     background-color: colors-ui-surface-primary-default
     height: 2em
@@ -191,11 +223,6 @@
     display: flex
     align-items: stretch
     overflow: visible   // allow tab curve pseudo-elements to bleed above the bar
-
-    // Show only the auto-hide tab strip; hide legacy status content
-    // (file-info, location-path, stable:ready, BUILD/PROBLEMS tabs, etc.).
-    > *:not(#auto-hide-bottom-strip)
-      display: none !important
     padding-top: 0.25em    // breathing room so curves are visible above the tabs
     padding-bottom: 0.25em // mirrors side-strip padding-left/right: 0.25em
 

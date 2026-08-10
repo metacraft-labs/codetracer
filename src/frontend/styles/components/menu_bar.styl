@@ -117,14 +117,22 @@
     align-items: center
     justify-content: center
 
-    // No visual feedback on hover, active, or focus — the logo button is
-    // purely decorative/functional with no interactive state highlight.
+    // No POINTER feedback on hover or active: the logo reads as part of the
+    // caption bar rather than as a raised button, so it deliberately keeps
+    // the bar's own background in both states instead of the highlight
+    // `.ct-button-image-md-secondary` gives every other icon button.
     &:hover:not(:disabled)
       background-color: colors-ui-surface-primary-default !important
     &:active
       background-color: colors-ui-surface-primary-default !important
-    &:focus-visible:not(:disabled)
-      box-shadow: none !important
+
+    // The KEYBOARD focus ring stays.  `:focus-visible` only matches keyboard
+    // focus, never a mouse press, so suppressing it buys nothing visually and
+    // costs the menu its focus indicator — and `#menu-root` is the only entry
+    // point to the application menu, with `#navigation-menu` already running
+    // `outline: 0 !important` below.  Removing both leaves a keyboard user
+    // unable to see where focus is (WCAG 2.4.7).  If the ring is the wrong
+    // shape here, restyle it; do not remove it.
 
     #menu-logo-img
       width: 1.25em
