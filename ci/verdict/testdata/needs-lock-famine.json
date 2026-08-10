@@ -1,0 +1,80 @@
+{
+  "appimage-build": {
+    "result": "skipped"
+  },
+  "appimage-cross-distro": {
+    "result": "skipped"
+  },
+  "appimage-lib-check": {
+    "result": "skipped"
+  },
+  "build-python-packages": {
+    "result": "skipped"
+  },
+  "cross-process-linux": {
+    "result": "failure"
+  },
+  "dev-build": {
+    "result": "skipped"
+  },
+  "dmg-build": {
+    "result": "skipped"
+  },
+  "dmg-lib-check": {
+    "result": "skipped"
+  },
+  "lint-bash": {
+    "result": "success"
+  },
+  "lint-nim": {
+    "result": "success"
+  },
+  "lint-nix": {
+    "result": "success"
+  },
+  "lint-rust": {
+    "result": "failure"
+  },
+  "nix-build": {
+    "result": "skipped"
+  },
+  "origin-dap-macos": {
+    "result": "cancelled"
+  },
+  "origin-dap-windows": {
+    "result": "failure"
+  },
+  "reprobuild-linux-smoke": {
+    "result": "success"
+  },
+  "reprobuild-macos-smoke": {
+    "result": "cancelled"
+  },
+  "test-non-gui": {
+    "result": "skipped"
+  },
+  "test-ui-tests": {
+    "result": "failure"
+  },
+  "test-ui-tests-rr": {
+    "result": "failure"
+  },
+  "viewmodel-tests": {
+    "result": "failure"
+  },
+  "visual-replay-regression-gate": {
+    "result": "failure"
+  },
+  "windows-bootstrap-smoke": {
+    "result": "failure"
+  },
+  "windows-headless-test": {
+    "result": "skipped"
+  },
+  "windows-named-pipe-tests": {
+    "result": "failure"
+  },
+  "windows-rust-components": {
+    "result": "failure"
+  }
+}

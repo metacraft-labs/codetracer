@@ -1965,11 +1965,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
-    needs:
-      - lint-bash
-      - lint-nim
-      - lint-nix
-      - lint-rust
+    # NOTE: this job deliberately does NOT declare `needs: [lint-bash,
+    # lint-nim, lint-nix, lint-rust]` any more.
+    #
+    # That dependency existed purely to fail fast and save runner time —
+    # the lint jobs produce no artifact and no output this job consumes.
+    # Its real effect was to make the entire non-GUI test suite hostage to
+    # the lint lane's toolchain: when lint-rust started dying before it
+    # linted anything (`direnv: not found`, exit 127; or `Setup dev env`
+    # failing for want of a workspace lock), GitHub reported this job as
+    # `skipped`, and the run was red from lint anyway, so the missing test
+    # coverage was invisible. On `dev`, this job last executed on
+    # 2026-06-25 and was skipped on every run after it.
+    #
+    # The lint jobs remain REQUIRED — ci/verdict/required-jobs.txt lists
+    # all four, so a lint failure still fails the run. They just no longer
+    # get to silence the tests on their way down.
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -3039,3 +3050,89 @@ jobs:
             resources.tar.xz.asc
           generate_release_notes: false
           tag_name: "${{ needs.push-tag.outputs.tag }}"
+
+  ci-verdict:
+    # Final gate: assert that CI actually RAN the jobs it gates on.
+    #
+    # GitHub reports a job whose dependency failed as `skipped`, and
+    # `skipped` is not `failure`. When `lint-rust` started failing early —
+    # in `Setup dev env` for want of a repo-workspaces workspace lock on
+    # the pushed commit, or one step later at `direnv: not found` — every
+    # job declaring `needs: [lint-bash, lint-nim, lint-nix, lint-rust]`,
+    # including `test-non-gui`, the whole non-GUI suite, was silently
+    # skipped. The run went red regardless, so for six weeks "the tests
+    # are failing" and "the tests never ran" looked identical. On `dev`,
+    # `test-non-gui` last actually executed on 2026-06-25.
+    #
+    # This job exists so those two states never look alike again. It does
+    # not suppress or soften any failure: a required job that ran and
+    # failed still fails this gate (exit 1). It only ensures that a
+    # required job which never ran fails LOUDLY and differently (exit 2).
+    #
+    # It deliberately runs on a stock GitHub-hosted runner with nothing
+    # but checkout + bash + jq — no Nix, no dev shell, no setup-dev-env,
+    # no workspace lock, no cross-repo siblings. A watchdog must not share
+    # the failure mode it is watching for; if this job needed the dev env,
+    # the very outage it reports would take it down too.
+    #
+    # KNOWN LATENCY — read before trusting the absence of a verdict.
+    # Two jobs in the needs: list below, `reprobuild-macos-smoke` and
+    # `origin-dap-macos`, request `runs-on: eph-macos-arm64`, and no
+    # registered runner carries that label (the org's darwin runners
+    # expose aarch64-darwin / nix-darwin / darwin instead). Those jobs
+    # therefore never get scheduled: they sit queued until GitHub's
+    # 24-hour ceiling cancels them. Because this gate waits on them, its
+    # verdict cannot be published until ~24h after the push. It is
+    # correct when it arrives, but it is NOT prompt, and a run that is
+    # still in progress has simply not been judged yet — do not read a
+    # missing verdict as a passing one. Fixing the runner labels removes
+    # the delay; dropping those jobs from needs: would remove the delay
+    # by giving up the coverage, which is the trade this gate exists to
+    # refuse.
+    needs:
+      - lint-bash
+      - lint-nim
+      - lint-nix
+      - lint-rust
+      - dev-build
+      - nix-build
+      - build-python-packages
+      - appimage-build
+      - dmg-build
+      - appimage-lib-check
+      - appimage-cross-distro
+      - dmg-lib-check
+      - test-non-gui
+      - test-ui-tests
+      - test-ui-tests-rr
+      - cross-process-linux
+      - viewmodel-tests
+      - visual-replay-regression-gate
+      - windows-bootstrap-smoke
+      - windows-named-pipe-tests
+      - windows-rust-components
+      - windows-headless-test
+      - origin-dap-windows
+      - origin-dap-macos
+      - reprobuild-linux-smoke
+      - reprobuild-macos-smoke
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Self-test the verdict gate
+        # The gate is only worth trusting if its own contracts hold, so
+        # they are checked on every run, against fixtures captured from
+        # the real broken runs this gate was built for.
+        run: bash ci/verdict/required-jobs-test.sh
+
+      - name: Assert the required jobs actually ran
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "$NEEDS_JSON" > "${RUNNER_TEMP}/needs.json"
+          bash ci/verdict/required-jobs.sh --needs-json "${RUNNER_TEMP}/needs.json"

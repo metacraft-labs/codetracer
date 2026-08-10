@@ -86,6 +86,32 @@ with pkgs;
     which
     procps
 
+    # direnv is a hard build dependency, not a developer convenience:
+    # src/db-backend/build.rs shells out to `direnv exec <recorder-root>
+    # bash ct_emulator/build_native_api.sh` to materialise the generated
+    # C sources before the Rust build, and scripts/build-siblings.sh
+    # builds every sibling repo through `direnv exec` so each one gets
+    # its own flake's toolchain. The lint-rust CI job also runs
+    # `nix develop ... -c direnv allow <recorder>`.
+    #
+    # It was never declared here, so those calls only ever worked by
+    # accident, when the self-hosted runner happened to leak a direnv
+    # from its ambient PATH. Once that stopped, lint-rust died with
+    # `direnv: not found` / exit 127 (observed in run 30726348404, where
+    # `Setup dev env` had otherwise succeeded in every job) — and because
+    # test-non-gui and every build job used to declare `needs: lint-rust`,
+    # that single missing binary silently skipped the entire test suite.
+    direnv
+
+    # jq parses the `needs` payload in ci/verdict/required-jobs.sh. That
+    # gate runs on a stock GitHub-hosted runner (where jq is preinstalled)
+    # precisely so it does not depend on this shell — but `ci/lint/bash.sh`
+    # lints ci/**/*.sh from in here, and anyone reproducing a CI script
+    # locally does so from in here too. Declaring it keeps this shell able
+    # to run the repo's own CI scripts, which is the whole point of the
+    # exercise that added direnv above.
+    jq
+
     # C/C++ + linkers used by tup, nim's gcc backend, and Rust crates
     # with native dependencies. CMake/Ninja/GTest/Catch2 are exercised by
     # `just test-ct-providers`' real C/C++ provider fixtures.
