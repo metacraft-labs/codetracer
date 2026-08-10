@@ -129,9 +129,22 @@
 
         <!-- <script async id="__bs_script__" src="http://localhost:9700/browser-sync/browser-sync-client.js?v=2.28.3"></script> -->
 
+        <!-- Startup phase marks.
+             The renderer's own Performance API reports only aggregate
+             milestones (`domInteractive`, `loadEventEnd`), which lump the two
+             very large synchronous scripts below into one number.  These marks
+             split that number per script so a startup regression can be
+             attributed to the webpack bundle or to the Nim-generated `ui.js`
+             without re-instrumenting the build.  They are read by
+             `src/tests/gui/tests/benchmarks/frontend-startup-budget.spec.ts`.
+             Cost is three `performance.mark()` calls (microseconds); nothing
+             reads them at runtime. -->
+        <script>performance.mark('ct:scripts-start');</script>
         <script src="public/dist/frontend_bundle.js" type="text/javascript"> </script>
+        <script>performance.mark('ct:bundle-done');</script>
         <script src='public/third_party/jstree.min.js' type='text/javascript'></script>
         <script src='ui.js'></script>
+        <script>performance.mark('ct:ui-done');</script>
 
     </body>
 </html>
