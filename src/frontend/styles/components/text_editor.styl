@@ -194,48 +194,21 @@
   // border: 0.0625em solid grey
   position: fixed
   background-color: colors-ui-surface-input-default
-  border-radius: 0.375em
-  padding-top: 0.25em
-  padding-bottom: 0.25em
-  font-family: "SpaceMono"
+  border-radius: 0.5em
+  font-family: "SpaceGrotesk"
   font-size: 0.875em
   z-index: 1000
 
 .context-menu-item-container
-  background-color: colors-ui-surface-input-default
-  line-height: 1.75em
+  &:first-child .context-menu-item
+    border-radius: 0.5em 0.5em 0 0
+
+  &:last-child .context-menu-item
+    border-bottom: none
+    border-radius: 0 0 0.5em 0.5em
 
 .context-menu-item
-  cursor: pointer
-  color: colors-ui-text-primary-body
-  display: flex
-  flex-direction: row
-  // border: 0.0625em solid white
-  // height: 1.5em
-  margin-left: 0.25em
-  margin-right: 0.25em
-  padding-left: 0.5em
-  padding-right: 0.5em
-  border-radius: 0.375em
-  justify-content: space-between
-  text-align: left
-  align-items: center
-  white-space: nowrap
-
-  &:hover
-    background-color: colors-ui-surface-primary-tertiary
-
-.context-menu-hint
-  color: colors-ui-text-primary-body
-  text-align: right
-  font-size: 0.625em
-  padding: 0.25em
-  line-height: 0.625em
-  // margin-right: 0.5em
-  margin-left: 0.5em
-  background-color: colors-ui-surface-primary-secondary-hover
-  border-radius: 0.375em
-  line-height: 0.625em
+  // No per-item border-radius or margins — items flow flush like the main menu
 
 .expansion-1
   .monaco-editor, .margin
@@ -726,19 +699,9 @@
     display: block
 
 .context-menu-option
-  height: 1.5625em
-  color: colors-ui-text-primary-body
-  background-color: colors-ui-surface-primary-tertiary
+  // Layout overrides on top of .ct-menu-item base styles
   border-radius: 0.3125em
-  padding-right: 0.625em
-  padding-left: 0.625em
   font-size: 0.875em
-  display: flex
-  align-items: center
-
-  &:hover
-    background-color: colors-ui-surface-input-default
-    color: colors-ui-text-primary-body
 
 .context-menu-option-text
   width: 100%
@@ -850,6 +813,7 @@
     padding-right: 0.15em
     text-align: right
     white-space: nowrap
+    opacity: 0.5
     // overflow: hidden
     cursor: default
 //font-weight: bold

@@ -818,3 +818,17 @@
   bottom: -0.625em
   left: 0.1875em
   top: 1.125em
+
+.isonim-calltrace
+  // 0.5em left padding on the search bar so its left edge aligns with the
+  // collapse/expand toggle on depth-0 rows.  Right padding kept smaller so
+  // the input extends close to the panel edge.
+  .calltrace-search
+    padding-left: 0.25em
+    padding-right: 0.25em
+
+  // Row-level padding so the selection highlight spans the full panel
+  // width while the collapse/expand toggle is inset by 0.5em — matching
+  // the left edge of the search input above.
+  .local-calltrace-view .calltrace-call-line
+    padding-left: 0.5em

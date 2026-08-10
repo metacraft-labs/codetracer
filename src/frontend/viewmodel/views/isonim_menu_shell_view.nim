@@ -199,34 +199,26 @@ template renderMenuShellImpl(
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
-                            class = "menu-element menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = "ct-menu-item" &
+                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
+                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            text ""
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
-                            span(class = "menu-node-shortcut"):
+                            span(class = "ct-menu-item-sublabel"):
                               text node.shortcut
                       else:
                         tdiv(
-                            class = "menu-folder menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = "ct-menu-item" &
+                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
+                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            tdiv(class = "icon " & node.iconClass):
-                              discard
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
-                            if node.children.len > 0:
-                              span(class = "menu-expand"):
-                                discard
+                          span(class = "ct-menu-item-trailing"):
+                            discard
                       if node.beforeNextSubGroup:
                         hr(class = "menu-sub-group-separator"):
                           discard
@@ -249,34 +241,26 @@ template renderMenuShellImpl(
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
-                            class = "menu-element menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = "ct-menu-item" &
+                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
+                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            text ""
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
-                            span(class = "menu-node-shortcut"):
+                            span(class = "ct-menu-item-sublabel"):
                               text node.shortcut
                       else:
                         tdiv(
-                            class = "menu-folder menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = "ct-menu-item" &
+                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
+                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            tdiv(class = "icon " & node.iconClass):
-                              discard
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
-                            if node.children.len > 0:
-                              span(class = "menu-expand"):
-                                discard
+                          span(class = "ct-menu-item-trailing"):
+                            discard
                       if node.beforeNextSubGroup:
                         hr(class = "menu-sub-group-separator"):
                           discard

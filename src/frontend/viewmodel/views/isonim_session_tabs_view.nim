@@ -129,15 +129,15 @@ proc renderSessionTab(
       if multiSession:
         span(class = SessionTabCloseClass,
              onclick = proc() = callbacks.invokeClose(index)):
-          text "×"
+          discard
 
 proc renderAddButton(
     r: MockRenderer;
     callbacks: SessionTabsCallbacks): MockNode =
   ui(r):
-    tdiv(class = SessionTabAddClass,
-         onclick = proc() = callbacks.invokeAdd()):
-      text "+"
+    button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+           onclick = proc() = callbacks.invokeAdd()):
+      discard
 
 proc renderOverflowButton(r: MockRenderer): MockNode =
   ui(r):
@@ -181,7 +181,7 @@ when defined(js):
           text tab.label
         if multiSession:
           span(ref = closeBtn, class = SessionTabCloseClass):
-            text "×"
+            discard
 
     if multiSession:
       isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
@@ -194,9 +194,9 @@ when defined(js):
       r: WebRenderer;
       callbacks: SessionTabsCallbacks): isonim_dom.Element =
     ui(r):
-      tdiv(class = SessionTabAddClass,
-           onclick = proc() = callbacks.invokeAdd()):
-        text "+"
+      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+             onclick = proc() = callbacks.invokeAdd()):
+        discard
 
   proc renderOverflowMenu(
       r: WebRenderer;
@@ -246,12 +246,12 @@ proc renderSessionTabsPanel*(
           if multiSession:
             span(class = SessionTabCloseClass,
                  onclick = tabCloseHandler(callbacks, tabIndex)):
-              text "×"
+              discard
       tdiv(class = SessionTabOverflowClass):
         text "⌄"
-      tdiv(class = SessionTabAddClass,
-           onclick = proc() = callbacks.invokeAdd()):
-        text "+"
+      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+             onclick = proc() = callbacks.invokeAdd()):
+        discard
       tdiv(class = SessionTabOverflowMenuClass):
         for i, tab in tabs:
           let tabIndex = i

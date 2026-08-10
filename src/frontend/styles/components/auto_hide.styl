@@ -87,7 +87,8 @@
   flex-direction: column
   flex-shrink: 0
   flex-grow: 0
-  background-color: colors-ui-surface-panel
+  background-color: transparent
+  border-radius: 0.36em
   position: relative
   // z-index: 5 creates a stacking context so GL children with high z-index
   // are confined within it — the backdrop (z-index: 98, transparent) is below
@@ -196,6 +197,7 @@
   flex-shrink: 0
   flex-grow: 0
   background-color: colors-ui-surface-panel
+  border-radius: 0.36em
   position: relative
   z-index: 5  // same as side docked panels — keeps panel children below backdrop (98)
   min-height: 100px
@@ -216,11 +218,6 @@
     // artifact — especially when the panel has a scrollbar.
     // Matches the hover overlay z-index (101) for identical visual behaviour.
     z-index: 101
-    // Match the hover-overlay gap: #root-container bottom is at 1.75rem from
-    // the viewport bottom (aligned with the tab labels), while the overlay uses
-    // bottom: 2rem (the full status-bar height). The 0.25em margin recreates
-    // the same status-bar padding-top breathing room between content and tabs.
-    margin-bottom: 0.25em
 
 #auto-hide-docked-bottom-content
   flex: 1
@@ -261,6 +258,17 @@
   // are inset by the same amount as the GL content area on both sides.
   padding-left: 0.25em
   padding-right: 0.25em
+
+// When the left side strip is visible (2em wide), push the bottom tab row to
+// start at the strip's right edge so the tabs sit between the strips — not
+// under them.  Only the strip (2em) is accounted for; the docked/hover panel
+// that may open on top does not affect this padding.
+#root-container:has(#auto-hide-strip-left.has-tabs) #auto-hide-bottom-strip
+  padding-left: 2em
+
+// Mirror for the right strip.
+#root-container:has(#auto-hide-strip-right.has-tabs) #auto-hide-bottom-strip
+  padding-right: 2em
 
 // ---------------------------------------------------------------------------
 // Bottom strip tab overrides — use the same .auto-hide-strip-tab classes
@@ -334,7 +342,7 @@
   text-orientation: mixed
   transform: none
   padding-left: 0
-  padding-right: 0.38em
+  padding-right: 0
   max-height: none
   align-self: stretch  // fill full tab height instead of centering the line box
   display: flex        // flex container so text node becomes a flex item
@@ -362,7 +370,7 @@
 .auto-hide-strip-tab
   font-family: "SpaceGrotesk"
   font-size: inherit
-  font-weight: 600
+  // font-weight: 600
   letter-spacing: -0.14px
   color: colors-ui-text-primary-disabled
   background-color: colors-ui-surface-panel
@@ -489,16 +497,17 @@
   padding-right: 0.38em
   white-space: nowrap
 
-// Left strip: text reads bottom-to-top.
+// Left strip: text reads top-to-bottom.
 #auto-hide-strip-left .auto-hide-strip-tab-label
-  writing-mode: vertical-lr
+  writing-mode: vertical-rl
   text-orientation: mixed
-  transform: rotate(180deg)
+  transform: none
 
-// Right strip: text reads top-to-bottom.
+// Right strip: text reads bottom-to-top (mirrored from left).
 #auto-hide-strip-right .auto-hide-strip-tab-label
   writing-mode: vertical-rl
   text-orientation: mixed
+  transform: rotate(180deg)
 
 // ---------------------------------------------------------------------------
 // Tab button group — close and unpin, always visible at the top of each tab.
@@ -578,24 +587,23 @@
 
 // ---------------------------------------------------------------------------
 // Overlay — the slide-in panel that appears when a strip tab is clicked.
-// Flush with the window edge, no border-radius, no margin/padding gap.
 // ---------------------------------------------------------------------------
 
 #auto-hide-overlay
   position: fixed
   // z-index: 101 — above the backdrop (98) and the strips (100).
   z-index: 101
-  // Use surface-panel to match the active strip tab, so the tab's box-shadow
-  // connection blends seamlessly into the overlay.
-  background-color: colors-ui-surface-panel
+  background-color: colors-ui-surface-primary-default
   border: none
-  border-radius: 0
+  border-radius: 0.36em
   box-shadow: none
   margin: 0
   padding: 0
   display: none
   flex-direction: column
-  overflow: hidden
+  // No overflow:hidden here — the resize handle must keep right-angle corners.
+  // Rounding is applied to #auto-hide-overlay-body instead, which clips only
+  // the panel content and leaves the handle unaffected.
   transition: transform 200ms ease
 
   &.visible
@@ -605,30 +613,24 @@
 // spans the full available dimension along that edge.
 
 // Left overlay: flush with the strip's right edge (2em from screen left).
-// The strip (z-index 100) sits above the overlay so the active-tab curves
-// are always visible against the strip background.
-// No border — the absolutely-positioned resize handle (4px, same background
-// color as GL splitters) serves as the visual separator, identical to the
-// docked panel divider.
 #auto-hide-overlay.auto-hide-overlay-left
   top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
   left: 2em
-  // Bottom tab strip is 2rem tall. Stop above it so the overlay doesn't overlap.
-  bottom: 2rem
+  bottom: 2rem  // stop above the bottom tab strip (2rem)
   width: 360px
 
 // Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
-  top: 2.27em  // matches #root-container top: 2.27em (the caption bar height)
+  top: 2.27em
   right: 2em
-  bottom: 2rem  // stop above the bottom tab strip (2rem)
+  bottom: 2rem
   width: 360px
 
 // Bottom overlay: sits above the tab strip, inset to match #ROOT left/right padding.
 #auto-hide-overlay.auto-hide-overlay-bottom
-  left: 0.25em   // matches #ROOT padding-left so content aligns with GL content
-  right: 0.25em  // matches #ROOT padding-right
-  bottom: 2rem  // stop above the bottom tab strip
+  left: 0.25em
+  right: 0.25em
+  bottom: 2rem
   height: 280px
 
 // ---------------------------------------------------------------------------
@@ -672,18 +674,29 @@
   height: 4px
   cursor: ns-resize
 
-// Push the overlay body away from the position:absolute resize handle so
-// the handle does not overdraw the edge of the content.
-// Mirrors the docked panels' #auto-hide-docked-{left,right}-content
-// padding-{right,left}: 4px and #auto-hide-docked-bottom-content padding-top: 4px.
+// The body carries the panel background and clips content to rounded corners.
+// The resize handle is outside the body (absolute in the outer overlay) so it
+// keeps right-angle corners and is not affected by this overflow:hidden.
+// box-shadow provides a subtle 1px outline that makes the rounded edges visible
+// even when the panel and the content behind it share similar dark colours.
+#auto-hide-overlay-body
+  background-color: colors-ui-surface-panel
+  border-radius: 0.36em
+  overflow: hidden
+  box-shadow: none
+
+// Use margin (not padding) to separate the body from the resize handle.
+// margin shrinks the body element itself, placing the handle visually OUTSIDE
+// the rounded body — it becomes a straight divider between panel and GL content,
+// not clipped or wrapped by the body's border-radius / box-shadow.
 .auto-hide-overlay-right #auto-hide-overlay-body
-  padding-left: 4px
+  margin-left: 4px
 
 .auto-hide-overlay-left #auto-hide-overlay-body
-  padding-right: 4px
+  margin-right: 4px
 
 .auto-hide-overlay-bottom #auto-hide-overlay-body
-  padding-top: 4px
+  margin-top: 4px
 
 // ---------------------------------------------------------------------------
 // Overlay header — hidden: the active strip tab acts as the panel header.

@@ -71,7 +71,7 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
   for key, option in self.options:
     let action = self.actions[key]
     let optionDom = kdom.document.createElement("div")
-    optionDom.class = cstring"context-menu-option"
+    optionDom.class = cstring"context-menu-option ct-menu-item"
     optionDom.addEventListener(cstring"click", proc(e: Event) =
       action()
       self.dom.toJs.classList.remove("visible"))
@@ -1148,8 +1148,12 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     let itemContainer = kdom.document.createElement("div")
     itemContainer.classList.add("context-menu-item-container")
     newElement.classList.add("context-menu-item")
+    newElement.classList.add("ct-menu-item")
     newElement.id = cstring(fmt"menu-item-{i}")
-    newElement.innerHTML = option.name
+    let labelEl = kdom.document.createElement("span")
+    labelEl.classList.add("ct-menu-item-label")
+    labelEl.innerHTML = option.name
+    cast[dom.Element](newElement).append(cast[dom.Element](labelEl))
     newElement.onclick = proc(ev: Event) {.nimcall.} =
       let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
       if targetId.startsWith("menu-item-"):
@@ -1158,8 +1162,8 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
           contextMenuHandlers[itemIndex](ev)
       cast[kdom.Element](dom.document.getElementById("context-menu-container")).style.display = "none"
     if option.hint != "":
-      let hint = kdom.document.createElement("div")
-      hint.classList.add("context-menu-hint")
+      let hint = kdom.document.createElement("span")
+      hint.classList.add("ct-menu-item-sublabel")
       hint.id = cstring(fmt"menu-hint-{i}")
       hint.innerHTML = option.hint
       cast[dom.Element](newElement).append(cast[dom.Element](hint))

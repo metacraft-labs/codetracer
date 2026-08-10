@@ -19,7 +19,7 @@ else:
     dialog = electron.dialog
     app* = cast[ElectronApp](electron.app)
     Menu* = electron.Menu
-  var electronDebug* = require("electron-debug")
+  var electronDebug*: js = try: require("electron-debug") except: undefined
 
 var
   callerProcessPid*: int = -1

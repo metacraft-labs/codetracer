@@ -197,7 +197,7 @@ body
 
 #root-container
   position: fixed
-  height: calc(100vh - 2.27em - 1.75rem)  // 1.75rem = bottom tab strip height
+  height: calc(100vh - 2.27em - 2rem)  // 2rem = #status-base height (2em at font-size:1rem)
   top: 2.27em
   left: 0
   right: 0
@@ -487,13 +487,23 @@ input:checked ~ .checkmark:after
     position: absolute;
     top: 100%
     right: 0 !important
-    font-size: 0.875rem
     border: 0.0625em solid colors-ui-border-tertiary
+    border-radius: 0.5em
+    overflow: hidden
 
     .layout-dropdown-node
+      font-size: 0.875em
       border-top: 0.0625em solid colors-ui-border-tertiary
       padding-left: 0.5em
       padding-right: 0.5em
+
+      &:first-child
+        border-top: none
+        border-radius: 0.5em 0.5em 0 0
+
+      &:last-child
+        border-bottom: none
+        border-radius: 0 0 0.5em 0.5em
 
       &:hover
         background-color: colors-ui-surface-primary-default-hover

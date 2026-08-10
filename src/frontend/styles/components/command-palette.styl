@@ -45,9 +45,13 @@
 
   .command-input-placeholder
     position: absolute
-    left: 4.6em
+    left: 1.875em
     right: 1em
+    top: 0
+    line-height: 2.875em
     pointer-events: none
+    font-size: 0.875rem
+    font-family: "SpaceGrotesk", sans-serif
     color: colors-ui-text-primary-body
     opacity: 0.45
     white-space: nowrap
@@ -62,18 +66,26 @@
     border: 0.0625em solid #4f4f4f
     border-top: 0
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
-    border-bottom-left-radius: 0.75em
-    border-bottom-right-radius: 0.75em
+    border-bottom-left-radius: 0.5em
+    border-bottom-right-radius: 0.5em
 
     &.hidden
       display: none
 
   .command-empty-overlay
-    padding: 0.75em 1em
-    color: colors-ui-text-primary-body
-    background: colors-ui-surface-base-panel
+    display: flex
+    align-items: center
+    width: 100%
+    box-sizing: border-box
+    height: 2.25em
+    padding: 0 0.75em
+    color: colors-ui-text-primary-body-subtle
+    background: colors-ui-surface-base-raised
+    font-family: "SpaceGrotesk"
     border: 0.0625em solid #4f4f4f
     border-top: 0
+    border-radius: 0 0 0.5em 0.5em
+    box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
 
     &.hidden
       display: none
@@ -122,7 +134,6 @@
 
   .command-result
     gap: 0.75em
-    font-size: 0.875em
     position: relative
     overflow: hidden
 
@@ -258,6 +269,7 @@
     max-width: 48em
     font-size: 0.75rem
     z-index: 25
+    position: relative  // anchor the absolutely-positioned dropdown to this element
 
     .command-input-row
       height: 1.75rem
@@ -270,8 +282,14 @@
       padding: 0 0.75rem
 
     .command-input-placeholder
-      left: 0.75rem
+      // Must match .ct-input-search-image padding-left (1.875em !important) so
+      // the ghost-text starts at the same x-position as the real input text.
+      // line-height matches .command-input-row height in this context (1.75rem)
+      // so text centers exactly as the native <input> element does.
+      left: 1.875em
       right: 0.75rem
+      top: 0
+      line-height: 1.75rem
 
     .command-results,
     .command-empty-overlay

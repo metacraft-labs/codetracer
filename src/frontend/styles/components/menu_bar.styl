@@ -8,7 +8,7 @@
   box-sizing: border-box
   -webkit-app-region: drag
   user-select: none
-  gap: 0.375em
+  gap: 0.5em
   height: 2.1em
   max-height: 2.1em
   min-width: 0
@@ -44,12 +44,11 @@
   cursor: pointer
 
   .menu-button-svg
-    width: 1.325em
-    height: 1.75em
+    width: 1.5em
+    height: 1.5em
     border-radius: 50%
     background-position: center
     background-repeat: no-repeat
-    background-size: 1em
 
     &.minimize
       background-image: WINDOW_MINIMIZE_ICON_PATH
@@ -118,6 +117,15 @@
     align-items: center
     justify-content: center
 
+    // No visual feedback on hover, active, or focus — the logo button is
+    // purely decorative/functional with no interactive state highlight.
+    &:hover:not(:disabled)
+      background-color: colors-ui-surface-primary-default !important
+    &:active
+      background-color: colors-ui-surface-primary-default !important
+    &:focus-visible:not(:disabled)
+      box-shadow: none !important
+
     #menu-logo-img
       width: 1.25em
       height: 1.25em
@@ -150,7 +158,7 @@
     margin-left: 6px
     background: colors-ui-surface-canvas
     border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.75em
+    border-radius: 0.5em
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
 
 
@@ -301,7 +309,7 @@
   #menu-elements
     width: 100%
     overflow: hidden
-    border-radius: 0.75em
+    border-radius: 0.5em
 
   .menu-node-container
     width: 100%
@@ -314,13 +322,17 @@
     padding: 0
     background: colors-ui-surface-canvas
     border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.75em
+    border-radius: 0.5em
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
     overflow: hidden
 
   #menu-elements, .menu-nested-elements
+    .menu-node-container:first-child > .ct-menu-item
+      border-radius: 0.5em 0.5em 0 0
+
     .menu-node-container:last-child > .ct-menu-item
       border-bottom: none
+      border-radius: 0 0 0.5em 0.5em
 
   .menu-enabled
     color: colors-ui-text-primary-body
@@ -335,6 +347,9 @@
     height: auto
     margin-top: 5px
     margin-bottom: 5px
+
+    &:empty
+      display: none
 
   #menu-search
     margin-left: 4px
@@ -395,29 +410,11 @@
     background-color: colors-ui-surface-input-default
 
   .menu-sub-group-separator
-    border: 0
-    // width: "calc(%s - 2px)" % MENU_NODE_WIDTH
-    height: 14px
-    margin: 0
-    background-color: colors-ui-surface-input-default
-
-    &::after
-      content: ""
-      display: block
-      width: 100%
-      height: 1px
-      background-color: colors-ui-surface-primary-secondary
-      position: relative
-      top: 50%
+    display: none
 
   .menu-active-node
     background-color: colors-ui-surface-input-default
-
-    .menu-node
-      background-color: colors-ui-surface-primary-tertiary
-
-    .menu-node-icon
-      opacity: 1
+    // .ct-menu-item--active inside handles the blue focus bg via menu_item.styl
 
   .menu-active-search-result
     background-color: colors-ui-surface-primary-tertiary

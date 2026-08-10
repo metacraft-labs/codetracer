@@ -1,6 +1,27 @@
 .state-component
   font-family: "SpaceMono" !important
 
+.isonim-state
+  // Add 0.5em horizontal breathing room to all non-value elements.
+  // The .value-components-container is excluded so its scrollbar
+  // remains flush with the right edge of the panel.
+  .code-state-line,
+  #gdb-evaluate,
+  .state-tabs,
+  .loading-indicator,
+  .value-components-container
+    padding-left: 0.25em
+    padding-right: 0.25em
+
+  .value-components-container
+    padding-right: 0
+    overflow-x: auto
+
+  // Prevent value rows from wrapping when the panel is narrow;
+  // the container scrolls horizontally instead.
+  .value-view
+    flex-wrap: nowrap
+
 .events-bottom
   height: 12.5em
   float: left

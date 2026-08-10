@@ -131,7 +131,10 @@ proc onRestoreWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.restore()
 
 proc onMaximizeWindow*(sender: js, response: JsObject) {.async.} =
-  mainWindow.maximize()
+  if cast[bool](mainWindow.isMaximized()):
+    mainWindow.unmaximize()
+  else:
+    mainWindow.maximize()
 
 proc onCloseWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.close()

@@ -200,7 +200,7 @@ method onUp*(self: MenuComponent) {.async.} =
     if self.activeSearchIndex > 0:
       self.activeSearchIndex -= 1
 
-  self.data.redraw()
+  self.requestMenuRender()
 
 method onDown*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
@@ -212,15 +212,17 @@ method onDown*(self: MenuComponent) {.async.} =
     if self.activeSearchIndex < self.searchResults.len:
       self.activeSearchIndex += 1
 
-  self.data.redraw()
+  self.requestMenuRender()
 
 method onRight*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
   enterFolder(self)
+  self.requestMenuRender()
 
 method onLeft*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
   closeFolder(self)
+  self.requestMenuRender()
 
 method onEnter*(self: MenuComponent) {.async.} =
   self.enterElement()
@@ -310,7 +312,9 @@ when defined(js):
         (node.menuOs and ord(MenuNodeOSMacOS)))
 
   proc activeNodeClass(self: MenuComponent; path: seq[int]): string =
-    if path.len == 0:
+    # Only highlight with the active class during keyboard navigation.
+    # Mouse hover is handled purely by CSS :hover on .ct-menu-item.
+    if path.len == 0 or not self.keyNavigation:
       return ""
     let depth = path.len - 1
     let index = path[^1]
@@ -387,7 +391,14 @@ when defined(js):
       for i in 1..<depth:
         left += cast[int](jq(cstring(fmt"#menu-nested-elements-{i}")).toJs.clientWidth)
 
-    fmt"top: {value * 28 + separators * 28 - 56}px; left: calc({left}px + {2 * depth}px)"
+    # Read the actual rendered item height so the submenu position scales
+    # correctly with MENU_FONT_SIZE (ct-menu-item uses em-based min-height).
+    # Fallback to 28 only if the DOM measurement isn't available yet.
+    let itemH = block:
+      let h = cast[int](jq(cstring"#menu-elements .ct-menu-item").toJs.offsetHeight)
+      if h > 0: h else: 28
+
+    fmt"top: {value * itemH + separators * itemH - 2 * itemH}px; left: calc({left}px + {2 * depth}px)"
 
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
     result.rootNodes = @[]
@@ -568,3 +579,5 @@ when defined(js):
         self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
       self.debug.requestDebugControlsRender()
     wireMenuKeyboard(container, self)
+    if self.keyNavigation:
+      focusNavigationSoon()
