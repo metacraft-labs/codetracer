@@ -102,15 +102,62 @@ fi
 if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
 	fail_auth_contract "effective-auth-header"
 fi
+# The invariant is that *the lldb-sys credential* does not widen to any other
+# URL. It is checked twice, because the two readings answer different
+# questions and only both together say what is needed.
+#
+# M69 — why this is no longer "no header matches at all". That is what it used
+# to assert, and it was falsified by something entirely legitimate:
+# `actions/checkout` defaults to `persist-credentials: true` and writes
+#
+#     [http "https://github.com/"]
+#         extraheader = AUTHORIZATION: basic <the run's own GITHUB_TOKEN>
+#
+# into the checkout's `.git/config`. `git config --get-urlmatch` reads the
+# repository config too, and `https://github.com/` is a prefix of every URL
+# below, so all three matched and the gate failed `auth-header-url-boundary`
+# on every run (30726348404, 31180327493, 31385899773) while the property it
+# exists to protect was intact — the lldb-sys URL still resolved to the
+# lldb-sys header, and nothing else did.
+#
+# Asserting "no header at all" was always stronger than the contract and was
+# never in the gate's power to guarantee: the ambient header belongs to the
+# checkout, not to this script.
+git_isolated_dir="$(mktemp -d)"
+if git -C "$git_isolated_dir" rev-parse --git-dir >/dev/null 2>&1; then
+	# TMPDIR inside a work tree would silently reintroduce repository config
+	# and make reading (1) below vacuous in the other direction.
+	rm -rf "$git_isolated_dir"
+	fail_auth_contract "auth-boundary-probe-isolation"
+fi
 for unauthenticated_url in \
 	"https://github.com/metacraft-labs/" \
 	"https://github.com/metacraft-labs/codetracer.git" \
 	"https://github.com/metacraft-labs/lldb-sys.rs.git-lookalike"; do
-	if git config --get-urlmatch http.extraHeader "$unauthenticated_url" >/dev/null 2>&1; then
+	# (1) Against only the configuration this gate installs — globals are
+	#     /dev/null and the probe runs outside any work tree, so the inline
+	#     GIT_CONFIG_* slots are the whole config stack — nothing may match.
+	#     This is the original invariant, now measured against the config the
+	#     gate actually controls. Widening GIT_CONFIG_KEY_0 to, say,
+	#     `https://github.com/metacraft-labs/` fires here.
+	if git -C "$git_isolated_dir" config --get-urlmatch http.extraHeader \
+		"$unauthenticated_url" >/dev/null 2>&1; then
+		rm -rf "$git_isolated_dir"
 		fail_auth_contract "auth-header-url-boundary"
+	fi
+	# (2) In the real environment, where the checkout's own credential is
+	#     present: whatever header applies to these URLs, it must not be the
+	#     lldb-sys one. This is the leak that matters, and it stays detectable
+	#     no matter what else is configured.
+	if [[ $(git config --get-urlmatch http.extraHeader \
+		"$unauthenticated_url" 2>/dev/null) == "$cargo_auth_header" ]]; then
+		rm -rf "$git_isolated_dir"
+		fail_auth_contract "auth-header-credential-leak"
 	fi
 done
 unset unauthenticated_url
+rm -rf "$git_isolated_dir"
+unset git_isolated_dir
 
 # Git's URL matching intentionally applies a URL-specific header to request
 # paths below that URL (for example /info/refs). Redirects are disabled above;

@@ -539,11 +539,98 @@
           name = "backend-manager";
           pname = "backend-manager";
 
+          # NOTE: the source of this derivation is the CRATE, not the
+          # repository. That is deliberate (nothing else in the tree is a
+          # build input of ``session-manager``) but it means the sandbox has
+          # no ``scripts/``, no sibling repos, no browser and no network --
+          # see ``checkPhase`` below.
           src = ../../src/backend-manager;
 
           cargoLock = {
             lockFile = ../../src/backend-manager/Cargo.lock;
           };
+
+          doCheck = true;
+          checkPhase = ''
+            runHook preCheck
+
+            # M69. ``buildRustPackage`` runs the crate's whole test suite
+            # here, and since 2026-08-01 one of those tests cannot run in a
+            # build sandbox at all:
+            #
+            #   browser_stream_host::tests::
+            #     verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+            #
+            # It reads a *real* browser recording, and that recording is
+            # deliberately not committed -- commit 5dc395c1 replaced the
+            # committed fixtures with ``scripts/materialize-recording.sh``,
+            # which records the three-tier demo from the tree under test:
+            # build the WASM tier, instrument it with
+            # ``codetracer-wasm-instrumenter``, bundle it, run the JS tier
+            # through ``codetracer-js-recorder``, and drive headless
+            # Chromium. The rationale for producing rather than committing
+            # is sound and is not in question; the consequence is that the
+            # test needs the repository, two sibling checkouts, a cargo
+            # wasm32 target, node and a browser.
+            #
+            # This sandbox has none of them and cannot be given them: it is
+            # network-isolated by construction and its source is the crate.
+            # Until this phase was written the failure showed up as
+            #
+            #   could not run /scripts/materialize-recording.sh:
+            #     No such file or directory (os error 2)
+            #
+            # -- the test's repo-root walk (``CARGO_MANIFEST_DIR/../..``)
+            # landing on ``/`` -- which took out ``backend-manager.drv`` and
+            # with it every job that builds the app: nix-build, dev-build,
+            # appimage-build, dmg-build, test-ui-tests, test-ui-tests-rr.
+            # Reproduced locally with ``nix build .#backend-manager`` and in
+            # CI runs 30726348404 / 31385899773.
+            #
+            # The test is NOT weakened and NOT skipped: it keeps every
+            # assertion, and it keeps running under ``test-non-gui``
+            # (``just test`` -> ``just test-rust`` -> ``cargo nextest run
+            # --release`` inside the checkout), which is a REQUIRED job in
+            # ci/verdict/required-jobs.txt. What changes is only that a
+            # *packaging* derivation stops pretending to be a lane that can
+            # host it. This mirrors the ``db-backend`` derivation above,
+            # which excludes its cross-language flow tests for the same
+            # reason and points at the job that does run them.
+            #
+            # Two guards keep the exclusion honest -- it must stay exactly
+            # one test wide, and it must never become a no-op:
+            listing=$(cargo test --release --offline -- --list)
+            listed=$(printf '%s\n' "$listing" | grep -c ': test$')
+
+            excluded=browser_stream_host::tests::verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+            if ! printf '%s\n' "$listing" | grep -qx "$excluded: test"; then
+              echo "ERROR: $excluded is not in this crate's test list." >&2
+              echo "The exclusion below would silently filter nothing. If the test was" >&2
+              echo "renamed, rename it here; if it was deleted, delete this phase." >&2
+              exit 1
+            fi
+
+            output=$(cargo test --release --offline -- --skip "$excluded" 2>&1) || {
+              printf '%s\n' "$output"
+              exit 1
+            }
+            printf '%s\n' "$output"
+
+            # ``--list`` counts ``#[ignore]``d tests too, so account for them
+            # explicitly rather than letting them look like lost coverage.
+            accounted=$(printf '%s\n' "$output" |
+              sed -n 's/^test result: ok\. \([0-9]*\) passed; [0-9]* failed; \([0-9]*\) ignored.*/\1 \2/p' |
+              awk '{ total += $1 + $2 } END { print total + 0 }')
+            if [ "$accounted" -ne "$((listed - 1))" ]; then
+              echo "ERROR: accounted for $accounted tests, expected $((listed - 1))" >&2
+              echo "(= $listed listed, minus the one that needs a repository)." >&2
+              echo "The exclusion has grown, or tests stopped reporting. Coverage in" >&2
+              echo "this lane must not shrink quietly." >&2
+              exit 1
+            fi
+
+            runHook postCheck
+          '';
         };
 
         ctRemote = stdenv.mkDerivation rec {

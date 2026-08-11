@@ -1985,9 +1985,77 @@ struct FunctionRecordOnDisk {
 /// `scripts/materialize-recording.sh` for the cache and its key.
 #[cfg(test)]
 mod tests_support {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
     use std::sync::{Mutex, OnceLock};
+
+    /// Files that identify a directory as the CodeTracer checkout rather
+    /// than as whatever else happens to sit two levels above this crate.
+    ///
+    /// The materialiser is the one the tests below actually invoke; the
+    /// manifest is there so a directory that merely carried a similarly
+    /// named script could not pass for the repository.
+    pub const REPO_ROOT_MARKERS: [&str; 2] = [
+        "scripts/materialize-recording.sh",
+        "src/backend-manager/Cargo.toml",
+    ];
+
+    /// The CodeTracer checkout that owns `manifest_dir`, or an
+    /// explanation of why `manifest_dir` does not sit inside one.
+    ///
+    /// # Why this is a verified lookup rather than `join("../..")`
+    ///
+    /// It used to be exactly that join, followed by `canonicalize()` and
+    /// nothing else, and the result was fed straight to `Command::new`.
+    /// Two levels up from the crate directory is the repository root only
+    /// when the crate is being tested *inside a checkout*. It is not when
+    /// the crate is the whole source tree, which is precisely the shape
+    /// `pkgs.rustPlatform.buildRustPackage` gives it: `nix/packages/default.nix`
+    /// passes `src = ../../src/backend-manager`, so the sandbox unpacks the
+    /// crate to `/build/source`, `../..` canonicalises to `/`, and the test
+    /// reported
+    ///
+    /// ```text
+    /// could not run /scripts/materialize-recording.sh: No such file or directory
+    /// ```
+    ///
+    /// which reads as a missing file rather than as "this build has no
+    /// repository" — and cost the campaign a diagnosis. It is also unsafe
+    /// in the other direction: had *any* `scripts/materialize-recording.sh`
+    /// existed at the misresolved root, the tests would have silently
+    /// executed it and believed the recordings it printed.
+    ///
+    /// So the root is now *verified*, and the error names the crate
+    /// directory, the directory that was derived from it, and the marker
+    /// that was absent.
+    pub fn locate_repo_root(manifest_dir: &Path) -> Result<PathBuf, String> {
+        let candidate = manifest_dir.join("../..");
+        let root = candidate.canonicalize().map_err(|e| {
+            format!(
+                "the CodeTracer repository root should be two directories above the \
+                 backend-manager crate ({}), but {} could not be resolved: {e}",
+                manifest_dir.display(),
+                candidate.display(),
+            )
+        })?;
+        for marker in REPO_ROOT_MARKERS {
+            if !root.join(marker).exists() {
+                return Err(format!(
+                    "{} is not a CodeTracer checkout: it has no {marker}.\n\
+                     It was derived as two directories above the backend-manager \
+                     crate ({}).\n\
+                     These tests record their fixtures from the repository, so they \
+                     need the repository — a build whose source is the crate alone \
+                     (for example the `backend-manager` Nix derivation, whose src is \
+                     `src/backend-manager`) cannot run them, and must not run them \
+                     against whatever else is at that path.",
+                    root.display(),
+                    manifest_dir.display(),
+                ));
+            }
+        }
+        Ok(root)
+    }
 
     /// Absolute path of a directory holding `frontend.ct`,
     /// `frontend-wasm.ct` and `backend.ct`, recording them first if this
@@ -2004,10 +2072,8 @@ mod tests_support {
             return path.clone();
         }
 
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .expect("resolve the repository root from the backend-manager manifest directory");
+        let repo_root = locate_repo_root(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap_or_else(|reason| panic!("{reason}"));
         let script = repo_root.join("scripts/materialize-recording.sh");
         let output = Command::new(&script)
             .arg("cross-process-three-trace")
@@ -2029,6 +2095,98 @@ mod tests_support {
         );
         *guard = Some(path.clone());
         path
+    }
+}
+
+/// Contracts for [`tests_support::locate_repo_root`].
+///
+/// These need nothing but a temporary directory, so unlike the recording
+/// tests they run in *every* lane that compiles this crate — including the
+/// `backend-manager` Nix derivation, whose sandbox is exactly the
+/// environment the misresolution used to go unnoticed in.
+#[cfg(test)]
+mod repo_root_tests {
+    use super::tests_support::{REPO_ROOT_MARKERS, locate_repo_root};
+    use tempfile::TempDir;
+
+    /// Build `<tmp>/src/backend-manager` and whichever markers are asked
+    /// for, and return the tempdir plus that crate directory.
+    fn checkout_with(markers: &[&str]) -> (TempDir, std::path::PathBuf) {
+        let tmp = TempDir::new().expect("create tempdir");
+        let crate_dir = tmp.path().join("src/backend-manager");
+        std::fs::create_dir_all(&crate_dir).unwrap();
+        for marker in markers {
+            let path = tmp.path().join(marker);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"").unwrap();
+        }
+        (tmp, crate_dir)
+    }
+
+    #[test]
+    fn a_real_checkout_resolves_to_its_root() {
+        let (tmp, crate_dir) = checkout_with(&REPO_ROOT_MARKERS);
+        let root = locate_repo_root(&crate_dir).expect("a marked checkout must resolve");
+        assert_eq!(
+            root,
+            tmp.path().canonicalize().unwrap(),
+            "the root two levels above the crate is the checkout"
+        );
+    }
+
+    /// The regression: a crate built as its own source tree.
+    ///
+    /// `../..` from `<tmp>/src/backend-manager` is `<tmp>`, which exists
+    /// and canonicalises fine — so the old code accepted it and went on to
+    /// run `<tmp>/scripts/materialize-recording.sh`. The failure must name
+    /// what is missing, not merely fail to spawn a file.
+    #[test]
+    fn a_directory_that_is_not_a_checkout_is_refused_by_name() {
+        let (_tmp, crate_dir) = checkout_with(&[]);
+        let err = locate_repo_root(&crate_dir)
+            .expect_err("a directory with no CodeTracer markers must not pass as the repo root");
+        assert!(
+            err.contains("scripts/materialize-recording.sh"),
+            "the diagnostic must name the missing marker; got: {err}"
+        );
+        assert!(
+            err.contains("is not a CodeTracer checkout"),
+            "the diagnostic must say what the directory failed to be; got: {err}"
+        );
+        assert!(
+            err.contains(&crate_dir.display().to_string()),
+            "the diagnostic must name the crate directory it started from; got: {err}"
+        );
+    }
+
+    /// A lookalike is not a checkout.
+    ///
+    /// Every marker is required, so a directory that merely happens to
+    /// carry a `scripts/materialize-recording.sh` cannot be mistaken for
+    /// the repository and have that script executed.
+    #[test]
+    fn one_marker_is_not_enough_to_pass_for_a_checkout() {
+        let (_tmp, crate_dir) = checkout_with(&["scripts/materialize-recording.sh"]);
+        let err = locate_repo_root(&crate_dir)
+            .expect_err("a partially marked directory must not pass as the repo root");
+        assert!(
+            err.contains("src/backend-manager/Cargo.toml"),
+            "the diagnostic must name the marker that was missing; got: {err}"
+        );
+    }
+
+    /// A path that does not exist is a returned error, not a panic inside
+    /// the resolver: the caller owns the message.
+    #[test]
+    fn an_unresolvable_path_is_reported_rather_than_unwrapped() {
+        let (tmp, _crate_dir) = checkout_with(&REPO_ROOT_MARKERS);
+        let absent = tmp.path().join("no/such/crate/dir");
+        let err = locate_repo_root(&absent).expect_err("a non-existent crate dir cannot resolve");
+        assert!(
+            err.contains("could not be resolved"),
+            "the diagnostic must distinguish an unresolvable path from an unmarked \
+             one; got: {err}"
+        );
     }
 }
 

@@ -118,6 +118,11 @@ run_negative_case() {
 	# shellcheck disable=SC1091
 	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
 
+	# These assignments mutate variables that
+	# ``visual-replay-private-cargo-env.sh`` (sourced just above) has
+	# already exported, so the child ``git`` sees them; shellcheck cannot
+	# follow that across the source boundary and reads them as unused.
+	# shellcheck disable=SC2034
 	case "$case_name" in
 	prompt) GIT_TERMINAL_PROMPT=1 ;;
 	global-config) GIT_CONFIG_GLOBAL="$TEST_ROOT/hostile.gitconfig" ;;
@@ -158,10 +163,11 @@ SECOND_GIT_SOURCE
 	esac
 	set +e
 	output="$(
-		CARGO_CALL_LOG="$TEST_ROOT/cargo-negative-$case_name.args" \
-			PATH="$TEST_ROOT/bin:$PATH" \
-			bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
-			"$workspace" 2>&1
+		cd "${NEGATIVE_CASE_CWD:-$PWD}" &&
+			CARGO_CALL_LOG="$TEST_ROOT/cargo-negative-$case_name.args" \
+				PATH="$TEST_ROOT/bin:$PATH" \
+				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+				"$workspace" 2>&1
 	)"
 	status=$?
 	set -e
@@ -172,7 +178,102 @@ SECOND_GIT_SOURCE
 	fi
 }
 
+# ---------------------------------------------------------------------------
+# M69: the ambient checkout credential.
+#
+# `actions/checkout` defaults to `persist-credentials: true` and writes
+#
+#     [http "https://github.com/"]
+#         extraheader = AUTHORIZATION: basic <the run's own GITHUB_TOKEN>
+#
+# into the checkout's `.git/config`. `git config --get-urlmatch` consults the
+# repository config, and `https://github.com/` is a prefix of every URL the
+# boundary check probes, so the old "no header may match at all" formulation
+# failed on every real run while the property it protects was intact.
+#
+# Neither of these is a mock: each builds a real git repository and writes the
+# real configuration actions/checkout writes, then runs the preflight as a
+# subprocess with that repository as its working directory — exactly how CI
+# invokes it.
+# ---------------------------------------------------------------------------
+AMBIENT_BASIC="$(printf 'x-access-token:%s' "ambient-checkout-token-$$" | base64 | tr -d '\r\n')"
+
+make_checkout_like_repo() {
+	# $1 = directory, $2 = the extraHeader value actions/checkout persisted.
+	local dir="$1" header="$2"
+	mkdir -p "$dir"
+	git -C "$dir" init -q .
+	git -C "$dir" config "http.https://github.com/.extraheader" "$header"
+}
+
+run_ambient_credential_positive_case() {
+	# The reproduction: an unrelated, legitimate credential scoped to
+	# https://github.com/ must not fail the gate.
+	local workspace="$TEST_ROOT/workspace/ambient-ok"
+	local repo="$TEST_ROOT/ambient-ok-checkout"
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-ambient-ok"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	make_checkout_like_repo "$repo" "AUTHORIZATION: basic ${AMBIENT_BASIC}"
+
+	(
+		cd "$repo" &&
+			CARGO_CALL_LOG="$TEST_ROOT/cargo-ambient-ok.args" \
+				PATH="$TEST_ROOT/bin:$PATH" \
+				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+				"$workspace"
+	) || {
+		echo "Private Cargo preflight rejected a checkout carrying its own" >&2
+		echo "actions/checkout credential; that is not a leak of the lldb-sys" >&2
+		echo "header and must not fail the gate." >&2
+		exit 1
+	}
+}
+
+run_ambient_credential_leak_case() {
+	# The leak that matters: the lldb-sys header itself, applied to a broader
+	# URL by the repository config, must be caught.
+	local workspace="$TEST_ROOT/workspace/ambient-leak"
+	local repo="$TEST_ROOT/ambient-leak-checkout"
+	local output status
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-ambient-leak"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	make_checkout_like_repo "$repo" "$GIT_CONFIG_VALUE_0"
+
+	set +e
+	output="$(
+		cd "$repo" &&
+			CARGO_CALL_LOG="$TEST_ROOT/cargo-ambient-leak.args" \
+				PATH="$TEST_ROOT/bin:$PATH" \
+				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+				"$workspace" 2>&1
+	)"
+	status=$?
+	set -e
+	if ((status == 0)) || [[ $output != *"auth-header-credential-leak"* ]]; then
+		echo "Private Cargo preflight did not catch the lldb-sys credential" >&2
+		echo "being applied to https://github.com/ by the repository config." >&2
+		printf '%s\n' "$output" >&2
+		exit 1
+	fi
+	# The failure must not print the credential it is complaining about.
+	if [[ $output == *"$SENTINEL_BASIC"* || $output == *"$SENTINEL"* ]]; then
+		echo "Private Cargo preflight echoed the credential in its diagnostic." >&2
+		exit 1
+	fi
+	# This fixture had to write the sentinel header into a git config on
+	# purpose — that IS the leak being reproduced. Remove it here so the
+	# end-of-run sweep below keeps its meaning: "nothing the preflight
+	# touched retained the credential", rather than "no test ever wrote it".
+	rm -rf "$repo"
+}
+
 run_positive_case
+run_ambient_credential_positive_case
+run_ambient_credential_leak_case
 run_negative_case prompt "interactive-credential-blocking"
 run_negative_case global-config "config-file-isolation"
 run_negative_case count "inline-config-count"

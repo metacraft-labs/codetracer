@@ -20,9 +20,70 @@ jobs:
   # `eph-win-x64` is the DIY-Windows runner. `eph-win-arm64` is intentionally NOT
   # added here (env.ps1 ARM support is unverified in CI and that class still
   # queues); revisit once eph-win-arm64 is live.
+  #
+  # M69 — WHY EVERY eph-win-x64 JOB STARTS WITH "Ensure Git and Git Bash":
+  # the migration above moved the runner label but inherited the GitHub-hosted
+  # `windows-latest` *image contract*, and `eph-win-x64` does not honour it.
+  # The garm-provisioned image ships neither `git` nor `bash` on PATH, which
+  # took out three of the four Windows jobs in three different places:
+  #
+  #   windows-bootstrap-smoke   "Validate env.sh syntax"   -> bash: command not found
+  #   windows-named-pipe-tests  "Install Rust toolchain"   -> bash: command not found
+  #                             (dtolnay/rust-toolchain's own step is shell: bash)
+  #   windows-rust-components   "Checkout"                 -> Input 'submodules' not
+  #                             supported when falling back to the GitHub REST API
+  #
+  # All three logs also carry actions/checkout's tell: "The repository will be
+  # downloaded using the GitHub REST API / To create a local Git repository
+  # instead, add Git 2.18 or higher to the PATH." Runs 30726348404, 31180327493
+  # and 31385899773 fail identically, so this is the steady state of the lane,
+  # not a one-off.
+  #
+  # `ci/ensure-git-for-checkout.ps1` already solved exactly this — it finds or
+  # provisions a pinned, digest-verified PortableGit and puts BOTH `cmd/`
+  # (git.exe) and `bin/` (bash.exe) on GITHUB_PATH. It was wired into
+  # `origin-dap-windows` only, where its step is the one Windows step that has
+  # been passing throughout. Every eph-win-x64 job now runs it, first, before
+  # checkout: the jobs that check out submodules need git *for* the checkout,
+  # and the jobs whose first real step is `shell: bash` need bash before it.
+  # It is fetched over HTTPS at the immutable `github.sha` rather than run from
+  # the tree because at that point there is no tree — the checkout is the step
+  # it is making possible.
+  #
+  # `ci/test/windows-runner-bootstrap-test.sh` pins this: it fails if any
+  # eph-win-x64 job stops opening with the bootstrap.
   windows-bootstrap-smoke:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -231,7 +292,9 @@ jobs:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (materialized Python, Windows)
     steps:
-      - name: Ensure Git supports recursive checkout
+      # See the eph-win-x64 note at the top of this file. This is where the
+      # bootstrap started, and for a long time it was the only job that had it.
+      - name: Ensure Git and Git Bash are on PATH
         shell: powershell
         env:
           CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
@@ -386,6 +449,39 @@ jobs:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
     steps:
+      # See the eph-win-x64 note at the top of this file. This job is
+      # schedule/dispatch-gated, so it has never run on the migrated runner
+      # class; it checks out with `submodules: recursive` and would hit the
+      # same REST-API fallback the moment it is triggered.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -510,6 +606,38 @@ jobs:
   windows-named-pipe-tests:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
+      # See the eph-win-x64 note at the top of this file. Without this,
+      # `dtolnay/rust-toolchain@stable` dies in its own `shell: bash` step
+      # with `bash: command not found` before rustup is ever consulted.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -524,6 +652,39 @@ jobs:
   windows-rust-components:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
+      # See the eph-win-x64 note at the top of this file. This job checks out
+      # with `submodules: recursive`, which actions/checkout can only honour
+      # through a real git; without one it falls back to the REST API and
+      # fails outright with "Input 'submodules' not supported".
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -568,9 +729,22 @@ jobs:
         #
         # We don't need WSL on this runner -- removing the stub
         # lets CreateProcessW fall through to Git for Windows'
-        # ``bash.exe`` (added to PATH below), which is what the
-        # build.rs comment ("Ensure Git for Windows bash is on
-        # PATH") actually wants.
+        # ``bash.exe``, which the "Ensure Git and Git Bash are on
+        # PATH" step above has already placed on GITHUB_PATH. That is
+        # what the build.rs comment ("Ensure Git for Windows bash is
+        # on PATH") actually wants.
+        #
+        # M69: this step used to append the literal
+        # ``C:\Program Files\Git\bin`` unconditionally. That is the
+        # GitHub-hosted ``windows-latest`` layout; on ``eph-win-x64``
+        # the directory does not exist, and the bootstrap step instead
+        # provisions PortableGit under RUNNER_TEMP. Appending a
+        # non-existent directory is silent, so the mismatch would not
+        # have shown up here -- it showed up as ``bash: command not
+        # found`` in whichever step needed bash first. The path is now
+        # added only when it is really there, so a runner that does
+        # ship Git for Windows keeps the old behaviour and one that
+        # does not relies on the bootstrap rather than on a lie.
         shell: pwsh
         run: |
           $wslStub = "$env:SystemRoot\System32\bash.exe"
@@ -579,8 +753,20 @@ jobs:
             icacls $wslStub /grant "Administrators:(F)" | Out-Null
             Remove-Item -Force $wslStub
           }
-          # Add Git Bash bin dir so ``bash`` resolves to Git for Windows.
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+          $gitForWindowsBin = "C:\Program Files\Git\bin"
+          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
+          }
+          # Whatever supplied it, `bash` must resolve now: every step below
+          # this one is `shell: bash`, and a missing bash there reads as a
+          # build failure rather than as a missing tool.
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
+                  "should have provisioned Git Bash; every step below this one needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
@@ -682,6 +868,40 @@ jobs:
     needs:
       - windows-rust-components
     steps:
+      # See the eph-win-x64 note at the top of this file. This job has been
+      # `skipped` behind windows-rust-components throughout the blackout, so it
+      # has never reported — but it checks out with `submodules: recursive` and
+      # runs `shell: bash` steps, so it would fail exactly as that job did the
+      # moment it is unblocked.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -1208,6 +1428,34 @@ jobs:
         uses: ./.github/actions/setup-isonim-siblings
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # M69. Nine ViewModel suites -- the eight request-panel ones plus
+        # request_span_conformance_test -- ``import codetracer_ctfs/container``
+        # to read a real CTFS container. ``config.nims`` resolves that module
+        # from ``$CODETRACER_TRACE_FORMAT_NIM_SRC`` or from the workspace
+        # sibling ``../codetracer-trace-format-nim/src``, and this job set up
+        # neither, so all nine failed to compile with
+        #
+        #   Error: cannot open file: codetracer_ctfs/container
+        #
+        # in every run (30726348404, 31180327493, 31385899773). They compile
+        # and pass in a normal workspace, which is why the gap survived: the
+        # only environment that lacked the sibling was the one nobody was
+        # reading. Cloned here with ``clone-repo``, the same way this job
+        # already gets ``codetracer-js-recorder``, rather than through
+        # ``setup-dev-env`` -- that route additionally requires a published
+        # workspace lock, which is a separate unresolved problem (M68) and
+        # would make this job depend on it for no benefit.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          # That repo's default branch is `dev` (confirmed against the API);
+          # `main` is not where its work lands.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -3124,6 +3372,15 @@ jobs:
         # they are checked on every run, against fixtures captured from
         # the real broken runs this gate was built for.
         run: bash ci/verdict/required-jobs-test.sh
+
+      - name: Assert the Windows lane provisions its own git and bash
+        # M69. The eph-win-x64 image ships neither; five of the six Windows
+        # jobs did not run the bootstrap that supplies them, and the lane
+        # failed in three places that looked unrelated. This is a static
+        # contract over this workflow file, so it can be enforced from a
+        # Linux runner -- which matters, because the Windows lane had no
+        # signal at all for the months this went unnoticed.
+        run: bash ci/test/windows-runner-bootstrap-test.sh
 
       - name: Assert the required jobs actually ran
         env:

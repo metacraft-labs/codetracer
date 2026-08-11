@@ -207,6 +207,28 @@ with pkgs;
     tup
     fuse
 
+    # M69: `fuse` is FUSE **2** and ships `fusermount`. The `tup` above
+    # links `libfuse3.so.4` and spawns `fusermount3`, which only FUSE 3
+    # provides, so the shell declared a helper tup does not use and
+    # omitted the one it does. `just build-once` therefore died in the
+    # `cross-process-linux` job with
+    #
+    #   posix_spawn(p)() for fusermount3 failed: No such file or directory
+    #   tup error: Timed out waiting for the FUSE file-system to be ready.
+    #   tup error: Unable to mount FUSE on .tup/mnt
+    #
+    # (run 30726348404). It works on a NixOS workstation only because
+    # /run/wrappers/bin/fusermount3 leaks in from the host — the same
+    # accident that hid the missing `direnv` in M67, and the same fix:
+    # declare it.
+    #
+    # NOTE: the store's fusermount3 is not setuid. On a host where
+    # unprivileged FUSE mounting needs the setuid wrapper, this turns an
+    # unfindable binary into a permission error that names the real
+    # requirement, which is the honest failure; it does not by itself
+    # grant the mount.
+    fuse3
+
     # ctRemote is the codetracer remote replay helper used by some
     # CI lanes' integration tests. Not currently packaged for
     # Darwin shells.

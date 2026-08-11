@@ -2220,16 +2220,47 @@ test-vm-native: vm-test-prereqs
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-native-$name"
     echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
+    # Compile and run as SEPARATE steps.
+    #
+    # This used to be a single `nim c -r`, which conflated three
+    # outcomes into one bucket. `welcome_screen_vm_test` compiles
+    # perfectly and then dies at process start with
+    #
+    #     could not load: libsqlite3.so(|.0)
+    #
+    # because the test dlopen's sqlite through db_connector. The old
+    # reporting called that a "COMPILE ERROR" and then printed only
+    # lines matching `Error:` — and that diagnostic does not match, so
+    # the one line naming the missing library was thrown away and all
+    # anybody saw was `execution of an external program failed`. An
+    # environmental gap must name what is missing; this one hid it.
+    #
+    # Splitting the steps also lets the run inherit CT_LD_LIBRARY_PATH
+    # (the dev shell's sqlite/pcre/glib/openssl/zstd set) the same way
+    # `test-bpf-native-integration` already does, WITHOUT putting those
+    # libraries in front of the Nim compiler's own loader path.
+    if ! compile_output=$(nim c --hints:off \
       --path:src/frontend/viewmodel \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1); then
+      echo "COMPILE ERROR"
+      echo "$compile_output" | grep 'Error:' | head -2 | sed 's/^/    /'
+      failed=$((failed + 1))
+      continue
+    fi
+    ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
+    output=$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      "$cache/$name" 2>&1) || true
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR"
-      echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'
+      # It built, so this is not a compile error: the binary could not
+      # run, or ran and reported nothing. Either way show its whole
+      # output — the reason is in there, and filtering is what lost it
+      # last time.
+      echo "DID NOT RUN (compiled, but produced no test results)"
+      echo "$output" | head -20 | sed 's/^/    /'
       failed=$((failed + 1))
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"

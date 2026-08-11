@@ -465,15 +465,40 @@ suite "EventLogVM isLoading":
 
 suite "EventLogVM auto-load effect":
 
-  test "changing rrTicks triggers event log request":
+  test "the event log loads once on creation, before any debugger position":
+    # The auto-load effect fires on its first evaluation whether or not
+    # the debugger has reported a position yet (`hasDebuggerPosition or
+    # not hasFired`). That is deliberate: the panel must show the
+    # recording's events as soon as it opens, and a trace whose entry
+    # stop is at rrTicks 0 would otherwise render permanently empty.
+    #
+    # These two tests used to assert the opposite — that nothing loads
+    # until the debugger moves. That contract was retired when the
+    # marker-rendering work made the first evaluation unconditional, and
+    # the assertions were left behind.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)
       drain()
 
-      # Initially rrTicks is 0 — no request should fire.
-      let initialCount = mock.receivedCommands.len
-      check initialCount == 0
+      var initialLoads = 0
+      for cmd in mock.receivedCommands:
+        if cmd.command == "ct/event-load":
+          check cmd.args["rrTicks"].getBiggestInt == 0
+          initialLoads += 1
+      check initialLoads == 1
+
+      dispose()
+
+  test "changing rrTicks triggers a further event log request at the new position":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      drain()
+
+      # Whatever the initial load did, it is behind us; only what the
+      # move produces is under test here.
+      let cmdCountBefore = mock.receivedCommands.len
 
       # Simulate debugger moving to a new position.
       var dbg = store.debugger.val
@@ -481,9 +506,13 @@ suite "EventLogVM auto-load effect":
       store.debugger.val = dbg
       drain()
 
-      # The effect should have triggered a load-event-log request.
+      # The effect should have triggered a load-event-log request, and it
+      # must carry the position that was moved to — reading the *first*
+      # `ct/event-load` in the whole log would have found the initial one
+      # at rrTicks 0 and passed on the wrong evidence.
       var found = false
-      for cmd in mock.receivedCommands:
+      for i in cmdCountBefore ..< mock.receivedCommands.len:
+        let cmd = mock.receivedCommands[i]
         if cmd.command == "ct/event-load":
           check cmd.args["rrTicks"].getBiggestInt == 100
           found = true
@@ -492,18 +521,24 @@ suite "EventLogVM auto-load effect":
 
       dispose()
 
-  test "auto-load does not fire for rrTicks == 0":
+  test "auto-load does not fire again for an unchanged rrTicks == 0":
+    # The dedup guard: reassigning the debugger signal without moving it
+    # must not issue a second load. `store.debugger` does not compare
+    # values, and several panels reassign it per move, so without this
+    # the panel would refetch on every one of them.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)
       drain()
+
+      let cmdCountBefore = mock.receivedCommands.len
 
       var dbg = store.debugger.val
       dbg.rrTicks = 0'u64
       store.debugger.val = dbg
       drain()
 
-      for cmd in mock.receivedCommands:
-        check cmd.command != "ct/event-load"
+      for i in cmdCountBefore ..< mock.receivedCommands.len:
+        check mock.receivedCommands[i].command != "ct/event-load"
 
       dispose()
