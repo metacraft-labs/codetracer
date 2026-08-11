@@ -992,14 +992,23 @@ package codeTracer:
       target("replay-server", replayServer)
       codetracerActions.add(replayServer)
 
-    # Nim cache dirs. ``/tmp`` is POSIX-only; on Windows we resolve to
-    # ``%TEMP%/ct-nim-cache`` via getEnv. The nimcache path is consumed
-    # raw by nim.exe (not via bash), so backslash mixing is OK.
+    # Nim cache dirs. Both platforms derive the root from the ambient
+    # temporary directory (``%TEMP%`` on Windows, ``$TMPDIR`` on POSIX,
+    # falling back to ``/tmp`` when unset or empty) rather than hardcoding
+    # one host-global path. Hardcoding ``/tmp/ct-nim-cache`` made every
+    # checkout, worktree and sandboxed build on the machine share a single
+    # object directory keyed only by target name, so two builds of the same
+    # target from different source roots overwrote each other's ``.o`` files
+    # and produced undefined-reference link failures. Honouring ``$TMPDIR``
+    # lets a caller that already scopes its temp directory (test harnesses,
+    # CI runners, sandboxes) scope the nimcache with it. The nimcache path is
+    # consumed raw by nim.exe (not via bash), so backslash mixing is OK.
     let ctNimCacheRoot =
       when defined(windows):
         (getEnv("TEMP") / "ct-nim-cache").replace('\\', '/')
       else:
-        "/tmp/ct-nim-cache"
+        (if getEnv("TMPDIR").len > 0: getEnv("TMPDIR") else: "/tmp") /
+          "ct-nim-cache"
 
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(
