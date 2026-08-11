@@ -122,6 +122,10 @@ run_nim_test src/ct_test/ruby_providers_test.nim
 echo "ct-providers: running framework gate suites"
 run_nim_test src/ct_test/contracts_test.nim
 run_nim_test src/ct_test/discovery_test.nim
+# The orchestration suite owns the `test run` worker pool, including the
+# high-thread-count worker-heap hand-off guard (it re-execs itself in a child
+# process and asserts the child's exit status). It needs no external toolchain.
+run_nim_test src/ct_test/run_orchestration_test.nim
 run_nim_test src/ct_test/release_gate_test.nim
 
 echo "ct-providers: all provider suites passed"
