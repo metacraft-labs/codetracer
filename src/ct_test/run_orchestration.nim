@@ -23,6 +23,13 @@
 ## ``Lock`` — mirroring ``ct_test_runner.nim``'s ``Queue`` / ``WorkerArgs``
 ## shape. The provider ``run`` procs are ``{.gcsafe.}`` so they are safe to
 ## invoke from the worker threads.
+##
+## Heap-ownership note (see ``ResultHandoff`` below): mutual exclusion is *not*
+## sufficient on its own. Nim's ARC/ORC allocator is per-thread, and a heap
+## block may only be freed while the thread that allocated it is still alive,
+## so ``runUnits`` additionally takes ownership of the workers' results — by
+## re-materialising them in the calling thread's heap — *before* the workers are
+## allowed to exit.
 
 import std/[cpuinfo, json, locks, options, os, sets, strutils, times]
 
@@ -230,6 +237,57 @@ type
     units: seq[RunUnit]
     pos: int
 
+  ResultHandoff = object
+    ## Ownership hand-off barrier between the workers and the spawning thread.
+    ##
+    ## **Why this exists.** Nim's ARC/ORC allocator is *per thread*: every
+    ## thread has its own ``MemRegion``, and that region lives in the thread's
+    ## thread-local storage (``lib/system/mmdisp.nim``:
+    ## ``var allocator {.rtlThreadVar.}: MemRegion``). Every ``string``/``seq``
+    ## payload a worker allocates is therefore stamped with that worker's region
+    ## as its owner (``PSmallChunk.owner``).
+    ##
+    ## Freeing such a block from a *different* thread is supported — but only
+    ## while the owning thread is still alive. ``rawDealloc``
+    ## (``lib/system/alloc.nim``) notices ``c.owner != addr(a)`` and hands the
+    ## cell to the owner via ``addToSharedFreeList``, which dereferences
+    ## ``c.owner`` to reach ``c.owner.sharedFreeLists[…]``. Once the worker has
+    ## exited, that dereference is a use-after-free: glibc only keeps a bounded
+    ## cache of retired thread stacks (``stack_cache_maxsize``, 40 MiB by
+    ## default) and unmaps the rest together with their static TLS blocks. Below
+    ## the cache limit the write silently lands in a retired region (leaking the
+    ## cell, or worse, resurfacing it in a *recycled* region); above it the
+    ## process dies with ``SIGSEGV`` inside ``addToSharedFreeList``.
+    ##
+    ## That is exactly what ``runUnits`` used to do: the aggregated
+    ## ``RunUnitOutcome``s were allocated by the workers, the workers were then
+    ## joined, and the caller freed the results afterwards — reliably crashing
+    ## once enough workers ran for their stacks to overflow glibc's cache. On
+    ## Linux/glibc that boundary is 21 workers, and the arithmetic is exact: Nim
+    ## gives every thread a 2 MiB stack of its own (``ThreadStackSize`` in
+    ## ``std/typedthreads`` is ``1024*256*sizeof(int) - 4096``, independent of
+    ## ``ulimit -s``), so glibc's 40 MiB default retains exactly 20 of them and
+    ## the 21st worker's region is unmapped by the time the caller frees.
+    ##
+    ## Below that boundary nothing is safe either — it is the same illegal
+    ## write, merely landing in a still-mapped retired region. Setting
+    ## ``GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0`` disables the cache
+    ## and makes the defect fatal at a *single* worker, which is the only
+    ## trustworthy way to stress-test this code path.
+    ##
+    ## **The protocol.** Workers park here once the queue is drained instead of
+    ## returning from their thread proc. The spawning thread waits for all of
+    ## them to park, re-materialises the results in its *own* heap region
+    ## (``adoptOutcomes``), releases the worker-owned originals — still legal,
+    ## the workers are alive and parked — and only then lets the workers exit.
+    ## Post-condition: ``runUnits`` hands its caller memory that the calling
+    ## thread owns, and no worker-owned allocation outlives its worker.
+    lock: Lock
+    parked: Cond          ## workers → owner: "another worker has parked"
+    releaseCond: Cond     ## owner → workers: "results adopted, you may exit"
+    arrived: int          ## workers that have reached the barrier
+    released: bool        ## owner is done with the worker-owned results
+
   WorkerArgs = object
     ## Plain-pointer bundle passed by value to each worker thread. Pointers (not
     ## closures) keep the worker proc ``{.thread.}``-safe; every shared mutation
@@ -238,6 +296,7 @@ type
     registry: ptr ProviderRegistry
     resultsLock: ptr Lock
     outcomes: ptr seq[RunUnitOutcome]
+    handoff: ptr ResultHandoff
 
 proc resolveThreadCount*(requested: int): int =
   ## Resolve the effective worker-thread count. An explicit positive
@@ -312,10 +371,45 @@ proc workerLoop(args: WorkerArgs) =
     args.outcomes[].add outcome
     release(args.resultsLock[])
 
+proc parkUntilReleased(handoff: ptr ResultHandoff) =
+  ## Announce that this worker has finished producing results and block until
+  ## the spawning thread has taken ownership of them (see ``ResultHandoff``).
+  ##
+  ## Parking — rather than returning — is what keeps this worker's ``MemRegion``
+  ## mapped while the owner frees the blocks this worker allocated.
+  acquire(handoff.lock)
+  inc handoff.arrived
+  signal(handoff.parked)
+  while not handoff.released:
+    wait(handoff.releaseCond, handoff.lock)
+  release(handoff.lock)
+
 proc workerMain(args: WorkerArgs) {.thread.} =
   ## Top-level thread entry point. Worker threads cannot capture closures, so
   ## the per-thread state arrives by value as ``WorkerArgs``.
-  workerLoop(args)
+  ##
+  ## The barrier is reached from a ``finally`` so that a worker which dies on an
+  ## unexpected exception still (a) reports its arrival — the owner would
+  ## otherwise wait forever — and (b) keeps its heap region alive until the
+  ## owner has adopted whatever results it did manage to append.
+  try:
+    workerLoop(args)
+  finally:
+    parkUntilReleased(args.handoff)
+
+proc adoptOutcomes(source: seq[RunUnitOutcome]): seq[RunUnitOutcome] =
+  ## Re-materialise ``source`` in the **calling** thread's heap region.
+  ##
+  ## ``source`` is a borrowed (non-``sink``) parameter and stays live across the
+  ## loop, so the compiler cannot turn ``add source[i]`` into a move: it must
+  ## emit ``=copy``. ``RunUnitOutcome`` and everything it transitively contains
+  ## (``TestEvent``, ``TestDiagnostic``, ``TraceMetadata`` and its
+  ## ``Table[string, string]``) are pure value types with no ``ref`` fields, so
+  ## ``=copy`` is a genuine deep copy: every payload in the result is freshly
+  ## allocated here rather than aliased from a worker's region.
+  result = newSeqOfCap[RunUnitOutcome](source.len)
+  for i in 0 ..< source.len:
+    result.add source[i]
 
 proc runUnits*(
     registry: var ProviderRegistry;
@@ -349,6 +443,11 @@ proc runUnits*(
   initLock(resultsLock)
   var outcomes: seq[RunUnitOutcome] = @[]
 
+  var handoff = ResultHandoff(arrived: 0, released: false)
+  initLock(handoff.lock)
+  initCond(handoff.parked)
+  initCond(handoff.releaseCond)
+
   # Never spin up more workers than there are units to run; ``resolveThreadCount``
   # has already floored the request at 1.
   let workerCount = min(threadCount, selected.len)
@@ -358,19 +457,73 @@ proc runUnits*(
     queue: addr queue,
     registry: addr registry,
     resultsLock: addr resultsLock,
-    outcomes: addr outcomes)
+    outcomes: addr outcomes,
+    handoff: addr handoff)
 
   var workers = newSeq[Thread[WorkerArgs]](workerCount)
   let wallStart = epochTime()
-  for i in 0 ..< workerCount:
-    createThread(workers[i], workerMain, args)
-  joinThreads(workers)
+
+  # Track how many threads actually started: ``createThread`` raises when the
+  # OS refuses one, and both the barrier wait below and ``joinThread`` must be
+  # driven by the real count rather than the requested one.
+  var started = 0
+  try:
+    while started < workerCount:
+      createThread(workers[started], workerMain, args)
+      inc started
+  except CatchableError:
+    # The OS refused a thread (``ResourceExhaustedError``). Continue with the
+    # workers we did get rather than failing the whole run; if none started we
+    # fall back to draining the queue on this thread below.
+    discard
+
+  if started == 0:
+    # No worker could be started: drain the queue here instead of silently
+    # reporting zero outcomes. Everything is then allocated on this thread, so
+    # the hand-off below degrades to a plain (redundant) copy.
+    result.threads = 1
+    workerLoop(args)
+  else:
+    # Wait for every started worker to reach the barrier. At that point the
+    # queue is drained and ``outcomes`` is complete and stable.
+    acquire(handoff.lock)
+    while handoff.arrived < started:
+      wait(handoff.parked, handoff.lock)
+    release(handoff.lock)
+    result.threads = started
+
   result.wallTimeMs = int((epochTime() - wallStart) * 1000)
 
+  # Take ownership while the workers are still parked and their heap regions
+  # are still mapped: copy the results into this thread's region, then release
+  # every worker-owned allocation. Doing this after ``joinThreads`` is the
+  # use-after-free documented on ``ResultHandoff``. Both halves matter — moving
+  # instead of copying, or moving the ``reset`` below the joins, each restores
+  # the crash on its own.
+  result.outcomes = adoptOutcomes(outcomes)
+  reset(outcomes)
+
+  # Deliberately NOT wrapped in a ``try/finally``. Nothing from here to the
+  # joins can raise in practice (``std/locks`` only looks fallible to Nim's
+  # effect inference), and a ``finally`` would have to run the release+join on
+  # the *barrier-wait* failure path too — signalling the workers and freeing
+  # ``outcomes`` while they may still be appending to it, which is a worse
+  # failure than the one it would be guarding against. If an exception does
+  # escape here, the scope destructors still free the worker-owned results
+  # while the workers are parked and alive, so the lifetime rule above holds.
+  acquire(handoff.lock)
+  handoff.released = true
+  broadcast(handoff.releaseCond)
+  release(handoff.lock)
+
+  for i in 0 ..< started:
+    joinThread(workers[i])
+
+  deinitCond(handoff.parked)
+  deinitCond(handoff.releaseCond)
+  deinitLock(handoff.lock)
   deinitLock(queue.lock)
   deinitLock(resultsLock)
-
-  result.outcomes = outcomes
 
 # ---------------------------------------------------------------------------
 # Summary aggregation

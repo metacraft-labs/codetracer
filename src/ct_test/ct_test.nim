@@ -200,12 +200,14 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     # worker loop on the very first run, before a single result exists.
     # ORC/ARC share one heap, so the workers run and a summary is produced.
     #
-    # ORC/ARC are the precondition for the runner working, not proof that it
-    # always does: a separate teardown defect can still abort the process
-    # after the summary has been written, once the worker count is high
-    # enough. That is a different failure with a different remedy (cap
-    # ``--threads``); what this branch is about is refc producing no results
-    # at all.
+    # ORC/ARC alone were once not enough either: worker-allocated results used
+    # to be freed after the workers had been joined, which aborted the process
+    # in the allocator once the worker count was high enough — after a
+    # correct-looking summary had already been printed. That is fixed at the
+    # source in ``run_orchestration.runUnits`` (see its ``ResultHandoff``
+    # type); no thread-count cap is involved, and `run` is expected to exit 0
+    # at any ``--threads`` value on ORC/ARC. What this branch is about is refc
+    # producing no results at all.
     #
     # This is not hypothetical — the `ct` binary embeds this CLI and is built
     # `--mm:refc` for the rest of CodeTracer's sake, so `ct test run` would

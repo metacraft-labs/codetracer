@@ -623,3 +623,42 @@ and a correlation marker's counterpart is by definition in another process.
   `.../nan-payloads/legacy-encoding.ct`, made by a pre-M52 `ct-instrument` that
   cannot be rebuilt — it is excluded from that check and must never be
   regenerated.
+- 2026-08-11 (Nim ORC's allocator is per-thread, and the region dies with the
+  thread — `ct-test test run` SIGSEGV'd at 21+ workers): Nim ARC/ORC gives every
+  thread its own `MemRegion`, and that region lives in the thread's TLS
+  (`lib/system/mmdisp.nim`: `var allocator {.rtlThreadVar.}: MemRegion`). Every
+  string/seq payload is stamped with the allocating thread's region as its
+  owner. Cross-thread `dealloc` IS supported — `rawDealloc` sees
+  `c.owner != addr(a)` and hands the cell over via `addToSharedFreeList` — but
+  ONLY while the owning thread is still alive; that helper dereferences
+  `c.owner`. So "protected by a Lock" is NOT sufficient for sharing GC-managed
+  data with worker threads: you must also not let worker-allocated memory
+  outlive its worker. `run_orchestration.runUnits` returned worker-built
+  `RunUnitOutcome`s to its caller *after* `joinThreads`, and the caller's free
+  then walked a dangling `c.owner`. It looked fine below 21 workers purely
+  because glibc caches retired thread stacks (`stack_cache_maxsize`, 40 MiB
+  default) so the dead TLS stayed mapped — silent corruption, not safety. The
+  boundary is exact arithmetic, not folklore: Nim gives every thread a 2 MiB
+  stack of its own (`ThreadStackSize` in `std/typedthreads` is
+  `1024*256*sizeof(int) - 4096`; `ulimit -s` is irrelevant), so 40 MiB holds
+  exactly 20 retired stacks and worker 21 is the first whose region is
+  unmapped. Then the free segfaults, *after* the run has already printed a
+  correct summary (stdout says success, `$?` says 139).
+  Two things worth keeping:
+  * `GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0` unmaps every worker's TLS
+    at join, so this whole bug class becomes deterministic at ONE worker instead
+    of probabilistic at 21. Measured on the pre-fix build: exit 139 at
+    `--threads 1`, and conversely a 1 GiB stack cache makes the pre-fix build
+    survive 64 workers — proof that thread count never made it safe, only quiet.
+    Reach for this tunable when stress-testing any threaded Nim code here; a
+    clean run without it is close to no evidence at all.
+  * `-d:useMalloc` is the independent cross-check: it removes the per-thread
+    regions, and the pre-fix build then passes at 64 workers even with the
+    cache disabled. If a crash survives `-d:useMalloc`, it is NOT this bug.
+  * The fix pattern is in `runUnits`' `ResultHandoff`: workers park on a
+    condvar after draining the queue, the spawning thread copies the results
+    into its own region and frees the worker-owned originals while the workers
+    are still alive, and only then releases and joins them. Any new worker pool
+    that returns GC-managed data needs the same hand-off (or `-d:useMalloc`,
+    which sidesteps per-thread regions entirely but only protects the binaries
+    that are built with it, not library consumers).
