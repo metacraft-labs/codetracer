@@ -34,6 +34,9 @@ echo "Running representative ct-test fixture providers"
 run_nim_test src/ct_test/contracts_test.nim
 run_nim_test src/ct_test/discovery_test.nim
 run_nim_test src/ct_test/run_store_test.nim
+# Guards `ct-test test run` against the worker-heap hand-off regression that
+# made it dump core at high thread counts *after* printing a valid summary.
+run_nim_test src/ct_test/run_orchestration_test.nim
 run_nim_test src/ct_test/nim_unittest_provider_test.nim
 run_nim_test src/ct_test/python_providers_test.nim
 run_nim_test src/ct_test/rust_libtest_provider_test.nim
