@@ -5,6 +5,7 @@ import
   ../frontend/viewmodel/agent_evidence,
   cli/e2e_tests,
   ../ct_test/incremental_cli,
+  ../ct_test/ct_test,
   codetracerconf, confutils,
   version
 
@@ -65,6 +66,20 @@ try:
       let testArgs = args[1 .. ^1]
       if testArgs.len > 0 and testArgs[0] == "--incremental":
         quit(runIncremental(testArgs[1 .. ^1]))
+      # M2 / Amendment A-2: `ct test discover` and `ct test run` are the
+      # cross-language ct_test surface (TestCatalog v1 discovery over the
+      # provider registry, plus the partitioned parallel runner). The engine
+      # already lived under src/ct_test but was reachable only through the
+      # standalone `ct-test` binary's `isMainModule` block; route the two
+      # implemented verbs here so `ct test …` exposes them too.
+      #
+      # Ordering matters: this dispatch sits AFTER the `--incremental`
+      # interception and BEFORE the `runE2eTestCli` fallback, and it triggers
+      # only on the two literal verbs, so `ct test --incremental …` and
+      # `ct test e2e …` keep their existing behaviour byte for byte.
+      # `runCtTestCli` wants the full vector including the leading "test".
+      if testArgs.len > 0 and testArgs[0] in ["discover", "run"]:
+        quit(runCtTestCli(args))
       quit(runE2eTestCli(testArgs))
 
     # M7 / M8: the help-delegate ``ct-complete`` / ``ct-completions``
