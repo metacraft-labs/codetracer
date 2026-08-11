@@ -1062,11 +1062,14 @@ package codeTracer:
       #     usable from the `ct` binary, which is refc for the rest of
       #     CodeTracer's sake — use this binary for runs.)
       #
-      #     ORC is the precondition for the runner working, not the whole of
-      #     it: with enough workers the process still aborts in the allocator
-      #     while `runUnits` tears down, after the summary has been written.
-      #     Cap `--threads` until that is fixed; the collector is not what
-      #     fixes it.
+      #     ORC used to be only the precondition and not the whole of it: with
+      #     21 or more workers the process also aborted in the allocator while
+      #     `runUnits` tore down, after the summary had been written. That was
+      #     a lifetime bug, not a collector choice — worker-allocated results
+      #     were freed after their threads had exited — and it is fixed at the
+      #     source by `run_orchestration.runUnits`' `ResultHandoff`. No
+      #     `--threads` cap is needed or wanted: `test run` is expected to exit
+      #     0 at any thread count on this ORC build.
       #
       #   * no `NativeDefines`, no `NativePassL`, no `NativeDynlibOverrides`.
       #     Those carry `-lssl -lcrypto -lsqlite3 -lpcre -lzip` and the
