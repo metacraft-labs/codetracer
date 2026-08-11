@@ -9,14 +9,23 @@
 ##   ``TestEvent`` streams is driven through the worker pool with and without a
 ##   partition file; exact executed/skipped/passed/failed counts and per-test
 ##   event kinds are asserted.
+## * runUnits (worker-heap hand-off) — a high-thread-count run is executed in a
+##   CHILD PROCESS and its exit status asserted, because the defect this guards
+##   is a fatal signal (see "worker-heap hand-off" below), which no in-process
+##   assertion can survive.
 ##
 ## The integration provider runs entirely in-process (no toolchain needed) so
 ## the test is self-contained and deterministic; it exercises the exact
 ## orchestration path real providers use (worker pool → provider.run(scope) →
 ## event aggregation), differing only in that the events are produced directly
-## rather than via execCaptured.
+## rather than via execCaptured. It is a fixture, not a mock of a collaborator:
+## nothing is stubbed out of ``run_orchestration`` itself — the real queue, the
+## real worker threads, the real aggregation and the real summary reduction all
+## run. Only the leaf ``TestProvider.run`` is supplied by the test, exactly as a
+## real language adapter would supply it, so the orchestration under test is
+## exercised end to end without depending on an external toolchain.
 
-import std/[json, options, os, sets, strutils, tables, unittest]
+import std/[json, options, os, osproc, sets, strutils, tables, unittest]
 
 import contracts
 import discovery
@@ -122,6 +131,105 @@ proc fixtureResponse(items: seq[TestItem]; workspaceRoot = "/tmp/ws"): DiscoverR
       items: items,
       diagnostics: @[])],
     diagnostics: @[])
+
+# ---------------------------------------------------------------------------
+# Worker-heap hand-off stress (regression guard)
+# ---------------------------------------------------------------------------
+#
+# Nim's ARC/ORC allocator is per-thread and each thread's ``MemRegion`` lives in
+# that thread's TLS. A heap block may only be freed while the thread that
+# allocated it is still alive — otherwise ``rawDealloc`` follows a dangling
+# ``PSmallChunk.owner`` into ``addToSharedFreeList`` and the process dies with
+# SIGSEGV. ``runUnits`` used to return worker-allocated results to its caller
+# *after* joining the workers, so `ct-test test run` reliably dumped core once
+# enough workers had run for glibc to stop caching their retired stacks — and it
+# did so only **after** printing a correct-looking summary, so stdout said
+# success while `$?` said 139.
+#
+# On Linux/glibc that boundary is exactly 21 workers: Nim gives every thread its
+# own 2 MiB stack (``ThreadStackSize`` in ``std/typedthreads``, independent of
+# `ulimit -s`), so glibc's 40 MiB `stack_cache_maxsize` retains exactly 20 of
+# them. Fewer workers is NOT safe, only quiet — the same illegal write lands in
+# a retired-but-still-mapped region. Running this binary under
+# `GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0` removes the cache and makes
+# the defect fatal at a single worker; that is the amplifier to reach for when
+# stress-testing any threaded Nim code in this repo.
+#
+# The failure is a fatal signal, so it cannot be observed with ``check``: the
+# test binary would die too. The guard therefore re-executes THIS binary in a
+# child process and asserts the child's exit status, which is the property the
+# CLI contract actually needs ("exit 0 at the default thread count").
+
+const
+  StressChildFlag = "--ct-orch-heap-handoff-child"
+    ## argv[1] marker that turns this test binary into the stress child.
+  StressUnits = 200
+    ## Enough units that every worker gets several, and enough total payload
+    ## that worker allocations spread across many allocator chunks.
+  StressEventsPerUnit = 40
+  StressPayloadBytes = 200
+
+proc stressRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
+  ## Like ``fixtureRun`` but with a bulky event stream: the regression being
+  ## guarded is about *heap ownership*, so each unit must make its worker
+  ## allocate a non-trivial amount of string/seq payload that then has to
+  ## survive the hand-off back to the spawning thread.
+  let failed = scope.selector.endsWith("::fail")
+  var events: seq[TestEvent] = @[]
+  for i in 0 ..< StressEventsPerUnit:
+    events.add TestEvent(
+      schemaVersion: TestEventSchemaVersion, kind: tekOutput,
+      providerId: FixtureProviderId, runId: scope.testId, testId: scope.testId,
+      output: repeat("x", StressPayloadBytes) & $i & scope.selector)
+  events.add TestEvent(
+    schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
+    providerId: FixtureProviderId, runId: scope.testId, testId: scope.testId,
+    status: some(if failed: tsFailed else: tsPassed), durationMs: 1)
+  ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
+
+proc stressRegistry(): ProviderRegistry =
+  var provider = TestProvider(info: fixtureInfo(canRunSingle = true))
+  provider.run = stressRun
+  ProviderRegistry(providers: @[M1Provider(
+    provider: provider, relevantConfigFiles: @[])])
+
+proc stressUnits(registry: ProviderRegistry): seq[RunUnit] =
+  var items: seq[TestItem] = @[]
+  for i in 0 ..< StressUnits:
+    items.add fixtureItem("stress" & $i, i + 1, i mod 3 == 0)
+  enumerateRunUnits(fixtureResponse(items), registry)
+
+proc stableSummaryJson(summary: TestRunSummary): JsonNode =
+  ## The summary minus the two fields that legitimately vary with the worker
+  ## count, so a 32-thread run and a 1-thread run can be compared for equality.
+  result = summaryToJson(summary)
+  result.delete "wall_time_ms"
+  result.delete "threads"
+
+const StressSummaryMarker = "STRESS-SUMMARY "
+
+proc runStressChild(threads: int) =
+  ## Child-process body: run ``StressUnits`` units across ``threads`` workers,
+  ## report the summary, and then explicitly release the whole result — the
+  ## release is the operation that used to fault, so forcing it here makes the
+  ## failure land inside the child rather than depending on teardown timing.
+  var registry = stressRegistry()
+  let units = stressUnits(registry)
+  var runResult = runUnits(registry, units, emptyPartition(), threads = threads)
+  let summary = summarize(runResult)
+  echo StressSummaryMarker, $stableSummaryJson(summary)
+  echo "STRESS-THREADS ", runResult.threads
+  reset(runResult)
+  echo "STRESS-RELEASED"
+
+when isMainModule:
+  # Must run before any `suite` body executes, so the child does nothing but
+  # the stress run. Placed here (rather than at the end of the file) because
+  # `suite` blocks execute as the module body is evaluated.
+  let childArgs = commandLineParams()
+  if childArgs.len == 2 and childArgs[0] == StressChildFlag:
+    runStressChild(parseInt(childArgs[1]))
+    quit(0)
 
 proc tempPartitionFile(name, content: string): string =
   let path = getTempDir() / ("ct-orch-part-" & name & "-" &
@@ -359,6 +467,48 @@ suite "parallel run integration":
     check summary.executed == 2
     check summary.skippedByPartition == 3
     check runExitCode(summary) == 0
+
+  test "high worker counts return safely and match a single-threaded run":
+    # Regression guard for the worker-heap hand-off (see the block comment
+    # above ``StressChildFlag``). Pre-fix this child exits 139 with
+    # `SIGSEGV … addToSharedFreeList`; the summary it printed first was already
+    # correct, which is precisely why the exit status has to be asserted.
+    #
+    # 32 workers is above the 21-worker Linux/glibc threshold at which retired
+    # worker stacks (and the thread-local ``MemRegion``s inside them) stop being
+    # cached and start being unmapped, with enough headroom that the guard does
+    # not depend on the cache size to the byte. `countProcessors()` is folded in
+    # so it also covers "the default thread count on this machine", which is
+    # what the CLI uses when `--threads` is omitted.
+    #
+    # ``StressUnits`` must stay comfortably above this too: ``runUnits`` starts
+    # ``min(threads, units)`` workers, so a small unit count would silently cap
+    # the pool below the threshold and neuter the guard.
+    let threads = max(32, osproc.countProcessors())
+    let child = execCmdEx(
+      quoteShellCommand([getAppFilename(), StressChildFlag, $threads]))
+    checkpoint "child output:\n" & child.output
+    check child.exitCode == 0
+    check "STRESS-RELEASED" in child.output
+
+    # The parallel result must equal the serial one. A single-threaded run
+    # never leaves the calling thread, so it is the trustworthy reference.
+    var stressReg = stressRegistry()
+    let stressUnitList = stressUnits(stressReg)
+    let serial = summarize(
+      runUnits(stressReg, stressUnitList, emptyPartition(), threads = 1))
+
+    var childSummary = newJNull()
+    var childThreads = 0
+    for line in child.output.splitLines():
+      if line.startsWith(StressSummaryMarker):
+        childSummary = parseJson(line[StressSummaryMarker.len .. ^1])
+      elif line.startsWith("STRESS-THREADS "):
+        childThreads = parseInt(line["STRESS-THREADS ".len .. ^1].strip())
+    check childSummary == stableSummaryJson(serial)
+    check childSummary["executed"].getInt == StressUnits
+    # The run must actually have been concurrent, or it proves nothing.
+    check childThreads == threads
 
   test "empty partition skips everything and runs nothing":
     let path = tempPartitionFile("none", "# no ids here\n")

@@ -192,8 +192,38 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
   if args.len >= 2 and args[0] == "test" and args[1] == "discover":
     return runDiscover(if args.len > 2: args[2 .. ^1] else: @[], registry, cache)
   if args.len >= 2 and args[0] == "test" and args[1] == "run":
-    var mutableRegistry = registry
-    return runRun(if args.len > 2: args[2 .. ^1] else: @[], mutableRegistry, cache)
+    # `run` executes the discovered tests on a worker pool
+    # (``run_orchestration.runUnits``), and the workers share the
+    # ``RunUnit``/``TestItem`` sequences with the spawning thread. Nim's refc
+    # collector gives every thread a PRIVATE heap, so that sharing is
+    # undefined behaviour: a refc build of this source SIGSEGVs inside the
+    # worker loop on the very first run, before a single result exists.
+    # ORC/ARC share one heap, so the workers run and a summary is produced.
+    #
+    # ORC/ARC alone were once not enough either: worker-allocated results used
+    # to be freed after the workers had been joined, which aborted the process
+    # in the allocator once the worker count was high enough — after a
+    # correct-looking summary had already been printed. That is fixed at the
+    # source in ``run_orchestration.runUnits`` (see its ``ResultHandoff``
+    # type); no thread-count cap is involved, and `run` is expected to exit 0
+    # at any ``--threads`` value on ORC/ARC. What this branch is about is refc
+    # producing no results at all.
+    #
+    # This is not hypothetical — the `ct` binary embeds this CLI and is built
+    # `--mm:refc` for the rest of CodeTracer's sake, so `ct test run` would
+    # crash where `ct test discover` (single-threaded) works fine. Refuse with
+    # the machine-readable error envelope every other `run` failure uses,
+    # rather than handing the caller a core dump. Compiled out entirely on
+    # ORC/ARC builds, which is what the standalone `ct-test` binary is.
+    when not defined(gcOrc) and not defined(gcArc):
+      return emitRunError(@[
+        "`test run` requires an ORC/ARC build: this binary was compiled with " &
+        "--mm:refc, whose per-thread heaps make the parallel runner unsafe. " &
+        "Use the standalone `ct-test` binary (built --mm:orc) for runs; " &
+        "`test discover` is supported here."])
+    else:
+      var mutableRegistry = registry
+      return runRun(if args.len > 2: args[2 .. ^1] else: @[], mutableRegistry, cache)
   let response = errorResponse(
     "usage: ct-test test (discover (--workspace <path> | --file <path>) --json " &
     "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
@@ -201,8 +231,22 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
   echo responseToJson(response).pretty
   discoverExitCode(response)
 
-when isMainModule:
+proc runCtTestCli*(args: seq[string]): int =
+  ## Convenience entry point for embedders that do not want to own the
+  ## provider registry or the discovery cache.
+  ##
+  ## ``runCtTest`` above deliberately takes both as parameters so a library
+  ## consumer can install a reduced/extended provider set and share a warm
+  ## cache across invocations. The two callers that just want "the default
+  ## ct_test CLI, please" — the standalone ``ct-test`` binary below and the
+  ## ``ct test discover|run`` route in ``src/ct/codetracer.nim`` — would
+  ## otherwise each duplicate the same two-line construction, so it lives
+  ## here once. ``args`` is the full ``test <verb> …`` vector, exactly as
+  ## ``runCtTest`` expects it.
   let
     registry = newDefaultProviderRegistry()
     cache = newDiscoveryCache()
-  quit(runCtTest(commandLineParams(), registry, cache))
+  runCtTest(args, registry, cache)
+
+when isMainModule:
+  quit(runCtTestCli(commandLineParams()))
