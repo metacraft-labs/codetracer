@@ -1026,6 +1026,74 @@ package codeTracer:
       target("ct", ct)
       codetracerActions.add(ct)
 
+    if fileExists("src/ct_test/ct_test.nim"):
+      # The standalone cross-language test driver (`ct-test test discover` /
+      # `ct-test test run`). The same engine is reachable as `ct test …`, but
+      # `ct` links the whole CodeTracer product (Electron-facing frontend
+      # plumbing, db-backend bridges, the recorder stack); consumers that only
+      # want discovery/run — CI, sibling repos, reprobuild's dev shell — should
+      # not have to build and ship that closure. Hence a separate, small
+      # binary from the same sources.
+      #
+      # NOTE: this target is deliberately NOT added to `codetracerActions`.
+      # That list feeds the `codetracer` aggregate (the default build action),
+      # and `ct-test` is an auxiliary tool, not part of the shipped product;
+      # adding it would put a second full Nim compile on every default build.
+      # Build it explicitly with `repro build ct-test`.
+      #
+      # The `target()` call below is not what makes that selector resolve —
+      # the output's basename already contributes the same implicit name, and
+      # `repro build ct-test` keeps working with the call renamed. It is here
+      # so the name this binary is built by is stated at its declaration
+      # rather than inferred from a path, and so renaming the output cannot
+      # silently rename the target.
+      #
+      # It does NOT go through `ctNative`, and both departures are load-bearing:
+      #
+      #   * `--mm:orc`, not `ctNative`'s `--mm:refc`. `test run` executes the
+      #     discovered tests on a worker pool (`run_orchestration.runUnits`),
+      #     and the workers share the `RunUnit`/`TestItem` sequences with the
+      #     spawning thread. Under refc every thread owns a private heap, so
+      #     that sharing is undefined behaviour — a refc build of this exact
+      #     source SIGSEGVs inside the worker loop on the first `test run`,
+      #     before a single result exists, while `test discover`
+      #     (single-threaded) survives. ORC shares one heap, so the workers run
+      #     and a summary comes out. (This is also why `ct test run` is not
+      #     usable from the `ct` binary, which is refc for the rest of
+      #     CodeTracer's sake — use this binary for runs.)
+      #
+      #     ORC is the precondition for the runner working, not the whole of
+      #     it: with enough workers the process still aborts in the allocator
+      #     while `runUnits` tears down, after the summary has been written.
+      #     Cap `--threads` until that is fixed; the collector is not what
+      #     fixes it.
+      #
+      #   * no `NativeDefines`, no `NativePassL`, no `NativeDynlibOverrides`.
+      #     Those carry `-lssl -lcrypto -lsqlite3 -lpcre -lzip` and the
+      #     chronicles/tup/ssl define set that the CodeTracer product needs;
+      #     `ct-test` links none of them (its whole non-stdlib dependency set
+      #     is `src/ct_test/**` plus runquota's process/host libraries). Pulling
+      #     them in only made this target unbuildable anywhere CodeTracer's full
+      #     native library set is absent — e.g. reprobuild's dev shell, which is
+      #     exactly where this tool is meant to run.
+      let ctTest = nim.c(
+        mm = "orc",
+        threadsOn = true,
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        boundChecksOn = true,
+        nimcache = ctNimCacheRoot & "/ct_test_codetracer_binary",
+        paths = CodeTracerNimPaths,
+        output = buildDebugPath("bin/ct-test" & (when defined(windows): ".exe" else: "")),
+        source = "src/ct_test/ct_test.nim")
+      target("ct-test", ctTest)
+
     if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
       let codetracer = aggregate("codetracer",
         actions = codetracerActions,
