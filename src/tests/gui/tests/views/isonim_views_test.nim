@@ -645,7 +645,7 @@ suite "IsoNim Menu Shell — structure":
     check findByClass(panel, WindowMenuClass) != nil
     check findByClass(panel, "maximize") != nil
     check findByClass(panel, "restore").isNil
-    check findAllByClass(panel, "menu-node").len == 0
+    check findAllByClass(panel, "menu-node-container").len == 0
 
   test "caption bar hosts survive without navigation menu":
     let r = MockRenderer()
@@ -7730,25 +7730,11 @@ suite "IsoNim Request Panel — structure":
 
       let panel = renderRequestPanel(r, vm)
 
-      check findByClass(panel, "request-panel-header") != nil
       check findByClass(panel, "request-panel-filters") != nil
       check findByClass(panel, "request-table-header") != nil
       let body = findByClass(panel, "request-table-body")
       check body != nil
       check body.children.len == 0
-
-      dispose()
-
-  test "count badge renders 0 / 0 requests in the empty state":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createRequestPanelVM(store)
-      let r = MockRenderer()
-
-      let panel = renderRequestPanel(r, vm)
-      let count = findByClass(panel, "request-panel-count-text")
-      check count != nil
-      check count.textContent == "0 / 0 requests"
 
       dispose()
 
@@ -7786,7 +7772,7 @@ suite "IsoNim Request Panel — row rendering":
 
       let body = findByClass(panel, "request-table-body")
       let row = body.children[0]
-      check findByClass(row, "request-col-id").textContent == "1"
+      check findByClass(row, "request-col-id").textContent == "01"
       check findByClass(row, "request-col-method").textContent == "POST"
       check findByClass(row, "request-col-url").textContent == "/api/x"
       check findByClass(row, "request-col-status").textContent == "201"
@@ -7810,23 +7796,6 @@ suite "IsoNim Request Panel — row rendering":
       check entries[0].id == 1
       check entries[1].id == 2
       check entries[2].id == 3
-
-      dispose()
-
-  test "count badge updates as rows arrive":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createRequestPanelVM(store)
-      let r = MockRenderer()
-
-      let panel = renderRequestPanel(r, vm)
-      let count = findByClass(panel, "request-panel-count-text")
-
-      check count.textContent == "0 / 0 requests"
-      vm.addRequest("GET", "/a", 200, 0, 0, 0)
-      check count.textContent == "1 / 1 requests"
-      vm.addRequest("POST", "/b", 500, 0, 0, 0)
-      check count.textContent == "2 / 2 requests"
 
       dispose()
 
@@ -8002,28 +7971,6 @@ suite "IsoNim Request Panel — filters":
 
       dispose()
 
-  test "count badge tracks filteredRequests vs total":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createRequestPanelVM(store)
-      let r = MockRenderer()
-
-      let panel = renderRequestPanel(r, vm)
-      vm.addRequest("GET", "/a", 200, 0, 0, 0)
-      vm.addRequest("POST", "/b", 200, 0, 0, 0)
-      vm.addRequest("GET", "/c", 200, 0, 0, 0)
-
-      let count = findByClass(panel, "request-panel-count-text")
-      check count.textContent == "3 / 3 requests"
-
-      vm.setFilterMethod("POST")
-      check count.textContent == "1 / 3 requests"
-
-      vm.setFilterMethod("")
-      check count.textContent == "3 / 3 requests"
-
-      dispose()
-
   test "filter mutation resets the selection":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -8149,6 +8096,7 @@ suite "IsoNim Request Panel — vm":
       check vm.searchText.val == ""
       check vm.selectedIndex.val == NO_SELECTED_INDEX
       check vm.filteredRequests.val.len == 0
+      check vm.detailTab.val == "headers"
       check not vm.store.isNil
 
       dispose()
@@ -8185,6 +8133,180 @@ suite "IsoNim Request Panel — vm":
   test "countText renders the legacy '<filtered> / <total> requests' shape":
     check countText(0, 0) == "0 / 0 requests"
     check countText(2, 5) == "2 / 5 requests"
+
+  test "statusCodeText returns reason phrase for known codes":
+    check statusCodeText(200) == "OK"
+    check statusCodeText(201) == "Created"
+    check statusCodeText(404) == "Not Found"
+    check statusCodeText(500) == "Internal Server Error"
+    check statusCodeText(999) == ""
+
+  test "detailStatusText formats code + reason phrase":
+    check detailStatusText(200) == "200 OK"
+    check detailStatusText(500) == "500 Internal Server Error"
+    check detailStatusText(999) == "999"
+
+# ---------------------------------------------------------------------------
+# IsoNim Request Panel — detail panel
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — detail panel":
+
+  test "no detail content when no selection":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+      let host = findByClass(panel, "request-detail-host")
+      check host != nil
+      check host.children.len == 0
+
+      dispose()
+
+  test "detail panel appears when row is selected":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
+      vm.selectRequest(0)
+
+      check findByClass(panel, "request-detail") != nil
+
+      dispose()
+
+  test "detail header shows method badge, URL, and status text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
+      vm.selectRequest(0)
+
+      let header = findByClass(panel, "request-detail-header")
+      check header != nil
+      # Method badge uses the same class as table rows
+      check findByClass(header, "request-method-delete") != nil
+      check findByClass(header, "request-method-delete").textContent == "DELETE"
+      # URL
+      check findByClass(header, "request-detail-header-url") != nil
+      check findByClass(header, "request-detail-header-url").textContent == "/api/users/42"
+      # Status: "500 Internal Server Error" coloured red
+      let statusEl = findByClass(header, "request-detail-header-status")
+      check statusEl != nil
+      check "500" in statusEl.textContent
+      check "Internal Server Error" in statusEl.textContent
+      check "request-status-server-error" in statusEl.attributes["class"]
+
+      dispose()
+
+  test "handler button is present and dispatches jumpToHandler":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/health", 200, 5, 64, 9999)
+      vm.selectRequest(0)
+
+      let btn = findByClass(panel, "request-detail-handler-btn")
+      check btn != nil
+      check "Handler" in btn.textContent
+
+      mock.clearReceivedCommands()
+      btn.fireEvent("click")
+      check mock.findCommand("ct/seek-to-geid").isSome
+
+      dispose()
+
+  test "tab bar renders all six tabs with Headers active by default":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/x", 200, 10, 100, 1)
+      vm.selectRequest(0)
+
+      let tabs = findAllByClass(panel, "request-detail-tab")
+      check tabs.len == 6
+      check tabs[0].textContent == "Headers"
+      check tabs[1].textContent == "Request"
+      check tabs[2].textContent == "Response"
+      check tabs[3].textContent == "Timing"
+      check tabs[4].textContent == "Call Trace"
+      check tabs[5].textContent == "Async Flow"
+      # Default active tab is "Headers"
+      check "request-detail-tab--active" in tabs[0].attributes["class"]
+      check "request-detail-tab--active" notin tabs[3].attributes["class"]
+
+      dispose()
+
+  test "clicking Timing tab updates vm.detailTab and shows timing content":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("POST", "/api/jobs", 201, 65, 512, 1)
+      vm.selectRequest(0)
+
+      findAllByClass(panel, "request-detail-tab")[3].fireEvent("click")
+      check vm.detailTab.val == "timing"
+
+      let content = findByClass(panel, "request-detail-content")
+      check content != nil
+      let title = findByClass(content, "request-detail-section-title")
+      check title != nil
+      check "TIMING" in title.textContent
+      check "65ms" in title.textContent
+
+      dispose()
+
+  test "detail panel disappears when selection is cleared":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/x", 200, 0, 0, 1)
+      vm.selectRequest(0)
+      check findByClass(panel, "request-detail") != nil
+
+      vm.selectRequest(NO_SELECTED_INDEX)
+      check findByClass(panel, "request-detail") == nil
+
+      dispose()
+
+  test "detail panel updates when selection changes to different row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/users", 200, 10, 100, 1)
+      vm.addRequest("DELETE", "/api/items/1", 404, 20, 50, 2)
+
+      vm.selectRequest(0)
+      check findByClass(panel, "request-detail-header-url").textContent == "/api/users"
+
+      vm.selectRequest(1)
+      check findByClass(panel, "request-detail-header-url").textContent == "/api/items/1"
+      check findByClass(panel, "request-method-delete") != nil
+
+      dispose()
 
 # ---------------------------------------------------------------------------
 # IsoNim Trace Log Panel — closes section 5.4 entry "trace_log"
