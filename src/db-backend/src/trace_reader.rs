@@ -719,8 +719,7 @@ pub trait TraceReader: std::fmt::Debug + Send {
         // meant step-over reported "no successor" for every frameless
         // step, so pressing F10 at the last statement of a Node module
         // body held the cursor forever even though step-into and continue
-        // both advanced from the identical position.  See
-        // `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org` §M50.
+        // both advanced from the identical position.
         let initial_call_depth: i64 = match self.call(initial_step.call_key) {
             Some(call) => call.depth as i64,
             None => OUTERMOST_CALL_DEPTH,

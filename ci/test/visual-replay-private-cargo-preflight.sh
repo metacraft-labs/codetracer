@@ -49,14 +49,22 @@ fi
 cargo_auth_key="${GIT_CONFIG_KEY_0:-}"
 cargo_auth_header="${GIT_CONFIG_VALUE_0:-}"
 cargo_auth_prefix="AUTHORIZATION: basic "
-if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ]]; then
-	fail_auth_contract "auth-header-url-scope"
-fi
 if [[ $cargo_auth_header != "$cargo_auth_prefix"* ||
 	$cargo_auth_header == "$cargo_auth_prefix" ||
 	${cargo_auth_header#"$cargo_auth_prefix"} =~ [^A-Za-z0-9+/=] ]]; then
 	fail_auth_contract "auth-header-shape"
 fi
+# The base64 credential itself, with the header field name and the auth scheme
+# stripped off. Everything downstream that asks "is this the lldb-sys secret?"
+# must ask it of THIS, never of the assembled header string: RFC 9110 §5.1
+# makes field names case-insensitive, RFC 7617 §2 makes the `basic` scheme
+# token case-insensitive, and RFC 9110 §5.5 lets optional whitespace surround
+# the field value. `authorization: basic <token>`,
+# `AUTHORIZATION: Basic <token>` and `AUTHORIZATION:  basic  <token>` are all
+# wire-equivalent to the line below and all leak exactly the same secret, so a
+# byte-equality test against the assembled header would wave three of the four
+# spellings straight through.
+cargo_auth_credential="${cargo_auth_header#"$cargo_auth_prefix"}"
 if [[ ${GIT_CONFIG_KEY_1:-} != "credential.helper" ||
 	-n ${GIT_CONFIG_VALUE_1:-} ]]; then
 	fail_auth_contract "credential-helper-blocking"
@@ -106,8 +114,8 @@ fi
 # URL. It is checked twice, because the two readings answer different
 # questions and only both together say what is needed.
 #
-# M69 — why this is no longer "no header matches at all". That is what it used
-# to assert, and it was falsified by something entirely legitimate:
+# Why this is no longer "no header matches at all". That is what it used to
+# assert, and it was falsified by something entirely legitimate:
 # `actions/checkout` defaults to `persist-credentials: true` and writes
 #
 #     [http "https://github.com/"]
@@ -126,7 +134,8 @@ fi
 git_isolated_dir="$(mktemp -d)"
 if git -C "$git_isolated_dir" rev-parse --git-dir >/dev/null 2>&1; then
 	# TMPDIR inside a work tree would silently reintroduce repository config
-	# and make reading (1) below vacuous in the other direction.
+	# and make reading (1) below vacuous in the other direction. Covered by
+	# the `probe-isolation` case in this script's test.
 	rm -rf "$git_isolated_dir"
 	fail_auth_contract "auth-boundary-probe-isolation"
 fi
@@ -138,26 +147,53 @@ for unauthenticated_url in \
 	#     /dev/null and the probe runs outside any work tree, so the inline
 	#     GIT_CONFIG_* slots are the whole config stack — nothing may match.
 	#     This is the original invariant, now measured against the config the
-	#     gate actually controls. Widening GIT_CONFIG_KEY_0 to, say,
-	#     `https://github.com/metacraft-labs/` fires here.
+	#     gate actually controls. It asks Git's own URL matcher rather than
+	#     comparing key strings, so it catches a widened `GIT_CONFIG_KEY_0`
+	#     (say `https://github.com/metacraft-labs/`) even when the literal
+	#     key check below has not run yet — which is why that check now sits
+	#     *after* this loop rather than before it. Ordered the other way the
+	#     literal check subsumed this one entirely and nothing could ever
+	#     reach here. Covered by the `auth-key-wide` case in the test.
 	if git -C "$git_isolated_dir" config --get-urlmatch http.extraHeader \
 		"$unauthenticated_url" >/dev/null 2>&1; then
 		rm -rf "$git_isolated_dir"
 		fail_auth_contract "auth-header-url-boundary"
 	fi
 	# (2) In the real environment, where the checkout's own credential is
-	#     present: whatever header applies to these URLs, it must not be the
-	#     lldb-sys one. This is the leak that matters, and it stays detectable
-	#     no matter what else is configured.
-	if [[ $(git config --get-urlmatch http.extraHeader \
-		"$unauthenticated_url" 2>/dev/null) == "$cargo_auth_header" ]]; then
+	#     present: whatever header applies to these URLs, it must not carry
+	#     the lldb-sys credential. This is the leak that matters, and it
+	#     stays detectable no matter what else is configured.
+	#
+	#     The test is on the credential, not on the header string. An earlier
+	#     formulation compared the whole matched header with `==` against
+	#     `AUTHORIZATION: basic <token>`, which let the very same token
+	#     through as `authorization: basic <token>`, `AUTHORIZATION: Basic
+	#     <token>`, `AUTHORIZATION: basic <token>  ` or `AUTHORIZATION:
+	#     basic  <token>` — four wire-valid spellings of one leak. Any header
+	#     that contains the secret is a leak regardless of how it is spelled,
+	#     so containment of the credential is both the correct test and a
+	#     strictly stronger one than equality of the header.
+	effective_header="$(git config --get-urlmatch http.extraHeader \
+		"$unauthenticated_url" 2>/dev/null || true)"
+	if [[ $effective_header == *"$cargo_auth_credential"* ]]; then
 		rm -rf "$git_isolated_dir"
 		fail_auth_contract "auth-header-credential-leak"
 	fi
 done
-unset unauthenticated_url
+unset unauthenticated_url effective_header
 rm -rf "$git_isolated_dir"
 unset git_isolated_dir
+
+# The literal key. Git's matcher above answers "does this credential reach a
+# URL it must not"; this answers the narrower syntactic question "is the key
+# spelled exactly as this gate installs it". They are not redundant: Git
+# normalises URLs before matching, so `http.https://github.com:443/...` is
+# semantically identical to the correct key and passes every probe above while
+# still being a key nothing in this repository writes. A rewritten key is worth
+# failing on even when it happens to be harmless today.
+if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ]]; then
+	fail_auth_contract "auth-header-url-scope"
+fi
 
 # Git's URL matching intentionally applies a URL-specific header to request
 # paths below that URL (for example /info/refs). Redirects are disabled above;
@@ -291,5 +327,6 @@ if ! cargo_fetch_output="$(
 	echo "Visual replay CI could not prefetch the native-backend Cargo graph." >&2
 	exit 1
 fi
-unset cargo_fetch_output cargo_auth_header cargo_auth_key cargo_auth_prefix native_backend_repo
+unset cargo_fetch_output cargo_auth_header cargo_auth_credential cargo_auth_key
+unset cargo_auth_prefix native_backend_repo
 unset LLDB_SYS_URL

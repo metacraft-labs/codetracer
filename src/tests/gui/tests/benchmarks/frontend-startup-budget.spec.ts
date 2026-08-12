@@ -94,15 +94,15 @@
  * below exists: it catches the specific regression this milestone fixed with
  * no launch, no statistics and no host dependence at all.
  *
- * WHERE THE TIME GOES (measured, M65, 2026-08-10)
- * ----------------------------------------------
+ * WHERE THE TIME GOES (measured 2026-08-10)
+ * -----------------------------------------
  * Of the bundle phase, only ~0.8s is module *execution* — instrumenting
  * webpack's module runtime showed 3562 of 3563 modules executing for 779ms of
  * self-time in total, with no hotspot (the largest single module is 30ms).
  * The rest is V8 compiling ~48MB of third-party source.  Several ways of
- * making that source smaller or later were measured, and rejected; see the
- * M65 note in
- * `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`.
+ * making that source smaller or later were measured, and rejected: the cost
+ * is spread evenly across thousands of modules, so there is no hotspot to
+ * split out or defer.
  *
  * FIXTURE
  * -------
@@ -159,8 +159,8 @@ export const SCRIPT_PHASE_TARGET_MS = 2_000;
 /**
  * The asserted ceiling, in contention-normalized milliseconds.
  *
- * This is a **ratchet, not the target**.  M65 removed webpack's `eval`
- * devtool; this number locks in what the phase costs afterwards so the next
+ * This is a **ratchet, not the target**.  Dropping webpack's `eval`
+ * devtool is what made the phase cheap; this number locks that in so the next
  * regression is caught.  It sits between two measured populations:
  *
  *   normalized median, good build, 7 runs × 5 launches      2.52s - 3.17s
@@ -189,7 +189,7 @@ export const SCRIPT_PHASE_CEILING_MS = 3_500;
 
 /**
  * Time (ms) the calibration workload below takes on the reference host — the
- * 32-core developer machine M65 was measured on — with the machine quiet.
+ * 32-core developer machine these numbers were measured on — machine quiet.
  * Measured: 115-120ms at load average under 15.
  *
  * It exists only to give `normalizedScriptsMs` a unit; it cancels out of any
@@ -616,8 +616,8 @@ test.describe("Frontend startup budget", () => {
           `derived from Performance-Targets.md § Startup & Initialization by ` +
           `${Math.round(medianNormalizedMs - SCRIPT_PHASE_TARGET_MS)}ms ` +
           `(${(medianNormalizedMs / SCRIPT_PHASE_TARGET_MS).toFixed(2)}x). ` +
-          `See the M65 note in Value-Origin-Tracking.milestones.org for what ` +
-          `was measured and rejected.`,
+          `See the "WHERE THE TIME GOES" note at the top of this file for ` +
+          `what was measured and rejected.`,
       );
     }
 

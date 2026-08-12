@@ -21,7 +21,7 @@ jobs:
   # added here (env.ps1 ARM support is unverified in CI and that class still
   # queues); revisit once eph-win-arm64 is live.
   #
-  # M69 — WHY EVERY eph-win-x64 JOB STARTS WITH "Ensure Git and Git Bash":
+  # WHY EVERY eph-win-x64 JOB STARTS WITH "Ensure Git and Git Bash":
   # the migration above moved the runner label but inherited the GitHub-hosted
   # `windows-latest` *image contract*, and `eph-win-x64` does not honour it.
   # The garm-provisioned image ships neither `git` nor `bash` on PATH, which
@@ -573,6 +573,23 @@ jobs:
           "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
       - name: Prefer Git Bash over WSL bash stub
+        # The twin of the step of the same purpose in
+        # ``windows-rust-components``; keep the two bodies in step. Both
+        # remove the WSL launcher stub so ``CreateProcessW``'s System32-first
+        # lookup falls through to Git for Windows' ``bash.exe``.
+        #
+        # The ``C:\Program Files\Git\bin`` append is conditional on the
+        # directory existing. That is the GitHub-hosted ``windows-latest``
+        # layout; on ``eph-win-x64`` the directory is absent and the
+        # "Ensure Git and Git Bash are on PATH" step above provisions
+        # PortableGit under RUNNER_TEMP instead. Appending a non-existent
+        # directory succeeds silently, which is why the original mismatch
+        # surfaced several steps later as ``bash: command not found`` rather
+        # than here.
+        #
+        # And then bash must actually resolve: this job's payload step is
+        # ``shell: bash``, so a missing bash there is reported as a test
+        # failure rather than as a missing tool.
         shell: pwsh
         run: |
           $wslStub = "$env:SystemRoot\System32\bash.exe"
@@ -581,7 +598,17 @@ jobs:
             icacls $wslStub /grant "Administrators:(F)" | Out-Null
             Remove-Item -Force $wslStub
           }
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+          $gitForWindowsBin = "C:\Program Files\Git\bin"
+          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
+          }
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
+                  "should have provisioned Git Bash; the routed matrix below needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
@@ -734,7 +761,7 @@ jobs:
         # what the build.rs comment ("Ensure Git for Windows bash is
         # on PATH") actually wants.
         #
-        # M69: this step used to append the literal
+        # This step used to append the literal
         # ``C:\Program Files\Git\bin`` unconditionally. That is the
         # GitHub-hosted ``windows-latest`` layout; on ``eph-win-x64``
         # the directory does not exist, and the bootstrap step instead
@@ -1430,7 +1457,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-trace-format-nim sibling
-        # M69. Nine ViewModel suites -- the eight request-panel ones plus
+        # Nine ViewModel suites -- the eight request-panel ones plus
         # request_span_conformance_test -- ``import codetracer_ctfs/container``
         # to read a real CTFS container. ``config.nims`` resolves that module
         # from ``$CODETRACER_TRACE_FORMAT_NIM_SRC`` or from the workspace
@@ -1445,7 +1472,7 @@ jobs:
         # reading. Cloned here with ``clone-repo``, the same way this job
         # already gets ``codetracer-js-recorder``, rather than through
         # ``setup-dev-env`` -- that route additionally requires a published
-        # workspace lock, which is a separate unresolved problem (M68) and
+        # workspace lock, which is a separate unresolved problem and
         # would make this job depend on it for no benefit.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
@@ -3374,13 +3401,25 @@ jobs:
         run: bash ci/verdict/required-jobs-test.sh
 
       - name: Assert the Windows lane provisions its own git and bash
-        # M69. The eph-win-x64 image ships neither; five of the six Windows
-        # jobs did not run the bootstrap that supplies them, and the lane
-        # failed in three places that looked unrelated. This is a static
-        # contract over this workflow file, so it can be enforced from a
-        # Linux runner -- which matters, because the Windows lane had no
-        # signal at all for the months this went unnoticed.
+        # The eph-win-x64 image ships neither; five of the six Windows jobs
+        # did not run the bootstrap that supplies them, and the lane failed
+        # in three places that looked unrelated. This is a static contract
+        # over this workflow file, so it can be enforced from a Linux runner
+        # -- which matters, because the Windows lane had no signal at all
+        # for the months this went unnoticed.
         run: bash ci/test/windows-runner-bootstrap-test.sh
+
+      - name: Self-test the private-registry credential preflight
+        # This suite is also run by `visual-replay-regression-gate`, but that
+        # job needs a GPU runner, a workspace lock and eight sibling
+        # checkouts, so it is exactly the kind of lane that can stop
+        # executing without anyone noticing -- which is what this whole
+        # verdict job exists to prevent. The suite itself needs only bash,
+        # git and coreutils (its `cargo` is a stub), so running it here as
+        # well means the boundary and credential-leak contracts around the
+        # private lldb-sys token are checked on every run, from a stock
+        # runner, regardless of the state of the heavy lanes.
+        run: bash ci/test/visual-replay-private-cargo-preflight-test.sh
 
       - name: Assert the required jobs actually ran
         env:

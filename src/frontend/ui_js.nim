@@ -1656,8 +1656,8 @@ when not defined(ctInExtension):
           # VM that threw during construction leaves its panel wired to a
           # stub (or to nothing), and every later symptom — an empty
           # calltrace, a state panel that never fills — is downstream of
-          # this line.  It must survive the M51 demotion of the surrounding
-          # `[PIPELINE]` progress traces.
+          # this line.  It must stay at ERROR even though the surrounding
+          # `[PIPELINE]` progress traces were demoted to DEBUG.
           cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
 
       initPanelVM("initStateVMWithStore"):
@@ -1922,7 +1922,7 @@ when not defined(ctInExtension):
             inc data.ui.status.completeMoveId
             data.ui.status.redraw()
           else:
-            # Stays at ERROR (M51 review).  The "it just arrived early"
+            # Stays at ERROR.  The "it just arrived early"
             # reading of this branch does not survive checking: the only
             # thing that registers this subscription is
             # `configureMiddleware`, and both of its call sites

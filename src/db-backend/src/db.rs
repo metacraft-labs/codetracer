@@ -41,8 +41,6 @@ pub(crate) const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
 /// `0` therefore makes the depth-filtered navigation primitives
 /// (`next` / `step out`) behave at a frameless step exactly as they do
 /// at an outermost frame, instead of reporting "no successor".
-///
-/// Spec: `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org` §M50.
 pub(crate) const OUTERMOST_CALL_DEPTH: i64 = 0;
 
 #[derive(Debug, Clone)]

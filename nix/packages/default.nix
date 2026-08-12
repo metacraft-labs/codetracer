@@ -554,9 +554,9 @@
           checkPhase = ''
             runHook preCheck
 
-            # M69. ``buildRustPackage`` runs the crate's whole test suite
-            # here, and since 2026-08-01 one of those tests cannot run in a
-            # build sandbox at all:
+            # ``buildRustPackage`` runs the crate's whole test suite here,
+            # and since 2026-08-01 one of those tests cannot run in a build
+            # sandbox at all:
             #
             #   browser_stream_host::tests::
             #     verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
@@ -597,9 +597,28 @@
             # which excludes its cross-language flow tests for the same
             # reason and points at the job that does run them.
             #
+            # ``--target`` is not optional here. ``cargoBuildHook`` builds
+            # with ``--target ${pkgs.stdenv.targetPlatform.rust.rustcTarget}``
+            # (nixpkgs' cargo-build-hook.sh passes ``--target @rustcTarget@``),
+            # which puts its artefacts under ``target/<triple>/release``. A
+            # bare ``cargo test --release`` here uses ``target/release``
+            # instead, shares nothing with the build that just finished, and
+            # recompiles the entire crate graph a second time -- 86 crates
+            # rather than 9 -- in every one of the six jobs that depend on
+            # this derivation. Passing the same triple makes the check phase
+            # reuse the build phase's output, which is what an unoverridden
+            # ``cargoCheckHook`` would have done.
+            #
+            # The reason to fix it is those 77 redundant compiles: CPU, disk
+            # and cache pressure across six jobs. It is NOT wall-clock -- A/B
+            # on one machine measured 3m08s against 2m50s, an 18s saving,
+            # because the dependency compiles parallelise and the critical
+            # path is linking the test binary either way.
+            cargoTargetTriple=${pkgs.stdenv.targetPlatform.rust.rustcTarget}
+
             # Two guards keep the exclusion honest -- it must stay exactly
             # one test wide, and it must never become a no-op:
-            listing=$(cargo test --release --offline -- --list)
+            listing=$(cargo test --release --offline --target "$cargoTargetTriple" -- --list)
             listed=$(printf '%s\n' "$listing" | grep -c ': test$')
 
             excluded=browser_stream_host::tests::verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
@@ -610,7 +629,8 @@
               exit 1
             fi
 
-            output=$(cargo test --release --offline -- --skip "$excluded" 2>&1) || {
+            output=$(cargo test --release --offline --target "$cargoTargetTriple" \
+              -- --skip "$excluded" 2>&1) || {
               printf '%s\n' "$output"
               exit 1
             }

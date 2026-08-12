@@ -18,14 +18,14 @@
  *     #status #status-base > *:not(#auto-hide-bottom-strip)
  *       display: none !important
  *
- * making the footer tabs-only; milestone M43 removed it and pinned the
- * contract with `tests/status-bar/status-bar-footer-contract.spec.ts`; and
+ * making the footer tabs-only; it was removed and the contract pinned with
+ * `tests/status-bar/status-bar-footer-contract.spec.ts`; and
  * `51a3e820e "fix: UI regressions"` wrote the identical rule back into
- * `status_bar.styl` (M66).  Both times the visible symptom was not a footer
+ * `status_bar.styl`.  Both times the visible symptom was not a footer
  * complaint but a suite-wide timeout: every Electron spec opens with
  * `readyOnEntryTest`, which waits for `.location-path` to be **visible**.
  *
- * The lesson M66 draws is that a guard must not recognise a *spelling*.
+ * The lesson of that repeat is that a guard must not recognise a *spelling*.
  * There are unboundedly many ways to make an element invisible —
  * `:not()`, `:where()`, `:has()`, an enumerated selector list, `visibility`,
  * `opacity`, a hidden ancestor — and only one thing they have in common:

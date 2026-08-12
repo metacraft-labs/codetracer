@@ -4983,7 +4983,8 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
 /// A recording is worth committing only when it was made by a version
 /// that can no longer be built. That is a real category (see
 /// `codetracer-wasm-recorder`'s `legacy-encoding.ct`, produced by a
-/// pre-M52 `ct-instrument`) and it is not this one.
+/// `ct-instrument` that predates the current boundary-value encoding)
+/// and it is not this one.
 ///
 /// # Cost
 ///

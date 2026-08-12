@@ -321,6 +321,14 @@ fi
 ct_tup_config="${CODETRACER_CONFIG:-debug}"
 ct_tup_variant="build-${ct_tup_config}"
 
+# tup's dependency tracking is a FUSE mount, and libfuse can only obtain
+# /dev/fuse through a setuid helper at a path compiled into the binary. When
+# that helper is missing, tup reports a mount timeout three layers away from
+# the cause -- which is how `cross-process-linux` spent its runs failing at
+# "Unable to mount FUSE on .tup/mnt". Check it here, where the diagnostic can
+# still name the host requirement.
+"${BASH:-bash}" "$SCRIPT_DIR/require-fuse-mount-helper.sh" "${TUP:-tup}"
+
 # We have to make the dist directory here, because it's missing on a fresh check out
 # It will be created by the webpack command below, but we have an a chicken and egg
 # problem because the Tupfiles refer to it.

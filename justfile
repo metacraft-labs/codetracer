@@ -1281,7 +1281,7 @@ test-origin-dap:
 # tree and replay it.
 #
 # These three fixtures — the imported-memory calldata demo (spec §3.3/§3.4),
-# the M52 NaN-payload demo, and the M45 four-module parity corpus — each
+# the NaN-payload demo, and the four-module parity corpus — each
 # ship a `verify.sh` that was reachable only by knowing it existed. Nothing
 # ran them, which is how one of them came to pass vacuously: its negative
 # control edited the host state in the `boundary_state.json` sidecar only,
@@ -2457,7 +2457,7 @@ test-ct-trace-units:
 # was run by nothing at all — 34 assertions that could not fail a build.  The
 # member-check suite added alongside it pins that `ct upload` does not replace
 # the user's recording with a lossier export just because the exporter exited 0
-# (CTFS-Binary-Format.md §5d, M61).
+# (CTFS-Binary-Format.md §5d).
 test-mcr-enrichment-units:
   #!/usr/bin/env bash
   set -e

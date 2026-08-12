@@ -1,7 +1,4 @@
-//! M50 — step-over must not stall on a FRAMELESS step.
-//!
-//! Spec:
-//!   `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org` §M50.
+//! Step-over must not stall on a FRAMELESS step.
 //!
 //! # The defect
 //!
@@ -47,8 +44,8 @@
 //!   step-over into step-into: from a frameless step, a deeper callee
 //!   frame is still stepped OVER.
 //!
-//! * `step_over_advances_past_the_last_top_level_statement` — the M50
-//!   reproduction driven end-to-end through the real DAP server against
+//! * `step_over_advances_past_the_last_top_level_statement` — the reported
+//!   stall reproduced end-to-end through the real DAP server against
 //!   the committed `backend.ct` recording (a real `codetracer-js-recorder`
 //!   trace; no recorder needed to replay it). Run to entry, then press
 //!   `next` the way the GUI's F10 does, and assert the cursor never
@@ -64,7 +61,7 @@
 //! over stdio.
 //!
 //! Compile/run:
-//!   cargo test --manifest-path src/db-backend/Cargo.toml --test m50_step_over_frameless_step_test
+//!   cargo test --manifest-path src/db-backend/Cargo.toml --test step_over_frameless_step_test
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -310,7 +307,7 @@ fn temp_trace_dir(tag: &str) -> PathBuf {
 /// onto the frameless event-loop steps that follow the module frame's
 /// close, and into the callback frame the module scheduled.
 ///
-/// Against the pre-M50 code the walk dies at step 3: the first `next`
+/// Against the old bail-out code the walk dies at step 3: the first `next`
 /// issued FROM a frameless step returned step 3 again, and so did every
 /// subsequent one — the trail was `[1, 2, 3, 3, 3]`.
 #[test]
@@ -381,7 +378,7 @@ fn step_over_skips_a_deeper_callee_from_a_frameless_step() {
 /// chosen semantics, and it is asserted rather than assumed:
 ///
 /// * from inside `<module>` (depth 0, steps 0-2) `stepOut` leaves the
-///   frame and lands on the first frameless step, 3 — unchanged by M50;
+///   frame and lands on the first frameless step, 3 — unchanged by the fix;
 /// * from the frameless step 3 it now behaves the same way, advancing to
 ///   the next step at the outermost level instead of refusing to move.
 ///
@@ -398,7 +395,7 @@ fn step_out_from_a_frameless_step_matches_step_out_from_an_outermost_frame() {
     assert_eq!(
         (from_module, module_moved),
         (StepId(3), true),
-        "step-out from the outermost recorded frame must leave it (pre-M50 behaviour)"
+        "step-out from the outermost recorded frame must leave it (pre-existing behaviour)"
     );
 
     let (from_frameless, frameless_moved) = reader.step_out_step_id_relative_to(StepId(3), true);
@@ -432,7 +429,7 @@ fn backend_recording() -> PathBuf {
 }
 
 /// `server.js:108` is `idleTimer.unref();` — the last top-level
-/// statement of the module, and where the M50 report saw the cursor
+/// statement of the module, and where the bug report saw the cursor
 /// stall.
 const LAST_TOP_LEVEL_LINE: i64 = 108;
 
@@ -459,7 +456,7 @@ fn next_location(client: &mut DapStdioTestClient) -> (i64, i64) {
     }
 }
 
-/// STRICT — the M50 reproduction, end to end through the real DAP
+/// STRICT — the reported stall reproduced end to end through the real DAP
 /// server: run to entry on `backend.ct`, then press step-over the way
 /// the GUI's F10 does.
 ///
@@ -503,8 +500,8 @@ fn step_over_advances_past_the_last_top_level_statement() {
                 assert_ne!(
                     landed.1, prev_step,
                     "press {press}: step-over at server.js:{LAST_TOP_LEVEL_LINE} (the module's \
-                     last top-level statement, step #{prev_step}) did not move — this is the M50 \
-                     stall. Trail so far: {trail:?}"
+                     last top-level statement, step #{prev_step}) did not move — this is the \
+                     frameless-step stall. Trail so far: {trail:?}"
                 );
                 left_last_top_level_line = true;
             }

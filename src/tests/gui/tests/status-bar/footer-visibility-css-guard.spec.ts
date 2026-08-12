@@ -6,15 +6,15 @@
  * encoding, cursor location) in the footer while the bottom auto-hide tab
  * strip moves in; §10.3 puts the collapsed-strip icon zone in the same bar.
  * Twice now a single stylesheet rule has made the bar tabs-only —
- * `b27da3947 "feat: Redesign of the status bar"` (milestone M43) and, after
- * M43 removed it, `51a3e820e "fix: UI regressions"` (milestone M66) — and
+ * `b27da3947 "feat: Redesign of the status bar"` and, after that rule was
+ * removed, `51a3e820e "fix: UI regressions"` writing it straight back — and
  * both times the symptom was not a footer complaint but a suite-wide
  * timeout, because every Electron spec opens with `readyOnEntryTest` waiting
  * for `.location-path` to be *visible*.
  *
  * WHY A SECOND GUARD, GIVEN `status-bar-footer-contract.spec.ts` EXISTS.
  * That spec asserts the same contract and would have failed on `51a3e820e`
- * — M66 confirmed it does, 3/3 — but it costs a real Electron launch
+ * — confirmed against that commit, 3/3 — but it costs a real Electron launch
  * against a real recorded trace, so it only ever runs where a built app and
  * a recorder sibling are both present.  This one needs neither: it applies
  * the compiled theme CSS to the footer's own markup in a plain browser page
@@ -268,8 +268,8 @@ test.describe("footer visibility guard (Auto-Hide-Panes §3.1 / §10.3)", () => 
           "location) while hosting the bottom tab strip, and §10.3 puts the " +
           "icon zone in the same bar.  A quieter footer has to come from " +
           "restyling or from changing the design doc first — not from hiding " +
-          "`#status-base`'s children.  See `status_bar.styl`, milestones " +
-          "M43 and M66.",
+          "`#status-base`'s children.  See `status_bar.styl`, and the " +
+          "regressions in `b27da3947` and `51a3e820e`.",
       ).toEqual([]);
 
       // §10.3: the icon zone is idle-hidden but reachable.  The regression's

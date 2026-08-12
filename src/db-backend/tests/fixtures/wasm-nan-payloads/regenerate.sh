@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# NaN-payload demo (M52) — recording pipeline.
+# NaN-payload demo — recording pipeline.
 #
 # Produces one real browser recording of a WebAssembly module that
-# computes with the three float values a JavaScript host could not carry
-# before M52 — an f32 signalling NaN, an f64 payload-carrying quiet NaN,
+# computes with the three float values a JavaScript `Number` cannot carry
+# — an f32 signalling NaN, an f64 payload-carrying quiet NaN,
 # and a negative zero:
 #
 #   nan-payloads.ct/       the browser recording
@@ -48,7 +48,7 @@ OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
 PREVIEW_PORT="${DEMO_PREVIEW_PORT:-4182}"
 RECORD_WEB_PORT="${DEMO_RECORD_WEB_PORT:-9233}"
 
-echo "[regenerate] NaN-payload demo (M52)"
+echo "[regenerate] NaN-payload demo"
 echo "[regenerate] fixture:      $FIXTURE_DIR"
 echo "[regenerate] instrumenter: $WASM_INSTRUMENTER"
 echo

@@ -9,6 +9,11 @@ SENTINEL="ct-private-cargo-preflight-test-$$"
 SENTINEL_BASIC="$(printf 'x-access-token:%s' "$SENTINEL" | base64 | tr -d '\r\n')"
 LLDB_SYS_URL="https://github.com/metacraft-labs/lldb-sys.rs.git"
 
+# `prepare_two_slot_environment` restores this. Cases that need the preflight's
+# isolated boundary probe to land somewhere specific override TMPDIR, and the
+# override must not leak into the next case.
+ORIGINAL_TMPDIR="${TMPDIR:-}"
+
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/workspace"
 cat >"$TEST_ROOT/bin/cargo" <<'FAKE_CARGO'
 #!/usr/bin/env bash
@@ -42,6 +47,11 @@ CARGO_LOCK
 prepare_two_slot_environment() {
 	local cargo_home="$1"
 	mkdir -p "$cargo_home"
+	if [[ -n $ORIGINAL_TMPDIR ]]; then
+		export TMPDIR="$ORIGINAL_TMPDIR"
+	else
+		unset TMPDIR
+	fi
 	unset GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_ALLOW_PROTOCOL
 	unset GIT_CONFIG_KEY_00 GIT_CONFIG_VALUE_00
 	unset GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
@@ -118,6 +128,14 @@ run_negative_case() {
 	# shellcheck disable=SC1091
 	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
 
+	# Cases that must run from inside a particular checkout set
+	# NEGATIVE_CASE_CWD; cases that build a repository carrying a credential
+	# set NEGATIVE_CASE_CLEANUP so the end-of-run sentinel sweep keeps
+	# meaning "nothing retained the credential" rather than "no test wrote
+	# one". Both are reset here so one case cannot bleed into the next.
+	NEGATIVE_CASE_CWD="$PWD"
+	NEGATIVE_CASE_CLEANUP=""
+
 	# These assignments mutate variables that
 	# ``visual-replay-private-cargo-env.sh`` (sourced just above) has
 	# already exported, so the child ``git`` sees them; shellcheck cannot
@@ -127,7 +145,62 @@ run_negative_case() {
 	prompt) GIT_TERMINAL_PROMPT=1 ;;
 	global-config) GIT_CONFIG_GLOBAL="$TEST_ROOT/hostile.gitconfig" ;;
 	count) GIT_CONFIG_COUNT=5 ;;
-	auth-key) GIT_CONFIG_KEY_0="http.https://github.com/.extraHeader" ;;
+	auth-key)
+		# Git normalises away the default port before matching, so this key
+		# is semantically identical to the correct one: it grants the header
+		# to the lldb-sys URL and to nothing else, and therefore passes the
+		# `effective-auth-header` check and both boundary readings. Only the
+		# literal key comparison can catch it. Using a *harmless* rewrite
+		# here is deliberate — it pins that check as an independent contract
+		# rather than as a shadow of the boundary probe.
+		GIT_CONFIG_KEY_0="http.https://github.com:443/metacraft-labs/lldb-sys.rs.git.extraHeader"
+		;;
+	auth-key-wide)
+		# A genuinely widened key: `https://github.com/metacraft-labs/` is a
+		# prefix of the first probe URL, so Git hands the lldb-sys header to
+		# a URL that is not lldb-sys. This is reading (1) of the boundary
+		# check — the isolated probe over the gate's own inline config —
+		# and it is the case that reddens if that reading is deleted.
+		GIT_CONFIG_KEY_0="http.https://github.com/metacraft-labs/.extraHeader"
+		;;
+	probe-isolation)
+		# The boundary probe's reading (1) is only meaningful while its
+		# working directory is outside every work tree. `mktemp -d` honours
+		# TMPDIR, so a runner whose temp directory sits inside a checkout
+		# would silently give the probe that checkout's repository config
+		# back and make the reading vacuous. Reproduce exactly that: a real
+		# repository, carrying the real `actions/checkout` credential, with
+		# TMPDIR pointing inside it.
+		local isolation_repo="$TEST_ROOT/probe-isolation-checkout"
+		make_checkout_like_repo "$isolation_repo" \
+			"AUTHORIZATION: basic ${AMBIENT_BASIC}"
+		mkdir -p "$isolation_repo/runner-temp"
+		export TMPDIR="$isolation_repo/runner-temp"
+		NEGATIVE_CASE_CLEANUP="$isolation_repo"
+		;;
+	leak-lowercase-field | leak-uppercase-scheme | leak-trailing-space | \
+		leak-doubled-space)
+		# One leaked credential, four wire-valid spellings. RFC 9110 §5.1
+		# makes the field name case-insensitive, RFC 7617 §2 makes the
+		# `basic` scheme token case-insensitive, and RFC 9110 §5.5 allows
+		# optional whitespace around the field value — so every one of these
+		# hands the *same* lldb-sys secret to `https://github.com/`, and a
+		# `==` comparison against `AUTHORIZATION: basic <token>` waves three
+		# of the four through. Git preserves the spelling verbatim
+		# (values with edge whitespace are written quoted), so what
+		# `--get-urlmatch` returns here is what the wire would carry.
+		local leak_repo="$TEST_ROOT/leak-checkout-$case_name"
+		local leaked_header
+		case "$case_name" in
+		leak-lowercase-field) leaked_header="authorization: basic ${SENTINEL_BASIC}" ;;
+		leak-uppercase-scheme) leaked_header="AUTHORIZATION: Basic ${SENTINEL_BASIC}" ;;
+		leak-trailing-space) leaked_header="AUTHORIZATION: basic ${SENTINEL_BASIC}   " ;;
+		leak-doubled-space) leaked_header="AUTHORIZATION:  basic  ${SENTINEL_BASIC}" ;;
+		esac
+		make_checkout_like_repo "$leak_repo" "$leaked_header"
+		NEGATIVE_CASE_CWD="$leak_repo"
+		NEGATIVE_CASE_CLEANUP="$leak_repo"
+		;;
 	header-shape) GIT_CONFIG_VALUE_0="AUTHORIZATION: basic bad value" ;;
 	helper) GIT_CONFIG_VALUE_1="hostile-helper" ;;
 	redirect) GIT_CONFIG_VALUE_2=true ;;
@@ -163,7 +236,7 @@ SECOND_GIT_SOURCE
 	esac
 	set +e
 	output="$(
-		cd "${NEGATIVE_CASE_CWD:-$PWD}" &&
+		cd "$NEGATIVE_CASE_CWD" &&
 			CARGO_CALL_LOG="$TEST_ROOT/cargo-negative-$case_name.args" \
 				PATH="$TEST_ROOT/bin:$PATH" \
 				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
@@ -171,15 +244,24 @@ SECOND_GIT_SOURCE
 	)"
 	status=$?
 	set -e
+	if [[ -n $NEGATIVE_CASE_CLEANUP ]]; then
+		rm -rf "$NEGATIVE_CASE_CLEANUP"
+	fi
 	if ((status == 0)) || [[ $output != *"$expected_invariant"* ]]; then
 		echo "Private Cargo preflight negative case failed: $case_name" >&2
 		printf '%s\n' "$output" >&2
 		exit 1
 	fi
+	# No diagnostic may echo the credential it is complaining about.
+	if [[ $output == *"$SENTINEL_BASIC"* || $output == *"$SENTINEL"* ]]; then
+		echo "Private Cargo preflight echoed the credential while reporting" >&2
+		echo "negative case: $case_name" >&2
+		exit 1
+	fi
 }
 
 # ---------------------------------------------------------------------------
-# M69: the ambient checkout credential.
+# The ambient checkout credential.
 #
 # `actions/checkout` defaults to `persist-credentials: true` and writes
 #
@@ -278,6 +360,15 @@ run_negative_case prompt "interactive-credential-blocking"
 run_negative_case global-config "config-file-isolation"
 run_negative_case count "inline-config-count"
 run_negative_case auth-key "auth-header-url-scope"
+run_negative_case auth-key-wide "auth-header-url-boundary"
+run_negative_case probe-isolation "auth-boundary-probe-isolation"
+# The same leaked lldb-sys credential, spelled four wire-valid ways. Each of
+# these passed the gate while the boundary check compared whole header strings
+# with `==`.
+run_negative_case leak-lowercase-field "auth-header-credential-leak"
+run_negative_case leak-uppercase-scheme "auth-header-credential-leak"
+run_negative_case leak-trailing-space "auth-header-credential-leak"
+run_negative_case leak-doubled-space "auth-header-credential-leak"
 run_negative_case header-shape "auth-header-shape"
 run_negative_case helper "credential-helper-blocking"
 run_negative_case redirect "redirect-blocking"

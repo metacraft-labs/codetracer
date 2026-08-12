@@ -54,9 +54,18 @@ mkShell {
     ripgrep
     universal-ctags
 
-    # Tup builds
-    fuse
+    # Tup builds.
+    #
+    # `fuse` (FUSE 2) used to sit here and was removed: tup links
+    # `libfuse3.so.4`, so the FUSE 2 `fusermount` it provides is never
+    # spawned. `fuse3` replaces it because libfuse's second mount attempt is
+    # `posix_spawnp("fusermount3", …)` — a bare name, so PATH is searched
+    # and this copy is used. See the long note in `ci-base.nix`: it still
+    # does not grant the mount, which needs a setuid wrapper and /dev/fuse
+    # from the system, and `scripts/require-fuse-mount-helper.sh` reports
+    # those by name.
     tup
+    fuse3
 
     # Make alternative
     # https://github.com/casey/just

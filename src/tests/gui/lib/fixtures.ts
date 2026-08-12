@@ -638,7 +638,7 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
-  // M51: turn HMR off for ordinary GUI tests.
+  // Turn HMR off for ordinary GUI tests.
   //
   // `just build-once` compiles the renderer with `-d:ctHmr`, and
   // `hmr_runtime.isHmrRequested()` defaults to ON when CT_HMR is unset.  So
@@ -1052,7 +1052,7 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
     try {
       ctPrefix = (window as any).require("process").env.CODETRACER_PREFIX ?? "(undefined)";
     } catch { /* renderer may not have Node integration */ }
-    // `console.info`, not `console.error` (M51).  These three lines are the
+    // `console.info`, not `console.error`.  These three lines are the
     // harness describing a healthy page, not the page reporting a fault —
     // and emitting them at ERROR put the collector's own output into the
     // very bucket `verify_clean_console_on_trace_open` asserts is empty.
@@ -1995,8 +1995,8 @@ export const READY_ON_ENTRY_BUDGET_MS = 30_000;
  * `toBeAttached()` would report readiness for a status bar that never
  * renders.
  *
- * Is the hidden `.location-path` intended?  No — asked and answered while
- * fixing M43 (`codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`).
+ * Is the hidden `.location-path` intended?  No — asked and answered when the
+ * regression that hid it was tracked down.
  * Commit b27da3947 ("feat: Redesign of the status bar") added
  * `#status #status-base > *:not(#auto-hide-bottom-strip) { display: none !important }`
  * to `src/frontend/styles/components/status_bar.styl`, which hid this
@@ -2010,8 +2010,8 @@ export const READY_ON_ENTRY_BUDGET_MS = 30_000;
  * wait so a repeat of that regression fails loudly instead of silently.
  *
  * It did repeat.  `51a3e820e "fix: UI regressions"` wrote the same rule back
- * one nesting level down (milestone M66) and this wait failed loudly exactly
- * as intended, with the diagnosis below naming the cause.  What that round
+ * one nesting level down and this wait failed loudly exactly as intended,
+ * with the diagnosis below naming the cause.  What that round
  * added is a guard that does not depend on this wait, because this wait
  * cannot see every way of hiding the footer: Playwright's visibility
  * predicate is box-and-`visibility`, so an `opacity: 0` status bar would

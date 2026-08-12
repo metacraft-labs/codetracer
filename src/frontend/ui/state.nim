@@ -126,7 +126,7 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
   let container = dom_api.getElementById(dom_api.document, data.key)
   if dom_api.isNodeNil(dom_api.Node(container)):
     if data.retryCount mod 10 == 0:
-      # Legitimate, hence DEBUG (M51).  `tryMountIsoNimStatePanel` is
+      # Legitimate, hence DEBUG.  `tryMountIsoNimStatePanel` is
       # called before GoldenLayout has necessarily created the panel's
       # container, so polling for it is the design, not a fault.  Only
       # exhausting the retry budget below is a failure.

@@ -204,29 +204,46 @@ with pkgs;
   ++ pkgs.lib.optionals (!stdenv.isDarwin) [
     # Tup is Linux-only (FUSE-based sandboxing). On Darwin we fall
     # back to a different build path that doesn't need tup.
-    tup
-    fuse
-
-    # M69: `fuse` is FUSE **2** and ships `fusermount`. The `tup` above
-    # links `libfuse3.so.4` and spawns `fusermount3`, which only FUSE 3
-    # provides, so the shell declared a helper tup does not use and
-    # omitted the one it does. `just build-once` therefore died in the
-    # `cross-process-linux` job with
+    #
+    # `fuse` (FUSE 2) is deliberately NOT here: it ships `fusermount`, and
+    # nothing in this repo spawns it. tup links `libfuse3.so.4`.
+    #
+    # `fuse3` IS here, and the reason is worth stating precisely, because a
+    # plausible-sounding argument for dropping it is wrong. nixpkgs patches
+    # libfuse to try the absolute path `/run/wrappers/bin/fusermount3` — a
+    # NixOS `security.wrappers` setuid binary that a devShell cannot
+    # provide — and that much is true. But that is only the FIRST of two
+    # attempts. `fusermount_posix_spawn` in libfuse 3.17.4 then falls back
+    # to `posix_spawnp("fusermount3", …)`: a BARE name, no slash, so PATH
+    # *is* searched and the store copy below *is* consulted (verified by
+    # disassembly — the two call sites load `.rodata` 0x2bde1
+    # "/run/wrappers/bin/fusermount3" and 0x2bdf3 "fusermount3" — and under
+    # strace, which shows the PATH copy being execve'd). tup's own literal
+    # has the same shape: nixpkgs' `fusermount-setuid.patch` is headed
+    # "Tup needs a setuid fusermount which may be outside $PATH" and does
+    # `access("/run/wrappers/bin/fusermount3", X_OK) == 0 ? absolute : bare`.
+    #
+    # So this entry is not inert. What it cannot do is make the helper
+    # setuid, which is what unprivileged FUSE mounting ultimately needs:
+    # on a host without the setuid wrapper it upgrades
     #
     #   posix_spawn(p)() for fusermount3 failed: No such file or directory
     #   tup error: Timed out waiting for the FUSE file-system to be ready.
     #   tup error: Unable to mount FUSE on .tup/mnt
     #
-    # (run 30726348404). It works on a NixOS workstation only because
-    # /run/wrappers/bin/fusermount3 leaks in from the host — the same
-    # accident that hid the missing `direnv` in M67, and the same fix:
-    # declare it.
+    # (run 30726348404, `cross-process-linux`) into a permission error that
+    # names the real requirement — the honest failure, and a strictly better
+    # one. It does not by itself grant the mount.
     #
-    # NOTE: the store's fusermount3 is not setuid. On a host where
-    # unprivileged FUSE mounting needs the setuid wrapper, this turns an
-    # unfindable binary into a permission error that names the real
-    # requirement, which is the honest failure; it does not by itself
-    # grant the mount.
+    # The remaining gap is a host capability, not a package: the system must
+    # provide the setuid wrapper (`programs.fuse` /
+    # `security.wrappers.fusermount3` on NixOS, the distribution's `fuse3`
+    # elsewhere) and a container must be given /dev/fuse. Neither is
+    # expressible here; both belong to whoever owns the `eph-linux-x64`
+    # runner image. `scripts/require-fuse-mount-helper.sh`, called by
+    # `scripts/build-once.sh`, checks for them and reports what is missing
+    # by name instead of letting it surface three layers down.
+    tup
     fuse3
 
     # ctRemote is the codetracer remote replay helper used by some

@@ -293,7 +293,7 @@ proc tryMountIsoNimCalltrace() =
     let container = dom_api.getElementById(dom_api.document, key)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if calltraceRetryCount mod 10 == 0:
-        # Legitimate, hence DEBUG (M51): polling for a container
+        # Legitimate, hence DEBUG: polling for a container
         # GoldenLayout has not created yet is the design.  Only exhausting
         # the budget below is a failure.
         cdebug "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &

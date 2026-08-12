@@ -143,7 +143,7 @@ proc requestDebugControlsRender*(self: DebugComponent) =
     cstring"isonim-debug-controls")
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
-  # M51 finding — this repair path runs FAR more often than "occasionally
+  # Measured finding — this repair path runs FAR more often than "occasionally
   # after a menu redraw" suggests.  Measured on one clean trace open:
   # `tryMountIsoNimDebugControls` is entered 46 times and mounts 45 of
   # them, i.e. the whole IsoNim control tree is cleared and rebuilt ~45
@@ -165,7 +165,8 @@ proc requestDebugControlsRender*(self: DebugComponent) =
   # If that is right, the guard below is not at fault and this path is
   # what keeps the toolbar alive; the thing worth chasing is the other
   # side, namely why the menu redraws dozens of times during a single
-  # open.  Deliberately not changed by M51, which was a logging milestone.
+  # open.  Deliberately left as it is: the fix belongs on the menu-redraw
+  # side, not in this repair path.
   if isoNimDebugMounted and not dom_api.isNodeNil(dom_api.Node(container).firstChild):
     return
   isoNimDebugMounted = false

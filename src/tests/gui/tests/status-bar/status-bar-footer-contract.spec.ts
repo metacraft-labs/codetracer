@@ -56,7 +56,7 @@ const repoRoot = path.resolve(__dirname, "../../../../..");
  * verbatim as the first entry of `BLANKET_HIDE_SPELLINGS` so the historical
  * case stays covered by name.  The negative controls below run the whole
  * list, because a control that only recognises the spelling that shipped is
- * a control the next spelling walks past (milestone M66).
+ * a control the next spelling walks past.
  */
 const TABS_ONLY_RULE = BLANKET_HIDE_SPELLINGS[0].css;
 

@@ -281,7 +281,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
   withViewModel proc(dispose: proc()): CalltraceVM =
     let wrappedDispose = proc() =
       when defined(js):
-        # Legitimate, hence DEBUG (M51).  This is the dispose path itself:
+        # Legitimate, hence DEBUG.  This is the dispose path itself:
         # it runs on session teardown and whenever a stub-backed VM is
         # replaced by a real-backend one during `configureMiddleware`.
         # Both are ordinary lifecycle events.  The shouting was a leftover

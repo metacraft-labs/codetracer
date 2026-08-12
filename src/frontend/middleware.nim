@@ -175,7 +175,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
         inc data.ui.status.completeMoveId
         data.ui.status.redraw()
       else:
-        # Stays at ERROR (M51 review), for the same reason as the twin
+        # Stays at ERROR, for the same reason as the twin
         # branch in `ui_js.configureMiddleware`.  This handler is installed
         # by `setupMiddlewareApis`, whose sole caller is
         # `configureMiddleware`, whose own two call sites both run after
