@@ -546,3 +546,87 @@ input:checked ~ .checkmark:after
 .jstree-default-contextmenu
   display: none !important
   visibility: hidden !important
+
+// ---------------------------------------------------------------------------
+// ct-picker — shared pill-style picker / dropdown component
+//
+// Extracts the VCS branch-picker pattern into a reusable component.
+// Usage:
+//   div.ct-picker[.ct-picker--chevron-left | .ct-picker--chevron-right]
+//     div.ct-picker-trigger[.ct-picker-trigger--open]
+//       span.ct-picker-chevron   (SVG set via innerHTML)
+//       span.ct-picker-label     (current selection text)
+//     div.ct-picker-dropdown     (shown when open; absent when closed)
+//       div.ct-menu-item …       (one per option; see menu_item.styl)
+//
+// .ct-picker--chevron-left  — chevron DOM node before label (default; matches VCS branch picker)
+// .ct-picker--chevron-right — chevron appears visually to the RIGHT of the label
+//                             (achieved by reversing the flex row order so the
+//                             chevron span, which is first in the DOM, ends up
+//                             on the right side visually)
+// ---------------------------------------------------------------------------
+
+.ct-picker
+  position: relative
+  flex-shrink: 0
+
+.ct-picker-trigger
+  display: flex
+  align-items: center
+  height: 1.75rem
+  max-height: 1.75rem
+  padding: 0 0.625em
+  cursor: pointer
+  gap: 0.375em
+  user-select: none
+  border-radius: 0.5em
+  border: 0.03125em solid colors-ui-border-primary
+  background: colors-ui-surface-primary-default
+  font-family: "SpaceGrotesk"
+  font-size: 0.75rem
+  color: colors-ui-text-primary-body-subtle
+  white-space: nowrap
+  min-width: 7.5em
+
+  &:hover
+    background: colors-ui-surface-primary-default-hover
+    color: colors-ui-text-primary-body
+
+  &.ct-picker-trigger--open
+    border-color: colors-ui-border-action
+    color: colors-ui-text-primary-body
+
+.ct-picker-chevron
+  display: flex
+  align-items: center
+  flex-shrink: 0
+  opacity: 0.7
+
+.ct-picker-label
+  flex: 1
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.ct-picker-dropdown
+  position: absolute
+  top: calc(100% + 0.125em)
+  left: 0
+  right: 0
+  z-index: 100
+  background: colors-ui-surface-primary-default
+  border: 0.03125em solid colors-ui-border-primary
+  border-radius: 0.375rem
+  padding: 0.25em
+  max-height: 12.5em
+  overflow-y: auto
+
+// .ct-picker--chevron-left: chevron DOM node is first → naturally appears on
+// the left. No reorder needed. Defined explicitly for self-documentation.
+.ct-picker--chevron-left .ct-picker-trigger
+  flex-direction: row
+
+// .ct-picker--chevron-right: chevron DOM node is first but we reverse the
+// visual order so it ends up on the right side of the label.
+.ct-picker--chevron-right .ct-picker-trigger
+  flex-direction: row-reverse

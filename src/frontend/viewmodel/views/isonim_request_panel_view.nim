@@ -12,24 +12,27 @@
 ## "request-panel")`` layout::
 ##
 ##   div.component-container.request-panel
-##     div.request-panel-header
-##       div.request-panel-filters
-##         select.request-filter-select  (method dropdown)
-##         select.request-filter-select  (status dropdown)
-##         input.request-filter-search   (URL search)
-##       div.request-panel-count
-##         text "<filtered>/<total> requests"
+##     div.request-panel-filters
+##       input.request-filter-search.ct-input-panel.ct-input-search-image
+##       div.ct-picker.ct-picker--chevron-right  (method picker)
+##         div.ct-picker-trigger[.ct-picker-trigger--open]
+##           span.ct-picker-chevron  (SVG)
+##           span.ct-picker-label
+##         div.ct-picker-dropdown  (when open)
+##           div.ct-menu-item[.ct-menu-item--active]  (one per method)
+##       div.ct-picker.ct-picker--chevron-right  (status picker, same structure)
 ##     div.request-table-header
 ##       div.request-col-id           text "#"
-##       div.request-col-method       text "Method"
+##       div.request-col-method       text "method"
 ##       div.request-col-url          text "URL"
-##       div.request-col-status       text "Status"
-##       div.request-col-duration     text "Duration"
-##       div.request-col-size         text "Size"
+##       div.request-col-status       text "STATUS"
+##       div.request-col-duration     text "DURATION"
+##       div.request-col-size         text "SIZE"
 ##     div.request-table-body
 ##       div.request-row[.selected]   (one per filtered request)
-##         div.request-col-id         text "<id>"
-##         div.request-col-method     text "<httpMethod>"
+##         div.request-col-id         text "<zero-padded id>"
+##         div.request-col-method
+##           span.request-method-badge.<method>  text "<httpMethod>"
 ##         div.request-col-url        text "<url>"
 ##         div.request-col-status
 ##           span.request-status-<bucket>  text "<statusCode>"
@@ -41,8 +44,6 @@
 ##   ``filteredRequests`` or ``selectedIndex`` changes.  Mirrors the
 ##   ``low_level_code`` view's pattern (DSL builds the static shell,
 ##   imperative renderer ops inside the effect handle the row list).
-## - The count badge is a small standalone ``createRenderEffect``
-##   that swaps the text node when the totals change.
 ## - Filter inputs / select wires use the captured ``var``-binding
 ##   pattern from the REPL view (``ref = inputEl`` then imperative
 ##   ``addEventListener`` after the DSL expansion) so we can read
@@ -157,6 +158,14 @@ proc methodBadgeClass*(httpMethod: string): string =
   ## ``"request-method-badge request-method-<lowercase-method>"``.
   "request-method-badge request-method-" & httpMethod.toLowerAscii()
 
+proc makeTabClickHandler*(vm: RequestPanelVM; tab: string): proc() =
+  ## Returns a click handler that switches the detail panel to ``tab``.
+  ## Uses a factory function so each call creates a unique closure
+  ## capturing its own ``captured`` binding — avoids the closure-in-loop
+  ## capture issue that arises with inline proc literals in for loops.
+  let captured = tab
+  result = proc() = vm.setDetailTab(captured)
+
 proc onRowClick(vm: RequestPanelVM; index: int): proc() =
   ## Closure factory that captures the row's filtered-list index so
   ## each row's click handler refers to its own value.  Without the
@@ -172,9 +181,266 @@ proc onRowDoubleClick(vm: RequestPanelVM; index: int): proc() =
   let captured = index
   result = proc() = vm.jumpToHandler(captured)
 
+proc formatReqId*(id: int): string =
+  ## Zero-pads single-digit IDs so the ``#`` column aligns nicely
+  ## (matches the reference design: 01, 02 … 09, 10, 11 …).
+  if id < 10: "0" & $id else: $id
+
+proc statusCodeText*(code: int): string =
+  ## Standard HTTP reason phrase for common status codes.
+  ## Returns an empty string for unrecognised codes.
+  case code
+  of 100: "Continue"
+  of 101: "Switching Protocols"
+  of 200: "OK"
+  of 201: "Created"
+  of 202: "Accepted"
+  of 204: "No Content"
+  of 206: "Partial Content"
+  of 301: "Moved Permanently"
+  of 302: "Found"
+  of 303: "See Other"
+  of 304: "Not Modified"
+  of 307: "Temporary Redirect"
+  of 308: "Permanent Redirect"
+  of 400: "Bad Request"
+  of 401: "Unauthorized"
+  of 403: "Forbidden"
+  of 404: "Not Found"
+  of 405: "Method Not Allowed"
+  of 408: "Request Timeout"
+  of 409: "Conflict"
+  of 410: "Gone"
+  of 413: "Content Too Large"
+  of 422: "Unprocessable Content"
+  of 429: "Too Many Requests"
+  of 500: "Internal Server Error"
+  of 501: "Not Implemented"
+  of 502: "Bad Gateway"
+  of 503: "Service Unavailable"
+  of 504: "Gateway Timeout"
+  else: ""
+
+proc detailStatusText*(code: int): string =
+  ## Full status display string for the detail panel header:
+  ## "NNN Reason Phrase" for known codes, just "NNN" otherwise.
+  let reason = statusCodeText(code)
+  if reason.len > 0: $code & " " & reason else: $code
+
+const DetailTabs* = [
+  ("headers",   "Headers"),
+  ("request",   "Request"),
+  ("response",  "Response"),
+  ("timing",    "Timing"),
+  ("calltrace", "Call Trace"),
+  ("asyncflow", "Async Flow"),
+]
+  ## (tabId, displayLabel) pairs for the request detail tab bar.
+  ## ``tabId`` values are used as ``vm.detailTab`` signal values.
+
+# ---------------------------------------------------------------------------
+# ct-picker chevron SVGs and option data
+# ---------------------------------------------------------------------------
+
+const chevronDownSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.353516 0.353577L4.35352 4.35358L8.35352 0.353576" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
+  ## Down-pointing chevron SVG injected into ``.ct-picker-chevron`` spans.
+  ## Matches the VCS branch-picker chevron shape and colour.
+const chevronUpSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.35352 4.35358L4.35352 0.353577L0.353516 4.35358" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
+  ## Up-pointing chevron — shown when a picker dropdown is open.
+
+const MethodPickerOptions*: array[8, (string, string)] = [
+  ("", "Method: All"),
+  ("GET", "GET"),
+  ("POST", "POST"),
+  ("PUT", "PUT"),
+  ("DELETE", "DELETE"),
+  ("PATCH", "PATCH"),
+  ("HEAD", "HEAD"),
+  ("OPTIONS", "OPTIONS"),
+]
+  ## (filterValue, displayLabel) pairs for the Method filter picker.
+  ## An empty ``filterValue`` means "all methods".
+
+const StatusPickerOptions*: array[5, (string, string)] = [
+  ("", "Status: All"),
+  ("2xx", "2xx Success"),
+  ("3xx", "3xx Redirect"),
+  ("4xx", "4xx Client Error"),
+  ("5xx", "5xx Server Error"),
+]
+  ## (filterValue, displayLabel) pairs for the Status filter picker.
+
+# ---------------------------------------------------------------------------
+# Picker host helpers — generic across Mock and Web renderers
+# ---------------------------------------------------------------------------
+
+proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
+  ## Attach a rendered picker item to its container.  Mirrors the VCS view's
+  ## helper of the same name so ``renderFilterPicker`` can stay generic.
+  r.appendChild(host, child)
+
+# Web-renderer picker helpers forward-declared here (before renderFilterPicker)
+# so that generic instantiation for WebRenderer finds setInnerHtml /
+# appendRenderedChild. Mirrors the VCS view's pattern exactly.
+when defined(js):
+  proc setInnerHtml(r: WebRenderer; node: isonim_dom.Element; html: string) =
+    ## Inject raw HTML into a DOM element.  Used by ``renderFilterPicker`` to
+    ## insert the chevron SVG into ``.ct-picker-chevron`` spans.
+    node.innerHTML = cstring(html)
+
+  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
+    ## Attach a rendered picker item to its container.
+    r.appendChild(host, child)
+
+  # ---------------------------------------------------------------------------
+  # Drag-resize FFI — used by the detail panel resize handle
+  # ---------------------------------------------------------------------------
+
+  proc clientY(e: isonim_dom.Event): float {.importjs: "#.clientY".}
+    ## Y coordinate of a mouse event relative to the viewport.
+
+  proc elemHeight(el: isonim_dom.Element): float
+    {.importjs: "#.getBoundingClientRect().height".}
+    ## Live height of an element's bounding box.
+
+  proc elemBottom(el: isonim_dom.Element): float
+    {.importjs: "#.getBoundingClientRect().bottom".}
+    ## Live bottom edge of an element's bounding box (viewport-relative).
+
+  proc preventDefault(e: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+    ## Suppress the default browser action for an event (used on mousedown to
+    ## prevent text-selection during a drag).
+
+  proc setDocMouseMove(h: proc(e: isonim_dom.Event))
+    {.importjs: "document.onmousemove = #".}
+    ## Install a one-slot mousemove handler on document.  A second call
+    ## replaces the previous handler, so only one drag is active at a time.
+
+  proc clearDocMouseMove() =
+    ## Remove the document mousemove handler installed by ``setDocMouseMove``.
+    {.emit: "document.onmousemove = null;".}
+
+  proc setDocMouseUp(h: proc(e: isonim_dom.Event))
+    {.importjs: "document.onmouseup = #".}
+    ## Install a one-slot mouseup handler on document (drag termination).
+
+  proc clearDocMouseUp() =
+    ## Remove the document mouseup handler installed by ``setDocMouseUp``.
+    {.emit: "document.onmouseup = null;".}
+
+proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
+                            currentValue: string;
+                            options: openArray[(string, string)];
+                            onToggle: proc();
+                            onSelect: proc(value: string)): auto =
+  ## Generic ``ct-picker`` renderer used for the Method and Status filter
+  ## pickers.  Produces a ``div.ct-picker.ct-picker--chevron-right`` shell
+  ## with a trigger row (chevron + label) and, when ``isOpen``, a floating
+  ## dropdown of ``ct-menu-item`` rows.
+  ##
+  ## ``label``        — placeholder text shown when ``currentValue`` is empty
+  ##                    (e.g. "Method: All").
+  ## ``currentValue`` — the active filter value (``""`` means unfiltered).
+  ## ``options``      — (filterValue, displayLabel) pairs; the entry whose
+  ##                    ``filterValue == currentValue`` gets the
+  ##                    ``ct-menu-item--active`` modifier.
+  ## ``onToggle``     — called when the trigger is clicked.
+  ## ``onSelect(v)``  — called when a dropdown item is clicked.
+  var chevronHost: typeof(r.createElement("span"))
+  var dropdown: typeof(r.createElement("div"))
+  let chevronSvg = if isOpen: chevronUpSvg else: chevronDownSvg
+  let triggerClass = if isOpen: "ct-picker-trigger ct-picker-trigger--open"
+                     else: "ct-picker-trigger"
+  let displayLabel = if currentValue == "": label else: currentValue
+  let panel = ui(r):
+    tdiv(class = "ct-picker ct-picker--chevron-right"):
+      tdiv(class = triggerClass, onclick = onToggle):
+        span(ref = chevronHost, class = "ct-picker-chevron")
+        span(class = "ct-picker-label"):
+          text displayLabel
+      if isOpen:
+        tdiv(ref = dropdown, class = "ct-picker-dropdown")
+  r.setInnerHtml(chevronHost, chevronSvg)
+  if isOpen:
+    for (optValue, optLabel) in options:
+      let v = optValue
+      let ol = optLabel
+      let itemClass = if v == currentValue: "ct-menu-item ct-menu-item--active"
+                      else: "ct-menu-item"
+      let item = ui(r):
+        tdiv(class = itemClass, onclick = proc() = onSelect(v)):
+          span(class = "ct-menu-item-label"):
+            text ol
+      r.appendRenderedChild(dropdown, item)
+  panel
+
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
+
+proc renderDetailContentMock(r: MockRenderer; req: RequestRecord;
+                              tab: string): MockNode =
+  ## Renders the content area for the active detail tab.
+  case tab
+  of "timing":
+    ui(r):
+      tdiv(class = "request-detail-timing"):
+        tdiv(class = "request-detail-section-title"):
+          text "TIMING (" & durationText(req) & ")"
+        tdiv(class = "request-timing-row"):
+          span(class = "request-timing-label"): text "Total"
+          span(class = "request-timing-value"): text durationText(req)
+  of "response":
+    ui(r):
+      tdiv(class = "request-detail-response"):
+        tdiv(class = "request-detail-section-title"):
+          text "RESPONSE"
+        tdiv(class = "request-detail-row"):
+          span(class = "request-detail-key"): text "Size"
+          span(class = "request-detail-value"): text formatSize(req.responseSize)
+  else:
+    ui(r):
+      tdiv(class = "request-detail-placeholder"):
+        text "No data available for this tab."
+
+proc renderDetailMock(r: MockRenderer; vm: RequestPanelVM;
+                      req: RequestRecord; tab: string): MockNode =
+  ## Full detail panel for the selected request — Mock renderer variant.
+  ## Header bar: method badge | URL | status text | Handler button.
+  ## Below: tab bar + content area driven by ``vm.detailTab``.
+  let badgeCls = methodBadgeClass(req.httpMethod)
+  let statusCls = statusCellClass(req)
+  let statusDisplayText = if req.isOpen: InFlightPlaceholder
+                          else: detailStatusText(req.statusCode)
+  var tabBarHost: MockNode
+  var contentHost: MockNode
+  let panel = ui(r):
+    tdiv(class = "request-detail"):
+      tdiv(class = "request-detail-resize-handle")
+      tdiv(class = "request-detail-header"):
+        tdiv(class = "request-detail-header-left"):
+          span(class = badgeCls):
+            text req.httpMethod
+          span(class = "request-detail-header-url"):
+            text req.url
+          span(class = "request-detail-header-status " & statusCls):
+            text statusDisplayText
+        tdiv(class = "request-detail-header-right"):
+          button(class = "ct-button-md-primary request-detail-handler-btn",
+                 onclick = proc() = vm.jumpToHandler(vm.selectedIndex.val)):
+            text "Handler >"
+      tdiv(ref = tabBarHost, class = "request-detail-tabs")
+      tdiv(ref = contentHost, class = "request-detail-content")
+  for (tabId, tabLabel) in DetailTabs:
+    let tl = tabLabel
+    let tabCls = if tabId == tab: "request-detail-tab request-detail-tab--active"
+                 else: "request-detail-tab"
+    let tabEl = ui(r):
+      span(class = tabCls, onclick = makeTabClickHandler(vm, tabId)):
+        text tl
+    r.appendRenderedChild(tabBarHost, tabEl)
+  r.appendRenderedChild(contentHost, renderDetailContentMock(r, req, tab))
+  panel
 
 proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
                    req: RequestRecord; index: int;
@@ -193,7 +459,7 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
          onclick = onClick,
          ondblclick = onDblClick):
       tdiv(class = "request-col-id"):
-        text $req.id
+        text formatReqId(req.id)
       tdiv(class = "request-col-method"):
         span(class = badgeCls):
           text req.httpMethod
@@ -211,97 +477,88 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
 proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
   ## Render the HTTP Request panel for the Mock renderer.
   ##
-  ## The static shell (header + table-header + table-body containers)
-  ## is built once via the DSL.  Three outer ``createRenderEffect``
-  ## blocks handle dynamic content:
-  ## 1. Count badge — re-renders when filteredRequests / requests
-  ##    counts change.
-  ## 2. Table body — rebuilt on filteredRequests / selectedIndex
-  ##    changes.
-  ## Filter widget event listeners are wired imperatively against
-  ## refs captured during DSL expansion.
-  var methodSelectEl: MockNode
-  var statusSelectEl: MockNode
+  ## The static shell (filter-bar + table-header + table-body containers)
+  ## is built once via the DSL.  Reactive ``createRenderEffect`` procs
+  ## rebuild each picker and the table body whenever their signals change.
+  ## The Method and Status pickers use the shared ``renderFilterPicker``
+  ## helper (``ct-picker ct-picker--chevron-right``) so they visually
+  ## match the VCS branch-picker style with the chevron on the right.
+  let methodPickerOpen = createSignal(false)
+  let statusPickerOpen = createSignal(false)
+  var methodPickerHost: MockNode
+  var statusPickerHost: MockNode
   var searchInputEl: MockNode
-  var clearBtnEl: MockNode
   var bodyContainer: MockNode
+  var detailContainer: MockNode
 
   let panel = ui(r):
     tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
-      # Title bar: "Requests  N requests  [Clear]"
-      tdiv(class = "request-panel-title-bar request-panel-header"):
-        span(class = "request-panel-title"):
-          text "Requests"
-        span(class = "request-panel-count-badge request-panel-count-text"):
-          text countText(vm)
-        span(ref = clearBtnEl, class = "request-panel-clear-btn"):
-          text "Clear"
-      # Filter bar: Method ▼  Status ▼  [Filter by URL...]  □ XHR/Fetch only
+      # Filter bar: [🔍 Find by URL...]  [Method ▼]  [Status ▼]
       tdiv(class = "request-panel-filters"):
-        select(ref = methodSelectEl, class = "request-filter-select"):
-          option(value = ""):
-            text "Method: All"
-          for m in HttpMethods:
-            option(value = m):
-              text m
-        select(ref = statusSelectEl, class = "request-filter-select"):
-          option(value = ""):
-            text "Status: All"
-          for opt in StatusBucketOptions:
-            option(value = opt.value):
-              text opt.label
         input(ref = searchInputEl,
-              class = "request-filter-search",
+              class = "request-filter-search ct-input-panel ct-input-search-image",
               `type` = "text",
-              placeholder = "Filter by URL...")
-        label(class = "request-xhr-only"):
-          input(`type` = "checkbox")
-          text "XHR/Fetch only"
+              placeholder = "Find by URL...")
+        tdiv(ref = methodPickerHost)
+        tdiv(ref = statusPickerHost)
       # Column headers
       tdiv(class = "request-table-header"):
         tdiv(class = "request-col-id"):
           text "#"
         tdiv(class = "request-col-method"):
-          text "Method"
+          text "method"
         tdiv(class = "request-col-url"):
           text "URL"
         tdiv(class = "request-col-status"):
-          text "Status"
+          text "STATUS"
         tdiv(class = "request-col-duration"):
-          text "Duration"
+          text "DURATION"
         tdiv(class = "request-col-size"):
-          text "Size"
+          text "SIZE"
       tdiv(ref = bodyContainer, class = "request-table-body"):
         discard
+      # Detail panel host — empty when no row is selected, populated reactively
+      tdiv(ref = detailContainer, class = "request-detail-host"):
+        discard
 
-  # Filter widget handlers.  ``MockNode.fireEvent`` calls the
-  # registered ``proc()`` listeners with no event arg, so each
-  # handler reads the source widget's "value" attribute directly.
-  # Headless tests set the value via ``r.setAttribute`` before
-  # firing the event.
-  let captureMethodEl = methodSelectEl
-  let captureStatusEl = statusSelectEl
+  # Search input handler.  Tests set ``value`` via ``r.setAttribute``
+  # then fire ``"input"``; the handler reads it back the same way.
   let captureSearchEl = searchInputEl
   let captureVm = vm
-  r.addEventListener(methodSelectEl, "change", proc() =
-    let v = captureMethodEl.attributes.getOrDefault("value", "")
-    captureVm.setFilterMethod(v)
-  )
-  r.addEventListener(statusSelectEl, "change", proc() =
-    let v = captureStatusEl.attributes.getOrDefault("value", "")
-    captureVm.setFilterStatus(v)
-  )
   r.addEventListener(searchInputEl, "input", proc() =
     let v = captureSearchEl.attributes.getOrDefault("value", "")
     captureVm.setSearchText(v)
   )
-  r.addEventListener(clearBtnEl, "click", proc() =
-    captureVm.clearRequests()
-  )
 
-  # Table body — rebuilt whenever the filtered list or selection
-  # changes.  ``selectedIndex`` is read inside the effect so the
-  # subscription edge is established for it too.
+  # Method picker — rebuilt reactively whenever its open flag or the
+  # current filter value changes.
+  createRenderEffect proc() =
+    let isOpen = methodPickerOpen.val
+    let currentMethod = vm.filterMethod.val
+    r.clearChildren(methodPickerHost)
+    let picker = renderFilterPicker(r, "Method: All", isOpen, currentMethod,
+      MethodPickerOptions,
+      onToggle = proc() = methodPickerOpen.val = not methodPickerOpen.val,
+      onSelect = proc(v: string) =
+        vm.setFilterMethod(v)
+        methodPickerOpen.val = false)
+    r.appendRenderedChild(methodPickerHost, picker)
+
+  # Status picker — rebuilt reactively whenever its open flag or the
+  # current filter value changes.
+  createRenderEffect proc() =
+    let isOpen = statusPickerOpen.val
+    let currentStatus = vm.filterStatus.val
+    r.clearChildren(statusPickerHost)
+    let picker = renderFilterPicker(r, "Status: All", isOpen, currentStatus,
+      StatusPickerOptions,
+      onToggle = proc() = statusPickerOpen.val = not statusPickerOpen.val,
+      onSelect = proc(v: string) =
+        vm.setFilterStatus(v)
+        statusPickerOpen.val = false)
+    r.appendRenderedChild(statusPickerHost, picker)
+
+  # Table body — rebuilt whenever the filtered list or selection changes.
   createRenderEffect proc() =
     let filtered = vm.filteredRequests.val
     let selected = vm.selectedIndex.val
@@ -309,6 +566,16 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
     for i, req in filtered:
       let row = renderRowMock(r, vm, req, i, i == selected)
       r.appendChild(bodyContainer, row)
+
+  # Detail panel — rebuilt when selection, filtered list, or active tab changes.
+  createRenderEffect proc() =
+    let idx = vm.selectedIndex.val
+    let filtered = vm.filteredRequests.val
+    let tab = vm.detailTab.val
+    r.clearChildren(detailContainer)
+    if idx >= 0 and idx < filtered.len:
+      r.appendRenderedChild(detailContainer,
+                            renderDetailMock(r, vm, filtered[idx], tab))
 
   panel
 
@@ -344,14 +611,6 @@ when defined(js):
     while not isonim_dom.isNodeNil(asNode.firstChild):
       discard isonim_dom.removeChild(asNode, asNode.firstChild)
 
-  proc createOption(value, label: string): isonim_dom.Element =
-    ## Build a ``<option value="...">label</option>`` element.
-    let opt = createWebElement("option")
-    isonim_dom.setAttribute(opt, cstring"value", cstring(value))
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(label))
-    isonim_dom.appendChild(isonim_dom.Node(opt), t)
-    opt
-
   proc renderRowWeb(vm: RequestPanelVM; req: RequestRecord;
                     index: int; selected: bool): isonim_dom.Element =
     ## Build a request row in the real DOM.  Same shape as the Mock
@@ -359,7 +618,7 @@ when defined(js):
     ## ``addEventListener``.
     let row = createWebElement("div", rowClass(selected, req.isOpen))
 
-    let idDiv = createWebTextElement("div", $req.id, "request-col-id")
+    let idDiv = createWebTextElement("div", formatReqId(req.id), "request-col-id")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(idDiv))
 
     # Method badge: <div.request-col-method><span.request-method-badge ...>
@@ -397,88 +656,158 @@ when defined(js):
                                 proc(ev: isonim_dom.Event) = onDbl())
     row
 
+  proc renderDetailContentWeb(r: WebRenderer; req: RequestRecord;
+                               tab: string): isonim_dom.Element =
+    ## Tab content for the detail panel — Web renderer variant.
+    case tab
+    of "timing":
+      ui(r):
+        tdiv(class = "request-detail-timing"):
+          tdiv(class = "request-detail-section-title"):
+            text "TIMING (" & durationText(req) & ")"
+          tdiv(class = "request-timing-row"):
+            span(class = "request-timing-label"): text "Total"
+            span(class = "request-timing-value"): text durationText(req)
+    of "response":
+      ui(r):
+        tdiv(class = "request-detail-response"):
+          tdiv(class = "request-detail-section-title"):
+            text "RESPONSE"
+          tdiv(class = "request-detail-row"):
+            span(class = "request-detail-key"): text "Size"
+            span(class = "request-detail-value"): text formatSize(req.responseSize)
+    else:
+      ui(r):
+        tdiv(class = "request-detail-placeholder"):
+          text "No data available for this tab."
+
+  proc renderDetailWeb(r: WebRenderer; vm: RequestPanelVM;
+                       req: RequestRecord; tab: string;
+                       onHandleDown: proc(e: isonim_dom.Event)): isonim_dom.Element =
+    ## Full detail panel for the selected request — Web renderer variant.
+    ## ``onHandleDown`` is wired to the resize handle's mousedown event so the
+    ## caller (``renderRequestPanel``) can install the drag logic with access to
+    ## the outer panel element and the ``detailHeightPct`` signal.
+    let badgeCls = methodBadgeClass(req.httpMethod)
+    let statusCls = statusCellClass(req)
+    let statusDisplayText = if req.isOpen: InFlightPlaceholder
+                            else: detailStatusText(req.statusCode)
+    var handleEl: isonim_dom.Element
+    var tabBarHost: isonim_dom.Element
+    var contentHost: isonim_dom.Element
+    let panel = ui(r):
+      tdiv(class = "request-detail"):
+        tdiv(ref = handleEl, class = "request-detail-resize-handle")
+        tdiv(class = "request-detail-header"):
+          tdiv(class = "request-detail-header-left"):
+            span(class = badgeCls):
+              text req.httpMethod
+            span(class = "request-detail-header-url"):
+              text req.url
+            span(class = "request-detail-header-status " & statusCls):
+              text statusDisplayText
+          tdiv(class = "request-detail-header-right"):
+            button(class = "ct-button-md-primary request-detail-handler-btn",
+                   onclick = proc() = vm.jumpToHandler(vm.selectedIndex.val)):
+              text "Handler >"
+        tdiv(ref = tabBarHost, class = "request-detail-tabs")
+        tdiv(ref = contentHost, class = "request-detail-content")
+    for (tabId, tabLabel) in DetailTabs:
+      let tl = tabLabel
+      let tabCls = if tabId == tab: "request-detail-tab request-detail-tab--active"
+                   else: "request-detail-tab"
+      let tabEl = ui(r):
+        span(class = tabCls, onclick = makeTabClickHandler(vm, tabId)):
+          text tl
+      r.appendRenderedChild(tabBarHost, tabEl)
+    r.appendRenderedChild(contentHost, renderDetailContentWeb(r, req, tab))
+    isonim_dom.addEventListener(isonim_dom.Node(handleEl), cstring"mousedown", onHandleDown)
+    panel
+
   proc renderRequestPanel*(r: WebRenderer; vm: RequestPanelVM): isonim_dom.Element =
-    ## Render the HTTP Request panel for the real DOM.  Same dispatch
-    ## shape as the Mock variant — outer wrapper plus render-effects
-    ## for the count badge and the table body.  Filter widget events
-    ## are wired imperatively against the captured nodes.
-    var methodSelectEl: isonim_dom.Element
-    var statusSelectEl: isonim_dom.Element
+    ## Render the HTTP Request panel for the real DOM.  Matches the Mock
+    ## variant: static shell via the DSL, three reactive effects for the
+    ## Method picker, Status picker, and table body.  The pickers use the
+    ## shared ``renderFilterPicker`` helper (``ct-picker--chevron-right``)
+    ## so they visually match the VCS branch-picker with the chevron on
+    ## the right side of the label.
+    let methodPickerOpen = createSignal(false)
+    let statusPickerOpen = createSignal(false)
+    # Percentage of the panel height claimed by the detail pane.
+    # Starts at 50% and is updated by the drag-resize handle.
+    # Stored as a signal so the style-sync effect updates the inline flex-basis
+    # reactively on every drag tick without rebuilding the detail content.
+    let detailHeightPct = createSignal(50.0)
+    var panelRef: isonim_dom.Element
+    var methodPickerHost: isonim_dom.Element
+    var statusPickerHost: isonim_dom.Element
     var searchInputEl: isonim_dom.Element
-    var clearBtnEl: isonim_dom.Element
     var bodyContainer: isonim_dom.Element
+    var detailContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
-        # Title bar: "Requests  N requests  [Clear]"
-        tdiv(class = "request-panel-title-bar request-panel-header"):
-          span(class = "request-panel-title"):
-            text "Requests"
-          span(class = "request-panel-count-badge request-panel-count-text"):
-            text countText(vm)
-          span(ref = clearBtnEl, class = "request-panel-clear-btn"):
-            text "Clear"
-        # Filter bar: Method ▼  Status ▼  [Filter by URL...]  □ XHR/Fetch only
+      tdiv(ref = panelRef, class = RequestPanelContainerClass, tabIndex = "2"):
+        # Filter bar: [🔍 Find by URL...]  [Method ▼]  [Status ▼]
         tdiv(class = "request-panel-filters"):
-          select(ref = methodSelectEl, class = "request-filter-select"):
-            discard
-          select(ref = statusSelectEl, class = "request-filter-select"):
-            discard
           input(ref = searchInputEl,
-                class = "request-filter-search",
+                class = "request-filter-search ct-input-panel ct-input-search-image",
                 `type` = "text",
-                placeholder = "Filter by URL...")
-          label(class = "request-xhr-only"):
-            input(`type` = "checkbox")
-            text "XHR/Fetch only"
+                placeholder = "Find by URL...")
+          tdiv(ref = methodPickerHost)
+          tdiv(ref = statusPickerHost)
         # Column headers
         tdiv(class = "request-table-header"):
           tdiv(class = "request-col-id"):
             text "#"
           tdiv(class = "request-col-method"):
-            text "Method"
+            text "method"
           tdiv(class = "request-col-url"):
             text "URL"
           tdiv(class = "request-col-status"):
-            text "Status"
+            text "STATUS"
           tdiv(class = "request-col-duration"):
-            text "Duration"
+            text "DURATION"
           tdiv(class = "request-col-size"):
-            text "Size"
+            text "SIZE"
         tdiv(ref = bodyContainer, class = "request-table-body"):
           discard
+        # Detail panel host — empty when no row is selected, populated reactively
+        tdiv(ref = detailContainer, class = "request-detail-host"):
+          discard
 
-    # Populate the dropdown options imperatively — the DSL ``select``
-    # bodies use ``discard`` so nothing was emitted there.
-    # Labels match the reference design: "Method: All" / "Status: All".
-    isonim_dom.appendChild(isonim_dom.Node(methodSelectEl),
-                           isonim_dom.Node(createOption("", "Method: All")))
-    for m in HttpMethods:
-      isonim_dom.appendChild(isonim_dom.Node(methodSelectEl),
-                             isonim_dom.Node(createOption(m, m)))
-    isonim_dom.appendChild(isonim_dom.Node(statusSelectEl),
-                           isonim_dom.Node(createOption("", "Status: All")))
-    for opt in StatusBucketOptions:
-      isonim_dom.appendChild(isonim_dom.Node(statusSelectEl),
-                             isonim_dom.Node(createOption(opt.value, opt.label)))
-
-    # Filter widget handlers.  Read the value off the live element.
-    let methodNode = isonim_dom.Node(methodSelectEl)
-    let statusNode = isonim_dom.Node(statusSelectEl)
+    # Search handler — reads directly from the live input element.
     let searchNode = isonim_dom.Node(searchInputEl)
-    let clearNode  = isonim_dom.Node(clearBtnEl)
-    isonim_dom.addEventListener(methodNode, cstring"change",
-      proc(ev: isonim_dom.Event) =
-        vm.setFilterMethod($methodNode.inputValue()))
-    isonim_dom.addEventListener(statusNode, cstring"change",
-      proc(ev: isonim_dom.Event) =
-        vm.setFilterStatus($statusNode.inputValue()))
     isonim_dom.addEventListener(searchNode, cstring"input",
       proc(ev: isonim_dom.Event) =
         vm.setSearchText($searchNode.inputValue()))
-    isonim_dom.addEventListener(clearNode, cstring"click",
-      proc(ev: isonim_dom.Event) =
-        vm.clearRequests())
+
+    # Method picker — rebuilt reactively on open/filter state changes.
+    createRenderEffect proc() =
+      let isOpen = methodPickerOpen.val
+      let currentMethod = vm.filterMethod.val
+      clearWebChildren(methodPickerHost)
+      let picker = renderFilterPicker(r, "Method: All", isOpen, currentMethod,
+        MethodPickerOptions,
+        onToggle = proc() = methodPickerOpen.val = not methodPickerOpen.val,
+        onSelect = proc(v: string) =
+          vm.setFilterMethod(v)
+          methodPickerOpen.val = false)
+      isonim_dom.appendChild(isonim_dom.Node(methodPickerHost),
+                             isonim_dom.Node(picker))
+
+    # Status picker — rebuilt reactively on open/filter state changes.
+    createRenderEffect proc() =
+      let isOpen = statusPickerOpen.val
+      let currentStatus = vm.filterStatus.val
+      clearWebChildren(statusPickerHost)
+      let picker = renderFilterPicker(r, "Status: All", isOpen, currentStatus,
+        StatusPickerOptions,
+        onToggle = proc() = statusPickerOpen.val = not statusPickerOpen.val,
+        onSelect = proc(v: string) =
+          vm.setFilterStatus(v)
+          statusPickerOpen.val = false)
+      isonim_dom.appendChild(isonim_dom.Node(statusPickerHost),
+                             isonim_dom.Node(picker))
 
     # Table body — rebuilt on filteredRequests / selectedIndex changes.
     createRenderEffect proc() =
@@ -489,6 +818,43 @@ when defined(js):
         let row = renderRowWeb(vm, req, i, i == selected)
         isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
                                isonim_dom.Node(row))
+
+    # Style effect: sync the detail host's flex-basis to detailHeightPct.
+    # Runs on every drag tick (detailHeightPct changes) and on selection change
+    # (to set or clear the style).  Kept separate from the content effect so
+    # drag ticks don't trigger a full DOM rebuild.
+    createRenderEffect proc() =
+      let pct = detailHeightPct.val
+      let idx = vm.selectedIndex.val
+      if idx >= 0:
+        isonim_dom.setAttribute(detailContainer, cstring"style",
+          cstring("flex: 0 0 " & $int(pct) & "%; min-height: 0"))
+      else:
+        isonim_dom.setAttribute(detailContainer, cstring"style", cstring"")
+
+    # Content effect: rebuild the detail panel DOM when selection, filtered
+    # list, or active tab changes.  Wires the resize-handle drag each time
+    # so the drag closure always captures a fresh panel bounding rect.
+    createRenderEffect proc() =
+      let idx = vm.selectedIndex.val
+      let filtered = vm.filteredRequests.val
+      let tab = vm.detailTab.val
+      clearWebChildren(detailContainer)
+      if idx >= 0 and idx < filtered.len:
+        let capturePanel = panelRef
+        let capturePct = detailHeightPct
+        let onHandleDown = proc(e: isonim_dom.Event) =
+          e.preventDefault()
+          let h = capturePanel.elemHeight
+          let b = capturePanel.elemBottom
+          setDocMouseMove proc(me: isonim_dom.Event) =
+            let newPct = (b - me.clientY) / h * 100.0
+            capturePct.val = max(15.0, min(85.0, newPct))
+          setDocMouseUp proc(ue: isonim_dom.Event) =
+            clearDocMouseMove()
+            clearDocMouseUp()
+        isonim_dom.appendChild(isonim_dom.Node(detailContainer),
+                               isonim_dom.Node(renderDetailWeb(r, vm, filtered[idx], tab, onHandleDown)))
 
     panel
 
