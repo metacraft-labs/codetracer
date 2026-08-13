@@ -67,6 +67,13 @@
 #      turn this suite into a vacuous pass).
 #   4. Every workflow step that runs `./non-nix-build/build.sh` is preceded, in
 #      its own job, by a step that provisions `codetracer-trace-format`.
+#   5. Every workflow step that runs `ci/setup-rr-backend.sh` sets
+#      `RR_BACKEND_REF`. That script's other route to a revision is the same
+#      workspace lock, reached through `scripts/resolve-sibling-rev.sh`, which
+#      locates the locks/ tree by walking up for `.repro/manifests` or
+#      `.repo/manifests` -- neither of which exists in a CI checkout. Without
+#      the override the step exits 3 with "cannot locate the manifest repo
+#      locks/ tree", one step after `Setup dev env` was made to survive.
 #
 # # No mocks
 #
@@ -266,11 +273,69 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 3. Every `ci/setup-rr-backend.sh` step overrides the ref explicitly.
+# ---------------------------------------------------------------------------
+echo
+echo "rr-backend setup overrides the ref explicitly"
+
+rr_sites=0
+rr_missing=()
+
+for wf in "$WORKFLOW_DIR"/*.yml; do
+	[ -f "$wf" ] || continue
+	wf_name="${wf##*/}"
+	step_has_override=0
+	line_no=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		stripped_line="${line#"${line%%[![:space:]]*}"}"
+		case "$stripped_line" in
+		'- name: '* | '- uses: '* | '- run: '*)
+			# A new step: the override must be declared inside the step that
+			# runs the script, so reset at every step boundary.
+			step_has_override=0
+			;;
+		esac
+		case "$stripped_line" in
+		'RR_BACKEND_REF:'*)
+			# An empty value is the unset case wearing a costume.
+			rr_ref="${stripped_line#RR_BACKEND_REF:}"
+			rr_ref="${rr_ref#"${rr_ref%%[![:space:]]*}"}"
+			[ -n "$rr_ref" ] && step_has_override=1
+			;;
+		esac
+		case "$stripped_line" in
+		*'ci/setup-rr-backend.sh'*)
+			case "$stripped_line" in
+			'#'*) ;;
+			*)
+				rr_sites=$((rr_sites + 1))
+				if [ "$step_has_override" -eq 0 ]; then
+					rr_missing+=("$wf_name:$line_no: runs ci/setup-rr-backend.sh without RR_BACKEND_REF")
+				fi
+				;;
+			esac
+			;;
+		esac
+	done <"$wf"
+done
+
+if [ "${#rr_missing[@]}" -eq 0 ]; then
+	ok "all $rr_sites ci/setup-rr-backend.sh call sites set RR_BACKEND_REF"
+else
+	fail "all ci/setup-rr-backend.sh call sites set RR_BACKEND_REF" \
+		"without it the script resolves the revision from the workspace lock via" \
+		"scripts/resolve-sibling-rev.sh, which exits 3 with 'cannot locate the" \
+		"manifest repo locks/ tree' on a runner -- there is no .repro/manifests there" \
+		"${rr_missing[@]}"
+fi
+
+# ---------------------------------------------------------------------------
 # Self-accounting: a contract that is deleted or short-circuited must not leave
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=4
+readonly EXPECTED_ASSERTIONS=5
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

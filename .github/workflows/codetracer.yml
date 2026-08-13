@@ -2950,8 +2950,19 @@ jobs:
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       - name: Setup rr-backend
+        # `ci/setup-rr-backend.sh` resolves codetracer-native-backend's revision
+        # from `$RR_BACKEND_REF` first and otherwise from the workspace lock via
+        # `scripts/resolve-sibling-rev.sh`. That second route cannot work on a
+        # runner: the resolver locates the locks/ tree by walking up for a
+        # `.repro/manifests` or `.repo/manifests` directory, and a CI checkout
+        # has neither (nothing sets `$CT_MANIFEST_DIR` here either), so it exits
+        # 3 with "cannot locate the manifest repo locks/ tree" -- the same
+        # lock dependency the `siblings:` entries above were pinned to avoid,
+        # reached one step later. Take the documented explicit override, which
+        # keeps the script's lock path intact for workspace use.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
+          RR_BACKEND_REF: dev
         run: ./ci/setup-rr-backend.sh
 
       - name: Run TypeScript Playwright UI tests (RR-based only)
