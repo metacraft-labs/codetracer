@@ -698,3 +698,62 @@ and a correlation marker's counterpart is by definition in another process.
   Mutation-verified against 7 mutations (drop the nested-VCS prune, the
   `VendorDirNames` prune in either mode, `--exclude-standard`, `--others`, the
   `--scope unscoped` branch, and the summary diagnostic).
+
+- 2026-08-13 (ct-test Nim discovery: one shared lexical scanner): the
+  nim-unittest provider had TWO hand-rolled character loops (a declaration
+  scanner and a per-line comment stripper) and both treated every `'` as the
+  opening quote of a character literal. Nim gives the apostrophe three other
+  jobs — numeric type suffix (`0'u8`, `1.0'f32`, `0x1F'i64`), custom numeric
+  literal (`12'MyType`), and accent-quoted operator names (`` `'u8` ``) — so
+  ONE `sizeBytes = 10485760'i64` desynchronised the scan and everything up to
+  the next apostrophe (typically the rest of the file) was skipped as string
+  content. Symptom: `std/unittest import detected but no literal suite/test
+  declarations were found` on files with ordinary `suite "…":` at column 0.
+  Both scans now run over one token stream: `src/ct_test/nim_lexer.nim`.
+  Things to know before touching it:
+  * It is written against the Nim distribution's own `compiler/lexer.nim`,
+    which IS on disk — `$(dirname $(readlink -f $(which nim)))/../nim/compiler/`
+    — and is the ground truth for every rule. It is NOT usable as a dependency
+    (nix store path that moves with the toolchain, compiler-internal API,
+    `lexMessage` aborts the process on a malformed literal).
+  * The load-bearing rule: lex numbers and identifiers FIRST. Once `lexNumber`
+    has eaten the type suffix, a remaining `'` really is a character literal.
+  * Fail-safe: anything Nim requires to close on its own line (single-quoted
+    string, character literal) ends at the newline, and an apostrophe with no
+    closer within `MaxCharLiteralBody` degrades to one punct token. A malformed
+    file costs one token, never the rest of the file. Both properties are
+    load-bearing and separately mutation-pinned.
+  * `NimToken` is position-first ON PURPOSE: no per-token copy of the source
+    slice. Use `sliceOf`, `identIs` and `.ch`. An earlier revision carried a
+    `text: string` on every token and doubled workspace discovery wall time
+    (5.6s -> 10.5s on the reprobuild workspace). If you add a field that
+    allocates per token, re-measure with
+    `time ct-test test discover --workspace <repo> --json`.
+  * `nimUnittestFileCatalog` scans each file ONCE and hands the same tokens to
+    `detectFrameworksInTokens` and `parseNimUnittestDeclarations`.
+  Measured effect over 16 Nim repos in this workspace: 10,305 -> 10,901
+  discovered cases and 2,468 -> 2,602 suites across 115 files; the "no literal
+  suite/test declarations" warning went 24 files -> 1 (the survivor is a helper
+  module that imports unittest and declares nothing — a true positive).
+  MIRROR DEFECT, also fixed: `suite`/`test` inside a `when false:` block were
+  being counted. The compiler never instantiates them, so no runner can produce
+  them; they are now skipped with an `info` diagnostic naming the count. That
+  is the only *semantic* rule in an otherwise purely lexical scan.
+  Regression guards: `src/ct_test/nim_lexer_test.nim`, the `ct-test Nim
+  unittest lexical regressions` suite in `nim_unittest_provider_test.nim`, and
+  the fixture `fixtures/nim_unittest_project/tests/test_lexical_edge_cases.nim`
+  — which is COMPILABLE, so `nim c -r` on it is an independent ground truth for
+  what discovery must report (1 suite + 5 cases).
+
+- 2026-08-13 (ct-test silent output truncation): `execCaptured` bounds captured
+  child output at `DefaultCaptureLimit` (16 MiB) and used to drop the fact that
+  it had cut anything. `CapturedRun` now carries `outputBytes` (the true
+  pre-bound count, from runquota_process's `stdoutBytes`/`stderrBytes`) and
+  `truncated`. ANY consumer that parses a LIST-shaped output must check it: a
+  prefix of a list is indistinguishable from a short complete list, so the loss
+  is invisible where a truncated JSON/XML document would at least fail to
+  parse. `workspace_scope.vcsInventory` refuses a truncated `git ls-files -z`
+  outright — git emits paths sorted, so truncation drops a contiguous tail of
+  the alphabet — and `auto` falls back to the pruning walk while `vcs` errors.
+  Test seam: `setVcsInventoryCaptureLimit` / `clearVcsInventoryCaptureLimit`
+  (lower the bound; do not try to materialise ~280,000 files).

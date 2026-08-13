@@ -34,9 +34,13 @@
 ## * it applies the full ``.gitignore`` / ``.git/info/exclude`` /
 ##   ``core.excludesFile`` chain, including negations and nested files;
 ## * it stops at nested repository boundaries, so a vendored upstream checkout
-##   is reported as a single directory entry instead of being descended into
-##   (this is what excludes ``references/llvm-project`` even in a workspace
-##   that does not gitignore it); and
+##   is reported as a single directory entry instead of being descended into.
+##   This is a BACKSTOP, not the rule that usually fires: in the workspace the
+##   45,256-item measurement came from, the trees under ``references/`` are
+##   gitignored and ``git ls-files`` reported no directory entries at all, so
+##   the ignore chain above did every bit of the excluding. The nested-checkout
+##   rule is what covers a workspace that vendors an upstream tree *without*
+##   ignoring it; and
 ## * it includes *untracked but not ignored* files, so a test written thirty
 ##   seconds ago and not yet ``git add``-ed is still discovered — which a
 ##   tracked-files-only query would have silently dropped.
@@ -140,6 +144,8 @@ var
   scopeCache {.threadvar.}: Table[string, WorkspaceScope]
   scopeModeOverride {.threadvar.}: WorkspaceScopeMode
   scopeModeOverrideSet {.threadvar.}: bool
+  vcsCaptureLimitOverride {.threadvar.}: int
+  vcsCaptureLimitOverrideSet {.threadvar.}: bool
 
 proc parseWorkspaceScopeMode*(raw: string): WorkspaceScopeMode =
   ## Parse a mode name; unknown values fall back to ``wsmAuto`` so a typo in
@@ -166,6 +172,16 @@ proc clearWorkspaceScopeMode*() =
 proc workspaceScopeMode*(): WorkspaceScopeMode =
   if scopeModeOverrideSet: scopeModeOverride
   else: parseWorkspaceScopeMode(getEnv(ScopeModeEnvVar, ""))
+
+proc scopeModeRequestOrigin(): string =
+  ## Name the surface the active mode actually came from.
+  ##
+  ## Both routes exist and the pinned mode (installed by ``--scope`` through
+  ## ``setWorkspaceScopeMode``) wins over the environment variable, so a
+  ## diagnostic that always blames ``CT_TEST_SCOPE`` sends a reader hunting for
+  ## an environment variable nobody set.
+  if scopeModeOverrideSet: "--scope "
+  else: ScopeModeEnvVar & "="
 
 proc invalidateWorkspaceScopes*() =
   ## Drop every memoized scope. Called at the top of each ``discover`` so the
@@ -239,8 +255,30 @@ proc walkPruned(root: string; prune: bool;
         # only, never the kind of entry a provider sees.
         discard
 
+proc vcsInventoryCaptureLimit(): int =
+  ## Capture bound for the inventory command.
+  ##
+  ## Overridable so the truncation guard below can be exercised against a
+  ## handful of files instead of the ~280,000 it would take to overrun the
+  ## 16 MiB default. The guard is the only thing standing between a cut
+  ## ``git ls-files`` and a silently short catalog, so it has to be tested.
+  if vcsCaptureLimitOverrideSet: vcsCaptureLimitOverride
+  else: DefaultCaptureLimit
+
+proc setVcsInventoryCaptureLimit*(bytes: int) =
+  ## Pin the inventory capture bound for this thread (tests only) and drop any
+  ## scope memoized under the previous bound.
+  vcsCaptureLimitOverride = bytes
+  vcsCaptureLimitOverrideSet = true
+  scopeCache = initTable[string, WorkspaceScope]()
+
+proc clearVcsInventoryCaptureLimit*() =
+  ## Return to ``DefaultCaptureLimit``.
+  vcsCaptureLimitOverrideSet = false
+  scopeCache = initTable[string, WorkspaceScope]()
+
 proc vcsInventory(root: string; excluded: var seq[string]):
-    tuple[ok: bool; files: seq[string]] =
+    tuple[ok: bool; files: seq[string]; failure: string] =
   ## Ask Git for the workspace's own files.
   ##
   ## ``git ls-files`` is scoped to the working directory it runs in, so a
@@ -249,11 +287,26 @@ proc vcsInventory(root: string; excluded: var seq[string]):
   ##
   ## ``-z`` because paths may contain anything but NUL (Git would otherwise
   ## quote and escape non-ASCII names, and we would have to unescape them).
-  result = (ok: false, files: @[])
+  ##
+  ## ``ok == false`` means "no usable inventory"; ``failure`` says why, so the
+  ## caller can report the real reason instead of a generic one.
+  result = (ok: false, files: @[], failure: "")
   let run = execCaptured(
     @["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-    cwd = root)
+    cwd = root, captureLimit = vcsInventoryCaptureLimit())
   if run.exitCode != 0 or run.timedOut:
+    result.failure = "`git ls-files` did not succeed under " & root
+    return
+  if run.truncated:
+    # A cut inventory is WORSE than no inventory. `git ls-files` emits paths in
+    # sorted order, so truncation removes a contiguous tail of the alphabet —
+    # a whole set of directories that simply never appear, with nothing in the
+    # output to say so. Every other failure mode here is loud; this one would
+    # hand back a plausible, short, wrong file set. Refuse it.
+    result.failure =
+      "`git ls-files` output exceeded the " & $vcsInventoryCaptureLimit() &
+      " byte capture bound (" & $run.outputBytes & " bytes produced) under " &
+      root & "; the inventory would be missing a tail of the sorted path list"
     return
   for raw in run.output.split('\0'):
     if raw.len == 0:
@@ -318,11 +371,24 @@ proc resolveScope(root: string; mode: WorkspaceScopeMode): WorkspaceScope =
           "ignored by an enclosing repository?); falling back to a pruning " &
           "filesystem walk")
       elif mode == wsmVcs:
+        # `vcs` means "an inventory or nothing" — that is the whole point of
+        # asking for it — so an unusable inventory is an error, not a quiet
+        # widening to a different rule.
         result.notes.add(
-          "workspace scope: CT_TEST_SCOPE=vcs was requested but `git " &
-          "ls-files` did not succeed under " & normalizedRoot)
+          "workspace scope: " & scopeModeRequestOrigin() &
+          "vcs was requested but the inventory is unusable: " &
+          inventory.failure)
         result.source = wssUnavailable
         return
+      else:
+        # `auto`: fall through to the pruning filesystem walk, but say why —
+        # an unusable inventory silently changing which rule produced the file
+        # set is exactly the kind of invisible scope change this module exists
+        # to make visible.
+        result.excludedRoots = @[]
+        result.notes.add(
+          "workspace scope: falling back to a pruning filesystem walk: " &
+          inventory.failure)
 
     if not usedVcs:
       result.excludedRoots = @[]
