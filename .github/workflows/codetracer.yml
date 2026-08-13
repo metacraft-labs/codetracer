@@ -1727,17 +1727,25 @@ jobs:
       - lint-nix
       - lint-rust
 
-    # TODO: migrate the matrix to self-hosted runners once the apt-get install
-    # libssl-dev / libbpf-dev / libelf-dev / zlib1g-dev steps and the manual
-    # nim/openssl/zlib downloads are replaced with nix equivalents. The macos
-    # legs additionally need a self-hosted macOS Intel runner (we only have
-    # aarch64-darwin self-hosted hosts today).
+    # CIP-5 Wave 4: the linux-amd64 leg is migrated to the self-hosted NixOS
+    # runner. Its apt-get install libssl-dev / libbpf-dev / libelf-dev /
+    # zlib1g-dev steps and the manual nim download are replaced with the
+    # codetracer nix dev shell (which already ships nim-codetracer, openssl,
+    # zlib, libbpf, elfutils and sets LIBRARY_PATH / C_INCLUDE_PATH); Python
+    # and its wheel `build` backend come from nixpkgs.
+    #
+    # The macos-arm64 leg is intentionally NOT migrated yet. It statically
+    # links against openssl/zlib archives it builds from source and passes the
+    # explicit `.a` paths to `nim` (macOS `ld` needs explicit static-archive
+    # paths, not GNU `-Wl,-Bstatic -l:` syntax). Re-homing that onto nix-store
+    # static libs is a build-logic redesign that cannot be validated without
+    # cutting a release, so it stays on the GitHub-hosted macOS image for now.
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: linux-amd64
-            runner: ubuntu-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (apt/nim-from-source) — see job TODO
+            runner: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
             target_os: linux
             arch: amd64
             plat_name: manylinux_2_17_x86_64
@@ -1748,7 +1756,7 @@ jobs:
           #   plat_name: manylinux_2_17_aarch64
 
           - name: macos-arm64
-            runner: macos-14  # HOLD (CIP-5 Wave 4): DIY macOS release build — see job TODO
+            runner: macos-14  # HOLD (CIP-5 Wave 4): DIY macOS static-link release build — see job note
             target_os: macos
             arch: arm64
             plat_name: macosx_11_0_arm64
@@ -1774,16 +1782,28 @@ jobs:
           submodules: 'true'
           token: ${{ steps.ci_token.outputs.token }}
 
+      # --- Linux (self-hosted NixOS) toolchain ---
+      - name: Install Nix (Linux)
+        if: ${{ matrix.target_os == 'linux' }}
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Set up Python
+      # --- macOS (GitHub-hosted) toolchain — DIY, not yet migrated ---
+      - name: Set up Python (macOS)
+        if: ${{ matrix.target_os == 'macos' }}
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
-      - name: Install Python build backend
+      - name: Install Python build backend (macOS)
+        if: ${{ matrix.target_os == 'macos' }}
         run: python -m pip install --upgrade build
 
-      - name: Install nim
+      - name: Install nim (macOS)
+        if: ${{ matrix.target_os == 'macos' }}
         run: |
           set -euo pipefail
 
@@ -1796,7 +1816,8 @@ jobs:
           export PATH="$(pwd)/bin:${PATH}"
           popd
 
-      - name: Get sqlite
+      - name: Get sqlite (macOS)
+        if: ${{ matrix.target_os == 'macos' }}
         run: |
           set -euo pipefail
 
@@ -1804,11 +1825,22 @@ jobs:
           unzip sqlite-amalgamation-3500400.zip
           cp sqlite-amalgamation-3500400/sqlite3.c .
 
-      - name: Install libssl and libbpf (Linux)
+      - name: Get sqlite (Linux)
         if: ${{ matrix.target_os == 'linux' }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev libbpf-dev libelf-dev
+          set -euo pipefail
+
+          nix shell nixpkgs#wget nixpkgs#unzip --command bash -c '
+            set -euo pipefail
+            wget https://sqlite.org/2025/sqlite-amalgamation-3500400.zip
+            unzip sqlite-amalgamation-3500400.zip
+            cp sqlite-amalgamation-3500400/sqlite3.c .
+          '
+
+      # Linux build deps (libssl/libcrypto, libbpf, libelf) are provided by the
+      # codetracer nix dev shell (nix/shells/ci-base.nix wires them onto
+      # LIBRARY_PATH / C_INCLUDE_PATH), so the former `apt-get install
+      # libssl-dev libbpf-dev libelf-dev` step is no longer needed.
 
       - name: Install libssl (MacOS)
         if: ${{ matrix.target_os == 'macos' }}
@@ -1823,11 +1855,9 @@ jobs:
 
           popd
 
-      - name: Install zlib (Linux)
-        if: ${{ matrix.target_os == 'linux' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zlib1g-dev
+      # Linux zlib (static `libz.a`) is provided by the codetracer nix dev
+      # shell via LIBRARY_PATH, so the former `apt-get install zlib1g-dev`
+      # step is no longer needed.
 
       - name: Install zlib (MacOS)
         if: ${{ matrix.target_os == 'macos' }}
@@ -1845,60 +1875,70 @@ jobs:
       - name: Build codetracer binaries (Linux)
         if: ${{ matrix.target_os == 'linux' }}
         shell: bash
+        # Runs inside the codetracer nix dev shell: `nim` is nim-codetracer and
+        # the static archives (`libz.a`, `libssl.a`, `libcrypto.a`) are found via
+        # the LIBRARY_PATH that nix/shells/ci-base.nix exports, so the former
+        # hardcoded `-L/usr/lib/x86_64-linux-gnu` (Debian/apt layout) is dropped;
+        # the `-Wl,-Bstatic … -l:lib*.a -Wl,-Bdynamic` static-link recipe is
+        # otherwise preserved verbatim.
         run: |
           set -euo pipefail
 
-          TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
-          mkdir -p "${TARGET_DIR}"
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -euo pipefail
 
-          ./nim-2.2.6/bin/nim -d:release \
-            --d:asyncBackend=asyncdispatch \
-            --dynlibOverride:std -d:staticStd \
-            --mm:refc --hints:on --warnings:off \
-            --boundChecks:on \
-            -d:useOpenssl3 \
-            -d:ssl \
-            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-            -d:chronicles_timestamps=UnixTime \
-            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-            -d:builtWithNix \
-            -d:ctEntrypoint \
-            -d:pythonPackage \
-            -d:libcPath=libc \
-            -d:pathToNodeModules=../node_modules \
-            --nimcache:nimcache \
-            -d:staticSqlite \
-            -d:useLibzipSrc \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libz.a -Wl,-Bdynamic" \
-            --dynlibOverride:ssl --dynlibOverride:crypto \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
-            --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
+            TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
+            mkdir -p "${TARGET_DIR}"
 
-          ./nim-2.2.6/bin/nim \
-            -d:release -d:asyncBackend=asyncdispatch \
-            --mm:refc --hints:off --warnings:off \
-            --debugInfo --lineDir:on \
-            --boundChecks:on --stacktrace:on --linetrace:on \
-            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-            -d:chronicles_timestamps=UnixTime \
-            -d:ssl \
-            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-            -d:libcPath=libc \
-            -d:builtWithNix \
-            -d:ctEntrypoint \
-            -d:pythonPackage \
-            --nimcache:nimcache \
-            -d:staticSqlite \
-            -d:useLibzipSrc \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libz.a -Wl,-Bdynamic" \
-            --dynlibOverride:ssl --dynlibOverride:crypto \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
-            --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
+            nim -d:release \
+              --d:asyncBackend=asyncdispatch \
+              --dynlibOverride:std -d:staticStd \
+              --mm:refc --hints:on --warnings:off \
+              --boundChecks:on \
+              -d:useOpenssl3 \
+              -d:ssl \
+              -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+              -d:chronicles_timestamps=UnixTime \
+              -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+              -d:builtWithNix \
+              -d:ctEntrypoint \
+              -d:pythonPackage \
+              -d:libcPath=libc \
+              -d:pathToNodeModules=../node_modules \
+              --nimcache:nimcache \
+              -d:staticSqlite \
+              -d:useLibzipSrc \
+              --passL:"-Wl,-Bstatic -l:libz.a -Wl,-Bdynamic" \
+              --dynlibOverride:ssl --dynlibOverride:crypto \
+              --passL:"-Wl,-Bstatic -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
+              --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
 
-          ./build-python/scripts/download_ct_remote.sh \
-            "${{ matrix.target_os }}" \
-            "${{ matrix.arch }}" \
-            "${TARGET_DIR}"
+            nim \
+              -d:release -d:asyncBackend=asyncdispatch \
+              --mm:refc --hints:off --warnings:off \
+              --debugInfo --lineDir:on \
+              --boundChecks:on --stacktrace:on --linetrace:on \
+              -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+              -d:chronicles_timestamps=UnixTime \
+              -d:ssl \
+              -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+              -d:libcPath=libc \
+              -d:builtWithNix \
+              -d:ctEntrypoint \
+              -d:pythonPackage \
+              --nimcache:nimcache \
+              -d:staticSqlite \
+              -d:useLibzipSrc \
+              --passL:"-Wl,-Bstatic -l:libz.a -Wl,-Bdynamic" \
+              --dynlibOverride:ssl --dynlibOverride:crypto \
+              --passL:"-Wl,-Bstatic -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
+              --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
+
+            ./build-python/scripts/download_ct_remote.sh \
+              "${{ matrix.target_os }}" \
+              "${{ matrix.arch }}" \
+              "${TARGET_DIR}"
+          '
 
       - name: Build codetracer binaries (MacOS)
         if: ${{ matrix.target_os == 'macos' }}
@@ -1957,12 +1997,25 @@ jobs:
             "${{ matrix.arch }}" \
             "${TARGET_DIR}"
 
-      - name: Build wheel
+      - name: Build wheel (macOS)
+        if: ${{ matrix.target_os == 'macos' }}
         run: |
           set -euo pipefail
 
           pushd build-python
           python -m build --wheel -C--build-option=--plat-name=${{ matrix.plat_name }}
+          popd
+
+      - name: Build wheel (Linux)
+        if: ${{ matrix.target_os == 'linux' }}
+        # `pyproject-build` is the CLI from nixpkgs' python312Packages.build —
+        # the same PyPA `build` frontend the macOS leg drives via `python -m
+        # build`, sourced from nix instead of `pip install --upgrade build`.
+        run: |
+          set -euo pipefail
+
+          pushd build-python
+          nix shell nixpkgs#python312Packages.build --command pyproject-build --wheel -C--build-option=--plat-name=${{ matrix.plat_name }}
           popd
 
       - name: Upload distributions
@@ -2047,10 +2100,16 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
 
   dmg-build:
-    # TODO: migrate to [self-hosted, darwin, nix-darwin, aarch64-darwin] once
-    # the `brew install awscli` step + signing flow are rewired through the
-    # nix dev shell (Homebrew is not installed on the nix-darwin runners).
-    runs-on: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew) — see TODO above
+    # DEFERRED (CIP-5 Wave 4): stays on the GitHub-hosted macOS image. The
+    # `brew install awscli` step alone would be a trivial `nixpkgs#awscli2`
+    # swap, but the actual dmg build (`./ci/build/dmg.sh` ->
+    # `./non-nix-build/build.sh`) is Homebrew-native end to end:
+    # non-nix-build/env.sh, build_with_nim.sh, build_dmg.sh, install_tup.sh and
+    # install_node.sh all `brew install` their deps (sqlite3, ruby, capnp,
+    # libzip, create-dmg, pcre2, macFUSE, node, …). The nix-darwin runners have
+    # no Homebrew, so migrating this leg means porting the whole non-nix-build
+    # toolchain to nix (a build-system redesign), not a tool-provisioning swap.
+    runs-on: macos-latest  # DEFERRED (CIP-5 Wave 4): Homebrew-native non-nix build — see note above
     needs:
       - lint-bash
       - lint-nim
@@ -2108,32 +2167,29 @@ jobs:
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
 
   dmg-lib-check:
-    # TODO: migrate to [self-hosted, darwin, nix-darwin, aarch64-darwin] once
-    # the `brew install awscli` + `brew install sevenzip` steps are replaced
-    # with nix equivalents (Homebrew is not installed on the nix-darwin runners).
-    runs-on: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew) — see TODO above
+    # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
+    # `brew install awscli` / `brew install sevenzip` steps are gone; `aws`
+    # comes from `nixpkgs#awscli2` and 7-Zip from `nixpkgs#p7zip` (the `7z`
+    # binary), both provisioned per-command via `nix shell`. This job only
+    # downloads + extracts + smoke-runs the release dmg, so it needs no
+    # Homebrew build toolchain.
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     needs:
       - dmg-build
     steps:
-      - name: Install AWS CLI
-        run: brew install awscli
-
-      - name: Install 7zip
-        run: brew install sevenzip
-
       - name: Download artifact
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
 
       - name: Extract dmg
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          7zz x ./CodeTracer.dmg
+          nix shell nixpkgs#p7zip --command 7z x ./CodeTracer.dmg
 
       - name: Check if ct starts
         env:
@@ -2143,31 +2199,29 @@ jobs:
           ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
 
   appimage-lib-check:
-    # TODO: migrate to [self-hosted, nixos] once the `sudo snap install
-    # aws-cli` + `sudo apt-get install fuse libfuse2` steps are replaced with
-    # nix equivalents (snap + apt are unavailable on the NixOS runners).
-    runs-on: ubuntu-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (snap/apt) — see TODO above
+    # CIP-5 Wave 4: migrated to the self-hosted NixOS runner. The DIY
+    # `sudo snap install aws-cli` step is gone (`aws` now comes from
+    # `nixpkgs#awscli2` via `nix shell`), and the `sudo apt-get install fuse
+    # libfuse2` step is dropped entirely: the ephemeral NixOS runner has no
+    # fusermount setuid wrapper / /dev/fuse, so we smoke-run the AppImage with
+    # `APPIMAGE_EXTRACT_AND_RUN=1` (self-extract, no FUSE) — the same mode
+    # nix/shells/ci-base.nix documents for AppImages on these runners.
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
       - appimage-build
     steps:
-      - name: Install AWS CLI
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
-        run: sudo snap install aws-cli --classic
-
-      - name: Install FUSE
-        run: sudo apt-get install -y fuse libfuse2
-
       - name: Download artifact
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
 
       - name: Check if ct starts
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           chmod +x ./CodeTracer.AppImage
           ./CodeTracer.AppImage --version
@@ -2181,11 +2235,14 @@ jobs:
   # don't need FUSE in the runner.  See
   # scripts/test-appimage-cross-distro.sh.
   appimage-cross-distro:
-    # TODO: migrate to [self-hosted, nixos] once the `sudo snap install
-    # aws-cli` step is replaced with a nix equivalent (snap is unavailable
-    # on the NixOS runners). The cross-distro smoke uses Docker, which the
-    # bare-metal NixOS runners can also expose.
-    runs-on: ubuntu-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (snap/Docker) — see TODO above
+    # DEFERRED (CIP-5 Wave 4): stays on the GitHub-hosted ubuntu image. The
+    # `sudo snap install aws-cli` step is a trivial `nixpkgs#awscli2` swap, but
+    # this job's core is a 5-distro Docker matrix (scripts/test-appimage-cross-
+    # distro.sh pulls ubuntu/debian/fedora/arch images and runs the AppImage
+    # inside each). The ephemeral eph-linux-x64 class is not confirmed to
+    # expose a Docker daemon, so migrating this leg needs a Docker-on-runner /
+    # container decision first — do not fake it. Left as-is pending that call.
+    runs-on: ubuntu-latest  # DEFERRED (CIP-5 Wave 4): needs Docker on the runner — see note above
     needs:
       - appimage-build
     strategy:
@@ -2225,13 +2282,15 @@ jobs:
         include:
           - platform: nixos
             runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
-          # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
-          # once the macOS-only steps in this job (`brew install just`,
-          # `actions/setup-python`, `brew install awscli`) are replaced with nix
-          # equivalents — they assume Homebrew, which is not installed on the
-          # nix-darwin runners.
+          # DEFERRED (CIP-5 Wave 4): the macOS leg stays on the GitHub-hosted
+          # image. Its top-level `brew install just` / `actions/setup-python`
+          # steps would swap to nix cleanly, but this leg is the *non-nix*
+          # macОС build path: `./non-nix-build/build.sh` is Homebrew-native
+          # (env.sh / build_with_nim.sh `brew install` sqlite3, ruby, capnp,
+          # libzip, …). The nix-darwin runners have no Homebrew, so migrating
+          # means porting non-nix-build to nix — a redesign, not a tool swap.
           - platform: macos
-            runner: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew/setup-python) — see leg TODO
+            runner: macos-latest  # DEFERRED (CIP-5 Wave 4): Homebrew-native non-nix build — see leg note
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2471,12 +2530,15 @@ jobs:
         include:
           - platform: nixos
             runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
-          # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
-          # once the macOS-only steps (`brew install just`, `actions/setup-python`)
-          # are replaced with nix equivalents (Homebrew is not installed on the
-          # nix-darwin runners).
+          # DEFERRED (CIP-5 Wave 4): the macOS leg stays on the GitHub-hosted
+          # image. Its top-level `brew install just` / `actions/setup-python`
+          # steps would swap to nix cleanly, but this leg drives the *non-nix*
+          # macОС build (`./non-nix-build/build.sh`), which is Homebrew-native
+          # (env.sh / build_with_nim.sh `brew install` sqlite3, ruby, capnp,
+          # libzip, …). The nix-darwin runners have no Homebrew, so migrating
+          # means porting non-nix-build to nix — a redesign, not a tool swap.
           - platform: macos
-            runner: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew/setup-python) — see leg TODO
+            runner: macos-latest  # DEFERRED (CIP-5 Wave 4): Homebrew-native non-nix build — see leg note
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
