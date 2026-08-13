@@ -662,3 +662,39 @@ and a correlation marker's counterpart is by definition in another process.
     that returns GC-managed data needs the same hand-off (or `-d:useMalloc`,
     which sidesteps per-thread regions entirely but only protects the binaries
     that are built with it, not library consumers).
+
+- 2026-08-13 (ct-test discovery scoping + cost): `ct test discover --workspace`
+  fans out to ~38 providers, and EVERY provider used to answer "which files are
+  in this workspace?" with its own `walkDirRec(projectRoot)` plus an ad-hoc
+  reject list (`js_common` skipped `node_modules/`, `go_test` skipped `vendor/`,
+  `python_common` and `nim_unittest` skipped nothing). That produced ~16 full
+  recursive walks during `detect` alone, several of which READ every matching
+  file, and ~21 more during `discoverProject`.
+  Measured against the reprobuild workspace on the pre-fix build: 53,349 items
+  in 10m40s and 59 MB of JSON, of which 45,256 (84.8%) came from
+  `references/{llvm-project,buildxl,nix,spack,mold,wild,…}` — vendored upstream
+  source trees reported as that project's tests. After scoping: 8,093 items in
+  2.1s and 9.8 MB. Same binary, same workspace; a ~300x wall-clock difference
+  that is almost entirely "stop walking other people's repositories".
+  The rule now lives in ONE place, `src/ct_test/workspace_scope.nim`:
+  * `walkWorkspaceFiles(root)` is the drop-in for `walkDirRec` — new providers
+    MUST use it, otherwise they re-open the hole for their own language.
+  * The scope honours the workspace's OWN declaration rather than a ct_test
+    ignore file: `git ls-files --cached --others --exclude-standard`, run with
+    cwd = root (so `--workspace <subdir>` scopes itself). That gets the whole
+    `.gitignore` chain, stops at nested checkouts (a vendored tree is reported
+    as ONE directory entry, never descended into), and — the part that is easy
+    to break — keeps untracked-but-not-ignored files, so a test written seconds
+    ago is still discovered. Fallback for non-checkouts is a PRUNING walk
+    (prunes the descent, not the results) plus `VendorDirNames`.
+  * The resolved set is memoized in a `{.threadvar.}` because `TestProvider`'s
+    callbacks only receive `projectRoot: string`; `discovery.discover` calls
+    `invalidateWorkspaceScopes()` once per invocation, so one traversal is
+    shared by all 38 providers within a discovery and no state survives it.
+  * Escape hatch is opt-OUT, not opt-in: `--scope unscoped` / `CT_TEST_SCOPE`.
+    An `info` diagnostic (`discovery scope: N file(s) … excluded …`) reports
+    what was dropped, so the exclusion is never silent.
+  Regression guard: the last two cases in `src/ct_test/discovery_test.nim`.
+  Mutation-verified against 7 mutations (drop the nested-VCS prune, the
+  `VendorDirNames` prune in either mode, `--exclude-standard`, `--others`, the
+  `--scope unscoped` branch, and the summary diagnostic).

@@ -1,5 +1,7 @@
 import std/[algorithm, os, sequtils, strutils, tables]
 
+import ../workspace_scope
+
 type
   PythonTestKind* = enum
     ptkClass
@@ -50,7 +52,10 @@ proc isCandidateUnittestFile*(path: string): bool =
 proc pythonFiles*(projectRoot: string; predicate: proc(path: string): bool {.gcsafe.}): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  # This walk had NO exclusions at all, and ``isCandidateUnittestFile`` matches
+  # any name merely *containing* "test" — the combination is what turned a
+  # vendored LLVM checkout into tens of thousands of "the project's tests".
+  for path in walkWorkspaceFiles(projectRoot):
     if predicate(path):
       result.add path
   result.sort(system.cmp[string])

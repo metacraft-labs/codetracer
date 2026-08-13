@@ -19,6 +19,14 @@
 # fails the gate — recorder-dependent recording tests must never be skipped
 # silently.
 #
+# CI: the `ct-test-providers` job in .github/workflows/codetracer.yml runs this
+# script. That job checks the three recorder siblings out through setup-dev-env
+# at workspace-lock-pinned revisions and `direnv allow`s them, then invokes
+# `just test-ct-providers` with neither CT_PROVIDERS_SKIP_SIBLINGS nor
+# CT_PROVIDERS_ALLOW_MISSING set — a missing or unbuildable recorder fails the
+# job. The job is listed in ci/verdict/required-jobs.txt, so a run that skips it
+# is reported as lost coverage.
+#
 # Run this from inside the codetracer dev shell (which provides nim plus the
 # gtest/catch2/cmake/ninja toolchain and the CT_TEST_CC/CT_TEST_CXX +
 # CMAKE_PREFIX_PATH the C/C++ providers need):

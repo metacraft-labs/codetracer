@@ -42,7 +42,7 @@ proc hasGoProject*(projectRoot: string): bool =
 proc goFiles*(projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     let rel = normalizedRelative(projectRoot, path)
     if rel.startsWith("vendor/") or rel.startsWith(".git/"):
       continue

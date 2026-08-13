@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# =============================================================================
+# M16 ct-test release gate: the toolchain-light provider matrix plus the
+# framework contract, discovery, run-store and worker-pool suites.
+#
+# CI: the `ct-test-release-gate` job in .github/workflows/codetracer.yml runs
+# this script. It needs only the codetracer dev shell (which exports
+# RUNQUOTA_SRC for the ct_test import paths) and the isonim siblings the two
+# ViewModel suites at the end build against — no recorder siblings. The
+# cross-language, recorder-dependent counterpart is ci/test/ct-providers.sh,
+# run by the `ct-test-providers` job. Both jobs are listed in
+# ci/verdict/required-jobs.txt.
+# =============================================================================
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

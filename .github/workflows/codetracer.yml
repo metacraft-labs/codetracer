@@ -2731,6 +2731,160 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # ---------------------------------------------------------------------------
+  # ct-test gates.
+  #
+  # `ci/test/m16-release-gate.sh` and `ci/test/ct-providers.sh` were real,
+  # maintained scripts that NO pipeline invoked: `.gitlab-ci.yml`'s only test
+  # jobs are `just test` (test-rust + test-nimsuggest + optional cross-repo) and
+  # `ci/test/ui-tests.sh`, and no workflow here named either script. They ran
+  # only when a human typed `just test-m16-release-gate` / `just
+  # test-ct-providers`. Every suite listed in them — not just the most recently
+  # added one — has therefore been in a gate that never gated.
+  #
+  # They are split across two jobs on purpose, because they have very different
+  # prerequisites and mixing them would let the harder one's infrastructure
+  # failures mask the easier one's test failures:
+  #
+  #   * `ct-test-release-gate` needs nothing but the codetracer dev shell. It is
+  #     the toolchain-light provider matrix plus the framework contract,
+  #     discovery, run-store and worker-pool suites.
+  #   * `ct-test-providers` drives real external toolchains AND three recorder
+  #     siblings (native/ct-mcr, JavaScript, Ruby), which have to be checked out
+  #     and built before the recording assertions can run.
+  #
+  # Neither job weakens what the scripts check: `CT_PROVIDERS_ALLOW_MISSING` and
+  # `CT_PROVIDERS_SKIP_SIBLINGS` are deliberately NOT set, so a recorder that is
+  # missing or fails to build fails the job instead of quietly turning the
+  # recording assertions into no-ops.
+  # ---------------------------------------------------------------------------
+  ct-test-release-gate:
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    name: ct-test release gate (M16 provider matrix)
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        # GitHub free plan restricts org-level secrets with visibility ALL from
+        # being readable inside private repos, so we mint per-run installation
+        # tokens from the repo-local CI_TOKEN_PROVIDER_APP_ID +
+        # CI_TOKEN_PROVIDER_PRIVATE_KEY secrets via the CI Token Provider App.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup isonim siblings
+        # The gate's last two suites are ViewModel tests under
+        # src/frontend/viewmodel/, which build against ../isonim/src et al. via
+        # codetracer's top-level nim.cfg. Same prerequisite as `viewmodel-tests`.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Run the M16 ct-test release gate
+        # The ct_test sources import runquota_process; the dev shell exports
+        # RUNQUOTA_SRC (nix/shells/ci-base.nix) and src/ct_test/config.nims
+        # turns that into the --path set, so no runquota sibling checkout is
+        # needed here.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-m16-release-gate
+
+  ct-test-providers:
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    name: ct-test cross-language provider gate
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+          skip-token-revoke: false
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        # ci/test/ct-providers.sh requires three recorder siblings checked out
+        # at ../<repo> and builds each through its own pinned dev shell
+        # (scripts/build-siblings.sh -> `direnv exec <repo> just build`). Without
+        # them the script aborts in its very first suite, which is why it could
+        # never simply be dropped into an existing job.
+        #
+        # setup-dev-env clones them adjacent to this checkout at
+        # workspace-lock-pinned revisions — the same mechanism
+        # `visual-replay-regression-gate` and `test-non-gui` already use, so
+        # this is not new infrastructure. The trace-format / io-mon /
+        # stackable-hooks / nim-shm-queue entries are the native recorder's own
+        # build dependencies, mirroring the visual gate's sibling list.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: |
+            nim-everywhere
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            io-mon
+            nim-shm-queue
+            nim-stackable-hooks
+            codetracer-native-recorder
+            codetracer-js-recorder
+            codetracer-ruby-recorder
+
+      - name: Allow direnv in the cloned recorder siblings
+        # scripts/build-siblings.sh runs every sibling build as
+        # `direnv exec <repo> …` so the repo's own flake pins its toolchain. A
+        # freshly cloned .envrc is in direnv's "blocked" state, so without this
+        # the build step fails (or silently falls back to the wrong PATH) —
+        # the same hazard `test-non-gui` handles for codetracer-beam-recorder.
+        run: |
+          set -euo pipefail
+          for sibling in codetracer-native-recorder codetracer-js-recorder codetracer-ruby-recorder; do
+            nix develop .#devShells.x86_64-linux.default -c \
+              direnv allow "${{ github.workspace }}/../${sibling}"
+          done
+
+      - name: Run the cross-language ct-test provider gate
+        # No CT_PROVIDERS_ALLOW_MISSING / CT_PROVIDERS_SKIP_SIBLINGS: a missing
+        # or unbuildable recorder must fail this job, not silently degrade the
+        # recording assertions into checks of nothing.
+        env:
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+        run: nix develop '.?submodules=1' --command just test-ct-providers
+
+      - name: Upload sibling build logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ct-test-providers-sibling-logs
+          # scripts/build-siblings.sh captures each recorder build into
+          # .tools/build-siblings-logs/<repo>.log (LOG_DIR in that script);
+          # without them a sibling build failure reports only its exit code.
+          path: .tools/build-siblings-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
   publish-pypi:
     needs:
       - build-python-packages
@@ -3103,6 +3257,8 @@ jobs:
       - cross-process-linux
       - viewmodel-tests
       - visual-replay-regression-gate
+      - ct-test-release-gate
+      - ct-test-providers
       - windows-bootstrap-smoke
       - windows-named-pipe-tests
       - windows-rust-components

@@ -43,7 +43,7 @@ proc hasDProject*(projectRoot: string): bool =
 proc dFiles*(projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     let rel = normalizedRelative(projectRoot, path)
     if rel.startsWith(".dub/") or rel.startsWith(".git/"):
       continue

@@ -46,6 +46,13 @@ test-ui-tests-rr
 cross-process-linux
 viewmodel-tests
 visual-replay-regression-gate
+# ct-test's two gate scripts (ci/test/m16-release-gate.sh and
+# ci/test/ct-providers.sh) were maintained for months while no pipeline ran
+# either one, so "this suite is in the gate" was true while "the gate runs" was
+# false. Listing them here is what makes the second half true: a run in which
+# they are skipped or missing is reported as lost coverage, not as a pass.
+ct-test-release-gate
+ct-test-providers
 
 # --- platform lanes --------------------------------------------------
 windows-bootstrap-smoke

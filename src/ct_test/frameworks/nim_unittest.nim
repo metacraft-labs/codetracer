@@ -480,7 +480,7 @@ proc isCandidateNimTestFile(path: string): bool =
   normalized.contains("/tests/") or filename.startsWith("test") or filename.endsWith("_test")
 
 proc nimProjectFiles(projectRoot: string): seq[string] =
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     if isCandidateNimTestFile(path):
       result.add path
   result.sort(system.cmp[string])
@@ -494,9 +494,22 @@ proc detectProject(projectRoot: string): ProviderResult[bool] =
   for kind, path in walkDir(projectRoot):
     if kind == pcFile and path.endsWith(".nimble"):
       return ProviderResult[bool](diagnostics: @[], value: true)
-  for path in walkDirRec(projectRoot):
+  # Last resort for a Nim workspace with no project marker at all: look for a
+  # unittest import in the sources themselves. This reads file contents, so it
+  # is the single most expensive probe in the registry — restricting it to the
+  # workspace's own files (rather than every ``.nim`` reachable from the root,
+  # vendored compiler checkouts included) is what keeps it affordable.
+  #
+  # A source file that cannot be read is not evidence either way; skipping it
+  # beats letting an ``IOError`` abort the whole discovery.
+  for path in walkWorkspaceFiles(projectRoot):
     if path.endsWith(".nim"):
-      let frameworks = detectFrameworksInContent(readFile(path))
+      var content = ""
+      try:
+        content = readFile(path)
+      except IOError, OSError:
+        continue
+      let frameworks = detectFrameworksInContent(content)
       if frameworks.len > 0:
         return ProviderResult[bool](diagnostics: @[], value: true)
   ProviderResult[bool](diagnostics: @[], value: false)

@@ -53,7 +53,7 @@ proc hasCrystalProject*(projectRoot: string): bool =
 proc crystalFiles*(projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     let rel = normalizedRelative(projectRoot, path)
     if rel.startsWith("lib/") or rel.startsWith(".git/"):
       continue

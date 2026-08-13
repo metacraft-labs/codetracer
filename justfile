@@ -663,6 +663,8 @@ test-visual-replay-gate:
   bash ci/test/visual-replay-gate.sh
 
 # Run the M16 ct-test provider matrix and release-gate checks.
+# CI runs this script in the required `ct-test-release-gate` job
+# (.github/workflows/codetracer.yml); it needs no recorder siblings.
 test-m16-release-gate:
   bash ci/test/m16-release-gate.sh
 
@@ -675,6 +677,9 @@ test-m16-release-gate:
 # already-built recorders. Run from inside the dev shell (it provides nim plus
 # the gtest/catch2/cmake/ninja toolchain and CMAKE_PREFIX_PATH / CT_TEST_C{C,XX}
 # the C/C++ providers need). See ci/test/ct-providers.sh.
+# CI runs this script in the required `ct-test-providers` job
+# (.github/workflows/codetracer.yml), which checks the recorder siblings out
+# via setup-dev-env first.
 test-ct-providers:
   bash ci/test/ct-providers.sh
 
