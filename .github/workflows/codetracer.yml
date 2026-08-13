@@ -3275,6 +3275,26 @@ jobs:
         # this is not new infrastructure. The trace-format / io-mon /
         # stackable-hooks / nim-shm-queue entries are the native recorder's own
         # build dependencies, mirroring the visual gate's sibling list.
+        #
+        # codetracer-native-backend is listed for the NATIVE RECORDER's sake,
+        # not this job's: `build-siblings.sh` runs `just build-ct-mcr`, whose
+        # `build-license-ffi` recipe opens with
+        # `cd ../codetracer-native-backend && ...` to build `ct_license_ffi` out
+        # of the backend checkout. Without it:
+        #
+        #   sh: line 1: cd: ../codetracer-native-backend: No such file or directory
+        #   error: could not find `Cargo.toml` in `.../codetracer-native-recorder`
+        #   error: Recipe `build-license-ffi` failed on line 123 with exit code 101
+        #
+        # The recipe `&&`-chains only its first link and uses `;` after, so the
+        # failed `cd` does not abort it -- cargo just runs in the recorder root,
+        # which has no root Cargo.toml, and the error names the wrong repo.
+        #
+        # A gap in this list, not in the lock: the recipe is byte-identical at
+        # the last lock-pinned recorder revision (196f95c9, 2026-07-07) and at
+        # today's `dev`, and neither revision has a root Cargo.toml, so the
+        # lock-pinned build would have failed the same way. It stayed invisible
+        # because this job could not get past `Setup dev env` to reach it.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -3291,6 +3311,7 @@ jobs:
             codetracer-native-recorder=dev
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
+            codetracer-native-backend=dev
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as
