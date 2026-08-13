@@ -3295,6 +3295,20 @@ jobs:
         # today's `dev`, and neither revision has a root Cargo.toml, so the
         # lock-pinned build would have failed the same way. It stayed invisible
         # because this job could not get past `Setup dev env` to reach it.
+        #
+        # codetracer-visual-replay is here for the same reason, one layer on:
+        # once the backend is present, `build-license-ffi` succeeds and the
+        # build reaches `cd ct_cli && nimble build`, which imports
+        # `gfx_stream/ctfs_visual` -- a module that lives in
+        # codetracer-visual-replay/src/gfx_stream, not in the recorder:
+        #
+        #   ct_cli/src/ct_cli/extract_gfx_cmd.nim(39, 18)
+        #     Error: cannot open file: gfx_stream/ctfs_visual
+        #   error: Recipe `build-ct-mcr` failed on line 43 with exit code 1
+        #
+        # `visual-replay-regression-gate` already lists it. Same missing-sibling
+        # class as the backend above, uncovered only because fixing the first
+        # one let the build run far enough to hit the second.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -3312,6 +3326,7 @@ jobs:
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             codetracer-native-backend=dev
+            codetracer-visual-replay=dev
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as

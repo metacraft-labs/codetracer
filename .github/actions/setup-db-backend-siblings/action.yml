@@ -25,9 +25,13 @@ runs:
   using: composite
   steps:
     - name: Setup dev env (clone db-backend siblings + install Nix)
-      # setup-dev-env resolves each sibling's revision from the per-commit
-      # repo-workspaces workspace lock (the single approved source of sibling
-      # revisions) and clones it to ../<name>. codetracer-native-recorder /
+      # setup-dev-env clones each sibling to ../<name> at its pinned `dev`
+      # ref. The refs are explicit because a bare entry resolves through a
+      # per-commit workspace lock in the shared manifests repo, which has
+      # published nothing since 2026-08-02 -- see the note at the top of
+      # .github/workflows/codetracer.yml. This composite is used by six jobs,
+      # and every one of them died in this step until the refs were pinned.
+      # codetracer-native-recorder /
       # codetracer-trace-format / codetracer-trace-format-nim have no
       # .gitmodules; the recursive-submodule update is best-effort and a
       # no-op for them. The bespoke "direnv allow" fixup that used to live
@@ -40,6 +44,6 @@ runs:
         substituters: ${{ inputs.substituters }}
         trusted-public-keys: ${{ inputs.trusted-public-keys }}
         siblings: |
-          codetracer-trace-format
-          codetracer-trace-format-nim
-          codetracer-native-recorder
+          codetracer-trace-format=dev
+          codetracer-trace-format-nim=dev
+          codetracer-native-recorder=dev
