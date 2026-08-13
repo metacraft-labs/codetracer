@@ -82,7 +82,7 @@ proc isIgnored(spec: M12FallbackSpec; projectRoot, path: string): bool =
 proc sourceFiles*(spec: M12FallbackSpec; projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     if fileExists(path) and spec.hasSupportedExtension(path) and
         not spec.isIgnored(projectRoot, path):
       result.add path

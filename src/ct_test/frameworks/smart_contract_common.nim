@@ -167,7 +167,7 @@ proc fixtureFiles*(spec: SmartHarnessSpec; projectRoot: string): seq[string] =
     let root = repo / fixtureRoot
     if not dirExists(root):
       continue
-    for path in walkDirRec(root):
+    for path in walkWorkspaceFiles(root):
       if fileExists(path) and spec.hasExtension(path) and
           not spec.isIgnored(path):
         result.add path

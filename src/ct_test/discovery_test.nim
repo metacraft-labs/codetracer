@@ -1,4 +1,4 @@
-import std/[json, os, osproc, strutils, tables, unittest]
+import std/[algorithm, json, os, osproc, strutils, tables, unittest]
 
 import contracts
 import discovery
@@ -323,6 +323,120 @@ quit(runCtTest(
     check second.catalogs.len == 0
     check messages(first).contains("provider parser failed")
     check messages(second).contains("provider parser failed")
+
+  test "workspace discovery excludes vendored subtrees and honours --scope":
+    ## Scoping regression guard.
+    ##
+    ## `ct test discover --workspace` used to hand every provider an
+    ## unrestricted `walkDirRec`, so a workspace that keeps vendored upstream
+    ## source trees in-tree had all of them enumerated as if they were its own
+    ## tests. On one real consumer that was 45,256 of 53,322 catalog items.
+    ##
+    ## The fixture reproduces the three shapes that produced those items:
+    ##   * `references/upstream/` — a nested VCS checkout (vendored source);
+    ##   * `node_modules/dep/`    — a package-manager dependency tree; and
+    ##   * `tests/own.fake`       — the workspace's actual test.
+    ## Only the last may appear in the catalog. The final leg re-runs the same
+    ## fixture with `--scope unscoped` and asserts the vendored items come
+    ## back: without it, an assertion that "the catalog has 1 item" would also
+    ## pass if discovery had simply stopped working.
+    let root = makeWorkspace("vendored")
+    defer: removeDir(root)
+    discard fakeFile(root, "tests/own.fake", markerLine = 1)
+    # A vendored upstream checkout: its own `.git` is what marks the boundary,
+    # exactly as `references/llvm-project` does in the real workspace.
+    createDir(root / "references" / "upstream" / ".git")
+    discard fakeFile(root, "references/upstream/tests/vendored.fake",
+      markerLine = 1)
+    discard fakeFile(root, "references/upstream/lib/deep/also_vendored.fake",
+      markerLine = 1)
+    # A dependency tree with no VCS metadata at all — caught by name.
+    discard fakeFile(root, "node_modules/dep/dep_test.fake", markerLine = 1)
+
+    let scoped = discover(
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root,
+          jsonOutput: true),
+      m1Registry(newFakeProviderCounters()),
+      newDiscoveryCache())
+
+    check discoverExitCode(scoped) == 0
+    check scoped.catalogs.len == 1
+    var scopedFiles: seq[string] = @[]
+    for item in scoped.catalogs[0].items:
+      scopedFiles.add item.file
+    check scopedFiles == @["tests/own.fake"]
+    for path in scopedFiles:
+      check not path.startsWith("references/")
+      check not path.startsWith("node_modules/")
+    # The exclusion must be *reported*, not silent: a caller reconciling this
+    # catalog against another runner has to be able to see what was dropped.
+    let scopeMessages = messages(scoped)
+    check scopeMessages.contains("discovery scope:")
+    check scopeMessages.contains("references/upstream")
+    check scopeMessages.contains("node_modules")
+
+    let unscoped = discover(
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root,
+          jsonOutput: true, scopeMode: wsmUnscoped),
+      m1Registry(newFakeProviderCounters()),
+      newDiscoveryCache())
+
+    check discoverExitCode(unscoped) == 0
+    check unscoped.catalogs.len == 1
+    var unscopedFiles: seq[string] = @[]
+    for item in unscoped.catalogs[0].items:
+      unscopedFiles.add item.file
+    unscopedFiles.sort(system.cmp[string])
+    check unscopedFiles == @[
+      "node_modules/dep/dep_test.fake",
+      "references/upstream/lib/deep/also_vendored.fake",
+      "references/upstream/tests/vendored.fake",
+      "tests/own.fake"]
+
+  test "workspace discovery honours the workspace's own VCS ignore rules":
+    ## The scoping rule deliberately does not invent a ct_test-specific ignore
+    ## file: it asks the workspace what it already considers its own, via
+    ## `git ls-files --cached --others --exclude-standard`. That buys the full
+    ## `.gitignore` chain (including nested files and negations) and — the
+    ## property this case pins — keeps *untracked but not ignored* files, so a
+    ## test written seconds ago is still discovered.
+    let root = makeWorkspace("vcs-ignore")
+    defer: removeDir(root)
+    let gitInit = execCmdEx("git init -q .", options = {poUsePath},
+      workingDir = root)
+    if gitInit.exitCode != 0:
+      skip()
+    else:
+      writeFixture(root / ".gitignore", "generated/\n*.tmp.fake\n")
+      discard fakeFile(root, "tests/tracked.fake", markerLine = 1)
+      discard fakeFile(root, "tests/untracked_but_visible.fake", markerLine = 1)
+      discard fakeFile(root, "generated/machine_written.fake", markerLine = 1)
+      discard fakeFile(root, "tests/scratch.tmp.fake", markerLine = 1)
+      # A dependency tree the workspace forgot to gitignore. The VCS inventory
+      # would happily list it (untracked, not ignored), so the built-in
+      # `VendorDirNames` prune has to apply to git-listed paths too — not only
+      # to the filesystem-walk fallback.
+      discard fakeFile(root, "node_modules/dep/vcs_dep.fake", markerLine = 1)
+      # Track only one of them: the others must still be classified correctly
+      # from their ignore status alone.
+      discard execCmdEx("git add tests/tracked.fake", options = {poUsePath},
+        workingDir = root)
+
+      let response = discover(
+        DiscoverRequest(scope: dskWorkspace, workspaceRoot: root,
+            jsonOutput: true),
+        m1Registry(newFakeProviderCounters()),
+        newDiscoveryCache())
+
+      check discoverExitCode(response) == 0
+      check response.catalogs.len == 1
+      var files: seq[string] = @[]
+      for item in response.catalogs[0].items:
+        files.add item.file
+      files.sort(system.cmp[string])
+      check files == @[
+        "tests/tracked.fake", "tests/untracked_but_visible.fake"]
+      check messages(response).contains("vcs-inventory")
 
   test "invalid workspace and file requests produce clear diagnostics":
     let root = makeWorkspace("invalid")

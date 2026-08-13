@@ -61,7 +61,11 @@ proc isCppFile*(path: string): bool =
 proc cppFiles*(projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  # ``walkWorkspaceFiles`` (see ``workspace_scope``) yields only the files the
+  # workspace claims as its own, so vendored/ignored trees never reach the
+  # per-provider reject list below — which stays for build outputs the VCS
+  # inventory may still track.
+  for path in walkWorkspaceFiles(projectRoot):
     let rel = normalizedRelative(projectRoot, path)
     if rel.startsWith("build/") or rel.startsWith(".git/") or
         rel.startsWith("cmake-build-"):
