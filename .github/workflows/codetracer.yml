@@ -2100,16 +2100,16 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
 
   dmg-build:
-    # DEFERRED (CIP-5 Wave 4): stays on the GitHub-hosted macOS image. The
-    # `brew install awscli` step alone would be a trivial `nixpkgs#awscli2`
-    # swap, but the actual dmg build (`./ci/build/dmg.sh` ->
-    # `./non-nix-build/build.sh`) is Homebrew-native end to end:
-    # non-nix-build/env.sh, build_with_nim.sh, build_dmg.sh, install_tup.sh and
-    # install_node.sh all `brew install` their deps (sqlite3, ruby, capnp,
-    # libzip, create-dmg, pcre2, macFUSE, node, …). The nix-darwin runners have
-    # no Homebrew, so migrating this leg means porting the whole non-nix-build
-    # toolchain to nix (a build-system redesign), not a tool-provisioning swap.
-    runs-on: macos-latest  # DEFERRED (CIP-5 Wave 4): Homebrew-native non-nix build — see note above
+    # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
+    # `dtolnay/rust-toolchain` + `./ci/build/dmg.sh` (-> Homebrew-native
+    # `./non-nix-build/build.sh`) and `brew install awscli` steps are gone. The
+    # dmg is now produced toolchain-free by reprobuild
+    # (`repro build .#dmg --tool-provisioning=nix`, driven by
+    # `ci/reprobuild/macos-daemon-build.sh`), which lands the artifact at the
+    # same `non-nix-build/CodeTracer.dmg` path the sign + upload steps consume.
+    # `aws` comes from `nixpkgs#awscli2`, provisioned per-command via `nix
+    # shell`.
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     needs:
       - lint-bash
       - lint-nim
@@ -2136,6 +2136,13 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: "Import GPG key for signing commits"
         id: import-gpg
         uses: crazy-max/ghaction-import-gpg@v6
@@ -2146,14 +2153,12 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
-        run: ./ci/build/dmg.sh
-
-      - name: Install AWS CLI
-        run: brew install awscli
+      - name: Build DMG via reprobuild
+        # Toolchain-free reprobuild macOS build: starts runquotad, runs
+        # `repro build .#dmg --tool-provisioning=nix`, and asserts the artifact
+        # at `non-nix-build/CodeTracer.dmg` — the exact path the sign + upload
+        # steps below consume.
+        run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
 
       - name: Upload artifact
         env:
@@ -2163,8 +2168,8 @@ jobs:
           gpg --armor --detach-sign non-nix-build/CodeTracer.dmg
           # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
           #   adding `--checksum-algorithm CRC32`
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
 
   dmg-lib-check:
     # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
