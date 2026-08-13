@@ -50,18 +50,33 @@ jobs:
     runs-on: eph-linux-x64  # CIP-5: nix job → eph-linux-x64
 
     steps:
-      - name: Checkout codetracer
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
       - name: Generate CI token
+        # MUST precede the checkout. `submodules: recursive` pulls
+        # `libs/tree-sitter-nim`, which is PRIVATE, so an unauthenticated
+        # checkout cannot see it and the whole step dies before anything else
+        # in this workflow runs:
+        #
+        #   remote: Repository not found.
+        #   fatal: clone of 'https://github.com/metacraft-labs/tree-sitter-nim.git'
+        #     into submodule path '.../libs/tree-sitter-nim' failed
+        #
+        # This workflow is path-filtered onto BEAM-related files, so it had not
+        # been triggered in the window where anyone was watching; the ordering
+        # defect meant it could never have checked out if it had been.
+        # `cross-repo-tests.yml` already mints its token first and passes it —
+        # this is that same shape.
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Checkout codetracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
