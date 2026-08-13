@@ -65,6 +65,14 @@
 #      lock" -- the bare-entry failure wearing a costume.
 #   3. The `siblings:` block set is non-empty (a rename of the input must not
 #      turn this suite into a vacuous pass).
+#
+#      Scope is `.github/workflows/*.yml` AND `.github/actions/*/action.yml`.
+#      The composite actions matter as much as the workflows and are easier to
+#      forget: `.github/actions/setup-db-backend-siblings/action.yml` carries
+#      its own `siblings:` block, is used by six jobs, and kept every one of
+#      them failing after the workflows themselves had been fixed -- this
+#      suite's first version only walked the workflow directory and waved it
+#      straight through.
 #   4. Every workflow step that runs `./non-nix-build/build.sh` is preceded, in
 #      its own job, by a step that provisions `codetracer-trace-format`.
 #   5. Every workflow step that runs `ci/setup-rr-backend.sh` sets
@@ -91,6 +99,20 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly REPO_ROOT
 WORKFLOW_DIR="${1:-$REPO_ROOT/.github/workflows}"
 readonly WORKFLOW_DIR
+ACTIONS_DIR="${2:-$REPO_ROOT/.github/actions}"
+readonly ACTIONS_DIR
+
+# Every file that may declare a `siblings:` block: the workflows, plus each
+# composite action. A composite is a workflow step by another name and the
+# action input it passes is the same one.
+declare -a SIBLING_SOURCE_FILES=()
+for _wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+	[ -f "$_wf" ] && SIBLING_SOURCE_FILES+=("$_wf")
+done
+for _act in "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml; do
+	[ -f "$_act" ] && SIBLING_SOURCE_FILES+=("$_act")
+done
+unset _wf _act
 
 # GitHub Actions' own expression syntax, quoted verbatim -- this is the literal
 # text a sibling ref must not contain without a `||` fallback beside it.
@@ -131,8 +153,7 @@ sibling_blocks=0
 bad_entries=()
 entry_count=0
 
-for wf in "$WORKFLOW_DIR"/*.yml; do
-	[ -f "$wf" ] || continue
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	wf_name="${wf##*/}"
 	in_block=0
 	key_indent=0
@@ -215,8 +236,7 @@ echo "non-nix build legs provision codetracer-trace-format"
 build_sites=0
 missing_sites=()
 
-for wf in "$WORKFLOW_DIR"/*.yml; do
-	[ -f "$wf" ] || continue
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	wf_name="${wf##*/}"
 	job=""
 	seen_trace_format=0
@@ -281,8 +301,7 @@ echo "rr-backend setup overrides the ref explicitly"
 rr_sites=0
 rr_missing=()
 
-for wf in "$WORKFLOW_DIR"/*.yml; do
-	[ -f "$wf" ] || continue
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	wf_name="${wf##*/}"
 	step_has_override=0
 	line_no=0
