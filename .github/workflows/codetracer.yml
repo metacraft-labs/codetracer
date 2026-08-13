@@ -2711,9 +2711,40 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       # --- NixOS setup ---
+
+      - name: Stage codetracer-trace-format-nim into libs/
+        # codetracer-trace-format and codetracer-trace-format-nim are a MATCHED
+        # PAIR across an FFI boundary, and must move together or not at all.
+        # `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs` is the
+        # Rust caller; `codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim`
+        # is the Nim provider. Overriding only the first one links the newer
+        # caller against the older provider:
+        #
+        #   libcodetracer_trace_writer_nim...rcgu.o: in function
+        #     `codetracer_trace_writer_nim::NimTraceReaderHandle::event_metadata':
+        #     undefined reference to `ct_reader_event_metadata'
+        #   error: could not compile `replay-server` (bin "replay-server")
+        #
+        # `ct_reader_event_metadata` was added to the Nim side on 2026-08-07;
+        # flake.lock pins that repo at 839ed880 (2026-06-24), which does not
+        # define it.
+        #
+        # This is what the per-commit workspace lock was actually buying: not a
+        # pinned SHA, but COORDINATION across repos -- it moved both halves to
+        # one consistent revision. Pinning each sibling independently to `dev`
+        # keeps them current and loses that coordination, so the pair has to be
+        # overridden together, explicitly.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format-nim"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format-nim"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
+
       - name: Build CodeTracer (nix)
         if: matrix.platform == 'nixos'
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
       # --- macOS setup ---
       # The macOS leg is the explicitly non-nix build path on the hosted
@@ -2934,6 +2965,7 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
             codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -2946,8 +2978,39 @@ jobs:
           rm -rf "$DEST"
           cp -a "$SRC" "$DEST"
 
+
+      - name: Stage codetracer-trace-format-nim into libs/
+        # codetracer-trace-format and codetracer-trace-format-nim are a MATCHED
+        # PAIR across an FFI boundary, and must move together or not at all.
+        # `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs` is the
+        # Rust caller; `codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim`
+        # is the Nim provider. Overriding only the first one links the newer
+        # caller against the older provider:
+        #
+        #   libcodetracer_trace_writer_nim...rcgu.o: in function
+        #     `codetracer_trace_writer_nim::NimTraceReaderHandle::event_metadata':
+        #     undefined reference to `ct_reader_event_metadata'
+        #   error: could not compile `replay-server` (bin "replay-server")
+        #
+        # `ct_reader_event_metadata` was added to the Nim side on 2026-08-07;
+        # flake.lock pins that repo at 839ed880 (2026-06-24), which does not
+        # define it.
+        #
+        # This is what the per-commit workspace lock was actually buying: not a
+        # pinned SHA, but COORDINATION across repos -- it moved both halves to
+        # one consistent revision. Pinning each sibling independently to `dev`
+        # keeps them current and loses that coordination, so the pair has to be
+        # overridden together, explicitly.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format-nim"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format-nim"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
+
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
       - name: Setup rr-backend
         # `ci/setup-rr-backend.sh` resolves codetracer-native-backend's revision
