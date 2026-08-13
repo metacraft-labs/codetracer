@@ -57,6 +57,23 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newAssemblyFallbackM1Provider()
   ] & newSmartContractHarnessM13Providers())
 
+proc ctTestUsageMessage*(): string =
+  ## The ``ct-test`` command-line surface, as one line.
+  ##
+  ## Exported so the surface can be asserted on directly: ``--scope`` and
+  ## ``--unscoped`` decide which files discovery is even allowed to look at,
+  ## and a flag with that much authority that appears in no usage text is a
+  ## flag nobody finds when they need it.
+  "usage: ct-test test (" &
+  "discover (--workspace <path> | --file <path>) [--json] " &
+  "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
+  "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
+  "[--threads N] [--json] [--summary <path>]); " &
+  "discovery is scoped to the workspace's own files by default — " &
+  "`--scope` (or the CT_TEST_SCOPE environment variable) selects the rule, " &
+  "and `--unscoped` is shorthand for `--scope unscoped`, which INCLUDES " &
+  "vendored and ignored trees"
+
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
     schemaVersion: DiscoverSchemaVersion,
@@ -224,10 +241,7 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     else:
       var mutableRegistry = registry
       return runRun(if args.len > 2: args[2 .. ^1] else: @[], mutableRegistry, cache)
-  let response = errorResponse(
-    "usage: ct-test test (discover (--workspace <path> | --file <path>) --json " &
-    "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
-    "[--threads N] [--json] [--summary <path>])")
+  let response = errorResponse(ctTestUsageMessage())
   echo responseToJson(response).pretty
   discoverExitCode(response)
 

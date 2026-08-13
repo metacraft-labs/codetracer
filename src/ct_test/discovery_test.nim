@@ -2,6 +2,7 @@ import std/[algorithm, json, os, osproc, strutils, tables, unittest]
 
 import contracts
 import discovery
+import process_exec
 
 proc writeFixture(path, content: string) =
   createDir(parentDir(path))
@@ -343,8 +344,13 @@ quit(runCtTest(
     let root = makeWorkspace("vendored")
     defer: removeDir(root)
     discard fakeFile(root, "tests/own.fake", markerLine = 1)
-    # A vendored upstream checkout: its own `.git` is what marks the boundary,
-    # exactly as `references/llvm-project` does in the real workspace.
+    # A vendored upstream checkout that the workspace does NOT gitignore, so
+    # its own `.git` is the only thing marking the boundary. This is the
+    # backstop case on purpose: in the workspace the 45,256-item measurement
+    # came from, the `references/` trees ARE gitignored and `git ls-files`
+    # never mentioned them, so `.gitignore` did the excluding there and the
+    # nested-VCS rule never fired. It is covered here because it is the case
+    # `.gitignore` cannot cover, not because it is the common one.
     createDir(root / "references" / "upstream" / ".git")
     discard fakeFile(root, "references/upstream/tests/vendored.fake",
       markerLine = 1)
@@ -464,3 +470,95 @@ quit(runCtTest(
     check messages(workspaceResponse).contains("invalid workspace")
     check discoverExitCode(noProviderResponse) == 1
     check messages(noProviderResponse).contains("no supported test providers")
+
+suite "ct-test workspace scoping guards":
+  test "a truncated VCS inventory is refused rather than used short":
+    ## Silent-truncation guard.
+    ##
+    ## `execCaptured` bounds how much of a child's output it keeps. `git
+    ## ls-files -z` emits paths in sorted order, so a cut inventory is not a
+    ## random sample — it is the alphabet with a contiguous tail missing, and
+    ## nothing in the output says so. Using it would report a plausible,
+    ## short, WRONG file set; refusing it costs only a fallback to the walk.
+    ##
+    ## Tested by lowering the bound, not by materialising the ~280,000 files
+    ## it would take to overrun the 16 MiB default: the guard is about the
+    ## bound being hit, and which number it is makes no difference to it.
+    let root = makeWorkspace("truncated-inventory")
+    defer: removeDir(root)
+    let gitInit = execCmdEx("git init -q .", options = {poUsePath},
+      workingDir = root)
+    if gitInit.exitCode != 0:
+      skip()
+    else:
+      discard fakeFile(root, "tests/first.fake", markerLine = 1)
+      discard fakeFile(root, "tests/second.fake", markerLine = 1)
+
+      # Baseline: with the real bound the inventory is used, so the assertions
+      # below cannot pass by discovery simply having stopped working.
+      clearVcsInventoryCaptureLimit()
+      invalidateWorkspaceScopes()
+      let intact = workspaceScope(root)
+      check intact.source == wssVcsInventory
+
+      setVcsInventoryCaptureLimit(4)
+      defer: clearVcsInventoryCaptureLimit()
+      invalidateWorkspaceScopes()
+      let truncated = workspaceScope(root)
+      # `auto` widens to the pruning walk — a rule that cannot silently lose a
+      # tail — and says why.
+      check truncated.source == wssFilesystemWalk
+      check truncated.notes.join("\n").contains("capture bound")
+      var walkedNames: seq[string] = @[]
+      for path in truncated.files:
+        walkedNames.add extractFilename(path)
+      check "first.fake" in walkedNames
+      check "second.fake" in walkedNames
+
+  test "`--scope vcs` errors on a truncated inventory and names the flag":
+    ## Two things at once, because they are the same diagnostic:
+    ##   * `vcs` means "the inventory or nothing", so an unusable inventory is
+    ##     an error rather than a quiet widening to a different rule; and
+    ##   * the message must name the surface the mode actually came from. It
+    ##     used to blame `CT_TEST_SCOPE` even when `--scope` was what was used,
+    ##     sending readers to look for an environment variable nobody set.
+    let root = makeWorkspace("vcs-truncated")
+    defer: removeDir(root)
+    let gitInit = execCmdEx("git init -q .", options = {poUsePath},
+      workingDir = root)
+    if gitInit.exitCode != 0:
+      skip()
+    else:
+      discard fakeFile(root, "tests/only.fake", markerLine = 1)
+      setVcsInventoryCaptureLimit(4)
+      defer:
+        clearVcsInventoryCaptureLimit()
+        clearWorkspaceScopeMode()
+      let response = discover(
+        DiscoverRequest(scope: dskWorkspace, workspaceRoot: root,
+            jsonOutput: true, scopeMode: wsmVcs),
+        m1Registry(newFakeProviderCounters()),
+        newDiscoveryCache())
+      let text = messages(response)
+      check text.contains("--scope vcs was requested")
+      check not text.contains("CT_TEST_SCOPE=vcs was requested")
+      check text.contains("capture bound")
+      check text.contains("unavailable")
+
+  test "execCaptured reports truncation instead of hiding it":
+    ## The guard above is only possible because `CapturedRun` surfaces the
+    ## truth. Pin the primitive too: `output` is a prefix, `outputBytes` is the
+    ## real length, and `truncated` says which.
+    const payload = "0123456789"
+    let full = execCaptured(@["printf", "%s", payload])
+    if full.exitCode != 0:
+      skip()
+    else:
+      check full.output == payload
+      check full.outputBytes == uint64(payload.len)
+      check not full.truncated
+
+      let cut = execCaptured(@["printf", "%s", payload], captureLimit = 4)
+      check cut.output == payload[0 ..< 4]
+      check cut.outputBytes == uint64(payload.len)
+      check cut.truncated
