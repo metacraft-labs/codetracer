@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
     inputs:
       rr_backend_ref:
-        description: 'rr-backend git ref to test against (default: workspace lock)'
+        description: 'rr-backend git ref to test against (default: dev)'
         required: false
         default: ''
       shell_recorders_ref:
-        description: 'shell-recorders git ref to test against (default: workspace lock)'
+        description: 'shell-recorders git ref to test against (default: dev)'
         required: false
         default: ''
 
@@ -55,12 +55,12 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones the cross-repo siblings adjacent to this checkout at the
-        # workspace-lock-pinned revisions (recursive submodules), replacing
+        # clones the cross-repo siblings adjacent to this checkout at their
+        # pinned `dev` refs (recursive submodules), replacing
         # the former Checkout-manifests / Resolve-lock / per-sibling
         # clone-repo machinery. The rr_backend_ref workflow_dispatch input
-        # overrides codetracer-native-backend's locked revision (empty =>
-        # lock). The native-backend submodule unfold below is still bespoke
+        # overrides codetracer-native-backend's ref (empty => `dev`).
+        # The native-backend submodule unfold below is still bespoke
         # because the path:-flake-input visibility fix is specific to this
         # repo's flake.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
@@ -70,10 +70,10 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref }}
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
+            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'dev' }}
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has
@@ -206,10 +206,10 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones codetracer-shell-recorders adjacent to this checkout at the
-        # workspace-lock-pinned revision, replacing the former
+        # pinned `dev` ref, replacing the former
         # Checkout-manifests / Resolve-lock / clone-repo steps. The
-        # shell_recorders_ref workflow_dispatch input overrides the locked
-        # revision (empty => lock).
+        # shell_recorders_ref workflow_dispatch input overrides the ref
+        # (empty => `dev`).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -217,7 +217,7 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref }}
+            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
 
       - name: Build shell trace writer
         run: |

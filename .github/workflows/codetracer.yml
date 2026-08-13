@@ -12,6 +12,45 @@ permissions:
   id-token: write
 
 jobs:
+  # WHY EVERY `siblings:` ENTRY CARRIES AN EXPLICIT `=dev` REF.
+  #
+  # `metacraft-github-actions/setup-dev-env` clones cross-repo siblings via its
+  # `clone-siblings` sub-action. A bare entry (`codetracer-trace-format`) asks
+  # that action to resolve the revision from a *workspace lock* — a per-commit
+  # snapshot published to `metacraft-labs/metacraft-manifests@latest` by the
+  # workspace tooling's pre-push hook. An entry of the form `name=ref` skips
+  # that lookup and clones `ref` directly.
+  #
+  # Lock publication for this repo stopped on 2026-08-02 (last entry:
+  # `locks/dev/codetracer/784c9bda…​.xml`). `clone-siblings` probes the pushed
+  # commit and its parent only (`--no-walk`), so `dev` stayed resolvable for
+  # exactly one more commit and then broke: 8d587343 (parent 784c9bda) was the
+  # last green `Setup dev env`; 3583cd6b (run 30951549711, 2026-08-04) was the
+  # first red one, and every push since has failed the same way:
+  #
+  #   ##[error]No workspace lock for codetracer (candidates: <sha> <parent>).
+  #   Neither a repo-workspaces locks/<project>/codetracer/<sha>.xml nor a
+  #   reprobuild locks/<project>/codetracer/<sha>.toml exists in
+  #   metacraft-labs/metacraft-manifests@latest.
+  #
+  # That took out `lint-rust`, `test-non-gui`, `test-ui-tests` (both legs),
+  # `test-ui-tests-rr`, `visual-replay-regression-gate` and `ct-test-providers`
+  # in their first real step, which in turn left nine jobs declaring `needs:` on
+  # them `skipped` — the exact "the tests never ran" state `ci-verdict` exists
+  # to name.
+  #
+  # Restoring lock publication is an infrastructure task outside this repo (the
+  # workspace moved from repo-workspaces to reprobuild and the manifests repo
+  # has received nothing since). Until it is restored, siblings are pinned to
+  # the branch the lock itself recorded for every one of them (`upstream="dev"`
+  # in 784c9bda's lock), which is also what the lock-free paths in this file
+  # already do — `.github/actions/setup-isonim-siblings` and the `clone-repo`
+  # steps in `viewmodel-tests` / `test-non-gui` all clone `ref: dev`.
+  #
+  # This changes WHERE a revision comes from, not WHICH repos are provisioned
+  # or what any job asserts. When locks are published again, dropping the
+  # `=dev` suffixes restores per-commit pinning.
+  #
   # NOTE (CIP-5 Wave 4): the whole Windows platform was migrated as a single
   # unit (honoring the prior "move the whole platform or none of it" rule) from
   # the GitHub-hosted `windows-latest` onto the self-hosted `eph-win-x64`
@@ -728,7 +767,7 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env (windows-diy) clones the cross-repo siblings adjacent
-        # to this checkout at the workspace-lock-pinned revisions and sources
+        # to this checkout at their pinned `dev` refs and sources
         # env.ps1, whose ensure-* helpers provision the Windows toolchain
         # (capnp / cargo / nim / nimble), persisting the env to GITHUB_ENV /
         # GITHUB_PATH for subsequent steps. This replaces the former
@@ -740,9 +779,9 @@ jobs:
           env-flavor: windows-diy
           gh-token: ${{ steps.app-token.outputs.token }}
           siblings: |
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
 
       - name: Remove WSL bash stub from System32
         # db-backend's build.rs runs ``Command::new("bash") ...
@@ -952,7 +991,7 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env clones the cross-repo siblings adjacent to this
-        # checkout at the workspace-lock-pinned revisions and sources
+        # checkout at their pinned `dev` refs and sources
         # env.ps1 (windows-diy flavor), persisting the resulting env to
         # GITHUB_ENV/GITHUB_PATH for subsequent steps — replacing the former
         # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps
@@ -965,9 +1004,9 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder
-            codetracer-trace-format
-            codetracer-trace-format-nim
+            codetracer-native-recorder=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Install Nim dependencies
         shell: bash
@@ -1150,7 +1189,7 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones the cross-repo siblings adjacent to this checkout at the
-        # workspace-lock-pinned revisions, replacing the former
+        # pinned `dev` refs, replacing the former
         # Checkout-manifests / Resolve-lock / per-sibling clone-repo / Install
         # Nix steps. The direnv-allow + ct_emulator nimble steps below remain
         # bespoke because they operate inside the cloned native-recorder
@@ -1162,9 +1201,9 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # src/db-backend/build.rs invokes ``direnv exec <recorder-root>
@@ -2380,8 +2419,57 @@ jobs:
         if: matrix.platform == 'macos'
         run: curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
 
+      - name: Clone codetracer-trace-format (macOS)
+        # ``./non-nix-build/build.sh`` -> ``env.sh`` -> ``build_trace_writer_ffi.sh``
+        # builds ``codetracer_trace_writer_ffi`` out of a codetracer-trace-format
+        # checkout, defaulting to the workspace sibling
+        # ``$ROOT_DIR/../codetracer-trace-format``.  That used to be the in-repo
+        # submodule ``libs/codetracer-trace-format``; e901eb6c8 (2026-05-12,
+        # "migrate codetracer-trace-format from submodule to sibling repo") made
+        # it a sibling, and nothing on THIS leg ever started providing it -- the
+        # job's ``Setup dev env`` (which clones siblings) is
+        # ``if: matrix.platform == 'nixos'``.  So every macOS run since has died
+        # here with
+        #
+        #   ERROR: codetracer-trace-format checkout not found at
+        #   .../non-nix-build/../../codetracer-trace-format.
+        #
+        # Its sibling job ``test-ui-tests`` runs the same script on the same
+        # runner and does not hit this, because its ``Setup dev env`` has no
+        # platform ``if:``.  (This leg was already red at ``Build (non-nix)``
+        # before e901eb6c8 -- its last green run anywhere is 24457842335, main,
+        # 2026-04-15, and it has never been green on ``dev`` -- so this may
+        # expose an older failure rather than turn the leg green.  It is
+        # ``continue-on-error`` on macOS either way.)  Clone the sibling here
+        # with the same ``clone-repo``
+        # + ``ref: dev`` pattern this job already uses for the python / ruby /
+        # BEAM recorders, rather than dropping the platform ``if:`` off
+        # ``Setup dev env``: this leg is deliberately the *non-nix* build path
+        # and must not acquire a nix dev env as a side effect.
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          # `dev` is where this repo's work lands; its default branch is
+          # `stable`, and the last published workspace lock recorded
+          # upstream="dev" for it.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Build (non-nix)
         if: matrix.platform == 'macos'
+        # Mirror the environment ``test-ui-tests``' macOS leg passes to this
+        # same script: ``install_nim_osx.sh`` bootstraps Nim without nimble, so
+        # ``codetracer_trace_writer_nim``'s build.rs must skip its
+        # ``nimble install --depsOnly`` and take stew/results from the in-repo
+        # submodules instead; and macos-latest has no direnv for db-backend's
+        # build.rs to wrap ``build_native_api.sh`` in.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
         run: ./non-nix-build/build.sh
 
       - name: Clone python-recorder (macOS)
@@ -2415,7 +2503,7 @@ jobs:
       #
       # setup-dev-env clones the BEAM recorder + codetracer-trace-format
       # (the recorder's CTFS path-dep) adjacent to this checkout at the
-      # workspace-lock-pinned revisions, replacing the former
+      # pinned `dev` refs, replacing the former
       # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps.
       # Nix is already installed by the earlier "Install Nix" step on the
       # nixos leg; setup-dev-env's nix install is idempotent.
@@ -2428,8 +2516,8 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-beam-recorder
-            codetracer-trace-format
+            codetracer-beam-recorder=dev
+            codetracer-trace-format=dev
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
@@ -2582,7 +2670,7 @@ jobs:
         # the workaround for the hosted-macOS ``eDSRecordAlreadyExists``
         # failure that the older installer trips on the GitHub-hosted Apple
         # Silicon image) and clones the cross-repo siblings adjacent to this
-        # checkout (``../<name>``) at the workspace-lock-pinned revisions. This
+        # checkout (``../<name>``) at their pinned `dev` refs. This
         # replaces the former Checkout-manifests / Resolve-lock / per-sibling
         # clone-repo steps (both legs), the nixos ``Install Nix`` (setup-nix),
         # and the bespoke macOS ``Install Nix (… for ct_cli build)`` Determinate
@@ -2602,17 +2690,17 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           nix-develop-args: '.?submodules=1'
           siblings: |
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
-            nim-stackable-hooks
-            codetracer-visual-replay
-            codetracer-native-backend
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
+            nim-stackable-hooks=dev
+            codetracer-visual-replay=dev
+            codetracer-native-backend=dev
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
         # with the in-repo path ./libs/codetracer-trace-format; mirror the
-        # lock-pinned sibling clone (placed at ../codetracer-trace-format by
+        # sibling clone (placed at ../codetracer-trace-format by
         # setup-dev-env) there.
         shell: bash
         run: |
@@ -2661,7 +2749,7 @@ jobs:
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
       # codetracer-native-backend are now cloned adjacent to this checkout
-      # (``../<name>``) at workspace-lock-pinned revisions by the
+      # (``../<name>``) at their pinned `dev` refs by the
       # ``Setup dev env`` step above. The macOS cargo path deps
       # (``../../../codetracer-trace-format/...``), the trace-format-nim FFI
       # entry point, the native-recorder canonicalize, the ct_cli
@@ -2833,7 +2921,7 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones codetracer-trace-format adjacent to this checkout at the
-        # workspace-lock-pinned revision, replacing the former
+        # pinned `dev` ref, replacing the former
         # Checkout-manifests / Resolve-lock / clone-repo / Install Nix steps.
         # The flake build below reads the in-repo path
         # libs/codetracer-trace-format, so the sibling clone is mirrored
@@ -2845,11 +2933,11 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-trace-format
+            codetracer-trace-format=dev
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
-        # mirror the lock-pinned sibling clone there.
+        # mirror the sibling clone there.
         shell: bash
         run: |
           set -euo pipefail
@@ -2925,7 +3013,7 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones every source dependency used by the visual gate adjacent to
-        # this checkout at workspace-lock-pinned revisions. That includes the
+        # this checkout at their pinned `dev` refs. That includes the
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
@@ -2936,21 +3024,21 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            isonim
-            nim-everywhere
-            nim-acp
-            nim-agent-harbor
-            nim-agents
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            io-mon
-            nim-shm-queue
-            nim-stackable-hooks
-            codetracer-visual-replay
-            codetracer-native-backend
-            codetracer-native-recorder
-            codetracer-native-test-programs
-            codetracer-visual-replay-fixtures
+            isonim=dev
+            nim-everywhere=dev
+            nim-acp=dev
+            nim-agent-harbor=dev
+            nim-agents=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            io-mon=dev
+            nim-shm-queue=dev
+            nim-stackable-hooks=dev
+            codetracer-visual-replay=dev
+            codetracer-native-backend=dev
+            codetracer-native-recorder=dev
+            codetracer-native-test-programs=dev
+            codetracer-visual-replay-fixtures=dev
 
       - name: Run visual replay regression gate
         env:
@@ -3171,7 +3259,7 @@ jobs:
         # never simply be dropped into an existing job.
         #
         # setup-dev-env clones them adjacent to this checkout at
-        # workspace-lock-pinned revisions — the same mechanism
+        # pinned `dev` refs — the same mechanism
         # `visual-replay-regression-gate` and `test-non-gui` already use, so
         # this is not new infrastructure. The trace-format / io-mon /
         # stackable-hooks / nim-shm-queue entries are the native recorder's own
@@ -3183,15 +3271,15 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            nim-everywhere
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            io-mon
-            nim-shm-queue
-            nim-stackable-hooks
-            codetracer-native-recorder
-            codetracer-js-recorder
-            codetracer-ruby-recorder
+            nim-everywhere=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            io-mon=dev
+            nim-shm-queue=dev
+            nim-stackable-hooks=dev
+            codetracer-native-recorder=dev
+            codetracer-js-recorder=dev
+            codetracer-ruby-recorder=dev
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as
@@ -3631,6 +3719,17 @@ jobs:
         # -- which matters, because the Windows lane had no signal at all
         # for the months this went unnoticed.
         run: bash ci/test/windows-runner-bootstrap-test.sh
+
+      - name: Assert no job's siblings depend on a published workspace lock
+        # A bare `siblings:` entry resolves its revision from a workspace lock
+        # in metacraft-labs/metacraft-manifests, which has published nothing
+        # for this repo since 2026-08-02. Six jobs died in their first real
+        # step for eight days because of it, and nine more were reported
+        # `skipped` in consequence -- the state the verdict step below exists
+        # to name. Like the Windows contract above this is a static check over
+        # this workflow file, so it runs here, from a stock runner, where it
+        # cannot be taken down by the outage it watches for.
+        run: bash ci/test/sibling-provisioning-test.sh
 
       - name: Self-test the private-registry credential preflight
         # This suite is also run by `visual-replay-regression-gate`, but that

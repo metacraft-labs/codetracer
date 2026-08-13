@@ -33,11 +33,11 @@ on:
   workflow_dispatch:
     inputs:
       beam_recorder_ref:
-        description: 'codetracer-beam-recorder ref (default: workspace lock)'
+        description: 'codetracer-beam-recorder ref (default: dev)'
         required: false
         default: ''
       trace_format_ref:
-        description: 'codetracer-trace-format ref (default: workspace lock)'
+        description: 'codetracer-trace-format ref (default: dev)'
         required: false
         default: ''
 
@@ -66,12 +66,12 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones the cross-repo siblings adjacent to this checkout at the
-        # workspace-lock-pinned revisions, replacing the former
+        # pinned `dev` refs, replacing the former
         # Checkout-manifests / Resolve-lock / Resolve-refs / clone-repo
         # machinery. The beam_recorder_ref / trace_format_ref
-        # workflow_dispatch inputs override the locked revisions (empty =>
-        # lock). codetracer-trace-format is also cloned as a sibling here so
-        # its workspace-locked SHA is available for the in-repo
+        # workflow_dispatch inputs override the refs (empty => `dev`).
+        # codetracer-trace-format is also cloned as a sibling here so
+        # its pinned SHA is available for the in-repo
         # libs/codetracer-trace-format swap below (the beam recorder reads
         # the in-repo path, not the sibling).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
@@ -81,13 +81,13 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-beam-recorder=${{ github.event.inputs.beam_recorder_ref }}
-            codetracer-trace-format=${{ github.event.inputs.trace_format_ref }}
+            codetracer-beam-recorder=${{ github.event.inputs.beam_recorder_ref || 'dev' }}
+            codetracer-trace-format=${{ github.event.inputs.trace_format_ref || 'dev' }}
 
       - name: Swap libs/codetracer-trace-format for the pinned sibling clone
         # The beam recorder's trace shim reuses the shared CTFS writer at
         # the in-repo path libs/codetracer-trace-format. setup-dev-env
-        # cloned codetracer-trace-format at the workspace-locked (or
+        # cloned codetracer-trace-format at the pinned `dev` (or
         # dispatch-overridden) revision adjacent to this checkout; mirror
         # it into libs/ so the recorder build picks up the pinned source
         # instead of the submodule-pinned copy.
