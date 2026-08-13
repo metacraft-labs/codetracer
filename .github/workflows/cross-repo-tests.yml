@@ -210,6 +210,19 @@ jobs:
         # Checkout-manifests / Resolve-lock / clone-repo steps. The
         # shell_recorders_ref workflow_dispatch input overrides the ref
         # (empty => `dev`).
+        #
+        # codetracer-trace-format is listed because the shell recorders' Cargo
+        # workspace path-depends on it:
+        #
+        #   error: failed to load manifest for workspace member
+        #     `.../codetracer-shell-recorders/crates/ct-shell-trace-writer`
+        #   Caused by: failed to load manifest for dependency `codetracer_trace_types`
+        #   Caused by: failed to read `.../codetracer-trace-format/codetracer_trace_types/Cargo.toml`
+        #   Caused by: No such file or directory (os error 2)
+        #
+        # It was missing from this list, not from the lock — the `rr-backend-tests`
+        # job above already names it for the same reason. The gap was invisible
+        # while this job could not get past `Setup dev env` at all.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -218,6 +231,7 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
             codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
+            codetracer-trace-format=dev
 
       - name: Build shell trace writer
         run: |
