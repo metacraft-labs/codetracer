@@ -3760,3 +3760,73 @@ jobs:
         run: |
           printf '%s' "$NEEDS_JSON" > "${RUNNER_TEMP}/needs.json"
           bash ci/verdict/required-jobs.sh --needs-json "${RUNNER_TEMP}/needs.json"
+
+  workspace-lock-freshness:
+    # Alarm, not a gate: is the shared manifests repo still receiving workspace
+    # locks for this repo's commits?
+    #
+    # Until 2026-08-04 that question was answered as a side effect —
+    # `setup-dev-env` resolved every cross-repo sibling from the per-commit
+    # lock, so an unlocked commit could not get past `Setup dev env`. That
+    # coupling was a terrible gate (six jobs dead in their first real step, nine
+    # more `skipped`, for eight days) and the `siblings:` entries above now name
+    # their refs explicitly so it cannot recur. But it was also the only thing
+    # anyone was watching, and the condition it was accidentally reporting is
+    # not small: nothing has been committed to the manifests repo, for ANY repo,
+    # since 2026-08-02. Those locks are what make a published workspace state
+    # reproducible, so the stall means no reproducible snapshot exists for any
+    # commit in that window.
+    #
+    # Fixing the pipeline must not be the thing that hides that. Hence a job
+    # with its own name, red on every run while the stall lasts.
+    #
+    # NOTHING declares `needs:` on this job, and it is deliberately absent from
+    # `ci/verdict/required-jobs.txt`. A red check here must never be able to
+    # skip a test job — coupling lock publication to the test suite is exactly
+    # the defect being undone, and re-introducing it as a gate would trade an
+    # eight-day outage for the next one. Loud, and structurally incapable of
+    # cascading.
+    #
+    # Stock ubuntu-latest, bash + git only: like `ci-verdict`, a watchdog must
+    # not share the failure mode it watches for.
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Mint installation token for the manifests repo
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        # depth 2 so HEAD's first parent is present: that is the second
+        # candidate, and the one that kept `dev` resolvable for exactly one
+        # commit after publication stopped.
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+          fetch-depth: 2
+
+      - name: Clone the manifests repo
+        env:
+          GH_TOKEN: ${{ steps.ci_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git clone --quiet --branch latest \
+            "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/metacraft-manifests.git" \
+            "${RUNNER_TEMP}/metacraft-manifests"
+
+      - name: Assert this commit has a published workspace lock
+        run: |
+          set -uo pipefail
+          # HEAD plus its first parent — the same two candidates clone-siblings
+          # probes. `git rev-parse HEAD^` is empty for a root commit or if the
+          # fetch depth did not reach the parent; the script ignores empty and
+          # all-zero candidates.
+          PARENT="$(git rev-parse --verify --quiet HEAD^ || true)"
+          bash ci/verdict/workspace-lock-freshness.sh \
+            --manifest-dir "${RUNNER_TEMP}/metacraft-manifests" \
+            --sha "${GITHUB_SHA}" \
+            --sha "${PARENT}"
