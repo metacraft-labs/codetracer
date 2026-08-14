@@ -3138,6 +3138,7 @@ jobs:
             codetracer-trace-format-nim=dev
             io-mon=dev
             nim-shm-queue=dev
+            nim-shm-gset=dev
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
             codetracer-native-backend=dev
@@ -3415,6 +3416,7 @@ jobs:
             codetracer-trace-format-nim=dev
             io-mon=dev
             nim-shm-queue=dev
+            nim-shm-gset=dev
             nim-stackable-hooks=dev
             codetracer-native-recorder=dev
             codetracer-js-recorder=dev

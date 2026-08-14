@@ -313,6 +313,69 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 1c. MATCHED PAIR: io-mon implies nim-shm-gset.
+#
+# The same defect class as 1b, found by asking the question 1b answers for one
+# pair of every other provisioned sibling.
+#
+#   io-mon/src/io_mon.nim
+#     -> io_mon/writer     imports `shm_gset/transport`
+#     -> io_mon/fs_snoop   imports `shm_gset` and `shm_gset/transport`
+#
+# `shm_gset` is the grow-only shared-memory set backing io-mon's Linux
+# dependency-capture channel. As with the trace-format pair, the dependency is
+# invisible from either manifest: io-mon resolves it as a plain sibling through
+# its `config.nims` `SHM_GSET_SRC` default (`../nim-shm-gset/src`), and
+# codetracer's repo-root `config.nims` mirrors that with
+#
+#     addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
+#
+# `addPathIfDir` is SILENT when the directory is absent. So an io-mon-only
+# `siblings:` block provisions successfully, and the omission surfaces much
+# later, in the `ct` compile, as
+#
+#     cannot open file: shm_gset/transport
+#
+# with nothing pointing back at the sibling list. Note the sibling clone WINS
+# over the `IO_MON_SRC` flake input here -- Nim searches `--path` entries
+# newest-first and the repo-root config adds the workspace sibling after it --
+# so pinning `io-mon=dev` is exactly what makes the newer `shm_gset` import
+# reachable, and exactly what makes the missing sibling fatal. Currency without
+# coordination again.
+#
+# NOT YET OBSERVED IN CI. Both jobs that provision io-mon
+# (`visual-replay-regression-gate`, `ct-test-providers`) have been dying earlier
+# than the `ct` compile for the whole period this was reachable, so this is a
+# static finding, not a reproduction. It is asserted anyway; the mechanism is
+# the one already paid for twice in 1b.
+# ---------------------------------------------------------------------------
+unpaired=()
+for _i in "${!BLOCK_REPOS[@]}"; do
+	_repos=" ${BLOCK_REPOS[$_i]} "
+	case "$_repos" in
+	*" io-mon "*)
+		case "$_repos" in
+		*" nim-shm-gset "*) ;;
+		*)
+			unpaired+=("${BLOCK_WHERE[$_i]}: provisions io-mon without nim-shm-gset")
+			;;
+		esac
+		;;
+	esac
+done
+unset _i _repos
+
+if [ "${#unpaired[@]}" -eq 0 ]; then
+	ok "every block provisioning io-mon also provisions nim-shm-gset"
+else
+	fail "every block provisioning io-mon also provisions nim-shm-gset" \
+		"io_mon's writer/fs_snoop import shm_gset; the repo-root config.nims adds the" \
+		"sibling with addPathIfDir, which is silent when absent, so the omission only" \
+		"surfaces later as 'cannot open file: shm_gset/transport' from the ct compile" \
+		"${unpaired[@]}"
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Every `./non-nix-build/build.sh` invocation has codetracer-trace-format
 #    provisioned earlier in its own job.
 #
@@ -443,7 +506,7 @@ fi
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=6
+readonly EXPECTED_ASSERTIONS=7
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
