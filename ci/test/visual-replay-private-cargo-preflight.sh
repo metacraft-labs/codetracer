@@ -128,9 +128,19 @@ fi
 # exists to protect was intact — the lldb-sys URL still resolved to the
 # lldb-sys header, and nothing else did.
 #
-# Asserting "no header at all" was always stronger than the contract and was
-# never in the gate's power to guarantee: the ambient header belongs to the
-# checkout, not to this script.
+# RE-EXAMINE THIS. As of 2026-08-14 the gate's checkout sets
+# `persist-credentials: false`, so the ambient header this relaxation exists to
+# tolerate is no longer written by the one step known to write it. Reading (1)
+# below may now be satisfiable in the real environment again, which would make
+# the stronger "no header matches at all" form achievable. It has deliberately
+# NOT been re-tightened in the same change: a persistent self-hosted GPU runner
+# can carry ambient Git configuration from sources other than actions/checkout,
+# and with the runner pool saturated that could not be observed here. Re-tighten
+# only against a green run that proves it, not against this comment.
+#
+# Asserting "no header at all" was also always stronger than the contract and
+# was never wholly in the gate's power to guarantee — ambient config belongs to
+# the environment, not to this script.
 git_isolated_dir="$(mktemp -d)"
 if git -C "$git_isolated_dir" rev-parse --git-dir >/dev/null 2>&1; then
 	# TMPDIR inside a work tree would silently reintroduce repository config
