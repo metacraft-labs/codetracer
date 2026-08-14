@@ -53,18 +53,32 @@ jobs:
     runs-on: [self-hosted, nixos]
 
     steps:
-      - name: Checkout codetracer
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
       - name: Generate CI token
+        # Must precede the checkout below, not follow it. `libs/tree-sitter-nim`
+        # is a PRIVATE submodule, so a checkout with no `token:` clones it with
+        # whatever credential the runner happens to have and fails with
+        #
+        #   fatal: repository 'https://github.com/metacraft-labs/tree-sitter-nim.git/'
+        #     not found
+        #   fatal: clone of '...' into submodule path '.../libs/tree-sitter-nim' failed
+        #
+        # taking every step after it down as `skipped`. beam-flow.yml carries
+        # the same note for the same defect; this job kept the original
+        # ordering and so kept failing intermittently -- intermittently because
+        # a runner with the submodule already in its work tree gets away with
+        # it, which is why it survived this long.
         id: ci_token
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Checkout codetracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
