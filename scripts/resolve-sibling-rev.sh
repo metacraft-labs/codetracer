@@ -49,18 +49,50 @@
 # across workspaces, preferring the canonical project when more than one lock
 # matches.
 #
+# MANIFEST LAYERS (public / org / team / personal)
+# -----------------------------------------------
+#
+# A workspace's repo set is not necessarily described by ONE manifest repo.
+# ``reprobuild-specs/Workspace-And-Develop-Mode.md`` §"Workspace Composition and
+# Manifest Layers" specifies a layered model: a public manifest repo defines the
+# base repo set, an org/team-private manifest repo (access-controlled,
+# VCS-backed, REQUIRED when private repos participate) extends it, and a
+# personal manifest repo or purely local workspace metadata sits on top. Repos
+# declared in several layers are deduplicated, "with the more specific (private)
+# layer taking precedence for overrides".
+#
+# ``--manifest-dir`` is therefore REPEATABLE, and the order is the precedence
+# order: LEAST specific first (public), MOST specific last (private/personal).
+# Passing it once is exactly the single-layer behaviour this resolver has always
+# had — nothing changes for a caller that names one manifest repo.
+#
+# Across layers, for the one commit selected below:
+#
+#   * every layer that carries a lock for that commit is consulted;
+#   * a MALFORMED lock (exit 5) or a lock pair that CONTRADICTS itself inside
+#     one layer (exit 6) still fails the whole resolve. Untrustworthy data is
+#     never skipped in favour of a layer that happens to look healthier;
+#   * a layer whose lock simply does not name the sibling contributes nothing.
+#     This is the normal case for a private layer that pins only private repos,
+#     and is NOT the intra-layer exit-4 condition;
+#   * when more than one layer pins the sibling, the MOST SPECIFIC (last) one
+#     wins and the shadowing is reported on stderr. This is the spec's override
+#     rule, not a coin toss: unlike the xml-vs-toml case inside one layer, the
+#     layers are explicitly ordered by the caller;
+#   * when NO layer pins it although some layer had a lock, that is exit 4.
+#
 # Usage:
 #   resolve-sibling-rev.sh --repo SELF --sibling NAME \
-#       [--manifest-dir DIR] [--sha COMMIT]... [--repo-dir DIR] \
+#       [--manifest-dir DIR]... [--sha COMMIT]... [--repo-dir DIR] \
 #       [--prefer-project PROJECT] [--no-walk]
 #
 #   --repo SELF         repo under test (e.g. codetracer, codetracer-ci)
 #   --sibling NAME      sibling repo whose revision to print
-#   --manifest-dir DIR  manifest-repo checkout containing locks/.  Default:
-#                       $CT_MANIFEST_DIR, else the nearest enclosing
-#                       .repro/manifests (reprobuild) or .repo/manifests
-#                       (repo-workspaces) discovered by walking up from
-#                       --repo-dir.
+#   --manifest-dir DIR  manifest-repo checkout containing locks/.  REPEATABLE;
+#                       least-specific layer first, most-specific last.
+#                       Default: $CT_MANIFEST_DIR (+ $CT_PRIVATE_MANIFEST_DIR
+#                       layered on top of it), else the layers discovered by
+#                       walking up from --repo-dir (see below).
 #   --sha COMMIT        candidate commit(s) whose lock to use, in priority order.
 #                       Repeatable.  Default: HEAD of --repo-dir.
 #   --repo-dir DIR      working copy of SELF (for HEAD + ancestry walk).
@@ -70,12 +102,36 @@
 #   --no-walk           do not walk ancestry; require a direct lock on a
 #                       candidate SHA (used by shallow CI checkouts).
 #
-# Resolution order for the lock to read:
-#   1. Each --sha candidate, in order, that has a lock.
+# Auto-discovered layers, in precedence order (least → most specific), at the
+# nearest enclosing workspace root:
+#
+#   .repro/manifests              the public manifest checkout (reprobuild), or
+#   .repo/manifests               the legacy repo-workspaces one when the
+#                                 reprobuild layer carries no locks/
+#   .repro/manifests-<n>-<slug>   URL-backed ``[[manifest]]`` layers, ordered by
+#                                 ``<n>`` NUMERICALLY (the layer's index in the
+#                                 workspace's ``[[manifest]]`` array) — not by
+#                                 glob order, which would sort ``manifests-10-x``
+#                                 ahead of ``manifests-2-x``
+#   .repro/manifests-private      the RA-11 private companion manifest checkout
+#                                 (``[manifest] private_url`` /
+#                                 ``.repro-workspace-private.toml``)
+#
+# The extra layers are picked up under ``.repro/`` whichever base won, so a
+# legacy ``.repo/manifests`` base does not silently drop a private companion.
+# A ``.repro/manifests-<name>`` directory whose name does NOT encode an index
+# (a hand-written ``local_path`` such as ``manifests-team``) cannot be ordered
+# from disk at all, so auto-discovery REFUSES (exit 3) and asks for explicit
+# ``--manifest-dir`` layers rather than guessing.
+#
+# Resolution order for the COMMIT whose lock to read (one commit for every
+# layer — the layers describe one workspace state, so they must be read at the
+# same commit or they are not layers at all):
+#   1. Each --sha candidate, in order, for which ANY layer has a lock.
 #   2. Otherwise (unless --no-walk), the nearest first-parent ancestor of the
-#      first candidate that has a lock.  This makes local runs work even when
-#      HEAD is unpushed (hence unlocked): siblings are unchanged since the last
-#      locked ancestor, so its pin is correct.
+#      first candidate for which any layer has a lock.  This makes local runs
+#      work even when HEAD is unpushed (hence unlocked): siblings are unchanged
+#      since the last locked ancestor, so its pin is correct.
 #
 # ``--no-walk`` remains correct for CI under both layouts. It exists because CI
 # checkouts are shallow, so ``git rev-list --first-parent`` sees only HEAD and
@@ -91,9 +147,9 @@
 # Exit codes:
 #   2  usage error
 #   3  no manifest dir, or no lock for any candidate commit
-#   4  a lock was found but does not mention the sibling
+#   4  a lock was found but no layer mentions the sibling
 #   5  a lock was found but is malformed / carries no usable revision
-#   6  two locks for the SAME commit disagree about the sibling
+#   6  two locks for the SAME commit IN ONE LAYER disagree about the sibling
 #
 # Codes 4/5/6 all mean "a lock exists but cannot be trusted to answer". They are
 # deliberately distinct from 3 so a caller probing several candidate commits can
@@ -106,11 +162,13 @@ set -euo pipefail
 
 SELF_REPO=""
 SIBLING=""
-MANIFEST_DIR="${CT_MANIFEST_DIR:-}"
 REPO_DIR="."
 PREFER_PROJECT=""
 NO_WALK=0
 declare -a SHAS=()
+# Manifest layers, least specific first. `--manifest-dir` appends; when none is
+# given, $CT_MANIFEST_DIR and then auto-discovery fill this in below.
+declare -a MANIFEST_DIRS=()
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -123,7 +181,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--manifest-dir)
-		MANIFEST_DIR="$2"
+		MANIFEST_DIRS+=("$2")
 		shift 2
 		;;
 	--sha)
@@ -159,21 +217,71 @@ done
 
 [[ -z $PREFER_PROJECT ]] && PREFER_PROJECT="$SELF_REPO"
 
-# --- locate the manifest repo (locks/ tree) -------------------------------
+# --- locate the manifest layers (locks/ trees) ----------------------------
+#
 # `.repro/manifests` (reprobuild) is checked before `.repo/manifests`
 # (repo-workspaces): a workspace that has migrated keeps the old `.repo`
 # directory around for a while, and the stale layer must not shadow the live
 # one. A layer that exists but has no `locks/` loses to one that has it.
-if [[ -z $MANIFEST_DIR ]]; then
+#
+# On top of that PUBLIC base, auto-discovery also picks up the private layers a
+# reprobuild workspace materialises next to it (Workspace-And-Develop-Mode.md
+# §"Manifest Sources"; the on-disk names are RA-11's):
+#
+#   .repro/manifests-<n>-<slug>   URL-backed `[[manifest]]` layers
+#   .repro/manifests-private      the `[manifest] private_url` companion
+#
+# They are appended AFTER the public layer, so they take precedence over it —
+# and `-private` is appended last of all, because it is the most specific layer
+# a workspace can have on disk. A layer with no `locks/` subtree is skipped
+# rather than reported: an org manifest that carries only `projects/` fragments
+# and no lock records is a normal, complete layer, it just has nothing to say
+# about revisions.
+#
+# The `<n>` in `manifests-<n>-<slug>` is the layer's index in the workspace's
+# `[[manifest]]` array (`repro_workspace_manifests/compose.nim` builds the name
+# as "manifests-" & $index & "-" & sanitizeForPath(url)), and THAT is the
+# precedence order — not the alphabet. Glob order sorts `manifests-10-x` before
+# `manifests-2-x`, which would silently invert precedence for any workspace with
+# ten or more URL-backed layers, so the numbered layers are sorted on `<n>`
+# numerically below.
+#
+# A `manifests-<something>` directory whose name does NOT encode an index —
+# a hand-written `local_path` such as `.repro/manifests-team` or
+# `.repro/manifests-personal` — carries no orderable information at all: its
+# position lives only in the workspace config's `[[manifest]]` array. Ordering
+# such layers alphabetically would make `manifests-team` override
+# `manifests-personal`, which is backwards, and it would be a guess either way.
+# Auto-discovery therefore REFUSES rather than choosing, and tells the caller to
+# order the layers explicitly with `--manifest-dir`. Skipping the layer instead
+# would be the silent downgrade to a less specific answer that the whole layering
+# model exists to prevent.
+FROM_ENV=0
+if [[ ${#MANIFEST_DIRS[@]} -eq 0 && -n ${CT_MANIFEST_DIR:-} ]]; then
+	MANIFEST_DIRS+=("$CT_MANIFEST_DIR")
+	FROM_ENV=1
+fi
+# The env-var spelling of the private layer, for callers that address the
+# manifest checkouts through the environment rather than through flags
+# (`ci/setup-rr-backend.sh`, `scripts/run-cross-repo-tests.sh`). It composes on
+# top of $CT_MANIFEST_DIR exactly as a second `--manifest-dir` would. It applies
+# ONLY when the base layer also came from the environment: a caller that names
+# its layers on the command line gets exactly those layers and no other.
+if [[ $FROM_ENV -eq 1 && -n ${CT_PRIVATE_MANIFEST_DIR:-} ]]; then
+	MANIFEST_DIRS+=("$CT_PRIVATE_MANIFEST_DIR")
+fi
+AUTO_LOOKED=""
+if [[ ${#MANIFEST_DIRS[@]} -eq 0 ]]; then
 	d="$(cd "$REPO_DIR" 2>/dev/null && pwd)" || d=""
+	base=""
 	fallback=""
 	while [[ -n $d && $d != "/" ]]; do
 		if [[ -d "$d/.repro/manifests/locks" ]]; then
-			MANIFEST_DIR="$d/.repro/manifests"
+			base="$d/.repro/manifests"
 			break
 		fi
 		if [[ -d "$d/.repo/manifests/locks" ]]; then
-			MANIFEST_DIR="$d/.repo/manifests"
+			base="$d/.repo/manifests"
 			break
 		fi
 		if [[ -z $fallback && -d "$d/.repro/manifests" ]]; then
@@ -184,19 +292,114 @@ if [[ -z $MANIFEST_DIR ]]; then
 		fi
 		d="${d%/*}"
 	done
-	[[ -z $MANIFEST_DIR ]] && MANIFEST_DIR="$fallback"
+	[[ -z $base ]] && base="$fallback"
+	if [[ -n $base ]]; then
+		MANIFEST_DIRS+=("$base")
+		AUTO_LOOKED="$base"
+		# The extra layers always live under `.repro/`, whichever base won.
+		# A legacy `.repo/manifests` base does NOT suppress them: a workspace
+		# midway through the migration can easily have a lock-carrying
+		# `.repo/manifests` beside a `.repro/manifests-private`, and dropping
+		# the private layer because the BASE happens to be the legacy one is
+		# exactly the silent downgrade to public-only that the CI path treats
+		# as fatal.
+		wsroot="${base%/*}" # .../.repo or .../.repro
+		wsroot="${wsroot%/*}"
+		declare -a XD=() XN=()
+		AMBIG=""
+		for extra in "$wsroot"/.repro/manifests-*; do
+			[[ -d "$extra/locks" ]] || continue
+			[[ $extra == */manifests-private ]] && continue
+			leaf="${extra##*/}"
+			rest="${leaf#manifests-}"
+			num="${rest%%-*}"
+			okn=1
+			# `manifests-<n>-<slug>`: <n> must be present, non-empty, all
+			# digits, and actually followed by a `-<slug>`.
+			[[ -z $num || $num == "$rest" ]] && okn=0
+			if [[ $okn -eq 1 ]]; then
+				for ((i = 0; i < ${#num}; i++)); do
+					case "${num:i:1}" in
+					[0-9]) ;;
+					*)
+						okn=0
+						break
+						;;
+					esac
+				done
+			fi
+			if [[ $okn -eq 0 ]]; then
+				AMBIG="${AMBIG}
+    ${extra}"
+				continue
+			fi
+			XD+=("$extra")
+			XN+=("$((10#$num))")
+		done
+		if [[ -n $AMBIG ]]; then
+			{
+				echo "resolve-sibling-rev: cannot order the auto-discovered manifest layers.$AMBIG"
+				echo "  A '.repro/manifests-<name>' layer whose name does not encode its"
+				echo "  '[[manifest]]' index (the 'manifests-<n>-<slug>' spelling) carries no"
+				echo "  precedence information — its position lives only in the workspace config."
+				echo "  Guessing an order here would silently pick a pin; ordering alphabetically"
+				echo "  would put 'manifests-team' ahead of 'manifests-personal', which is backwards."
+				echo "  Pass the layers explicitly instead, least specific first:"
+				echo "    --manifest-dir <public> [--manifest-dir <next>]... --manifest-dir <most specific>"
+			} >&2
+			exit 3
+		fi
+		# Selection sort on the `[[manifest]]` index. Glob order is
+		# lexicographic, which puts `manifests-10-x` BEFORE `manifests-2-x` and
+		# would silently invert precedence at ten or more layers. Pure bash: no
+		# `sort` on PATH is assumed.
+		xn=${#XD[@]}
+		for ((a = 0; a < xn; a++)); do
+			m=$a
+			for ((b = a + 1; b < xn; b++)); do
+				[[ ${XN[b]} -lt ${XN[m]} ]] && m=$b
+			done
+			if [[ $m -ne $a ]]; then
+				t="${XN[a]}"
+				XN[a]="${XN[m]}"
+				XN[m]="$t"
+				t="${XD[a]}"
+				XD[a]="${XD[m]}"
+				XD[m]="$t"
+			fi
+		done
+		for ((a = 0; a < xn; a++)); do
+			MANIFEST_DIRS+=("${XD[a]}")
+		done
+		# `-private` is the most specific layer a workspace can have on disk.
+		if [[ -d "$wsroot/.repro/manifests-private/locks" ]]; then
+			MANIFEST_DIRS+=("$wsroot/.repro/manifests-private")
+		fi
+	fi
 fi
-if [[ -z $MANIFEST_DIR || ! -d "$MANIFEST_DIR/locks" ]]; then
+
+# Keep only the layers that actually carry a locks/ tree, preserving order.
+declare -a LOCKS_ROOTS=()
+declare -a LAYER_DIRS=()
+for md in ${MANIFEST_DIRS[@]+"${MANIFEST_DIRS[@]}"}; do
+	[[ -n $md && -d "$md/locks" ]] || continue
+	LOCKS_ROOTS+=("$md/locks")
+	LAYER_DIRS+=("$md")
+done
+if [[ ${#LOCKS_ROOTS[@]} -eq 0 ]]; then
 	{
 		echo "resolve-sibling-rev: cannot locate the manifest repo locks/ tree."
-		echo "  Pass --manifest-dir <metacraft-manifests checkout>, set CT_MANIFEST_DIR,"
-		echo "  or run from inside a workspace with .repro/manifests (reprobuild) or"
-		echo "  .repo/manifests (repo-workspaces)."
-		[[ -n $MANIFEST_DIR ]] && echo "  (looked at: $MANIFEST_DIR, which has no locks/ subtree)"
+		echo "  Pass --manifest-dir <metacraft-manifests checkout> (repeatable, least-"
+		echo "  specific layer first), set CT_MANIFEST_DIR, or run from inside a"
+		echo "  workspace with .repro/manifests (reprobuild) or .repo/manifests"
+		echo "  (repo-workspaces)."
+		for md in ${MANIFEST_DIRS[@]+"${MANIFEST_DIRS[@]}"}; do
+			[[ -n $md ]] && echo "  (looked at: $md, which has no locks/ subtree)"
+		done
+		[[ -n $AUTO_LOOKED ]] && echo "  (auto-discovery reached: $AUTO_LOOKED)"
 	} >&2
 	exit 3
 fi
-LOCKS_ROOT="$MANIFEST_DIR/locks"
 
 # --- candidate SHAs -------------------------------------------------------
 if [[ ${#SHAS[@]} -eq 0 ]]; then
@@ -231,33 +434,37 @@ fi
 #      tools are cross-checked against each other rather than silently resolved
 #      by glob order. THIS is the migration hazard worth refusing: neither
 #      spelling is the elder, so there is no basis for preferring one.
+# `find_locks <locks-root> <sha>` — the search is per LAYER, because each layer
+# is its own manifest repo with its own `locks/` tree; the three tie-breaks
+# below narrow ONE layer's locks for one commit. Ordering BETWEEN layers is the
+# caller's explicit `--manifest-dir` order and is applied further down.
 declare -a LOCK_FILES=()
 find_locks() {
-	local sha="$1" f proj
+	local locks_root="$1" sha="$2" f proj
 	local -a pref_nested=() pref_flat=() other_nested=() other_flat=()
 	local other_project=""
 	for f in \
-		"$LOCKS_ROOT"/*/"$SELF_REPO"/"$sha.xml" \
-		"$LOCKS_ROOT"/*/"$SELF_REPO"/"$sha.toml"; do
-		[[ -f "$f" ]] || continue
-		if [[ $f == "$LOCKS_ROOT/$PREFER_PROJECT/"* ]]; then
+		"$locks_root"/*/"$SELF_REPO"/"$sha.xml" \
+		"$locks_root"/*/"$SELF_REPO"/"$sha.toml"; do
+		[[ -f $f ]] || continue
+		if [[ $f == "$locks_root/$PREFER_PROJECT/"* ]]; then
 			pref_nested+=("$f")
 			continue
 		fi
-		proj="${f#"$LOCKS_ROOT"/}"
+		proj="${f#"$locks_root"/}"
 		proj="${proj%%/*}"
 		[[ -z $other_project ]] && other_project="$proj"
 		[[ $proj == "$other_project" ]] && other_nested+=("$f")
 	done
 	for f in \
-		"$LOCKS_ROOT"/*/"$SELF_REPO-$sha.xml" \
-		"$LOCKS_ROOT"/*/"$SELF_REPO-$sha.toml"; do
-		[[ -f "$f" ]] || continue
-		if [[ $f == "$LOCKS_ROOT/$PREFER_PROJECT/"* ]]; then
+		"$locks_root"/*/"$SELF_REPO-$sha.xml" \
+		"$locks_root"/*/"$SELF_REPO-$sha.toml"; do
+		[[ -f $f ]] || continue
+		if [[ $f == "$locks_root/$PREFER_PROJECT/"* ]]; then
 			pref_flat+=("$f")
 			continue
 		fi
-		proj="${f#"$LOCKS_ROOT"/}"
+		proj="${f#"$locks_root"/}"
 		proj="${proj%%/*}"
 		[[ -z $other_project ]] && other_project="$proj"
 		[[ $proj == "$other_project" ]] && other_flat+=("$f")
@@ -481,37 +688,49 @@ rev_from_toml() {
 	return 0
 }
 
-# --- select the lock(s) ---------------------------------------------------
-FOUND=0
-# 1. direct lock on a candidate SHA (priority order)
-for sha in "${SHAS[@]}"; do
-	if find_locks "$sha"; then
-		FOUND=1
-		break
-	fi
-done
-# 2. nearest locked first-parent ancestor (local / non-shallow only)
-if [[ $FOUND -eq 0 && $NO_WALK -eq 0 ]]; then
+# --- select the commit whose locks to read --------------------------------
+#
+# ONE commit is chosen for ALL layers. The layers are descriptions of the same
+# workspace state at the same commit, so reading the public layer at HEAD and a
+# private layer at some older ancestor would compose two different workspaces
+# into one answer. The candidate list is therefore built first, and the first
+# candidate that ANY layer has a lock for is the commit every layer is then read
+# at.
+declare -a CANDIDATES=("${SHAS[@]}")
+# The nearest first-parent ancestors (local / non-shallow only) extend the
+# candidate list rather than forming a second search pass, so the "same commit
+# for every layer" rule holds for the walk too.
+if [[ $NO_WALK -eq 0 ]]; then
 	if anc=$(git -C "$REPO_DIR" rev-list --first-parent --max-count=400 "${SHAS[0]}" 2>/dev/null); then
-		while IFS= read -r sha; do
-			[[ -z $sha ]] && continue
-			if find_locks "$sha"; then
-				FOUND=1
-				break
-			fi
+		while IFS= read -r ancsha; do
+			[[ -z $ancsha ]] && continue
+			CANDIDATES+=("$ancsha")
 		done <<<"$anc"
 	fi
 fi
 
-if [[ $FOUND -eq 0 ]]; then
+CHOSEN_SHA=""
+for sha in "${CANDIDATES[@]}"; do
+	for lr in "${LOCKS_ROOTS[@]}"; do
+		if find_locks "$lr" "$sha"; then
+			CHOSEN_SHA="$sha"
+			break
+		fi
+	done
+	[[ -n $CHOSEN_SHA ]] && break
+done
+
+if [[ -z $CHOSEN_SHA ]]; then
 	{
 		echo "resolve-sibling-rev: no workspace lock found for $SELF_REPO"
 		echo "  candidate SHAs: ${SHAS[*]}"
-		echo "  searched, for each candidate <sha>:"
-		echo "    $LOCKS_ROOT/*/$SELF_REPO/<sha>.xml    (repo-workspaces)"
-		echo "    $LOCKS_ROOT/*/$SELF_REPO/<sha>.toml   (reprobuild)"
-		echo "    $LOCKS_ROOT/*/$SELF_REPO-<sha>.xml    (legacy flat)"
-		echo "    $LOCKS_ROOT/*/$SELF_REPO-<sha>.toml   (legacy flat)"
+		echo "  searched, for each candidate <sha>, in every manifest layer:"
+		for lr in "${LOCKS_ROOTS[@]}"; do
+			echo "    $lr/*/$SELF_REPO/<sha>.xml    (repo-workspaces)"
+			echo "    $lr/*/$SELF_REPO/<sha>.toml   (reprobuild)"
+			echo "    $lr/*/$SELF_REPO-<sha>.xml    (legacy flat)"
+			echo "    $lr/*/$SELF_REPO-<sha>.toml   (legacy flat)"
+		done
 		[[ $NO_WALK -eq 0 ]] && echo "  (also walked first-parent ancestry of ${SHAS[0]})"
 		echo "  Every commit under cross-repo CI must be locked by the workspace tooling"
 		echo "  ('repro workspace lock' / the reprobuild post-commit + pre-push hooks, or"
@@ -521,49 +740,77 @@ if [[ $FOUND -eq 0 ]]; then
 	exit 3
 fi
 
-# --- read the sibling's revision -----------------------------------------
-# When both a .xml and a .toml lock exist for the same commit they are two
-# descriptions of one workspace state and must agree. If they do not, there is
-# no basis for choosing between them, and picking either would hand CI a
-# revision that half the tooling disputes — so refuse.
+# --- read the sibling's revision, layer by layer --------------------------
+#
+# Within ONE layer: when both a .xml and a .toml lock exist for the same commit
+# they are two descriptions of one workspace state and must agree. If they do
+# not, there is no basis for choosing between them, and picking either would
+# hand CI a revision that half the tooling disputes — so refuse (exit 6).
+#
+# Across layers: the caller ordered them, so a more specific layer legitimately
+# OVERRIDES a less specific one (Workspace-And-Develop-Mode.md §"Layering
+# Rules"). The override is announced on stderr; stdout still carries only the
+# winning revision.
 REV=""
 REV_SRC=""
-for LOCK in "${LOCK_FILES[@]}"; do
-	rc=0
-	if [[ $LOCK == *.toml ]]; then
-		rev_from_toml "$LOCK" "$SIBLING" || rc=$?
-	else
-		rev_from_xml "$LOCK" "$SIBLING" || rc=$?
-	fi
-	if [[ $rc -eq 2 ]]; then
-		echo "resolve-sibling-rev: malformed lock $LOCK: $PARSE_ERR" >&2
-		exit 5
-	fi
-	this_rev=""
-	[[ $rc -eq 0 ]] && this_rev="$PARSE_REV"
-	if [[ -z $REV_SRC ]]; then
-		REV="$this_rev"
-		REV_SRC="$LOCK"
-		continue
-	fi
-	if [[ $this_rev != "$REV" ]]; then
+CONSULTED=""
+for lr in "${LOCKS_ROOTS[@]}"; do
+	find_locks "$lr" "$CHOSEN_SHA" || continue
+	LAYER_REV=""
+	LAYER_SRC=""
+	for LOCK in "${LOCK_FILES[@]}"; do
+		CONSULTED="${CONSULTED}
+    ${LOCK}"
+		rc=0
+		if [[ $LOCK == *.toml ]]; then
+			rev_from_toml "$LOCK" "$SIBLING" || rc=$?
+		else
+			rev_from_xml "$LOCK" "$SIBLING" || rc=$?
+		fi
+		if [[ $rc -eq 2 ]]; then
+			echo "resolve-sibling-rev: malformed lock $LOCK: $PARSE_ERR" >&2
+			exit 5
+		fi
+		this_rev=""
+		[[ $rc -eq 0 ]] && this_rev="$PARSE_REV"
+		if [[ -z $LAYER_SRC ]]; then
+			LAYER_REV="$this_rev"
+			LAYER_SRC="$LOCK"
+			continue
+		fi
+		if [[ $this_rev != "$LAYER_REV" ]]; then
+			{
+				echo "resolve-sibling-rev: conflicting locks for $SELF_REPO — they disagree about '$SIBLING'"
+				echo "  ${LAYER_SRC}: ${LAYER_REV:-<sibling absent>}"
+				echo "  ${LOCK}: ${this_rev:-<sibling absent>}"
+				echo "  Both locks describe the same commit in the SAME manifest layer, so exactly"
+				echo "  one is stale. Remove or regenerate the wrong one; this resolver will not"
+				echo "  guess which pin is correct."
+			} >&2
+			exit 6
+		fi
+	done
+	# A layer that has a lock but does not name the sibling contributes nothing.
+	# That is the normal shape of a private layer pinning only private repos —
+	# not a failure, as long as some layer does name it.
+	[[ -z $LAYER_REV ]] && continue
+	if [[ -n $REV && $LAYER_REV != "$REV" ]]; then
 		{
-			echo "resolve-sibling-rev: conflicting locks for $SELF_REPO — they disagree about '$SIBLING'"
-			echo "  ${REV_SRC}: ${REV:-<sibling absent>}"
-			echo "  ${LOCK}: ${this_rev:-<sibling absent>}"
-			echo "  Both locks describe the same commit, so exactly one is stale. Remove or"
-			echo "  regenerate the wrong one; this resolver will not guess which pin is correct."
+			echo "resolve-sibling-rev: '$SIBLING' overridden by a more specific manifest layer"
+			echo "  ${REV_SRC}: ${REV}"
+			echo "  ${LAYER_SRC}: ${LAYER_REV}  <- used"
 		} >&2
-		exit 6
 	fi
+	REV="$LAYER_REV"
+	REV_SRC="$LAYER_SRC"
 done
 
 if [[ -z $REV ]]; then
 	{
-		echo "resolve-sibling-rev: sibling '$SIBLING' not present in lock $REV_SRC"
-		echo "  A lock exists for this commit but does not pin '$SIBLING'. Either the name is"
-		echo "  wrong (siblings are keyed by repo NAME, which can differ from the workspace"
-		echo "  path) or the repo is not a member of that workspace's project."
+		echo "resolve-sibling-rev: sibling '$SIBLING' not present in lock${CONSULTED}"
+		echo "  A lock exists for this commit but no manifest layer pins '$SIBLING'. Either"
+		echo "  the name is wrong (siblings are keyed by repo NAME, which can differ from the"
+		echo "  workspace path) or the repo is not a member of that workspace's project."
 	} >&2
 	exit 4
 fi

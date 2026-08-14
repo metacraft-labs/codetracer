@@ -32,7 +32,7 @@ if [[ ! -x $RESOLVER && ! -f $RESOLVER ]]; then
 	exit 3
 fi
 
-EXPECTED_ASSERTIONS=51
+EXPECTED_ASSERTIONS=76
 
 PASS=0
 FAIL=0
@@ -637,6 +637,288 @@ expect_fail "missing --sibling is a usage error" 2 "missing required value" -- \
 expect_fail "unknown argument is a usage error" 2 "unknown argument" -- \
 	--repo codetracer --sibling codetracer-native-backend --bogus \
 	--manifest-dir "$T" --sha "$SHA_SELF" --no-walk
+
+# =========================================================================
+# 11. Manifest LAYERS — public + org/team-private + personal
+#
+# `reprobuild-specs/Workspace-And-Develop-Mode.md` §"Workspace Composition and
+# Manifest Layers" specifies that a workspace's repo set is assembled from
+# several manifest repos by visibility, that private layers are REQUIRED once
+# private repos participate, and that a repo declared in more than one layer is
+# deduplicated "with the more specific (private) layer taking precedence".
+#
+# `--manifest-dir` is repeatable and its order IS the precedence order. These
+# contracts pin what composition may and may not do — in particular that a
+# broken private layer can never be silently skipped in favour of the public
+# one, which is the failure mode that would quietly reintroduce a wrong pin.
+# =========================================================================
+
+# One [[repo]] block, arbitrary name — private layers pin repos the public
+# layer has never heard of, which the two-repo fixture above cannot express.
+mk_toml_lock1() {
+	local file="$1" name="$2" rev="$3"
+	mkparent "$file"
+	{
+		printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
+		printf '%s\n' ''
+		printf '%s\n' '[lock]'
+		printf '%s\n' 'project = "codetracer"'
+		printf '%s\n' ''
+		printf '%s\n' '[[repo]]'
+		printf '%s\n' "name = \"$name\""
+		printf '%s\n' "path = \"$name\""
+		printf '%s\n' 'remote = "metacraft-labs"'
+		printf '%s\n' "revision = \"$rev\""
+	} >"$file"
+}
+
+REV_PRIVATE="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+REV_PRIVATE2="ffffffffffffffffffffffffffffffffffffffff"
+
+# (a) A private layer that pins only its own repo leaves the public answer
+# alone. This is the ordinary shape of an org-private manifest.
+LPUB="$TMPROOT/layers/public"
+LPRIV="$TMPROOT/layers/private"
+mk_toml_lock "$LPUB/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$LPRIV/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-internal-dashboards" "$REV_PRIVATE"
+expect_rev "layers: a private layer that does not name the sibling leaves the public pin" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LPRIV" --sha "$SHA_SELF" --no-walk
+
+# (b) A repo only the private layer knows about resolves. Without the private
+# layer this same query is the exit-4 "not present in lock" case, so the
+# assertion is not vacuous.
+expect_rev "layers: a private-only repo resolves from the private layer" "$REV_PRIVATE" -- \
+	--repo codetracer --sibling codetracer-internal-dashboards \
+	--manifest-dir "$LPUB" --manifest-dir "$LPRIV" --sha "$SHA_SELF" --no-walk
+expect_fail "layers: that same repo is exit 4 without the private layer" 4 "not present in lock" -- \
+	--repo codetracer --sibling codetracer-internal-dashboards \
+	--manifest-dir "$LPUB" --sha "$SHA_SELF" --no-walk
+
+# (c) Both layers pin the sibling: the MORE SPECIFIC (last) layer wins, and
+# says so on stderr. This is the spec's override rule.
+LPRIV_OVR="$TMPROOT/layers/private-override"
+mk_toml_lock1 "$LPRIV_OVR/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+expect_rev "layers: the more specific layer overrides the public pin" "$REV_PRIVATE" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LPRIV_OVR" --sha "$SHA_SELF" --no-walk
+run_resolver --repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LPRIV_OVR" --sha "$SHA_SELF" --no-walk
+if [[ $_err == *"overridden by a more specific manifest layer"* &&
+	$_err == *"$REV_NB_TOML"* && $_err == *"$REV_PRIVATE"* ]]; then
+	ok "layers: the override is announced on stderr, naming both pins"
+else
+	bad "layers: the override is announced on stderr, naming both pins" "stderr: $_err"
+fi
+
+# (d) Precedence is the CALLER'S order, not any property of the directories.
+# Swapping the two `--manifest-dir` arguments flips the winner.
+expect_rev "layers: swapping the layer order flips which pin wins" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPRIV_OVR" --manifest-dir "$LPUB" --sha "$SHA_SELF" --no-walk
+
+# (e) A MALFORMED private layer fails the whole resolve. Skipping it and
+# answering from the healthy public layer would hand CI a pin while a layer
+# that claims authority over it could not be read — the exact silent-wrong-pin
+# outcome the exit-5 contract exists to prevent.
+LBAD="$TMPROOT/layers/private-malformed"
+mkdir -p "$LBAD/locks/codetracer/codetracer"
+{
+	printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer-native-backend"'
+	printf '%s\n' 'revision = "main"'
+} >"$LBAD/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_fail "layers: a private layer pinning a branch name is refused, not skipped" 5 "SHA" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LBAD" --sha "$SHA_SELF" --no-walk
+
+LBAD2="$TMPROOT/layers/private-noschema"
+mkdir -p "$LBAD2/locks/codetracer/codetracer"
+{
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer-native-backend"'
+	printf '%s\n' "revision = \"$REV_PRIVATE\""
+} >"$LBAD2/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_fail "layers: a schema-less private layer is refused, not skipped" 5 "schema" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LBAD2" --sha "$SHA_SELF" --no-walk
+
+# (f) A layer that contradicts ITSELF (xml vs toml for one commit) is still an
+# unresolvable conflict. Layer precedence orders LAYERS; it never arbitrates
+# inside one.
+LSELF="$TMPROOT/layers/private-self-conflict"
+mk_xml_lock "$LSELF/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$LSELF/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_PRIVATE" "$REV_NIM_TOML"
+expect_fail "layers: a layer that contradicts itself is still exit 6" 6 "conflicting" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LSELF" --sha "$SHA_SELF" --no-walk
+
+# (g) A private layer with no lock for this commit contributes nothing and is
+# not an error — private manifests are locked on their own cadence.
+LEMPTY="$TMPROOT/layers/private-otherlock"
+mk_toml_lock1 "$LEMPTY/locks/codetracer/codetracer/$SHA_OTHER.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+expect_rev "layers: a private layer with no lock for this commit is not an error" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LEMPTY" --sha "$SHA_SELF" --no-walk
+
+# (h) The COMMIT is chosen once, for ALL layers. The layers describe one
+# workspace state; reading each at whichever candidate it happens to have a
+# lock for would compose two different workspaces into one answer.
+#
+# Here the public layer locks $SHA_SELF and the private layer locks only the
+# unrelated $SHA_OTHER, with both offered as candidates in that order. The
+# chosen commit is $SHA_SELF, at which the private layer has nothing to say —
+# so the public pin stands. A resolver that let each layer pick its own commit
+# would fall the private layer through to $SHA_OTHER and let a lock for a
+# DIFFERENT commit override the one under test.
+LONLY_PUB="$TMPROOT/layers/other-commit-public"
+LONLY_PRIV="$TMPROOT/layers/other-commit-private"
+mk_toml_lock "$LONLY_PUB/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$LONLY_PRIV/locks/codetracer/codetracer/$SHA_OTHER.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE2"
+expect_rev "layers: one commit is chosen for every layer, never a mix" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LONLY_PUB" --manifest-dir "$LONLY_PRIV" \
+	--sha "$SHA_SELF" --sha "$SHA_OTHER" --no-walk
+
+# The mirror image: when the chosen commit is the one the PRIVATE layer locks,
+# its pin is the one that must be used — so (h) is not passing merely because
+# the private layer is being ignored.
+LONLY_PUB2="$TMPROOT/layers/other-commit-public2"
+LONLY_PRIV2="$TMPROOT/layers/other-commit-private2"
+mk_toml_lock "$LONLY_PUB2/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$LONLY_PRIV2/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE2"
+expect_rev "layers: at the chosen commit the private pin is used" "$REV_PRIVATE2" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LONLY_PUB2" --manifest-dir "$LONLY_PRIV2" \
+	--sha "$SHA_SELF" --sha "$SHA_OTHER" --no-walk
+
+# (i) A named layer with no locks/ subtree is skipped, not fatal — an org
+# manifest may carry only projects/ fragments.
+LNOLOCKS="$TMPROOT/layers/no-locks"
+mkdir -p "$LNOLOCKS/projects"
+expect_rev "layers: a layer with no locks/ subtree is skipped, not fatal" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --manifest-dir "$LNOLOCKS" --sha "$SHA_SELF" --no-walk
+
+# ...but when NO named layer has one, that is still the exit-3 no-manifest case,
+# and the diagnostic names every layer it looked at.
+expect_fail "layers: no layer with a locks/ subtree is exit 3" 3 "cannot locate the manifest repo" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LNOLOCKS" --manifest-dir "$TMPROOT/nope" --sha "$SHA_SELF" --no-walk
+run_resolver --repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LNOLOCKS" --manifest-dir "$TMPROOT/nope" --sha "$SHA_SELF" --no-walk
+if [[ $_err == *"$LNOLOCKS"* && $_err == *"$TMPROOT/nope"* ]]; then
+	ok "layers: the exit-3 diagnostic names every layer it looked at"
+else
+	bad "layers: the exit-3 diagnostic names every layer it looked at" "stderr: $_err"
+fi
+
+# (j) Auto-discovery finds the workspace's private companion checkout
+# (`.repro/manifests-private`, the RA-11 `[manifest] private_url` layer) on top
+# of the public `.repro/manifests`, with private taking precedence — the same
+# composition CI gets by passing both dirs explicitly, for a developer running
+# the resolver from inside their workspace.
+WP="$TMPROOT/ws-private"
+mkdir -p "$WP/codetracer"
+mk_toml_lock "$WP/.repro/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$WP/.repro/manifests-private/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+expect_rev "auto-discovery: .repro/manifests-private overrides the public layer" "$REV_PRIVATE" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WP/codetracer" --sha "$SHA_SELF" --no-walk
+expect_rev "auto-discovery: the public layer still answers repos the private one omits" "$REV_NIM_TOML" -- \
+	--repo codetracer --sibling nim \
+	--repo-dir "$WP/codetracer" --sha "$SHA_SELF" --no-walk
+
+# (k) A URL-backed `[[manifest]]` layer materialised at
+# `.repro/manifests-<n>-<slug>` participates too, and is itself shadowed by the
+# private companion — the public -> org -> personal ordering of the spec.
+WL="$TMPROOT/ws-layers"
+mkdir -p "$WL/codetracer"
+mk_toml_lock "$WL/.repro/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$WL/.repro/manifests-0-github-com-org-internal/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+expect_rev "auto-discovery: a .repro/manifests-<n>-<slug> layer overrides the public one" "$REV_PRIVATE" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WL/codetracer" --sha "$SHA_SELF" --no-walk
+mk_toml_lock1 "$WL/.repro/manifests-private/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE2"
+expect_rev "auto-discovery: the private companion is the most specific layer of all" "$REV_PRIVATE2" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WL/codetracer" --sha "$SHA_SELF" --no-walk
+
+# (k2) The `<n>` in `manifests-<n>-<slug>` is the layer's index in the
+# workspace's `[[manifest]]` array, and THAT is the precedence order — not the
+# alphabet. Shell glob order sorts `manifests-10-x` ahead of `manifests-2-x`, so
+# a resolver that simply iterated the glob would let layer 2 override layer 10
+# once a workspace has ten or more URL-backed layers: a silently inverted
+# precedence, in the one mechanism whose entire purpose is to say which pin wins.
+WN="$TMPROOT/ws-numeric"
+mkdir -p "$WN/codetracer"
+mk_toml_lock "$WN/.repro/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$WN/.repro/manifests-2-two/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+mk_toml_lock1 "$WN/.repro/manifests-10-ten/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE2"
+expect_rev "auto-discovery: numbered layers are ordered by <n>, not lexicographically" "$REV_PRIVATE2" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WN/codetracer" --sha "$SHA_SELF" --no-walk
+
+# (k3) A `.repro/manifests-<name>` layer whose name encodes no index carries no
+# precedence information at all — its position lives only in the workspace
+# config. Alphabetical order would put `manifests-team` ahead of
+# `manifests-personal`, which is backwards; skipping it would silently answer
+# from a LESS specific layer. Refuse, and say how to order them explicitly.
+WA="$TMPROOT/ws-ambiguous"
+mkdir -p "$WA/codetracer"
+mk_toml_lock "$WA/.repro/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$WA/.repro/manifests-team/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+expect_fail "auto-discovery: an unorderable manifests-<name> layer is refused, not guessed" 3 "cannot order the auto-discovered manifest layers" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WA/codetracer" --sha "$SHA_SELF" --no-walk
+run_resolver --repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WA/codetracer" --sha "$SHA_SELF" --no-walk
+if [[ $_err == *"manifests-team"* && $_err == *"--manifest-dir"* ]]; then
+	ok "auto-discovery: the refusal names the layer and how to order it explicitly"
+else
+	bad "auto-discovery: the refusal names the layer and how to order it explicitly" "stderr: $_err"
+fi
+
+# (k4) A workspace midway through the migration can carry a lock-bearing legacy
+# `.repo/manifests` beside a `.repro/manifests-private`. The private layer must
+# still apply: dropping it because the BASE happens to be the legacy one is the
+# silent downgrade to public-only that the CI path treats as fatal.
+WM="$TMPROOT/ws-mixed"
+mkdir -p "$WM/codetracer" "$WM/.repro/manifests/projects"
+mk_toml_lock "$WM/.repo/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mk_toml_lock1 "$WM/.repro/manifests-private/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer-native-backend" "$REV_PRIVATE"
+expect_rev "auto-discovery: a legacy .repo base does not drop .repro/manifests-private" "$REV_PRIVATE" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WM/codetracer" --sha "$SHA_SELF" --no-walk
+
+# (l) The env-var spelling of the same composition, for callers that address
+# the manifest checkouts through the environment (`ci/setup-rr-backend.sh`,
+# `scripts/run-cross-repo-tests.sh`).
+export CT_MANIFEST_DIR="$LPUB"
+export CT_PRIVATE_MANIFEST_DIR="$LPRIV_OVR"
+expect_rev "CT_PRIVATE_MANIFEST_DIR layers on top of CT_MANIFEST_DIR" "$REV_PRIVATE" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--sha "$SHA_SELF" --no-walk
+# An explicit --manifest-dir still wins outright over both env vars, so a
+# caller that names its layers is never silently given another one.
+expect_rev "an explicit --manifest-dir ignores CT_PRIVATE_MANIFEST_DIR" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$LPUB" --sha "$SHA_SELF" --no-walk
+unset CT_MANIFEST_DIR
+unset CT_PRIVATE_MANIFEST_DIR
 
 # =========================================================================
 
