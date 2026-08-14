@@ -176,10 +176,14 @@ printf '%s\n' "$git_bootstrap" | grep -Fq '& $bootstrapScript' ||
 	fail "Windows Git bootstrap must invoke the downloaded tested helper"
 printf '%s\n' "$git_bootstrap" | grep -Fq 'Invoke-WebRequest' ||
 	fail "Windows Git bootstrap must retrieve the helper before checkout"
-# The app token is reserved for authenticated checkout and later private
-# recorder fetches. The public immutable helper fetch must not receive it.
+# The installation token is reserved for authenticated checkout and later
+# private recorder fetches. The public immutable helper fetch must not receive
+# it. Matched by SHAPE (`steps.<any-id>.outputs.token`) rather than by the id
+# of the day: this check previously named `app-token` literally and would have
+# gone quietly blind the moment that step was renamed, which is exactly what
+# the consolidation onto a single `ci_token` mint step did.
 if printf '%s\n' "$git_bootstrap" |
-	grep -Eq 'app-token\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
+	grep -Eq 'steps\.[A-Za-z0-9_-]+\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
 	fail "Windows Git bootstrap must not receive or transmit repository credentials"
 fi
 # shellcheck disable=SC2016 # Match literal inline PowerShell.

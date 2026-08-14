@@ -363,10 +363,10 @@ jobs:
           }
 
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -374,12 +374,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -415,7 +415,7 @@ jobs:
         shell: powershell
         env:
           RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
-          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+          SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
         run: |
           $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
           ./ci/checkout-locked-python-recorder.ps1 `
@@ -522,10 +522,10 @@ jobs:
           }
 
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -533,12 +533,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -571,7 +571,7 @@ jobs:
         shell: pwsh
         env:
           RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
-          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+          SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
         run: |
           $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
           ./ci/checkout-locked-python-recorder.ps1 `
@@ -752,10 +752,10 @@ jobs:
           }
 
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -763,7 +763,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env (windows-diy) clones the cross-repo siblings adjacent
@@ -777,7 +777,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: windows-diy
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
@@ -969,10 +969,10 @@ jobs:
           }
 
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -980,7 +980,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Disable TTD validation for the Windows DIY bootstrap
         # setup-dev-env (windows-diy) sources env.ps1 inside the composite;
@@ -1001,7 +1001,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: windows-diy
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
             codetracer-native-recorder=dev
@@ -1172,14 +1172,6 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -1197,7 +1189,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
@@ -1335,19 +1327,11 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1359,7 +1343,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run required materialized Python origin-DAP gate
         env:
@@ -1390,19 +1374,11 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1414,7 +1390,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run routed materialized origin-DAP matrix
         env:
@@ -1436,10 +1412,10 @@ jobs:
     name: cross-process value-origin (Linux)
     steps:
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -1447,17 +1423,17 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup isonim siblings
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build frontend (needed by gated Playwright stage)
         env:
@@ -1477,10 +1453,10 @@ jobs:
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -1488,12 +1464,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup isonim siblings
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Clone codetracer-trace-format-nim sibling
         # Nine ViewModel suites -- the eight request-panel ones plus
@@ -1520,7 +1496,7 @@ jobs:
           # `main` is not where its work lands.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Install Nix
@@ -1528,7 +1504,7 @@ jobs:
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
@@ -1570,7 +1546,7 @@ jobs:
           # stale recorder while reporting green.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
@@ -1689,14 +1665,6 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -1706,12 +1674,12 @@ jobs:
       - name: Setup isonim siblings
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -2086,14 +2054,6 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -2107,7 +2067,7 @@ jobs:
         # ``path:"../isonim/src"`` directives resolve.
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -2368,15 +2328,6 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        if: matrix.platform == 'nixos'
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -2389,7 +2340,7 @@ jobs:
         if: matrix.platform == 'nixos'
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # --- NixOS setup ---
       - name: Install Nix
@@ -2512,7 +2463,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           # MATCHED FFI PAIR. The "Build codetracer-beam-recorder (nixos)" step
@@ -2663,19 +2614,11 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env (nix) installs Nix via the shared setup-nix (which
@@ -2699,7 +2642,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           nix-develop-args: '.?submodules=1'
@@ -2789,7 +2732,7 @@ jobs:
         # the Linux jobs already use.
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
@@ -2813,7 +2756,7 @@ jobs:
           repo: metacraft-labs/codetracer-snapshot-codecs
           ref: main
           path: ${{ github.workspace }}/../codetracer-snapshot-codecs
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-image-diff sibling (macOS)
@@ -2826,7 +2769,7 @@ jobs:
           repo: metacraft-labs/codetracer-image-diff
           ref: main
           path: ${{ github.workspace }}/../codetracer-image-diff
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       # NOTE: Nix is installed by the ``Setup dev env`` step above. On the
@@ -2861,8 +2804,8 @@ jobs:
           # private ``lldb-sys.rs`` dependency picks up the App-token
           # we set via ``GIT_CREDENTIALS`` below.
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
-          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
-          git config --global --add url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
           nix develop --no-write-lock-file --command just build-ct-mcr
 
       - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
@@ -2949,19 +2892,11 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
@@ -2974,7 +2909,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
@@ -3863,15 +3798,24 @@ jobs:
         # for the months this went unnoticed.
         run: bash ci/test/windows-runner-bootstrap-test.sh
 
-      - name: Assert no job's siblings depend on a published workspace lock
-        # A bare `siblings:` entry resolves its revision from a workspace lock
-        # in metacraft-labs/metacraft-manifests, which has published nothing
-        # for this repo since 2026-08-02. Six jobs died in their first real
-        # step for eight days because of it, and nine more were reported
-        # `skipped` in consequence -- the state the verdict step below exists
-        # to name. Like the Windows contract above this is a static check over
-        # this workflow file, so it runs here, from a stock runner, where it
-        # cannot be taken down by the outage it watches for.
+      - name: Assert every job's sibling checkout is self-sufficient
+        # Two halves of one contract, both static checks over this workflow
+        # file, so they run here from a stock runner where they cannot be
+        # taken down by the outages they watch for.
+        #
+        # WHICH REF: a bare `siblings:` entry resolves its revision from a
+        # workspace lock in metacraft-labs/metacraft-manifests, which has
+        # published nothing for this repo since 2026-08-02. Six jobs died in
+        # their first real step for eight days because of it, and nine more
+        # were reported `skipped` in consequence -- the state the verdict step
+        # below exists to name.
+        #
+        # WHICH CREDENTIAL: one org-scoped installation token per job, minted
+        # from the per-repo secret. The org-variable form of the app id
+        # resolves only because this repo is public and evaluates to the empty
+        # string anywhere else; a job that minted two tokens made it ambiguous
+        # which one a step used; and an unresolved `steps.*.outputs.token`
+        # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
 
       - name: Self-test the private-registry credential preflight

@@ -65,10 +65,10 @@ jobs:
         # defect meant it could never have checked out if it had been.
         # `cross-repo-tests.yml` already mints its token first and passes it —
         # this is that same shape.
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -76,7 +76,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
@@ -92,7 +92,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           # codetracer-trace-format-nim is the second half of a MATCHED FFI PAIR
