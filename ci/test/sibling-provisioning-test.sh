@@ -94,6 +94,11 @@
 #      installation token per job, minted from the per-repo SECRET, org-scoped
 #      by `owner:` and never narrowed by `repositories:`, and every consuming
 #      step naming a mint step that exists in its own job.
+#   6b. A checkout that pulls `submodules:` passes a `token:`. A submodule
+#      checkout is a clone of OTHER repositories and `libs/tree-sitter-nim` is
+#      private, so an untokened one is a private clone with no credential --
+#      which is why `mcr-dap-flow` failed at `Checkout codetracer` on a fresh
+#      runner and passed on a warm one.
 #
 # # No mocks
 #
@@ -606,6 +611,8 @@ mint_duplicate=()
 legacy_pat_refs=()
 unresolved_consumers=()
 consumer_count=0
+submodule_checkouts=0
+untokened_submodule_checkouts=()
 
 # Per-scope record of the mint step ids declared in it. A "scope" is a job in a
 # workflow, or the whole file for a composite action (which has no jobs but can
@@ -645,6 +652,29 @@ flush_mint_step() {
 	SCOPE_MINT_IDS[$key]="${already} ${mint_step_id}"
 }
 
+# flush_checkout_step: record the actions/checkout step whose body has just
+# ended. A checkout that pulls submodules is a CLONE OF OTHER REPOSITORIES,
+# not just of this one, and this repo's `libs/tree-sitter-nim` submodule is
+# private -- so an untokened `submodules: recursive` is a private clone with no
+# credential. It does not fail deterministically, which is what makes it worth
+# a contract: a runner whose work tree already holds the submodule succeeds,
+# and a fresh one dies with
+#
+#   fatal: repository 'https://github.com/metacraft-labs/tree-sitter-nim.git/'
+#     not found
+#
+# after which every remaining step in the job is reported `skipped`.
+flush_checkout_step() {
+	[ "$in_checkout" -eq 1 ] || return 0
+	in_checkout=0
+	case "$checkout_submodules" in
+	'' | 'false' | "'false'" | '"false"' | '0') return 0 ;;
+	esac
+	submodule_checkouts=$((submodule_checkouts + 1))
+	[ "$checkout_token" -eq 1 ] && return 0
+	untokened_submodule_checkouts+=("$wf_name:$checkout_line: job '$scope' checks out 'submodules: $checkout_submodules' with no token:")
+}
+
 for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	wf_name="${wf##*/}"
 	scope="(file scope)"
@@ -658,6 +688,10 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	mint_owner=0
 	mint_repositories=0
 	cur_step_id=""
+	in_checkout=0
+	checkout_line=0
+	checkout_submodules=""
+	checkout_token=0
 
 	while IFS= read -r line || [ -n "$line" ]; do
 		line_no=$((line_no + 1))
@@ -685,6 +719,7 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			'   '*) ;;
 			'  '[a-zA-Z0-9_-]*':')
 				flush_mint_step
+				flush_checkout_step
 				scope="${header#  }"
 				scope="${scope%:}"
 				cur_step_id=""
@@ -698,6 +733,7 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		case "$stripped" in
 		'- name: '* | '- uses: '* | '- run: '* | '- id: '* | '- if: '* | '- with:'*)
 			flush_mint_step
+			flush_checkout_step
 			cur_step_id=""
 			;;
 		esac
@@ -707,6 +743,25 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			cur_step_id="${cur_step_id#id: }"
 			;;
 		esac
+
+		case "$stripped" in
+		'uses: actions/checkout@'* | '- uses: actions/checkout@'*)
+			in_checkout=1
+			checkout_line="$line_no"
+			checkout_submodules=""
+			checkout_token=0
+			;;
+		esac
+
+		if [ "$in_checkout" -eq 1 ]; then
+			case "$stripped" in
+			'submodules:'*)
+				checkout_submodules="${stripped#submodules:}"
+				checkout_submodules="${checkout_submodules#"${checkout_submodules%%[![:space:]]*}"}"
+				;;
+			'token:'*) checkout_token=1 ;;
+			esac
+		fi
 
 		case "$stripped" in
 		*"$MINT_ACTION"*)
@@ -770,6 +825,7 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		esac
 	done <"$wf"
 	flush_mint_step
+	flush_checkout_step
 done
 
 for record in ${CONSUMER_RECORDS+"${CONSUMER_RECORDS[@]}"}; do
@@ -860,6 +916,18 @@ else
 		"${mint_bad_scope[@]}"
 fi
 
+if [ "${#untokened_submodule_checkouts[@]}" -eq 0 ]; then
+	ok "all $submodule_checkouts submodule checkouts authenticate with a minted token"
+else
+	fail "all submodule checkouts authenticate with a minted token" \
+		"a checkout that pulls submodules clones OTHER repositories, and" \
+		"libs/tree-sitter-nim is private; with no token: it clones with whatever" \
+		"credential the runner happens to carry, so it succeeds on a runner that" \
+		"already has the submodule and dies with 'repository ... not found' on a fresh" \
+		"one, taking every later step down as 'skipped'" \
+		"${untokened_submodule_checkouts[@]}"
+fi
+
 if [ "${#unresolved_consumers[@]}" -eq 0 ]; then
 	ok "every token reference names a mint step in its own job"
 else
@@ -876,7 +944,7 @@ fi
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=15
+readonly EXPECTED_ASSERTIONS=16
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
