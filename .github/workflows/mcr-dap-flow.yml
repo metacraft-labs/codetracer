@@ -59,10 +59,10 @@ jobs:
           submodules: recursive
 
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -71,7 +71,7 @@ jobs:
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Resolve sibling refs
         id: refs
@@ -106,7 +106,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.refs.outputs.recorder-ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-native-backend
@@ -117,7 +117,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-backend
           ref: ${{ steps.refs.outputs.backend-ref }}
           path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-trace-format sibling
@@ -128,7 +128,7 @@ jobs:
           repo: metacraft-labs/codetracer-trace-format
           ref: ${{ steps.refs.outputs.trace-format-ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-trace-format-nim sibling
@@ -139,7 +139,7 @@ jobs:
           repo: metacraft-labs/codetracer-trace-format-nim
           ref: ${{ steps.refs.outputs.trace-format-nim-ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Run MCR DAP flow tests
