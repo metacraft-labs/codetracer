@@ -229,9 +229,31 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # codetracer-trace-format-nim is the second half of a MATCHED FFI
+          # PAIR and is required whenever codetracer-trace-format is BUILT, not
+          # only when something imports the Nim library directly.
+          # `crates/ct-shell-trace-writer` path-depends on
+          # `codetracer-trace-format/codetracer_trace_writer_nim`, whose
+          # build.rs resolves the Nim entry point as a SIBLING of
+          # codetracer-trace-format and hard-errors when it is absent:
+          #
+          #   error: failed to run custom build command for
+          #     `codetracer_trace_writer_nim v0.1.0`
+          #   Nim FFI entry point not found at
+          #     .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+          #     -- is the codetracer-trace-format-nim repo checked out as a
+          #     sibling? (override with CODETRACER_TRACE_FORMAT_NIM_DIR)
+          #
+          # Observed in run 31719867246, job 94513828226, step "Build shell
+          # trace writer" -- reached only because the `=dev` pins here got this
+          # job past `Setup dev env` for the first time since 2026-08-04.
+          # Pinned by the "codetracer-trace-format implies
+          # codetracer-trace-format-nim" assertion in
+          # ci/test/sibling-provisioning-test.sh.
           siblings: |
             codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
             codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Build shell trace writer
         run: |

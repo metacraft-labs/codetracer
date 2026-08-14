@@ -2515,9 +2515,23 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # MATCHED FFI PAIR. The "Build codetracer-beam-recorder (nixos)" step
+          # below already documents that this recorder "transitively
+          # path-depends on codetracer-trace-format/codetracer_trace_writer_nim"
+          # -- that crate's build.rs also needs the Nim half checked out as a
+          # SIBLING of codetracer-trace-format, and hard-errors without it:
+          #
+          #   Nim FFI entry point not found at
+          #   .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+          #
+          # Observed via the identical path-dep from codetracer-shell-recorders
+          # (run 31719867246, job 94513828226). Pinned by the
+          # "codetracer-trace-format implies codetracer-trace-format-nim"
+          # assertion in ci/test/sibling-provisioning-test.sh.
           siblings: |
             codetracer-beam-recorder=dev
             codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``

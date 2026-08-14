@@ -95,9 +95,32 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # codetracer-trace-format-nim is the second half of a MATCHED FFI PAIR
+          # and must be provisioned wherever codetracer-trace-format is built.
+          # codetracer-beam-recorder's Cargo.toml path-depends on
+          # `../codetracer-trace-format/codetracer_trace_writer_nim`, and that
+          # crate's build.rs resolves the Nim entry point as a SIBLING of
+          # codetracer-trace-format, hard-erroring when it is absent:
+          #
+          #   Nim FFI entry point not found at
+          #   .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+          #   -- is the codetracer-trace-format-nim repo checked out as a sibling?
+          #
+          # Not yet observed in THIS job only because it currently dies earlier,
+          # at `cargo: command not found` (run 31719867251, job 94513828329); the
+          # build that would hit it never starts. It is observed in the identical
+          # path-dep from codetracer-shell-recorders (run 31719867246, job
+          # 94513828226, step "Build shell trace writer").
+          #
+          # Pinned `=dev` rather than reusing `trace_format_ref`: that input names
+          # a ref in the *Rust* repo and must not be applied to a different
+          # repository. A dispatch overriding trace_format_ref therefore still
+          # moves only one half of the pair -- a pre-existing gap in this
+          # workflow's dispatch interface, recorded rather than silently widened.
           siblings: |
             codetracer-beam-recorder=${{ github.event.inputs.beam_recorder_ref || 'dev' }}
             codetracer-trace-format=${{ github.event.inputs.trace_format_ref || 'dev' }}
+            codetracer-trace-format-nim=dev
 
       - name: Swap libs/codetracer-trace-format for the pinned sibling clone
         # The beam recorder's trace shim reuses the shared CTFS writer at
