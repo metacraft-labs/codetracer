@@ -1,3 +1,23 @@
+## OUTSTANDING VERIFICATION OBLIGATION (recorded 2026-08-14, PR #622)
+##
+## The lexical-scanner rewrite in this provider was merged on the evidence of
+## `ct-test-release-gate` alone, which passed (16m49s, run 31706159237). The
+## other gate that exercises this code, `ct-test-providers` (the "ct-test
+## cross-language provider gate"), was NOT green: it failed in 2m48s in the same
+## run, in `Setup dev env`, as part of the workspace-lock outage that PR #623
+## fixed. It therefore never reached this provider and says nothing about it
+## either way.
+##
+## So: this provider has no green `ct-test-providers` run behind it.
+## `ct-test-providers` MUST be observed green before the next change that
+## touches this file or `../nim_lexer`. Do not treat a passing
+## `ct-test-release-gate` as covering it -- the two gates have deliberately
+## different prerequisites (see the block comment above `ct-test-release-gate`
+## in `.github/workflows/codetracer.yml`), and only the providers gate drives
+## the real recorder siblings.
+##
+## Delete this note once such a run exists, and cite it.
+
 import std/[algorithm, options, os, sequtils, strutils, tables]
 
 import ../contracts
