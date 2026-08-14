@@ -73,6 +73,12 @@
 #      them failing after the workflows themselves had been fixed -- this
 #      suite's first version only walked the workflow directory and waved it
 #      straight through.
+#   3b. Any `siblings:` block that provisions `codetracer-trace-format` also
+#      provisions `codetracer-trace-format-nim`. They are the two halves of one
+#      FFI boundary and are only ever correct together; the dependency is
+#      invisible from either repo's own manifest, so it keeps being missed.
+#      See the assertion's own comment for the two failure modes already paid
+#      for (absent half -> build.rs error; stale half -> link error).
 #   4. Every workflow step that runs `./non-nix-build/build.sh` is preceded, in
 #      its own job, by a step that provisions `codetracer-trace-format`.
 #   5. Every workflow step that runs `ci/setup-rr-backend.sh` sets
@@ -152,12 +158,17 @@ echo "siblings: entries pin an explicit ref"
 sibling_blocks=0
 bad_entries=()
 entry_count=0
+# Per-block record of which repos each `siblings:` block provisions, used by
+# the matched-pair assertion further down. One space-delimited entry per block.
+declare -a BLOCK_REPOS=()
+declare -a BLOCK_WHERE=()
 
 for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	wf_name="${wf##*/}"
 	in_block=0
 	key_indent=0
 	line_no=0
+	block_repos=""
 	while IFS= read -r line || [ -n "$line" ]; do
 		line_no=$((line_no + 1))
 		stripped="${line#"${line%%[![:space:]]*}"}"
@@ -166,7 +177,17 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		if [ "$in_block" -eq 1 ]; then
 			if [ -z "$stripped" ] || [ "$indent" -le "$key_indent" ]; then
 				in_block=0
+				BLOCK_REPOS+=("$block_repos")
+				block_repos=""
 			else
+				# `clone-siblings` strips a `#` comment from each line before
+				# tokenising ("Both accept '#' comments and whitespace/newline
+				# separation" -- clone-siblings/action.yml). Model that here, or
+				# this scanner rejects a configuration the action accepts.
+				stripped="${stripped%%#*}"
+				stripped="${stripped%"${stripped##*[![:space:]]}"}"
+				[ -z "$stripped" ] && continue
+				block_repos="$block_repos ${stripped%%=*}"
 				entry_count=$((entry_count + 1))
 				case "$stripped" in
 				*=*)
@@ -199,10 +220,16 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		'siblings: |'*)
 			in_block=1
 			key_indent=$indent
+			block_repos=""
+			BLOCK_WHERE+=("$wf_name:$line_no")
 			sibling_blocks=$((sibling_blocks + 1))
 			;;
 		esac
 	done <"$wf"
+	# A block that runs to EOF never hits the dedent that closes it.
+	if [ "$in_block" -eq 1 ]; then
+		BLOCK_REPOS+=("$block_repos")
+	fi
 done
 
 if [ "${#bad_entries[@]}" -eq 0 ]; then
@@ -221,6 +248,68 @@ else
 	fail "the workflows still declare cross-repo siblings" \
 		"no 'siblings: |' block was found -- either the input was renamed or the" \
 		"scanner no longer matches it, and this suite is passing vacuously"
+fi
+
+# ---------------------------------------------------------------------------
+# 1b. MATCHED PAIR: codetracer-trace-format implies codetracer-trace-format-nim.
+#
+# These two repos are the two halves of one FFI boundary and are only ever
+# correct together:
+#
+#   codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs      caller
+#   codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim     provider
+#
+# The dependency is not visible from a repo's own manifest, which is why it
+# keeps being missed. Anything that path-depends on the
+# `codetracer_trace_writer_nim` crate -- codetracer-shell-recorders'
+# `crates/ct-shell-trace-writer`, codetracer-beam-recorder, codetracer's own
+# db-backend -- drags in a build.rs that resolves the Nim entry point as a
+# SIBLING OF codetracer-trace-format and hard-errors when it is absent:
+#
+#   Nim FFI entry point not found at
+#   .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+#   -- is the codetracer-trace-format-nim repo checked out as a sibling?
+#
+# So provisioning the Rust half alone is never right. Two forms of the same
+# defect have now been paid for:
+#
+#   * the Nim half ABSENT      -> the build.rs error above
+#                                 (run 31719867246, job 94513828226)
+#   * the Nim half STALE       -> a link error against the older provider,
+#                                 `undefined reference to ct_reader_event_metadata`
+#                                 (fixed in 32a9de3c7 by overriding both)
+#
+# This is also the general lesson of the lock outage: a per-commit workspace
+# lock bought COORDINATION across repos, not merely a pinned SHA. Pinning each
+# sibling independently to `dev` keeps them current and silently discards that
+# coordination. For independent siblings that is invisible; for a matched pair
+# it is a build failure. Where coordination is required it now has to be stated
+# explicitly -- and this assertion is where "explicitly" is enforced.
+# ---------------------------------------------------------------------------
+unpaired=()
+for _i in "${!BLOCK_REPOS[@]}"; do
+	_repos=" ${BLOCK_REPOS[$_i]} "
+	case "$_repos" in
+	*" codetracer-trace-format "*)
+		case "$_repos" in
+		*" codetracer-trace-format-nim "*) ;;
+		*)
+			unpaired+=("${BLOCK_WHERE[$_i]}: provisions codetracer-trace-format without codetracer-trace-format-nim")
+			;;
+		esac
+		;;
+	esac
+done
+unset _i _repos
+
+if [ "${#unpaired[@]}" -eq 0 ]; then
+	ok "every block provisioning codetracer-trace-format also provisions its -nim half"
+else
+	fail "every block provisioning codetracer-trace-format also provisions its -nim half" \
+		"the two repos are one FFI boundary; the Rust half alone fails in build.rs with" \
+		"'Nim FFI entry point not found ... is the codetracer-trace-format-nim repo" \
+		"checked out as a sibling?'" \
+		"${unpaired[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -354,7 +443,7 @@ fi
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=5
+readonly EXPECTED_ASSERTIONS=6
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
