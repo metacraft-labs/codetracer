@@ -3097,6 +3097,23 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave `http.https://github.com/.extraHeader` behind in
+          # `.git/config`. That persisted header prefix-matches every URL, which
+          # is what forced `visual-replay-private-cargo-preflight.sh` to weaken
+          # its `auth-header-url-boundary` check from "no header matches at all"
+          # to "the lldb-sys credential does not widen"; see the long comment
+          # there. Nothing downstream needs it:
+          #   * `Setup dev env` gets the same token explicitly via `gh-token`.
+          #   * `submodules: recursive` is unaffected — actions/checkout fetches
+          #     submodules under a temporary *global* auth config it installs
+          #     regardless of this setting, and only strips the credential in
+          #     its `finally` block, after submodules are checked out.
+          #   * The gate itself does no network git against this checkout. Its
+          #     one authenticated fetch (`git ls-remote` on lldb-sys, in the
+          #     preflight) uses the process-scoped `GIT_CONFIG_KEY_0`
+          #     extraHeader; every other git-touching step runs with its working
+          #     directory inside a *sibling* repo provisioned by setup-dev-env.
+          persist-credentials: false
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
