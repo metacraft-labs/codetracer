@@ -674,12 +674,18 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		esac
 
 		# Job header: `  <id>:` at exactly two spaces, after the `jobs:` key.
+		# A trailing comment is stripped first. Without that, `  foo:  # note`
+		# would not match, the scope would stay on the PREVIOUS job, and a
+		# consumer in `foo` could resolve against a mint step in its
+		# predecessor -- the reachability check silently weakened by a comment.
+		header="${line%%#*}"
+		header="${header%"${header##*[![:space:]]}"}"
 		if [ "$seen_jobs_key" -eq 1 ]; then
-			case "$line" in
+			case "$header" in
 			'   '*) ;;
 			'  '[a-zA-Z0-9_-]*':')
 				flush_mint_step
-				scope="${line#  }"
+				scope="${header#  }"
 				scope="${scope%:}"
 				cur_step_id=""
 				;;
