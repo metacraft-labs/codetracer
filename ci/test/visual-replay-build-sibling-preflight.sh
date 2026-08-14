@@ -18,6 +18,23 @@ REQUIRED_BUILD_SIBLING_FILES=(
 	"codetracer-trace-format-nim/src/codetracer_trace_writer/new_trace_reader.nim"
 	"io-mon/src/io_mon.nim"
 	"nim-shm-queue/src/shm_queue/ring.nim"
+	# io-mon and nim-shm-gset are a MATCHED PAIR, for the same reason
+	# codetracer-trace-format and codetracer-trace-format-nim are. `io_mon.nim`
+	# imports `io_mon/writer` and `io_mon/fs_snoop`, both of which import
+	# `shm_gset` / `shm_gset/transport` -- the grow-only shared-memory set that
+	# backs io-mon's Linux dependency-capture channel. Nothing in io-mon's own
+	# manifest names nim-shm-gset (io-mon resolves it as a plain sibling via its
+	# `config.nims` `SHM_GSET_SRC` default), so provisioning io-mon alone looks
+	# complete and is not.
+	#
+	# The repo-root `config.nims` threads it on with `addPathIfDir`, which is
+	# SILENT when the directory is absent: the missing sibling does not surface
+	# at provisioning time, it surfaces much later as
+	#
+	#     cannot open file: shm_gset/transport
+	#
+	# out of the `ct` compile. Checking it here names the real cause instead.
+	"nim-shm-gset/src/shm_gset/transport.nim"
 	"nim-stackable-hooks/src/stackable_hooks/propagation.nim"
 )
 
