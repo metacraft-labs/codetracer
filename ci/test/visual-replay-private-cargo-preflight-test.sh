@@ -163,6 +163,19 @@ run_negative_case() {
 		# and it is the case that reddens if that reading is deleted.
 		GIT_CONFIG_KEY_0="http.https://github.com/metacraft-labs/.extraHeader"
 		;;
+	auth-key-hostless)
+		# The widening that matters most now the credential is known to be
+		# org-wide: a key with no URL section at all. Git applies
+		# `http.extraHeader` to *every* URL it fetches, github.com or not,
+		# so this would hand an organisation-scoped token to whatever host a
+		# dependency happens to name. Reading (1) catches it — via the
+		# same-host probes as well as the off-host ones, since a host-less
+		# key matches everything. That redundancy is the point: the
+		# `auth-key-wide` case above only widens within github.com, so
+		# without this case nothing would distinguish "keyed to one URL"
+		# from "keyed to one host".
+		GIT_CONFIG_KEY_0="http.extraHeader"
+		;;
 	probe-isolation)
 		# The boundary probe's reading (1) is only meaningful while its
 		# working directory is outside every work tree. `mktemp -d` honours
@@ -180,15 +193,16 @@ run_negative_case() {
 		;;
 	leak-lowercase-field | leak-uppercase-scheme | leak-trailing-space | \
 		leak-doubled-space)
-		# One leaked credential, four wire-valid spellings. RFC 9110 §5.1
-		# makes the field name case-insensitive, RFC 7617 §2 makes the
-		# `basic` scheme token case-insensitive, and RFC 9110 §5.5 allows
-		# optional whitespace around the field value — so every one of these
-		# hands the *same* lldb-sys secret to `https://github.com/`, and a
-		# `==` comparison against `AUTHORIZATION: basic <token>` waves three
-		# of the four through. Git preserves the spelling verbatim
-		# (values with edge whitespace are written quoted), so what
-		# `--get-urlmatch` returns here is what the wire would carry.
+		# One leaked credential, four wire-valid spellings, all pointed at a
+		# host that is not github.com. RFC 9110 §5.1 makes the field name
+		# case-insensitive, RFC 7617 §2 makes the `basic` scheme token
+		# case-insensitive, and RFC 9110 §5.5 allows optional whitespace
+		# around the field value — so every one of these hands the *same*
+		# organisation-scoped token to `https://example.invalid/`, and a `==`
+		# comparison against `AUTHORIZATION: basic <token>` waves three of the
+		# four through. Git preserves the spelling verbatim (values with edge
+		# whitespace are written quoted), so what `--get-urlmatch` returns
+		# here is what the wire would carry.
 		local leak_repo="$TEST_ROOT/leak-checkout-$case_name"
 		local leaked_header
 		case "$case_name" in
@@ -197,7 +211,8 @@ run_negative_case() {
 		leak-trailing-space) leaked_header="AUTHORIZATION: basic ${SENTINEL_BASIC}   " ;;
 		leak-doubled-space) leaked_header="AUTHORIZATION:  basic  ${SENTINEL_BASIC}" ;;
 		esac
-		make_checkout_like_repo "$leak_repo" "$leaked_header"
+		make_checkout_like_repo "$leak_repo" "$leaked_header" \
+			"https://example.invalid/"
 		NEGATIVE_CASE_CWD="$leak_repo"
 		NEGATIVE_CASE_CLEANUP="$leak_repo"
 		;;
@@ -266,21 +281,31 @@ SECOND_GIT_SOURCE
 # `actions/checkout` defaults to `persist-credentials: true` and writes
 #
 #     [http "https://github.com/"]
-#         extraheader = AUTHORIZATION: basic <the run's own GITHUB_TOKEN>
+#         extraheader = AUTHORIZATION: basic <the token the job supplied>
 #
-# into the checkout's `.git/config`. `git config --get-urlmatch` consults the
-# repository config, and `https://github.com/` is a prefix of every URL the
-# boundary check probes, so the old "no header may match at all" formulation
-# failed while the property it protects was intact. (One run is on record for
-# this gate — 30726348404; see the corrected evidence note in
-# `visual-replay-private-cargo-preflight.sh`, which retracts a wider claim.)
+# into the checkout's `.git/config`, and `git config --get-urlmatch` consults
+# the repository config. A persistent self-hosted runner can carry equivalent
+# configuration from other sources too, so the preflight has to stay correct
+# in the presence of a github.com-wide header regardless of what any one
+# `actions/checkout` step is configured to do.
 #
-# The gate's own checkout now sets `persist-credentials: false`, so it should no
-# longer produce this header itself. These cases are kept regardless: a
-# persistent self-hosted runner can carry ambient Git configuration from other
-# sources, and the preflight must stay correct when it does.
+# Two of the cases below are the crux of the boundary contract, and they differ
+# only in the *host* the ambient header applies to:
 #
-# Neither of these is a mock: each builds a real git repository and writes the
+#   * github.com-wide, carrying the very same token the gate installs for
+#     lldb-sys — MUST PASS. `metacraft-labs/lldb-sys.rs` is a private repo in
+#     this organisation, reached with the org-wide CI Token Provider App
+#     installation token; the same token authenticates this checkout and every
+#     private sibling the gate clones. One credential covering all of them is
+#     the policy, not a leak. See the long note in
+#     `visual-replay-private-cargo-preflight.sh` and
+#     `metacraft-dev-guidelines/policies/ci-workflow-standards.md`.
+#   * off-github.com, carrying that same token — MUST FAIL. An
+#     organisation-scoped credential handed to a third-party host is a leak
+#     under any policy, and is the only sense in which "this credential
+#     widened" is still a meaningful accusation.
+#
+# None of these is a mock: each builds a real git repository and writes the
 # real configuration actions/checkout writes, then runs the preflight as a
 # subprocess with that repository as its working directory — exactly how CI
 # invokes it.
@@ -288,16 +313,31 @@ SECOND_GIT_SOURCE
 AMBIENT_BASIC="$(printf 'x-access-token:%s' "ambient-checkout-token-$$" | base64 | tr -d '\r\n')"
 
 make_checkout_like_repo() {
-	# $1 = directory, $2 = the extraHeader value actions/checkout persisted.
-	local dir="$1" header="$2"
+	# $1 = directory, $2 = the extraHeader value actions/checkout persisted,
+	# $3 = the URL the header is scoped to (default: all of github.com, which
+	# is what actions/checkout writes).
+	local dir="$1" header="$2" url="${3:-https://github.com/}"
 	mkdir -p "$dir"
 	git -C "$dir" init -q .
-	git -C "$dir" config "http.https://github.com/.extraheader" "$header"
+	git -C "$dir" config "http.${url}.extraheader" "$header"
+}
+
+run_preflight_in_repo() {
+	# $1 = repo to run from, $2 = cargo workspace, $3 = call-log tag.
+	# Prints combined output; returns the preflight's exit status.
+	local repo="$1" workspace="$2" tag="$3"
+	(
+		cd "$repo" &&
+			CARGO_CALL_LOG="$TEST_ROOT/cargo-$tag.args" \
+				PATH="$TEST_ROOT/bin:$PATH" \
+				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+				"$workspace" 2>&1
+	)
 }
 
 run_ambient_credential_positive_case() {
-	# The reproduction: an unrelated, legitimate credential scoped to
-	# https://github.com/ must not fail the gate.
+	# An unrelated, legitimate credential scoped to https://github.com/ must
+	# not fail the gate.
 	local workspace="$TEST_ROOT/workspace/ambient-ok"
 	local repo="$TEST_ROOT/ambient-ok-checkout"
 	write_valid_workspace "$workspace"
@@ -306,45 +346,62 @@ run_ambient_credential_positive_case() {
 	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
 	make_checkout_like_repo "$repo" "AUTHORIZATION: basic ${AMBIENT_BASIC}"
 
-	(
-		cd "$repo" &&
-			CARGO_CALL_LOG="$TEST_ROOT/cargo-ambient-ok.args" \
-				PATH="$TEST_ROOT/bin:$PATH" \
-				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
-				"$workspace"
-	) || {
+	run_preflight_in_repo "$repo" "$workspace" "ambient-ok" || {
 		echo "Private Cargo preflight rejected a checkout carrying its own" >&2
-		echo "actions/checkout credential; that is not a leak of the lldb-sys" >&2
-		echo "header and must not fail the gate." >&2
+		echo "actions/checkout credential; that is not a leak and must not" >&2
+		echo "fail the gate." >&2
 		exit 1
 	}
 }
 
-run_ambient_credential_leak_case() {
-	# The leak that matters: the lldb-sys header itself, applied to a broader
-	# URL by the repository config, must be caught.
-	local workspace="$TEST_ROOT/workspace/ambient-leak"
-	local repo="$TEST_ROOT/ambient-leak-checkout"
-	local output status
+run_same_credential_org_wide_positive_case() {
+	# The regression this whole rework exists for. The gate installs an
+	# lldb-sys-scoped header carrying the org-wide App installation token; the
+	# checkout carries the SAME token github.com-wide because that is how
+	# every private sibling gets cloned. Failing here would mean the gate
+	# passes only when someone provisions a second, narrower token — the
+	# arrangement the policy exists to avoid, because per-repo tokens are the
+	# ones that need rotating.
+	local workspace="$TEST_ROOT/workspace/same-token"
+	local repo="$TEST_ROOT/same-token-checkout"
 	write_valid_workspace "$workspace"
-	prepare_two_slot_environment "$TEST_ROOT/cargo-ambient-leak"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-same-token"
 	# shellcheck disable=SC1091
 	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
 	make_checkout_like_repo "$repo" "$GIT_CONFIG_VALUE_0"
 
+	run_preflight_in_repo "$repo" "$workspace" "same-token" || {
+		echo "Private Cargo preflight failed a correctly provisioned job: the" >&2
+		echo "org-wide CI App token legitimately authenticates both this" >&2
+		echo "checkout and the private lldb-sys sibling. Do not 'fix' this by" >&2
+		echo "minting a second token; fix the assertion." >&2
+		exit 1
+	}
+	# The fixture wrote the sentinel header into a git config, so remove it
+	# before the end-of-run sweep below.
+	rm -rf "$repo"
+}
+
+run_offsite_credential_leak_case() {
+	# The leak that is still real: the run's credential, applied by ambient
+	# repository config to a host that is not github.com.
+	local workspace="$TEST_ROOT/workspace/offsite-leak"
+	local repo="$TEST_ROOT/offsite-leak-checkout"
+	local output status
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-offsite-leak"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	make_checkout_like_repo "$repo" "$GIT_CONFIG_VALUE_0" \
+		"https://example.invalid/"
+
 	set +e
-	output="$(
-		cd "$repo" &&
-			CARGO_CALL_LOG="$TEST_ROOT/cargo-ambient-leak.args" \
-				PATH="$TEST_ROOT/bin:$PATH" \
-				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
-				"$workspace" 2>&1
-	)"
+	output="$(run_preflight_in_repo "$repo" "$workspace" "offsite-leak")"
 	status=$?
 	set -e
-	if ((status == 0)) || [[ $output != *"auth-header-credential-leak"* ]]; then
-		echo "Private Cargo preflight did not catch the lldb-sys credential" >&2
-		echo "being applied to https://github.com/ by the repository config." >&2
+	if ((status == 0)) || [[ $output != *"auth-header-offsite-leak"* ]]; then
+		echo "Private Cargo preflight did not catch the run's credential being" >&2
+		echo "applied to a non-github.com host by the repository config." >&2
 		printf '%s\n' "$output" >&2
 		exit 1
 	fi
@@ -362,20 +419,22 @@ run_ambient_credential_leak_case() {
 
 run_positive_case
 run_ambient_credential_positive_case
-run_ambient_credential_leak_case
+run_same_credential_org_wide_positive_case
+run_offsite_credential_leak_case
 run_negative_case prompt "interactive-credential-blocking"
 run_negative_case global-config "config-file-isolation"
 run_negative_case count "inline-config-count"
 run_negative_case auth-key "auth-header-url-scope"
 run_negative_case auth-key-wide "auth-header-url-boundary"
+run_negative_case auth-key-hostless "auth-header-url-boundary"
 run_negative_case probe-isolation "auth-boundary-probe-isolation"
-# The same leaked lldb-sys credential, spelled four wire-valid ways. Each of
-# these passed the gate while the boundary check compared whole header strings
-# with `==`.
-run_negative_case leak-lowercase-field "auth-header-credential-leak"
-run_negative_case leak-uppercase-scheme "auth-header-credential-leak"
-run_negative_case leak-trailing-space "auth-header-credential-leak"
-run_negative_case leak-doubled-space "auth-header-credential-leak"
+# The same leaked credential, spelled four wire-valid ways, applied to a host
+# that is not github.com. Each of these passed the gate while the boundary check
+# compared whole header strings with `==`.
+run_negative_case leak-lowercase-field "auth-header-offsite-leak"
+run_negative_case leak-uppercase-scheme "auth-header-offsite-leak"
+run_negative_case leak-trailing-space "auth-header-offsite-leak"
+run_negative_case leak-doubled-space "auth-header-offsite-leak"
 run_negative_case header-shape "auth-header-shape"
 run_negative_case helper "credential-helper-blocking"
 run_negative_case redirect "redirect-blocking"

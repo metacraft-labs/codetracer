@@ -2714,11 +2714,17 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
           # Do not leave `http.https://github.com/.extraHeader` behind in
-          # `.git/config`. That persisted header prefix-matches every URL, which
-          # is what forced `visual-replay-private-cargo-preflight.sh` to weaken
-          # its `auth-header-url-boundary` check from "no header matches at all"
-          # to "the lldb-sys credential does not widen"; see the long comment
-          # there. Nothing downstream needs it:
+          # `.git/config` for the rest of a three-hour job on a persistent GPU
+          # runner. This is ordinary least-persistence hygiene — the same reason
+          # actions/checkout v6 moved the credential out of `.git/config`
+          # entirely — and NOT a boundary the private-Cargo preflight depends
+          # on: that header carries the org-wide CI App token, which by policy
+          # also authenticates the private lldb-sys dependency, so its presence
+          # is never a leak and the preflight no longer asserts anything about
+          # it. See the long note in
+          # `ci/test/visual-replay-private-cargo-preflight.sh`.
+          #
+          # Nothing downstream needs the persisted header:
           #   * `Setup dev env` gets the same token explicitly via `gh-token`.
           #   * `submodules: recursive` is unaffected — actions/checkout fetches
           #     submodules under a temporary *global* auth config it installs
