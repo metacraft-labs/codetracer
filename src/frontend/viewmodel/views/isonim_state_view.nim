@@ -645,7 +645,7 @@ template renderVariableRowImpl(r, vm, item,
             if atomTypeVisible(item):
               span(class = "value-type"):
                 text item().typeName
-            button(class = "value-history-button ct-button-image-sm-secondary ct-custom-button-size ct-ml-2",
+            button(class = "value-history-button ct-button-image-xs-secondary ct-ml-2",
                    id = "value-history",
                    onclick = proc() = vm.toggleHistory(item().path)):
               tdiv(class = "custom-tooltip"):
