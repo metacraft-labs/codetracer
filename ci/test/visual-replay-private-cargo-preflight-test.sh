@@ -271,7 +271,14 @@ SECOND_GIT_SOURCE
 # into the checkout's `.git/config`. `git config --get-urlmatch` consults the
 # repository config, and `https://github.com/` is a prefix of every URL the
 # boundary check probes, so the old "no header may match at all" formulation
-# failed on every real run while the property it protects was intact.
+# failed while the property it protects was intact. (One run is on record for
+# this gate — 30726348404; see the corrected evidence note in
+# `visual-replay-private-cargo-preflight.sh`, which retracts a wider claim.)
+#
+# The gate's own checkout now sets `persist-credentials: false`, so it should no
+# longer produce this header itself. These cases are kept regardless: a
+# persistent self-hosted runner can carry ambient Git configuration from other
+# sources, and the preflight must stay correct when it does.
 #
 # Neither of these is a mock: each builds a real git repository and writes the
 # real configuration actions/checkout writes, then runs the preflight as a

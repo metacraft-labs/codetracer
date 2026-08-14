@@ -124,9 +124,31 @@ fi
 # into the checkout's `.git/config`. `git config --get-urlmatch` reads the
 # repository config too, and `https://github.com/` is a prefix of every URL
 # below, so all three matched and the gate failed `auth-header-url-boundary`
-# on every run (30726348404, 31180327493, 31385899773) while the property it
-# exists to protect was intact — the lldb-sys URL still resolved to the
-# lldb-sys header, and nothing else did.
+# while the property it exists to protect was intact — the lldb-sys URL still
+# resolved to the lldb-sys header, and nothing else did.
+#
+# EVIDENCE, CORRECTED (2026-08-14). 57ef307d4 cited three runs here —
+# 30726348404, 31180327493, 31385899773 — and said the gate failed this way on
+# "every run". Only the first is real:
+#
+#   30726348404  2026-08-02  failed in `Run visual replay regression gate`,
+#                            log: "Visual replay CI private Cargo
+#                            authentication invariant failed:
+#                            auth-header-url-boundary."   <- genuine
+#   31180327493  2026-08-07  failed in `Setup dev env`    <- never reached here
+#   31385899773  2026-08-10  failed in `Setup dev env`    <- never reached here
+#
+# The latter two are the workspace-lock outage (see the header of
+# `.github/workflows/codetracer.yml`); they died before this script ran and
+# cannot evidence anything about it. The same three run IDs appear in
+# codetracer.yml for the *Windows* git/bash defect, where all three genuinely
+# do show the failure — that citation is sound, and is the likely source this
+# one was copied from.
+#
+# So the relaxation rests on ONE observed failure plus a mechanism that is
+# verifiable from first principles (the persisted header prefix-matches every
+# URL). That is not nothing, but it is not what was claimed, and a security
+# check should not be loosened on a count of runs nobody re-read.
 #
 # RE-EXAMINE THIS. As of 2026-08-14 the gate's checkout sets
 # `persist-credentials: false`, so the ambient header this relaxation exists to
@@ -138,9 +160,9 @@ fi
 # and with the runner pool saturated that could not be observed here. Re-tighten
 # only against a green run that proves it, not against this comment.
 #
-# Asserting "no header at all" was also always stronger than the contract and
-# was never wholly in the gate's power to guarantee — ambient config belongs to
-# the environment, not to this script.
+# Independently of the citation count: asserting "no header at all" was also
+# always stronger than the contract and was never wholly in the gate's power to
+# guarantee — ambient config belongs to the environment, not to this script.
 git_isolated_dir="$(mktemp -d)"
 if git -C "$git_isolated_dir" rev-parse --git-dir >/dev/null 2>&1; then
 	# TMPDIR inside a work tree would silently reintroduce repository config
