@@ -1026,6 +1026,8 @@ package codeTracer:
       target("ct", ct)
       codetracerActions.add(ct)
 
+    var auxiliaryActionIds: seq[string] = @[]
+
     if fileExists("src/ct_test/ct_test.nim"):
       # The standalone cross-language test driver (`ct-test test discover` /
       # `ct-test test run`). The same engine is reachable as `ct test …`, but
@@ -1094,8 +1096,13 @@ package codeTracer:
         nimcache = ctNimCacheRoot & "/ct_test_codetracer_binary",
         paths = CodeTracerNimPaths,
         output = buildDebugPath("bin/ct-test" & (when defined(windows): ".exe" else: "")),
+        extraOutputs = when defined(macosx):
+          @[buildDebugPath("bin/ct-test.dSYM")]
+        else:
+          @[],
         source = "src/ct_test/ct_test.nim")
       target("ct-test", ctTest)
+      auxiliaryActionIds.add(ctTest.id)
 
     if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
       let codetracer = aggregate("codetracer",
@@ -1489,3 +1496,16 @@ package codeTracer:
           @["scripts/docs/capture-visual-recording-screenshots.sh"],
         cacheableValue = false)
       target("docs-book-assets", bookAssets)
+
+    if not (hasFrontendInputs and hasDbBackendRecordInput and hasCtInput):
+      # A source-subset checkout intentionally exposes every action whose
+      # inputs were materialised. Preserve that legacy no-target graph while
+      # keeping auxiliary tools opt-in: without an explicit default,
+      # reprobuild's compatibility fallback would also schedule `ct-test`.
+      var sourceSubsetActions: seq[BuildActionDef] = @[]
+      for action in registeredBuildActions():
+        if action.id notin auxiliaryActionIds:
+          sourceSubsetActions.add(action)
+      let codetracer = aggregate("codetracer",
+        actions = sourceSubsetActions)
+      defaultBuildAction(codetracer)
