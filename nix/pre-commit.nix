@@ -91,7 +91,6 @@ in
         "^examples/" # Example project READMEs with varied formatting
         "^test-programs/" # Test program READMEs
         "^tsc-ui-tests/" # TypeScript UI tests
-        "^build-python/" # Python build docs
         "^src/tracer/" # Tracer docs
         "^CHANGELOG\\.md$" # Auto-generated changelog
         "^CONTRIBUTING\\.md$"

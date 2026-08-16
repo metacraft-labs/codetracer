@@ -12,7 +12,7 @@
 # publishes, branch-scoped deploys) must NOT appear here, or this gate would
 # cry wolf on every normal run:
 #   origin-dap-windows-nightly, origin-dap-macos-nightly  (schedule/dispatch)
-#   publish-pypi, create-release                          (tag-only)
+#   create-release                                        (tag-only)
 #   push-to-attic, build-and-deploy-docs                  (main-only)
 #
 # Pure publication side-effects (push-gpg-public-key, push-install-script,
@@ -32,7 +32,6 @@ lint-rust
 # --- builds ----------------------------------------------------------
 dev-build
 nix-build
-build-python-packages
 appimage-build
 dmg-build
 appimage-lib-check
