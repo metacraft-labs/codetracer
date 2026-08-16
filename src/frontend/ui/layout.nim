@@ -360,6 +360,19 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   if not data.ui.componentMapping[content].hasKey(id):
     raise newException(Exception, "There is not any component with the given id.")
 
+  # Detach the component from the event bus BEFORE it leaves the registry.
+  # Dropping the reference alone is not enough: the component's handlers live
+  # on its private mediator, which is itself registered as a subscriber of
+  # `data.viewsApi`, so a closed panel keeps receiving (and acting on) every
+  # event it ever subscribed to.  Re-opening the panel then adds a second
+  # live handler, and each closed generation multiplies the effect — this is
+  # what made "Add to Scratchpad" append the same value once per generation
+  # (#612).  `itemDestroyed` suppresses this path while auto-hide is
+  # reparenting a panel, so a pinned panel is never unregistered here.
+  let closedComponent = data.ui.componentMapping[content][id]
+  if not closedComponent.isNil:
+    closedComponent.unregister()
+
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
 

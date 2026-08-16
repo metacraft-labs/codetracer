@@ -319,6 +319,26 @@ proc closeSession*(data: Data, targetIndex: int) =
   if not data.ipc.isNil and not data.ipc.isUndefined:
     data.ipc.send(cstring"CODETRACER::close-replay-session",
                   js{"replayId": closingSession.replayId})
+  # Detach every component of the closing session from its event bus before
+  # the session object is dropped.  The session owns its own `viewsApi`, so
+  # this is mostly hygiene rather than a cross-session leak — but the panel
+  # sinks that mirror into module-global ViewModel instances (Scratchpad,
+  # Trace Log, Request Panel) are shared by all sessions, and a component
+  # that is still subscribed can write into the panel of a session the user
+  # has already closed (#612).
+  if not closingSession.ui.isNil:
+    for content, mapping in closingSession.ui.componentMapping:
+      if mapping.isNil:
+        continue
+      for id, component in mapping:
+        if component.isNil:
+          continue
+        try:
+          component.unregister()
+        except:
+          cwarn "session_switch: unregister failed for component " & $id &
+            " of session " & $targetIndex
+
   if not closingSession.ui.layout.isNil:
     try:
       {.emit: [closingSession.ui.layout, ".destroy();"].}

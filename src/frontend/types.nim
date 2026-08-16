@@ -2407,6 +2407,27 @@ when defined(ctRenderer):
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
 
+  method unregister*(self: Component) {.base.} =
+    ## Counterpart of ``register`` — detach a destroyed component from the
+    ## event bus.
+    ##
+    ## ``register`` subscribes the component's handlers on a private mediator
+    ## created by ``setupLocalViewToMiddlewareApi``; that mediator in turn
+    ## registers itself as a subscriber of ``data.viewsApi``.  Neither side
+    ## used to have a removal path, so every panel that was closed and
+    ## reopened (``closeLayoutTab``), every layout reset
+    ## (``renderer.resetLayoutState``) and every closed session left its
+    ## handlers subscribed for the lifetime of the page.  A single emit was
+    ## then delivered once per dead component as well as to the live one —
+    ## the "Add to Scratchpad adds the value N times" symptom (#612).
+    ##
+    ## ``api`` is cleared so a component object that is later re-registered
+    ## (``registerComponent`` skips components that already carry an ``api``)
+    ## gets a fresh mediator instead of the silenced one.
+    if not self.api.isNil:
+      self.api.unsubscribeAll()
+      self.api = nil
+
   # === LocalViewSubscriber:
 
   type
@@ -2447,6 +2468,10 @@ when defined(ctRenderer):
     let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
     result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
     result.asSubscriber = newLocalViewSubscriber(transport)
+    # Remember which mediator this one subscribes to, so ``Component.unregister``
+    # can take the component off ``middlewareToViewsApi.subscribers`` as well as
+    # clear its own handlers.  See ``communication.unsubscribeAll``.
+    result.parent = middlewareToViewsApi
 
   proc registerComponent*(data: Data, component: Component, content: Content) =
     if data.ui.componentMapping[content].hasKey(component.id):

@@ -274,6 +274,27 @@ proc destroyLayoutInstance(layout: GoldenLayout) {.importjs: "#.destroy()".}
 
 proc resetLayoutState*(data: Data) =
   ## Tear down the current GoldenLayout instance so createUIComponents/tryInitLayout can rebuild from scratch.
+  ##
+  ## Every component in the old `componentMapping` is unregistered first.
+  ## `data.viewsApi` survives the reset (it lives on the session, not on
+  ## `data.ui`), so components that are merely dropped from the mapping keep
+  ## their handlers subscribed on it; `createUIComponents` then registers a
+  ## fresh generation on top.  That is how a re-record or a trace reload used
+  ## to double every event handler in the app — most visibly as "Add to
+  ## Scratchpad" appending one row per accumulated generation (#612).
+  for content, mapping in data.ui.componentMapping:
+    # `componentMapping` is only populated per-Content once a layout has been
+    # built, so the entries are still nil on the very first reset.
+    if mapping.isNil:
+      continue
+    for id, component in mapping:
+      if component.isNil:
+        continue
+      try:
+        component.unregister()
+      except:
+        cwarn fmt"layout: unregister failed for {content}#{id}: {getCurrentExceptionMsg()}"
+
   if not data.ui.layout.isNil:
     try:
       destroyLayoutInstance(data.ui.layout)
