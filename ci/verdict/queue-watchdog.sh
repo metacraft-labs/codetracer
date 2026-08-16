@@ -59,7 +59,8 @@
 # -----------------
 # Same rule as `ci-verdict` and `workspace-lock-freshness`: a watchdog must not
 # share the failure mode it watches for. This runs on a stock GitHub-hosted
-# runner with nothing but `bash`, `jq` and `curl`, declares no `needs:`, and
+# runner with nothing but `bash`, `jq` and the preinstalled `gh` CLI, declares
+# no `needs:`, and
 # touches no Nix, dev shell, workspace lock or sibling checkout. If it needed
 # any of those, a run starved of self-hosted runners would starve the watchdog
 # too, and it would report nothing at precisely the moment it is needed.
