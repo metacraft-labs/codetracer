@@ -437,12 +437,35 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	done <"$wf"
 done
 
-if [ "$build_sites" -gt 0 ]; then
-	ok "the workflows still run the non-nix build ($build_sites call sites)"
+# How many `./non-nix-build/build.sh` call sites this workflow is EXPECTED to
+# have. The Homebrew-native macOS legs were migrated into the nix dev shell on
+# eph-macos-arm64 (6fee21a17), so the answer is now zero and the pairing
+# contract below has nothing left to pair.
+#
+# This is asserted as an exact count rather than dropped, because the check it
+# guards -- "the scanner still matches the thing it scans for" -- is still
+# worth having in both directions. Requiring `> 0` reported the retirement as a
+# failure on every run. Deleting the check outright would mean a re-introduced
+# non-nix leg silently reinstates the original defect (a build.sh with no
+# codetracer-trace-format sibling, which fails with "checkout not found"). An
+# exact count keeps that loud: bring the lane back and this fails until the
+# number is updated, which is precisely the moment someone must confirm the
+# pairing contract below still holds.
+EXPECTED_BUILD_SITES=0
+
+if [ "$build_sites" -eq "$EXPECTED_BUILD_SITES" ]; then
+	if [ "$build_sites" -eq 0 ]; then
+		ok "the non-nix build lane is retired, as recorded (0 call sites)"
+	else
+		ok "the workflows still run the non-nix build ($build_sites call sites)"
+	fi
 else
-	fail "the workflows still run the non-nix build" \
-		"no './non-nix-build/build.sh' step was found -- either the macOS lane was" \
-		"removed or the scanner no longer matches it, and this check is vacuous"
+	fail "the non-nix build call sites match what this contract expects" \
+		"expected $EXPECTED_BUILD_SITES './non-nix-build/build.sh' step(s), found $build_sites." \
+		"If a non-nix leg was (re)introduced, confirm it provisions" \
+		"codetracer-trace-format first -- see the pairing contract below -- and then" \
+		"update EXPECTED_BUILD_SITES. If a leg was removed, update the count." \
+		"If neither is true, this scanner has stopped matching the steps it scans."
 fi
 
 if [ "${#missing_sites[@]}" -eq 0 ]; then
