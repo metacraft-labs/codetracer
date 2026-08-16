@@ -2587,10 +2587,28 @@ proc editorAfterRedraw(self: EditorViewComponent) =
   if self.data.ui.activeFocus == self:
     discard self.renderValueTooltip()
 
-  var toggleList: seq[int] = @[]
-
+  # Tracepoint results (#566): this used to unconditionally call
+  # `refreshTraceViewZoneDom()` for every expanded tracepoint, on every
+  # completed move — including the `CtTraceJump` the results grid's OWN row
+  # click emits. That wipes `viewZone.domNode.innerHTML`, detaching the
+  # `<table>` the live jQuery-DataTables instance is bound to while leaving
+  # `dataTable.context` non-nil, so `renderTableResults` then refused to build
+  # a replacement and the `.chart-table` container stayed `hidden`: the grid
+  # disappeared after the first jump. Only rebuild when there is genuinely
+  # nothing mounted; otherwise refresh the live subtree in place.
+  # The decision lives in `ui/trace_redraw_policy.nim` so it is unit-testable
+  # (this panel has no ViewModel).
   for line, trace in self.traces:
-    if trace.expanded:
+    case traceRedrawAction(
+        expanded = trace.expanded,
+        hasViewZone = not trace.viewZone.isNil,
+        resultsDomMounted = trace.traceResultsDomMounted())
+    of traSkip:
+      discard
+    of traRefreshInPlace:
+      trace.refreshTrace()
+      trace.refreshTraceTableLayout()
+    of traRebuild:
       trace.refreshTraceViewZoneDom()
 
   for line, expandedInstance in self.expanded:
