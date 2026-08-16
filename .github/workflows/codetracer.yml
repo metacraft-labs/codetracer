@@ -3577,6 +3577,73 @@ jobs:
           generate_release_notes: false
           tag_name: "${{ needs.push-tag.outputs.tag }}"
 
+  queue-watchdog:
+    # Alarm, not a gate: is anything actually SERVICING this run?
+    #
+    # `ci-verdict` below answers "did the required jobs run?", and answers it
+    # correctly -- but it cannot answer at all until every job it declares
+    # `needs:` on has reached a conclusion. A job that never gets a runner
+    # never reaches one: it does not fail and it does not finish, it sits
+    # `queued` until GitHub cancels it at the 24-hour ceiling. Neither GitHub
+    # timer covers that state -- the 24h limit applies to a job WAITING for a
+    # runner, `timeout-minutes` to a job that has STARTED -- so the verdict
+    # lands about a day after the push, and for that whole day "nothing is
+    # servicing this run" is indistinguishable from "CI is still thinking".
+    # The `ci-verdict` header has to warn readers not to read a missing
+    # verdict as a passing one; this job is what puts a deadline on that
+    # warning.
+    #
+    # It declares NO `needs:`, so it starts in the first scheduling wave and
+    # is watching before there is anything to watch. Nothing declares `needs:`
+    # on it and it is deliberately absent from ci/verdict/required-jobs.txt:
+    # like `workspace-lock-freshness`, it must be loud and structurally
+    # incapable of cascading. An alarm that can skip a test job would be a
+    # worse defect than the one it reports.
+    #
+    # WHAT IT IS NOT. It is NOT a "does a runner exist for label X?" precheck,
+    # because that is not implementable against this org:
+    # `/orgs/{org}/actions/runner-scale-sets` answers 404, and scale-set
+    # runners appear in `/orgs/{org}/actions/runners` with an EMPTY `labels`
+    # array -- so comparing `runs-on:` labels against registered runner labels
+    # would declare healthy job classes unserviceable and cry wolf on every
+    # run. This watches the run's own observed behaviour instead, which needs
+    # no runner introspection and no permission beyond reading its own run.
+    #
+    # Stock ubuntu-latest, bash + jq + curl: a watchdog must not share the
+    # failure mode it watches for. If this needed a self-hosted runner, a run
+    # starved of self-hosted runners would starve the watchdog too, and it
+    # would fall silent at exactly the moment it is meant to speak.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The jobs API of this run. The workflow's top-level grant is
+      # `contents: read` only, so this must be named here or every poll 403s
+      # and the watchdog retries forever without ever reaching a verdict.
+      actions: read
+    # Must exceed --deadline-minutes, or the job is killed before it can
+    # report. It exits as soon as nothing is queued, so a healthy run releases
+    # this runner early rather than holding it for the ceiling.
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Self-test the queue watchdog
+        # Same rule as `ci-verdict`'s self-tests: a gate is only worth trusting
+        # if its own contracts hold, and they are checked on every run against
+        # fixtures captured from the real starved runs it was built for.
+        run: bash ci/verdict/queue-watchdog-test.sh
+
+      - name: Fail if nothing is servicing this run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash ci/verdict/queue-watchdog.sh --poll \
+            --deadline-minutes 30 --interval-seconds 30
+
   ci-verdict:
     # Final gate: assert that CI actually RAN the jobs it gates on.
     #
