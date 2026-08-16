@@ -13,6 +13,11 @@ fi
 
 LLDB_SYS_URL="https://github.com/metacraft-labs/lldb-sys.rs.git"
 
+# Resolved once, before anything changes directory, so the lock guard below is
+# found whether this script is invoked by path or from a sibling checkout.
+PREFLIGHT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PREFLIGHT_DIR
+
 redact_cargo_fetch_output() {
 	sed -E \
 		-e 's#(https://x-access-token:)[^@[:space:]]+(@github\.com)#\1[REDACTED]\2#g' \
@@ -374,15 +379,70 @@ fi
 # Cargo cache used by the later native-replay build and turns bad credentials,
 # a missing private revision, or an accidental return to libgit2 into an early
 # gate failure before the long CodeTracer build and GUI-test phases.
+#
+# This fetch is deliberately NOT `--locked`, and the guard below is why.
+#
+# native-backend's Cargo.lock is not a function of native-backend alone. Its
+# manifest routes `ct-dap-client` through a sibling working tree:
+#
+#     [patch.crates-io]
+#     ct-dap-client = { path = "../codetracer/libs/ct-dap-client" }
+#
+# A path dependency records no source, no checksum and no revision, so Cargo
+# writes that sibling's dependency edges into the lock verbatim. In this job the
+# sibling IS this pull request's checkout, so the hunk is a function of the tree
+# under test. `--locked` therefore asserted "native-backend was relocked after
+# the CodeTracer commit you are testing" -- an assertion no CodeTracer author
+# can satisfy from this repository, reported as "cannot update the lock file
+# because --locked was passed", which names the flag and not the cause.
+#
+# Dropping `--locked` on its own would trade that for a worse failure: Cargo
+# would silently re-resolve pinned versions and the gate would build
+# ct-native-replay against whatever crates.io serves today. So the lock is
+# re-resolved and then compared, and the comparison is stricter than `--locked`
+# in the dimension that matters: no package carrying a source may change
+# version, source or checksum, and no unpinned package may enter the graph.
+# Only path-package edges are allowed to lag, and every one of them is named.
+cargo_lock_committed="$(mktemp "${TMPDIR:-/tmp}/native-backend-lock.XXXXXX")"
+cp "$native_backend_repo/Cargo.lock" "$cargo_lock_committed"
+
 cargo_fetch_output=""
 if ! cargo_fetch_output="$(
-	cargo fetch --locked --manifest-path "$native_backend_repo/Cargo.toml" 2>&1
+	cargo fetch --manifest-path "$native_backend_repo/Cargo.toml" 2>&1
 )"; then
 	printf '%s\n' "$cargo_fetch_output" |
 		redact_cargo_fetch_output >&2
+	rm -f "$cargo_lock_committed"
 	echo "Visual replay CI could not prefetch the native-backend Cargo graph." >&2
 	exit 1
 fi
+
+cargo_lock_pin_guard_python="$(type -P python3 2>/dev/null || true)"
+if [[ -z $cargo_lock_pin_guard_python ]]; then
+	rm -f "$cargo_lock_committed"
+	echo "Visual replay CI needs python3 to classify native-backend lock drift." >&2
+	exit 1
+fi
+
+cargo_lock_guard_status=0
+"$cargo_lock_pin_guard_python" -I \
+	"$PREFLIGHT_DIR/cargo-lock-pin-guard.py" \
+	--committed "$cargo_lock_committed" \
+	--resolved "$native_backend_repo/Cargo.lock" \
+	--manifest "$native_backend_repo/Cargo.toml" \
+	--label codetracer-native-backend || cargo_lock_guard_status=$?
+
+# Leave the sibling checkout exactly as it was found. The later
+# `cargo build --bin ct-native-replay` re-resolves it the same way, against the
+# cache this fetch just warmed.
+cp "$cargo_lock_committed" "$native_backend_repo/Cargo.lock"
+rm -f "$cargo_lock_committed"
+
+if [[ $cargo_lock_guard_status -ne 0 ]]; then
+	exit "$cargo_lock_guard_status"
+fi
+
+unset cargo_lock_committed cargo_lock_guard_status cargo_lock_pin_guard_python
 unset cargo_fetch_output cargo_auth_header cargo_auth_credential cargo_auth_key
 unset cargo_auth_prefix native_backend_repo
 unset LLDB_SYS_URL
