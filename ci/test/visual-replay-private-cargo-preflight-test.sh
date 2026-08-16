@@ -47,6 +47,9 @@ edition = "2021"
 [patch.crates-io]
 lldb-sys = { git = "https://github.com/metacraft-labs/lldb-sys.rs.git" }
 ct-dap-client = { path = "../codetracer/libs/ct-dap-client" }
+
+[dev-dependencies]
+private-cargo-preflight-fixture = { path = "." }
 CARGO_TOML
 	cat >"$workspace/Cargo.lock" <<'CARGO_LOCK'
 version = 4
@@ -170,7 +173,7 @@ run_positive_case() {
 # author can satisfy from this repository, and reported it as "cannot update
 # the lock file because --locked was passed" — the flag, not the cause.
 #
-# The three cases below pin the replacement contract. They are not mocks of the
+# The four cases below pin the replacement contract. They are not mocks of the
 # classifier: each writes a real pair of lock files and runs the real preflight
 # against them, with a stub `cargo` standing in only for the network fetch.
 #
@@ -183,6 +186,10 @@ run_positive_case() {
 #                   re-resolution. MUST FAIL: a sibling pulled in a crate the
 #                   committed lock does not pin, so Cargo took whatever the
 #                   registry serves today.
+#   local drift   — the drifting package is the workspace member itself, or an
+#                   in-repo path dependency. MUST FAIL: no sibling checkout can
+#                   explain it, so the lock is simply unrefreshed. `path = "."`
+#                   is the repository, not a sibling, and lands on this side.
 # ---------------------------------------------------------------------------
 run_lock_drift_case() {
 	# $1 = case name, $2 = expected exit status, $3 = required output fragment,
