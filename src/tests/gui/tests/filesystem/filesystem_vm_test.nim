@@ -72,6 +72,56 @@ proc makeRoot(children: seq[FilesystemEntryNode]): FilesystemEntryNode =
     children: children,
   )
 
+proc makeSourceFoldersRoot(children: seq[FilesystemEntryNode]):
+    FilesystemEntryNode =
+  ## The production tree root: the synthetic "source folders" container
+  ## that ``loadFilesystem`` builds.  It carries an EMPTY path because it
+  ## is not a folder on disk, only a grouping node for the (possibly
+  ## non-sibling) source folders below it.
+  FilesystemEntryNode(
+    id: "0",
+    text: "source folders",
+    path: "",
+    icon: "",
+    isFolder: true,
+    isExpanded: true,
+    diffClass: fdcNone,
+    children: children,
+  )
+
+proc makeActiveFileTree(): FilesystemEntryNode =
+  ## Tree used by the "reveal the active file" suite:
+  ##
+  ##   source folders            (synthetic, path "")
+  ##   └── /proj
+  ##       ├── /proj/src
+  ##       │   ├── /proj/src/db
+  ##       │   │   └── /proj/src/db/main.rs
+  ##       │   └── /proj/src/ui
+  ##       │       └── /proj/src/ui/view.rs
+  ##       └── /proj/README.md
+  ##
+  ## ``src`` deliberately has TWO folder children and ``/proj`` has a
+  ## folder plus a file, so the pre-existing single-child chain collapse
+  ## (``collectSmartExpansionPaths``) contributes NOTHING below the
+  ## synthetic root.  Any expansion of ``/proj``, ``/proj/src`` or
+  ## ``/proj/src/db`` can therefore only have come from the active-file
+  ## ancestor walk — without this shape the assertions would pass for
+  ## the wrong reason.
+  makeSourceFoldersRoot(@[
+    makeEntry("proj", path = "/proj", isFolder = true, children = @[
+      makeEntry("src", path = "/proj/src", isFolder = true, children = @[
+        makeEntry("db", path = "/proj/src/db", isFolder = true, children = @[
+          makeEntry("main.rs", path = "/proj/src/db/main.rs"),
+        ]),
+        makeEntry("ui", path = "/proj/src/ui", isFolder = true, children = @[
+          makeEntry("view.rs", path = "/proj/src/ui/view.rs"),
+        ]),
+      ]),
+      makeEntry("README.md", path = "/proj/README.md"),
+    ]),
+  ])
+
 # ---------------------------------------------------------------------------
 # Initial state
 # ---------------------------------------------------------------------------
@@ -111,6 +161,86 @@ suite "self-contained source path candidates":
       "repo/game/src/main.nr",
       "src/main.nr"
     ]
+
+suite "lazy file-tree content roots (#574)":
+  ## Regression cover for "Open Folder leaves the file tree on
+  ## Loading...".  The index-process handler used to build the payload
+  ## root with an unconditional ``join(data.trace.outputFolder, "files")``
+  ## — and ``data.trace`` is nil in folder/edit mode, so the async handler
+  ## rejected before it could answer and the stub was never replaced.
+
+  test "no trace yields an empty payload root (the Open Folder case)":
+    check traceFilesRootFor("") == ""
+
+  test "a trace yields its files/ payload root":
+    check traceFilesRootFor("/home/dev/.local/share/codetracer/trace-7") ==
+      "/home/dev/.local/share/codetracer/trace-7/files"
+
+  test "a trailing separator or backslashes do not double up":
+    check traceFilesRootFor("/traces/trace-7/") == "/traces/trace-7/files"
+    check traceFilesRootFor("D:\\traces\\trace-7") == "D:/traces/trace-7/files"
+
+  test "folder mode reads from the live filesystem, never a trace payload":
+    let root = pathContentRootFor(
+      traceOutputFolder = "",
+      traceImported = false,
+      workspaceFolder = "/home/dev/project",
+      requestedPath = "/home/dev/project/src/db")
+    check root.filesRoot == ""
+    check not root.selfContained
+
+  test "an imported trace reads from its payload root":
+    let root = pathContentRootFor(
+      traceOutputFolder = "/traces/trace-7",
+      traceImported = true,
+      workspaceFolder = "",
+      requestedPath = "/recorded/project/src")
+    check root.filesRoot == "/traces/trace-7/files"
+    check root.selfContained
+
+  test "a stale trace does not hijack a path inside the opened folder":
+    # Opening a folder does not clear the index process's previously
+    # loaded trace, so without this guard the subtree would be read out
+    # of an unrelated recording's payload.
+    let root = pathContentRootFor(
+      traceOutputFolder = "/traces/trace-7",
+      traceImported = true,
+      workspaceFolder = "/home/dev/project",
+      requestedPath = "/home/dev/project/src/db")
+    check root.filesRoot == ""
+    check not root.selfContained
+
+  test "the opened folder itself counts as inside the workspace":
+    let root = pathContentRootFor(
+      traceOutputFolder = "/traces/trace-7",
+      traceImported = true,
+      workspaceFolder = "/home/dev/project/",
+      requestedPath = "/home/dev/project")
+    check root.filesRoot == ""
+
+  test "a sibling of the opened folder is not treated as inside it":
+    # ``/home/dev/project-other`` must not match the ``/home/dev/project``
+    # prefix — the guard compares path SEGMENTS, not raw string prefixes.
+    let root = pathContentRootFor(
+      traceOutputFolder = "/traces/trace-7",
+      traceImported = true,
+      workspaceFolder = "/home/dev/project",
+      requestedPath = "/home/dev/project-other/src")
+    check root.filesRoot == "/traces/trace-7/files"
+    check root.selfContained
+
+  test "isAncestorPathOf is strict, separator- and slash-tolerant":
+    check isAncestorPathOf("/proj/src", "/proj/src/main.rs")
+    check isAncestorPathOf("/proj/src/", "/proj/src/db/main.rs")
+    check isAncestorPathOf("C:\\proj\\src", "C:/proj/src/main.rs")
+    check isAncestorPathOf("/", "/proj/main.rs")
+    # Not an ancestor of itself.
+    check not isAncestorPathOf("/proj/src", "/proj/src")
+    # Segment-aware, not a raw string prefix.
+    check not isAncestorPathOf("/proj/src", "/proj/srcx/main.rs")
+    # The synthetic container root is a grouping node, not a folder.
+    check not isAncestorPathOf("", "/proj/main.rs")
+    check not isAncestorPathOf("/proj", "")
 
 suite "FilesystemVM initial state":
 
@@ -354,6 +484,190 @@ suite "FilesystemVM expand / collapse / toggle":
       check vm.isExpanded("b")
       check vm.isExpanded("c/d")
       check not vm.isExpanded("c")
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# reveal the active file (#576)
+# ---------------------------------------------------------------------------
+
+suite "FilesystemVM reveals the active file":
+  ## The Filesystem panel must auto-expand down to the file the debugger
+  ## is stopped in.  Note that the pre-existing
+  ## ``collectSmartExpansionPaths`` is a DIFFERENT feature (it collapses
+  ## single-child folder chains, the VS Code "compact folders"
+  ## affordance) and cannot satisfy any of the assertions below — see
+  ## ``makeActiveFileTree``.
+
+  test "trace load expands every ancestor of the active file":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      vm.setRoot(makeActiveFileTree())
+      # Nothing on the way to the file is expanded by tree load alone.
+      check not vm.isExpanded("/proj")
+      check not vm.isExpanded("/proj/src")
+      check not vm.isExpanded("/proj/src/db")
+
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 12)
+
+      check vm.isExpanded("/proj")
+      check vm.isExpanded("/proj/src")
+      check vm.isExpanded("/proj/src/db")
+      # Siblings off the path stay closed …
+      check not vm.isExpanded("/proj/src/ui")
+      # … and the file itself is not a folder.
+      check not vm.isExpanded("/proj/src/db/main.rs")
+
+      dispose()
+
+  test "expansion also happens when the tree arrives after the active file":
+    # The index process sends ``filesystem-loaded`` before
+    # ``trace-loaded``, but a re-mounted panel (or a session restore) can
+    # deliver the tree after the debugger already has a position.  Both
+    # orderings must reveal the file.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 12)
+      check not vm.isExpanded("/proj/src/db")
+
+      vm.setRoot(makeActiveFileTree())
+
+      check vm.isExpanded("/proj")
+      check vm.isExpanded("/proj/src")
+      check vm.isExpanded("/proj/src/db")
+
+      dispose()
+
+  test "onFolderExpanded fires for each ancestor so lazy subtrees load":
+    # Folders deeper than the edit-mode depth limit arrive as
+    # "Loading..." stubs; only the ``onFolderExpanded`` bridge asks the
+    # index process for their children.  A bulk ``expandedPaths`` write
+    # would mark them open and leave them empty, so the ordering AND the
+    # per-ancestor callback are both load-bearing.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      var expandedOrder: seq[string] = @[]
+      vm.onFolderExpanded = proc(path: string) =
+        expandedOrder.add(path)
+
+      vm.setRoot(makeActiveFileTree())
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 12)
+
+      # Root-first: a parent must be expanded before the child it reveals.
+      check expandedOrder == @["/proj", "/proj/src", "/proj/src/db"]
+
+      dispose()
+
+  test "a lazily filled subtree expands the next-deeper ancestor":
+    # In folder/edit mode the tree is only loaded two levels deep, so
+    # ``/proj/src/db`` is not in the tree at first.  When the index
+    # process answers ``load-path-content`` the bridge re-publishes the
+    # tree, and the newly revealed ancestor must expand in turn.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      var expandedOrder: seq[string] = @[]
+      vm.onFolderExpanded = proc(path: string) =
+        expandedOrder.add(path)
+
+      # Depth-limited tree: ``/proj/src`` still shows the stub child.
+      vm.setRoot(makeSourceFoldersRoot(@[
+        makeEntry("proj", path = "/proj", isFolder = true, children = @[
+          makeEntry("src", path = "/proj/src", isFolder = true, children = @[
+            makeEntry("Loading...", path = ""),
+          ]),
+          makeEntry("README.md", path = "/proj/README.md"),
+        ]),
+      ]))
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 12)
+
+      check expandedOrder == @["/proj", "/proj/src"]
+      check not vm.isExpanded("/proj/src/db")
+
+      # The requested content arrives and the bridge re-publishes.
+      vm.setRoot(makeActiveFileTree())
+
+      check expandedOrder == @["/proj", "/proj/src", "/proj/src/db"]
+      check vm.isExpanded("/proj/src/db")
+
+      dispose()
+
+  test "a manual collapse survives while the active file is unchanged":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      vm.setRoot(makeActiveFileTree())
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 12)
+      check vm.isExpanded("/proj/src/db")
+
+      vm.collapsePath("/proj/src/db")
+      check not vm.isExpanded("/proj/src/db")
+
+      # Stepping within the same file must not fight the user.
+      store.updateDebuggerPosition(rrTicks = 2'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 13)
+      check not vm.isExpanded("/proj/src/db")
+
+      # Moving to another file reveals that file's ancestors …
+      store.updateDebuggerPosition(rrTicks = 3'u64,
+                                   file = "/proj/src/ui/view.rs",
+                                   line = 4)
+      check vm.isExpanded("/proj/src/ui")
+      # … and leaves the collapsed folder that is not on the new path alone.
+      check not vm.isExpanded("/proj/src/db")
+
+      # Coming back re-reveals it.
+      store.updateDebuggerPosition(rrTicks = 4'u64,
+                                   file = "/proj/src/db/main.rs",
+                                   line = 12)
+      check vm.isExpanded("/proj/src/db")
+
+      dispose()
+
+  test "a position with no source file expands nothing":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      vm.setRoot(makeActiveFileTree())
+      store.updateDebuggerPosition(rrTicks = 1'u64, file = "", line = 0)
+
+      check not vm.isExpanded("/proj")
+      check not vm.isExpanded("/proj/src")
+
+      dispose()
+
+  test "a file outside the tree expands nothing":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      vm.setRoot(makeActiveFileTree())
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/elsewhere/lib/other.rs",
+                                   line = 1)
+
+      check not vm.isExpanded("/proj")
+      check not vm.isExpanded("/proj/src")
+      check not vm.isExpanded("/elsewhere")
+      check not vm.isExpanded("/elsewhere/lib")
 
       dispose()
 
