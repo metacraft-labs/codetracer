@@ -170,7 +170,20 @@
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
 
 
-  .menu-node, .menu-search-result
+  // Search results still use the pre-design-system row markup
+  // (`.menu-node-name` / `.menu-node-shortcut` / `.menu-node-icon`), so these
+  // rules stay — but scoped to `.menu-search-result` ALONE.
+  //
+  // `.menu-node` / `.menu-element` / `.menu-folder` are deliberately NOT
+  // styled here any more: on menu rows they are pure semantic hooks for the
+  // GUI test suite (see `viewmodel/views/isonim_menu_shell_view.menuItemClass`
+  // and `codetracer-specs/Testing/UI-Test-Catalog.md`), and the row's whole
+  // appearance comes from the `.ct-menu-item` component
+  // (`components/menu_item.styl`).  Because `#menu .menu-node` outranks
+  // `.ct-menu-item`, leaving them in this selector would repaint every row
+  // with the old input-surface background, margins and 4px radius the moment
+  // the hooks came back.
+  .menu-search-result
     font-size: MENU_FONT_SIZE
     height: auto
     min-width: fit-content //"calc(%s + 2px)" % MENU_NODE_MIN_WIDTH
@@ -197,7 +210,7 @@
   // .menu-node:hover > .menu-node-icon
   //   opacity: 1
 
-  .menu-element, .menu-search-result, .menu-folder
+  .menu-search-result
     .menu-node-name
       // width: MENU_ELEMENT_NAME_WIDTH
       width: -webkit-fill-available !important
@@ -342,14 +355,13 @@
       border-bottom: none
       border-radius: 0 0 0.5em 0.5em
 
-  .menu-enabled
-    color: colors-ui-text-primary-body
-    cursor: pointer
-    border-radius: 4px
-
-  .menu-disabled
-    .menu-node-name
-      color: #777
+  // `.menu-enabled` / `.menu-disabled` are semantic hooks only — the enabled
+  // and disabled *appearance* of a menu row is owned by `.ct-menu-item` and
+  // `.ct-menu-item--disabled` (`components/menu_item.styl`).  They carry no
+  // declarations here on purpose: `#menu .menu-enabled` outranks
+  // `.ct-menu-item`, so the old `border-radius: 4px` would win over the
+  // component's square rows, and the old `.menu-disabled .menu-node-name`
+  // grey no longer has a `.menu-node-name` to colour.
 
   #menu-search-results
     height: auto

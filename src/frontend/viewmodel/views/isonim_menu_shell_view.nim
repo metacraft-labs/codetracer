@@ -143,6 +143,43 @@ proc searchResultClass(searchResult: MenuSearchResultRecord): string =
   else:
     "menu-node-name "
 
+proc menuItemClass*(node: MenuNodeRecord): string =
+  ## Class list for one rendered menu row (both the root menu and every
+  ## submenu use it, so the two stay addressable by the same selectors).
+  ##
+  ## Two vocabularies live on the row on purpose:
+  ##
+  ## * the design-system component classes — ``ct-menu-item`` plus the
+  ##   ``--active`` / ``--disabled`` modifiers — carry *all* of the visual
+  ##   styling (``styles/components/menu_item.styl``);
+  ## * the semantic hooks — ``menu-node``, ``menu-element`` / ``menu-folder``,
+  ##   the per-entry identity class in ``node.nameClass`` (``menu-folder-debug``,
+  ##   ``menu-element-ruby-fibonacci``, …, built in ``ui/menu.nim``) and
+  ##   ``menu-enabled`` / ``menu-disabled`` — carry no styling at all.  They
+  ##   exist so the menu remains *addressable*: they are the published contract
+  ##   the GUI test suite selects on
+  ##   (``codetracer-specs/Testing/UI-Test-Catalog.md`` § Launch Configuration
+  ##   Tests: ".menu-folder-debug", ".menu-folder-launch-configurations",
+  ##   ".menu-element-python-fibonacci", ".menu-element-ruby-fibonacci" and
+  ##   "Verifies `.menu-enabled` class on launch config elements"), and what
+  ##   ``welcome-screen/launch_config.spec.ts`` drives the Debug ▸ Launch
+  ##   Configurations flow through.
+  ##
+  ## They were dropped when the rows were restyled onto ``ct-menu-item``, which
+  ## silently unhooked every one of those selectors — hence this helper, so the
+  ## four call sites below cannot drift apart again.
+  let kindClass =
+    if node.kind == MenuRecordElement: "menu-element" else: "menu-folder"
+  result = "ct-menu-item menu-node " & kindClass
+  if node.nameClass.len > 0:
+    result.add ' '
+    result.add node.nameClass
+  result.add(if node.enabled: " menu-enabled" else: " menu-disabled")
+  if node.nodeClass == "menu-active-node":
+    result.add " ct-menu-item--active"
+  if not node.enabled:
+    result.add " ct-menu-item--disabled"
+
 template renderMenuShellImpl(
     r: untyped;
     model: MenuShellModel;
@@ -199,9 +236,7 @@ template renderMenuShellImpl(
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
-                            class = "ct-menu-item" &
-                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
-                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
                           span(class = "ct-menu-item-label"):
@@ -211,9 +246,7 @@ template renderMenuShellImpl(
                               text node.shortcut
                       else:
                         tdiv(
-                            class = "ct-menu-item" &
-                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
-                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
                           span(class = "ct-menu-item-label"):
                             text node.name
@@ -241,9 +274,7 @@ template renderMenuShellImpl(
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
-                            class = "ct-menu-item" &
-                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
-                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
                           span(class = "ct-menu-item-label"):
@@ -253,9 +284,7 @@ template renderMenuShellImpl(
                               text node.shortcut
                       else:
                         tdiv(
-                            class = "ct-menu-item" &
-                              (if node.nodeClass == "menu-active-node": " ct-menu-item--active" else: "") &
-                              (if not node.enabled: " ct-menu-item--disabled" else: ""),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
                           span(class = "ct-menu-item-label"):
                             text node.name

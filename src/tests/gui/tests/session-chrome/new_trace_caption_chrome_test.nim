@@ -20,6 +20,15 @@
 ## ``views/isonim_views_test.nim``.  Together these tests catch the regressions
 ## where clicking "+" / "New Trace" produced a blank screen and the caption bar
 ## lost the CodeTracer menu, omnibox, or debug toolbar hosts.
+##
+## One contract here is *not* a source contract: the edit-mode layout
+## sanitiser is JavaScript (``index/layout_config_repair.nim``), so it is
+## executed for real in the ``nim js`` suite at the top of the file, and the
+## native suite only asserts what a native run can — which panels edit mode
+## declares hidden, and that the production call sites route through that
+## module.  It used to grep the sanitiser's implementation text out of
+## ``index/config.nim``, which broke the moment issue #608 moved that text
+## without changing what it does.
 
 import std/[strutils, unittest]
 
@@ -55,12 +64,144 @@ proc indexOfRequired(source, needle: string): int =
   check result >= 0
 
 when defined(js):
+  ## Nim's JavaScript backend does not provide the filesystem reads the source
+  ## contracts below need, and the structural caption DOM checks run on this
+  ## backend through ``views/isonim_views_test.nim``.  What *can* only run
+  ## here is the edit-layout sanitiser itself: it is JavaScript
+  ## (``index/layout_config_repair.nim`` is an ``importjs`` body over
+  ## ``std/jsffi``), so this is the backend on which its behaviour is real.
+  import std/jsffi
+  import ../../../../frontend/index/layout_config_repair
+
+  # ``Content`` ordinals, mirrored as literals so this test keeps the
+  # dependency-free property of the module under test — the same convention
+  # ``layout/layout_config_roundtrip_test.nim`` uses.  Source of truth:
+  # ``src/common/common_types/codetracer_features/frontend.nim`` (``Content``).
+  # The corresponding *names* are asserted against
+  # ``index/config.nim``'s ``editModeHiddenContentIds()`` by the native suite
+  # below, which is what keeps these numbers honest.
+  const
+    ContentTrace = 1
+    ContentEditorView = 2
+    ContentState = 4
+    ContentCalltrace = 6
+    ContentFilesystem = 9
+    ContentTraceLog = 22
+    ContentCalltraceEditor = 23
+    ContentTerminalOutput = 24
+    ContentNoInfo = 34
+    ContentAgentActivity = 35
+
+    EditModeHiddenContents = @[
+      ContentTrace,
+      ContentState,
+      ContentCalltrace,
+      ContentTraceLog,
+      ContentCalltraceEditor,
+      ContentTerminalOutput,
+      ContentAgentActivity
+    ]
+
+  proc component(content: int; title: cstring; componentType: cstring): js =
+    js{
+      "type": cstring"component",
+      "componentType": componentType,
+      "componentState": js{"id": 0, "label": title, "content": content},
+      "title": title
+    }
+
+  proc editorTab(title: cstring): js =
+    component(ContentEditorView, title, cstring"editorComponent")
+
+  proc genericTab(content: int; title: cstring): js =
+    component(content, title, cstring"genericUiComponent")
+
+  proc stackOf(activeItemIndex: int; children: seq[js]): js =
+    js{
+      "type": cstring"stack",
+      "activeItemIndex": activeItemIndex,
+      "content": children
+    }
+
+  proc debuggerLayout(): js =
+    ## A layout saved by a replay session: an editor stack holding a source
+    ## tab next to "CALLS" and "NO SOURCE", a side stack holding the
+    ## Filesystem panel next to the debugger-only State panel, and a bottom
+    ## stack carrying the remaining replay-only panels.  Every id in
+    ## `EditModeHiddenContents` is present on purpose, so the assertions
+    ## below cannot pass by asserting the absence of something that was never
+    ## there.
+    var replayOnly: seq[js] = @[]
+    for hiddenContent in EditModeHiddenContents:
+      if hiddenContent != ContentState and
+          hiddenContent != ContentCalltraceEditor and
+          hiddenContent != ContentTerminalOutput:
+        replayOnly.add genericTab(hiddenContent, cstring"REPLAY PANEL")
+    js{
+      "root": js{
+        "type": cstring"row",
+        "content": @[
+          stackOf(1, @[
+            genericTab(ContentFilesystem, cstring"FILES"),
+            genericTab(ContentState, cstring"STATE")]),
+          stackOf(2, @[
+            editorTab(cstring"main.rb"),
+            genericTab(ContentCalltraceEditor, cstring"CALLS"),
+            genericTab(ContentNoInfo, cstring"NO SOURCE"),
+            genericTab(ContentTerminalOutput, cstring"OUTPUT")]),
+          stackOf(0, replayOnly)
+        ]
+      }
+    }
+
   suite "New Trace session chrome contract":
-    test "source contract checks run in native headless mode":
-      ## Nim's JavaScript backend does not provide filesystem reads in Node for
-      ## this test binary.  The structural caption DOM checks still run on the
-      ## JS backend through ``views/isonim_views_test.nim``.
-      check true
+
+    test "edit layout sanitizer removes debugger-only panels":
+      ## An edit session has no recording behind it, so the panels that only
+      ## mean something during replay must not come back when the layout a
+      ## replay session saved is reopened in edit mode.
+      ##
+      ## This used to be asserted by grepping the sanitiser's source text out
+      ## of ``index/config.nim``; the implementation moved to
+      ## ``index/layout_config_repair.nim`` (issue #608) and the grep failed
+      ## while the behaviour was intact.  It is executed here instead, against
+      ## the real production module.
+      let before = debuggerLayout()
+      for hiddenContent in EditModeHiddenContents:
+        check layoutContainsContentId(before, hiddenContent)
+      check layoutContainsContentId(before, ContentEditorView)
+
+      let sanitized = sanitizeLayoutConfig(
+        before, ContentEditorView, EditModeHiddenContents)
+
+      for hiddenContent in EditModeHiddenContents:
+        check not layoutContainsContentId(sanitized, hiddenContent)
+      # The per-trace editor tabs go too: their `componentState.fullPath`
+      # names a source file of whatever program was being debugged.
+      check not layoutContainsContentId(sanitized, ContentEditorView)
+
+      # Everything that is not debugger-only survives — the sanitiser must
+      # not be "reset the layout" wearing a different name.
+      check layoutContainsContentId(sanitized, ContentFilesystem)
+      check layoutContainsContentId(sanitized, ContentNoInfo)
+
+      # …and what survives is loadable: issue #608 is a stack whose
+      # `activeItemIndex` still points past the tabs that were removed, which
+      # GoldenLayout rejects in `Stack.init`.
+      check stackActiveItemIndexInRange(sanitized)
+
+    test "replay mode keeps the debugger-only panels the edit mode hides":
+      ## The same call with an empty hidden set is the replay-mode save path
+      ## (`sanitizeDefaultLayoutJson`).  Asserting both directions is what
+      ## makes the test above a statement about the *edit-mode hidden set*
+      ## rather than about the sanitiser dropping panels in general.
+      let sanitized = sanitizeLayoutConfig(
+        debuggerLayout(), ContentEditorView, @[])
+
+      for hiddenContent in EditModeHiddenContents:
+        check layoutContainsContentId(sanitized, hiddenContent)
+      check not layoutContainsContentId(sanitized, ContentEditorView)
+      check stackActiveItemIndexInRange(sanitized)
 else:
   suite "New Trace session chrome contract":
 
@@ -230,7 +371,14 @@ else:
         indexOfRequired(noTraceBody, "requestSessionTabsRender(data)")
       check startOptionsIndex < tabRenderIndex
 
-    test "edit layout sanitizer removes debugger-only panels":
+    test "edit mode declares every debugger-only panel hidden":
+      ## The *names* half of the edit-mode sanitiser contract.  Which panels
+      ## count as "debugger-only" is a product decision that can only be read
+      ## off `editModeHiddenContentIds()`; the matching *behavioural* half —
+      ## that the sanitiser really drops them, and keeps them in replay mode —
+      ## runs on the JavaScript backend at the top of this file against the
+      ## real `index/layout_config_repair` module.  The two halves are paired
+      ## by these `Content` members and their ordinals.
       let source = readFile(IndexConfigPath)
       let hiddenBody = sectionBetween(source,
         "proc editModeHiddenContentIds(): seq[int] =",
@@ -247,11 +395,32 @@ else:
       ]:
         check hiddenBody.contains(contentName)
 
+    test "edit layout save and load route through the repair module":
+      ## What replaced two greps for the sanitiser's *implementation text*
+      ## (`Number(state.content) === editorContent`, `hidden.has(...)`).  That
+      ## text moved out of `index/config.nim` when issue #608 extracted the
+      ## logic into `index/layout_config_repair.nim`, and the test failed even
+      ## though the behaviour it named was intact — a test keyed to how a
+      ## thing is written cannot survive it being rewritten.
+      ##
+      ## The behaviour is now asserted by executing it (JS suite above).  What
+      ## is left here is the one thing a native run can still establish: the
+      ## production call sites are wired to the module that owns that
+      ## behaviour, and every edit-mode entry point passes the hidden set —
+      ## an edit session that forgets it restores the debugger panels it must
+      ## not have.
+      let source = readFile(IndexConfigPath)
+      check source.contains("./layout_config_repair,")
+
       let sanitizeBody = sectionBetween(source,
         "proc sanitizeEditLayoutConfig*(config: js; editorContent: int;",
         "proc editModeHiddenContentIds(): seq[int] =")
-      check sanitizeBody.contains("Number(state.content) === editorContent")
-      check sanitizeBody.contains("hidden.has(Number(state.content))")
+      check sanitizeBody.contains("sanitizeLayoutConfig(config, editorContent, hiddenContents)")
+
+      # Every edit-mode call site — the save path and both load paths — hands
+      # the sanitiser the editor content id AND the hidden set.
+      check source.count(
+        "ord(Content.EditorView), editModeHiddenContentIds())") == 3
 
     test "delegated ct edit opens a populated edit session":
       let indexSource = readFile(IndexPath)

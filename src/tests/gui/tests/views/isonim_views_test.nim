@@ -579,6 +579,23 @@ suite "IsoNim Status Shell — structure":
 
 suite "IsoNim Menu Shell — structure":
 
+  proc menuSlug(name: string): string =
+    ## The same slug `ui/menu.nim` feeds into a node's identity class via
+    ## `jslib.convertStringToHtmlClass`: alphanumeric words, lower-cased and
+    ## joined with `-`, so "Ruby: Fibonacci" becomes `ruby-fibonacci` and the
+    ## GUI suite's `.menu-element-ruby-fibonacci` selector resolves.
+    var words: seq[string] = @[]
+    var current = ""
+    for ch in name:
+      if ch.isAlphaNumeric or ch == '-':
+        current.add ch
+      elif current.len > 0:
+        words.add current
+        current = ""
+    if current.len > 0:
+      words.add current
+    words.join("-").toLowerAscii
+
   proc menuNode(
       name: string;
       path: seq[int];
@@ -592,7 +609,15 @@ suite "IsoNim Menu Shell — structure":
       shortcut: shortcut,
       enabled: enabled,
       iconClass: name.toLowerAscii,
-      nameClass: "menu-element-" & name.toLowerAscii,
+      # Mirror `ui/menu.nim`'s `menuRecord`: an element gets
+      # `menu-element-<slug>`, a folder gets `menu-folder-<slug>`.  The
+      # fixture used the element prefix for both, which made it impossible
+      # for this suite to notice that the folder identity classes the GUI
+      # suite selects on (`.menu-folder-debug`,
+      # `.menu-folder-launch-configurations`) had stopped being rendered.
+      nameClass:
+        (if kind == MenuRecordFolder: "menu-folder-" else: "menu-element-") &
+          menuSlug(name),
       nodeClass: nodeClass,
       path: path,
       nameWidth: name.len + 1)
@@ -652,10 +677,39 @@ suite "IsoNim Menu Shell — structure":
         maximized: true))
 
     check findByClass(panel, "menu-active-node") != nil
+    # One `.menu-node` per rendered menu row.  This is the selector the GUI
+    # suite enumerates the open menu with — `#menu-elements .menu-node` and
+    # `.menu-nested-elements .menu-node` in
+    # `welcome-screen/launch_config.spec.ts`, catalogued in
+    # `codetracer-specs/Testing/UI-Test-Catalog.md` § Launch Configuration
+    # Tests — so a row that renders without it is invisible to every one of
+    # those tests even though the user can see it.
     check findAllByClass(panel, "menu-node").len == 2
+    # …and each row is addressable by kind and by identity, which is what
+    # ".menu-folder-debug" / ".menu-element-ruby-fibonacci" in that same
+    # catalogue mean for a real menu.
+    check findAllByClass(panel, "menu-folder").len == 1
+    check findAllByClass(panel, "menu-element").len == 1
+    check findByClass(panel, "menu-folder-file") != nil
+    check findByClass(panel, "menu-element-run") != nil
     check findById(panel, DebugShellId).attributes["class"] == DebugShellClass
     check findById(panel, "isonim-debug-controls") != nil
-    check findByClass(panel, "menu-node-shortcut").textContent == "CTRL+R"
+    # The row must show its keyboard shortcut.  Spec:
+    # `codetracer-specs/GUI/Keyboard-Shortcuts-System.md` — "Shortcut display
+    # in menus uses a manual `loadShortcut()` function" (§ Known Issues) and
+    # "Shortcut hints in UI: Show keyboard shortcut hints on toolbar buttons
+    # (tooltips), menu items (already partial)" (§ Future Work).  The slot it
+    # is displayed in is the design system's sublabel —
+    # `styles/components/menu_item.styl`: ".ct-menu-item-sublabel — secondary
+    # / descriptive text (keyboard shortcut)".
+    #
+    # The nil guards here are deliberate: a nil deref in a `check` aborts the
+    # whole test binary with a SIGSEGV, which is how the menu-shell suite once
+    # took every later suite in this file down with it.
+    let shortcut = findByClass(panel, "ct-menu-item-sublabel")
+    check shortcut != nil
+    if shortcut != nil:
+      check shortcut.textContent == "CTRL+R"
     check findByClass(panel, "restore") != nil
     check findByClass(panel, "maximize").isNil
 
@@ -673,10 +727,17 @@ suite "IsoNim Menu Shell — structure":
         onNodeClick: proc(path: seq[int]) = clickedPath = path,
         onSearchResultClick: proc(index: int) = searchIndex = index))
 
+    # `.menu-element` is the clickable leaf row; `launch_config.spec.ts`
+    # activates a launch configuration by clicking exactly this selector
+    # (".menu-nested-elements .menu-element", catalogued in
+    # `codetracer-specs/Testing/UI-Test-Catalog.md`), so the class and the
+    # click handler have to sit on the same element.
     let item = findByClass(menuPanel, "menu-element")
     check item != nil
-    item.fireEvent("click")
-    check clickedPath == @[1]
+    # Guarded — see the note above: a nil deref here aborts the whole binary.
+    if item != nil:
+      item.fireEvent("click")
+      check clickedPath == @[1]
 
     let searchPanel = renderMenuShell(
       r,
@@ -697,8 +758,9 @@ suite "IsoNim Menu Shell — structure":
 
     let result = findByClass(searchPanel, "menu-search-result")
     check result != nil
-    result.fireEvent("click")
-    check searchIndex == 0
+    if result != nil:
+      result.fireEvent("click")
+      check searchIndex == 0
 
   test "shell UI model can render menu without window controls":
     let r = MockRenderer()
@@ -713,7 +775,69 @@ suite "IsoNim Menu Shell — structure":
     check findByClass(panel, WindowMenuClass).isNil
     check findById(panel, DebugShellId) != nil
     check findById(panel, "isonim-debug-controls") != nil
-    check findByClass(panel, "menu-folder").textContent.contains("Shell")
+    let folder = findByClass(panel, "menu-folder")
+    check folder != nil
+    if folder != nil:
+      check folder.textContent.contains("Shell")
+      # A folder is enabled here, so it must advertise itself as activatable:
+      # `codetracer-specs/Testing/UI-Test-Catalog.md` § Launch Configuration
+      # Tests — "Launch config items are clickable | Verifies `.menu-enabled`
+      # class on launch config elements".
+      check folder.attributes["class"].split(' ').contains("menu-enabled")
+      check findByClass(panel, "menu-folder-shell") != nil
+
+  test "submenu rows carry the same identity and enablement hooks":
+    ## The launch-configuration flow the GUI suite drives lives entirely in
+    ## *submenus*: `codetracer-specs/Testing/UI-Test-Catalog.md` § Launch
+    ## Configuration Tests hovers `.menu-folder-debug`, then
+    ## `.menu-folder-launch-configurations`, then clicks
+    ## `.menu-element-ruby-fibonacci` inside `.menu-nested-elements`, and
+    ## checks `.menu-enabled` on it.  Only the root menu was covered here, so
+    ## the nested branch could lose those hooks unnoticed — as it had.
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: true,
+        rootNodes: @[menuNode("Debug", @[0], kind = MenuRecordFolder)],
+        nestedMenus: @[
+          MenuNestedRecord(
+            id: "menu-nested-elements-1",
+            className: "menu-nested-elements",
+            style: "top: 0px; left: 0px",
+            nodes: @[
+              menuNode("Launch Configurations", @[0, 0],
+                kind = MenuRecordFolder),
+              menuNode("Ruby: Fibonacci", @[0, 1], shortcut = "CTRL+SHIFT+R"),
+              menuNode("Stop", @[0, 2], enabled = false)
+            ])
+        ]))
+
+    let nested = findByClass(panel, "menu-nested-elements")
+    check nested != nil
+    if nested != nil:
+      check findAllByClass(nested, "menu-node").len == 3
+      check findByClass(nested, "menu-folder-launch-configurations") != nil
+      let entry = findByClass(nested, "menu-element-ruby-fibonacci")
+      check entry != nil
+      if entry != nil:
+        let entryClasses = entry.attributes["class"].split(' ')
+        check entryClasses.contains("menu-element")
+        check entryClasses.contains("menu-enabled")
+        check entry.textContent.contains("CTRL+SHIFT+R")
+
+      # A disabled entry must say so in both vocabularies: `menu-disabled` is
+      # the semantic counterpart of `menu-enabled` above, and
+      # `ct-menu-item--disabled` is what actually greys the row out and turns
+      # off its pointer events (`styles/components/menu_item.styl`).
+      let disabled = findByClass(nested, "menu-element-stop")
+      check disabled != nil
+      if disabled != nil:
+        let disabledClasses = disabled.attributes["class"].split(' ')
+        check disabledClasses.contains("menu-disabled")
+        check disabledClasses.contains("ct-menu-item--disabled")
+        check not disabledClasses.contains("menu-enabled")
 
   test "caption shell keeps chrome hosts when menu nodes are unavailable":
     ## Regression guard for welcome / newly-created empty sessions: the caption
@@ -747,16 +871,40 @@ suite "IsoNim Menu Shell — structure":
 suite "IsoNim Session Tabs — structure":
 
   test "single session uses hidden modifier and renders add button":
+    ## Spec: `codetracer-specs/GUI/Multi-Window-Tab-Management.md` § Tab
+    ## Behavior — 'The "+" button opens a new empty tab (for loading a new
+    ## trace)'.
+    ##
+    ## What that requires of the rendered bar is a single, activatable,
+    ## named control wired to "add a session".  This used to be asserted as
+    ## `textContent == "+"`, which stopped holding when the plus glyph moved
+    ## into the button's background image
+    ## (`styles/components/session_tabs.styl` → `session_tab_add.svg`) — a
+    ## presentation detail, not the contract.  It is asserted here as the
+    ## contract instead: the control exists exactly once, is a real `button`
+    ## (so it is focusable and activatable, not a bare div), announces itself
+    ## through its title now that no text node names it, and adding is what
+    ## clicking it does.
+    var addCount = 0
     let r = MockRenderer()
     let panel = renderSessionTabsPanel(
       r,
       @[SessionTabRecord(label: "main.py")],
-      activeIndex = 0)
+      activeIndex = 0,
+      callbacks = SessionTabsCallbacks(onAdd: proc() = addCount += 1))
 
     check panel.attributes["id"] == SessionTabBarId
     check panel.attributes["class"] == SessionTabBarSingleClass
     check findAllByClass(panel, SessionTabClass).len == 1
-    check findByClass(panel, SessionTabAddClass).textContent == "+"
+    check findAllByClass(panel, SessionTabAddClass).len == 1
+
+    let addButton = findByClass(panel, SessionTabAddClass)
+    check addButton != nil
+    if addButton != nil:
+      check addButton.tag == "button"
+      check addButton.attributes["title"] == SessionTabAddTitle
+      addButton.fireEvent("click")
+      check addCount == 1
     check panel.textContent.contains("main.py")
 
   test "multiple sessions mark the active tab and show close buttons":
@@ -9076,6 +9224,60 @@ suite "IsoNim Filesystem Panel — vm":
 
       dispose()
 
+  test "the active file's row materialises after the debugger stops in it":
+    ## View-layer companion to the FilesystemVM suite in
+    ## src/tests/gui/tests/filesystem/filesystem_vm_test.nim (#576).
+    ##
+    ## The view only recurses into EXPANDED folders
+    ## (isonim_filesystem_view.nim), so a file three levels down is absent
+    ## from the DOM until every folder above it is expanded.  That is what
+    ## makes this a proof the file is REVEALED, rather than merely marked
+    ## expanded in a set.
+    ##
+    ## Note the contrast with the test directly above: that one covers the
+    ## single-child chain collapse (`collectSmartExpansionPaths`), which is a
+    ## DIFFERENT feature and was wrongly cited in the milestone file as
+    ## verification for auto-expand-to-active-file.  Here `src` deliberately
+    ## has TWO folder children, so the chain collapse contributes nothing and
+    ## this cannot pass for the wrong reason.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("proj", path = "/proj", isFolder = true, children = @[
+          makeFsEntry("src", path = "/proj/src", isFolder = true, children = @[
+            makeFsEntry("db", path = "/proj/src/db", isFolder = true,
+                        children = @[
+                          makeFsEntry("main.rs",
+                                      path = "/proj/src/db/main.rs")]),
+            makeFsEntry("ui", path = "/proj/src/ui", isFolder = true,
+                        children = @[
+                          makeFsEntry("view.rs",
+                                      path = "/proj/src/ui/view.rs")]),
+          ]),
+          makeFsEntry("README.md", path = "/proj/README.md"),
+        ]),
+      ]))
+
+      proc labelTexts(): seq[string] =
+        for node in findAllByClass(panel, "filesystem-entry-label"):
+          result.add(node.textContent)
+
+      # Everything below the top level is collapsed, so the file is absent.
+      check "main.rs" notin labelTexts()
+
+      store.updateDebuggerPosition(1'u64, "/proj/src/db/main.rs", 12)
+
+      let texts = labelTexts()
+      check "main.rs" in texts
+      # The sibling subtree stays collapsed, so its file is still absent.
+      check "view.rs" notin texts
+
+      dispose()
+
   test "diffClassToCss maps the enum to the legacy CSS modifier strings":
     check diffClassToCss(fdcNone) == ""
     check diffClassToCss(fdcAdded) == "diff-file-added"
@@ -10874,8 +11076,8 @@ suite "IsoNim VCS Panel — structure":
       let callbacks = VCSCallbacks(
         onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
           (expandedCommit = index; expandModifiers = (ctrl, shift)),
-        onSelectFile: proc(index: int; path: string) =
-          (discard index; selectedFile = path),
+        onSelectFile: proc(index: int; path: string; target: string) =
+          (discard index; discard target; selectedFile = path),
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
@@ -10931,8 +11133,12 @@ suite "IsoNim VCS Panel — structure":
       let dropdown = findByClass(panel, "vcs-branch-dropdown")
       check dropdown != nil
 
-      let options = findAllByClass(dropdown, "vcs-branch-option")
+      # `0717477a` moved the dropdown onto the shared `ct-menu-item` markup;
+      # the old `vcs-branch-option` class no longer exists.
+      let options = findAllByClass(dropdown, "ct-menu-item")
       check options.len == 3
+      # The checked-out branch is marked so the picker shows where you are.
+      check options[0].attributes["class"].contains("ct-menu-item--active")
       check options[0].textContent.contains("main")
       check options[1].textContent.contains("feature-1")
       check options[2].textContent.contains("feature-2")
@@ -10949,8 +11155,8 @@ suite "IsoNim VCS Panel — structure":
       let r = MockRenderer()
       var selected = -1
       let callbacks = VCSCallbacks(
-        onSelectFile: proc(index: int; path: string) =
-          (discard path; selected = index),
+        onSelectFile: proc(index: int; path: string; target: string) =
+          (discard path; discard target; selected = index),
       )
       let panel = renderVCSPanel(r, vm, callbacks)
 
@@ -10972,7 +11178,13 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
-  test "test_vcs_unified_diff_inline":
+  test "test_vcs_unified_diff_tab":
+    ## A panel instance that IS a diff — a "View Diff" tab, or the inline
+    ## review diff of an agentic session — shows the diff and nothing else.
+    ##
+    ## This is the `unifiedDiffActive` case.  It is deliberately NOT what the
+    ## "Unified Diff" view-mode toggle does; see the test below.  (Formerly
+    ## named `test_vcs_unified_diff_inline`, from when the two were one flag.)
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
@@ -10990,6 +11202,151 @@ suite "IsoNim VCS Panel — structure":
       check filePath.textContent == "src/main.nim"
       check findAllByClass(diff, "deepreview-unified-line").len == 2
       check findByClass(panel, "vcs-commit-history") == nil
+      # A diff tab carries none of the docked panel's chrome.
+      check findByClass(panel, "vcs-branch-picker") == nil
+      check findByClass(panel, "vcs-diff-toggle") == nil
+
+      dispose()
+
+  test "test_vcs_view_mode_toggle_keeps_commit_history":
+    ## #561: the reporter's complaint was that turning on "Unified Diff"
+    ## replaced the VCS panel's contents.  The toggle selects what a file click
+    ## *does*; the commit history must survive it.
+    ##
+    ## `renderDiffToggle` was dead code — `renderVCSPanelImpl` never called it
+    ## — and `onToggleUnifiedDiff` was a `discard`, so neither the switch nor
+    ## its effect existed.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var toggled = 0
+      let callbacks = VCSCallbacks(
+        onToggleUnifiedDiff: proc() =
+          toggled += 1
+          vm.setViewMode(
+            if vm.viewMode.val == vmUnifiedDiff: vmOpenFile
+            else: vmUnifiedDiff),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[])
+
+      let toggle = findByClass(panel, "vcs-diff-toggle")
+      let button = findByClass(panel, "vcs-toggle-button")
+      check toggle != nil
+      check button != nil
+      # Guarded: without the switch there is nothing to click, and the
+      # assertions below would dereference nil.
+      if button != nil:
+        # Unified diff is the spec default, so the switch starts active.
+        check button.attributes["class"] ==
+          "vcs-toggle-button vcs-toggle-active"
+        check findByClass(panel, "vcs-commit-history") != nil
+
+        button.fireEvent("click")
+
+        check toggled == 1
+        check vm.viewMode.val == vmOpenFile
+        # Still a commit list, still no diff: the toggle changed behaviour only.
+        check findByClass(panel, "vcs-commit-history") != nil
+        check findByClass(panel, "deepreview-unified-diff") == nil
+        check findByClass(panel, "vcs-toggle-button").attributes["class"] ==
+          "vcs-toggle-button"
+
+      dispose()
+
+  test "test_vcs_view_diff_button_dispatches_target":
+    ## #561 / #611: the "View Diff" button must dispatch the diff target for
+    ## its row, and must not also trigger the row's own file-selection click.
+    ##
+    ## Both row kinds are covered.  In a normal git session `renderChangedFiles`
+    ## is not rendered at all, so the rows a user actually sees are the
+    ## `vcs-accordion-file` rows of an expanded commit; the `vcs-file-item`
+    ## rows only appear in DeepReview mode.  They dispatch different targets.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var selectedFile = ""
+      var openedDiff = ""
+      let callbacks = VCSCallbacks(
+        onSelectFile: proc(index: int; path: string; target: string) =
+          (discard index; discard target; selectedFile = path),
+        onOpenFileDiff: proc(target: string) =
+          openedDiff = target,
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      # --- normal git mode: accordion rows under an expanded commit ---------
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[0])
+      vm.setCommitFiles(0, @[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim"),
+        VCSFileRow(status: "A", path: "src/other.nim", baseName: "other.nim"),
+      ])
+
+      # Every row carries a button — dropping one must fail loudly.
+      check findAllByClass(panel, "vcs-accordion-file").len == 2
+      let commitButtons = findAllByClass(panel, "vcs-file-diff-btn")
+      check commitButtons.len == 2
+      if commitButtons.len == 2:
+        commitButtons[1].fireEvent("click")
+        check openedDiff == "commit:abc123:src/other.nim"
+        # The button must not double as a row click.
+        check selectedFile == ""
+
+      # --- DeepReview mode: changed-file rows -------------------------------
+      openedDiff = ""
+      vm.setDeepReviewMode(true)
+      vm.setChangedFiles(@[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim"),
+      ])
+
+      check findAllByClass(panel, "vcs-file-item").len == 1
+      let reviewButtons = findAllByClass(panel, "vcs-file-diff-btn")
+      check reviewButtons.len == 1
+      if reviewButtons.len == 1:
+        reviewButtons[0].fireEvent("click")
+        check openedDiff == "file:src/main.nim"
+        check selectedFile == ""
+
+      dispose()
+
+  test "test_vcs_row_click_carries_its_diff_target":
+    ## The row click reports the same target as the row's button, so the host
+    ## can honour the unified-diff view mode without having to re-derive which
+    ## commit an accordion row belonged to.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var rowTarget = ""
+      var rowPath = ""
+      let callbacks = VCSCallbacks(
+        onSelectFile: proc(index: int; path: string; target: string) =
+          (discard index; rowPath = path; rowTarget = target),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[0])
+      vm.setCommitFiles(0, @[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim"),
+      ])
+
+      let row = findByClass(panel, "vcs-accordion-file")
+      check row != nil
+      if row != nil:
+        row.fireEvent("click")
+        check rowPath == "src/main.nim"
+        check rowTarget == "commit:abc123:src/main.nim"
 
       dispose()
 
@@ -11272,12 +11629,12 @@ suite "IsoNim App Shell — structure":
     mockPin(2)
     check pinnedEdge == 2 # Bottom
 
-  test "test_flow_conditional_branch_colors":
-    # Verify the Taken and NotTaken style classes.
-    # Taken branch line style should carry the "flow-taken" CSS class.
-    # NotTaken branch line style should carry the "flow-not-taken" CSS class.
-    let takenClass = "flow-taken"
-    let notTakenClass = "flow-not-taken"
-
-    check takenClass == "flow-taken"
-    check notTakenClass == "flow-not-taken"
+  # `test_flow_conditional_branch_colors` used to live here. It compared two
+  # string literals to themselves (`check "flow-taken" == "flow-taken"`), so it
+  # passed both before and after the 2026-07-16 attempt at #594 and could not
+  # have detected that the colours were being wiped by the flow reload. Removed
+  # rather than repaired: this suite renders IsoNim views through MockRenderer
+  # and has no access to the Monaco decoration bookkeeping where the bug lives.
+  # Real coverage is in
+  # `src/tests/gui/tests/editor/editor_decorations_test.nim` (the retention
+  # rule) and `src/tests/gui/tests/flow/flow_branch_colors.spec.ts` (end to end).
