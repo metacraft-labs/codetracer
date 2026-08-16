@@ -1344,6 +1344,28 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     if not data.ui.status.isNil:
       data.ui.status.requestStatusRender()
     requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
+    # …and the collapsed status-bar icon zone, for the same reason and on the
+    # same terms as the bottom strip: it is a host inside the status shell, so
+    # the mount below is a no-op while the host is missing and `ui/status.nim`
+    # re-mounts it whenever it rebuilds the shell.
+    #
+    # This line was missing, and its absence is a real defect rather than a
+    # missed optimisation.  When the strips are collapsed — the normal state for
+    # a maximized window, `Planned-Features/Auto-Hide-Panes.md` §1.3 — the side
+    # strip renders as a 1 px accent line with no tabs, and §10 makes the icon
+    # zone the replacement affordance: "This icon zone serves as the panel
+    # directory — it tells the user which panels" are pinned.  With no render
+    # request here, pinning a panel while collapsed left the zone empty until
+    # something unrelated happened to rebuild the status shell, so the panel had
+    # no visible affordance at all.
+    requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+    # Persist here rather than only from the `stateChanged` handler below.
+    # Pinning is a REPARENT, and `itemDestroyed` deliberately returns early
+    # while `data.ui.isReparenting` is set, so a pin can complete without
+    # ever setting `data.ui.saveLayout` — the flag that gates the save in
+    # `stateChanged`.  Hanging the write off the auto-hide state's own
+    # change hook makes the persistence follow the thing being persisted.
+    persistAutoHideState()
 
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-left",
@@ -1407,9 +1429,20 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     for panelDef in standaloneAutoHidePanels:
       # Skip if this content is already in the auto-hide state (e.g.
       # restored from a saved layout or previously pinned by the user).
-      if not autoHideState.isNil and
-         not autoHideState.findPanelByContent(panelDef.content).isNil:
-        continue
+      if not autoHideState.isNil:
+        let existing = autoHideState.findPanelByContent(panelDef.content)
+        if not existing.isNil:
+          if existing.standalone or not existing.liveElement.isNil:
+            continue
+          # A pinned-state entry restored from disk for one of the four
+          # standalone panes: it has no live element, and unlike a restored
+          # GL panel there is no component config the overlay could build one
+          # from.  Leaving it in place would suppress the registration below
+          # and leave a strip tab whose overlay is empty, so drop it and
+          # register the standalone pane normally.
+          cwarn "auto_hide: replacing a restored entry for standalone pane '" &
+            $panelDef.title & "' with a fresh registration"
+          autoHideState.panels = autoHideState.panels.filterIt(it != existing)
 
       # Check if GL created a container for this component (from a saved
       # layout that still includes it). If so, find the GL content item

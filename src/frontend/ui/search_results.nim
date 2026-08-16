@@ -350,7 +350,7 @@ proc autoRevealSearchResultsPanel*() =
     return
   let panel = autoHideState.findPanelByContent(Content.SearchResults)
   if not panel.isNil:
-    showOverlay(panel)
+    revealOverlay(panel)
 
 # SearchResultsComponent.render() removed: IsoNim is the primary renderer.
 # Generic callers are expected to use direct IsoNim mount paths; all real

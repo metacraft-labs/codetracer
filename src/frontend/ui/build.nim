@@ -238,7 +238,7 @@ proc autoRevealBuildPanel*() =
   let panel = autoHideState.findPanelByContent(Content.Build)
   if not panel.isNil:
     cancelBuildAutoDismiss()
-    showOverlay(panel)
+    revealOverlay(panel)
 
 proc autoDismissBuildPanel*() =
   ## After a successful build, keep the overlay visible for 2 seconds,
@@ -488,7 +488,7 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
     if not autoHideState.isNil:
       let errorsPanel = autoHideState.findPanelByContent(Content.BuildErrors)
       if not errorsPanel.isNil:
-        showOverlay(errorsPanel)
+        revealOverlay(errorsPanel)
 
     self.data.functions.switchToEdit(self.data)
   else:

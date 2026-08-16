@@ -1262,6 +1262,13 @@ proc openLayoutTab*(
           data.ui.componentMapping[content][0].layoutItem)
       return
 
+  # Group a new panel with an already-open panel of the same kind.
+  #
+  # An independent editor-area tab may only join another *independent* tab.
+  # Grouping it with the docked singleton would drop it into the sidebar stack
+  # the singleton lives in, which is precisely the placement `isEditor` asks us
+  # to avoid.
+  let wantsIndependentTab = opensAsIndependentTab(content, isEditor)
   var similarParent: GoldenContentItem = nil
   if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
     for i in countdown(openSimilarComponentsTabs.len - 1, 0):
