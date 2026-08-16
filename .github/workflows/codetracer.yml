@@ -3688,6 +3688,23 @@ jobs:
         # runner, regardless of the state of the heavy lanes.
         run: bash ci/test/visual-replay-private-cargo-preflight-test.sh
 
+      - name: Assert the JS ViewModel lane can observe its own failures
+        # `test-vm-js` believed it was checking node's exit code. It was not:
+        # without `-d:nodejs` std/unittest cannot set a failing exit code on
+        # the js backend, so a failing suite exited 0 -- and the compile
+        # redirected the compiler warning that says exactly that to
+        # /dev/null. The lane went red only when a test printed `[FAILED]`,
+        # so a suite that ran zero tests, or died before printing anything,
+        # scored `OK`.
+        #
+        # The shape half of this suite is a static check over the justfile, so
+        # it belongs here on a stock runner: the lane it guards runs inside the
+        # dev shell on a self-hosted runner, and is therefore exactly the kind
+        # of lane that can stop reporting without anyone noticing. The suite's
+        # toolchain-dependent half skips cleanly where nim and node are absent
+        # and is exercised in full by `viewmodel-tests`.
+        run: bash ci/test/vm-js-lane-test.sh
+
       - name: Assert the required jobs actually ran
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}

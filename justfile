@@ -2361,26 +2361,52 @@ test-vm-js: vm-test-prereqs
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"
     echo -n "  $f ... "
-    if ! nim js --hints:off \
+    # `-d:nodejs` is load-bearing, not decoration.
+    #
+    # Nim auto-defines `nodejs` only for `nim js -r`. This lane compiles and
+    # runs as separate steps (same split, and for the same reasons, as the
+    # native lane above), so the define is absent unless spelled out -- and
+    # without it `std/exitprocs.setProgramResult` is undeclared, so
+    # `std/unittest` substitutes a no-op and the process exits 0 even when a
+    # test fails. The compiler says exactly that:
+    #
+    #     unittest.nim: Warning: setProgramResult not available on platform,
+    #       unittest will not give failing exit code on test failure
+    #
+    # and the old `>/dev/null 2>&1` on the compile threw the warning away.
+    # Measured on this repo's Nim with a suite whose only test fails:
+    # `nim js` -> node exits 0; `nim js -d:nodejs` -> node exits 1.
+    #
+    # So the `$exitcode` arm below was dead twice over. The define is what
+    # makes the exit code mean anything at all, and capturing it with
+    # `|| exitcode=$?` is what lets this recipe SEE it -- the old
+    # `output=$(...)` followed by `exitcode=$?` could never observe a failure,
+    # because under this recipe's `set -e` a non-zero `node` killed the whole
+    # loop before the assignment was read.
+    if ! compile_output=$(nim js -d:nodejs --hints:off \
       --path:src/frontend/viewmodel \
       --nimcache:"$cache" \
       -o:"$cache/$name.js" \
-      "$f" >/dev/null 2>&1; then
+      "$f" 2>&1); then
       echo "COMPILE ERROR"
-      nim js --hints:off \
-        --path:src/frontend/viewmodel \
-        --nimcache:"$cache" \
-        -o:"$cache/$name.js" \
-        "$f" 2>&1 | grep 'Error:' | head -2 | sed 's/^/    /'
+      echo "$compile_output" | grep 'Error:' | head -2 | sed 's/^/    /'
       failed=$((failed + 1))
       continue
     fi
-    output=$(node "$cache/$name.js" 2>&1)
-    exitcode=$?
+    exitcode=0
+    output=$(node "$cache/$name.js" 2>&1) || exitcode=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$fails" -gt 0 ] || [ "$exitcode" -ne 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
+    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
+      # Built, so not a compile error: it could not run, or ran and reported
+      # nothing. The native lane has had this guard for a while; without it
+      # this lane scored a silent no-op as `OK (0 tests)`, which is the one
+      # result a test lane must never invent.
+      echo "DID NOT RUN (compiled, but produced no test results)"
+      echo "$output" | head -20 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ] || [ "$exitcode" -ne 0 ]; then
+      echo "PARTIAL ($oks OK, $fails FAILED, exit $exitcode)"
       echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
       failed=$((failed + 1))
     else
