@@ -17,10 +17,43 @@ permissions:
 
 jobs:
   CLAAssistant:
-    runs-on: eph-linux-x64  # CIP-5: nix job → eph-linux-x64
+    # The gate is on the JOB, not on the step. It used to sit on the single
+    # step below, which meant every `issue_comment` on every *issue* in the
+    # repo still allocated a runner, booted it, skipped its only step, and
+    # tore it down. That is not hypothetical: run 31920424241 occupied the
+    # ephemeral runner `garm-qjynbrvg9hfi` to produce
+    # `CLA Assistant ... skipped`. With 25 such comments queued at once the
+    # workflow was holding the entire `eph-linux-x64` class (6 slots) hostage
+    # to do nothing. A job-level `if` is evaluated before scheduling, so no
+    # runner is requested at all.
+    #
+    # `github.event.issue.pull_request` is present only when the comment is on
+    # a pull request, so plain-issue chatter no longer reaches this job.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request != null &&
+       (github.event.comment.body == 'recheck' ||
+        github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+
+    # A CLA lookup is a git checkout plus an API call. It needs none of the
+    # custom NixOS image, so it has no business on the 6-slot self-hosted
+    # class. codetracer is a public repository, so `ubuntu-latest` is free.
+    runs-on: ubuntu-latest
+
+    # Grouped per pull request, NOT per `github.ref`: on `pull_request_target`
+    # and `issue_comment` the ref is the *base* branch, so a ref-keyed group
+    # would put every open PR in one group and let one PR's CLA run cancel
+    # another's.
+    #
+    # `cancel-in-progress: false` because this action commits the signature
+    # file back to the `main` branch; cancelling mid-commit can leave the
+    # signature store half-written. Queueing is the correct behaviour here.
+    concurrency:
+      group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
+
     steps:
       - name: "CLA Assistant"
-        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

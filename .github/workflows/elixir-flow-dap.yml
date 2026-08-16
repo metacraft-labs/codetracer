@@ -22,7 +22,10 @@ permissions:
 
 jobs:
   redirect-notice:
-    runs-on: eph-linux-x64  # CIP-5: nix job → eph-linux-x64
+    # Two `echo` lines. This is not a nix job and never was — it needs nothing
+    # from the custom image, so it does not belong on the 6-slot
+    # `eph-linux-x64` class. codetracer is public, so `ubuntu-latest` is free.
+    runs-on: ubuntu-latest
     steps:
       - name: Notify and redirect
         run: |
