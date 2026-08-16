@@ -178,10 +178,12 @@ def main() -> int:
         line = f"    {name} ({origin}): {detail or 'entry added/removed'}"
         # A workspace member, or a path dependency that stays inside the
         # repository, is content the repository controls: nothing outside it can
-        # explain the drift, so it is simply an unrefreshed lock.
-        outside = relative is not None and repo_root not in (
-            repo / relative
-        ).resolve().parents
+        # explain the drift, so it is simply an unrefreshed lock. `path = "."`
+        # is the repository itself and must land on that side of the line.
+        outside = False
+        if relative is not None:
+            crate_dir = (repo / relative).resolve()
+            outside = crate_dir != repo_root and repo_root not in crate_dir.parents
         if outside:
             lagging.append(line)
         else:
