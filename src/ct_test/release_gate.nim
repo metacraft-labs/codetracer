@@ -149,6 +149,77 @@ const
     # it belongs in the sibling-gated `just test-no-sidecar-manifests` lane
     # rather than in this toolchain-free one.
     "src/tests/gui/tests/request-panel/request_span_conformance_test.nim",
+    # pxor bug campaign (2026-08).  Each of these pins a defect that had
+    # previously been reported fixed and was not, so the gate is the point:
+    # an ungated ViewModel test is how three of these regressed unnoticed in
+    # the first place.
+    #
+    # #612 (M44) — the Scratchpad merges repeat captures of one expression
+    # instead of appending a duplicate row.  Guards the spec behaviour in
+    # `GUI/Core-Panes/Scratchpad-Pane.md` that was never implemented.
+    # (The event-bus teardown half of #612 is guarded by
+    # `src/frontend/tests/scratchpad_add_dispatch_test.nim`, which runs in
+    # the `just test-frontend-js` lane because `communication.nim` is
+    # JS-only and cannot compile on this array's native backend.)
+    "src/tests/gui/tests/scratchpad/scratchpad_vm_test.nim",
+    # #576 (M22) — auto-expansion to the active file.  The feature did not
+    # exist; the test that was cited as its verification exercised the
+    # unrelated single-child chain collapse and never set an active file.
+    # #574 (M20) — `traceFilesRootFor` returning "" when no trace is loaded,
+    # the nil dereference that left the tree on "Loading..." forever.
+    "src/tests/gui/tests/filesystem/filesystem_vm_test.nim",
+    # #558 (M6) — value history rendering into the MOUNTED panel.  The prior
+    # test re-rendered a fresh panel, which is exactly what let a one-shot
+    # `for` inside `ui()` pass as reactive.
+    "src/frontend/viewmodel/tests/unit/test_state_value_history_toggle.nim",
+    # #608 (M41) — the saved layout breaking on the next open.  The persisted
+    # config was stripped of its editor tabs on every replay-mode save
+    # without remapping the enclosing stack's `activeItemIndex`, so
+    # GoldenLayout threw `ActiveItemIndex out of range` at restore and only
+    # `just reset-layout` recovered it.  The JS branch drives the real
+    # sanitiser/repair logic (`src/frontend/index/layout_config_repair.nim`)
+    # headlessly; the native branch asserts the production call sites still
+    # route through it and that the auto-hide state is persisted, handled and
+    # restored.  Listed here because the GUI-level `layout_resilience.spec.ts`
+    # is NOT coverage: every shape it writes is rejected by
+    # `isValidLayoutConfig` before GoldenLayout ever sees it, which is how
+    # this defect stayed invisible.
+    "src/tests/gui/tests/layout/layout_config_roundtrip_test.nim",
+    # #610 (M42a) — DeepReview replacing the whole GoldenLayout.  Launching
+    # `ct --deepreview` pasted a hard-coded three-panel preset over
+    # `data.ui.resolvedConfig`, so FILES, STATE, SCRATCHPAD, AGENT ACTIVITY,
+    # EVENT LOG, TIMELINE and TERMINAL OUTPUT were gone for the session and
+    # the user's own layout was ignored.  The behavioural half asserts that
+    # additive placement keeps every panel of the REAL bundled
+    # `src/config/default_layout.json`; the native-only source-contract half
+    # asserts the startup path is actually wired through that helper, which
+    # is the part no placement test could catch — the old code called no
+    # placement helper at all.
+    "src/tests/gui/tests/layout/deepreview_layout_test.nim",
+    # #603 (M38) — the re-record queue's decision model.  Both encode the two
+    # "never hang" invariants: a failed save must abort loudly, and dirty files
+    # with nothing in flight is unreachable-by-waiting.  Note
+    # `file_conflicts_vm_test.nim` already existed and was NOT listed here, so
+    # it was gated by nothing at all.
+    "src/tests/gui/tests/welcome-screen/file_conflicts_vm_test.nim",
+    "src/tests/gui/tests/welcome-screen/re_record_queue_vm_test.nim",
+    # #594 (M33) — the flow decoration layer must survive the window between
+    # `loadFlow` and `ct/updated-flow`, during which the flow data is nil and
+    # the computed decoration set is empty.  Replacing it with that empty set
+    # is what wiped the branch colours on every step.
+    "src/tests/gui/tests/editor/editor_decorations_test.nim",
+    # #566 (M4) — a live tracepoint results grid is refreshed in place, never
+    # rebuilt.  Rebuilding wiped the `<table>` the DataTables instance holds a
+    # reference to, on every completed move, including the jump the grid's own
+    # row click emits.
+    "src/tests/gui/tests/editor/trace_redraw_policy_test.nim",
+    # #568 (M19) — the recent-traces list was fetched only in the
+    # welcome-screen branch of `index/startup.nim`, so a process started with
+    # `ct run <program>` reached the tab bar's "+" with an empty cache and the
+    # new tab's Recent Traces panel stayed blank.  The test asserts the
+    # delivery contract exhaustively over every startup path, so a new path
+    # cannot be added without deciding how it gets its lists.
+    "src/tests/gui/tests/welcome-screen/recent_items_startup_vm_test.nim",
   ]
 
   CliRecordGateTests* = [
