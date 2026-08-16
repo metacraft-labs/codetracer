@@ -19,6 +19,19 @@ cat >"$TEST_ROOT/bin/cargo" <<'FAKE_CARGO'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >"${CARGO_CALL_LOG:?}"
+# The preflight no longer asserts the whole lock with `--locked`; it re-resolves
+# it and classifies the diff. Modelling that needs a cargo that can actually
+# rewrite the lock, so the drift cases hand this stub the lock a real
+# re-resolution would have produced.
+if [[ -n ${FAKE_CARGO_RESOLVED_LOCK:-} ]]; then
+	manifest=""
+	prev=""
+	for arg in "$@"; do
+		[[ $prev == "--manifest-path" ]] && manifest="$arg"
+		prev="$arg"
+	done
+	[[ -n $manifest ]] && cp "$FAKE_CARGO_RESOLVED_LOCK" "$(dirname "$manifest")/Cargo.lock"
+fi
 FAKE_CARGO
 chmod +x "$TEST_ROOT/bin/cargo"
 
@@ -33,14 +46,41 @@ edition = "2021"
 
 [patch.crates-io]
 lldb-sys = { git = "https://github.com/metacraft-labs/lldb-sys.rs.git" }
+ct-dap-client = { path = "../codetracer/libs/ct-dap-client" }
 CARGO_TOML
 	cat >"$workspace/Cargo.lock" <<'CARGO_LOCK'
 version = 4
 
 [[package]]
+name = "ct-dap-client"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "private-cargo-preflight-fixture"
+version = "0.1.0"
+dependencies = [
+ "lldb-sys",
+]
+
+[[package]]
+name = "libc"
+version = "0.2.180"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+
+[[package]]
 name = "lldb-sys"
 version = "0.0.31"
 source = "git+https://github.com/metacraft-labs/lldb-sys.rs.git#0123456789abcdef0123456789abcdef01234567"
+
+[[package]]
+name = "log"
+version = "0.4.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
 CARGO_LOCK
 }
 
@@ -113,8 +153,79 @@ run_positive_case() {
 	PATH="$TEST_ROOT/bin:$PATH" \
 		bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
 		"$workspace"
-	grep -Fxq "fetch --locked --manifest-path $workspace/Cargo.toml" \
+	grep -Fxq "fetch --manifest-path $workspace/Cargo.toml" \
 		"$CARGO_CALL_LOG"
+}
+
+# ---------------------------------------------------------------------------
+# The native-backend lock is a function of a sibling working tree.
+#
+# `codetracer-native-backend/Cargo.toml` routes `ct-dap-client` through
+# `[patch.crates-io] path = "../codetracer/libs/ct-dap-client"`, and in the
+# visual replay job that sibling is THIS pull request's checkout. A path
+# dependency records no source, checksum or revision, so Cargo copies the
+# sibling's dependency edges into the lock and the hunk moves with the tree
+# under test. `cargo fetch --locked` therefore asserted "native-backend was
+# relocked after the CodeTracer commit you are testing", which no CodeTracer
+# author can satisfy from this repository, and reported it as "cannot update
+# the lock file because --locked was passed" — the flag, not the cause.
+#
+# The three cases below pin the replacement contract. They are not mocks of the
+# classifier: each writes a real pair of lock files and runs the real preflight
+# against them, with a stub `cargo` standing in only for the network fetch.
+#
+#   sibling lag   — only path-package edges moved. MUST PASS, and must name the
+#                   package, the sibling path and the edge that moved.
+#   version drift — a package carrying a source changed version. MUST FAIL:
+#                   this is what `--locked` was protecting and the reason
+#                   dropping it outright would have been a regression.
+#   new pin       — a package carrying a source appears only after
+#                   re-resolution. MUST FAIL: a sibling pulled in a crate the
+#                   committed lock does not pin, so Cargo took whatever the
+#                   registry serves today.
+# ---------------------------------------------------------------------------
+run_lock_drift_case() {
+	# $1 = case name, $2 = expected exit status, $3 = required output fragment,
+	# $4 = sed program producing the re-resolved lock from the committed one.
+	local case_name="$1" expected_status="$2" expected_text="$3" mutation="$4"
+	local workspace="$TEST_ROOT/workspace/lock-$case_name"
+	local resolved="$TEST_ROOT/resolved-$case_name.lock"
+	local output status
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-lock-$case_name"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	sed "$mutation" "$workspace/Cargo.lock" >"$resolved"
+
+	set +e
+	output="$(
+		CARGO_CALL_LOG="$TEST_ROOT/cargo-lock-$case_name.args" \
+			FAKE_CARGO_RESOLVED_LOCK="$resolved" \
+			PATH="$TEST_ROOT/bin:$PATH" \
+			bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+			"$workspace" 2>&1
+	)"
+	status=$?
+	set -e
+	if ((status != expected_status)) || [[ $output != *"$expected_text"* ]]; then
+		echo "Native-backend lock drift case failed: $case_name" >&2
+		echo "expected status $expected_status and text: $expected_text" >&2
+		printf '%s\n' "$output" >&2
+		exit 1
+	fi
+	# The preflight must hand the sibling checkout back exactly as it found it;
+	# a gate that leaves another repository's lock rewritten is a gate that
+	# changes what the build it is guarding compiles.
+	if ! diff -q "$workspace/Cargo.lock" <(write_committed_lock_to_stdout) >/dev/null; then
+		echo "Preflight left the sibling Cargo.lock rewritten: $case_name" >&2
+		exit 1
+	fi
+}
+
+write_committed_lock_to_stdout() {
+	local reference="$TEST_ROOT/workspace/lock-reference"
+	write_valid_workspace "$reference"
+	cat "$reference/Cargo.lock"
 }
 
 run_negative_case() {
@@ -484,6 +595,33 @@ run_negative_case extra-padded "unexpected-inline-config-slot"
 run_negative_case extra-huge "unexpected-inline-config-slot"
 run_negative_case raw-token "Raw visual replay CI token"
 run_negative_case lock-boundary "locked-git-source-boundary"
+
+# The exact shape of the failure this replaced: native-backend's committed lock
+# lacked `ct-dap-client -> libc`, which `libs/ct-dap-client` has declared since
+# codetracer 26f0bdba2. Nothing pinned moves — `libc` is already in the lock —
+# so the gate continues and says why.
+run_lock_drift_case sibling-lag 0 \
+	"lags the sibling revisions under test" \
+	's|^ "log",$| "libc",\n "log",|'
+run_lock_drift_case sibling-lag-names-cause 0 \
+	"ct-dap-client (../codetracer/libs/ct-dap-client" \
+	's|^ "log",$| "libc",\n "log",|'
+# Version drift: the protection `--locked` was actually buying. Dropping the
+# flag without this check is the regression a previous attempt correctly refused.
+run_lock_drift_case version-drift 1 \
+	"does not pin the graph it resolves to" \
+	's|^version = "0.2.180"$|version = "0.2.181"|'
+# A crate that is not in the committed lock at all: resolved from the registry
+# at whatever version it serves today, so the gate must refuse it.
+# The hole a "path packages may lag" rule would otherwise open: the drifting
+# package is the workspace member itself, so no sibling checkout can explain it
+# and the lock is simply unrefreshed.
+run_lock_drift_case local-member-drift 1 \
+	"is out of date with codetracer-native-backend's own" \
+	's|^ "lldb-sys",$| "libc",\n "lldb-sys",|'
+run_lock_drift_case new-pin 1 \
+	"does not match the sibling revision under" \
+	's|^checksum = "2222222222222222222222222222222222222222222222222222222222222222"$|checksum = "2222222222222222222222222222222222222222222222222222222222222222"\n\n[[package]]\nname = "unpinned-newcomer"\nversion = "9.9.9"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "3333333333333333333333333333333333333333333333333333333333333333"|'
 
 if grep -R -aFq -- "$SENTINEL" "$TEST_ROOT" ||
 	grep -R -aFq -- "$SENTINEL_BASIC" "$TEST_ROOT"; then
