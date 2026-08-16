@@ -32,7 +32,7 @@ if [[ ! -x $RESOLVER && ! -f $RESOLVER ]]; then
 	exit 3
 fi
 
-EXPECTED_ASSERTIONS=76
+EXPECTED_ASSERTIONS=86
 
 PASS=0
 FAIL=0
@@ -919,6 +919,189 @@ expect_rev "an explicit --manifest-dir ignores CT_PRIVATE_MANIFEST_DIR" "$REV_NB
 	--manifest-dir "$LPUB" --sha "$SHA_SELF" --no-walk
 unset CT_MANIFEST_DIR
 unset CT_PRIVATE_MANIFEST_DIR
+
+# =========================================================================
+# 12. Routed per-repo participation records are NOT locks
+# =========================================================================
+#
+# `repro locking adopt-manifest` puts a workspace in ROUTED locking mode. In
+# that mode reprobuild's HL-2 tier isolation deliberately skips the monolithic
+# workspace-lock document and `recordRoutedParticipation` writes one minimal
+# per-repo record — via the git-checkout backend, into the SAME
+# `locks/<project>/<repo>/<sha>.toml` namespace the lock documents use.
+#
+# Such a record pins only the repo whose directory it sits in, so it cannot
+# answer this resolver's question at all. Read as a lock it produced
+# "malformed lock ... no top-level 'schema' key" and EXIT 5 — the code that
+# means "a lock exists but cannot be trusted", which callers escalate to a job
+# abort. 98 of these records (96 repos) are published in
+# metacraft-labs/metacraft-manifests@latest and 71 of them reproduced that
+# exit 5, so a commit that merely lacked a lock became a commit that killed the
+# job.
+#
+# The contract below is that they degrade EXACTLY like a missing lock: exit 3,
+# candidate fall-through intact, ancestry walk intact — while every genuinely
+# untrustworthy document stays loud at exit 5.
+
+# A routed participation record, byte-for-byte the shape reprobuild's
+# `routedParticipationBody` emits.
+mk_participation_record() {
+	local file="$1" name="$2" path="$3" sha="$4"
+	mkparent "$file"
+	{
+		printf '%s\n' '[[repo]]'
+		printf '%s\n' "name = \"$name\""
+		printf '%s\n' "path = \"$path\""
+		printf '%s\n' "revision = \"$sha\""
+	} >"$file"
+}
+
+P="$TMPROOT/participation"
+
+# (a) A routed record ALONE is a missing lock, not a broken one. This is the
+# whole point: exit 5 aborts the job, exit 3 is the graceful "not locked".
+mk_participation_record "$P/a/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer" "codetracer" "$SHA_SELF"
+expect_fail "participation: a routed record alone is exit 3, not exit 5" 3 \
+	"no workspace lock found" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/a" --sha "$SHA_SELF" --no-walk
+
+# (b) ...and the diagnostic must say WHY, naming the file. A silent exit 3 for
+# a commit that visibly has a file on disk is its own debugging trap.
+expect_fail "participation: the exit-3 diagnostic names the ignored record" 3 \
+	"locks/codetracer/codetracer/$SHA_SELF.toml" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/a" --sha "$SHA_SELF" --no-walk
+
+# (c) A routed record must not poison a REAL lock written for the same commit.
+# Before this was recognised, the record was collected alongside the lock and
+# failed the whole resolve at exit 5 even though the answer was right there.
+mk_xml_lock "$P/c/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_participation_record "$P/c/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer" "codetracer" "$SHA_SELF"
+expect_rev "participation: a routed record does not poison a real xml lock" "$REV_NB_XML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/c" --sha "$SHA_SELF" --no-walk
+
+# (d) The same in the flat legacy spelling, so the recognition is not attached
+# to one layout.
+mk_xml_lock "$P/d/locks/codetracer/codetracer-$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_participation_record "$P/d/locks/codetracer/codetracer-$SHA_SELF.toml" \
+	"codetracer" "codetracer" "$SHA_SELF"
+expect_rev "participation: recognised in the flat layout too" "$REV_NB_XML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/d" --sha "$SHA_SELF" --no-walk
+
+# (e) Candidate FALL-THROUGH. This is what parsing the record into an exit 4
+# would NOT have bought: a caller probing HEAD then its parent must move past
+# the routed record to the parent's real lock, exactly as it moves past a
+# commit with no file at all.
+mk_participation_record "$P/e/locks/codetracer/codetracer/$SHA_OTHER.toml" \
+	"codetracer" "codetracer" "$SHA_OTHER"
+mk_toml_lock "$P/e/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "participation: a routed leading candidate falls through to a locked one" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/e" --sha "$SHA_OTHER" --sha "$SHA_SELF" --no-walk
+
+# (f) The ancestry walk must survive it too: a routed record at the tip must
+# not stop the walk reaching the locked parent.
+GP="$TMPROOT/walkp"
+mkdir -p "$GP/codetracer"
+(
+	cd "$GP/codetracer" || exit 1
+	git init -q .
+	git config user.email t@t.invalid
+	git config user.name t
+	git config commit.gpgsign false
+	: >a
+	git add a
+	git commit -qm one
+	: >b
+	git add b
+	git commit -qm two
+) >/dev/null 2>&1
+PBASE="$(git -C "$GP/codetracer" rev-parse HEAD~1)"
+PTIP="$(git -C "$GP/codetracer" rev-parse HEAD)"
+mk_toml_lock "$GP/.repro/manifests/locks/codetracer/codetracer/$PBASE.toml" \
+	"$REV_NB_TOML" "$REV_NIM_TOML"
+mk_participation_record "$GP/.repro/manifests/locks/codetracer/codetracer/$PTIP.toml" \
+	"codetracer" "codetracer" "$PTIP"
+expect_rev "participation: a routed record at the tip does not stop the walk" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$GP/codetracer" --sha "$PTIP"
+
+# (g) Extra keys must not un-recognise it. Recognition is semantic — "declares
+# no schema, only [[repo]] tables, names nobody but itself" — precisely so that
+# reprobuild adding `remote` / `branch` to the record does not silently restore
+# the exit-5 abort.
+mkdir -p "$P/g/locks/codetracer/codetracer"
+{
+	printf '%s\n' '# written by repro'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer"'
+	printf '%s\n' 'path = "codetracer"'
+	printf '%s\n' 'remote = "metacraft-labs"'
+	printf '%s\n' 'branch = "dev"'
+	printf '%s\n' "revision = \"$SHA_SELF\""
+} >"$P/g/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_fail "participation: extra keys still degrade to exit 3" 3 \
+	"no workspace lock found" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/g" --sha "$SHA_SELF" --no-walk
+
+# (h) OVER-BREADTH GUARD. A schema-less document that names some OTHER repo is
+# not a participation record — it is a lock document that failed to declare
+# itself, and it claims to know a sibling's revision. Trusting it silently, or
+# skipping it silently, would both be wrong: it stays exit 5.
+mkdir -p "$P/h/locks/codetracer/codetracer"
+{
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer"'
+	printf '%s\n' 'path = "codetracer"'
+	printf '%s\n' "revision = \"$SHA_SELF\""
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer-native-backend"'
+	printf '%s\n' 'path = "codetracer-native-backend"'
+	printf '%s\n' "revision = \"$REV_NB_TOML\""
+} >"$P/h/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_fail "participation: a schema-less doc naming a sibling is still exit 5" 5 \
+	"schema" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/h" --sha "$SHA_SELF" --no-walk
+
+# (i) OVER-BREADTH GUARD. A schema-less document carrying a non-[[repo]] table
+# is a truncated or corrupt LOCK, not a participation record: reprobuild's
+# record has no `[lock]` header. Still exit 5.
+mkdir -p "$P/i/locks/codetracer/codetracer"
+{
+	printf '%s\n' '[lock]'
+	printf '%s\n' 'project = "codetracer"'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer"'
+	printf '%s\n' 'path = "codetracer"'
+	printf '%s\n' "revision = \"$SHA_SELF\""
+} >"$P/i/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_fail "participation: a schema-less doc with a [lock] table is still exit 5" 5 \
+	"schema" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/i" --sha "$SHA_SELF" --no-walk
+
+# (j) A document that DOES declare the schema is a lock even when it pins only
+# one repo — a one-repo workspace is legitimate, and its "sibling absent"
+# answer is the honest exit 4, not exit 3.
+mkdir -p "$P/j/locks/codetracer/codetracer"
+{
+	printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer"'
+	printf '%s\n' 'path = "codetracer"'
+	printf '%s\n' "revision = \"$SHA_SELF\""
+} >"$P/j/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_fail "participation: a schema'd self-only lock is exit 4, not exit 3" 4 \
+	"not present in lock" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/j" --sha "$SHA_SELF" --no-walk
 
 # =========================================================================
 
