@@ -2875,6 +2875,37 @@ proc onWelcomeScreen(
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
+proc onRecentItems(
+  sender: js,
+  response: jsobject(
+    recentTraces=seq[Trace],
+    recentFolders=seq[RecentFolder],
+    recentTransactions=seq[StylusTransaction]
+  )
+) =
+  ## Fill the recent-traces / recent-folders cache on startup paths that never
+  ## render the welcome screen themselves (issue #568).
+  ##
+  ## `onWelcomeScreen` above is the only other writer of these fields, and it
+  ## only ever runs when CodeTracer was launched *into* the welcome screen.
+  ## Started with `ct run <program>`, the process reached the session tab bar's
+  ## "+" button with `data.recentTraces` still empty, and
+  ## `ui/welcome_screen.nim:syncLegacyWelcomeScreenIntoVM` mirrored that empty
+  ## list into `WelcomeScreenVM` — the Recent Traces panel of the new tab was
+  ## blank while the identical click after a welcome-screen launch listed them.
+  ##
+  ## Only the cache is written here: rendering is not forced, so this cannot
+  ## draw the welcome surface over a live debugging session.  When a welcome
+  ## screen component already exists (an empty tab is open), its ViewModel is
+  ## re-synced so a visible, already-mounted panel picks the lists up
+  ## reactively.
+  clog "welcome_screen: on recent items"
+  data.recentTraces = response.recentTraces
+  data.recentFolders = response.recentFolders
+  data.stylusTransactions = response.recentTransactions
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
+
 proc onNewNotification(sender: js, notification: Notification) =
   data.viewsApi.showNotification(notification)
 
@@ -3110,8 +3141,12 @@ proc configureIPC(data: Data) =
 
     "no-trace"
     "welcome-screen"
+    # #568: the recent-traces / recent-folders push for startup paths whose own
+    # startup message does not carry them (`index/recent_items.nim`).
+    "recent-items"
     "saved-as"
     "saved-file"
+    "save-file-error"
 
     # notifications
     "new-notification"

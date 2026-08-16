@@ -25,6 +25,12 @@ const
   ]
 
   bootstrapEvents* = bootstrapPriority & @[
+    # #568: the recent-traces / recent-folders push is a one-shot startup
+    # message like the ones above, so a reconnecting browser client must have
+    # it replayed or its welcome surface comes back with an empty Recent
+    # Traces panel.  Not in `bootstrapPriority`: it configures no layout and
+    # may replay in any order relative to the heavier trace messages.
+    cstring"CODETRACER::recent-items",
     cstring"CODETRACER::trace-loaded",
     cstring"CODETRACER::filenames-loaded",
     cstring"CODETRACER::filesystem-loaded",
