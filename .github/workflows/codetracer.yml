@@ -1934,14 +1934,12 @@ jobs:
   # don't need FUSE in the runner.  See
   # scripts/test-appimage-cross-distro.sh.
   appimage-cross-distro:
-    # DEFERRED (CIP-5 Wave 4): stays on the GitHub-hosted ubuntu image. The
-    # `sudo snap install aws-cli` step is a trivial `nixpkgs#awscli2` swap, but
-    # this job's core is a 5-distro Docker matrix (scripts/test-appimage-cross-
-    # distro.sh pulls ubuntu/debian/fedora/arch images and runs the AppImage
-    # inside each). The ephemeral eph-linux-x64 class is not confirmed to
-    # expose a Docker daemon, so migrating this leg needs a Docker-on-runner /
-    # container decision first — do not fake it. Left as-is pending that call.
-    runs-on: ubuntu-latest  # DEFERRED (CIP-5 Wave 4): needs Docker on the runner — see note above
+    # Self-hosted on the nested-Docker class: this job's core is a 5-distro
+    # Docker matrix (scripts/test-appimage-cross-distro.sh pulls
+    # ubuntu/debian/fedora/arch images and runs the AppImage inside each), and
+    # eph-linux-x64-nested is the Incus class that exposes an in-guest Docker
+    # daemon (security.nesting + fuse-overlayfs). aws-cli comes from nixpkgs.
+    runs-on: eph-linux-x64-nested
     needs:
       - appimage-build
     strategy:
@@ -1959,7 +1957,9 @@ jobs:
 
       - name: Install AWS CLI
         if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
-        run: sudo snap install aws-cli --classic
+        # nixpkgs' awscli2 into the runner's nix profile (on PATH for the
+        # download step) — snap/apt are unavailable on the NixOS runner.
+        run: nix profile install nixpkgs#awscli2
 
       - name: Download AppImage
         env:
