@@ -38,6 +38,13 @@
 # The historical flat spelling ``locks/<project>/<repo>-<sha>.<ext>`` is also
 # accepted, for both extensions.
 #
+# A THIRD kind of file shares that ``.toml`` namespace and is NOT a lock: the
+# per-repo participation record reprobuild's ROUTED locking mode writes (see
+# ``is_participation_record`` below). It pins only the repo whose directory it
+# sits in, so it can never answer a question about a sibling. It is recognised
+# and IGNORED, which makes such a commit read as UNLOCKED (exit 3) rather than
+# as carrying a broken lock (exit 5).
+#
 # Legacy ``.github/sibling-pins`` / ``.github/sibling-pins.json`` /
 # ``.github/rr-backend-pin.txt`` files and the ``locks/<project>/index.json``
 # layout are NOT used: the lock keyed by the commit-under-test is the only
@@ -434,11 +441,108 @@ fi
 #      tools are cross-checked against each other rather than silently resolved
 #      by glob order. THIS is the migration hazard worth refusing: neither
 #      spelling is the elder, so there is no basis for preferring one.
+# ROUTED PER-REPO PARTICIPATION RECORDS (not locks)
+# -------------------------------------------------
+#
+# `repro locking adopt-manifest` puts a workspace into ROUTED mode (an explicit
+# `[locking] route` in the repo's VCS-private reprobuild config). In that mode
+# reprobuild's HL-2 tier isolation deliberately stops writing the monolithic
+# all-repos lock document — that document is the cross-tier leak it exists to
+# prevent — and `recordRoutedParticipation` instead writes ONE MINIMAL RECORD
+# PER REPO, through that repo's routed backend. The git-checkout backend's
+# records land in the SAME `locks/<project>/<repo>/<sha>.toml` namespace as the
+# lock documents, and their whole body is (reprobuild's
+# `routedParticipationBody`):
+#
+#     [[repo]]
+#     name = "<repo>"
+#     path = "<workspace path>"
+#     revision = "<sha>"
+#
+# That is not a workspace lock and cannot be read as one: it announces no
+# schema, and it pins ONLY the repo whose directory it sits in. It cannot
+# answer "what revision is sibling S at for commit C" because nothing in it,
+# or keyed to C, mentions S at all. Reprobuild itself treats it as a separate
+# thing — its strict `readLock` rejects the body and only the lenient
+# `shasFromBody` accepts it.
+#
+# Fed to `rev_from_toml` these records fail as "no top-level 'schema' key" and
+# the resolver exits 5. That is the wrong answer and an actively dangerous one:
+# exit 5 means "a lock exists but cannot be trusted", which callers escalate to
+# a job abort, whereas the truth is the strictly milder "this commit has no
+# workspace lock" (exit 3), which every caller already degrades from gracefully.
+# 98 such records, covering 96 repos, are already published under
+# `locks/codetracer/` in metacraft-labs/metacraft-manifests@latest, so this is
+# not hypothetical and cannot be fixed by changing what reprobuild writes NEXT.
+#
+# So they are recognised HERE, at discovery, and excluded from the lock set —
+# which is strictly better than parsing them into an exit 4, because a commit
+# whose only record is routed then falls through to the NEXT candidate SHA (the
+# parent) exactly as an unlocked commit does, instead of stopping the probe.
+#
+# The recognition is SEMANTIC, not a syntax fingerprint, so it does not break
+# the first time reprobuild adds a key to the record:
+#
+#   * the document announces no top-level `schema`, AND
+#   * every table in it is `[[repo]]`, AND
+#   * the only repo NAME it pins is $SELF_REPO itself.
+#
+# A schema-less document that names some OTHER repo is not a participation
+# record — it is a lock document that failed to declare itself — and must still
+# be refused loudly (exit 5). Likewise a document that DOES declare a schema is
+# a lock, and a one-repo workspace's lock is answered normally.
+is_participation_record() { # $1 = .toml file
+	local file="$1" l key val
+	local tables=0 repo_tables=0 names=0 foreign=0
+
+	while IFS= read -r l || [[ -n $l ]]; do
+		l="${l%$'\r'}"
+		while [[ $l == [[:space:]]* ]]; do l="${l#?}"; done
+		while [[ $l == *[[:space:]] ]]; do l="${l%?}"; done
+		[[ -z $l ]] && continue
+		[[ ${l:0:1} == "#" ]] && continue
+
+		if [[ ${l:0:1} == "[" ]]; then
+			tables=$((tables + 1))
+			[[ $l == "[[repo]]" ]] && repo_tables=$((repo_tables + 1))
+			continue
+		fi
+
+		key="${l%%=*}"
+		[[ $key == "$l" ]] && continue
+		val="${l#*=}"
+		while [[ $key == *[[:space:]] ]]; do key="${key%?}"; done
+		while [[ $val == [[:space:]]* ]]; do val="${val#?}"; done
+		case "$val" in
+		\"*\") val="${val#\"}" && val="${val%\"}" ;;
+		\'*\') val="${val#\'}" && val="${val%\'}" ;;
+		esac
+
+		# A top-level `schema` (i.e. before any table header) makes this a lock
+		# document, whatever else it contains.
+		if [[ $tables -eq 0 && $key == "schema" ]]; then
+			return 1
+		fi
+		if [[ $key == "name" ]]; then
+			names=$((names + 1))
+			[[ $val != "$SELF_REPO" ]] && foreign=1
+		fi
+	done <"$file"
+
+	# At least one [[repo]], nothing but [[repo]] tables, at least one name, and
+	# no name other than our own.
+	[[ $repo_tables -gt 0 && $tables -eq $repo_tables && $names -gt 0 && $foreign -eq 0 ]]
+}
+
 # `find_locks <locks-root> <sha>` — the search is per LAYER, because each layer
 # is its own manifest repo with its own `locks/` tree; the three tie-breaks
 # below narrow ONE layer's locks for one commit. Ordering BETWEEN layers is the
 # caller's explicit `--manifest-dir` order and is applied further down.
 declare -a LOCK_FILES=()
+# Routed participation records passed over while searching, so the exit-3
+# diagnostic can name them instead of reporting a bare "nothing found" for a
+# commit that visibly has files on disk.
+declare -a SKIPPED_PARTICIPATION=()
 find_locks() {
 	local locks_root="$1" sha="$2" f proj
 	local -a pref_nested=() pref_flat=() other_nested=() other_flat=()
@@ -447,6 +551,10 @@ find_locks() {
 		"$locks_root"/*/"$SELF_REPO"/"$sha.xml" \
 		"$locks_root"/*/"$SELF_REPO"/"$sha.toml"; do
 		[[ -f $f ]] || continue
+		if [[ $f == *.toml ]] && is_participation_record "$f"; then
+			SKIPPED_PARTICIPATION+=("$f")
+			continue
+		fi
 		if [[ $f == "$locks_root/$PREFER_PROJECT/"* ]]; then
 			pref_nested+=("$f")
 			continue
@@ -460,6 +568,10 @@ find_locks() {
 		"$locks_root"/*/"$SELF_REPO-$sha.xml" \
 		"$locks_root"/*/"$SELF_REPO-$sha.toml"; do
 		[[ -f $f ]] || continue
+		if [[ $f == *.toml ]] && is_participation_record "$f"; then
+			SKIPPED_PARTICIPATION+=("$f")
+			continue
+		fi
 		if [[ $f == "$locks_root/$PREFER_PROJECT/"* ]]; then
 			pref_flat+=("$f")
 			continue
@@ -732,6 +844,19 @@ if [[ -z $CHOSEN_SHA ]]; then
 			echo "    $lr/*/$SELF_REPO-<sha>.toml   (legacy flat)"
 		done
 		[[ $NO_WALK -eq 0 ]] && echo "  (also walked first-parent ancestry of ${SHAS[0]})"
+		if [[ ${#SKIPPED_PARTICIPATION[@]} -gt 0 ]]; then
+			echo "  Ignored ${#SKIPPED_PARTICIPATION[@]} routed per-repo participation record(s):"
+			for f in "${SKIPPED_PARTICIPATION[@]}"; do
+				echo "    $f"
+			done
+			echo "  Those are written by reprobuild's ROUTED locking mode ('repro locking"
+			echo "  adopt-manifest'), which by design does not write the monolithic workspace"
+			echo "  lock document. Each record pins only '$SELF_REPO' itself, so none of them"
+			echo "  can name a sibling. Treated exactly as a missing lock, never as a broken"
+			echo "  one. To make these commits resolvable, the workspace must publish a"
+			echo '  workspace-lock document (schema = "reprobuild.workspace.lock.v1") for the'
+			echo "  public tier alongside the routed records."
+		fi
 		echo "  Every commit under cross-repo CI must be locked by the workspace tooling"
 		echo "  ('repro workspace lock' / the reprobuild post-commit + pre-push hooks, or"
 		echo "  legacy 'workspace lock'). A missing lock means the commit was not published"
