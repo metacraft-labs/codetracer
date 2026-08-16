@@ -41,6 +41,17 @@ on:
         required: false
         default: ''
 
+# Collapse superseded pull-request runs only.
+#
+# `github.head_ref` is set on `pull_request` and empty everywhere else, so PR
+# runs group per source branch and a new push cancels the run it superseded.
+# Pushes to `main` and manual dispatches fall through to `github.run_id`,
+# which is unique per run: each gets its own group and is never cancelled, so
+# the per-commit history on the mainline stays complete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
