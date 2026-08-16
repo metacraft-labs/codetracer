@@ -174,7 +174,44 @@ run_negative_case() {
 		# `auth-key-wide` case above only widens within github.com, so
 		# without this case nothing would distinguish "keyed to one URL"
 		# from "keyed to one host".
+		#
+		# RUN IT FROM A CHECKOUT THAT CARRIES THE AMBIENT HEADER, not from
+		# whatever directory the suite happens to start in. A host-less key
+		# is the least specific key there is, so against the github.com-wide
+		# `extraHeader` that `actions/checkout` persists it LOSES Git's
+		# specificity contest: the lldb-sys URL resolves to the ambient
+		# header, and `effective-auth-header` fires before reading (1) is
+		# reached. That is environment-dependent — green on a laptop with no
+		# ambient header, red on the runner — and it is what made this case
+		# pass locally and fail in CI. The fixture pins the runner's
+		# environment so the ordering in the preflight cannot regress
+		# unnoticed; the expected invariant stays `auth-header-url-boundary`
+		# because reading (1) is isolated and must answer first.
 		GIT_CONFIG_KEY_0="http.extraHeader"
+		local hostless_repo="$TEST_ROOT/auth-key-hostless-checkout"
+		make_checkout_like_repo "$hostless_repo" \
+			"AUTHORIZATION: basic ${AMBIENT_BASIC}"
+		NEGATIVE_CASE_CWD="$hostless_repo"
+		NEGATIVE_CASE_CLEANUP="$hostless_repo"
+		;;
+	auth-key-narrow)
+		# The other side of `auth-key-wide`, and the case that pins
+		# `effective-auth-header` now that it runs after reading (1).
+		#
+		# This key is a strict extension of the lldb-sys URL, so it is too
+		# narrow rather than too wide: Git hands the header to
+		# `<lldb-sys>/subpath` and NOT to the lldb-sys URL the lockfile
+		# actually names. Nothing leaks — reading (1) sees a key that matches
+		# none of its probes and passes, and reading (2) has nothing to find
+		# — but the fetch this gate exists to authenticate would go out
+		# unauthenticated. Only asking Git's matcher "does the URL we fetch
+		# actually receive this gate's header" catches that.
+		#
+		# The literal key check (`auth-header-url-scope`) would catch this
+		# too, but it runs later, so this case pins the semantic check rather
+		# than the syntactic one: delete the `effective-auth-header` block and
+		# this case reports `auth-header-url-scope` instead and fails.
+		GIT_CONFIG_KEY_0="http.${LLDB_SYS_URL}/subpath.extraHeader"
 		;;
 	probe-isolation)
 		# The boundary probe's reading (1) is only meaningful while its
@@ -427,6 +464,7 @@ run_negative_case count "inline-config-count"
 run_negative_case auth-key "auth-header-url-scope"
 run_negative_case auth-key-wide "auth-header-url-boundary"
 run_negative_case auth-key-hostless "auth-header-url-boundary"
+run_negative_case auth-key-narrow "effective-auth-header"
 run_negative_case probe-isolation "auth-boundary-probe-isolation"
 # The same leaked credential, spelled four wire-valid ways, applied to a host
 # that is not github.com. Each of these passed the gate while the boundary check
