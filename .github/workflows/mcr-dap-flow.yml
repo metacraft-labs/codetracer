@@ -22,7 +22,6 @@ on:
       - 'libs/ct-dap-client/**'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
-      - '.github/sibling-pins'
       - '.github/workflows/mcr-dap-flow.yml'
   push:
     branches: [main]
@@ -31,16 +30,15 @@ on:
       - 'libs/ct-dap-client/**'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
-      - '.github/sibling-pins'
       - '.github/workflows/mcr-dap-flow.yml'
   workflow_dispatch:
     inputs:
       native_recorder_ref:
-        description: 'codetracer-native-recorder ref (default: .github/sibling-pins)'
+        description: 'codetracer-native-recorder ref (default: dev)'
         required: false
         default: ''
       native_backend_ref:
-        description: 'codetracer-native-backend ref (default: .github/sibling-pins)'
+        description: 'codetracer-native-backend ref (default: dev)'
         required: false
         default: ''
 
@@ -80,81 +78,61 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
+      - name: Setup dev env
+        # setup-dev-env installs Nix (with the Attic substituter/keys) and
+        # clones the cross-repo siblings adjacent to this checkout at the
+        # refs named below, replacing the former
+        # Install-Nix / Resolve-sibling-refs / four clone-repo steps.
+        #
+        # WHY THE OLD RESOLVE STEP HAD TO GO. It read `.github/sibling-pins`,
+        # a repo-local pin file that e0c3a1593 deleted from this repo eight
+        # weeks ago when every cross-repo CI site was migrated to resolve
+        # sibling revisions from the workspace lock instead. This workflow was
+        # the one site that migration missed. Since then the step could only
+        # ever fail: `grep` on a nonexistent file exits 2, and under
+        # `set -euo pipefail` the command substitution takes the whole job
+        # down before a single sibling is cloned. It survived unnoticed
+        # because the workflow is path-filtered onto db-backend files, so it
+        # fires rarely -- the same reason beam-flow.yml's checkout ordering
+        # defect survived, noted at that workflow's own token step.
+        #
+        # Re-adding the pin file is not an option: repo-local pin files are
+        # exactly what e0c3a1593 removed, so this now resolves siblings the
+        # way every other cross-repo job here does. This mirrors
+        # beam-flow.yml, which this workflow's header already says it follows.
+        #
+        # WHICH REF. `=dev` is spelled explicitly rather than left bare. A
+        # bare entry resolves through the per-commit workspace lock in the
+        # shared manifests repo, which has published nothing for this repo
+        # since 2026-08-02 -- the outage documented at the top of
+        # codetracer.yml and alarmed on by the `workspace-lock-freshness`
+        # job. Every job that left it bare died in this step. When lock
+        # publication resumes, dropping the `=dev` suffixes restores
+        # per-commit pinning here along with everywhere else.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Resolve sibling refs
-        id: refs
-        run: |
-          set -euo pipefail
-          PINS=".github/sibling-pins"
-          RECORDER_REF="${{ github.event.inputs.native_recorder_ref }}"
-          BACKEND_REF="${{ github.event.inputs.native_backend_ref }}"
-          if [[ -z "$RECORDER_REF" ]]; then
-            RECORDER_REF="$(grep '^codetracer-native-recorder ' "$PINS" | cut -d' ' -f2)"
-          fi
-          if [[ -z "$BACKEND_REF" ]]; then
-            BACKEND_REF="$(grep '^codetracer-native-backend ' "$PINS" | cut -d' ' -f2)"
-          fi
-          TRACE_FORMAT_REF="$(grep '^codetracer-trace-format ' "$PINS" | cut -d' ' -f2)"
-          TRACE_FORMAT_NIM_REF="$(grep '^codetracer-trace-format-nim ' "$PINS" | cut -d' ' -f2)"
-          echo "recorder-ref=$RECORDER_REF" >> "$GITHUB_OUTPUT"
-          echo "backend-ref=$BACKEND_REF" >> "$GITHUB_OUTPUT"
-          echo "trace-format-ref=$TRACE_FORMAT_REF" >> "$GITHUB_OUTPUT"
-          echo "trace-format-nim-ref=$TRACE_FORMAT_NIM_REF" >> "$GITHUB_OUTPUT"
-          echo "codetracer-native-recorder ref: $RECORDER_REF"
-          echo "codetracer-native-backend ref: $BACKEND_REF"
-          echo "codetracer-trace-format ref: $TRACE_FORMAT_REF"
-          echo "codetracer-trace-format-nim ref: $TRACE_FORMAT_NIM_REF"
-
-      - name: Clone codetracer-native-recorder
-        # src/db-backend/build.rs canonicalises ../../../codetracer-native-recorder
-        # at compile time; ensure-ct-mcr builds ct_cli from it. No .gitmodules
-        # in the recorder, so submodules: 'false' avoids clone-repo's sed step.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-recorder
-          ref: ${{ steps.refs.outputs.recorder-ref }}
-          path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-native-backend
-        # ensure-ct-native-replay builds ct-native-replay from this sibling;
-        # ct-native-replay drives the MCR DAP flow under test.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-backend
-          ref: ${{ steps.refs.outputs.backend-ref }}
-          path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-trace-format sibling
-        # Required by src/db-backend/Cargo.toml's path deps
-        # (../../../codetracer-trace-format/...).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          ref: ${{ steps.refs.outputs.trace-format-ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-trace-format-nim sibling
-        # codetracer_trace_writer_nim's build.rs reads
-        # ../codetracer-trace-format-nim at db-backend cargo build time.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format-nim
-          ref: ${{ steps.refs.outputs.trace-format-nim-ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # codetracer-native-recorder: src/db-backend/build.rs canonicalises
+          #   ../../../codetracer-native-recorder at compile time, and
+          #   ensure-ct-mcr builds ct_cli from it.
+          # codetracer-native-backend: ensure-ct-native-replay builds
+          #   ct-native-replay from it; ct-native-replay drives the flow
+          #   under test.
+          # codetracer-trace-format: src/db-backend/Cargo.toml path-deps on
+          #   ../../../codetracer-trace-format/...
+          # codetracer-trace-format-nim: the second half of a MATCHED FFI
+          #   PAIR -- codetracer_trace_writer_nim's build.rs resolves its Nim
+          #   entry point as a SIBLING of codetracer-trace-format and
+          #   hard-errors when it is absent, so it must be provisioned
+          #   wherever codetracer-trace-format is.
+          siblings: |
+            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || 'dev' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'dev' }}
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Run MCR DAP flow tests
         # The single canonical target. scripts/detect-siblings.sh (sourced
