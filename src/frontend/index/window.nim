@@ -178,6 +178,63 @@ proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, 
   else:
     infoPrint fmt"Layout saved to {layoutFilePath} (editMode={response.isEditMode})"
 
+proc readFileSyncOrEmpty(path: cstring): cstring {.importjs:
+  """(function(path) {
+    try {
+      return require('fs').readFileSync(path, 'utf8');
+    } catch (error) {
+      return '';
+    }
+  })(#)""".}
+  ## Synchronous read used only by `onRequestAutoHideState`; see there for
+  ## why the auto-hide handshake cannot be asynchronous.
+
+proc setIpcReturnValue(event: js, value: cstring) {.importjs:
+  """(function(event, value) {
+    if (event && typeof event === 'object') { event.returnValue = value; }
+  })(#, #)""".}
+  ## Reply to an `ipcRenderer.sendSync` call.  Guarded because in server
+  ## builds the IPC shim invokes handlers with an undefined sender.
+
+proc onSaveAutoHideState*(sender: js,
+                          response: jsobject(state=cstring)) {.async.} =
+  ## Persist the set of panels the user pinned to a screen edge.
+  ##
+  ## Pinning REMOVES the component from the GoldenLayout tree, so this state
+  ## cannot live inside `default_layout.json`: it is exactly the panels that
+  ## are *not* in it.  It gets its own sibling file.
+  ##
+  ## Before this handler existed the renderer sent
+  ## `CODETRACER::save-auto-hide-state` into the void — the channel name
+  ## occurred at exactly one site in the whole repository, the send — so a
+  ## pinned panel was gone on the next launch and, when the pinned panel was
+  ## FILES, the layout validator declared the saved layout incompatible and
+  ## deleted it (issue #608).
+  let statePath = frontend_config.userLayoutDir / "auto_hide_state.json"
+  let payload = if response.state.isNil: cstring"{}" else: response.state
+  let errWrite = await fsWriteFileWithErr(cstring(statePath), payload)
+  if not errWrite.isNil:
+    errorPrint "save auto-hide state error: ", errWrite
+  else:
+    debugPrint "index: auto-hide state saved to ", statePath
+
+proc onRequestAutoHideState*(sender: js, response: js) =
+  ## Hand the persisted auto-hide state back to the renderer, synchronously.
+  ##
+  ## Deliberately NOT `{.async.}` and deliberately a synchronous read: the
+  ## renderer asks for this with `ipcRenderer.sendSync` from inside
+  ## `initLayout`, because the restore has to have completed before the
+  ## standalone auto-hide panels are registered (`ui/layout.nim`) — otherwise
+  ## a restored panel and a freshly-created standalone one race for the same
+  ## content.  `event.returnValue` is only read while this handler is on the
+  ## stack, so an `await` here would return `undefined` to the renderer.
+  ##
+  ## The payload is a few hundred bytes and is read once per window start.
+  ## A missing file is the normal first-run case and yields an empty string,
+  ## which the renderer treats as "nothing pinned".
+  let statePath = frontend_config.userLayoutDir / "auto_hide_state.json"
+  setIpcReturnValue(sender, readFileSyncOrEmpty(cstring(statePath)))
+
 proc onExitError*(sender: js, response: cstring) {.async.} =
   # we call this on fatal errors
   errorPrint fmt"exit: {response}"

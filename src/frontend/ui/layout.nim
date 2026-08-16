@@ -9,6 +9,7 @@ import
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config, utils ],
+  ../index/layout_config_repair,
   ../lib/[ logging, misc_lib, jslib ]
 
 import kdom except Location
@@ -434,6 +435,135 @@ proc ensureSharedRenderers() =
 
   if not data.ui.status.isNil:
     discard windowSetTimeout(proc() = data.ui.status.requestStatusRender(), 0)
+
+## The layout shipped with CodeTracer, embedded at compile time.
+##
+## It is the last-resort fallback for `loadLayoutSafely`: if the persisted
+## layout AND its repaired form are both rejected by GoldenLayout, we still
+## have to hand `loadLayout` *something*, because everything after it in
+## `initLayout` — auto-hide init, the `stateChanged` / `itemDestroyed`
+## handlers, standalone panel registration — must still run.  Reading it
+## from disk here would need another IPC round trip during startup; the file
+## is ~6 KB, so embedding it is cheaper than the mechanism to fetch it.
+const bundledDefaultLayoutJson = staticRead("../../config/default_layout.json")
+
+proc tryParseLayoutJson(raw: cstring): js {.importjs:
+  """(function(raw) {
+    try { return JSON.parse(raw); } catch (error) { return null; }
+  })(#)""".}
+
+proc callLoadLayoutUnchecked(layout: GoldenLayout,
+                             config: GoldenLayoutResolvedConfig) =
+  ## Thin wrapper that calls `loadLayout` as a normal Nim call, so
+  ## `loadLayoutOnce` can reference the call site from inside a JS-level
+  ## try/catch without emit-level name-resolution issues.  Mirrors
+  ## `ui/session_switch.nim`'s `callInitLayoutUnchecked`.
+  layout.loadLayout(config)
+
+proc loadLayoutOnce(layout: GoldenLayout, config: GoldenLayoutResolvedConfig,
+                    what: cstring): bool =
+  ## Apply a config to GoldenLayout, reporting failure instead of propagating
+  ## it.  The try/catch is raw JavaScript on purpose: GoldenLayout signals a
+  ## rejected config with a native `Error` (`ActiveItemIndex out of range`,
+  ## `ConfigurationError`, a `TypeError` from an unknown component type), and
+  ## Nim's `except` catches only Nim-derived exceptions — the same reason
+  ## `ui/session_switch.nim:97-116` uses this pattern around `initLayout`.
+  if config.isNil:
+    return false
+  {.emit: """
+    try {
+      `callLoadLayoutUnchecked`(`layout`, `config`);
+      `result` = true;
+    } catch (e) {
+      console.warn("layout: loadLayout rejected " + `what` + ": " +
+        (e && e.message ? e.message : String(e)));
+      `result` = false;
+    }
+  """.}
+
+proc loadLayoutSafely(layout: GoldenLayout,
+                      initialLayout: GoldenLayoutResolvedConfig): bool
+                     {.discardable.} =
+  ## Apply the session's layout, degrading rather than aborting.
+  ##
+  ## A config that GoldenLayout rejects used to throw straight out of
+  ## `initLayout`, *after* `data.ui.layout` had been assigned but *before*
+  ## auto-hide init, the event handlers and the standalone panels were
+  ## installed — a half-initialised, unusable window that reappeared on every
+  ## launch because nothing rewrote the offending file (issue #608).
+  ##
+  ## Three attempts, in decreasing fidelity to what the user arranged:
+  ## the saved config, its repaired form, then the bundled default.
+  if loadLayoutOnce(layout, initialLayout, cstring"the saved layout"):
+    return true
+
+  let repair = repairLayoutConfig(cast[js](initialLayout))
+  if repair.ok:
+    for issue in repair.issues:
+      cwarn "layout: repairing the rejected layout: " & $issue
+    if loadLayoutOnce(layout,
+                      cast[GoldenLayoutResolvedConfig](repair.config),
+                      cstring"the repaired layout"):
+      cwarn "layout: restored the saved layout after repairing it"
+      return true
+
+  let bundled = tryParseLayoutJson(cstring(bundledDefaultLayoutJson))
+  if not bundled.isNil and
+      loadLayoutOnce(layout, cast[GoldenLayoutResolvedConfig](bundled),
+                     cstring"the bundled default layout"):
+    cerror "layout: the saved layout could not be restored; " &
+      "fell back to the bundled default"
+    return true
+
+  cerror "layout: no layout config could be applied; " &
+    "continuing with an empty GoldenLayout so the rest of the UI still mounts"
+  return false
+
+proc persistAutoHideState*() =
+  ## Send the current pinned-panel set to the index process, which writes it
+  ## to `~/.config/codetracer/auto_hide_state.json`.
+  ##
+  ## The panels a user pins are REMOVED from the GoldenLayout tree, so they
+  ## are not part of the layout config and cannot ride along with it — they
+  ## need their own persisted file, and this is the only writer.
+  if ipc.isNil or ipc.isUndefined:
+    return
+  let serialized = serializeAutoHideState()
+  if serialized.isNil or serialized.isUndefined:
+    return
+  ipc.send "CODETRACER::save-auto-hide-state", js{
+    state: JSON.stringify(serialized)
+  }
+
+var autoHideStateRestored = false
+  ## Guards the once-per-process restore in `initLayout`; see the call site.
+
+proc requestSavedAutoHideState(): JsObject =
+  ## Read back the auto-hide (pinned panel) state the index process persisted.
+  ##
+  ## Synchronous on purpose.  The standalone auto-hide panels are registered
+  ## on a 500 ms timer whose `findPanelByContent` skip is what keeps a
+  ## restored panel from being duplicated, so the restore has to have
+  ## happened before `initLayout` returns; an async round trip would make
+  ## that a race.  The payload is a few hundred bytes, read once per window.
+  ##
+  ## Returns `undefined` when there is no saved state, when the IPC bridge is
+  ## absent (server builds render without Electron), or when the payload does
+  ## not parse — every one of which is an ordinary first-run situation.
+  {.emit: """
+    `result` = undefined;
+    try {
+      if (`ipc` && typeof `ipc`.sendSync === 'function') {
+        const raw = `ipc`.sendSync("CODETRACER::request-auto-hide-state");
+        if (typeof raw === 'string' && raw.length > 0) {
+          `result` = JSON.parse(raw);
+        }
+      }
+    } catch (e) {
+      console.warn("layout: could not read the saved auto-hide state: " +
+        (e && e.message ? e.message : String(e)));
+    }
+  """.}
 
 # Triage: rename to initGoldenLayout
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
@@ -1082,7 +1212,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     `initialLayout`.dimensions.borderGrabWidth = 8;
     `initialLayout`.dimensions.headerHeight = `data`.ui.fontSize * 2;
   """.}
-  layout.loadLayout(initialLayout)
+  # NEVER call `loadLayout` directly here: a config GoldenLayout rejects
+  # throws a native JS Error that Nim cannot catch, which would abort the
+  # rest of this proc (auto-hide, event handlers, standalone panels) and
+  # leave a half-initialised window — issue #608.
+  loadLayoutSafely(layout, initialLayout)
   enforceMinStackWidth(layout)
 
   # M21: Register IPC handler for receiving panels from other windows.
@@ -1091,6 +1225,28 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.
   initAutoHideState()
+
+  # Restore the panels the user pinned to a screen edge in an earlier
+  # session.  This has to happen here — after `initAutoHideState`, before the
+  # 500 ms standalone-panel registration below — because that loop skips any
+  # content already present in the auto-hide state (`findPanelByContent`),
+  # which is what stops a restored BUILD/PROBLEMS/SEARCH/REQUESTS panel from
+  # being duplicated as a fresh standalone one.
+  #
+  # Before this call `restoreAutoHideState` had zero call sites and the state
+  # was posted to an IPC channel nobody listened on, so pinning a panel never
+  # survived a restart (issue #608).
+  #
+  # Once per renderer process, not once per `initLayout`: creating or
+  # switching to another session calls this proc again against the SAME
+  # module-level `autoHideState`, and `restoreAutoHideState` appends, so a
+  # second restore would duplicate every pinned panel in the strips.
+  if not autoHideStateRestored:
+    autoHideStateRestored = true
+    let savedAutoHideState = requestSavedAutoHideState()
+    if not savedAutoHideState.isNil and not savedAutoHideState.isUndefined:
+      restoreAutoHideState(savedAutoHideState)
+
   setupDragToPinListeners(layout)
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
     let isEditor = panel.config.componentState.isEditor.to(bool)
@@ -1394,9 +1550,28 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Force collapsed mode on/off for E2E tests.  Bypasses maximize
   # detection so tests can capture collapsed-mode screenshots without
   # actually maximizing the window.
+  #
+  # The override is STICKY.  Without this, `updateCollapsedMode` below — which
+  # runs on every window `resize`, plus once 1 s after layout init — simply
+  # overwrote the forced value from its maximize heuristic, so the override
+  # silently expired at the next resize.  Under Xvfb the window
+  # fills the virtual screen, so the heuristic answers "maximized", and a spec
+  # that had asked for expanded strips would find `#auto-hide-strip-left`
+  # rendered as the 1 px `collapsed-strip-line` with its tabs gone —
+  # `auto-hide-panes.spec.ts`'s "editor unpin behavior" failed exactly that
+  # way, with the tab detached from under `locator.hover`.
+  #
+  # There is deliberately no way to clear the override: only test hooks set it,
+  # and a test that has pinned the rendering mode wants it pinned for the rest
+  # of the process.
+  var collapsedModeForced = false
+  var collapsedModeForcedValue = false
+
   proc forceCollapsedMode(enable: bool) =
     if autoHideState.isNil:
       initAutoHideState()
+    collapsedModeForced = true
+    collapsedModeForcedValue = enable
     autoHideState.collapsedMode = enable
     autoHideState.leftBounded = enable
     autoHideState.rightBounded = enable
@@ -1448,6 +1623,17 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     ## Electron's screen API (done via IPC in main process).
     ## For now, we use a heuristic: if outerWidth ~= screen.availWidth
     ## and outerHeight ~= screen.availHeight, the window is maximized.
+    ##
+    ## An explicit `forceCollapsedMode` override wins: see the note there.
+    if collapsedModeForced:
+      if not autoHideState.isNil and
+         autoHideState.collapsedMode != collapsedModeForcedValue:
+        autoHideState.collapsedMode = collapsedModeForcedValue
+        autoHideState.leftBounded = collapsedModeForcedValue
+        autoHideState.rightBounded = collapsedModeForcedValue
+        if not autoHideState.onChanged.isNil:
+          autoHideState.onChanged()
+      return
     {.emit: """
       var isMax = (window.outerWidth >= screen.availWidth - 8) &&
                   (window.outerHeight >= screen.availHeight - 8);
@@ -1526,13 +1712,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       data.ui.saveLayout = false
 
       # Persist auto-hide panel state alongside the GL layout config.
-      # The auto-hide state is saved as a separate IPC message so that
-      # the existing config loading path does not need modification.
-      let autoHideSerialized = serializeAutoHideState()
-      if not autoHideSerialized.isNil and not autoHideSerialized.isUndefined:
-        ipc.send "CODETRACER::save-auto-hide-state", js{
-          state: JSON.stringify(autoHideSerialized)
-        }
+      # It travels on its own IPC channel and lands in its own file because
+      # a pinned panel is precisely a panel the GoldenLayout config no
+      # longer contains.  `autoHideState.onChanged` writes it too — this
+      # call additionally covers changes that never reach that hook, such
+      # as a resized overlay.
+      persistAutoHideState()
 
     dispatchLayoutUpdated()
 

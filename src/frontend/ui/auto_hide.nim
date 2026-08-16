@@ -106,6 +106,15 @@ type
     overlayWidth*: int   ## Remembered overlay pixel width for left/right panels (0 = CSS default)
     overlayHeight*: int  ## Remembered overlay pixel height for bottom panels (0 = CSS default)
     isUnpinning*: bool
+    standalone*: bool
+      ## True for panels that were never in GoldenLayout to begin with —
+      ## BUILD, PROBLEMS, SEARCH RESULTS and REQUESTS, registered by
+      ## `addStandaloneAutoHidePanel` from `ui/layout.nim` on every startup.
+      ##
+      ## They must NOT be persisted: they carry no GL config to re-attach
+      ## from and their live element is created fresh each launch, so a
+      ## restored copy would occupy the content slot (`findPanelByContent`)
+      ## and suppress the real registration, leaving a dead strip tab.
 
   AutoHideState* = ref object
     ## Central state for all auto-hidden panels.
@@ -216,6 +225,83 @@ proc findPanelByContentAndId*(state: AutoHideState, content: Content, id: int): 
     return nil
   for panel in state.panels:
     if panel.content == content and panel.componentId == id:
+      return panel
+  return nil
+
+proc pinnedDocumentPath*(panel: AutoHidePanel): cstring =
+  ## The layout path a pinned editor-area *document* is keyed by, or `""` when
+  ## the panel has no document identity.
+  ##
+  ## Two sources, because `openLayoutTab` keys the two document shapes
+  ## differently:
+  ##
+  ## * An **independent tab** (the VCS panel's per-target `View Diff` tabs)
+  ##   carries its key on the component itself, in `independentTabPath` — the
+  ##   GoldenLayout component state only gets the generated
+  ##   `vcsComponent-<id>` label.  That method is the single definition of
+  ##   "what this instance is keyed by", so it is consulted first.
+  ## * An **editor tab** has no separate component identity: `openLayoutTab`
+  ##   puts `editorTabPath(path, editorView)` straight into the component
+  ##   state's `label`, which `pinPanel` copies into `panel.config`.
+  ##
+  ## Everything else answers `""` — singleton panels carry a generated component
+  ## label and `addStandaloneAutoHidePanel` builds no config at all — and
+  ## `revealsPinnedPanel` reads `""` as "no document identity".
+  if panel.isNil:
+    return cstring""
+
+  # The live component, when it is still registered, is the authoritative
+  # source of an independent tab's key.
+  if not data.isNil and not data.ui.isNil:
+    let mapping = data.ui.componentMapping[panel.content]
+    if not mapping.isNil and mapping.hasKey(panel.componentId):
+      let component = mapping[panel.componentId]
+      if not component.isNil:
+        let independent = component.independentTabPath
+        if not independent.isNil and independent.len > 0:
+          return independent
+
+  if panel.config.isNil or panel.config.isUndefined:
+    return cstring""
+  let componentState = panel.config["componentState"]
+  if componentState.isNil or componentState.isUndefined:
+    return cstring""
+  let label = componentState["label"]
+  if label.isNil or label.isUndefined:
+    return cstring""
+  label.to(cstring)
+
+proc findPanelToRevealOnOpen*(
+    state: AutoHideState;
+    content: Content;
+    isEditor: bool;
+    layoutPath: cstring): AutoHidePanel =
+  ## The pinned panel an `openLayoutTab(content, …)` request should reveal
+  ## instead of opening a GoldenLayout tab, or nil if the request must go on to
+  ## the normal layout path.
+  ##
+  ## This is the auto-hide half of the layout routing rule; the content-kind
+  ## decision itself lives in `revealsPinnedPanel`
+  ## (`common_types/codetracer_features/frontend.nim`) so it can be tested on
+  ## the C backend, where `openLayoutTab` cannot go.
+  ##
+  ## Use this rather than `findPanelByContent` for open requests:
+  ## `findPanelByContent` matches on the content kind alone, which is right for
+  ## the singleton lookups it was written for (BUILD / PROBLEMS / SEARCH
+  ## RESULTS / REQUESTS) and wrong for anything with per-document instances.
+  if state.isNil:
+    return nil
+  for panel in state.panels:
+    if panel.content != content:
+      continue
+    if panel.isUnpinning:
+      # The panel is mid-unpin: it is on its way back into GoldenLayout and the
+      # component registration callback is about to drop it from `panels`.
+      # Answering an open request with it would reveal a panel that is about to
+      # disappear, and would leave the request unserved.
+      continue
+    if revealsPinnedPanel(
+        content, isEditor, layoutPath, panel.pinnedDocumentPath):
       return panel
   return nil
 
@@ -407,7 +493,8 @@ proc addStandaloneAutoHidePanel*(
     domTab: nil,
     liveElement: liveElement,
     containerElement: nil,
-    isUnpinning: false
+    isUnpinning: false,
+    standalone: true
   )
   autoHideState.panels.add(panel)
 
@@ -1061,6 +1148,47 @@ proc showOverlay*(panel: AutoHidePanel) =
   autoHideState.pinnedOpen = true
   doShowOverlayImpl(panel)
 
+proc revealOverlay*(panel: AutoHidePanel) =
+  ## Show `panel` because something asked for it to be *opened* — a command, a
+  ## jump-to-location, a search that produced results, a build that failed.
+  ##
+  ## Unlike `showOverlay` this is IDEMPOTENT and never toggles.  `showOverlay`
+  ## implements the strip tab's click gesture, where a second click on the same
+  ## tab is a request to close; an open request is not.
+  ## `Planned-Features/Auto-Hide-Panes.md` §3.3 enumerates the ways the overlay
+  ## is dismissed — pointer leaving the overlay and tab, a backdrop click,
+  ## Escape, and Unpin — and an open request is not among them.
+  ##
+  ## This matters beyond correctness of a single call.  Several callers fire
+  ## repeatedly (one per search-result batch, one per debugger step that
+  ## re-opens the current source file), and routing those through `showOverlay`
+  ## alternates show/hide.  Every one of those transitions runs
+  ## `autoHideState.onChanged`, and `layout.nim` rebuilds the whole edge strip
+  ## from scratch there — so the strip tabs are continuously destroyed and
+  ## recreated, which is both a visible flicker and an element no pointer
+  ## (or `locator.hover`) can ever land on.
+  if autoHideState.isNil or panel.isNil:
+    return
+
+  cancelHoverPreview()
+
+  # Already docked inline: the panel is on screen and holds layout space.
+  # `showDockedPanel` would toggle it closed, which is the opposite of what an
+  # open request means.
+  if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+    return
+
+  if autoHideState.activeOverlay == panel and autoHideState.overlayVisible:
+    # Already visible.  Promote a hover preview to a click-pinned overlay so it
+    # survives the pointer leaving, but re-render nothing: `pinnedOpen` feeds no
+    # rendered output, so signalling `onChanged` here would only rebuild the
+    # strip for no observable change.
+    autoHideState.pinnedOpen = true
+    return
+
+  autoHideState.pinnedOpen = true
+  doShowOverlayImpl(panel)
+
 # ---------------------------------------------------------------------------
 # Strip rendering (called from layout.nim or a dedicated Karax renderer)
 # ---------------------------------------------------------------------------
@@ -1373,13 +1501,38 @@ else:
 # ---------------------------------------------------------------------------
 
 proc serializeAutoHideState*(): JsObject =
-  ## Serialise the auto-hide state to a JSON-compatible object for
-  ## inclusion in the saved layout config.
+  ## Serialise the auto-hide state to a JSON-compatible object, persisted by
+  ## the index process to ``~/.config/codetracer/auto_hide_state.json``.
+  ##
+  ## Only the fields that can survive a process restart are written.
+  ## ``domTab``, ``liveElement`` and ``containerElement`` are live DOM nodes —
+  ## ``JSON.stringify`` cannot round-trip them and a DOM tree is cyclic, so
+  ## including them would either lose them silently or throw.  A panel is
+  ## rebuilt from its persisted GoldenLayout component ``config`` instead
+  ## (``restoreAutoHideState`` leaves ``liveElement`` nil for exactly that
+  ## reason).
+  ##
+  ## ``overlayWidth`` / ``overlayHeight`` carry the size the user dragged the
+  ## overlay to; without them a restored panel silently reverts to the CSS
+  ## default on every launch.
+  ##
+  ## A panel with ``isUnpinning`` set is mid-animation on its way *back* into
+  ## the layout — persisting it would resurrect a panel the user just
+  ## un-pinned.  A ``standalone`` panel is re-registered from scratch on every
+  ## launch and has no GL config to re-attach from, so persisting it would
+  ## only suppress that registration.
   if autoHideState.isNil or autoHideState.panels.len == 0:
-    return js{}
+    return js{"panels": newJsArray()}
 
   var panelArray = newJsArray()
-  for panel in autoHideState.panels:
+  # Index rather than `for panel in ...`: the loop variable of a `for x in seq`
+  # binds as `lent AutoHidePanel`, and the `js{...}` constructor below captures
+  # its fields into a closure, which Nim rejects ("'panel' is of type
+  # <lent AutoHidePanel> which cannot be captured").
+  for panelIndex in 0 ..< autoHideState.panels.len:
+    let panel = autoHideState.panels[panelIndex]
+    if panel.isUnpinning or panel.standalone:
+      continue
     let edge = panel.edge
     let title = panel.title
     let content = panel.content
@@ -1390,6 +1543,8 @@ proc serializeAutoHideState*(): JsObject =
       "title": title,
       "content": cint(ord(content)),
       "componentId": componentId,
+      "overlayWidth": panel.overlayWidth,
+      "overlayHeight": panel.overlayHeight,
       "config": config
     }
     panelArray.push(obj)
@@ -1411,12 +1566,35 @@ proc restoreAutoHideState*(saved: JsObject) =
   let panelLen = cast[int](panelArray.length)
   for i in 0 ..< panelLen:
     let obj = panelArray[i]
+    if obj.isNil or obj.isUndefined:
+      continue
+    # A panel whose component config did not survive cannot be re-attached,
+    # and a half-restored entry would shadow the standalone panel that would
+    # otherwise be created for the same content.  Skip it instead.
+    if obj["config"].isNil or obj["config"].isUndefined:
+      cwarn "auto_hide: skipping restored panel with no component config"
+      continue
+    # `edgeCssClass` and friends `case` over AutoHideEdge without an `else`,
+    # so an out-of-range ordinal from a hand-edited or downgraded state file
+    # would produce a panel that crashes the strip renderer.
+    let edgeOrdinal = obj["edge"].to(int)
+    if edgeOrdinal < ord(AutoHideEdge.low) or edgeOrdinal > ord(AutoHideEdge.high):
+      cwarn "auto_hide: skipping restored panel with an unknown edge"
+      continue
+    let overlayWidth = obj["overlayWidth"]
+    let overlayHeight = obj["overlayHeight"]
     let panel = AutoHidePanel(
-      edge: AutoHideEdge(obj["edge"].to(int)),
+      edge: AutoHideEdge(edgeOrdinal),
       title: obj["title"].to(cstring),
       content: Content(obj["content"].to(int)),
       componentId: obj["componentId"].to(int),
       config: obj["config"],
+      overlayWidth:
+        if overlayWidth.isNil or overlayWidth.isUndefined: 0
+        else: overlayWidth.to(int),
+      overlayHeight:
+        if overlayHeight.isNil or overlayHeight.isUndefined: 0
+        else: overlayHeight.to(int),
       domTab: nil,
       liveElement: nil,      # No live element for restored panels — will use config fallback
       containerElement: nil,

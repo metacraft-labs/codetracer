@@ -32,7 +32,12 @@ import { _electron, chromium } from "playwright";
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
 import { requiresRR } from "./lang-support";
-import { ensureDefaultConfig, ensureDefaultLayout, restoreUserLayout } from "./layout-reset";
+import {
+  ensureDefaultConfig,
+  ensureDefaultLayout,
+  resetAutoHideState,
+  restoreUserLayout,
+} from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
   LIMIT_SMALL_RECORDING_MS,
@@ -281,6 +286,16 @@ interface CodetracerOptions {
   visualReplayTrace: boolean;
   /** Existing .ct or trace folder to import via ct host --trace-path. */
   visualReplayTracePath: string;
+  /**
+   * Keep whatever `auto_hide_state.json` the spec wrote before launching.
+   *
+   * The launch fixture normally deletes it alongside the layout reset, so a
+   * panel one test pinned cannot come back in the next one.  Specs that exist
+   * to prove a pinned panel IS restored across a restart seed the file in a
+   * fixture-free `beforeEach` (which runs first) and set this so the reset
+   * does not undo them.
+   */
+  preserveAutoHideState: boolean;
 }
 
 /**
@@ -1710,6 +1725,7 @@ export const test = base.extend<
   deepreviewJsonPath: ["", { option: true }],
   visualReplayTrace: [false, { option: true }],
   visualReplayTracePath: ["", { option: true }],
+  preserveAutoHideState: [false, { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -1782,6 +1798,7 @@ export const test = base.extend<
         visualReplayTracePath,
         newTracePolicy,
         testOpenFolderDialogPath,
+        preserveAutoHideState,
       },
       use,
       testInfo,
@@ -1798,6 +1815,12 @@ export const test = base.extend<
       try {
         ensureDefaultConfig(codetracerInstallDir);
         ensureDefaultLayout(codetracerInstallDir);
+        // The saved auto-hide state is the other half of the saved
+        // arrangement — see `resetAutoHideState`. Without this a test that
+        // pins a panel leaves it pinned for every later test in the worker.
+        if (!preserveAutoHideState) {
+          resetAutoHideState();
+        }
       } catch (ex) {
         // Non-fatal: a missing bundled layout file would surface as a
         // launch-time error anyway.  Log and continue so the test still

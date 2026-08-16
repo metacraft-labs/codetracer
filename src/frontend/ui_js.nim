@@ -1398,10 +1398,41 @@ proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
       cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
         getCurrentExceptionMsg()
 
+proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
+  initLayout(config)
+
 proc tryInitLayout*(data: Data) =
+  ## Mount the GoldenLayout tree once both the page and the init event are in.
+  ##
+  ## `initLayout` reaches into GoldenLayout, which throws *native* JavaScript
+  ## `Error`s that Nim's `except` does not catch — so a single bad saved layout
+  ## aborted this proc half-way and `redrawAll()` below never ran, leaving a
+  ## blank window with nothing in the log.  The guard therefore has to be
+  ## written in raw JS, the same way `ui/session_switch.nim` does it.
   if data.ui.pageLoaded and data.ui.initEventReceived:
     if data.ui.layout.isNil:
-      initLayout(data.ui.resolvedConfig)
+      var ok = false
+      {.emit: """
+        try {
+          `callInitLayoutUnchecked`(`data`.ui.resolvedConfig);
+          `ok` = true;
+        } catch (e) {
+          console.error("ui_js: initLayout failed: " +
+            (e && e.message ? e.message : String(e)));
+        }
+      """.}
+      if not ok:
+        cerror "ui_js: layout initialisation failed; see the console"
+        # A blank window with only a console line is exactly the class of
+        # silent failure this pass is removing.  The notification host is
+        # rendered outside the GoldenLayout tree, so it survives this.
+        try:
+          data.viewsApi.errorMessage(cstring(
+            "The saved panel layout could not be restored. " &
+            "Reset it from the View menu if the window stays empty."))
+        except:
+          cerror "ui_js: could not report the layout failure: " &
+            getCurrentExceptionMsg()
     redrawAll()
 
 # In both these `on` functions, we must communicate them to the ui
