@@ -18,9 +18,6 @@ build-*/
 # build/ (build/generated/ct_config.h, build/c/*.o).
 /build/
 
-!build-python
-build-python/src/ct/bin
-
 gem_home/
 
 # wasm binaries
