@@ -80,6 +80,45 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Test 1b: The review surface is added to the layout, not swapped for it
+  // -----------------------------------------------------------------------
+
+  test("Test 1b: DeepReview startup keeps the full standard panel set", async ({ ctPage }) => {
+    // Issue #610. DeepReview used to paste a hard-coded three-panel preset
+    // (VCS + DeepReview + CALLTRACE) over the resolved GoldenLayout config,
+    // so seven standard panels disappeared for the whole session and the
+    // user's own layout was ignored. Placement is additive now.
+    //
+    // Headless counterpart:
+    //   src/tests/gui/tests/layout/deepreview_layout_test.nim
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1000);
+
+    const titles = await dr.layoutTabTitles();
+
+    for (const expected of [
+      "FILES",
+      "VCS",
+      "STATE",
+      "SCRATCHPAD",
+      "CALLTRACE",
+      "AGENT ACTIVITY",
+      "EVENT LOG",
+      "TIMELINE",
+      "TERMINAL OUTPUT",
+    ]) {
+      expect(titles, `missing standard panel: ${expected}`).toContain(expected);
+    }
+
+    // ...and the review surface itself, exactly once.
+    expect(titles.filter((t) => t === "DEEP REVIEW").length).toBe(1);
+
+    // The mode toggle is part of the panel in every mode.
+    await expect(dr.modeToggle()).toBeVisible();
+  });
+
+  // -----------------------------------------------------------------------
   // Test 2: File list sidebar rendering
   // -----------------------------------------------------------------------
 
@@ -89,6 +128,27 @@ test.describe("DeepReview GUI - main features", () => {
 
     const items = await dr.fileItems();
     expect(items.length).toBe(3);
+
+    // The list must be VISIBLE when the review opens, not merely present in
+    // the DOM. DeepReview-GUI.md §2 lists the "Modified Files panel" as a
+    // shared workspace element whose purpose is to "Navigate within the
+    // review set", drawn beside the review surface; §3 makes it "shared by
+    // both DeepReview modes"; §5.2 states "Full Files Mode relies on the
+    // Modified Files panel for cross-file navigation"; and §7's startup
+    // sequence begins "1. The VCS panel populates with the changeset data".
+    //
+    // Regression: additive layout placement (issue #610 / M42a) left the VCS
+    // panel as the *inactive* second tab behind FILES, so every
+    // `.vcs-file-item` rendered under `display: none`. Reading textContent
+    // still worked — which is why this test passed — but nothing could be
+    // clicked, and Tests 5, 22 and DR-8 timed out on "element is not
+    // visible". Fixed in viewmodel/viewmodels/deepreview_layout.nim
+    // (`focusReviewFileList`); headless counterpart in
+    // src/tests/gui/tests/layout/deepreview_layout_test.nim.
+    await expect(dr.fileList()).toBeVisible();
+    for (const item of items) {
+      await expect(item.root).toBeVisible();
+    }
 
     const expectedBasenames = ["main.rs", "utils.rs", "config.rs"];
     for (let i = 0; i < expectedBasenames.length; i++) {
@@ -180,8 +240,10 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 3: Coverage highlighting
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco editor) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but the Monaco
+  // coverage/inline-value decorations it asserts need a loaded recording, and
+  // `--deepreview` mode does not load one yet (M42b). Restore with the trace
+  // plumbing, not with the layout fix.
   test.skip("Test 3: coverage decorations are applied to the editor", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -202,8 +264,10 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 4: Inline variable values
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco editor) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but the Monaco
+  // coverage/inline-value decorations it asserts need a loaded recording, and
+  // `--deepreview` mode does not load one yet (M42b). Restore with the trace
+  // plumbing, not with the layout fix.
   test.skip("Test 4: inline variable values appear as decorations", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -258,8 +322,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 6: Execution slider
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (execution slider) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: the execution slider renders in Full Files mode again (issue #610),
+  // but it is driven by per-function flow data that `--deepreview` mode has no
+  // recording behind yet (M42b).
   test.skip("Test 6: execution slider navigates between function executions", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -295,8 +360,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 7: Loop iteration slider
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (loop slider) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: the loop slider renders in Full Files mode again (issue #610), but
+  // it is driven by per-loop iteration data that `--deepreview` mode has no
+  // recording behind yet (M42b).
   test.skip("Test 7: loop slider is visible and navigable for files with loops", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -421,37 +487,49 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 13: Mode toggle switches between views
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode and mode toggle are not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
-  test.skip("Test 13: mode toggle switches between full files and unified diff views", async ({ ctPage }) => {
+  // Re-enabled with the #610 fix: the mode toggle used to be hidden behind
+  // `glEmbedded`, which is set for every `--deepreview` session, so Full
+  // Files mode was unreachable. GL-embedded panels default to Unified Diff
+  // (the file list and call tree live in the VCS / CALLTRACE panels), so the
+  // starting mode differs from the standalone panel's.
+  //
+  // Headless counterpart: the "DeepReview view — GL-embedded panel" suite in
+  //   src/tests/gui/tests/deepreview/deepreview_vm_test.nim
+  test("Test 13: mode toggle switches between full files and unified diff views", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
     await wait(500);
 
-    // Default mode should be Full Files (editor is visible, no unified diff).
-    await expect(dr.editor()).toBeVisible();
+    // The toggle is present at all.
+    await expect(dr.modeToggle()).toBeVisible();
+    await expect(dr.fullFilesButton()).toBeVisible();
+    await expect(dr.unifiedDiffButton()).toBeVisible();
 
-    // Switch to unified diff.
+    // GL-embedded default is Unified Diff.
+    await expect(dr.unifiedDiff()).toBeVisible();
+
+    // Switch to full files: the Monaco host div appears and the unified
+    // diff goes away.
+    await dr.switchToFullFiles();
+    await wait(1000);
+
+    await expect(dr.editor()).toBeVisible();
+    await expect(dr.unifiedDiff()).toHaveCount(0);
+
+    // Switch back.
     await dr.switchToUnifiedDiff();
     await wait(500);
 
     await expect(dr.unifiedDiff()).toBeVisible();
-
-    // Switch back to full files.
-    await dr.switchToFullFiles();
-    await wait(500);
-
-    // The editor area should be back. The editor div is present.
-    await expect(dr.editor()).toBeVisible();
   });
 
   // -----------------------------------------------------------------------
   // Test 19: Diff decorations in Full Files Mode
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco diff decorations) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but these assert
+  // Monaco diff decorations that need the file's real source text, which
+  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 19: diff decorations appear in Full Files Mode for modified file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -469,8 +547,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 20: Added lines have green decoration class
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco diff decorations) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but these assert
+  // Monaco diff decorations that need the file's real source text, which
+  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 20: added lines have green decoration class for purely added file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -497,8 +576,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 21: Diff decorations are removed when switching files
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco diff decorations) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but these assert
+  // Monaco diff decorations that need the file's real source text, which
+  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 21: diff decorations are removed when switching to a file without diff data", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -540,12 +620,12 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 22: DR-6 - Mode switch preserves file selection
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode and mode toggle are not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
-  test.skip("Test 22: mode switch preserves the selected file index", async ({ ctPage }) => {
+  // Re-enabled with the #610 fix (see Test 13). File selection is owned by
+  // the VCS panel in GL-embedded mode, so this asserts that toggling the
+  // view mode does not disturb it.
+  test("Test 22: mode switch preserves the selected file index", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
     await wait(500);
 
     // Select the second file (src/utils.rs).
@@ -844,8 +924,9 @@ test.describe("DeepReview GUI - empty data handling", () => {
       const items = await dr.fileItems();
       expect(items.length).toBe(0);
 
-      // Note: execution slider is not rendered in GL-embedded mode.
-      // The empty state is verified by the 0 file items above.
+      // Note: the execution slider only renders in Full Files mode; the
+      // GL-embedded default is Unified Diff. The empty state is verified by
+      // the 0 file items above.
     });
   });
 
@@ -856,9 +937,9 @@ test.describe("DeepReview GUI - empty data handling", () => {
   test.describe("missing call trace", () => {
     test.use({ launchMode: "deepreview", deepreviewJsonPath: noCalltracePath });
 
-    // Skip: Call trace panel is rendered by a separate GL panel in
-    // GL-embedded mode, not by the DeepReview component itself.
-    // Restore when the calltrace GL panel is testable.
+    // Skip: the call tree is rendered by the GL CALLTRACE panel, not by the
+    // DeepReview component, and that panel has no data until `--deepreview`
+    // mode loads a recording (M42b).
     test.skip("Test 9b: renders without crash when callTrace is null", async ({ ctPage }) => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
@@ -936,7 +1017,7 @@ test.describe("DeepReview comprehensive workflow", () => {
       expect(await secondItem.isSelected()).toBe(true);
       expect(await dr.fileItemByIndex(0).isSelected()).toBe(false);
 
-      // Step 5: In GL-embedded mode the unified diff is always shown.
+      // Step 5: Unified Diff is the GL-embedded default mode.
       await expect(dr.unifiedDiff()).toBeVisible();
 
       // Step 6: Verify hunks are rendered with correct added/removed counts.
@@ -997,9 +1078,9 @@ test.describe("DeepReview comprehensive workflow", () => {
         await wait(500);
       }
 
-      // Note: Steps 11-13 (Full Files mode, mode toggle, Monaco diff
-      // decorations) are not applicable in GL-embedded mode. They will be
-      // restored when the VCS panel's "Open File" mode is implemented.
+      // Note: the mode toggle and Full Files mode are covered by Test 13
+      // since the #610 fix. The Monaco diff/inline-value decorations remain
+      // uncovered because `--deepreview` mode loads no recording yet (M42b).
     });
   });
 
@@ -1026,8 +1107,9 @@ test.describe("DeepReview comprehensive workflow", () => {
       const statsText = await dr.statsDisplay().textContent();
       expect(statsText).toContain("0 files");
 
-      // Note: execution slider is not rendered in GL-embedded mode.
-      // The empty state is verified by the 0 file items and stats above.
+      // Note: the execution slider only renders in Full Files mode; the
+      // GL-embedded default is Unified Diff. The empty state is verified by
+      // the 0 file items and stats above.
     });
   });
 

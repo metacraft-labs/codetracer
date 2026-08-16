@@ -2,6 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger, launch_config,
+  recent_items,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -55,6 +56,52 @@ proc started*: Future[void] =
         discard started(), 100)
   return future
 
+proc pushRecentItems(startOptions: StartOptions) {.async.} =
+  ## Make sure the renderer holds the recent-traces / recent-folders lists, on
+  ## every startup path that can put the welcome surface on screen.
+  ##
+  ## Issue #568: the lists used to be fetched only in the welcome-screen branch
+  ## of ``init`` below, and the renderer only ever assigned them from the
+  ## ``CODETRACER::welcome-screen`` message that branch sends.  A process
+  ## started with ``ct run <program>`` took a different branch, so pressing the
+  ## session tab bar's "+" opened an empty tab whose Recent Traces panel stayed
+  ## empty for the whole lifetime of the process — while the same click after a
+  ## welcome-screen launch listed them.
+  ##
+  ## ``recent_items.recentItemsChannel`` owns the decision of which paths need
+  ## this push, so it can be (and is) tested headlessly; this proc is the
+  ## adapter that performs it.
+  ##
+  ## Deliberately *eager* rather than a lazy renderer-side request: it reuses
+  ## the exact data flow and freshness model the welcome path already has, needs
+  ## no request channel and no in-flight state in the renderer, and cannot make
+  ## the panel flash empty before filling in.  It is called only after the work
+  ## that path's user is actually waiting for has completed, so the two
+  ## ``codetracer trace-metadata`` child processes stay off the critical path.
+  if not needsRecentItemsPush(startupPath(
+      shellUi = startOptions.shellUi,
+      withDeepReview = startOptions.withDeepReview,
+      edit = startOptions.edit,
+      welcomeScreen = startOptions.welcomeScreen)):
+    return
+
+  # `quitOnError = false`: these paths are already showing a live session, and
+  # failing to list recent traces must never cost the user that session.
+  let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(
+    limit = RECENT_ITEMS_LIMIT, quitOnError = false)
+  let recentFolders = await electron_vars.app.findRecentFoldersWithCodetracer(
+    limit = RECENT_ITEMS_LIMIT, quitOnError = false)
+  var recentTransactions: seq[StylusTransaction] = @[]
+  if startOptions.stylusExplorer:
+    recentTransactions = await electron_vars.app.findRecentTransactions(
+      limit = RECENT_ITEMS_LIMIT, quitOnError = false)
+
+  mainWindow.webContents.send RecentItemsMessage, js{
+    recentTraces: recentTraces,
+    recentFolders: recentFolders,
+    recentTransactions: recentTransactions
+  }
+
 proc startShellUi*(main: js, config: Config): Future[void] {.async.} =
   debugPrint "start shell ui"
   main.webContents.send "CODETRACER::start-shell-ui", js{config: config}
@@ -84,6 +131,10 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     await startShellUi(mainWindow, data.config)
     await wait(1_000)
     await started()
+    # A no-op for the shell UI (it hides the welcome surface entirely), but
+    # every exit of `init` routes through the same decision so a new startup
+    # path cannot silently skip it — see `index/recent_items.nim`.
+    await pushRecentItems(data.startOptions)
     return
 
   if data.startOptions.withDeepReview:
@@ -92,10 +143,18 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     # DeepReview component layout.
     debugPrint "start deepreview mode"
     await started()
+    # Forward the loaded GoldenLayout config.  DeepReview used to build its
+    # own three-panel preset in the renderer and drop everything else for
+    # the session (issue #610); it now *adds* the review surface to this
+    # layout, so the user's panels survive.
     mainWindow.webContents.send "CODETRACER::start-deepreview", js{
       config: data.config,
+      layout: layout,
       startOptions: data.startOptions
     }
+    # DeepReview is a normal window with a session tab bar, so its "+" opens a
+    # welcome tab too (issue #568).
+    await pushRecentItems(data.startOptions)
     return
 
   # TODO: leave this to backend/DAP if possible
@@ -214,7 +273,7 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     var recentTransactions: seq[StylusTransaction] = @[]
     if data.startOptions.stylusExplorer:
       recentTransactions = await electron_vars.app.findRecentTransactions(limit=RECENT_ITEMS_LIMIT)
-    mainWindow.webContents.send "CODETRACER::welcome-screen", js{
+    mainWindow.webContents.send WelcomeScreenMessage, js{
       home: paths.home.cstring,
       layout: layout,
       startOptions: startOptionsSnapshot,
@@ -223,3 +282,9 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
       recentFolders: recentFolders,
       recentTransactions: recentTransactions
     }
+
+  # Issue #568: the welcome branch above carries the recent lists inline; every
+  # other startup path needs them pushed separately, or the welcome surface the
+  # session tab bar's "+" opens has nothing to list.  `pushRecentItems` is a
+  # no-op for the paths whose message already carried them.
+  await pushRecentItems(startOptionsSnapshot)

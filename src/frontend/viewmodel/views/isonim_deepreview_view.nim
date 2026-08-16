@@ -217,20 +217,26 @@ template renderHeaderImpl(r, vm, callbacks: untyped): untyped =
               else:
                 option(value = $ctxId):
                   text ctxLabel
-      if not vm.glEmbedded.val:
-        tdiv(class = "deepreview-mode-toggle"):
-          button(class = modeButtonClass(vm.viewMode.val == drpvmFullFiles),
-                 onclick = proc() =
-                   vm.setViewMode(drpvmFullFiles)
-                   if callbacks.onSetViewMode != nil:
-                     callbacks.onSetViewMode(drpvmFullFiles)):
-            text "Full Files"
-          button(class = modeButtonClass(vm.viewMode.val == drpvmUnified),
-                 onclick = proc() =
-                   vm.setViewMode(drpvmUnified)
-                   if callbacks.onSetViewMode != nil:
-                     callbacks.onSetViewMode(drpvmUnified)):
-            text "Unified Diff"
+      # The mode toggle renders in every mode.  It used to be suppressed
+      # whenever the panel was GL-embedded, which — because DeepReview
+      # startup always sets ``glEmbedded`` — meant Full Files mode was
+      # unreachable for the entire ``--deepreview`` session (issue #610).
+      # ``glEmbedded`` legitimately suppresses the panel's own file list and
+      # calltrace columns (the VCS and CALLTRACE panels own those in the GL
+      # layout); it says nothing about which view mode the user may pick.
+      tdiv(class = "deepreview-mode-toggle"):
+        button(class = modeButtonClass(vm.viewMode.val == drpvmFullFiles),
+               onclick = proc() =
+                 vm.setViewMode(drpvmFullFiles)
+                 if callbacks.onSetViewMode != nil:
+                   callbacks.onSetViewMode(drpvmFullFiles)):
+          text "Full Files"
+        button(class = modeButtonClass(vm.viewMode.val == drpvmUnified),
+               onclick = proc() =
+                 vm.setViewMode(drpvmUnified)
+                 if callbacks.onSetViewMode != nil:
+                   callbacks.onSetViewMode(drpvmUnified)):
+          text "Unified Diff"
       span(class = "deepreview-stats"):
         text vm.statsText.val
 
@@ -522,6 +528,12 @@ when defined(js):
   proc renderCallTrace(r: WebRenderer; vm: DeepReviewVM): isonim_dom.Element =
     renderCallTraceImpl(r, vm)
 
+## ``glEmbedded`` means the panel sits in the GoldenLayout beside the VCS
+## and CALLTRACE panels, which own the file list and the call tree — so the
+## panel drops its own copies of those two columns and renders only the
+## editor area.  The editor area itself still honours the selected view
+## mode; suppressing that as well is what made Full Files mode unreachable
+## in ``--deepreview`` sessions (issue #610).
 proc renderDeepReviewLoadedContent(r: MockRenderer; vm: DeepReviewVM;
     componentId: int; callbacks: DeepReviewCallbacks): MockNode =
   ui(r):
@@ -529,7 +541,11 @@ proc renderDeepReviewLoadedContent(r: MockRenderer; vm: DeepReviewVM;
       renderHeader(r, vm, callbacks)
       if vm.glEmbedded.val:
         tdiv(class = DeepReviewEditorAreaClass):
-          renderUnifiedDiff(r, vm, callbacks)
+          if vm.viewMode.val == drpvmUnified:
+            renderUnifiedDiff(r, vm, callbacks)
+          else:
+            renderSliders(r, vm, callbacks)
+            tdiv(class = DeepReviewEditorClass, id = editorId(componentId))
       else:
         tdiv(class = DeepReviewBodyClass):
           tdiv(class = DeepReviewFileListClass):
@@ -551,7 +567,11 @@ when defined(js):
         renderHeader(r, vm, callbacks)
         if vm.glEmbedded.val:
           tdiv(class = DeepReviewEditorAreaClass):
-            renderUnifiedDiff(r, vm, callbacks)
+            if vm.viewMode.val == drpvmUnified:
+              renderUnifiedDiff(r, vm, callbacks)
+            else:
+              renderSliders(r, vm, callbacks)
+              tdiv(class = DeepReviewEditorClass, id = editorId(componentId))
         else:
           tdiv(class = DeepReviewBodyClass):
             tdiv(class = DeepReviewFileListClass):

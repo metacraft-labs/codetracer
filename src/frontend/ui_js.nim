@@ -178,6 +178,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
+import viewmodel/viewmodels/deepreview_layout
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
@@ -2338,14 +2339,27 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   data.tryInitLayout()
 
 
-proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions)) =
+proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions, layout=js)) =
   ## Handler for ``CODETRACER::start-deepreview`` IPC message.
-  ## Sets up the frontend for DeepReview offline review mode using the
-  ## standard GL layout (filesystem, editor, calltrace panels) instead
-  ## of a monolithic DeepReview panel.  The filesystem panel detects
-  ## ``data.deepReviewActive`` and shows changed files from the review
-  ## data.  Editor tabs receive diff decorations when a file has review
-  ## data.  The calltrace panel works as normal.
+  ##
+  ## Sets up the frontend for DeepReview offline review mode on the user's
+  ## own GoldenLayout: the review surface is *added* to the layout the
+  ## index process loaded, it does not replace it.  Every standard panel —
+  ## FILES, VCS, STATE, SCRATCHPAD, CALLTRACE, AGENT ACTIVITY, EVENT LOG,
+  ## TIMELINE, TERMINAL OUTPUT — therefore stays where the user put it
+  ## (issue #610).
+  ##
+  ## The VCS panel detects ``data.deepReviewActive`` and populates its file
+  ## list from ``data.deepReviewData.files``; clicking a file updates
+  ## ``data.deepReviewSelectedFileIndex``, which the DeepReview component
+  ## reads to decide which file's diff to render.
+  ##
+  ## NOTE (M42b): in ``--deepreview`` mode the index process never loads a
+  ## recording (``index/args.nim`` forces ``recordingID = ""`` and
+  ## ``index/startup.nim`` returns before ``CODETRACER::init``), so the
+  ## replay-backed panels come up present but EMPTY.  Populating them needs
+  ## the exporter to emit a resolvable ``traceContexts[].recordingId`` and
+  ## the startup path to load that recording — tracked separately.
   data.startOptions.loading = false
   data.startOptions.withDeepReview = true
   data.config = response.config
@@ -2362,104 +2376,67 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   hideWelcomeScreenSurface()
 
-  # DeepReview GL layout: VCS panel (left) showing changed files from the
-  # review data, DeepReview component (center) rendering the unified diff
-  # for the selected file, and calltrace (right).  The VCS panel detects
-  # ``data.deepReviewActive`` and populates its file list from
-  # ``data.deepReviewData.files``.  Clicking a file updates
-  # ``data.deepReviewSelectedFileIndex`` which the DeepReview component
-  # reads to decide which file's diff to render.
-  let standardLayoutJson = cstring"""{
-    "settings": {
-      "constrainDragToContainer": true,
-      "reorderEnabled": true,
-      "popoutWholeStack": false,
-      "blockedPopoutsThrowError": true,
-      "responsiveMode": "always"
-    },
-    "dimensions": {
-      "borderWidth": 2,
-      "borderHeight": 4,
-      "headerHeight": 35,
-      "dragProxyWidth": 300,
-      "dragProxyHeight": 200
-    },
-    "root": {
-      "type": "row",
-      "size": "100%",
-      "isClosable": false,
-      "content": [
-        {
-          "type": "column",
-          "size": "20%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "size": "100%",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "vcsComponent-0",
-                    "content": 41
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "column",
-          "size": "60%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "deepReviewComponent-0",
-                    "content": 36
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "column",
-          "size": "20%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "calltraceComponent-0",
-                    "content": 6
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    "openPopouts": []
-  }"""
-  data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](JSON.parse(standardLayoutJson))
+  # Additive placement, mirroring `applyVisualReplayTabsToResolvedConfig`:
+  # parse the layout the index process loaded, insert one DeepReview
+  # component into the editor area, hand it back to GoldenLayout.
+  var layoutNode = resolvedConfigToJsonNode(
+    cast[GoldenLayoutResolvedConfig](response.layout))
+  if layoutNode.isNil:
+    # `index/config.loadLayoutConfig` never returns nil (it resets to the
+    # bundled default, or exits), so this is an emergency path only: keep
+    # DeepReview usable with the file list it depends on rather than
+    # opening an empty window.
+    cerror "onStartDeepReview: no usable layout in the start message; " &
+      "falling back to a review-only layout"
+    layoutNode = %*{
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "responsiveMode": "always"
+      },
+      "dimensions": {
+        "borderWidth": 4,
+        "borderHeight": 4,
+        "headerHeight": 32,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "root": {
+        "type": "row",
+        "size": "100%",
+        "isClosable": false,
+        "content": [
+          {
+            "type": "stack",
+            "size": "20%",
+            "content": [
+              {
+                "type": "component",
+                "componentType": "genericUiComponent",
+                "componentName": "genericUiComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "vCSComponent-0",
+                  "content": VcsContentId
+                },
+                "title": "genericUiComponent"
+              }
+            ]
+          }
+        ]
+      },
+      "openPopouts": []
+    }
 
-  # Create UI components from the standard layout config.  This walks the GL
+  let reviewConfig = jsonNodeToResolvedConfig(addDeepReviewSurface(layoutNode))
+  if not reviewConfig.isNil:
+    data.ui.resolvedConfig = reviewConfig
+  else:
+    cerror "onStartDeepReview: could not build the DeepReview layout"
+
+  # Create UI components from the resolved layout config.  This walks the GL
   # config tree and instantiates each component.  The VCS panel detects
   # deepReviewActive and shows changed files; editor tabs get diff decorations.
   data.createUIComponents()

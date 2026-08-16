@@ -1,11 +1,20 @@
 ## Unit tests for ``DeepReviewVM``.
+##
+## The last suite renders the real IsoNim DeepReview view through
+## ``MockRenderer`` rather than asserting on VM state alone.  It lives here
+## because the defect it guards (issue #610) is a *view* decision keyed off a
+## VM flag: the mode toggle used to be suppressed whenever ``glEmbedded`` was
+## set, and ``glEmbedded`` is set for every ``--deepreview`` session — so no
+## VM-level assertion could observe it.
 
-import std/unittest
+import std/[strutils, tables, unittest]
 import isonim/core/[signals, computation, owner]
+import isonim/testing/mock_dom
 import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/deepreview_vm
+import views/isonim_deepreview_view
 
 proc makeStoreWithMock(autoRespond: bool = true):
     tuple[store: ReplayDataStore, mock: MockBackendService] =
@@ -286,3 +295,123 @@ suite "DeepReviewVM helpers":
     check clampDeepReviewIndex(-1, 3) == 0
     check clampDeepReviewIndex(7, 3) == 2
     check clampDeepReviewIndex(1, 3) == 1
+
+# ---------------------------------------------------------------------------
+# View-level guards for issue #610 (M42a)
+# ---------------------------------------------------------------------------
+
+proc findByClass(node: MockNode; className: string): MockNode =
+  if node.kind == mnkElement and
+      className in node.attributes.getOrDefault("class", ""):
+    return node
+  for child in node.children:
+    let found = findByClass(child, className)
+    if found != nil:
+      return found
+  nil
+
+proc findAllByClass(node: MockNode; className: string;
+                    acc: var seq[MockNode]) =
+  if node.kind == mnkElement and
+      className in node.attributes.getOrDefault("class", ""):
+    acc.add(node)
+  for child in node.children:
+    findAllByClass(child, className, acc)
+
+proc findAllByClass(node: MockNode; className: string): seq[MockNode] =
+  result = @[]
+  findAllByClass(node, className, result)
+
+proc findById(node: MockNode; id: string): MockNode =
+  ## Used for the Monaco host div rather than `findByClass`: the editor's
+  ## class (`deepreview-editor`) is a prefix of its container's
+  ## (`deepreview-editor-area`), so a substring class match cannot tell the
+  ## two apart.
+  if node.kind == mnkElement and node.attributes.getOrDefault("id", "") == id:
+    return node
+  for child in node.children:
+    let found = findById(child, id)
+    if found != nil:
+      return found
+  nil
+
+proc populateEmbeddedPanel(vm: DeepReviewVM) =
+  ## Minimum state for a GL-embedded review panel with something to show.
+  vm.setHasData(true)
+  vm.setGlEmbedded(true)
+  vm.setHeader("DeepReview: parser", "abcdef123456...",
+               "1 files | 1 recordings | 9ms")
+  vm.setFiles(@[makeFile("/repo/src/main.rs")])
+  vm.setViewMode(drpvmUnified)
+
+suite "DeepReview view — GL-embedded panel (issue #610)":
+
+  test "the view mode toggle is rendered even when GL-embedded":
+    ## `glEmbedded` is true for the whole `--deepreview` session, so hiding
+    ## the toggle behind it made Full Files mode permanently unreachable.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+      let panel = renderDeepReviewPanel(r, vm, componentId = 11)
+
+      populateEmbeddedPanel(vm)
+
+      check vm.glEmbedded.val
+      check findByClass(panel, "deepreview-mode-toggle") != nil
+      check findAllByClass(panel, "deepreview-mode-btn").len == 2
+
+      dispose()
+
+  test "picking Full Files switches the embedded editor area":
+    ## The toggle has to *do* something: `glEmbedded` legitimately drops the
+    ## panel's own file list and calltrace columns (the VCS and CALLTRACE
+    ## panels own those), but the editor area must still honour the mode.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+      var reportedMode = drpvmUnified
+      let callbacks = DeepReviewCallbacks(
+        onSetViewMode: proc(mode: DeepReviewPanelViewMode) =
+          (reportedMode = mode))
+      let panel = renderDeepReviewPanel(r, vm, componentId = 12,
+                                        callbacks = callbacks)
+
+      populateEmbeddedPanel(vm)
+      check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
+      check findById(panel, isonim_deepreview_view.editorId(12)) == nil
+
+      findAllByClass(panel, "deepreview-mode-btn")[0].fireEvent("click")
+
+      check vm.viewMode.val == drpvmFullFiles
+      check reportedMode == drpvmFullFiles
+      let editorHost = findById(panel, isonim_deepreview_view.editorId(12))
+      check editorHost != nil
+      check editorHost.attributes.getOrDefault("class", "") ==
+        DeepReviewEditorClass
+      check findByClass(panel, DeepReviewUnifiedDiffClass) == nil
+      # The duplicated columns stay suppressed — that part of `glEmbedded`
+      # is correct and must not regress.
+      check findByClass(panel, DeepReviewFileListClass) == nil
+      check findByClass(panel, "deepreview-calltrace") == nil
+
+      dispose()
+
+  test "switching back to Unified restores the diff surface":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+      let panel = renderDeepReviewPanel(r, vm, componentId = 13)
+
+      populateEmbeddedPanel(vm)
+      findAllByClass(panel, "deepreview-mode-btn")[0].fireEvent("click")
+      check findById(panel, isonim_deepreview_view.editorId(13)) != nil
+
+      findAllByClass(panel, "deepreview-mode-btn")[1].fireEvent("click")
+      check vm.viewMode.val == drpvmUnified
+      check findById(panel, isonim_deepreview_view.editorId(13)) == nil
+      check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
+
+      dispose()

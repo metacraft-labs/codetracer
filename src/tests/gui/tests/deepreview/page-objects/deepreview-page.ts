@@ -13,12 +13,25 @@
  *
  * In GL-embedded mode, the file list lives in the VCS panel rather than in
  * the DeepReview component itself. Selectors for file items use the
- * ``vcs-file-*`` CSS classes from ``src/frontend/ui/vcs.nim``.
+ * ``vcs-file-*`` CSS classes from ``src/frontend/ui/vcs.nim``. The call
+ * trace likewise lives in the GL CALLTRACE panel, not inside the DeepReview
+ * component — those two columns are the only things ``glEmbedded``
+ * suppresses.
  *
- * Full Files mode (Monaco editor, execution slider, loop slider, mode
- * toggle) is not available in GL-embedded mode. The corresponding page
- * object methods are retained for future use when VCS panel "Open File"
- * mode is implemented.
+ * NOTE: this block used to say that Full Files mode and the mode toggle
+ * were "not available in GL-embedded mode". That was never a design
+ * decision — it documented issue #610, in which DeepReview startup replaced
+ * the whole GoldenLayout with a three-panel preset and the view hid its own
+ * mode toggle behind ``glEmbedded``, which is set for every ``--deepreview``
+ * session. Both are fixed: startup now ADDS the review surface to the
+ * user's layout (so FILES, STATE, SCRATCHPAD, CALLTRACE, AGENT ACTIVITY,
+ * EVENT LOG, TIMELINE and TERMINAL OUTPUT are all present), and the mode
+ * toggle renders in every mode.
+ *
+ * Still outstanding, and the reason some Full Files assertions below remain
+ * skipped: in ``--deepreview`` mode the index process never loads a
+ * recording, so the replay-backed panels are present but empty and the
+ * Monaco inline-value decorations have no data to show.
  */
 
 import type { Locator, Page } from "@playwright/test";
@@ -182,6 +195,23 @@ export class DeepReviewPage {
   /** The error message shown when no data is loaded. */
   errorMessage(): Locator {
     return this.page.locator(".deepreview-error");
+  }
+
+  // -- Surrounding GoldenLayout --------------------------------------------
+
+  /**
+   * Titles of every GoldenLayout tab currently attached.
+   *
+   * DeepReview is one panel inside the user's layout, not a replacement for
+   * it (issue #610), so the standard panel titles must be present alongside
+   * the review surface. Titles come from ``convertTabTitle``
+   * (``src/frontend/ui/layout.nim``): "FILES", "VCS", "STATE",
+   * "SCRATCHPAD", "CALLTRACE", "AGENT ACTIVITY", "EVENT LOG", "TIMELINE",
+   * "TERMINAL OUTPUT", "DEEP REVIEW".
+   */
+  async layoutTabTitles(): Promise<string[]> {
+    const titles = await this.page.locator(".lm_tab .lm_title").allTextContents();
+    return titles.map((t) => t.trim());
   }
 
   // -- Header --------------------------------------------------------------
