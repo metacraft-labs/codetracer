@@ -1121,8 +1121,12 @@ proc onRecordWithLaunchConfig*(sender: js,
       js{errorMessage: errorText}
 
 proc sendNotification*(kind: NotificationKind, message: string) =
+  # The renderer subscribes to the namespaced channel (`ui_js.configureIPC`),
+  # so an unprefixed send is simply dropped.  Every progress message routed
+  # through this helper — "ct record process started", "starting live native
+  # session" — was therefore invisible; see issue #603.
   let notification = newNotification(kind, message)
-  mainWindow.webContents.send "new-notification", notification
+  mainWindow.webContents.send "CODETRACER::new-notification", notification
 
 proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   ## Initialize edit mode for a folder - called from welcome screen after folder selection

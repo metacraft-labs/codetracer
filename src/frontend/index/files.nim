@@ -283,9 +283,13 @@ proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
 
 proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
   try:
-    if data.tabs.hasKey(response.name):
-      data.tabs[response.name].ignoreNext += 1
+    # Arm the self-write window before the write (events can be raised while
+    # it is still in progress) and re-arm it after, anchored to the moment the
+    # file settled.  Without this the renderer gets a "File changed on disk"
+    # conflict dialog for CodeTracer's own save — issue #603.
+    suppressSelfWrite(response.name)
     discard await writeFileAsync(fsAsync, response.name, response.raw)
+    suppressSelfWrite(response.name)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
     errorPrint "save-file error: ", getCurrentExceptionMsg()
@@ -294,9 +298,9 @@ proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveA
 
 proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
   try:
-    if data.tabs.hasKey(response.name):
-      data.tabs[response.name].ignoreNext += 1
+    suppressSelfWrite(response.name)
     discard await writeFileAsync(fsAsync, response.name, response.raw)
+    suppressSelfWrite(response.name)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()

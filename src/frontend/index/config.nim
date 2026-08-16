@@ -37,7 +37,18 @@ type
     path*:          cstring
     lang*:          Lang
     fileWatched*:   bool
-    ignoreNext*:    int # save
+    ## Epoch-ms deadline until which filesystem events for this file are
+    ## attributed to CodeTracer's own write and suppressed.
+    ##
+    ## This replaces an `ignoreNext: int` counter that was incremented once
+    ## per save and decremented once per event.  That only works if a write
+    ## produces exactly one event, and it does not: up to three watchers are
+    ## registered per file (`fs.watch` on the file, `fs.watch` on its
+    ## directory, `fs.watchFile` polling) and a single `writeFile` — open,
+    ## truncate, write — yields several inotify `change` events on its own.
+    ## Every surplus event walked straight past the mask and raised the
+    ## "File changed on disk" dialog for the user's *own* save (issue #603).
+    selfWriteUntilMs*: float
     waitsPrompt*:   bool
 
 var data* = ServerData(
@@ -63,16 +74,36 @@ var data* = ServerData(
   debugInstances: JsAssoc[cstring, DebugInstance]{}
 )
 
+const selfWriteSuppressionMs* = 750.0
+  ## How long after one of our own writes filesystem events for that file are
+  ## ignored.  Comfortably longer than the 250 ms `fs.watchFile` poll below,
+  ## and short enough that a real external edit made right after a save is
+  ## still picked up.
+
+proc nowMs(): float {.importjs: "Date.now()".}
+
 proc ensureServerTab(filename: cstring, lang: Lang): ServerTab =
   if not data.tabs.hasKey(filename):
     data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
   data.tabs[filename]
 
+proc suppressSelfWrite*(filename: cstring) =
+  ## Mark `filename` as being written by CodeTracer itself, so the watchers
+  ## below do not report the write back to the renderer as an external change.
+  ##
+  ## Call this both immediately before and immediately after the write: the
+  ## first arms the window for events raised while the write is in progress,
+  ## the second re-anchors it to the moment the file actually settled.
+  if data.tabs.hasKey(filename):
+    data.tabs[filename].selfWriteUntilMs = nowMs() + selfWriteSuppressionMs
+
 proc notifySourceFileChanged(filename: cstring, lang: Lang) =
   let tab = ensureServerTab(filename, lang)
-  if tab.ignoreNext > 0:
-    tab.ignoreNext = tab.ignoreNext - 1
-  elif tab.fileWatched and not tab.waitsPrompt:
+  if nowMs() < tab.selfWriteUntilMs:
+    # Our own write.  Unlike the counter this replaced, a time window absorbs
+    # an arbitrary number of events from an arbitrary number of watchers.
+    return
+  if tab.fileWatched and not tab.waitsPrompt:
     tab.waitsPrompt = true
     mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
 
@@ -211,10 +242,15 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       # Always also register the polling watcher.  This is intentional: even
       # when ``fs.watch`` *appears* to succeed, it can silently never fire on
       # certain mounts (in Playwright + Electron + tmpfs scenarios we observed
-      # zero ``change`` events).  ``fs.watchFile`` only fires when the
-      # mtime/size actually changed between polls, so registering both does
-      # not double-notify in practice; ``tab.waitsPrompt`` further dedupes
-      # the IPC.
+      # zero ``change`` events).
+      #
+      # These watchers DO double-notify.  A single ``writeFile`` (open,
+      # truncate, write) raises several inotify ``change`` events, each of
+      # which is delivered to both ``fs.watch`` registrations, and the poller
+      # can add one more.  ``tab.waitsPrompt`` only dedupes events that arrive
+      # while a prompt is already outstanding.  Suppressing our own writes is
+      # therefore ``selfWriteUntilMs``'s job, not a counter's — see
+      # ``notifySourceFileChanged`` above and issue #603.
       try:
         fs.watchFile(openedPath, js{interval: 250, persistent: false}) do (curr: js, prev: js):
           # ``curr.mtimeMs`` and ``prev.mtimeMs`` are numeric epoch ms;

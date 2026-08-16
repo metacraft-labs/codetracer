@@ -2826,13 +2826,20 @@ proc onSuccessfulRecord(
 proc onFailedRecord(
   sender: js,
   response: jsobject(errorMessage=cstring)) =
+  ## A build/record run failed.
+  ##
+  ## The notification is unconditional.  Routing the message *only* into the
+  ## new-record form's status meant that any user who had ever opened "Record
+  ## new trace" got zero feedback from a failed re-record: `welcomeScreen` is
+  ## created once at startup and never cleared, and `newRecord` stays non-nil
+  ## once the form has been opened, so the form is usually hidden while it
+  ## silently absorbs the error (issue #603).
+  data.viewsApi.errorMessage(response.errorMessage)
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordError
     data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
     data.ui.welcomeScreen.requestWelcomeScreenRender()
-  else:
-    data.viewsApi.errorMessage(response.errorMessage)
 
 proc onLoadingTrace(
   sender: js,
@@ -2919,23 +2926,44 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     data.services.editor.open[response.name].changed = false
     data.services.editor.open[response.name].lastSyncedSource =
       data.services.editor.open[response.name].source
-  if data.ui.editors.hasKey(response.name):
-    let editor = data.ui.editors[response.name]
-    if not editor.tabInfo.isNil:
-      editor.tabInfo.changed = false
-      editor.tabInfo.lastSyncedSource = editor.tabInfo.source
-    editor.name = response.name
-    if not data.services.search.paths.hasKey(response.name):
-      data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
-      data.services.search.paths[response.name] = true
-    var tokens = rsplit($response.name, {'/'}, maxsplit=1)
-    var label = $response.name
-    if tokens.len >= 2:
-      label = tokens[1]
-    editor.contentItem.setTitle(cstring(label))
-    editor.contentItem.config.componentState.label = response.name
-    editor.contentItem.config.componentState.fullPath = response.name
+  # The editor-chrome updates below touch GoldenLayout internals
+  # (`contentItem.config.componentState`) that are not guaranteed to exist for
+  # every tab.  They must never be able to stop `checkPendingReRecord` from
+  # running: that call is the *only* thing that drains a queued re-record
+  # request, and a throw here left the request armed forever (issue #603).
+  try:
+    if data.ui.editors.hasKey(response.name):
+      let editor = data.ui.editors[response.name]
+      if not editor.tabInfo.isNil:
+        editor.tabInfo.changed = false
+        editor.tabInfo.lastSyncedSource = editor.tabInfo.source
+      editor.name = response.name
+      if not data.services.search.paths.hasKey(response.name):
+        data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
+        data.services.search.paths[response.name] = true
+      var tokens = rsplit($response.name, {'/'}, maxsplit=1)
+      var label = $response.name
+      if tokens.len >= 2:
+        label = tokens[1]
+      editor.contentItem.setTitle(cstring(label))
+      editor.contentItem.config.componentState.label = response.name
+      editor.contentItem.config.componentState.fullPath = response.name
+  except:
+    cerror "saved-file: could not refresh the editor tab for " &
+      $response.name & ": " & getCurrentExceptionMsg()
   checkPendingReRecord(data)
+  data.redraw()
+
+proc onSaveFileError(sender: js, response: jsobject(name=cstring, error=cstring)) =
+  ## The main process could not write a buffer to disk.
+  ##
+  ## This message had no subscriber at all: the buffer stayed dirty, a queued
+  ## re-record request stayed armed with nothing left to answer it, and the
+  ## user was told nothing (issue #603).
+  cerror "save-file-error: " & $response.name & ": " & $response.error
+  data.viewsApi.errorMessage(
+    cstring("Could not save " & $response.name & ": " & $response.error))
+  data.noteReRecordSaveOutcome(failed = true)
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =
