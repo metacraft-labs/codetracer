@@ -32,7 +32,12 @@ import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types as store_types]
 import origin_chain_types
-import ../../../common/types
+# NOTE: deliberately does NOT import `common/types`. That module *includes*
+# `common_types`, which is also included by `frontend/types.nim` under
+# different `langstring`/`TableLike` bindings — so every type in it exists
+# twice and the two copies are incompatible. Value-history rows therefore
+# cross into this VM as `ValueHistoryRow` (see below), normalised by the
+# host at `ui/state.nim`.
 
 type
   StateTab* = enum
@@ -40,6 +45,29 @@ type
     stLocals   ## Local variables at the current execution point
     stGlobals  ## Global / module-level variables
     stWatches  ## User-defined watch expressions
+
+  ValueHistoryRow* = object
+    ## One row of a variable's value history, already reduced to the
+    ## two fields the panel renders.
+    ##
+    ## Deliberately NOT the wire type
+    ## ``common_types/language_features/value_history.nim::HistoryResult``.
+    ## That type lives in an *included* module, so it exists twice with
+    ## incompatible field types — once through ``common/types.nim``
+    ## (``langstring = string``) and once through ``frontend/types.nim``
+    ## (``langstring = cstring``). A ViewModel that named either copy
+    ## would only be usable from one of the two worlds; the previous
+    ## workaround was a generic ``updateHistory[T]`` with a
+    ## ``cast[seq[HistoryResult]]``, which silently reinterpreted one
+    ## layout as the other and was only ever sound because the JS
+    ## backend erases the difference. Normalising at the host boundary
+    ## (``ui/state.nim``) instead keeps this VM backend-neutral and
+    ## natively compilable for the headless tests.
+    locationTicks*: BiggestInt
+      ## ``HistoryResult.location.rrTicks`` — the recording position the
+      ## value was observed at.
+    valueText*: string
+      ## Rendered form of ``HistoryResult.value`` (``textRepr``).
 
   StateVM* = ref object of ViewModel
     ## Reactive state for the State panel.
@@ -66,7 +94,11 @@ type
       ## Empty string means "no selection".
     watchExpressions*: Signal[seq[string]]
     expandedHistories*: Signal[HashSet[string]]
-    valueHistory*: Signal[Table[string, seq[HistoryResult]]]
+    valueHistory*: Signal[Table[string, seq[ValueHistoryRow]]]
+      ## Value history per variable path. Keyed by the dot-separated
+      ## variable path (``VariableViewState.path``) — the same key
+      ## ``expandedHistories`` uses and the same key the
+      ## ``ct/load-history`` request was sent under.
 
     # -- Derived state --
     currentVariables*: Memo[seq[store_types.Variable]]
@@ -317,9 +349,17 @@ proc toggleHistory*(vm: StateVM; expression: string) =
     if not vm.onToggleHistory.isNil and not vm.valueHistory.val.hasKey(expression):
       vm.onToggleHistory(expression)
 
-proc updateHistory*[T](vm: StateVM; expression: string; results: seq[T]) =
+proc updateHistory*(vm: StateVM; expression: string;
+                    rows: seq[ValueHistoryRow]) =
+  ## Store the value-history rows the backend returned for `expression`.
+  ##
+  ## `expression` MUST be the same key the request was made under — the
+  ## variable's dot-separated `path` (see `VariableViewState.path`), which
+  ## `toggleHistory` records in `expandedHistories` and which
+  ## `state_view.flattenVariables` reads back. A mismatch here silently
+  ## renders an empty history container.
   var h = vm.valueHistory.val
-  h[expression] = cast[seq[HistoryResult]](results)
+  h[expression] = rows
   vm.valueHistory.val = h
 
 # ---------------------------------------------------------------------------
@@ -438,7 +478,7 @@ proc createStateVM*(store: ReplayDataStore;
     let selectedPath = createSignal("")
     let watchExpressions = createSignal(newSeq[string]())
     let expandedHistories = createSignal(initHashSet[string]())
-    let valueHistory = createSignal(initTable[string, seq[HistoryResult]]())
+    let valueHistory = createSignal(initTable[string, seq[ValueHistoryRow]]())
     let expandedOrigins = createSignal(initHashSet[VariableId]())
     let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
     let originSummaries = createSignal(initTable[string, OriginSummary]())

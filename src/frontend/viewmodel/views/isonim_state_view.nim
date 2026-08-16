@@ -416,6 +416,57 @@ proc hopLineText(hop: OriginHop): string =
   ## semantics the side-panel renders for the same data shape.
   hop.targetExpr & " = " & hop.sourceExpr
 
+type
+  OriginChainLineView = object
+    ## One rendered line of the in-row origin chain: either a hop or the
+    ## trailing terminator.
+    ##
+    ## Hops and the terminator are flattened into a SINGLE list so the
+    ## block can be rendered by one `indexEach` (see
+    ## `renderOriginChainLines`). Rendering them as two separate
+    ## structures would need a structural `if` for the terminator, and a
+    ## structural `if` inside a `ui()` block is one-shot — exactly the
+    ## defect this flattening exists to avoid.
+    iconClass: string
+    text: string
+    isTerminator: bool
+
+proc originChainLines(vm: StateVM; item: VariableViewState):
+    seq[OriginChainLineView] =
+  ## Flatten the row's origin chain into the lines the in-row block
+  ## renders. Empty when no chain has been fetched for the row yet — the
+  ## container then renders nothing rather than a stale chain.
+  let chain = chainForRow(vm, item)
+  if chain.isNone:
+    return @[]
+  for hop in chain.get.hops:
+    result.add OriginChainLineView(
+      iconClass: iconClassForKind(hop.kind),
+      text: hopLineText(hop),
+      isTerminator: false)
+  result.add OriginChainLineView(
+    iconClass: iconClassForTerminator(chain.get.terminator.kind),
+    text: chain.get.terminator.expression,
+    isTerminator: true)
+
+# The three helpers below are read through the DSL's dynamic-attribute
+# path, so each one re-runs (inside its own `createRenderEffect`) when
+# the line's signal changes. `indexEach` reuses a node for a given
+# position, and a position can switch between "hop" and "terminator" as
+# the chain grows or shrinks — hence the class names must be reactive
+# expressions rather than static literals.
+
+proc chainLineClass(line: proc(): OriginChainLineView): string =
+  if line().isTerminator: "ct-origin-inline-chain-terminator"
+  else: "ct-origin-inline-chain-hop"
+
+proc chainLineTextClass(line: proc(): OriginChainLineView): string =
+  if line().isTerminator: "ct-origin-inline-chain-terminator-text"
+  else: "ct-origin-inline-chain-hop-text"
+
+proc chainLineIconClass(line: proc(): OriginChainLineView): string =
+  line().iconClass
+
 # ---------------------------------------------------------------------------
 # Click handler factories
 # ---------------------------------------------------------------------------
@@ -434,6 +485,87 @@ proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
     if v.hasChildren: vm.toggleExpand(v.path)
 
 # ---------------------------------------------------------------------------
+# Reactive sub-lists of a variable row (origin chain, value history)
+# ---------------------------------------------------------------------------
+#
+# GOTCHA — the reason these exist as separate `indexEach` calls rather
+# than plain `for` loops inside the row's `ui()` block:
+#
+# The IsoNim DSL expands a `for` (and an `if`) inside `ui()` as a
+# ONE-SHOT STRUCTURAL construct — `processForStmt`
+# (isonim/src/isonim/dsl/ui.nim) emits a plain `nnkForStmt` with no
+# `createRenderEffect` wrapper, unlike dynamic attributes and dynamic
+# text which ARE wrapped. The loop therefore runs exactly once, when the
+# row is constructed, and never again.
+#
+# That is invisible for a freshly built panel (the loop runs after the
+# data is in place) but fatal for the live app, which mounts ONE
+# long-lived panel and updates it incrementally: `indexEach` reuses a
+# row node for a given position and only assigns `itemSignals[i].val`,
+# which fires attribute/text effects but re-runs no structural loop. The
+# symptom is a container whose `display` flips reactively on toggle
+# while its children stay frozen at their construction-time value —
+# i.e. an empty history panel (#558).
+#
+# `indexEach` is the reactive replacement: its body runs inside a
+# `createRenderEffect` that tracks `item()`, so appearing/disappearing
+# rows are appended/removed as the data changes. `forEachKeyed` would
+# also work but rebuilds a row's DOM whenever its value changes, which
+# on the State panel means every debugger step — destroying focus and
+# expansion state. Position-keyed reuse is what this panel wants.
+
+template renderOriginChainLineImpl(r, line: untyped): untyped =
+  ## One line of the in-row origin chain (hop or terminator).
+  ui(r):
+    tdiv(class = chainLineClass(line)):
+      span(class = chainLineIconClass(line)):
+        discard
+      span(class = chainLineTextClass(line)):
+        text line().text
+
+template renderHistoryRowImpl(r, row: untyped): untyped =
+  ## One value-history line: "<rrTicks>  <value>".
+  ui(r):
+    tdiv(class = "ct-history-inline-row ct-flex"):
+      tdiv(class = "history-location ct-mr-4"):
+        text $row().locationTicks
+      tdiv(class = "history-value"):
+        text row().valueText
+
+proc renderOriginChainLines(r: MockRenderer; container: MockNode;
+                            item: proc(): VariableViewState;
+                            vm: StateVM) =
+  indexEach[OriginChainLineView, MockRenderer, MockNode](r, container,
+    proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
+    proc(line: proc(): OriginChainLineView, index: int): MockNode =
+      renderOriginChainLineImpl(r, line))
+
+proc renderHistoryRows(r: MockRenderer; container: MockNode;
+                       item: proc(): VariableViewState) =
+  indexEach[VariableHistoryRowView, MockRenderer, MockNode](r, container,
+    proc(): seq[VariableHistoryRowView] = item().history,
+    proc(row: proc(): VariableHistoryRowView, index: int): MockNode =
+      renderHistoryRowImpl(r, row))
+
+when defined(js):
+  proc renderOriginChainLines(r: WebRenderer; container: isonim_dom.Element;
+                              item: proc(): VariableViewState;
+                              vm: StateVM) =
+    indexEach[OriginChainLineView, WebRenderer, isonim_dom.Element](
+      r, container,
+      proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
+      proc(line: proc(): OriginChainLineView, index: int): isonim_dom.Element =
+        renderOriginChainLineImpl(r, line))
+
+  proc renderHistoryRows(r: WebRenderer; container: isonim_dom.Element;
+                         item: proc(): VariableViewState) =
+    indexEach[VariableHistoryRowView, WebRenderer, isonim_dom.Element](
+      r, container,
+      proc(): seq[VariableHistoryRowView] = item().history,
+      proc(row: proc(): VariableHistoryRowView, index: int): isonim_dom.Element =
+        renderHistoryRowImpl(r, row))
+
+# ---------------------------------------------------------------------------
 # Variable row component (shared between Mock and Web renderers)
 # ---------------------------------------------------------------------------
 #
@@ -442,8 +574,14 @@ proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
 # compile time — can be expanded once per concrete renderer (Mock,
 # Web) without duplicating the markup.
 
-template renderVariableRowImpl(r, vm, item: untyped): untyped =
+template renderVariableRowImpl(r, vm, item,
+                               chainContainer, historyContainer: untyped): untyped =
   ## Build a single variable row using the Karax-compatible markup.
+  ##
+  ## `chainContainer` / `historyContainer` are OUT parameters: the two
+  ## sub-list containers are captured via the DSL's `ref =` form so the
+  ## caller can attach the reactive `indexEach` lists to them once the
+  ## element exists (see the GOTCHA above `renderOriginChainLineImpl`).
   ##
   ## DOM structure (matches legacy `value-component`):
   ##   div.value-expanded.value-expanded-name.border-value-{depth}
@@ -463,10 +601,13 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
   ##           button.ct-origin-badge[.{terminator-icon}|.ct-origin-badge-placeholder]
   ##             span.ct-origin-badge-icon
   ##             span.ct-origin-badge-text
-  ##         (when expandedOrigins contains row id)
-  ##         div.ct-origin-inline-chain
-  ##           ol > li.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
-  ##           li.ct-origin-inline-chain-terminator
+  ##         div.ct-origin-inline-chain[display: block when expanded]
+  ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
+  ##           div.ct-origin-inline-chain-terminator
+  ##         div.ct-history-inline-container[display: block when expanded]
+  ##           div.ct-history-inline-row (one per history entry)
+  ##             div.history-location : "{rrTicks}"
+  ##             div.history-value    : "{value}"
   ##
   ## Per spec §3.2.1 + M4 deliverable #3, the badge is appended to the
   ## value cell on every row. The placeholder variant (spec §3.2.1
@@ -528,39 +669,39 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
           # via ``display: none`` while collapsed so the placeholder
           # stays present in the DOM (matches the empty-overlay /
           # loading-indicator pattern the same view already uses).
+          #
+          # Both containers below are populated AFTER the ``ui()`` block
+          # by `indexEach` (see the GOTCHA above); their bodies here are
+          # deliberately empty so the only thing the DSL emits is the
+          # container element plus its reactive ``display`` attribute.
           tdiv(class = "ct-origin-inline-chain",
-               display = (if rowExpanded(vm, item()): "block" else: "none")):
-            let chain = chainForRow(vm, item())
-            if chain.isSome:
-              for i, hop in chain.get.hops:
-                tdiv(class = "ct-origin-inline-chain-hop"):
-                  span(class = iconClassForKind(hop.kind)):
-                    discard
-                  span(class = "ct-origin-inline-chain-hop-text"):
-                    text hopLineText(hop)
-              tdiv(class = "ct-origin-inline-chain-terminator"):
-                span(class = iconClassForTerminator(chain.get.terminator.kind)):
-                  discard
-                span(class = "ct-origin-inline-chain-terminator-text"):
-                  text chain.get.terminator.expression
+               display = (if rowExpanded(vm, item()): "block" else: "none"),
+               ref = chainContainer):
+            discard
           tdiv(class = "ct-history-inline-container ct-mt-2",
-               display = (if item().isHistoryExpanded: "block" else: "none")):
-            for hrVal in item().history:
-              let hr = hrVal
-              tdiv(class = "ct-history-inline-row ct-flex"):
-                tdiv(class = "history-location ct-mr-4"):
-                  text $hr.locationTicks
-                tdiv(class = "history-value"):
-                  text hr.valueText
+               display = (if item().isHistoryExpanded: "block" else: "none"),
+               ref = historyContainer):
+            discard
 
 proc renderVariableRow*(r: MockRenderer; vm: StateVM;
                         item: proc(): VariableViewState): MockNode =
-  renderVariableRowImpl(r, vm, item)
+  var chainContainer, historyContainer: MockNode
+  let row = renderVariableRowImpl(r, vm, item,
+                                  chainContainer, historyContainer)
+  # Attach the reactive sub-lists AFTER the row exists — a plain `for`
+  # inside the `ui()` block would only ever run once (see #558).
+  renderOriginChainLines(r, chainContainer, item, vm)
+  renderHistoryRows(r, historyContainer, item)
+  row
 
 when defined(js):
   proc renderVariableRow*(r: WebRenderer; vm: StateVM;
                           item: proc(): VariableViewState): isonim_dom.Element =
-    let row = renderVariableRowImpl(r, vm, item)
+    var chainContainer, historyContainer: isonim_dom.Element
+    let row = renderVariableRowImpl(r, vm, item,
+                                    chainContainer, historyContainer)
+    renderOriginChainLines(r, chainContainer, item, vm)
+    renderHistoryRows(r, historyContainer, item)
     # Wire the right-click context menu on the row's outer element so
     # the spec §3.1 entry-point "right-click → Show value origin"
     # surfaces through ``showContextMenu`` — the same primitive
