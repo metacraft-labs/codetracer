@@ -2309,106 +2309,67 @@ impl ReplaySession for MaterializedReplaySession {
         self.next_statement(forward)
     }
 
+    /// Locals visible at the current step, as a **point-in-time** snapshot.
+    ///
+    /// Every language takes the same path: the answer is whatever the
+    /// recorder wrote for *this* step, and nothing else.
+    ///
+    /// JavaScript used to be special-cased here (issue #602): because the
+    /// recorder only emitted a value on the step that *wrote* a binding,
+    /// stopping on a non-assigning line reported nothing, and the
+    /// workaround re-scanned the frame from its entry step, unioning every
+    /// value it saw into a `HashMap`. That union was last-write-wins, so it
+    /// answered with a binding's *final* value at every step of the frame
+    /// (e.g. 94 instead of 84 while stopped on `scaled = scaled + offset;`)
+    /// and kept block-scoped bindings alive after their block had exited.
+    /// It also re-read the whole frame on every `ct/load-locals`, defeating
+    /// M22's bounded-chunk-decompression guarantee. The JS recorder now
+    /// emits the full in-scope local set on every step, so the workaround
+    /// is both unnecessary and wrong; see
+    /// `tests/javascript_locals_dap_test.rs` for the regression guard.
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
-        let current_step = self.reader.step(self.step_id).ok_or("step not found")?;
-        let current_call_key = current_step.call_key;
+        // Validity check only — the locals themselves come from the value
+        // streams below. Kept so an out-of-range step surfaces as an error
+        // instead of as a silently empty State panel.
+        let _ = self.reader.step(self.step_id).ok_or("step not found")?;
 
-        let current_call = self.reader.call(current_call_key);
-        let is_js = if let Some(call) = current_call {
-            self.is_javascript_frame(call.function_id)
-        } else {
-            false
-        };
+        // M22 — prefer the SEEKABLE `values.dat` stream when the trace ships one
+        // (`variables_at_owned` reads the step's values on-demand, decompressing
+        // only the needed chunk); fall back to the materialized `db.variables`
+        // for legacy (flag-off) traces.
+        let variables_for_step = self.reader.variables_at_owned(self.step_id).unwrap_or_default();
+        let full_value_locals: Vec<VariableWithRecord> = variables_for_step
+            .iter()
+            .map(|v| VariableWithRecord {
+                expression: self
+                    .reader
+                    .variable_name(v.variable_id)
+                    .unwrap_or("<unknown>")
+                    .to_string(),
+                value: self.to_value_record_with_type(&v.value),
+                address: NO_ADDRESS,
+            })
+            .collect();
 
-        let (full_value_locals, value_tracking_locals) = if is_js {
-            let Some(call) = current_call else {
-                return Ok(vec![]);
-            };
-            let mut active_vars: HashMap<VariableId, FullValueRecord> = HashMap::new();
-            for arg in &call.args {
-                active_vars.insert(arg.variable_id, arg.clone());
-            }
-
-            let start_step_val = call.step_id.0;
-            let end_step_val = self.step_id.0;
-            for s_val in start_step_val..=end_step_val {
-                let s_id = StepId(s_val);
-                if let Some(step) = self.reader.step(s_id)
-                    && step.call_key == current_call_key
-                {
-                    if let Some(variables) = self.reader.variables_at_owned(s_id) {
-                        for v in variables {
-                            active_vars.insert(v.variable_id, v);
-                        }
-                    }
-                    if let Some(variable_cells) = self.reader.variable_cells_at(s_id) {
-                        for (var_id, place) in variable_cells {
-                            let value = self.reader.load_value_for_place(*place, s_id);
-                            active_vars.insert(
-                                *var_id,
-                                FullValueRecord {
-                                    variable_id: *var_id,
-                                    value,
-                                },
-                            );
-                        }
-                    }
+        // TODO: fix random order here as well: ensure order(or in final locals?)
+        let variable_cells_for_step = self.reader.variable_cells_at(self.step_id).cloned().unwrap_or_default();
+        let value_tracking_locals: Vec<VariableWithRecord> = variable_cells_for_step
+            .iter()
+            .map(|(variable_id, place)| {
+                let name = self.reader.variable_name(*variable_id).unwrap_or("<unknown>");
+                info!("log local {variable_id:?} {name} place: {place:?}");
+                let value = self.reader.load_value_for_place(*place, self.step_id);
+                VariableWithRecord {
+                    expression: self
+                        .reader
+                        .variable_name(*variable_id)
+                        .unwrap_or("<unknown>")
+                        .to_string(),
+                    value: self.to_value_record_with_type(&value),
+                    address: NO_ADDRESS,
                 }
-            }
-
-            let f_locals: Vec<VariableWithRecord> = active_vars
-                .into_values()
-                .map(|v| VariableWithRecord {
-                    expression: self
-                        .reader
-                        .variable_name(v.variable_id)
-                        .unwrap_or("<unknown>")
-                        .to_string(),
-                    value: self.to_value_record_with_type(&v.value),
-                    address: NO_ADDRESS,
-                })
-                .collect();
-            (f_locals, vec![])
-        } else {
-            // M22 — prefer the SEEKABLE `values.dat` stream when the trace ships one
-            // (`variables_at_owned` reads the step's values on-demand, decompressing
-            // only the needed chunk); fall back to the materialized `db.variables`
-            // for legacy (flag-off) traces.
-            let variables_for_step = self.reader.variables_at_owned(self.step_id).unwrap_or_default();
-            let full_value_locals: Vec<VariableWithRecord> = variables_for_step
-                .iter()
-                .map(|v| VariableWithRecord {
-                    expression: self
-                        .reader
-                        .variable_name(v.variable_id)
-                        .unwrap_or("<unknown>")
-                        .to_string(),
-                    value: self.to_value_record_with_type(&v.value),
-                    address: NO_ADDRESS,
-                })
-                .collect();
-
-            // TODO: fix random order here as well: ensure order(or in final locals?)
-            let variable_cells_for_step = self.reader.variable_cells_at(self.step_id).cloned().unwrap_or_default();
-            let value_tracking_locals: Vec<VariableWithRecord> = variable_cells_for_step
-                .iter()
-                .map(|(variable_id, place)| {
-                    let name = self.reader.variable_name(*variable_id).unwrap_or("<unknown>");
-                    info!("log local {variable_id:?} {name} place: {place:?}");
-                    let value = self.reader.load_value_for_place(*place, self.step_id);
-                    VariableWithRecord {
-                        expression: self
-                            .reader
-                            .variable_name(*variable_id)
-                            .unwrap_or("<unknown>")
-                            .to_string(),
-                        value: self.to_value_record_with_type(&value),
-                        address: NO_ADDRESS,
-                    }
-                })
-                .collect();
-            (full_value_locals, value_tracking_locals)
-        };
+            })
+            .collect();
 
         // TODO: watches require tracepoint-like evaluate_expression or would duplicate locals
         // for now don't evaluate/support them for db traces: just ignoring
@@ -2419,6 +2380,18 @@ impl ReplaySession for MaterializedReplaySession {
         // based on https://stackoverflow.com/a/56490417/438099
         let mut locals: Vec<VariableWithRecord> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
 
+        // LOAD-BEARING ORDER — do not replace `sort_by` with `sort_unstable_by`
+        // and do not reorder the `chain` above.
+        //
+        // One step can carry two records for the same name, because the two
+        // sources above overlap: `full_value_locals` is the value the recorder
+        // wrote directly for this step, while `value_tracking_locals` is
+        // reconstructed by reading the variable's *cell* at this step. The
+        // dedup below keeps the first of each run of equal names, and
+        // `sort_by` is a stable sort, so chaining the directly-recorded values
+        // first is what makes them win. That is the intended precedence: the
+        // recorded value is the value at this step, whereas the cell read can
+        // reflect a write the step's own line performed.
         locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
         // for now just removing duplicated variables/expressions: even if storing different values
         locals.dedup_by(|a, b| a.expression == b.expression);
@@ -3694,13 +3667,45 @@ impl MaterializedReplaySession {
                     (None, None) => {}
                 }
             } else if step.call_key.0 < current_frame.0 {
-                // We've walked past the entry step of `current_frame`;
-                // the variable entered as a parameter. JavaScript top-level
-                // bindings live in a synthetic <module> frame with no caller
-                // argument; for those, the earliest sighting is the write.
+                // We've walked past the entry step of `current_frame`
+                // without ever observing `var_name` change value inside
+                // it. There are two very different reasons for that and
+                // the frame's own `Call` record tells them apart.
                 if let Some(call) = self.reader.call(current_frame) {
+                    // (a) `var_name` is bound by the call — it really did
+                    //     enter the frame as a parameter, so the chain has
+                    //     to cross into the caller.
+                    //
+                    // (b) `var_name` is NOT a parameter of this frame, so
+                    //     it is a frame-local. Its value never *changed*
+                    //     inside the frame only because the recorders
+                    //     snapshot locals *after* the declaring line runs
+                    //     (spec §6.1.0 monotonicity): the very first
+                    //     sighting of a `const x = <expr>` local already
+                    //     carries the assigned value. That earliest
+                    //     sighting therefore IS the write step, exactly as
+                    //     in the recording-boundary fallback below.
+                    //
+                    //     Reporting `FrameEntryReached` here would send the
+                    //     chain into `resolve_caller_argument`, which
+                    //     cannot find the name among the call's args and
+                    //     terminates the chain at
+                    //     `ParameterAtRecordStart` — claiming a plain
+                    //     local was a parameter at the recording boundary
+                    //     and dropping every remaining hop. This is what
+                    //     truncated the JavaScript destructuring chains
+                    //     (`const obj = {...}; const { a } = obj;`) after
+                    //     their first hop.
+                    //
+                    // JavaScript top-level bindings live in a synthetic
+                    // `<module>` frame whose `Call` record carries no args
+                    // at all, so they are subsumed by case (b).
+                    let is_frame_parameter = call
+                        .args
+                        .iter()
+                        .any(|arg| self.var_name_matches(arg.variable_id, var_name));
                     if let Some(prev_step) = previous_step
-                        && self.is_javascript_module_frame(call.function_id)
+                        && !is_frame_parameter
                     {
                         return BackwardScanOutcome::FoundInFrame {
                             step_id: prev_step,
@@ -3733,44 +3738,6 @@ impl MaterializedReplaySession {
 
     fn var_name_matches(&self, var_id: VariableId, name: &str) -> bool {
         self.reader.variable_name(var_id).map(|n| n == name).unwrap_or(false)
-    }
-
-    fn is_javascript_module_frame(&self, function_id: FunctionId) -> bool {
-        self.reader
-            .function(function_id)
-            .map(|function| {
-                function.name == "<module>"
-                    && self
-                        .reader
-                        .path(function.path_id)
-                        .map(|path| {
-                            path.ends_with(".js")
-                                || path.ends_with(".mjs")
-                                || path.ends_with(".cjs")
-                                || path.ends_with(".ts")
-                                || path.ends_with(".tsx")
-                        })
-                        .unwrap_or(false)
-            })
-            .unwrap_or(false)
-    }
-
-    fn is_javascript_frame(&self, function_id: FunctionId) -> bool {
-        self.reader
-            .function(function_id)
-            .map(|function| {
-                self.reader
-                    .path(function.path_id)
-                    .map(|path| {
-                        path.ends_with(".js")
-                            || path.ends_with(".mjs")
-                            || path.ends_with(".cjs")
-                            || path.ends_with(".ts")
-                            || path.ends_with(".tsx")
-                    })
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false)
     }
 
     /// Spec §6.1 helper `resolve_caller_argument`.
