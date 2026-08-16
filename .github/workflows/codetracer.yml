@@ -2558,12 +2558,44 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-native-recorder"
-          # Allow cargo to use git's credential helper so cloning the
-          # private ``lldb-sys.rs`` dependency picks up the App-token
-          # we set via ``GIT_CREDENTIALS`` below.
+          # Cargo's default libgit2 transport does not read gitconfig, so the
+          # git CLI has to be forced for the private ``lldb-sys.rs``
+          # dependency. The CREDENTIAL it then uses is already installed
+          # job-wide by ``Setup dev env`` above, so nothing is configured here.
+          #
+          # That step runs the shared ``setup-nix``, which exports
+          #
+          #   GIT_CONFIG_KEY_0=http.https://github.com/metacraft-labs/.extraHeader
+          #
+          # through $GITHUB_ENV. Four things make it sufficient here, and each
+          # was checked rather than assumed:
+          #
+          #   * ``Setup dev env`` is unconditional on this job -- it is not
+          #     gated on ``matrix.platform`` -- so the macOS leg gets it too.
+          #   * ``lldb-sys.rs`` lives at github.com/metacraft-labs/lldb-sys.rs,
+          #     and git matches ``http.<url>.*`` by scheme + host + port +
+          #     slash-delimited path prefix, so the metacraft-labs scope covers
+          #     it (and nothing outside the org).
+          #   * GIT_CONFIG_COUNT/KEY_n/VALUE_n are ordinary environment
+          #     variables, so they survive ``nix develop --command`` into
+          #     cargo's child git processes. Verified directly: inside a
+          #     ``nix develop`` shell, ``git config --get-all`` resolves the
+          #     header from the environment alone.
+          #   * The same scoped-header + git-CLI combination already fetches
+          #     this exact dependency in ``visual-replay-regression-gate``,
+          #     which builds its own per-repo header and neutralises
+          #     ~/.gitconfig entirely.
+          #
+          # What used to be here was a GLOBAL catch-all rewriting every
+          # github.com URL to carry the token as userinfo. Unlike a
+          # per-checkout local header, ``--global`` config IS inherited by
+          # ``git clone``, and it put the token into argv, into the
+          # ``.git/config`` of every clone it touched, and into git's own error
+          # messages -- for nixpkgs and every third-party fetch as well, none of
+          # which the token is for. ``setup-nix`` evicts exactly that pattern
+          # from a reused ~/.gitconfig at the start of the job; re-adding it
+          # here put it straight back.
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
-          git config --global --add url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
           nix develop --no-write-lock-file --command just build-ct-mcr
 
       - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
