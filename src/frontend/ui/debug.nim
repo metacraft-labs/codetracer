@@ -4,6 +4,7 @@ import
   command,
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
+from menu_render_gate import shouldRemountDebugControls
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
@@ -68,11 +69,20 @@ proc invokeDebugStepAction*(action: cstring): bool =
 
 proc tryMountIsoNimDebugControls() =
   ## Mount the IsoNim debug controls view into the dedicated
-  ## `#isonim-debug-controls` container div (defined in index.html).
+  ## `#isonim-debug-controls` container div.
   ##
-  ## This div lives outside Karax's VDOM tree, so direct DOM manipulation
+  ## That div is NOT a static element of `index.html` — it is emitted by
+  ## `viewmodel/views/isonim_menu_shell_view.nim` as part of the menu shell,
+  ## so a full menu-shell rebuild replaces it with a fresh, empty node and
+  ## takes the mounted toolbar with it.  (An older comment here claimed the
+  ## div came from `index.html`, which sent a previous investigation of
+  ## issue #555 down the wrong path; there is no such element in any HTML
+  ## file in the repo.)
+  ##
+  ## The div lives outside Karax's VDOM tree, so direct DOM manipulation
   ## is safe and won't be overwritten by Karax redraw cycles.
-  ## Safe to call multiple times — mounts only once.
+  ## Safe to call multiple times — mounts only once per `isoNimDebugMounted`
+  ## cycle.
   cdebug "tryMountIsoNimDebugControls: called, isoNimDebugMounted=" & $isoNimDebugMounted & " vmIsNil=" & $debugControlsVMInstance.isNil
   if isoNimDebugMounted or debugControlsVMInstance.isNil:
     cdebug "tryMountIsoNimDebugControls: skipping (already mounted or VM nil)"
@@ -143,31 +153,40 @@ proc requestDebugControlsRender*(self: DebugComponent) =
     cstring"isonim-debug-controls")
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
-  # Measured finding — this repair path runs FAR more often than "occasionally
-  # after a menu redraw" suggests.  Measured on one clean trace open:
-  # `tryMountIsoNimDebugControls` is entered 46 times and mounts 45 of
-  # them, i.e. the whole IsoNim control tree is cleared and rebuilt ~45
-  # times before the user has touched anything.  A second, independent
-  # launch of the same recording gave 37 entries and 36 mounts, so the
-  # absolute count varies with how many menu redraws a launch happens to
-  # do; what is stable is the ratio — the "skipping (already mounted or VM
-  # nil)" branch fired ZERO times in both, so every single entry rebuilt
-  # the tree.
+  # Issue #555 — why this path used to fire on essentially every redraw.
   #
-  # The counts above are measured.  The EXPLANATION below is inferred and
-  # was not directly observed, so confirm it before acting on it: menu
-  # redraws (see `ui/menu.nim`, which calls us) are documented to replace
-  # this kind of host — `requestDebugShellRender` just below says so in as
-  # many words — which would leave `firstChild` legitimately nil on every
-  # call, making the guard miss and the rebuild the correct repair rather
-  # than a bug.
+  # A previous investigation measured `tryMountIsoNimDebugControls` being
+  # entered 46 times and mounting 45 of them on one clean trace open, with the
+  # "already mounted" branch firing ZERO times, and concluded the guard below
+  # was somehow not working.  It was working; the situation it guards against
+  # simply held every single time, for a structural reason:
   #
-  # If that is right, the guard below is not at fault and this path is
-  # what keeps the toolbar alive; the thing worth chasing is the other
-  # side, namely why the menu redraws dozens of times during a single
-  # open.  Deliberately left as it is: the fix belongs on the menu-redraw
-  # side, not in this repair path.
-  if isoNimDebugMounted and not dom_api.isNodeNil(dom_api.Node(container).firstChild):
+  #   * `#isonim-debug-controls` is created by `renderMenuShell`
+  #     (viewmodel/views/isonim_menu_shell_view.nim), and
+  #     `renderMenuShellInto` begins with `clearChildren(container)`.
+  #   * So every full menu-shell rebuild hands us a brand-new EMPTY host:
+  #     `container.firstChild` is nil, the guard correctly declines to skip,
+  #     and we re-mount.
+  #   * `ui/menu.nim`'s `requestMenuRender` is called from
+  #     `renderer.sharedDirectRedraw`, i.e. from every `data.redraw()`, and it
+  #     rebuilt the shell unconditionally.  Dozens of redraws per trace open
+  #     therefore meant dozens of toolbar teardowns — the flicker in the bug
+  #     report.
+  #
+  # (The zero "already mounted" hits inside `tryMountIsoNimDebugControls`
+  # are additionally explained by this proc clearing `isoNimDebugMounted`
+  # immediately before calling it; that inner check only ever guards the
+  # asynchronous container-retry loop, never this path.)
+  #
+  # The fix is on the menu side: `ui/menu_render_gate.nim` now stops
+  # `requestMenuRender` from rebuilding a shell whose content has not changed,
+  # so the host survives, `firstChild` stays non-nil, and this repair becomes
+  # the no-op it was always meant to be.  The predicate lives in that module
+  # so both halves of the story can be exercised headlessly — see
+  # `src/tests/gui/tests/session-chrome/menu_redraw_storm_test.nim`.
+  if not shouldRemountDebugControls(
+      isoNimDebugMounted,
+      not dom_api.isNodeNil(dom_api.Node(container).firstChild)):
     return
   isoNimDebugMounted = false
   tryMountIsoNimDebugControls()
