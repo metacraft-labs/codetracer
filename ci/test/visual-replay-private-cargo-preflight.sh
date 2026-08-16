@@ -104,12 +104,6 @@ if [[ -n ${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN:-} ]]; then
 	exit 1
 fi
 
-# Ask Git itself which URL receives the header. This catches subtle widening of
-# the config key without printing the credential. The sibling and lookalike
-# URLs must not inherit lldb-sys authentication.
-if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
-	fail_auth_contract "effective-auth-header"
-fi
 # Two readings of one boundary. Both ask where the *header* this gate installs
 # may travel. Neither asks what the credential inside it is allowed to reach —
 # that is not a property this script can define, and the attempt to define it
@@ -181,6 +175,19 @@ off_host_probe_urls=(
 #     before it. Ordered the other way the literal check subsumed this one
 #     entirely and nothing could ever reach here. Covered by the
 #     `auth-key-wide` and `auth-key-hostless` cases in the test.
+#
+#     `effective-auth-header` sits after this loop for the same reason, and it
+#     is a sharper instance of it. That check reads the AMBIENT config stack,
+#     so on the runner it also sees the github.com-wide `extraHeader` that
+#     `actions/checkout` persists. Against that backdrop a host-less
+#     `http.extraHeader` is the *less* specific key, so Git's matcher answers
+#     the lldb-sys URL with the ambient header instead of this gate's, and
+#     `effective-auth-header` fired first — on CI only. Reading (1) is
+#     isolated and therefore gives the same answer on a runner and on a
+#     laptop, so it must speak first; otherwise its host-less coverage is
+#     live in development and dead in the one environment the gate runs in.
+#     Both orderings fail the gate, so this is a question of which invariant
+#     is reported and of keeping this loop reachable, not of strictness.
 git_isolated_dir="$(mktemp -d)"
 if git -C "$git_isolated_dir" rev-parse --git-dir >/dev/null 2>&1; then
 	# TMPDIR inside a work tree would silently reintroduce repository config
@@ -198,6 +205,15 @@ for unauthenticated_url in "${same_host_probe_urls[@]}" "${off_host_probe_urls[@
 done
 rm -rf "$git_isolated_dir"
 unset git_isolated_dir
+
+# Ask Git itself which URL receives the header, in the real environment. This
+# catches subtle widening of the config key without printing the credential:
+# the sibling and lookalike URLs must not inherit lldb-sys authentication, and
+# the lldb-sys URL must receive this gate's header rather than an ambient one.
+# It runs after reading (1) — see the note there.
+if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
+	fail_auth_contract "effective-auth-header"
+fi
 
 # (2) In the real environment, including whatever ambient Git configuration a
 #     persistent self-hosted runner carries: no header reaching a host outside
