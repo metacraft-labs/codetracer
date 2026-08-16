@@ -4,6 +4,16 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Assert that `just build` is `just build-once` plus watchers, and nothing
+# else. Executes BOTH scripts under a PATH of recording stubs (tup, webpack,
+# livereload, repro, runquotad, nix, uname) and compares the resulting command
+# traces: same host branch, same tup variant, same steps in the same order,
+# and — the assertion that catches issue #599 — no webpack invocation ordered
+# before the first tup/repro invocation. Builds nothing, needs no toolchain,
+# runs in seconds. See the header of scripts/test-build-alignment.sh.
+test-build-alignment:
+  bash scripts/test-build-alignment.sh
+
 # Build all sibling-recorder binaries that the GUI tests reach for.
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
@@ -589,6 +599,7 @@ test-ct-print:
 test:
   #!/usr/bin/env bash
   set -e
+  just test-build-alignment
   just test-rust
   just test-nimsuggest
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
@@ -857,8 +868,20 @@ reset-config:
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_config.yaml ~/.config/codetracer/.config.yaml
 
+# Clear every persisted layout artifact and reseed the bundled default.
+#
+# The auto-hide strip is a SECOND persisted file (#608 gave it a real handler
+# and a restore path), and `default_layout.json.broken` is the quarantined copy
+# a failed repair leaves behind.  Both must be cleared here — a `reset-layout`
+# that leaves a stale auto-hide state behind would restore panels the reseeded
+# layout knows nothing about, which is the class of inconsistency #608 was
+# reported for in the first place.
 reset-layout:
-  rm --force  ~/.config/codetracer/default_layout.json && \
+  rm --force  ~/.config/codetracer/default_layout.json \
+              ~/.config/codetracer/default_edit_layout.json \
+              ~/.config/codetracer/default_layout.json.broken \
+              ~/.config/codetracer/default_edit_layout.json.broken \
+              ~/.config/codetracer/auto_hide_state.json && \
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_layout.json ~/.config/codetracer/default_layout.json
 
@@ -1003,11 +1026,20 @@ test-frontend-js:
   #!/usr/bin/env bash
   set -e
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test"' EXIT
+  scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
   node "$frontend_lang_test"
+  echo ""
+  echo "Running scratchpad add-to-scratchpad dispatch tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$scratchpad_dispatch_test" js src/frontend/tests/scratchpad_add_dispatch_test.nim
+  # `types.nim` installs a `window.data` debugging hook at import time; node
+  # has no `window`, so alias it to the global object before loading the
+  # bundle.  Nothing else in this test needs a DOM.
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$scratchpad_dispatch_test"
   echo ""
   echo "Running Nim language definition tests..."
   node src/frontend/tests/nimLanguage.test.mjs

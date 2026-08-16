@@ -39,5 +39,24 @@ echo '##########################################################################
 # tup FUSE mount that cannot succeed. If it is broken, the build either dies
 # for the wrong reason or stops reporting the right one, so lint it here --
 # the glob above only reaches ci/*/*.sh.
-shellcheck scripts/require-fuse-mount-helper.sh
+# scripts/require-siblings.sh and scripts/require-tup-globs.sh sit in the same
+# position: they are the only place a missing sibling repo, or a `: foreach`
+# rule pointing at a directory that is not there, is reported by name instead
+# of surfacing minutes later as `cannot open file: <module>`, undefined `mcr*`
+# symbols, or a missing asset in the variant tree.
+shellcheck \
+	scripts/require-fuse-mount-helper.sh \
+	scripts/require-siblings.sh \
+	scripts/require-tup-globs.sh
+echo OK
+
+echo
+echo '###############################################################################'
+echo "Build-alignment harness (lint only; 'just test' runs it):"
+echo '###############################################################################'
+# scripts/test-build-alignment.sh asserts that `just build` is `just build-once`
+# plus watchers. It executes both scripts under recording stubs, so a break in
+# the harness itself silently stops guarding issue #599 -- lint it here, and
+# note that `just test` (ci/test/non-gui.sh) is what actually runs it.
+shellcheck scripts/test-build-alignment.sh
 echo OK
