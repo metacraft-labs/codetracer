@@ -1397,6 +1397,15 @@ type
     editorUI*: EditorViewComponent
     focusedLine*: int
     flow*: FlowViewUpdate
+    ## Set when `EditorViewComponent.loadFlow` replaces this component with a
+    ## newer one for the same editor.  A superseded component still owns the
+    ## loop-control DOM the user can see and click until the replacement has
+    ## rendered, so it is not torn down — but it must stop *repainting*: its
+    ## deferred redraw/render timers were scheduled against the previous
+    ## debugger position and would otherwise rebuild the flow view zones (and
+    ## the loop counter inside them) from a stale location, on top of the ones
+    ## the live component is about to create.  See `ui/flow.nim::flowIsLive`.
+    superseded*: bool
     flowLines*: JsAssoc[int, FlowLine]
     flowViewWidth*: int
     flowLoops*: JsAssoc[int, FlowLoop]
@@ -1432,7 +1441,6 @@ type
     selectedStepCount*: int
     service*: FlowService
     shrinkedLoopColumnMinWidth*: int
-    sliderWidgets*: JsAssoc[int, js]
     status*: FlowUpdateState
     statusDom*: kdom.Node
     statusWidget*: js

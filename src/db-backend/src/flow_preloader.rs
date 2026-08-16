@@ -262,8 +262,15 @@ impl<'a> CallFlowPreloader<'a> {
             }
 
             // For DB traces, the flow should cover the entire function call,
-            // not just from the breakpoint forward. Use jump_to_call to find
-            // the call's first step, then step with StepIn to enter the body.
+            // not just from the breakpoint forward.
+            //
+            // That widening is done for ALL materialized locations by
+            // `move_to_first_step` below, which resolves the enclosing call
+            // entry from whatever step the request lands on. This pre-pass only
+            // handles the line-only case (no rrTicks, no event): there is no
+            // step to resolve a call from yet, so we seek to a plausible one —
+            // jump_to_call finds the call containing step 0 and StepIn enters
+            // its body — and record it as the request's rrTicks.
             if self.trace_kind == TraceKind::Materialized
                 && self.lang != Lang::Elixir
                 && self.lang != Lang::Erlang
@@ -405,13 +412,20 @@ impl<'a> CallFlowPreloader<'a> {
             FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
         };
         if self.trace_kind == TraceKind::Materialized {
-            // For materialized traces the frontend usually sends an exact rrTicks for the
-            // current stop, while some API callers only provide a source line.
-            // When step_id is non-zero the caller already knows the exact step
-            // (e.g. from a DAP breakpoint hit) — we just jump there directly.
-            // When step_id is 0, only a source line was provided: we set a
-            // temporary breakpoint to reach it, then jump_to_call to widen the
-            // flow to the enclosing call entry.
+            // Both arms below end at the SAME place — the entry step of the
+            // enclosing call — because `FlowMode::Call` is defined as "the
+            // whole enclosing call". They differ only in how they reach a step
+            // from which that call can be resolved:
+            //
+            //   step_id == 0: the caller gave only a source line (no rrTicks,
+            //     no event), so we set a temporary breakpoint on that line and
+            //     continue to it first.
+            //   step_id != 0: the caller (normally the frontend, on every move)
+            //     gave an exact step, so we can seek straight to it.
+            //
+            // `jump_to_call` then resolves step -> call_key -> call entry
+            // (see `Db::jump_to_call`), which preserves the exact call
+            // INSTANCE, so widening never moves us into a different call.
             if step_id.0 == 0 && self.mode == FlowMode::Call && self.location.line > 0 {
                 replay.jump_to(StepId(0))?;
                 let bp = replay.add_breakpoint(&self.location.path, self.location.line, None, None)?;
@@ -438,7 +452,48 @@ impl<'a> CallFlowPreloader<'a> {
                     move_error = true;
                 }
             } else {
+                // The caller gave us an exact step. Seek there first so the
+                // callstack is resolved for the right call instance, then widen
+                // the flow window to the ENCLOSING CALL ENTRY — exactly what the
+                // RR branch below does.
+                //
+                // Why widening is required and not just "nice to have":
+                // `FlowMode::Call` is specified to return the whole enclosing
+                // call window (see `.agents/codebase-insights.txt`). The loop
+                // metadata the frontend's Omniscience controls depend on
+                // (`Loop.iteration`, `rr_ticks_for_iterations`,
+                // `loop_iteration_steps`) is built by `process_loops` while
+                // walking forward from this start step, and a loop iteration is
+                // only counted when the walker passes the loop HEADER line.
+                // Starting the window at the current statement therefore drops
+                // every iteration before the cursor, so the iteration counter
+                // and the slider re-base on every move: "0 from 10" becomes
+                // "0 from 8" after one forward click. Starting at the call entry
+                // makes the window — and hence the iteration count — invariant
+                // under movement inside the call.
                 replay.jump_to(step_id)?;
+                let mut expr_loader = ExprLoader::new(CoreTrace::default());
+                match replay.load_location(&mut expr_loader) {
+                    Ok(current_location) => match replay.jump_to_call(&current_location) {
+                        Ok(call_start_loc) => {
+                            step_id = StepId(call_start_loc.rr_ticks.0);
+                            info!(
+                                "  flow: navigated to function call entry at step {} (line {})",
+                                step_id.0, call_start_loc.line
+                            );
+                        }
+                        Err(e) => {
+                            // Not fatal: without call-entry widening the flow is
+                            // still usable, just scoped to the current statement.
+                            warn!("  flow: jump_to_call failed, keeping current flow start: {e:?}");
+                            step_id = replay.current_step_id();
+                        }
+                    },
+                    Err(e) => {
+                        warn!("  flow: load_location after jump_to failed: {e:?}");
+                        step_id = replay.current_step_id();
+                    }
+                }
             }
         } else {
             // For RR traces we still need to resolve the current stop first so
@@ -1231,12 +1286,18 @@ mod tests {
     }
 
     #[test]
-    fn db_call_flow_starts_from_exact_step_when_step_id_is_nonzero() {
-        // When step_id is non-zero the caller already has an exact step
-        // (e.g. from a DAP breakpoint hit). We should jump directly to that
-        // step without rewinding via jump_to_call — otherwise we would land
-        // at the enclosing function entry and produce flow data for the wrong
-        // loop iteration / call instance.
+    fn materialized_call_flow_widens_to_enclosing_call_entry() {
+        // Regression guard for the Omniscience loop controls (#562/#593/#595).
+        //
+        // `FlowMode::Call` must return the window of the ENCLOSING CALL, not the
+        // window starting at the current statement — for materialized traces
+        // exactly as for RR ones (see `rr_call_flow_starts_from_enclosing_call_entry_after_location_seek`,
+        // which asserts the same call sequence for the RR branch).
+        //
+        // If this window instead started at the caller-supplied step, every
+        // loop iteration before the cursor would fall outside it, and the
+        // frontend's iteration counter/slider would silently re-base on each
+        // move ("0 from 10" -> "0 from 8" -> "0 from 6").
         let flow_preloader = FlowPreloader::new();
         let request_location = make_location(15, 42, 0);
         let current_location = request_location.clone();
@@ -1255,10 +1316,12 @@ mod tests {
             todo!()
         };
 
-        assert_eq!(step_id, StepId(42));
+        // StepId(17) is `call_entry_location.rr_ticks`: the flow starts at the
+        // enclosing call entry, not at the requested step 42.
+        assert_eq!(step_id, StepId(17));
         assert!(progressing);
         assert!(!move_error);
-        assert_eq!(replay.calls, vec!["jump_to:42"]);
+        assert_eq!(replay.calls, vec!["jump_to:42", "load_location", "jump_to_call:42"]);
     }
 
     #[test]

@@ -1613,6 +1613,31 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
   # if flowMode != FlowMode.Diff:
   #  return
 
+  # Retire the component we are about to replace.
+  #
+  # A `FlowComponent` schedules deferred work on itself — `scheduleFlowRedraw`
+  # and the five `scheduleActiveLoopIterationValueRender` timers — and those
+  # closures keep the component alive long after this assignment drops the last
+  # reference the editor holds. Without this flag the retired component's timer
+  # fires ~100 ms into the new load, runs a full `redrawFlow()`, and re-creates
+  # the Monaco view zones (and the loop-iteration control inside them) from the
+  # location it was built for: the PREVIOUS debugger position.
+  #
+  # Two visible failures came out of that (#593, #595). The zombie zones are
+  # tracked only in the retired component's `loopViewZones`, so the live
+  # component's `clear()` cannot remove them and the editor ends up with two
+  # loop controls; and the zombie's control shows the previous iteration, so the
+  # next arrow click read that stale number, recomputed the same target it had
+  # already jumped to, and the counter stopped advancing.
+  #
+  # It is deliberately a "stop painting" flag rather than a teardown: until the
+  # replacement has rendered, the retired component's DOM is what the user sees
+  # and clicks, and its `loopStates` carry the optimistic iteration
+  # `selectLoopIteration` just wrote, which is exactly what a rapid second
+  # click must read.
+  if not self.flow.isNil:
+    self.flow.superseded = true
+
   self.flow = FlowComponent(
     api: self.api,
     id: self.id,
@@ -1639,7 +1664,14 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     lineGroups: JsAssoc[int, Group]{},
     status: FlowUpdateState(kind: FlowWaitingForStart),
     statusWidget: nil,
-    sliderWidgets: JsAssoc[int, js]{},
+    # `sliderWidgets` used to be initialised here.  Nothing ever wrote to it
+    # (the only writer was an `isSliderWidget = true` argument to
+    # `addContentWidget` that had no call site), so every reader — linked-slider
+    # sync, slider cleanup and the slider resize pass — was an unconditional
+    # no-op, and the guard it fed made `makeSlider` destroy and recreate the
+    # loop slider on every step.  Removed with the #562 fix; see the notes in
+    # `ui/flow.nim` for why reviving it with `flowLines` would not be
+    # behaviour-preserving.
     lineWidgets: JsAssoc[int, js]{},
     multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
     stepNodes: JsAssoc[int, kdom.Node]{},

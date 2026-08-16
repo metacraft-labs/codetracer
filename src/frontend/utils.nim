@@ -647,7 +647,9 @@ proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): F
     lineGroups: JsAssoc[int, Group]{},
     status: FlowUpdateState(kind: FlowWaitingForStart),
     statusWidget: nil,
-    sliderWidgets: JsAssoc[int, js]{},
+    # `sliderWidgets` used to be initialised here too.  Nothing ever wrote to
+    # it, so every reader was an unconditional no-op; removed with the #562
+    # fix — see the note at the sibling construction site in `ui/editor.nim`.
     lineWidgets: JsAssoc[int, js]{},
     multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
     stepNodes: JsAssoc[int, kdom.Node]{},
