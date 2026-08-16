@@ -3,6 +3,7 @@ import
   ui_imports, trace, debug, menu, flow, value, no_source, shortcuts, kdom,
   trace_macro, trace_static,
   column_click_resolver,
+  editor_decoration_layers, trace_redraw_policy,
   ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/ct_event
 
@@ -118,7 +119,12 @@ const EDITOR_GUTTER_PADDING = 2 #px
 
 proc getLineFunctionName(self: EditorViewComponent, line: int): cstring
 proc removeClasses(index: int, class: cstring, name: string)
-proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
+proc styleLines(
+  self: EditorViewComponent,
+  editor: MonacoEditor,
+  baseLines: seq[MonacoLineStyle],
+  flowLines: seq[MonacoLineStyle],
+  flowDataAvailable: bool)
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
@@ -366,19 +372,19 @@ proc highlightTag(path: cstring, tag: Tag, name: cstring) =
     highlightLine(data.services.editor.active, line)
     gotoLine(line)
 
-proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle]) =
-  if editor.decorations.toJs.isNil:
-    editor.decorations = @[]
-
-  let textModel = self.monacoEditor.getModel()
-  var newDecorations: seq[DeltaDecoration] = @[]
-
+proc toDeltaDecorations(
+    textModel: MonacoTextModel,
+    lines: seq[MonacoLineStyle]): seq[DeltaDecoration] =
+  ## Translate our line-style descriptions into Monaco decoration requests.
+  ## Split out of ``styleLines`` so the base and the flow layer are built by
+  ## the same code path and cannot drift apart.
+  result = @[]
   for lineItem in lines:
     let line = lineItem
     let lineContent = textModel.getLineContent(line.line)
     let endIndex = lineContent.len() + 1
     let startIndex = textModel.getLineFirstNonWhitespaceColumn(line.line)
-    newDecorations.add(DeltaDecoration(
+    result.add(DeltaDecoration(
       `range`: newMonacoRange(line.line, startIndex, line.line, endIndex),
       options: js{
         isWholeLine: line.class.isNil or
@@ -390,7 +396,41 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
         className: line.class,
         inlineClassName: line.inlineClass}))
 
-  self.decorations = self.decorations.filterIt(not it[1]).concat(newDecorations.mapIt((it, true)))
+proc styleLines(
+    self: EditorViewComponent,
+    editor: MonacoEditor,
+    baseLines: seq[MonacoLineStyle],
+    flowLines: seq[MonacoLineStyle],
+    flowDataAvailable: bool) =
+  ## Apply the editor's Monaco line decorations as TWO independently tracked
+  ## layers (see ``ui/editor_decoration_layers.nim`` for the rules and for the
+  ## #594 post-mortem).
+  ##
+  ## ``baseLines`` (current-line highlight, diff / DeepReview stripes, origin
+  ## chain hops) is recomputed from inputs that are always available, so it is
+  ## replaced on every call. ``flowLines`` (``flow-taken`` / ``flow-not-taken``
+  ## and the per-line hit / skip / unknown styles) is derived from omniscience
+  ## flow data, which is *absent* for the whole window between ``loadFlow``
+  ## installing a fresh ``FlowComponent`` and ``ct/updated-flow`` delivering
+  ## its payload — a window that ``onCompleteMove`` opens on every single step.
+  ## Pushing the resulting empty set into Monaco is what made the conditional
+  ## branch colours disappear, so during that window the previous flow layer is
+  ## retained instead.
+  if editor.decorations.toJs.isNil:
+    editor.decorations = @[]
+
+  let textModel = self.monacoEditor.getModel()
+  if textModel.isNil:
+    return
+
+  let baseDecorations = toDeltaDecorations(textModel, baseLines)
+  let computedFlowDecorations = toDeltaDecorations(textModel, flowLines)
+  let flowLayer = nextFlowDecorationLayer(
+    previous = flowDecorationLayer(self.decorations),
+    computed = computedFlowDecorations,
+    flowDataAvailable = flowDataAvailable)
+
+  self.decorations = mergeDecorationLayers(baseDecorations, flowLayer)
 
   editor.decorations = editor.deltaDecorations(
     editor.decorations,
@@ -773,19 +813,31 @@ proc originHopStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
                                  class: cstring"ct-origin-hop-gutter",
                                  inlineClass: cstring"ct-origin-hop-line"))
 
-proc applyEventualStylesLines(self: EditorViewComponent) =
-  var colorLineList = self.colorLines()
-  var conditionFlowLines = self.conditionStyleLines()
-  # var diffLineList = self.diffStyleLines()
-  var flowLineList = self.flowStyleLines(conditionFlowLines)
-  var deepReviewDiffLines = self.deepReviewDiffStyleLines()
-  var originHopLines = self.originHopStyleLines()
-  let lines = concat(colorLineList,
-                     concat(flowLineList,
-                            concat(conditionFlowLines,
-                                   concat(deepReviewDiffLines, originHopLines))))
+proc applyEventualStylesLines*(self: EditorViewComponent) =
+  ## Recompute and re-apply every Monaco line decoration this editor owns.
+  ##
+  ## Exported (#594) because it is the ONLY producer of the ``flow-taken`` /
+  ## ``flow-not-taken`` conditional-branch styles, and the two moments at which
+  ## flow data actually becomes paintable — the ``ct/updated-flow`` event and
+  ## tab (re)activation — live outside this proc's original call sites.
+  if self.monacoEditor.isNil:
+    return
 
-  self.styleLines(self.monacoEditor, lines)
+  let colorLineList = self.colorLines()
+  let conditionFlowLines = self.conditionStyleLines()
+  # var diffLineList = self.diffStyleLines()
+  let flowLineList = self.flowStyleLines(conditionFlowLines)
+  let deepReviewDiffLines = self.deepReviewDiffStyleLines()
+  let originHopLines = self.originHopStyleLines()
+
+  # Layer split, see `styleLines` / `ui/editor_decoration_layers.nim`:
+  # everything derived from `self.flow.flow` goes into the flow layer, which is
+  # retained rather than wiped while a flow reload is in flight.
+  let baseLines = concat(colorLineList, concat(deepReviewDiffLines, originHopLines))
+  let flowLines = concat(flowLineList, conditionFlowLines)
+  let flowDataAvailable = not self.flow.isNil and not self.flow.flow.isNil
+
+  self.styleLines(self.monacoEditor, baseLines, flowLines, flowDataAvailable)
 
 proc statusWidgetDom(self: FlowComponent, line: int): Node =
   var dom = cast[Node](document.createElement(cstring"div"))
@@ -2546,11 +2598,11 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     if expandedInstance.isExpanded:
       expandedInstance.renderExpandedEditorDirect()
 
-proc refreshFlowAfterActivation*(self: EditorViewComponent) =
-  if self.isNil:
-    return
-  if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
-    return
+proc reloadFlowAfterActivation(self: EditorViewComponent) =
+  ## Flow-data half of ``refreshFlowAfterActivation``: get the flow either
+  ## redrawn or (re)requested, whichever the component's state calls for.
+  ## Split out so the decoration repaint below runs on EVERY one of these
+  ## branches instead of being skipped by the first early ``return``.
   if not self.api.isNil and self.flow.isNil:
     self.api.emit(InternalLastCompleteMove, EmptyArg())
   if not self.flow.isNil:
@@ -2567,6 +2619,24 @@ proc refreshFlowAfterActivation*(self: EditorViewComponent) =
      not self.flow.flow.isNil:
     self.flow.redrawFlow()
     self.flow.scheduleActiveLoopIterationValueRender()
+
+proc refreshFlowAfterActivation*(self: EditorViewComponent) =
+  if self.isNil:
+    return
+  if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
+    return
+
+  self.reloadFlowAfterActivation()
+
+  # #594: activating a tab must repaint the line decorations too. Neither
+  # `redrawFlow` overload touches them (the EditorViewComponent one only
+  # recomputes `maxFlowLineWidth`), so without this the newly activated tab
+  # showed the flow widgets but no `flow-taken` / `flow-not-taken` colours —
+  # while the tab the user came from, which had been repainted by an
+  # `onCompleteMove` at an already-loaded rrTicks, kept them. That asymmetry
+  # is exactly what the reporter described.
+  self.applyEventualStylesLines()
+  self.applyColumnBreakpointDecorations()
 
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
   ## Mark the IsoNim editor view as the primary renderer once Monaco
@@ -3111,3 +3181,10 @@ method onUpdatedFlow*(self: EditorViewComponent, update: FlowUpdate) {.async.} =
   if not self.flow.isNil:
     await self.flow.onUpdatedFlow(update)
     self.adjustEditorWidth()
+    # #594: this is the moment the conditional-branch data actually becomes
+    # paintable. `onCompleteMove` ran `editorAfterRedraw` synchronously back
+    # when `self.flow.flow` was still nil, so the flow decoration layer was
+    # merely RETAINED there; nothing in `FlowComponent.onUpdatedFlow` applies
+    # line styles. Without this call the colours only ever reappeared by
+    # accident, on a later move that happened not to trigger a flow reload.
+    self.applyEventualStylesLines()
