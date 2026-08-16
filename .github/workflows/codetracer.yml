@@ -2286,15 +2286,14 @@ jobs:
         include:
           - platform: nixos
             runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
-          # DEFERRED (CIP-5 Wave 4): the macOS leg stays on the GitHub-hosted
-          # image. Its top-level `brew install just` / `actions/setup-python`
-          # steps would swap to nix cleanly, but this leg is the *non-nix*
-          # macОС build path: `./non-nix-build/build.sh` is Homebrew-native
-          # (env.sh / build_with_nim.sh `brew install` sqlite3, ruby, capnp,
-          # libzip, …). The nix-darwin runners have no Homebrew, so migrating
-          # means porting non-nix-build to nix — a redesign, not a tool swap.
+          # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
+          # runner and drives the tests through codetracer's nix dev shell
+          # (``nix develop . --command just test``), same as the nixos leg. The
+          # former Homebrew-native ``./non-nix-build/build.sh`` toolchain (brew
+          # install just / setup-python / dtolnay rust-toolchain) is gone; nim /
+          # cargo / cargo-nextest / nimsuggest all come from the dev shell.
           - platform: macos
-            runner: macos-latest  # DEFERRED (CIP-5 Wave 4): Homebrew-native non-nix build — see leg note
+            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2334,17 +2333,20 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings (nixos)
+      - name: Setup isonim siblings
         # ``just test`` -> ``test-nimsuggest`` needs the codetracer
         # source to build, which pulls in ``../isonim/src`` siblings.
-        if: matrix.platform == 'nixos'
+        # Both legs now build inside the nix dev shell, so both need the
+        # isonim siblings adjacent to this checkout.
         uses: ./.github/actions/setup-isonim-siblings
         with:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      # --- NixOS setup ---
       - name: Install Nix
-        if: matrix.platform == 'nixos'
+        # Both legs drive the tests through ``nix develop`` now. On the
+        # self-hosted eph-linux-x64 / eph-macos-arm64 runners nix is already
+        # on PATH, so setup-nix is a fast no-op; it stays for hosted-runner
+        # portability.
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
@@ -2352,51 +2354,21 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       # --- macOS setup ---
-      - name: Install just (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install just
-
-      - name: Set up Python 3.12 (macOS)
-        if: matrix.platform == 'macos'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Set up Rust toolchain (macOS)
-        if: matrix.platform == 'macos'
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-nextest (macOS)
-        if: matrix.platform == 'macos'
-        run: curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-
+      # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
+      # no ``./non-nix-build/build.sh`` any more: the macOS leg runs the tests
+      # inside codetracer's nix dev shell (``nix develop . --command just
+      # test``), which provisions nim / cargo / cargo-nextest / nimsuggest from
+      # /nix/store exactly like the nixos leg. ``just test`` (test-rust +
+      # test-nimsuggest) builds what it needs via cargo, so no explicit
+      # pre-build of the ct tree is required here.
       - name: Clone codetracer-trace-format (macOS)
-        # ``./non-nix-build/build.sh`` -> ``env.sh`` -> ``build_trace_writer_ffi.sh``
-        # builds ``codetracer_trace_writer_ffi`` out of a codetracer-trace-format
-        # checkout, defaulting to the workspace sibling
-        # ``$ROOT_DIR/../codetracer-trace-format``.  That used to be the in-repo
-        # submodule ``libs/codetracer-trace-format``; e901eb6c8 (2026-05-12,
-        # "migrate codetracer-trace-format from submodule to sibling repo") made
-        # it a sibling, and nothing on THIS leg ever started providing it -- the
-        # job's ``Setup dev env`` (which clones siblings) is
-        # ``if: matrix.platform == 'nixos'``.  So every macOS run since has died
-        # here with
-        #
-        #   ERROR: codetracer-trace-format checkout not found at
-        #   .../non-nix-build/../../codetracer-trace-format.
-        #
-        # Its sibling job ``test-ui-tests`` runs the same script on the same
-        # runner and does not hit this, because its ``Setup dev env`` has no
-        # platform ``if:``.  (This leg was already red at ``Build (non-nix)``
-        # before e901eb6c8 -- its last green run anywhere is 24457842335, main,
-        # 2026-04-15, and it has never been green on ``dev`` -- so this may
-        # expose an older failure rather than turn the leg green.  It is
-        # ``continue-on-error`` on macOS either way.)  Clone the sibling here
-        # with the same ``clone-repo``
-        # + ``ref: dev`` pattern this job already uses for the python / ruby /
-        # BEAM recorders, rather than dropping the platform ``if:`` off
-        # ``Setup dev env``: this leg is deliberately the *non-nix* build path
-        # and must not acquire a nix dev env as a side effect.
+        # The BEAM recorder built below transitively path-depends on
+        # codetracer-trace-format / codetracer_trace_writer_nim; its build.rs
+        # resolves that crate from the workspace sibling
+        # ``$GITHUB_WORKSPACE/../codetracer-trace-format``. Clone it (and its
+        # matched FFI half, codetracer-trace-format-nim) with the same
+        # ``clone-repo`` + ``ref: dev`` pattern the nixos leg's setup-dev-env
+        # uses.
         if: matrix.platform == 'macos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
@@ -2408,20 +2380,19 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-trace-format
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Build (non-nix)
+      - name: Clone codetracer-trace-format-nim (macOS)
+        # Matched FFI half of codetracer-trace-format: the recorder's build.rs
+        # hard-errors ("Nim FFI entry point not found ...
+        # codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim")
+        # without this sibling. Same pairing the nixos leg's setup-dev-env
+        # ``siblings:`` list encodes.
         if: matrix.platform == 'macos'
-        # Mirror the environment ``test-ui-tests``' macOS leg passes to this
-        # same script: ``install_nim_osx.sh`` bootstraps Nim without nimble, so
-        # ``codetracer_trace_writer_nim``'s build.rs must skip its
-        # ``nimble install --depsOnly`` and take stew/results from the in-repo
-        # submodules instead; and macos-latest has no direnv for db-backend's
-        # build.rs to wrap ``build_native_api.sh`` in.
-        env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-        run: ./non-nix-build/build.sh
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -2558,19 +2529,33 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build codetracer-beam-recorder (macOS)
-        # macOS has cargo from ``Set up Rust toolchain (macOS)`` above.
-        # Skip the recorder's ``just build-native`` (which uses
-        # ``--locked``) for the same reason as the nixos step above --
-        # the trace-format sibling is checked out at a newer ref than
-        # the recorder's Cargo.lock expects.  Elixir / rebar3 aren't
-        # required to *produce* the binary, only to run its full test
-        # matrix.
+        # cargo now comes from codetracer's nix dev shell (``nix develop .``)
+        # rather than a DIY rust-toolchain — same source the nixos step above
+        # uses, only with the host-default aarch64-darwin shell instead of the
+        # explicit x86_64-linux selector.  Codetracer's shell ships the full
+        # nim / nimble toolchain the recorder's transitive
+        # codetracer_trace_writer_nim build.rs needs.
+        #
+        # Skip the recorder's ``just build-native`` (which uses ``--locked``)
+        # for the same reason as the nixos step -- the trace-format sibling is
+        # checked out at a newer ref than the recorder's Cargo.lock expects.
+        # ``CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1`` +
+        # ``CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS`` inject codetracer's
+        # vendored stew instead of a network ``nimble install --depsOnly``,
+        # exactly as the nixos step does.
         if: matrix.platform == 'macos'
         shell: bash
+        env:
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
-          cargo build
+          cd "${{ github.workspace }}"
+          nix develop . --command bash -c '
+            set -euo pipefail
+            cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
+            cargo build
+          '
 
       # Runs all Rust tests including flow integration tests for all languages.
       # WASM flow tests skip automatically if wazero or wasm32-wasip1 target
@@ -2588,15 +2573,15 @@ jobs:
         include:
           - platform: nixos
             runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
-          # DEFERRED (CIP-5 Wave 4): the macOS leg stays on the GitHub-hosted
-          # image. Its top-level `brew install just` / `actions/setup-python`
-          # steps would swap to nix cleanly, but this leg drives the *non-nix*
-          # macОС build (`./non-nix-build/build.sh`), which is Homebrew-native
-          # (env.sh / build_with_nim.sh `brew install` sqlite3, ruby, capnp,
-          # libzip, …). The nix-darwin runners have no Homebrew, so migrating
-          # means porting non-nix-build to nix — a redesign, not a tool swap.
+          # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
+          # runner. The ct binary is built by codetracer's reprobuild recipe in
+          # the nix dev shell (``nix develop . --command just build-once`` ->
+          # ``src/build-debug-repro/bin/ct``) and the Playwright suite runs
+          # inside that same dev shell, replacing the Homebrew-native
+          # ``./non-nix-build/build.sh`` toolchain (brew install just /
+          # setup-python / dtolnay rust-toolchain).
           - platform: macos
-            runner: macos-latest  # DEFERRED (CIP-5 Wave 4): Homebrew-native non-nix build — see leg note
+            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2621,24 +2606,15 @@ jobs:
           token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
-        # setup-dev-env (nix) installs Nix via the shared setup-nix (which
-        # skips the install when nix is already on PATH for the self-hosted
-        # nixos runner, and otherwise installs via the Determinate installer —
-        # the workaround for the hosted-macOS ``eDSRecordAlreadyExists``
-        # failure that the older installer trips on the GitHub-hosted Apple
-        # Silicon image) and clones the cross-repo siblings adjacent to this
-        # checkout (``../<name>``) at their pinned `dev` refs. This
-        # replaces the former Checkout-manifests / Resolve-lock / per-sibling
-        # clone-repo steps (both legs), the nixos ``Install Nix`` (setup-nix),
-        # and the bespoke macOS ``Install Nix (… for ct_cli build)`` Determinate
-        # step (Nix is now provisioned here for the macOS sibling
-        # ``nix develop`` builds below).
-        #
-        # NOTE: the macOS leg keeps its open-coded ``just`` / Python / Rust
-        # toolchain steps below — its ``./non-nix-build/build.sh`` and
-        # ``./ci/test/ui-tests-db.sh`` invocations run at the top shell (the
-        # explicitly *non-nix* macOS build path) and rely on those tools being
-        # on the system PATH rather than inside codetracer's nix dev shell.
+        # setup-dev-env (nix) installs Nix via the shared setup-nix (a fast
+        # no-op on the self-hosted eph-linux-x64 / eph-macos-arm64 runners,
+        # where nix is already on PATH) and clones the cross-repo siblings
+        # adjacent to this checkout (``../<name>``) at their pinned `dev` refs.
+        # This replaces the former Checkout-manifests / Resolve-lock /
+        # per-sibling clone-repo steps (both legs) and the nixos ``Install Nix``
+        # (setup-nix). Nix is provisioned here for both the macOS sibling
+        # ``nix develop`` builds and the ct build + Playwright run, which now
+        # all go through codetracer's dev shell.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -2704,25 +2680,12 @@ jobs:
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
       # --- macOS setup ---
-      # The macOS leg is the explicitly non-nix build path on the hosted
-      # ``macos-latest`` runner (``./non-nix-build/build.sh`` +
-      # ``./ci/test/ui-tests-db.sh`` run at the top shell). It still needs
-      # just / Python / Rust on the system PATH; the nix dev env from
-      # ``Setup dev env`` only backs the sibling ``nix develop`` builds.
-      - name: Install just (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install just
-
-      - name: Set up Python 3.12 (macOS)
-        if: matrix.platform == 'macos'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Set up Rust toolchain (macOS)
-        if: matrix.platform == 'macos'
-        uses: dtolnay/rust-toolchain@stable
-
+      # The macOS leg now builds the ct binary with codetracer's reprobuild
+      # recipe inside the nix dev shell and runs the Playwright suite in that
+      # same shell (see the "Build CodeTracer (nix dev shell)" step and
+      # ``./ci/test/ui-tests-db.sh`` below). just / nim / cargo / node /
+      # Playwright all come from ``nix develop .``; the former open-coded brew
+      # install just / setup-python / dtolnay rust-toolchain steps are gone.
       - name: Setup isonim siblings (macOS)
         if: matrix.platform == 'macos'
         # codetracer's nim.cfg ``--path:``s into ``../isonim/src`` and
@@ -2772,12 +2735,9 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
-      # NOTE: Nix is installed by the ``Setup dev env`` step above. On the
-      # hosted ``macos-latest`` (arm64) runner the shared setup-nix installs
-      # via DeterminateSystems/nix-installer-action — the workaround for the
-      # ``eDSRecordAlreadyExists`` failure that the older installer trips on
-      # the GitHub-hosted Apple Silicon image (leftover Nix state in the base
-      # snapshot). The former bespoke ``Install Nix (macOS, for ct_cli build)``
+      # NOTE: Nix is installed by the ``Setup dev env`` step above (a fast
+      # no-op on the self-hosted eph-macos-arm64 runner, where nix is already
+      # on PATH). The former bespoke ``Install Nix (macOS, for ct_cli build)``
       # step is therefore no longer needed; the visual-replay sibling builds
       # below still drive each sibling's own ``nix develop`` flake.
 
@@ -2793,7 +2753,7 @@ jobs:
         #
         # We bypass scripts/build-siblings.sh because that script
         # assumes direnv-allow state and a parent codetracer dev shell
-        # that supplies nim/nimble.  On macos-latest none of those
+        # that supplies nim/nimble.  On this runner none of those
         # preconditions hold yet -- ``nix develop`` invokes the recorder's
         # flake directly and supplies the same Nim/Rust/LLDB toolchain
         # the recipe expects, without the direnv allow state plumbing.
@@ -2822,34 +2782,18 @@ jobs:
           cd "${{ github.workspace }}/../codetracer-visual-replay"
           nix develop --no-write-lock-file --command just build
 
-      - name: Build CodeTracer (non-nix)
+      - name: Build CodeTracer (nix dev shell)
         if: matrix.platform == 'macos'
-        # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
-        # at ``$ROOT_DIR/../codetracer-trace-format`` (the dev-machine
-        # workspace-sibling layout).  In CI we already clone it into
-        # ``libs/codetracer-trace-format``; point TRACE_FORMAT_DIR there
-        # instead of duplicating the clone.
-        #
-        # The codetracer_trace_writer_nim build.rs also defaults to
-        # running ``nimble install --depsOnly`` to pull stew + results;
-        # ``install_nim_osx.sh`` only bootstraps Nim itself (no nimble
-        # binary), so SKIP that step and provide the deps via
-        # CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS instead.  Same pair
-        # of stew paths the Nix derivation uses (``stew/`` first so
-        # ``import results`` resolves to stew's results.nim, then the
-        # parent so ``import stew/...`` also resolves).
-        # db-backend's build.rs wraps build_native_api.sh in
-        # ``direnv exec`` on POSIX so the recorder's Nim/Nimble env
-        # loads onto PATH.  macos-latest doesn't ship direnv and
-        # we already have nim on PATH from install_nim_osx.sh, so
-        # tell build.rs to skip the direnv wrapper.
-        env:
-          TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-        run: ./non-nix-build/build.sh
+        # Toolchain-free reprobuild build inside codetracer's nix dev shell,
+        # the same path ``dmg-build`` uses on this runner. On Darwin
+        # ``scripts/build-once.sh`` selects the reprobuild driver (``repro`` +
+        # ``runquotad`` are both provisioned by ``nix develop .``) and emits the
+        # ct binary at ``src/build-debug-repro/bin/ct`` — the path
+        # ``ci/test/ui-tests-db.sh`` points ``CODETRACER_E2E_CT_PATH`` at. The
+        # in-repo ``libs/codetracer-trace-format{,-nim}`` staged above feed the
+        # recipe; no ``--override-input`` is needed for the tup/reprobuild dev
+        # build. Replaces the old Homebrew ``./non-nix-build/build.sh``.
+        run: nix develop . --command just build-once
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
