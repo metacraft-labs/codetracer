@@ -1084,6 +1084,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1115,6 +1122,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1146,6 +1160,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1177,6 +1198,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
@@ -1260,6 +1288,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1291,6 +1326,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -3250,6 +3292,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Setup isonim siblings
         # The gate's last two suites are ViewModel tests under
