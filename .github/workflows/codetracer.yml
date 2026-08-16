@@ -7,6 +7,23 @@ on:
       - stable
   pull_request:
 
+# Collapse superseded pull-request runs only.
+#
+# This is the widest workflow in the repository -- Windows, Linux and macOS
+# legs across three runner classes -- so a superseded pull-request run is the
+# single most expensive thing the fleet can be doing.
+#
+# `github.head_ref` is set on `pull_request` and empty everywhere else, so PR
+# runs group per source branch and a new push cancels the run it superseded.
+# Pushes to `main`/`dev`/`stable` fall through to `github.run_id`, which is
+# unique per run: every mainline commit keeps a group of its own and is never
+# cancelled. That is deliberate -- `dev` is the integration branch and each
+# commit's build result is independently meaningful for bisecting, so
+# collapsing mainline pushes would destroy history rather than save capacity.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
