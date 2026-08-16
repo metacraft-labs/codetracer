@@ -3609,7 +3609,8 @@ jobs:
     # run. This watches the run's own observed behaviour instead, which needs
     # no runner introspection and no permission beyond reading its own run.
     #
-    # Stock ubuntu-latest, bash + jq + curl: a watchdog must not share the
+    # Stock ubuntu-latest, bash + jq + the preinstalled gh CLI: a watchdog
+    # must not share the
     # failure mode it watches for. If this needed a self-hosted runner, a run
     # starved of self-hosted runners would starve the watchdog too, and it
     # would fall silent at exactly the moment it is meant to speak.
