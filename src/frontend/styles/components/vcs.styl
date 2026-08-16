@@ -159,6 +159,14 @@
     background: colors-ui-surface-primary-secondary-hover
     color: colors-ui-text-primary-body
 
+// The refresh action shares the toggle row and is pushed to its right edge.
+// It overrides the standalone `.vcs-refresh` bottom-bar presentation below.
+.vcs-diff-toggle .vcs-refresh
+  margin-left: auto
+  padding: 0 0.5em
+  border-top: none
+  text-align: right
+
 // ---------------------------------------------------------------------------
 // Commit graph + accordion history
 // ---------------------------------------------------------------------------

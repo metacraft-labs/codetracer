@@ -292,6 +292,13 @@ proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
   if skip == 0:
     self.commits = @[]
 
+  # Rows appended by THIS call, so the caller can tell a full page from the
+  # last, short one. `commitOffset` used to advance by a flat `commitPageSize`
+  # whether or not any commit came back, which left the infinite-scroll
+  # sentinel with no way to know it had reached the end — see
+  # `allCommitsLoaded` in `VCSComponent`.
+  var appended = 0
+
   if raw.len > 0:
     for line in ($raw).splitLines():
       let trimmed = line.strip()
@@ -322,8 +329,10 @@ proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
         author: cstring(authorStr),
         parents: parents,
       ))
+      appended += 1
 
-  self.commitOffset = skip + commitPageSize
+  self.commitOffset = skip + appended
+  self.allCommitsLoaded = appended < commitPageSize
 
 proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
   ## Load the files changed in a specific commit with diff --stat style info.
@@ -423,7 +432,14 @@ proc loadMoreCommits*(self: VCSComponent) =
   ## Append the next page of commits to ``self.commits`` and push the
   ## updated list to the VM.  Guards against concurrent fetches with
   ## ``self.loadingMore``.
+  ##
+  ## The caller is an IntersectionObserver on a sentinel at the bottom of the
+  ## commit list, which fires again every time the list is rebuilt.  It is
+  ## therefore this proc's job — not the observer's — to be a no-op once the
+  ## history is exhausted; see ``allCommitsLoaded``.
   if self.loadingMore:
+    return
+  if self.allCommitsLoaded:
     return
   if not self.isGitRepo:
     return
@@ -445,6 +461,10 @@ proc resetAndRefreshVCS*(self: VCSComponent) =
     return
   self.initialized = false
   self.commitOffset = 0
+  # Paired with `commitOffset`: a fresh paging window must be allowed to fetch
+  # again, otherwise a repo that grew since the last load can never show its
+  # new commits.
+  self.allCommitsLoaded = false
   self.refreshVCSData()
   self.syncLegacyVCSIntoVM()
 
@@ -741,9 +761,21 @@ proc ensureVCSVM(self: VCSComponent): VCSVM =
   result = createVCSVM()
   vcsVMInstances[self.id] = result
 
+proc isDiffTab*(self: VCSComponent): bool =
+  ## True for a panel instance opened as an editor-area diff tab rather than
+  ## the docked VCS panel.  Such an instance renders only the unified diff for
+  ## its ``diffTarget``; it has no branch picker and no commit history.
+  not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:")
+
 proc isDeepReviewMode(self: VCSComponent): bool =
   ## Return true when the VCS panel should show DeepReview changeset data
   ## instead of normal git data.
+  ##
+  ## A diff tab is excluded: it was opened to show one specific diff and must
+  ## keep showing it even while a DeepReview session is active, otherwise it
+  ## would silently turn into a second copy of the review's file list.
+  if self.isDiffTab():
+    return false
   self.data.deepReviewActive and not self.data.deepReviewData.isNil
 
 # ---------------------------------------------------------------------------
@@ -907,7 +939,14 @@ proc safeStr(s: cstring): string =
 proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
-    if not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:"):
+    if self.isDiffTab():
+      # A diff tab shows git data, so it must report itself as being in a git
+      # repository: otherwise the view falls through to the "not a git
+      # repository" placeholder and the diff is never rendered.  Nothing had
+      # ever reached this branch before the `openLayoutTab` fix, so the
+      # omission was invisible.
+      self.isGitRepo = true
+      self.errorMessage = cstring""
       self.unifiedDiffActive = true
       self.loadGitDiffForUnifiedView()
     else:
@@ -1052,6 +1091,7 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
 
   self.ensureVCSDataLoaded()
   vm.setDeepReviewMode(false)
+  vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
   vm.setHeader(safeStr(self.currentBranch))
   vm.setGitRepoState(self.isGitRepo, safeStr(self.errorMessage))
   vm.setBranchState(safeStr(self.currentBranch),
@@ -1082,15 +1122,48 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   vm.setHunkState(self.selectedHunks, self.hunkToolbarVisible,
                   self.hunkCopyFeedback)
 
-proc handleVCSFileSelection(self: VCSComponent; index: int; path: string) =
+proc openUnifiedDiffTab*(self: VCSComponent; target: string) =
+  ## Open (or focus) a dedicated editor-area tab showing the unified diff for
+  ## ``target`` — ``file:<path>``, ``commit:<hash>``, ``commit:<hash>:<path>``
+  ## or ``Working Tree``.  The tab is keyed by the target, so clicking the same
+  ## file twice focuses the tab that is already showing it.
+  let newId = self.data.generateId(Content.VCS)
+  self.data.openLayoutTab(Content.VCS, newId, isEditor = true,
+                          path = cstring("diff:" & target))
+
+proc repositoryRoot(self: VCSComponent): cstring =
+  ## Absolute path of the git work tree root.
+  ##
+  ## Every path git reports (``diff-tree --numstat``, ``status --porcelain``,
+  ## …) is relative to this directory, while the editor addresses files by
+  ## absolute path.  The working directory is only a fallback: it is not
+  ## necessarily the repository root, so joining against it would break for
+  ## projects opened at a subdirectory.
+  let cwd = self.getWorkingDirectory()
+  let top = gitExec(@[cstring"rev-parse", cstring"--show-toplevel"], cwd)
+  if top.isNil or top.len == 0: cwd else: top
+
+proc absoluteRepoPath(self: VCSComponent; path: string): cstring =
+  if path.len == 0 or utils.isAbsolutePath(path):
+    cstring(path)
+  else:
+    cstring($self.repositoryRoot() & "/" & path)
+
+proc handleVCSFileSelection(self: VCSComponent; index: int; path: string;
+                            target: string) =
   if self.isDeepReviewMode():
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
     self.syncDeepReviewPanelSelection()
     return
-  if self.unifiedDiffActive:
-    self.loadGitDiffForUnifiedView()
-  self.data.openTab(cstring(path), ViewSource)
+  if self.openFileMode:
+    # VCS-005: open the file itself.  git hands us a repository-relative path;
+    # the editor needs an absolute one, otherwise the tab load is issued for a
+    # path that does not exist unless some already-open tab happens to end
+    # with it.
+    self.data.openTab(self.absoluteRepoPath(path), ViewSource)
+  else:
+    self.openUnifiedDiffTab(target)
 
 proc handleHunkSelection(self: VCSComponent; fileIdx, hunkIdx: int;
                          shiftKey, ctrlKey: bool) =
@@ -1136,6 +1209,7 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
       onCheckoutBranch: proc(branch: string) =
         component.branchDropdownOpen = false
         component.commitOffset = 0
+        component.allCommitsLoaded = false
         component.selectedCommitIndices = @[]
         component.lastClickedCommitIndex = -1
         component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
@@ -1149,12 +1223,13 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
         component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
         component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
         component.syncLegacyVCSIntoVM(),
-      onSelectFile: proc(index: int; path: string) =
-        component.handleVCSFileSelection(index, path),
+      onSelectFile: proc(index: int; path: string; target: string) =
+        component.handleVCSFileSelection(index, path, target),
       onToggleUnifiedDiff: proc() =
-        discard,
+        component.openFileMode = not component.openFileMode
+        component.syncLegacyVCSIntoVM(),
       onRefresh: proc() =
-        if not component.diffTarget.isNil and ($component.diffTarget).startsWith("diff:"):
+        if component.isDiffTab():
           component.loadGitDiffForUnifiedView()
         else:
           component.refreshVCSData()
@@ -1162,9 +1237,7 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
             component.loadGitDiffForUnifiedView()
         component.syncLegacyVCSIntoVM(),
       onOpenFileDiff: proc(target: string) =
-        let newId = component.data.generateId(Content.VCS)
-        let tabPath = "diff:" & target
-        component.data.openLayoutTab(Content.VCS, newId, isEditor = true, path = cstring(tabPath)),
+        component.openUnifiedDiffTab(target),
       onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
         component.handleHunkSelection(fileIdx, hunkIdx, shiftKey, ctrlKey),
       onCopySelectedHunks: proc() =

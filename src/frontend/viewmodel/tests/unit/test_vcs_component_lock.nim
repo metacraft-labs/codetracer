@@ -7,8 +7,16 @@ import isonim/testing/mock_dom
 import ../../viewmodels/vcs_vm
 import ../../views/isonim_vcs_view
 
+proc hasClass(node: MockNode; className: string): bool =
+  ## Whole-word class match.  A substring match would conflate BEM-style
+  ## siblings such as `ct-menu-item` and `ct-menu-item-label`.
+  for part in node.attributes.getOrDefault("class", "").split(' '):
+    if part == className:
+      return true
+  false
+
 proc findAllByClass*(node: MockNode; className: string; result: var seq[MockNode]) =
-  if node.kind == mnkElement and className in node.attributes.getOrDefault("class", ""):
+  if node.kind == mnkElement and node.hasClass(className):
     result.add(node)
   for child in node.children:
     findAllByClass(child, className, result)
@@ -81,13 +89,17 @@ suite "VCS Component Commit Selection":
       let dropdown = findByClass(panel, "vcs-branch-dropdown")
       check dropdown != nil
 
-      let options = findAllByClass(dropdown, "vcs-branch-option")
+      # `0717477a` moved the dropdown onto the shared `ct-menu-item` markup;
+      # the old `vcs-branch-option` class no longer exists, so this assertion
+      # had been silently matching nothing.
+      let options = findAllByClass(dropdown, "ct-menu-item")
       check options.len == 2
 
-      # Click the "feature" branch option
-      options[1].fireEvent("click")
-      check checkedOut == "feature"
-      check vm.currentBranch.val == "feature"
-      check vm.branchDropdownOpen.val == false
+      if options.len == 2:
+        # Click the "feature" branch option
+        options[1].fireEvent("click")
+        check checkedOut == "feature"
+        check vm.currentBranch.val == "feature"
+        check vm.branchDropdownOpen.val == false
 
       dispose()

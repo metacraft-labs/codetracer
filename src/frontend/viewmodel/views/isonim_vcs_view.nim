@@ -67,7 +67,12 @@ type
     ## Called when the scroll sentinel becomes visible so the next page of
     ## commits can be appended.
     onLoadMoreCommits*: proc()
-    onSelectFile*: proc(index: int; path: string)
+    ## Row click.  ``path`` is the repository-relative file path; ``target``
+    ## is the same diff target the row's "View Diff" button dispatches
+    ## (``file:<path>`` or ``commit:<hash>:<path>``), so the host can honour
+    ## the unified-diff view mode without having to re-derive which commit the
+    ## row belonged to.
+    onSelectFile*: proc(index: int; path: string; target: string)
     onToggleUnifiedDiff*: proc()
     onRefresh*: proc()
     onSelectHunk*: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool)
@@ -213,15 +218,21 @@ proc invokeToggleCommitExpand(vm: VCSVM; callbacks: VCSCallbacks;
     else:
       vm.selectedCommitIndices.val = @[index]
 
-proc invokeSelectFile(callbacks: VCSCallbacks; index: int; path: string) =
+proc invokeSelectFile(callbacks: VCSCallbacks; index: int;
+                      path: string; target: string) =
   if callbacks.onSelectFile != nil:
-    callbacks.onSelectFile(index, path)
+    callbacks.onSelectFile(index, path, target)
 
 proc invokeToggleUnifiedDiff(vm: VCSVM; callbacks: VCSCallbacks) =
   if callbacks.onToggleUnifiedDiff != nil:
     callbacks.onToggleUnifiedDiff()
   else:
-    vm.unifiedDiffActive.val = not vm.unifiedDiffActive.val
+    # Fallback for unit tests / the mock renderer: flip the view mode, which
+    # is what the toggle controls.  It must NOT flip `unifiedDiffActive` —
+    # that would replace the commit history with a diff, the regression
+    # reported in issue #561.
+    vm.viewMode.val =
+      if vm.viewMode.val == vmUnifiedDiff: vmOpenFile else: vmUnifiedDiff
 
 proc invokeRefresh(callbacks: VCSCallbacks) =
   if callbacks.onRefresh != nil:
@@ -659,11 +670,13 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
   ## independently captures its own index and path.
   let rowIndex = index
   let rowPath = file.path
+  let rowTarget = "commit:" & commitHash & ":" & rowPath
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
     tdiv(ref = rowNode, class = "vcs-accordion-file",
-         onclick = proc() = callbacks.invokeSelectFile(rowIndex, rowPath))
+         onclick = proc() =
+           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget))
 
   r.appendRenderedChild(rowNode, renderLaneSpacer(r, continuationCells))
 
@@ -684,7 +697,7 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
         tdiv(class = "custom-tooltip"):
           text "View Diff"
   r.appendRenderedChild(rowNode, content)
-  r.attachFileDiffClick(diffBtn, callbacks, "commit:" & commitHash & ":" & rowPath)
+  r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
 
   row
 
@@ -845,11 +858,12 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   ## proc parameters — a guaranteed-fresh binding per call.
   let rowIndex = index
   let rowPath = file.path
+  let rowTarget = "file:" & rowPath
   var diffBtn: typeof(r.createElement("span"))
   let row = ui(r):
     tdiv(class = fileRowClass(file.selected),
          onclick = proc() =
-           callbacks.invokeSelectFile(rowIndex, rowPath)):
+           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget)):
       span(class = "vcs-file-status " & statusClass(file.status)):
         text statusLabel(file.status)
       span(class = "vcs-file-name"):
@@ -868,7 +882,7 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
       span(ref = diffBtn, class = "vcs-file-diff-btn"):
         tdiv(class = "custom-tooltip"):
           text "View Diff"
-  r.attachFileDiffClick(diffBtn, callbacks, "file:" & rowPath)
+  r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
   row
 
 proc renderChangedFiles[R](r: R; vm: VCSVM;
@@ -988,18 +1002,19 @@ proc renderUnifiedDiff*[R](r: R; vm: VCSVM;
   panel
 
 proc renderDiffToggle[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+  ## The view-mode switch described in VCS-Panel.md ("View mode toggle").
+  ## Active = clicking a file opens a unified diff tab; inactive = it opens the
+  ## file itself.  It changes only what a click *does*, never what this panel
+  ## renders — the commit history stays put either way.
   ui(r):
     tdiv(class = "vcs-diff-toggle"):
-      tdiv(class = toggleButtonClass(vm.unifiedDiffActive.val),
+      tdiv(class = toggleButtonClass(vm.viewMode.val == vmUnifiedDiff),
            onclick = proc() =
              vm.invokeToggleUnifiedDiff(callbacks)):
         text "Unified Diff"
-
-proc renderRefresh[R](r: R; callbacks: VCSCallbacks): auto =
-  ui(r):
-    tdiv(class = "vcs-refresh",
-         onclick = proc() = callbacks.invokeRefresh()):
-      text "Refresh"
+      tdiv(class = "vcs-refresh",
+           onclick = proc() = callbacks.invokeRefresh()):
+        text "Refresh"
 
 # ---------------------------------------------------------------------------
 # Scroll-position preservation helpers
@@ -1076,13 +1091,16 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
       r.appendRenderedChild(body, renderChangedFiles(r, vm, callbacks))
     elif not vm.isGitRepo.val:
       r.appendRenderedChild(body, renderNoRepo(r, vm))
+    elif vm.unifiedDiffActive.val:
+      # This panel instance IS a diff — a dedicated "View Diff" tab, or the
+      # inline review diff of an agentic session.  It shows the diff and
+      # nothing else: no branch picker, no view-mode toggle, no history.
+      r.appendRenderedChild(body, renderUnifiedDiff(r, vm, callbacks))
     else:
       r.appendRenderedChild(body, renderBranchPicker(r, vm, callbacks))
-      if vm.unifiedDiffActive.val:
-        r.appendRenderedChild(body, renderUnifiedDiff(r, vm, callbacks))
-      else:
-        # Commit graph with accordion expand/collapse and infinite-scroll.
-        r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
+      r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks))
+      # Commit graph with accordion expand/collapse and infinite-scroll.
+      r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
     restoreCommitListScroll(body)
 
   panel

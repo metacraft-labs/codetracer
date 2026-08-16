@@ -95,6 +95,13 @@ type
     deletions*: int
     hunks*: seq[VCSHunkRow]
 
+  VCSViewMode* = enum
+    ## What clicking a file row in the docked panel does — the "View mode
+    ## toggle" of `codetracer-specs/GUI/Core-Panes/VCS-Panel.md`.
+    vmUnifiedDiff  ## open a unified diff tab for the file (spec default,
+                   ## `vcs.defaultView: "unified-diff"`)
+    vmOpenFile     ## open the file itself in the editor
+
   VCSVM* = ref object of ViewModel
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
@@ -115,6 +122,12 @@ type
     ## different file lists simultaneously.
     commitFilesMap*: Signal[seq[(int, seq[VCSFileRow])]]
     changedFiles*: Signal[seq[VCSFileRow]]  ## DeepReview mode file list
+    ## What a file click does in the docked panel.  Distinct from
+    ## `unifiedDiffActive`: this one never changes what the panel *renders*.
+    viewMode*: Signal[VCSViewMode]
+    ## True when this panel instance IS a unified diff — a dedicated diff tab,
+    ## or the inline diff of an agentic-session review.  The docked panel keeps
+    ## it false so toggling the view mode never replaces its commit history.
     unifiedDiffActive*: Signal[bool]
     diffFiles*: Signal[seq[VCSDiffFileRow]]
     selectedHunks*: Signal[seq[(int, int)]]
@@ -219,6 +232,9 @@ proc syncCommitFilesMap*(vm: VCSVM;
 proc setChangedFiles*(vm: VCSVM; files: openArray[VCSFileRow]) =
   vm.changedFiles.val = @files
 
+proc setViewMode*(vm: VCSVM; mode: VCSViewMode) =
+  vm.viewMode.val = mode
+
 proc setUnifiedDiff*(vm: VCSVM; active: bool;
                      files: openArray[VCSDiffFileRow]) =
   vm.unifiedDiffActive.val = active
@@ -247,6 +263,7 @@ proc clearPanel*(vm: VCSVM) =
   vm.lastClickedIndex.val = -1
   vm.commitFilesMap.val = @[]
   vm.changedFiles.val = @[]
+  vm.viewMode.val = vmUnifiedDiff
   vm.unifiedDiffActive.val = false
   vm.diffFiles.val = @[]
   vm.selectedHunks.val = @[]
@@ -279,6 +296,7 @@ proc createVCSVM*(): VCSVM =
       lastClickedIndex: createSignal(-1),
       commitFilesMap: createSignal(newSeq[(int, seq[VCSFileRow])]()),
       changedFiles: changedFiles,
+      viewMode: createSignal(vmUnifiedDiff),
       unifiedDiffActive: createSignal(false),
       diffFiles: createSignal(newSeq[VCSDiffFileRow]()),
       selectedHunks: selectedHunks,

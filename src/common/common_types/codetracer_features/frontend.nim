@@ -334,3 +334,78 @@ type
   NewOperation* = ref object
     name*: langstring
     stableBusy*: bool
+
+# ---------------------------------------------------------------------------
+# Layout routing rules
+# ---------------------------------------------------------------------------
+#
+# Defined here (rather than in the JS-only frontend `utils.nim`) so the rule
+# is a single definition shared by `src/frontend/types.nim` and
+# `src/common/types.nim`, and therefore reachable from headless tests that
+# compile on the C backend.  `openLayoutTab` itself cannot be tested that way
+# because it manipulates GoldenLayout through the DOM.
+
+func opensAsIndependentTab*(content: Content; isEditor: bool): bool =
+  ## Whether a panel of `content` requested with `isEditor = true` must be
+  ## opened as its own tab in the editor area rather than being collapsed onto
+  ## the (usually sidebar-docked) singleton instance of that content kind.
+  ##
+  ## Most panel kinds — FILESYSTEM, EVENT LOG, STATE … — are singletons: asking
+  ## for one when it is already on screen should just focus it.  But a panel
+  ## may also be asked for as an *editor-area document*, keyed by the thing it
+  ## displays; the VCS panel does this for `View Diff`, opening one tab per
+  ## diff target.  Those instances are not interchangeable with the singleton
+  ## and must not be folded into it.
+  ##
+  ## `EditorView` is excluded because editor tabs already have their own,
+  ## richer reuse path in `openLayoutTab` (keyed by `data.ui.editors`), which
+  ## also carries the tab-history and source-loading bookkeeping.
+  isEditor and content != Content.EditorView
+
+func opensAsDocumentTab*(content: Content; isEditor: bool): bool =
+  ## Whether an `openLayoutTab` request names an editor-area *document* — an
+  ## instance keyed by the thing it displays — rather than the singleton
+  ## instance of a panel kind.
+  ##
+  ## Two shapes qualify: `Content.EditorView`, which has one instance per open
+  ## file (`GUI/Core-Panes/Editor-Pane.md`, "Tab Management": "Multiple files
+  ## can be open simultaneously as tabs"), and the independent tabs of
+  ## `opensAsIndependentTab` (the VCS panel's per-diff-target `View Diff` tabs).
+  content == Content.EditorView or opensAsIndependentTab(content, isEditor)
+
+func revealsPinnedPanel*(
+    content: Content;
+    isEditor: bool;
+    requestedPath: langstring;
+    pinnedPath: langstring): bool =
+  ## Whether an `openLayoutTab` request for `content` should be satisfied by
+  ## revealing an already auto-hidden (pinned) panel of the same content kind
+  ## instead of opening or focusing a GoldenLayout tab.
+  ##
+  ## `requestedPath` is the layout path the request is keyed by
+  ## (`editorTabPath(path, editorView)`); `pinnedPath` is the layout path the
+  ## candidate pinned panel carries in its serialised component state (empty
+  ## for a singleton, which has no document identity).
+  ##
+  ## For a SINGLETON panel — FILESYSTEM, STATE, BUILD, PROBLEMS, SEARCH
+  ## RESULTS, REQUESTS … — the pinned instance *is* the panel the request asks
+  ## for, and revealing it is the entire point of pinning
+  ## (`Planned-Features/Auto-Hide-Panes.md` §1.1: the panel "slides in as a
+  ## floating overlay on top of the Golden Layout area, without displacing the
+  ## existing layout").
+  ##
+  ## For a DOCUMENT tab the content kind is not an identity.  A pinned panel
+  ## only answers a request for the SAME document; a request for a different
+  ## file or a different diff target must open its own tab.
+  ##
+  ## Matching on the content kind alone is a real defect, not a nicety.  Pin one
+  ## editor and every later "open a file" request resolves to that one panel, so
+  ## no other file can ever be opened again — contradicting Editor-Pane.md's
+  ## "Multiple files can be open simultaneously as tabs" — and each such request
+  ## instead becomes a `showOverlay` call, i.e. an overlay show/hide toggle that
+  ## rebuilds the edge strip from scratch.  The same mistake re-breaks the VCS
+  ## `View Diff` button (issues #561 / #611) whenever the VCS panel is pinned.
+  if opensAsDocumentTab(content, isEditor):
+    requestedPath.len > 0 and requestedPath == pinnedPath
+  else:
+    true

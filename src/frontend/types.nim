@@ -770,6 +770,16 @@ type
 
   VCSComponent* = ref object of Component
     diffTarget*: cstring
+      ## Empty/nil for the docked VCS panel.  For a panel opened as an
+      ## editor-area diff tab this is the layout path identifying the diff
+      ## target (``diff:file:<path>`` / ``diff:commit:<hash>[:<path>]``),
+      ## and it is what makes repeat clicks on the same target focus the
+      ## existing tab instead of stacking duplicates.
+    openFileMode*: bool
+      ## View-mode toggle for the docked panel (VCS-Panel.md "View mode
+      ## toggle").  ``false`` — the spec's ``defaultView: "unified-diff"`` —
+      ## means clicking a file opens a unified diff tab; ``true`` means it
+      ## opens the file itself in the editor.
     currentBranch*: cstring
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
@@ -819,6 +829,21 @@ type
     loadingMore*: bool
       ## True while a background git-log call is in progress to load the
       ## next commit page.  Prevents concurrent overlapping fetches.
+    allCommitsLoaded*: bool
+      ## True once a page came back short (or empty), i.e. the repository has
+      ## no commits beyond the ones already in ``commits``.
+      ##
+      ## Without this the infinite-scroll sentinel is a busy loop on every
+      ## repository whose history is shorter than the panel: the sentinel sits
+      ## permanently inside the viewport, its IntersectionObserver fires,
+      ## ``loadMoreCommits`` shells out to ``git log`` for a page that does not
+      ## exist, publishes the unchanged list anyway, the panel's render effect
+      ## tears the whole subtree down and rebuilds it — sentinel included — and
+      ## the new sentinel is intersecting the moment it is attached.  Measured
+      ## at ~60 ``git log`` processes and ~440 DOM rebuilds per second, which is
+      ## also why nothing in the panel could ever be clicked: every element was
+      ## detached again before a click could land on it.
+      ## Reset wherever ``commitOffset`` is reset.
 
   ViewKind* =       enum ViewTable, ViewLine, ViewPie
 
@@ -2470,6 +2495,21 @@ proc duration*(call: nil Call): int64 =
 proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
+
+method independentTabPath*(self: Component): cstring {.base.} =
+  ## The layout path this component instance is *keyed by* when it is opened
+  ## as an independent editor-area tab (see `opensAsIndependentTab`).
+  ##
+  ## The empty string means "no independent identity": the component is the
+  ## singleton instance of its content kind.  Because `openLayoutTab` only ever
+  ## compares this against a non-empty requested path, singleton instances can
+  ## never be mistaken for an independent tab.
+  cstring""
+
+method independentTabPath*(self: VCSComponent): cstring =
+  ## A VCS panel opened for a diff target is identified by that target, so a
+  ## second `View Diff` on the same file focuses the tab that already shows it.
+  if self.diffTarget.isNil: cstring"" else: self.diffTarget
 
 method restart*(self: Component) {.base.} =
   discard

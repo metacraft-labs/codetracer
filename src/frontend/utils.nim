@@ -300,6 +300,17 @@ proc sourceRevisionHasIdentity*(location: types.Location): bool =
     (not location.sourceDigest.isNil and location.sourceDigest.len > 0) or
     (not location.path.isNil and location.path.len > 0 and location.line > 0)
 
+proc isAbsolutePath*(path: string): bool =
+  ## POSIX absolute, UNC, or a Windows drive-letter path (``C:\`` / ``C:/``).
+  ##
+  ## Used wherever a path of unknown provenance reaches the editor: git, for
+  ## instance, reports repository-relative paths, and those must be resolved
+  ## against the work-tree root before a tab can be opened for them.
+  path.len > 0 and
+    (path[0] == '/' or path[0] == '\\' or
+     (path.len >= 3 and path[1] == ':' and
+      (path[2] == '\\' or path[2] == '/')))
+
 proc editorTabPath*(path: cstring; editorView: EditorView): cstring =
   if editorView in {ViewSource, ViewTargetSource}:
     canonicalSourceRevisionPath(path)
@@ -1199,17 +1210,48 @@ proc openLayoutTab*(
   # If this panel lives in the auto-hide state (e.g. BUILD, PROBLEMS,
   # SEARCH RESULTS), show it via the auto-hide overlay instead of
   # trying to activate or create a GL tab.
+  #
+  # The match must be on the *document* the request names, not on the content
+  # kind: `Content.EditorView` has one instance per open file and a VCS diff tab
+  # one per target.  Matching on the kind alone meant that pinning a single
+  # editor made every later "open a file" request resolve to that one panel, so
+  # no other file could be opened again, and each request turned into a
+  # `showOverlay` toggle that rebuilt the auto-hide edge strip.  See
+  # `findPanelToRevealOnOpen` / `revealsPinnedPanel`.
   if not autoHideState.isNil:
-    let autoHidePanel = autoHideState.findPanelByContent(content)
+    let autoHidePanel = autoHideState.findPanelToRevealOnOpen(
+      content, isEditor, layoutPath)
     if not autoHidePanel.isNil:
-      showOverlay(autoHidePanel)
+      # `revealOverlay`, not `showOverlay`: an open request must never toggle a
+      # panel closed, and this path fires repeatedly (every debugger step
+      # re-opens the current source file).
+      revealOverlay(autoHidePanel)
       return
 
   var parent: GoldenContentItem
   let similarComponents = data.ui.componentMapping[content]
   let openSimilarComponentsTabs = data.ui.openComponentIds[content]
 
-  if content != Content.EditorView and
+  # Reuse rules, in two flavours.
+  #
+  # A panel asked for with `isEditor` is an editor-area *document* keyed by the
+  # thing it displays (the VCS panel's per-target diff tabs), so it is reused
+  # only when a tab for the SAME target is already open; anything else gets a
+  # new tab.  Every other panel kind is a singleton: asking for it while it is
+  # on screen just focuses it.
+  #
+  # Before this distinction existed the singleton rule was applied to VCS diff
+  # tabs too.  The docked VCS panel is component 0 and is always attached, so
+  # every `View Diff` click re-activated the already-active VCS panel and
+  # returned — silently, with no tab and no error (issues #561, #611).
+  if opensAsIndependentTab(content, isEditor):
+    for _, comp in data.ui.componentMapping[content]:
+      if not comp.isNil and not comp.layoutItem.isNil and
+        comp.independentTabPath == layoutPath and
+        isAttachedToLayout(comp.layoutItem, data.ui.layout):
+          comp.layoutItem.parent.setActiveContentItem(comp.layoutItem)
+          return
+  elif content != Content.EditorView and
     content != Content.AgentActivity and
     data.ui.componentMapping[content].len() > 0 and
     not data.ui.componentMapping[content][0].layoutItem.isNil and
@@ -1227,6 +1269,8 @@ proc openLayoutTab*(
       if similarComponents.hasKey(similarId):
         let comp = similarComponents[similarId]
         if not comp.isNil and not comp.layoutItem.isNil and isAttachedToLayout(comp.layoutItem, data.ui.layout):
+          if wantsIndependentTab and comp.independentTabPath.len == 0:
+            continue
           similarParent = cast[GoldenContentItem](comp.layoutItem.parent)
           break
 
@@ -1234,7 +1278,7 @@ proc openLayoutTab*(
     parent = similarParent
   else:
     let hasOpenEditors = data.hasActiveOpenEditors()
-    if (content == Content.EditorView or content == Content.NoInfo or (content == Content.VCS and isEditor)) and
+    if (content == Content.EditorView or content == Content.NoInfo or wantsIndependentTab) and
       not data.ui.editorPanels[EditorView.ViewSource].isNil and
       hasOpenEditors:
       let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
@@ -1550,9 +1594,10 @@ proc openTab*(
   if editorView in {EditorView.ViewSource, EditorView.ViewTargetSource} and
       not data.services.editor.open.hasKey(tabName):
     let nameText = $name
-    if nameText.len > 0 and not nameText.startsWith("/") and
-        not (nameText.len >= 3 and nameText[1] == ':' and
-             (nameText[2] == '\\' or nameText[2] == '/')):
+    if nameText.len > 0 and not isAbsolutePath(nameText):
+      # Last-resort rescue for a relative path: match it against the tail of an
+      # already-open tab.  Callers should resolve the path themselves — this
+      # cannot find a file that is not open yet.
       let suffix = "/" & nameText
       for openName, info in data.services.editor.open:
         let openText = $openName
