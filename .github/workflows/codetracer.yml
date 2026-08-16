@@ -3146,13 +3146,21 @@ jobs:
           # contents:write permission below) -- the same reliable mechanism the
           # isonim/isonim-docs docs deploys use. The old origin+CODETRACER_PUSH_
           # GITHUB_TOKEN path failed auth ("Authentication failed for .../codetracer").
+          #
+          # `origin` is deliberately NOT re-pointed at a credentialed URL here.
+          # docs.sh only reads `origin` in its DEPLOY_TOKEN-absent fallback
+          # (`ci/deploy/docs.sh`, the `git push --force "$REMOTE" HEAD:gh-pages`
+          # branch), and DEPLOY_TOKEN is always set on this step -- so the
+          # rewrite could never be the credential that pushed, it could only
+          # expand a long-lived PAT into `.git/config` on a self-hosted runner
+          # that reuses its workspace. This is a category-1 push (the
+          # workflow's own public repo), and the policy credential for that is
+          # the token Actions already provides.
           DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main
-
-          git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
 
           nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
 
@@ -3208,6 +3216,24 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main
 
+          # KNOWN DEVIATION from the credential policy
+          # (metacraft-dev-guidelines/policies/ci-workflow-standards.md
+          # §"Which credential for which repo"). This is a category-1 push --
+          # the workflow's OWN public repo -- so the credential should be the
+          # one Actions already provides; this job already declares
+          # `permissions: contents: write` for it. `CODETRACER_PUSH_GITHUB_TOKEN`
+          # is a long-lived PAT and therefore the one rotation-bearing GitHub
+          # credential left in this workflow, which is exactly what the policy
+          # exists to eliminate.
+          #
+          # It is left in place deliberately rather than swapped blind: this is
+          # the release tag-push path and it cannot be exercised outside a real
+          # release, and the checkout above persists an
+          # `http.https://github.com/.extraheader` for the App token, which
+          # takes precedence over any userinfo in a push URL. Correcting it
+          # means also setting `persist-credentials: false` on that checkout
+          # (or scoping the header) and verifying on a release run, not just
+          # deleting this line.
           git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
 
           git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
