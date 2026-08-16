@@ -3216,26 +3216,39 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main
 
-          # KNOWN DEVIATION from the credential policy
-          # (metacraft-dev-guidelines/policies/ci-workflow-standards.md
-          # §"Which credential for which repo"). This is a category-1 push --
-          # the workflow's OWN public repo -- so the credential should be the
-          # one Actions already provides; this job already declares
-          # `permissions: contents: write` for it. `CODETRACER_PUSH_GITHUB_TOKEN`
-          # is a long-lived PAT and therefore the one rotation-bearing GitHub
-          # credential left in this workflow, which is exactly what the policy
-          # exists to eliminate.
+          # `origin` is deliberately NOT re-pointed at a credentialed URL.
           #
-          # It is left in place deliberately rather than swapped blind: this is
-          # the release tag-push path and it cannot be exercised outside a real
-          # release, and the checkout above persists an
-          # `http.https://github.com/.extraheader` for the App token, which
-          # takes precedence over any userinfo in a push URL. Correcting it
-          # means also setting `persist-credentials: false` on that checkout
-          # (or scoping the header) and verifying on a release run, not just
-          # deleting this line.
-          git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
-
+          # It used to be, at `CODETRACER_PUSH_GITHUB_TOKEN` -- a long-lived
+          # PAT, and the last rotation-bearing GitHub credential in this
+          # workflow. That userinfo could never be the credential that pushed.
+          # The `Checkout` step above runs with `persist-credentials` at its
+          # default of true, so actions/checkout leaves
+          # `http.https://github.com/.extraheader` in `.git/config` carrying
+          # the App installation token, and Git prefers a configured
+          # Authorization header over userinfo in the remote URL.
+          #
+          # That preference is total, not merely a first choice, which is what
+          # makes deleting the line safe rather than a gamble. Against a server
+          # that answers 401, `git push` retries with the SAME header and then
+          # gives up; the userinfo is never put on the wire at all, so it is not
+          # a fallback either. (Reproducible without any real credential: point
+          # a checkout at a local HTTP server with both an `extraHeader` and
+          # userinfo configured, and read the `Authorization` it receives.)
+          #
+          # So the App token was already performing this push, and removing the
+          # rewrite changes which credential authenticates not at all -- it only
+          # stops expanding a PAT into `.git/config` on a self-hosted runner
+          # that reuses its workspace. `persist-credentials` must therefore STAY
+          # enabled on the checkout above: here the persisted header is
+          # load-bearing, which is the opposite of the situation in most jobs.
+          #
+          # STILL UNVERIFIED, for whoever runs the next release. Whether the App
+          # installation has `contents: write` on this repo has never been
+          # exercised: the last tag (25.11.1) predates the switch to App tokens,
+          # and no `main` run has reached this job since. If the tag push fails
+          # with 403, that is the App's permission set, NOT this change -- the
+          # PAT was already inert and restoring it would not help. Grant the
+          # installation contents:write rather than reintroducing a PAT.
           git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
