@@ -26,6 +26,18 @@ import std/strutils
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
+const
+  ContextExpandStep* = 10
+    ## Lines one click of an expand control reveals — VCS-Panel.md, "Unified
+    ## Diff View (Editor Integration)": "Context expansion controls (Expand N
+    ## lines above/below)".
+    ##
+    ## Carried over unchanged from ``ui/deepreview.nim``'s ``EXPAND_STEP`` so
+    ## the migrated control behaves exactly as the standalone panel's did.  It
+    ## lives here, next to the state it advances, because both the counters
+    ## below and the control's own label are derived from it and the two must
+    ## not drift apart; ``viewmodels/context_expansion.nim`` re-exports it.
+
 type
   VCSGraphCellKind* = enum
     gckEmpty  ## no branch passes through this column for this row
@@ -96,6 +108,32 @@ type
     additions*: int
     deletions*: int
     hunks*: seq[VCSHunkRow]
+    sourceLines*: seq[string]
+      ## The file's full text on the *new* side of the diff, one element per
+      ## 1-based source line, or empty when it could not be obtained.
+      ##
+      ## This is what context expansion reveals from (DeepReview-GUI.md §4.2:
+      ## "Context expansion is incremental loading").  It is a plain field
+      ## rather than a fetch callback because the two instantiation modes
+      ## "differ in where the extra lines come from, and only there": the
+      ## review export carries the text in ``DeepReviewFileData.sourceContent``
+      ## and normal version-control mode obtains it with ``git show
+      ## <rev>:<path>``.  Both answer that question at the data-source edge
+      ## (``ui/unified_diff.nim``) and hand the result here, so nothing
+      ## downstream — the document builder, the decorations, the overlay —
+      ## can tell the modes apart.
+
+  VCSHunkExpansion* = object
+    ## How far one hunk has been expanded, in lines, in each direction.
+    ##
+    ## Totals rather than deltas, so a hunk's whole expansion state is these
+    ## two numbers and re-deriving its revealed window is idempotent.  Keyed by
+    ## ``(fileIndex, hunkIndex)`` — the same pair the hunk selection uses — so
+    ## expanding one hunk cannot disturb its siblings or another file's.
+    fileIndex*: int
+    hunkIndex*: int
+    above*: int
+    below*: int
 
   VCSTraceContextRow* = object
     ## One selectable trace context of a review session — the control
@@ -176,6 +214,17 @@ type
     ## it false so toggling the view mode never replaces its commit history.
     unifiedDiffActive*: Signal[bool]
     diffFiles*: Signal[seq[VCSDiffFileRow]]
+    ## Per-hunk context expansion, one entry per hunk the user has expanded
+    ## (DeepReview-GUI.md §4.2).  Absent means "not expanded", so the empty
+    ## seq is the initial state and ``resetContextExpansion`` is the whole
+    ## reset.
+    ##
+    ## It lives on the ViewModel rather than in a JS-side ``JsAssoc`` on the
+    ## host component — where ``ui/deepreview.nim`` kept it — so that it is
+    ## assertable headlessly and survives a re-render: a GoldenLayout tab drag
+    ## re-creates the component's DOM, and expansion held there would collapse
+    ## every time the user moved the tab.
+    hunkExpansion*: Signal[seq[VCSHunkExpansion]]
     selectedHunks*: Signal[seq[(int, int)]]
     hunkToolbarVisible*: Signal[bool]
     hunkCopyFeedback*: Signal[bool]
@@ -224,7 +273,12 @@ proc `==`*(a, b: VCSHunkRow): bool {.noSideEffect.} =
 proc `==`*(a, b: VCSDiffFileRow): bool {.noSideEffect.} =
   a.fileIndex == b.fileIndex and a.status == b.status and
     a.path == b.path and a.additions == b.additions and
-    a.deletions == b.deletions and a.hunks == b.hunks
+    a.deletions == b.deletions and a.hunks == b.hunks and
+    a.sourceLines == b.sourceLines
+
+proc `==`*(a, b: VCSHunkExpansion): bool {.noSideEffect.} =
+  a.fileIndex == b.fileIndex and a.hunkIndex == b.hunkIndex and
+    a.above == b.above and a.below == b.below
 
 proc `==`*(a, b: VCSTraceContextRow): bool {.noSideEffect.} =
   a.id == b.id and a.label == b.label
@@ -620,6 +674,61 @@ proc buildPatchFromSelectedHunks*(vm: VCSVM): string =
     return ""
   result = parts.join("\n") & "\n"
 
+# ---------------------------------------------------------------------------
+# Context expansion (DeepReview-GUI.md §4.2, "Context Expansion")
+# ---------------------------------------------------------------------------
+#
+# Only the bookkeeping lives here — which hunk has been expanded how far.  The
+# window arithmetic (which source lines that reveals, and whether a further
+# step would reveal anything) is ``viewmodels/context_expansion.nim``, which
+# imports this module; the split is what keeps the arithmetic pure and this
+# state reactive.
+
+proc expansionCountsIn*(rows: openArray[VCSHunkExpansion];
+                        fileIndex, hunkIndex: int): (int, int)
+                        {.noSideEffect.} =
+  ## ``(above, below)`` for one hunk.  A hunk with no entry is not expanded,
+  ## which is also the honest answer for a hunk that does not exist.
+  for row in rows:
+    if row.fileIndex == fileIndex and row.hunkIndex == hunkIndex:
+      return (row.above, row.below)
+  (0, 0)
+
+proc expansionCounts*(vm: VCSVM; fileIndex, hunkIndex: int): (int, int) =
+  expansionCountsIn(vm.hunkExpansion.val, fileIndex, hunkIndex)
+
+proc bumpExpansion(vm: VCSVM; fileIndex, hunkIndex, above, below: int) =
+  ## Add to one hunk's counters, creating its entry on first use.
+  ##
+  ## Accumulating rather than replacing is what §4.2's third required control
+  ## means — "Repeated expansion loads more file content instead of merely
+  ## uncovering lines that were already fetched".
+  var rows = vm.hunkExpansion.val
+  for i in 0 ..< rows.len:
+    if rows[i].fileIndex == fileIndex and rows[i].hunkIndex == hunkIndex:
+      rows[i].above += above
+      rows[i].below += below
+      vm.hunkExpansion.val = rows
+      return
+  rows.add(VCSHunkExpansion(fileIndex: fileIndex, hunkIndex: hunkIndex,
+                            above: above, below: below))
+  vm.hunkExpansion.val = rows
+
+proc expandContextAbove*(vm: VCSVM; fileIndex, hunkIndex: int) =
+  ## §4.2: "Expand surrounding context above a visible region".
+  vm.bumpExpansion(fileIndex, hunkIndex, ContextExpandStep, 0)
+
+proc expandContextBelow*(vm: VCSVM; fileIndex, hunkIndex: int) =
+  ## §4.2: "Expand surrounding context below a visible region".
+  vm.bumpExpansion(fileIndex, hunkIndex, 0, ContextExpandStep)
+
+proc resetContextExpansion*(vm: VCSVM) =
+  ## Forget every hunk's expansion.  The host calls this when the tab stops
+  ## describing what it described — a closed tab, or a diff reloaded after
+  ## staging, where the hunk indices the counters are keyed on no longer name
+  ## the same hunks.
+  vm.hunkExpansion.val = @[]
+
 proc clearPanel*(vm: VCSVM) =
   vm.deepReviewMode.val = false
   vm.headerTitle.val = ""
@@ -640,6 +749,7 @@ proc clearPanel*(vm: VCSVM) =
   vm.viewMode.val = vmUnifiedDiff
   vm.unifiedDiffActive.val = false
   vm.diffFiles.val = @[]
+  vm.hunkExpansion.val = @[]
   vm.selectedHunks.val = @[]
   vm.hunkToolbarVisible.val = false
   vm.hunkCopyFeedback.val = false
@@ -677,6 +787,7 @@ proc createVCSVM*(): VCSVM =
       viewMode: createSignal(vmUnifiedDiff),
       unifiedDiffActive: createSignal(false),
       diffFiles: createSignal(newSeq[VCSDiffFileRow]()),
+      hunkExpansion: createSignal(newSeq[VCSHunkExpansion]()),
       selectedHunks: selectedHunks,
       hunkToolbarVisible: createSignal(false),
       hunkCopyFeedback: createSignal(false),

@@ -39,6 +39,7 @@ import isonim/core/signals
 import git_cli
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/diff_document
+import ../viewmodel/viewmodels/context_expansion
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -48,6 +49,13 @@ when defined(js):
 var unifiedDiffVMInstances*: JsAssoc[int, VCSVM] = JsAssoc[int, VCSVM]{}
 var unifiedDiffComponentRefs: JsAssoc[int, UnifiedDiffComponent] =
   JsAssoc[int, UnifiedDiffComponent]{}
+var unifiedDiffSourceCaches: JsAssoc[int, SourceTextCache] =
+  JsAssoc[int, SourceTextCache]{}
+  ## One source-text cache per diff tab, holding the file text context
+  ## expansion reveals from in normal version-control mode (DeepReview-GUI.md
+  ## §4.2).  Per tab rather than global because a tab's lifetime is exactly the
+  ## lifetime the cached blobs are wanted for, and `forgetUnifiedDiffTab`
+  ## drops both this and the tab's ViewModel when the tab closes.
 var isoNimUnifiedDiffMountedIds {.used.}: JsAssoc[int, bool] =
   JsAssoc[int, bool]{}
 
@@ -72,6 +80,12 @@ proc udUpdateOptions(editor: MonacoEditor, options: JsObject)
 
 proc udOnMouseDown(editor: MonacoEditor, handler: proc(e: js))
   {.importjs: "#.onMouseDown(#)".}
+
+proc udScrollTop(editor: MonacoEditor): int
+  {.importjs: "#.getScrollTop()".}
+
+proc udSetScrollTop(editor: MonacoEditor, top: int)
+  {.importjs: "#.setScrollTop(#)".}
 
 # Monaco's mouse event carries `target.position` only when the pointer is over
 # content (it is absent over the scrollbar, the overview ruler and past the
@@ -126,6 +140,37 @@ proc ensureUnifiedDiffVM*(self: UnifiedDiffComponent): VCSVM =
     return unifiedDiffVMInstances[self.id]
   result = createVCSVM()
   unifiedDiffVMInstances[self.id] = result
+
+proc ensureSourceCache(self: UnifiedDiffComponent): SourceTextCache =
+  if self.isNil:
+    return nil
+  if unifiedDiffSourceCaches.hasKey(self.id):
+    return unifiedDiffSourceCaches[self.id]
+  result = newSourceTextCache()
+  unifiedDiffSourceCaches[self.id] = result
+
+proc forgetUnifiedDiffTab*(componentId: int) =
+  ## Drop everything a closed diff tab owned.
+  ##
+  ## DR-R5's deliverable: "Expansion state resets when the tab is closed and
+  ## does not leak between files."  The ViewModel holds that state, so the
+  ## reset IS dropping it — a re-opened tab gets a fresh `VCSVM` with no
+  ## expansion, no hunk selection and an empty source cache, rather than
+  ## inheriting the previous tab's revealed windows for hunk indices that may
+  ## now name entirely different hunks.
+  if unifiedDiffVMInstances.hasKey(componentId):
+    let vm = unifiedDiffVMInstances[componentId]
+    if not vm.isNil:
+      vm.resetContextExpansion()
+    discard jsDelete(unifiedDiffVMInstances[componentId])
+  if unifiedDiffSourceCaches.hasKey(componentId):
+    let cache = unifiedDiffSourceCaches[componentId]
+    cache.invalidate()
+    discard jsDelete(unifiedDiffSourceCaches[componentId])
+  if unifiedDiffComponentRefs.hasKey(componentId):
+    discard jsDelete(unifiedDiffComponentRefs[componentId])
+  if isoNimUnifiedDiffMountedIds.hasKey(componentId):
+    discard jsDelete(isoNimUnifiedDiffMountedIds[componentId])
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -209,6 +254,49 @@ proc loadFromGit(self: UnifiedDiffComponent) =
     files: parseGitDiffHunks($raw))
   self.reviewBacked = false
 
+proc expansionRevision(self: UnifiedDiffComponent): string =
+  ## The revision whose text the *new* side of this tab's diff shows.
+  ##
+  ## It is what context expansion must read from, and it is not always a
+  ## revision: `git diff HEAD` compares against the tree on disk, so for a
+  ## working-tree or `file:` target the new side is the working tree and no
+  ## commit holds it.  That is spelled as the empty revision, which
+  ## `gitFileText` reads as "the file itself".  A `commit:<hash>[:<path>]`
+  ## target is the case §4.2 names: the lines are neither in the diff nor in
+  ## the working tree, and only `git show <hash>:<path>` has them.
+  let target = self.rawTarget()
+  if target.startsWith("commit:"):
+    let commitPart = target[7 .. ^1]
+    let colonIdx = commitPart.find(':')
+    return if colonIdx >= 0: commitPart[0 ..< colonIdx] else: commitPart
+  ""
+
+proc sourceLinesFor(self: UnifiedDiffComponent; file: DeepReviewFileData;
+                    path: string): seq[string] =
+  ## One file's full text, as the lines context expansion reveals from.
+  ##
+  ## This is the *only* place in the diff tab where the two instantiation
+  ## modes differ, which is exactly what DeepReview-GUI.md §4.2 allows: "The
+  ## two instantiation modes of the diff tab differ in where the extra lines
+  ## come from, and only there ... The control, the decorations and the
+  ## overlay behavior are identical in both cases."  Downstream of this proc
+  ## the text is just ``VCSDiffFileRow.sourceLines`` and nothing can tell
+  ## where it came from.
+  if self.reviewBacked:
+    # The review export carries the text — DeepReviewFileData.sourceContent,
+    # "Full source text of the file ... Used to expand context around diff
+    # hunks".  Expansion is a local slice; no I/O at all.
+    if file.isNil or file.sourceContent.isNil:
+      return @[]
+    return sourceTextLines($file.sourceContent)
+  if path.len == 0:
+    return @[]
+  let cwd = gitWorkingDirectory(self.data)
+  let revision = self.expansionRevision()
+  self.ensureSourceCache().linesFor(revision, path,
+    proc(rev, blobPath: string): string =
+      $gitFileText(cstring(rev), cstring(blobPath), cwd))
+
 proc diffRows(self: UnifiedDiffComponent): seq[VCSDiffFileRow] =
   ## Project the parsed hunks into the ViewModel's row shape.
   ##
@@ -236,13 +324,15 @@ proc diffRows(self: UnifiedDiffComponent): seq[VCSDiffFileRow] =
         newStart: hunk.newStart,
         newCount: hunk.newCount,
         lines: lines))
+    let path = safeStr(file.path)
     result.add(VCSDiffFileRow(
       fileIndex: fileIdx,
       status: safeStr(file.diff.status),
-      path: safeStr(file.path),
+      path: path,
       additions: file.diff.linesAdded,
       deletions: file.diff.linesRemoved,
-      hunks: hunks))
+      hunks: hunks,
+      sourceLines: self.sourceLinesFor(file, path)))
 
 proc ensureLoaded(self: UnifiedDiffComponent) =
   if self.initialized:
@@ -363,13 +453,45 @@ proc refreshModel(self: UnifiedDiffComponent) =
   if vm.isNil:
     return
   let doc = diffDocumentFor(vm)
+  # `setValue` scrolls the viewport back to the top, which would throw the
+  # reader out of the region they just expanded.  Expansion is the operation
+  # that made this matter: it re-publishes the model on every click.
+  let scrollTop = self.editor.udScrollTop()
   self.editor.udSetValue(cstring(documentText(doc)))
   self.rebuildLineLabels(doc)
   self.editor.udUpdateOptions(js{
     lineNumbers: udLineNumberFn(self.lineLabels),
     lineNumbersMinChars: 2 * lineNumberWidth(doc) + 2
   })
+  self.editor.udSetScrollTop(scrollTop)
   self.applyDecorations()
+
+proc handleExpandClick(self: UnifiedDiffComponent; modelLine: int): bool =
+  ## DeepReview-GUI.md §4.2: "Expand surrounding context above a visible
+  ## region / Expand surrounding context below a visible region".
+  ##
+  ## Returns true when the line WAS an expand control, so the caller stops
+  ## rather than also treating the click as a hunk-selection gesture.
+  ##
+  ## The counters live on the ViewModel, so a click is state plus a re-publish
+  ## of the document: `diffDocumentFor` re-derives the whole window from
+  ## `(diffFiles, hunkExpansion)` and the model grows by exactly the lines the
+  ## new counters reveal.  Repeated clicks therefore load *further* content
+  ## rather than re-revealing what is already shown — §4.2's third required
+  ## control — because the counters accumulate.
+  let vm = self.ensureUnifiedDiffVM()
+  if vm.isNil:
+    return false
+  let doc = diffDocumentFor(vm)
+  let target = expandTargetAtLine(doc, modelLine)
+  if not target.present:
+    return false
+  if target.above:
+    vm.expandContextAbove(target.fileIndex, target.hunkIndex)
+  else:
+    vm.expandContextBelow(target.fileIndex, target.hunkIndex)
+  self.refreshModel()
+  true
 
 proc stageSelectedHunks(self: UnifiedDiffComponent) =
   ## VCS-Panel.md, "Hunk Operations": "Stage/unstage hunk".
@@ -384,9 +506,14 @@ proc stageSelectedHunks(self: UnifiedDiffComponent) =
   if patch.len == 0:
     return
   applyPatchToIndex(cstring(patch), gitWorkingDirectory(self.data))
-  # The staged hunks are no longer part of the working-tree diff.
+  # The staged hunks are no longer part of the working-tree diff, so the hunk
+  # indices the selection and the expansion counters are keyed on no longer
+  # name the same hunks, and the cached working-tree text may no longer be
+  # what the diff describes.  All three are dropped together.
   self.initialized = false
+  self.ensureSourceCache().invalidate()
   vm.clearHunkSelection()
+  vm.resetContextExpansion()
   self.syncIntoVM()
   self.refreshModel()
 
@@ -439,6 +566,11 @@ proc initEditor(self: UnifiedDiffComponent) =
   self.editor.udOnMouseDown(proc(e: js) =
     let line = udMouseLine(e)
     if line <= 0:
+      return
+    # The expand controls are checked first and swallow the click: a control
+    # line is not a hunk header, so the two gestures cannot both fire, but
+    # ordering them makes that explicit rather than incidental.
+    if component.handleExpandClick(line):
       return
     component.handleHunkClick(line, udMouseShift(e), udMouseCtrl(e)))
 

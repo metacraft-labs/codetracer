@@ -70,6 +70,30 @@
 .ct-diff-line-context.ct-diff-hunk-selected
   background-color rgba(86, 156, 214, 0.08)
 
+// --- Context expansion (DR-R5) -------------------------------------------
+//
+// DeepReview-GUI.md §4.2 requires "Expand surrounding context above/below a
+// visible region".  The controls are LINES of the model, not DOM chrome, so
+// they are styled here as whole-line decorations like everything else; the
+// colours come from `.deepreview-expand-row` / `.deepreview-expanded-context`
+// in deepreview.styl, so the migrated controls read the way the standalone
+// panel's did.
+
+.ct-diff-line-expand
+  background-color rgba(56, 58, 68, 0.30)
+  cursor pointer
+
+  &:hover
+    background-color rgba(56, 58, 68, 0.55)
+
+// A revealed line is a NORMAL context line — §4.2: "Newly revealed lines
+// become normal code lines in the diff tab and can receive Omniscience
+// overlays" — so this only dims it slightly to show where the diff itself
+// ended.  It must not change the line's kind colouring, or a revealed line
+// would stop looking like the context line it is.
+.ct-diff-line-revealed
+  opacity 0.75
+
 // --- Gutter markers ------------------------------------------------------
 
 .ct-diff-gutter

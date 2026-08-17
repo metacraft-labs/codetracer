@@ -5,6 +5,7 @@ import std/unittest
 
 import isonim/core/[signals, computation, owner]
 import viewmodels/vcs_vm
+import viewmodels/context_expansion
 import ../../../../common/types as ct_types
 
 suite "openLayoutTab routing":
@@ -535,6 +536,127 @@ suite "VCSVM hunk editor (DR-R4)":
       check vm.selectedHunks.val == @[(1, 0)]
       check vm.buildPatchFromSelectedHunks().len > 0
 
+      dispose()
+
+suite "VCSVM context expansion state (DR-R5)":
+  ## DeepReview-GUI.md §4.2 requires the expand-above / expand-below controls;
+  ## how far each hunk is currently expanded is the state behind them.
+  ##
+  ## It lives on this ViewModel rather than in a JS-side ``JsAssoc`` on the
+  ## component (where ``ui/deepreview.nim:505-535`` kept it) for two reasons the
+  ## tests below are: it must survive a re-render, and it must be assertable
+  ## without a browser.  The window arithmetic itself is
+  ## ``viewmodels/context_expansion.nim`` and is tested in
+  ## ``vcs_context_expansion_test.nim``; this is only the bookkeeping.
+
+  proc expansionFixture(): seq[VCSDiffFileRow] =
+    ## Two files, two hunks each — the same shape the hunk-editor suite uses,
+    ## restated here because a ``suite`` body is its own scope.
+    @[
+      VCSDiffFileRow(
+        fileIndex: 0, status: "M", path: "src/parser.rs",
+        hunks: @[
+          VCSHunkRow(oldStart: 40, oldCount: 1, newStart: 40, newCount: 1,
+            lines: @[VCSDiffLineRow(lineType: "added", content: "a",
+                                    newLine: 40)]),
+          VCSHunkRow(oldStart: 80, oldCount: 1, newStart: 80, newCount: 1,
+            lines: @[VCSDiffLineRow(lineType: "added", content: "b",
+                                    newLine: 80)]),
+        ]),
+      VCSDiffFileRow(
+        fileIndex: 1, status: "M", path: "src/lexer.rs",
+        hunks: @[
+          VCSHunkRow(oldStart: 5, oldCount: 1, newStart: 5, newCount: 1,
+            lines: @[VCSDiffLineRow(lineType: "added", content: "c",
+                                    newLine: 5)]),
+          VCSHunkRow(oldStart: 9, oldCount: 1, newStart: 9, newCount: 1,
+            lines: @[VCSDiffLineRow(lineType: "added", content: "d",
+                                    newLine: 9)]),
+        ]),
+    ]
+
+  proc expansionVM(): VCSVM =
+    result = createVCSVM()
+    result.setUnifiedDiff(true, expansionFixture())
+
+  test "test_context_expansion_state_is_per_hunk_and_per_file":
+    createRoot proc(dispose: proc()) =
+      let vm = expansionVM()
+
+      # Nothing is expanded to begin with.
+      check vm.expansionCounts(0, 0) == (0, 0)
+      check vm.expansionCounts(0, 1) == (0, 0)
+      check vm.expansionCounts(1, 0) == (0, 0)
+
+      vm.expandContextAbove(0, 0)
+
+      check vm.expansionCounts(0, 0) == (ContextExpandStep, 0)
+      # The sibling hunk of the same file is untouched...
+      check vm.expansionCounts(0, 1) == (0, 0)
+      # ...and so is a hunk of a different file.
+      check vm.expansionCounts(1, 0) == (0, 0)
+
+      # Repeated expansion accumulates rather than replacing, which is what
+      # makes a second click reveal *further* content (§4.2).
+      vm.expandContextAbove(0, 0)
+      check vm.expansionCounts(0, 0) == (2 * ContextExpandStep, 0)
+
+      # The two directions are independent counters.
+      vm.expandContextBelow(0, 0)
+      check vm.expansionCounts(0, 0) == (2 * ContextExpandStep,
+                                         ContextExpandStep)
+
+      vm.expandContextBelow(1, 1)
+      check vm.expansionCounts(1, 1) == (0, ContextExpandStep)
+      check vm.expansionCounts(0, 0) == (2 * ContextExpandStep,
+                                         ContextExpandStep)
+
+      dispose()
+
+  test "expansion state survives a re-sync of the same diff":
+    ## The tab re-publishes its rows into the VM on every mount attempt
+    ## (a tab drag, a layout restore, a GoldenLayout re-create).  If the
+    ## counters were reset there, every re-render would collapse the context
+    ## the user had revealed — the concrete bug that keeping them on the
+    ## component instead of the ViewModel invites.
+    createRoot proc(dispose: proc()) =
+      let vm = expansionVM()
+
+      vm.expandContextAbove(0, 0)
+      vm.expandContextBelow(0, 0)
+      vm.setUnifiedDiff(true, expansionFixture())
+
+      check vm.expansionCounts(0, 0) == (ContextExpandStep, ContextExpandStep)
+
+      dispose()
+
+  test "closing the tab resets the expansion, and it never leaks between files":
+    ## "Expansion state resets when the tab is closed and does not leak
+    ## between files" — DR-R5's deliverable.  ``clearPanel`` is what the host
+    ## calls when a diff surface stops describing its target.
+    createRoot proc(dispose: proc()) =
+      let vm = expansionVM()
+
+      vm.expandContextAbove(0, 0)
+      vm.expandContextBelow(1, 1)
+      check vm.hunkExpansion.val.len == 2
+
+      vm.resetContextExpansion()
+      check vm.hunkExpansion.val.len == 0
+      check vm.expansionCounts(0, 0) == (0, 0)
+      check vm.expansionCounts(1, 1) == (0, 0)
+
+      vm.expandContextAbove(0, 0)
+      vm.clearPanel()
+      check vm.hunkExpansion.val.len == 0
+      check vm.expansionCounts(0, 0) == (0, 0)
+
+      dispose()
+
+  test "an unknown hunk reports no expansion rather than inventing one":
+    createRoot proc(dispose: proc()) =
+      let vm = expansionVM()
+      check vm.expansionCounts(7, 3) == (0, 0)
       dispose()
 
 suite "VCSVM":

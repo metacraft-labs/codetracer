@@ -361,3 +361,209 @@ test.describe("VCS unified diff", () => {
     await expect(ctPage.locator(".vcs-branch-picker").first()).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// e2e_normal_git_diff_tab_expand_fetches_content (DR-R5)
+// ---------------------------------------------------------------------------
+//
+// DeepReview-GUI.md §4.2 makes the content source the ONE thing the two
+// instantiation modes of the diff tab may differ in:
+//
+//   "In normal version-control mode the surrounding lines are not part of the
+//    diff and must be fetched from the repository (e.g. `git show
+//    <rev>:<path>`) before they can be revealed.  The control, the
+//    decorations and the overlay behavior are identical in both cases."
+//
+// Before DR-R5 nothing implemented that fetch, so expansion in normal git
+// mode did not exist at all: the review's `sourceContent` was the only source
+// of revealed lines anywhere in the product.
+//
+// The scenario needs a diff whose surroundings are in NEITHER the diff nor
+// the working tree, or the fetch could be faked by reading the file on disk.
+// Hence a three-commit fixture of its own:
+//
+//   1. "baseline"          — src/app.nim, 41 lines: `proc main() =` then
+//                            `echo "alpha 1"` .. `echo "alpha 40"`.
+//   2. "edit the middle"   — rewrites line 21 (`alpha 20` -> `beta 20`).
+//                            Its diff carries 3 context lines either side,
+//                            i.e. new lines 18..24; everything else is hidden.
+//   3. "replace the file"  — rewrites the file completely, so NO `alpha` line
+//                            survives into the working tree.
+//
+// The tab under test is commit 2's, which is not HEAD.  `alpha 7` is then a
+// line that exists only in that commit's blob: absent from the diff, absent
+// from HEAD, absent from disk.  Revealing it is possible only via `git show
+// <rev>:<path>`, which is exactly the claim.
+//
+// Headless counterparts: test_context_expansion_window_reveals_lines_above_and_below
+// and test_context_expansion_clamps_at_file_boundaries (the window
+// arithmetic), plus test_context_expansion_fetches_source_once_and_caches
+// (the fetch-and-cache boundary: one fetch per (revision, path), a failed
+// fetch not remembered as an answer) — all in
+// src/tests/gui/tests/vcs/vcs_context_expansion_test.nim.
+
+const historyFixture = fs.mkdtempSync(
+  path.join(os.tmpdir(), "codetracer-vcs-expand-"),
+);
+
+function historyGit(...args: string[]): void {
+  childProcess.execFileSync("git", args, {
+    cwd: historyFixture,
+    stdio: "ignore",
+  });
+}
+
+function historyCommit(message: string): string {
+  historyGit("add", ".");
+  historyGit(
+    "-c",
+    "user.name=CodeTracer Tests",
+    "-c",
+    "user.email=tests@codetracer.dev",
+    "commit",
+    "-m",
+    message,
+  );
+  return childProcess
+    .execFileSync("git", ["rev-parse", "HEAD"], { cwd: historyFixture })
+    .toString()
+    .trim();
+}
+
+const historyAppPath = path.join(historyFixture, "src", "app.nim");
+
+/// 41 lines: a header plus `echo "<tag> N"` for N in 1..40, with line
+/// `markedLine` carrying `markedTag` instead.  40 lines is comfortably more
+/// than git's 3-line context plus two 10-line expansion steps in each
+/// direction, so the expansion never runs into a file boundary here — the
+/// boundary cases are asserted headlessly, where they belong.
+function appNim(markedTag: string): string {
+  const lines = ["proc main() ="];
+  for (let i = 1; i <= 40; i += 1) {
+    lines.push(i === 20 ? `  echo "${markedTag} 20"` : `  echo "alpha ${i}"`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+fs.mkdirSync(path.join(historyFixture, "src"), { recursive: true });
+fs.writeFileSync(historyAppPath, appNim("alpha"));
+historyGit("init");
+historyCommit("baseline");
+
+fs.writeFileSync(historyAppPath, appNim("beta"));
+const middleCommitSha = historyCommit("edit the middle");
+
+// The newest commit replaces the file outright, so nothing the middle
+// commit's diff surrounds is on disk any more.
+fs.writeFileSync(
+  historyAppPath,
+  'proc main() =\n  echo "the file was rewritten"\n',
+);
+historyCommit("replace the file");
+
+test.describe("VCS unified diff — context expansion in normal git mode", () => {
+  test.use({ launchMode: "edit", editFolderPath: historyFixture });
+
+  /// The rendered lines of the diff tab.
+  function diffTabLines(ctPage: any) {
+    return ctPage.locator(".unified-diff-container .monaco-editor .view-line");
+  }
+
+  /// The dual old/new gutter labels, whitespace-normalised.  Monaco pads them
+  /// with U+00A0 to keep the two columns aligned.
+  async function diffLineNumbers(ctPage: any): Promise<string[]> {
+    const raw = await ctPage
+      .locator(".unified-diff-container .margin-view-overlays .line-numbers")
+      .allTextContents();
+    return raw.map((t: string) =>
+      t.replace(/\u00a0/g, " ").trim().replace(/\s+/g, " "),
+    );
+  }
+
+  test("e2e_normal_git_diff_tab_expand_fetches_content", async ({ ctPage }) => {
+    // The premise, checked rather than assumed: the line this test reveals is
+    // not on disk, so no implementation that reads the working tree could
+    // produce it.
+    const workingTree = fs.readFileSync(historyAppPath, "utf8");
+    expect(workingTree).not.toContain("alpha");
+
+    await openVcsPanel(ctPage);
+
+    // Expand the "edit the middle" commit, which is not HEAD, and open the
+    // diff tab for its file.
+    //
+    // The entry is located by its commit message and the file row is scoped
+    // INSIDE it: the panel may already have another commit expanded, and an
+    // unscoped `.vcs-accordion-file` would then belong to that one — which is
+    // how this test first opened HEAD's diff and looked for a line HEAD does
+    // not contain.
+    const middleEntry = ctPage
+      .locator(".vcs-commit-entry")
+      .filter({ hasText: "edit the middle" })
+      .first();
+    await expect(middleEntry).toBeVisible({ timeout: 30_000 });
+    await middleEntry.locator(".vcs-commit-header").first().click();
+
+    const fileRow = middleEntry.locator(".vcs-accordion-file").first();
+    await expect(fileRow).toBeVisible({ timeout: 15_000 });
+    await fileRow.hover();
+    const diffButton = fileRow.locator(".vcs-file-diff-btn").first();
+    await expect(diffButton).toBeVisible({ timeout: 5_000 });
+    await diffButton.click();
+
+    await waitForDiffTab(ctPage);
+
+    // The diff itself carries only the edited line and git's 3 lines of
+    // context either side, so `alpha 7` is nowhere in the tab yet.
+    await expect(
+      diffTabLines(ctPage).filter({ hasText: /echo\s+"beta\s+20"/ }),
+    ).toHaveCount(1, { timeout: 15_000 });
+    await expect(
+      diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+7"/ }),
+    ).toHaveCount(0);
+
+    // Expand above.  The control is a line of the model, clicked like any
+    // other (VCS-Panel.md: "Context expansion controls (Expand N lines
+    // above/below)").
+    const expandAbove = diffTabLines(ctPage).filter({
+      hasText: /Expand\s+\d+\s+lines\s+above/,
+    });
+    await expect(expandAbove).toHaveCount(1, { timeout: 15_000 });
+    await expandAbove.click();
+
+    // Ten lines appear, decorated as revealed context lines.
+    await expect(
+      ctPage.locator(
+        ".unified-diff-container .view-overlays .ct-diff-line-context.ct-diff-line-revealed",
+      ),
+    ).toHaveCount(10, { timeout: 15_000 });
+
+    // ...and they are the right ten: the hunk starts at new line 18, so a
+    // step above reveals 8..17 — `echo "alpha 7"` through `echo "alpha 16"`.
+    // This line is in neither the diff nor the working tree; only
+    // `git show <rev>:<path>` has it.
+    await expect(
+      diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+7"/ }),
+    ).toHaveCount(1, { timeout: 15_000 });
+    const numbers = await diffLineNumbers(ctPage);
+    expect(numbers).toContain("8 8");
+    expect(numbers).toContain("17 17");
+    expect(numbers).not.toContain("7 7");
+
+    // A second click loads FURTHER content rather than re-revealing the same
+    // window — DeepReview-GUI.md §4.2's third required control.  Seventeen
+    // lines precede the hunk, so the second step reveals the remaining seven
+    // and the control retires: expansion is exhausted, not unbounded.
+    await expandAbove.click();
+    await expect(
+      diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+1"$/ }),
+    ).toHaveCount(1, { timeout: 15_000 });
+    const afterSecond = await diffLineNumbers(ctPage);
+    expect(afterSecond).toContain("2 2");
+    expect(afterSecond).toContain("7 7");
+    await expect(expandAbove).toHaveCount(0);
+
+    // The commit whose blob was fetched is the one the tab shows, not HEAD.
+    expect(middleCommitSha).toBeTruthy();
+  });
+});

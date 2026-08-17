@@ -31,6 +31,7 @@ import std/strutils
 
 import isonim/core/signals
 import ../viewmodels/vcs_vm
+import ../viewmodels/context_expansion
 
 type
   DiffLineKind* = enum
@@ -40,6 +41,8 @@ type
     dlkAdded        ## a line present only in the new revision
     dlkRemoved      ## a line present only in the old revision
     dlkContext      ## a line present in both
+    dlkExpandAbove  ## the "Expand N lines above" control (§4.2)
+    dlkExpandBelow  ## the "Expand N lines below" control (§4.2)
 
   DiffDocumentLine* = object
     ## One line of the Monaco model, plus everything the gutters and the
@@ -50,9 +53,30 @@ type
     newNumber*: int    ## line number in the new revision; 0 = none
     fileIndex*: int    ## ``VCSDiffFileRow.fileIndex`` this line belongs to
     hunkIndex*: int    ## hunk within that file; -1 on a file header
+    revealed*: bool
+      ## True for a context line that context expansion uncovered rather than
+      ## one the diff itself carried.
+      ##
+      ## Deliberately a *flag on a context line* and not a sixth kind:
+      ## DeepReview-GUI.md §4.2 says "Newly revealed lines become normal code
+      ## lines in the diff tab and can receive Omniscience overlays", so they
+      ## must classify, decorate and (for DR-R6) annotate exactly as any other
+      ## unchanged line.  The flag only adds a marker class, so nothing
+      ## downstream has to learn a new case.
 
   DiffDocument* = object
     lines*: seq[DiffDocumentLine]
+
+  DiffExpandTarget* = object
+    ## What an expand control at some model line would expand.
+    ##
+    ## The Monaco host maps a click position through ``expandTargetAtLine``
+    ## and hands this to ``VCSVM.expandContextAbove`` / ``…Below``; nothing
+    ## else turns a screen position into an expansion request.
+    present*: bool    ## false when that line is not an expand control
+    above*: bool      ## true for expand-above, false for expand-below
+    fileIndex*: int
+    hunkIndex*: int
 
   DiffDecoration* = object
     ## One Monaco whole-line decoration.
@@ -71,6 +95,18 @@ const
   ## so the hunk editor's selection is visible on the Monaco content
   ## (VCS-Panel.md, "Hunk Selection").
   DiffSelectedHunkClass* = "ct-diff-hunk-selected"
+  ## The two context-expansion controls (DeepReview-GUI.md §4.2).  They are
+  ## lines of the model rather than DOM chrome for the same reason the file
+  ## header is: they belong at a specific place in the scroll — immediately
+  ## after a hunk's `@@` divider, and immediately after its last line — and a
+  ## floating overlay could not follow them there.
+  DiffExpandAboveClass* = "ct-diff-line ct-diff-line-expand ct-diff-line-expand-above"
+  DiffExpandBelowClass* = "ct-diff-line ct-diff-line-expand ct-diff-line-expand-below"
+  ## Applied *in addition* to the context class on a line that expansion
+  ## revealed, so it reads as slightly dimmer than the diff's own context
+  ## lines without becoming a different kind of line.  Carried over from
+  ## ``.deepreview-expanded-context``.
+  DiffRevealedClass* = "ct-diff-line-revealed"
 
   DiffGutterAddedClass* = "ct-diff-gutter ct-diff-gutter-added"
   DiffGutterRemovedClass* = "ct-diff-gutter ct-diff-gutter-removed"
@@ -116,14 +152,32 @@ proc lineKindFor*(lineType: string): DiffLineKind {.noSideEffect.} =
   of "removed", "delete", "deleted": dlkRemoved
   else: dlkContext
 
-proc buildDiffDocument*(files: openArray[VCSDiffFileRow]): DiffDocument =
+proc expandAboveText*(): string {.noSideEffect.} =
+  ## VCS-Panel.md: "Context expansion controls (Expand N lines above/below)".
+  ## The leading "..." is the standalone panel's expand-row icon, kept so the
+  ## migrated control reads the same.
+  "... Expand " & $ContextExpandStep & " lines above"
+
+proc expandBelowText*(): string {.noSideEffect.} =
+  "... Expand " & $ContextExpandStep & " lines below"
+
+proc buildDiffDocument*(files: openArray[VCSDiffFileRow];
+                        expansion: openArray[VCSHunkExpansion] = []):
+                        DiffDocument =
   ## Assemble the document a diff tab's Monaco model holds.
   ##
   ## Order is exactly the render order of the rows: for each file, its header,
-  ## then each hunk's `@@` divider followed by that hunk's lines.  Files with
-  ## no hunks are skipped — they have nothing to show and a bare header would
-  ## read as an empty diff for a file that was not, in fact, part of the
-  ## changeset the target named.
+  ## then for each hunk the `@@` divider, the expand-above control, the lines
+  ## expansion has revealed above, the hunk's own lines, the lines revealed
+  ## below, and the expand-below control.  That is the order the standalone
+  ## panel's DOM renderer used (``isonim_deepreview_view.nim``), so the
+  ## migrated surface reads identically.  Files with no hunks are skipped —
+  ## they have nothing to show and a bare header would read as an empty diff
+  ## for a file that was not, in fact, part of the changeset the target named.
+  ##
+  ## ``expansion`` defaults to empty, which is exactly "nothing expanded yet":
+  ## the controls still appear wherever hidden lines exist, so a caller that
+  ## does not track expansion still gets a correct, if static, document.
   result.lines = @[]
   for file in files:
     if file.hunks.len == 0:
@@ -134,11 +188,33 @@ proc buildDiffDocument*(files: openArray[VCSDiffFileRow]): DiffDocument =
       fileIndex: file.fileIndex,
       hunkIndex: -1))
     for hunkIndex, hunk in file.hunks:
+      let counts = expansionCountsIn(expansion, file.fileIndex, hunkIndex)
+      let window = expansionWindow(hunk, file.sourceLines, counts[0], counts[1])
+
       result.lines.add(DiffDocumentLine(
         kind: dlkHunkHeader,
         text: hunkHeaderText(hunk),
         fileIndex: file.fileIndex,
         hunkIndex: hunkIndex))
+
+      # The control is offered only while a further click would reveal
+      # something, so a user never presses a button that cannot act.
+      if window.canExpandAbove:
+        result.lines.add(DiffDocumentLine(
+          kind: dlkExpandAbove,
+          text: expandAboveText(),
+          fileIndex: file.fileIndex,
+          hunkIndex: hunkIndex))
+      for line in window.above:
+        result.lines.add(DiffDocumentLine(
+          kind: lineKindFor(line.lineType),
+          text: line.content,
+          oldNumber: line.oldLine,
+          newNumber: line.newLine,
+          fileIndex: file.fileIndex,
+          hunkIndex: hunkIndex,
+          revealed: true))
+
       for line in hunk.lines:
         result.lines.add(DiffDocumentLine(
           kind: lineKindFor(line.lineType),
@@ -148,15 +224,35 @@ proc buildDiffDocument*(files: openArray[VCSDiffFileRow]): DiffDocument =
           fileIndex: file.fileIndex,
           hunkIndex: hunkIndex))
 
+      for line in window.below:
+        result.lines.add(DiffDocumentLine(
+          kind: lineKindFor(line.lineType),
+          text: line.content,
+          oldNumber: line.oldLine,
+          newNumber: line.newLine,
+          fileIndex: file.fileIndex,
+          hunkIndex: hunkIndex,
+          revealed: true))
+      if window.canExpandBelow:
+        result.lines.add(DiffDocumentLine(
+          kind: dlkExpandBelow,
+          text: expandBelowText(),
+          fileIndex: file.fileIndex,
+          hunkIndex: hunkIndex))
+
 proc diffDocumentFor*(vm: VCSVM): DiffDocument =
   ## The document for the diff a panel currently holds.
   ##
-  ## This reads ``vm.diffFiles`` and *nothing else* — in particular not
-  ## ``vm.deepReviewMode``.  That is the mode-agnosticism rule of
-  ## VCS-Panel.md, "Unified Diff View (Shared)", expressed as code rather than
-  ## as a comment, and ``test_diff_decorations_are_mode_agnostic`` fails if a
-  ## later change makes this proc consult the mode.
-  buildDiffDocument(vm.diffFiles.val)
+  ## This reads ``vm.diffFiles`` and ``vm.hunkExpansion`` and *nothing else* —
+  ## in particular not ``vm.deepReviewMode``.  That is the mode-agnosticism
+  ## rule of VCS-Panel.md, "Unified Diff View (Shared)", expressed as code
+  ## rather than as a comment, and ``test_diff_decorations_are_mode_agnostic``
+  ## fails if a later change makes this proc consult the mode.  Context
+  ## expansion is the one place the two modes genuinely differ, and the
+  ## difference is answered before the rows reach here: whoever filled
+  ## ``VCSDiffFileRow.sourceLines`` has already decided whether that text came
+  ## from a review export or from ``git show``.
+  buildDiffDocument(vm.diffFiles.val, vm.hunkExpansion.val)
 
 proc documentText*(doc: DiffDocument): string {.noSideEffect.} =
   ## The Monaco model's value.
@@ -174,15 +270,17 @@ proc classFor*(kind: DiffLineKind): string {.noSideEffect.} =
   of dlkAdded: DiffAddedClass
   of dlkRemoved: DiffRemovedClass
   of dlkContext: DiffContextClass
+  of dlkExpandAbove: DiffExpandAboveClass
+  of dlkExpandBelow: DiffExpandBelowClass
 
 proc gutterClassFor*(kind: DiffLineKind): string {.noSideEffect.} =
   ## The class that draws the `+` / `-` gutter marker VCS-Panel.md requires.
-  ## Headers get none: they are dividers, not content.
+  ## Headers and the expand controls get none: they are chrome, not content.
   case kind
   of dlkAdded: DiffGutterAddedClass
   of dlkRemoved: DiffGutterRemovedClass
   of dlkContext: DiffGutterContextClass
-  of dlkFileHeader, dlkHunkHeader: ""
+  of dlkFileHeader, dlkHunkHeader, dlkExpandAbove, dlkExpandBelow: ""
 
 proc oldNumberText*(line: DiffDocumentLine): string {.noSideEffect.} =
   ## The old-revision gutter number, blank where there is none — an added line
@@ -203,7 +301,8 @@ proc lineNumberLabels*(doc: DiffDocument; width = 4): seq[string] =
   ## per-column width the host derives from the largest number in the document.
   result = newSeq[string](doc.lines.len)
   for i, line in doc.lines:
-    if line.kind in {dlkFileHeader, dlkHunkHeader}:
+    if line.kind in {dlkFileHeader, dlkHunkHeader,
+                     dlkExpandAbove, dlkExpandBelow}:
       result[i] = ""
     else:
       result[i] = align(oldNumberText(line), width) & " " &
@@ -237,6 +336,8 @@ proc decorationsFor*(doc: DiffDocument;
   result = newSeq[DiffDecoration](doc.lines.len)
   for i, line in doc.lines:
     var className = classFor(line.kind)
+    if line.revealed:
+      className.add(" " & DiffRevealedClass)
     if line.hunkIndex >= 0 and
         isHunkSelected(selectedHunks, line.fileIndex, line.hunkIndex):
       className.add(" " & DiffSelectedHunkClass)
@@ -255,6 +356,24 @@ proc hunkAtLine*(doc: DiffDocument; modelLine: int): (int, int) {.noSideEffect.}
   if line.hunkIndex < 0:
     return (-1, -1)
   (line.fileIndex, line.hunkIndex)
+
+proc expandTargetAtLine*(doc: DiffDocument; modelLine: int): DiffExpandTarget
+    {.noSideEffect.} =
+  ## The expansion a click on a 1-based model line requests, if any.
+  ##
+  ## Returns ``present: false`` for every other line, including a hunk header
+  ## — clicking that selects the hunk (VCS-Panel.md, "Hunk Selection"), and
+  ## the two gestures must not both fire from one click.
+  if modelLine < 1 or modelLine > doc.lines.len:
+    return DiffExpandTarget(present: false)
+  let line = doc.lines[modelLine - 1]
+  if line.kind notin {dlkExpandAbove, dlkExpandBelow}:
+    return DiffExpandTarget(present: false)
+  DiffExpandTarget(
+    present: true,
+    above: line.kind == dlkExpandAbove,
+    fileIndex: line.fileIndex,
+    hunkIndex: line.hunkIndex)
 
 proc isHunkHeaderLine*(doc: DiffDocument; modelLine: int): bool {.noSideEffect.} =
   ## VCS-Panel.md, "Hunk Selection": "Click a hunk header to select it."  Only

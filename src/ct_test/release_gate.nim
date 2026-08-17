@@ -229,6 +229,21 @@ const
     # `ui/vcs.nim`, where no headless test could reach it, so porting the
     # renderer could have deleted a specified capability silently.
     "src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim",
+    # DR-R5 — context expansion in the diff tab.  Until it landed the whole
+    # capability was private procs inside `ui/deepreview.nim`, a JS-only
+    # module with no importable entry point, so the boundary arithmetic that
+    # decides how many lines exist above a hunk near the top of a file — the
+    # arithmetic that produces blank lines numbered 0 and -1 when it is wrong
+    # — was asserted by nothing.  This file asserts the window computation,
+    # its clamping at both file boundaries, the fetch-once-per-(revision,path)
+    # cache the normal-git content source needs, and that a revealed line is a
+    # plain context line of the document rather than a fourth, inert kind.
+    #
+    # DR-R5 also grew `vcs_vm_test.nim` (already listed above) with the
+    # per-hunk expansion counters, which used to be a JS-side `JsAssoc` on the
+    # component and therefore unreachable headlessly and lost on every
+    # re-render.
+    "src/tests/gui/tests/vcs/vcs_context_expansion_test.nim",
     # DR-R3 — the Agent Activity panel as DeepReview's third pillar.  The
     # panel's ViewModel, view and component all existed and were all wired to
     # nothing: the only caller of `setCoverageSummary` / `setTestResults` /

@@ -374,6 +374,13 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   if not closedComponent.isNil:
     closedComponent.unregister()
 
+  # A closed diff tab drops its ViewModel and its source-text cache with it, so
+  # a re-opened tab starts with no hunk selection, no context expansion and no
+  # cached blobs — DR-R5: "Expansion state resets when the tab is closed and
+  # does not leak between files."
+  if content == Content.UnifiedDiff:
+    unified_diff.forgetUnifiedDiffTab(id)
+
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
 

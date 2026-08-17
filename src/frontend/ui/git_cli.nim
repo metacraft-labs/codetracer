@@ -41,6 +41,60 @@ proc gitExec*(args: seq[cstring], cwd: cstring): cstring =
   except:
     return cstring""
 
+proc fsReadTextFile*(path: cstring): cstring
+  {.importjs: """(function(p) {
+    try { return require('fs').readFileSync(p, 'utf8'); } catch (e) { return ''; }
+  })(#)""".}
+  ## A file's text, or "" when it cannot be read.  The guard is on the JS side
+  ## because a missing file is an ordinary outcome here — the working tree of a
+  ## diff can legitimately no longer contain the path — and must not surface as
+  ## an exception in the middle of a render.
+
+proc stripTrailingNewline(text: string): string =
+  ## Drop the one line terminator a file ends with.
+  ##
+  ## Without this, splitting the text into lines yields a phantom final empty
+  ## line, and context expansion would offer to reveal it as if it were content
+  ## of the file.
+  result = text
+  if result.len > 0 and result[^1] == '\n':
+    result.setLen(result.len - 1)
+  if result.len > 0 and result[^1] == '\r':
+    result.setLen(result.len - 1)
+
+proc gitFileText*(revision, path, cwd: cstring): cstring =
+  ## The full text of ``path`` on the *new* side of a diff.
+  ##
+  ## DeepReview-GUI.md §4.2: "In normal version-control mode the surrounding
+  ## lines are not part of the diff and must be fetched from the repository
+  ## (e.g. `git show <rev>:<path>`) before they can be revealed."
+  ##
+  ## An empty ``revision`` means the working tree — the new side of `git diff
+  ## HEAD` is the tree on disk, and no revision of the repository holds it — so
+  ## that case reads the file rather than asking git for a blob.
+  ##
+  ## Deliberately NOT routed through ``gitExec``: that one strips the output at
+  ## both ends, which would eat the indentation of the file's first line and
+  ## silently shift the revealed text left.  Only the trailing terminator is
+  ## removed here.
+  ##
+  ## Returns "" on any failure, which callers read as "nothing can be
+  ## revealed" rather than as an empty file — the two are indistinguishable and
+  ## both mean the same thing for an expand control.
+  if revision.isNil or ($revision).len == 0:
+    let full = if cwd.isNil or ($cwd).len == 0: $path
+               else: $pathJoin(cwd, path)
+    return cstring(stripTrailingNewline($fsReadTextFile(cstring(full))))
+  try:
+    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
+    let raw = execFileSyncRaw(cstring"git",
+      @[cstring"show", cstring($revision & ":" & $path)], opts)
+    if raw.isNil:
+      return cstring""
+    return cstring(stripTrailingNewline($raw))
+  except:
+    return cstring""
+
 proc applyPatchToIndex*(patch, cwd: cstring) =
   ## Stage a patch with ``git apply --cached``, through a temporary file
   ## because git reads the patch from a path rather than from argv.

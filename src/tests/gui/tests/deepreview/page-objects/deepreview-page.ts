@@ -275,6 +275,54 @@ export class DeepReviewPage {
     return this.diffTabLines().filter({ hasText: /@@\s-\d+,\d+\s\+\d+,\d+\s@@/ });
   }
 
+  // -- Context expansion in the diff tab (DR-R5) ---------------------------
+  //
+  // The controls are LINES of the Monaco model, not DOM chrome
+  // (`diff_document.nim`: `dlkExpandAbove` / `dlkExpandBelow`), so they are
+  // located and clicked as rendered lines like the `@@` dividers above.
+  // Their `ct-diff-line-expand*` classes live on the decoration layer, which
+  // is a sibling of the line, so filtering by text is what identifies them
+  // here.
+
+  /** The "Expand N lines above" control line of ``tab``. */
+  static expandAboveLine(tab: Locator): Locator {
+    return tab
+      .locator(".monaco-editor .view-line")
+      .filter({ hasText: /Expand\s+\d+\s+lines\s+above/ });
+  }
+
+  /** The "Expand N lines below" control line of ``tab``. */
+  static expandBelowLine(tab: Locator): Locator {
+    return tab
+      .locator(".monaco-editor .view-line")
+      .filter({ hasText: /Expand\s+\d+\s+lines\s+below/ });
+  }
+
+  /**
+   * The whole-line decorations marking lines that context expansion revealed
+   * (``DiffRevealedClass``).  Monaco renders them into ``.view-overlays``.
+   */
+  static revealedDecorations(tab: Locator): Locator {
+    return tab.locator(".view-overlays .ct-diff-line-revealed");
+  }
+
+  /**
+   * The dual old/new gutter labels of ``tab``, whitespace-normalised.
+   *
+   * Asserting the revealed *line numbers* rather than only the revealed line
+   * count is what distinguishes "expansion revealed the right lines" from
+   * "expansion revealed some lines" — the off-by-one this milestone's clamping
+   * tests exist for would pass the second and fail the first.
+   */
+  static async diffLineNumbers(tab: Locator): Promise<string[]> {
+    const raw = await tab
+      .locator(".margin-view-overlays .line-numbers")
+      .allTextContents();
+    // Monaco preserves the label's padding with U+00A0, which no `\s` class
+    // matches, so it is normalised to an ordinary space first.
+    return raw.map((t) => t.replace(/ /g, " ").trim().replace(/\s+/g, " "));
+  }
+
   // -- The docked VCS panel ------------------------------------------------
 
   /**

@@ -877,88 +877,209 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 14: Context expansion - expand buttons visible
+  // Tests 14-16: Context expansion in the diff tab (DR-R5)
   // -----------------------------------------------------------------------
 
-  test("Test 14: expand buttons are visible around hunks in unified diff", async ({ ctPage }) => {
+  // e2e_diff_tab_expand_reveals_context — the rewrite of "Test 14: expand
+  // buttons are visible around hunks", "Test 15: clicking expand above
+  // reveals additional context lines" and "Test 16: clicking expand below".
+  //
+  // Same three scenarios, retargeted from the standalone DeepReview panel's
+  // `deepreview-expand-*` DOM to the Monaco diff tab, which is where
+  // DeepReview-GUI.md §4.2 puts them:
+  //
+  //   "The user can reveal surrounding unchanged lines around the changed
+  //    regions.  Required controls: Expand surrounding context above a
+  //    visible region / Expand surrounding context below a visible region /
+  //    Repeated expansion loads more file content instead of merely
+  //    uncovering lines that were already fetched."
+  //
+  //   "Context expansion is incremental loading.  Newly revealed lines become
+  //    normal code lines in the diff tab and can receive Omniscience overlays
+  //    when matching DeepReview data exists."
+  //
+  // The old tests asserted only that *some* lines appeared; these assert
+  // WHICH — the revealed line numbers and their text — because the arithmetic
+  // being migrated is the clamping at a file's first and last line, and a
+  // count-only assertion passes with every off-by-one it can make.
+  //
+  // Falsifiable against the ported code: before DR-R5 the diff tab had no
+  // expand controls at all (the capability lived only in `ui/deepreview.nim`,
+  // the panel DR-R8 deletes), so every locator below found nothing.
+  //
+  // Fixture geometry, from `sample-review.json` — src/main.rs has one hunk at
+  // new lines 2..11 in a 25-line file, so:
+  //   above: exactly ONE hidden line (line 1, "fn main() {"), after which no
+  //          further expansion above is possible;
+  //   below: lines 12..25 hidden, so one step reveals 12..21 and a further
+  //          step is still offered.
+  // That asymmetry is deliberate — it exercises the clamp in one direction
+  // and the "more remains" branch in the other within a single fixture.
+  //
+  // Headless counterparts:
+  //   test_context_expansion_window_reveals_lines_above_and_below and
+  //   test_context_expansion_clamps_at_file_boundaries in
+  //   src/tests/gui/tests/vcs/vcs_context_expansion_test.nim;
+  //   test_context_expansion_state_is_per_hunk_and_per_file in
+  //   src/tests/gui/tests/vcs/vcs_vm_test.nim.
+
+  /// Open src/main.rs's diff tab and wait for Monaco to render its lines.
+  async function openMainDiffTab(dr: DeepReviewPage) {
+    await dr.fileItemByIndex(0).click();
+    const tab = dr.diffTabFor("src/main.rs");
+    await expect(tab).toBeVisible({ timeout: 20_000 });
+    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible({
+      timeout: 20_000,
+    });
+    return tab;
+  }
+
+  test("Test 14: the diff tab offers expand controls around a hunk with hidden neighbours", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
-    await wait(500);
+    const tab = await openMainDiffTab(dr);
 
-    // The fixture has sourceContent for all 3 files. The first file
-    // (src/main.rs) has a hunk starting at newLine 2, so there is 1 line
-    // above (line 1 "fn main() {") to expand, and lines below (12+).
-    // We expect expand rows to be present in the unified diff.
-    const expandRows = dr.expandRows();
-    const expandCount = await expandRows.count();
-    expect(expandCount).toBeGreaterThan(0);
+    // VCS-Panel.md, "Unified Diff View (Editor Integration)": "Context
+    // expansion controls (Expand N lines above/below)".  Both directions are
+    // offered: main.rs's hunk has one hidden line above it and fourteen below.
+    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveCount(1, {
+      timeout: 15_000,
+    });
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(1);
 
-    // Verify the expand label text is correct.
-    const firstExpandText = await expandRows.first().textContent();
-    expect(firstExpandText).toContain("Expand 10 lines");
+    // The control names how much a click reveals, and the number is the step
+    // the ViewModel actually advances by (`ContextExpandStep`).
+    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveText(
+      /Expand\s+10\s+lines\s+above/,
+    );
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveText(
+      /Expand\s+10\s+lines\s+below/,
+    );
+
+    // Nothing is revealed until a control is pressed.
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(0);
   });
 
-  // -----------------------------------------------------------------------
-  // Test 15: Context expansion - clicking expand above reveals lines
-  // -----------------------------------------------------------------------
-
-  test("Test 15: clicking expand above reveals additional context lines", async ({ ctPage }) => {
+  test("Test 15: clicking expand above reveals the lines preceding the hunk", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
-    await wait(500);
+    const tab = await openMainDiffTab(dr);
 
-    // Before expanding, no expanded context lines should exist.
-    const initialExpanded = await dr.expandedContextLines().count();
-    expect(initialExpanded).toBe(0);
+    // The hunk starts at new line 2, so line 1 is not in the diff and its
+    // number is absent from the gutter before expanding.
+    const before = await DeepReviewPage.diffLineNumbers(tab);
+    expect(before).not.toContain("1 1");
 
-    // Expand above the first hunk of the first file (src/main.rs).
-    // The hunk starts at newLine 2, and there is 1 line above (line 1).
-    // So expanding should reveal 1 context line ("fn main() {").
-    await dr.expandAbove(0, 0);
-    await wait(500);
+    await DeepReviewPage.expandAboveLine(tab).click();
 
-    const expandedCount = await dr.expandedContextLines().count();
-    expect(expandedCount).toBeGreaterThan(0);
+    // Exactly one line exists above the hunk, so exactly one is revealed —
+    // the clamp, asserted through the UI it protects.
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(1, {
+      timeout: 15_000,
+    });
 
-    // The expanded line should be a context line (not added/removed).
-    const expandedLine = dr.expandedContextLines().first();
-    const classes = await expandedLine.getAttribute("class");
-    expect(classes).toContain("deepreview-unified-line-context");
+    // ...and it is the right one: line 1 of src/main.rs, by number and by
+    // text.  A revealed line is unchanged, so it carries the same old and new
+    // number.
+    const after = await DeepReviewPage.diffLineNumbers(tab);
+    expect(after).toContain("1 1");
+    await expect(
+      // Monaco renders runs of spaces as U+00A0, so the regex uses `\s`
+      // rather than a literal space (the same trap DR-R4 hit on `@@`).
+      tab.locator(".monaco-editor .view-line", { hasText: /fn\s+main\(\)\s+\{/ }),
+    ).toHaveCount(1);
+
+    // §4.2: "Newly revealed lines become normal code lines in the diff tab"
+    // — the revealed line is decorated as context, not as a fourth kind, so
+    // it is eligible for the Omniscience overlay DR-R6 draws on context lines.
+    await expect(
+      tab.locator(".view-overlays .ct-diff-line-context.ct-diff-line-revealed"),
+    ).toHaveCount(1);
+
+    // Nothing further is hidden above, so the control is gone — a user cannot
+    // press a button that can no longer act.
+    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveCount(0);
   });
 
-  // -----------------------------------------------------------------------
-  // Test 16: Context expansion - clicking expand below reveals lines
-  // -----------------------------------------------------------------------
-
-  test("Test 16: clicking expand below reveals additional context lines", async ({ ctPage }) => {
+  test("Test 16: clicking expand below reveals further content on each click", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
+    const tab = await openMainDiffTab(dr);
+
+    await DeepReviewPage.expandBelowLine(tab).click();
+
+    // The hunk ends at new line 11 and the file has 25 lines, so one step
+    // reveals lines 12..21.
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(10, {
+      timeout: 15_000,
+    });
+    const afterFirst = await DeepReviewPage.diffLineNumbers(tab);
+    expect(afterFirst).toContain("12 12");
+    expect(afterFirst).toContain("21 21");
+    expect(afterFirst).not.toContain("22 22");
+    // Line 12 of main.rs is the closing brace of `fn main`.
+    await expect(
+      tab.locator(".view-overlays .ct-diff-line-revealed"),
+    ).toHaveCount(10);
+
+    // §4.2's third required control: "Repeated expansion loads more file
+    // content instead of merely uncovering lines that were already fetched."
+    // Four lines remain (22..25), so a second click reveals those four rather
+    // than re-revealing the first ten.
+    await DeepReviewPage.expandBelowLine(tab).click();
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(14, {
+      timeout: 15_000,
+    });
+    const afterSecond = await DeepReviewPage.diffLineNumbers(tab);
+    expect(afterSecond).toContain("22 22");
+    expect(afterSecond).toContain("25 25");
+
+    // The file is exhausted, so the control disappears.
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(0);
+  });
+
+  test("Test 16b: expansion is per hunk and per file, and resets when the tab closes", async ({ ctPage }) => {
+    // DR-R5: "Expansion state resets when the tab is closed and does not leak
+    // between files."  Each diff tab owns its own `VCSVM`, so a second file's
+    // tab must open unexpanded however far the first was expanded.
+    //
+    // Headless counterpart: "closing the tab resets the expansion, and it
+    // never leaks between files" in
+    // src/tests/gui/tests/vcs/vcs_vm_test.nim.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
     await wait(500);
 
-    // Expand below the first hunk of the first file (src/main.rs).
-    // The hunk ends at newLine 11, and the file has 25 lines, so
-    // expanding should reveal up to 10 more context lines.
-    await dr.expandBelow(0, 0);
-    await wait(500);
+    const mainTab = await openMainDiffTab(dr);
+    await DeepReviewPage.expandBelowLine(mainTab).click();
+    await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
+      timeout: 15_000,
+    });
 
-    const expandedCount = await dr.expandedContextLines().count();
-    expect(expandedCount).toBeGreaterThan(0);
+    // A different file's tab starts from nothing revealed.
+    await dr.fileItemByIndex(1).click();
+    const utilsTab = dr.diffTabFor("src/utils.rs");
+    await expect(utilsTab).toBeVisible({ timeout: 20_000 });
+    await expect(
+      utilsTab.locator(".monaco-editor .view-lines"),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(DeepReviewPage.revealedDecorations(utilsTab)).toHaveCount(0);
 
-    // The expanded lines should contain source content from the file.
-    const firstExpandedContent = await dr.expandedContextLines().first()
-      .locator(".deepreview-unified-line-content").textContent();
-    expect(firstExpandedContent).toBeTruthy();
-    // Line 12 of main.rs is "}" (closing brace of fn main).
-    expect(firstExpandedContent).toContain("}");
+    // ...and coming back finds main.rs still expanded: the state is on the
+    // ViewModel, so it survives the tab losing and regaining focus.
+    await dr.fileItemByIndex(0).click();
+    await expect(mainTab.locator(".monaco-editor .view-lines")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
+      timeout: 15_000,
+    });
   });
 
   // -----------------------------------------------------------------------
