@@ -525,6 +525,29 @@ proc vcsRowsFromFixture(fixture: string): seq[VCSFileRow] =
       selected: false,
     ))
 
+proc datasetFromFixture(fixture: string): ReviewDataset =
+  ## The same changeset as the two projections above, in the shape the one
+  ## review-entry routine takes (DR-R7).  Composed from them rather than
+  ## re-derived, so the tests keep describing exactly the changeset the
+  ## fixture assertions above pin down.
+  let coverage = coverageRowsFromFixture(fixture)
+  let rows = vcsRowsFromFixture(fixture)
+  result = ReviewDataset(
+    title: "DeepReview: parser cleanup",
+    files: @[],
+    traceContexts: @[],
+    functionsTraced: tracedFunctionsFromFixture(fixture))
+  for i, row in rows:
+    result.files.add(ReviewFile(
+      path: row.path,
+      baseName: row.baseName,
+      status: row.status,
+      additions: row.additions,
+      deletions: row.deletions,
+      coveredLines: coverage[i].coveredLines,
+      totalLines: coverage[i].totalLines,
+      hasFlow: coverage[i].hasFlow))
+
 suite "Agent Activity DeepReview — populated by a review (DR-R3)":
 
   test "the fixture projection matches the review dataset":
@@ -559,8 +582,7 @@ suite "Agent Activity DeepReview — populated by a review (DR-R3)":
       var documents: seq[string] = @[]
       discard enterReview(
         vcs, activity,
-        coverageRowsFromFixture(SampleReviewJson),
-        tracedFunctionsFromFixture(SampleReviewJson),
+        datasetFromFixture(SampleReviewJson),
         proc(a: VCSOpenAction) =
           if a.documentKey notin documents:
             documents.add(a.documentKey))
@@ -669,10 +691,7 @@ suite "Agent Activity DeepReview — populated by a review (DR-R3)":
       vcs.setChangedFiles(vcsRowsFromFixture(SampleReviewJson))
 
       discard enterReview(
-        vcs, activity,
-        coverageRowsFromFixture(SampleReviewJson),
-        tracedFunctionsFromFixture(SampleReviewJson),
-        nil)
+        vcs, activity, datasetFromFixture(SampleReviewJson), nil)
 
       # Review entry leaves both views on the first file.
       check vcs.changedFiles.val[0].selected

@@ -1134,3 +1134,43 @@ suites. Use `resolveTestProgramPath()` for any new classification helper.
 "Add value to scratchpad\nCTRL+<click on value>" as the action name for the
 only menus that declare hints (flow values, `ui/flow.nim`). jstree menus keep
 their own selectors via `createJsTreeContextMenu`.
+
+## `common_types` types exist TWICE, and a generic proc is how you share code
+
+`src/common/common_types.nim` is `include`d by both `src/common/types.nim`
+(`langstring = string`, native) and `src/frontend/types.nim`
+(`langstring = cstring`, renderer). Every type in it — `DeepReviewData`,
+`Diff`, `Trace`, … — therefore exists as two *distinct* types, and a module
+that names one has picked a backend. `state_vm.nim` records what happens when
+both end up in scope: "every type in it exists twice and the two copies are
+incompatible".
+
+Two ways to write code once and run it against both copies:
+
+1. **A generic proc in a ViewModel module.** `review_entry.reviewDatasetFrom[T]`
+   projects a `DeepReviewData` into a plain ViewModel value; the renderer
+   instantiates it over its copy, the headless tests over the native one, and
+   both run the same source. Read `langstring` fields with `$`.
+2. **A proc inside `common_types` itself.** Anything that maps between two
+   `common_types` types belongs there — it is compiled once per copy for free.
+   `codetracer_features/deepreview_from_diff.nim` (a trace's structured `Diff`
+   → a review dataset) and `utils/text_representation.nim` are the examples.
+   Convert with `langstring(x)`, which is `cstring(x)` or `string(x)` as
+   appropriate.
+
+A headless test *can* `import ../../../../common/types as ct_types` alongside
+ViewModel modules (`vcs_vm_test.nim`, `deepreview_entry_test.nim` do); what it
+must not do is drag `frontend/types` in as well.
+
+## Review entry has exactly one routine — do not add a second
+
+All three DeepReview launch paths (`ct --deepreview`, a trace with an
+associated diff, the agentic handoff) publish `data.deepReviewData` and then
+call `vcs.startDeepReviewNavigation(data)` → `review_entry.enterReview`, which
+populates the VCS panel, the Agent Activity DeepReview section and the editor.
+It is idempotent by design: the data half re-runs on every call (the agentic
+launcher re-syncs constantly) while the entry half — focus the panels, open
+the first file — is gated by `VCSVM.reviewEntered` and the selection is
+carried across a refresh *by path*. `src/tests/gui/tests/deepreview/
+deepreview_entry_test.nim` holds both a behavioural suite and a source
+contract asserting the hosts still call it.

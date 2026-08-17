@@ -11,13 +11,23 @@
 ##   4. the Agent Activity DeepReview section populates,
 ##   5. every other panel keeps showing trace data.
 ##
-## This module owns step 2, step 4, and the "list and editor agree" half of
-## step 1.  It is a named, reusable routine rather than inline startup code
-## because §7 requires all three launch paths to converge on one routine ("All
-## three entry points converge on the same routine: load the dataset, populate
-## the three panels, focus the VCS panel, open the first file") — DR-R7 makes
-## `ct --deepreview`, the diff-associated trace and the agentic handoff call
-## it.
+## This module owns steps 1, 2 and 4.  It is one named routine — `enterReview`
+## — rather than inline startup code because §7 requires all three launch
+## paths to converge on it ("All three entry points converge on the same
+## routine: load the dataset, populate the three panels, focus the VCS panel,
+## open the first file").  Since DR-R7 all three do:
+##
+##   * `ct --deepreview <PATH>`  → `ui_js.onStartDeepReview` sets
+##     `data.deepReviewData`; `tryInitLayout` calls
+##     `vcs.startDeepReviewNavigation`;
+##   * a trace with an associated diff → `ui_js.onTraceLoaded` assembles a
+##     review dataset from the trace's structured diff and calls the same
+##     host routine;
+##   * the agentic handoff → `ui/agentic_session_launcher.syncDeepReview`
+##     sets `data.deepReviewData` from the session's evidence and calls the
+##     same host routine.
+##
+## None of them configures review state of its own any more.
 ##
 ## Step 4 — "The Agent Activity panel's DeepReview section populates with
 ## coverage and test results" — lives here for exactly the reason §2.1 gives:
@@ -45,6 +55,167 @@ type
     ## Opens (or focuses) the editor document an action names.  Implemented by
     ## the host over `openLayoutTab` / `openTab`; implemented by tests over a
     ## list of document keys.
+
+  ReviewFocusProc* = proc() {.closure.}
+    ## Brings the review's panels to the front of the stacks that host them —
+    ## Layout-System.md, "DeepReview and the Layout", obligation 2 ("Focus,
+    ## not relocation").  Implemented by the host over GoldenLayout; nil for a
+    ## host (or a test) with no layout.  Called at most *once* per review, by
+    ## obligation 3.
+
+  ReviewFile* = object
+    ## One file of the changeset a review is bound to, reduced to what the
+    ## three panels render.
+    ##
+    ## This is the review dataset as the ViewModel layer sees it: a plain
+    ## value, with no `cstring`, no JS object and no dependency on
+    ## `DeepReviewData` — which is a `common/types` type and therefore exists
+    ## twice (once through `frontend/types`, once natively) and cannot be
+    ## named by a ViewModel module at all.  `reviewDatasetFrom` is the one
+    ## conversion, and it is generic precisely so that the *same* code runs
+    ## over either copy.
+    path*: string
+    baseName*: string
+    status*: string       ## "A" / "M" / "D" / "R", as the diff reports it
+    additions*: int
+    deletions*: int
+    coveredLines*: int
+    totalLines*: int
+    hasFlow*: bool
+
+  ReviewDataset* = object
+    ## Everything the review-entry routine needs, whichever launch path
+    ## produced it: `ct --deepreview <PATH>`, opening a trace that carries an
+    ## associated diff, or the agentic handoff (DeepReview-GUI.md §1).
+    title*: string
+    files*: seq[ReviewFile]
+    traceContexts*: seq[VCSTraceContextRow]
+    functionsTraced*: int
+
+proc `==`*(a, b: ReviewFile): bool {.noSideEffect.} =
+  a.path == b.path and a.baseName == b.baseName and a.status == b.status and
+    a.additions == b.additions and a.deletions == b.deletions and
+    a.coveredLines == b.coveredLines and a.totalLines == b.totalLines and
+    a.hasFlow == b.hasFlow
+
+proc `==`*(a, b: ReviewDataset): bool {.noSideEffect.} =
+  a.title == b.title and a.files == b.files and
+    a.traceContexts == b.traceContexts and
+    a.functionsTraced == b.functionsTraced
+
+proc reviewBaseName(path: string): string {.noSideEffect.} =
+  var cut = -1
+  for i in countdown(path.high, 0):
+    if path[i] == '/' or path[i] == '\\':
+      cut = i
+      break
+  if cut >= 0: path[cut + 1 .. ^1] else: path
+
+proc coverageText(covered, total: int): string {.noSideEffect.} =
+  ## The Changed Files row's coverage badge — "executed/total", or nothing at
+  ## all when the dataset carries no coverage for the file.  An empty badge is
+  ## the honest answer for a file nothing executed data was collected for;
+  ## "0/0" would read as "measured, and nothing ran".
+  if total > 0: $covered & "/" & $total else: ""
+
+proc changedFileRows*(dataset: ReviewDataset): seq[VCSFileRow] =
+  ## The dataset as the VCS panel's Changed Files rows (VCS-Panel.md,
+  ## "Changed Files").  Selection is *not* decided here — `applyReviewDataset`
+  ## owns it, because it is the one place that knows what the reviewer had
+  ## selected before the data was refreshed.
+  result = @[]
+  for file in dataset.files:
+    result.add(VCSFileRow(
+      status: file.status,
+      path: file.path,
+      baseName: file.baseName,
+      additions: file.additions,
+      deletions: file.deletions,
+      coverageText: coverageText(file.coveredLines, file.totalLines),
+      selected: false))
+
+proc coverageRows*(dataset: ReviewDataset): seq[AgentDeepReviewFileCoverage] =
+  ## The dataset as the Agent Activity panel's per-file coverage rows —
+  ## DeepReview-GUI.md §2.1, "Per-file coverage — one row per file in the
+  ## review, aligned with the VCS panel's Changed Files rows".  The alignment
+  ## is literal: both projections walk `dataset.files` in order, so row *i* of
+  ## each describes the same file.
+  result = @[]
+  for file in dataset.files:
+    result.add(AgentDeepReviewFileCoverage(
+      path: file.path,
+      coveredLines: file.coveredLines,
+      totalLines: file.totalLines,
+      hasFlow: file.hasFlow))
+
+proc reviewDatasetFrom*[T](drData: T): ReviewDataset =
+  ## Project an exported/assembled review dataset (`DeepReviewData`) into the
+  ## ViewModel layer's `ReviewDataset`.
+  ##
+  ## It is generic over the *shape* rather than typed against `DeepReviewData`
+  ## because that type is defined in `common/common_types/codetracer_features/
+  ## deepreview.nim`, which is `include`d both by `frontend/types` (with
+  ## `langstring = cstring`) and by `common/types` (with `langstring =
+  ## string`).  The two copies are distinct types, so a ViewModel module can
+  ## name neither without picking a backend.  Instantiating one generic proc
+  ## over both means the renderer and the headless tests run *the same
+  ## projection code* rather than two hand-kept-in-sync copies — which is the
+  ## whole point of DR-R7: every launch path reaching the same review state.
+  ##
+  ## Everything is derived from the dataset; nothing is invented.  A file with
+  ## no `diff` record is reported as modified with no counts rather than
+  ## dropped, because dropping it would silently renumber the changeset.
+  if drData.isNil:
+    return ReviewDataset(title: "", files: @[], traceContexts: @[])
+
+  let sessionTitle = $drData.sessionTitle
+  let commitSha = $drData.commitSha
+  result.title =
+    if sessionTitle.len > 0:
+      sessionTitle
+    elif commitSha.len > 12:
+      "Review: " & commitSha[0 ..< 12] & "..."
+    else:
+      "Review: " & commitSha
+
+  result.traceContexts = @[]
+  for ctx in drData.traceContexts:
+    let label = $ctx.label
+    # A context with no label would render an unpickable blank option, so it
+    # is named after its id rather than dropped.
+    result.traceContexts.add(VCSTraceContextRow(
+      id: ctx.id,
+      label: if label.len > 0: label else: "Trace " & $ctx.id))
+
+  result.files = @[]
+  var tracedFunctions: seq[string] = @[]
+  for file in drData.files:
+    let path = $file.path
+    var executed = 0
+    for cov in file.coverage:
+      if cov.executed:
+        executed += 1
+    # `DeepReviewFunctionFlow` is *one execution* of a function, so several
+    # entries can share a `functionKey`; counting entries would report four
+    # "functions traced" for three functions called four times.  Keys are
+    # qualified by path because a key is only unique within its file.
+    for flow in file.flow:
+      let key = path & ":" & $flow.functionKey
+      if key notin tracedFunctions:
+        tracedFunctions.add(key)
+    let hasDiff = not file.diff.isNil
+    let status =
+      if hasDiff and ($file.diff.status).len > 0: $file.diff.status else: "M"
+    result.files.add(ReviewFile(
+      path: path,
+      baseName: reviewBaseName(path),
+      status: status,
+      additions: if hasDiff: file.diff.linesAdded else: 0,
+      deletions: if hasDiff: file.diff.linesRemoved else: 0,
+      coveredLines: executed,
+      totalLines: file.coverage.len,
+      hasFlow: file.flow.len > 0))
+  result.functionsTraced = tracedFunctions.len
 
 proc selectReviewRow*(vm: VCSVM; index: int): bool {.discardable.} =
   ## Mark row `index` of the changed-files list as the selected one.
@@ -208,20 +379,113 @@ proc selectActivityReviewFile*(vcs: VCSVM;
 # The whole entry step
 # ---------------------------------------------------------------------------
 
+const KeepCurrentTraceContext* = low(int)
+  ## `applyReviewDataset`'s default: keep whichever trace context the panel
+  ## already has selected.  A distinct sentinel is needed because 0 is a
+  ## perfectly ordinary context id (`DeepReviewTraceContext.id` is 0-based in
+  ## the exported datasets).
+
+proc applyReviewDataset*(vcs: VCSVM; dataset: ReviewDataset;
+                         wantedTraceContextId = KeepCurrentTraceContext):
+    int {.discardable.} =
+  ## Populate the VCS panel from a review dataset, and report which row ends
+  ## up selected.
+  ##
+  ## This is DeepReview-GUI.md §7 step 1 — "The VCS panel populates with the
+  ## changeset data" — and it is re-runnable: every launch path re-syncs its
+  ## data (the agentic launcher on every product-panel sync, the CLI path on
+  ## every panel re-render), and a refresh must not throw away what the
+  ## reviewer is looking at.  So the selection is carried across *by path*:
+  ## the row the reviewer selected stays selected as long as the changeset
+  ## still contains that file, and only a review that has no selection yet
+  ## falls back to the first row.
+  if vcs.isNil:
+    return -1
+  let previous = vcs.selectedReviewPath()
+  var rows = dataset.changedFileRows()
+  result = -1
+  if rows.len > 0:
+    result = 0
+    if previous.len > 0:
+      for i in 0 ..< rows.len:
+        if rows[i].path == previous:
+          result = i
+          break
+    rows[result].selected = true
+
+  vcs.setDeepReviewMode(true)
+  # DeepReview-GUI.md §2: the VCS panel header owns the review's session title
+  # *and* its stats.  The stats summarise only what the dataset carries — file
+  # count and total +/-; coverage and test results belong to the Agent
+  # Activity panel (§2.1).
+  vcs.setHeader(dataset.title, statsText = reviewStatsText(rows))
+  vcs.setTraceContexts(dataset.traceContexts)
+  # An unknown or unset preference resolves to the review's first context,
+  # which is what `DeepReviewTraceContext`'s own contract says the default is
+  # — without it a freshly started review shows a dropdown with no option
+  # marked selected.
+  let wanted =
+    if wantedTraceContextId == KeepCurrentTraceContext:
+      vcs.selectedTraceContextId.val
+    else:
+      wantedTraceContextId
+  vcs.setSelectedTraceContextId(
+    resolveTraceContextId(dataset.traceContexts, wanted))
+  vcs.setGitRepoState(true)
+  vcs.setBranchState("", @[], false)
+  vcs.setCommits(@[], @[])
+  vcs.setChangedFiles(rows)
+  # The docked panel is never a diff surface (#561): a unified diff is its own
+  # editor tab.  Cleared explicitly so a panel that once hosted one cannot
+  # leave a stale diff behind.
+  vcs.setUnifiedDiff(false, @[])
+  vcs.setHunkState(@[], false, false)
+
 proc enterReview*(vcs: VCSVM;
                   activity: AgentActivityDeepReviewVM;
-                  coverage: openArray[AgentDeepReviewFileCoverage];
-                  functionsTraced: int;
-                  open: ReviewOpenProc): VCSOpenAction {.discardable.} =
-  ## The review-entry step, whichever launch path started the review.
+                  dataset: ReviewDataset;
+                  open: ReviewOpenProc;
+                  focus: ReviewFocusProc = nil;
+                  wantedTraceContextId = KeepCurrentTraceContext):
+    VCSOpenAction {.discardable.} =
+  ## **The** review-entry routine.  Every launch path calls this one
+  ## (DeepReview-GUI.md §7: "All three entry points converge on the same
+  ## routine: load the dataset, populate the three panels, focus the VCS
+  ## panel, open the first file").
   ##
-  ## DeepReview-GUI.md §7, "Transition into a Review": the first modified file
-  ## opens in the editor (step 2), the Agent Activity panel's DeepReview
-  ## section populates (step 4), and the changed-files list and the coverage
-  ## table end up naming the same file (step 1 + §2.1).
+  ## In order, and matching §7's "Transition into a Review":
+  ##
+  ##   1. the VCS panel populates with the changeset, the session title, the
+  ##      stats line and the trace-context selector (steps 1, and DR-R2);
+  ##   4. the Agent Activity panel's DeepReview section populates with the
+  ##      review's coverage (step 4) — §2.1 is emphatic that this "must not
+  ##      require a live agent session", which is why it happens here rather
+  ##      than on the agentic path only;
+  ##   2. the three panels are focused and the first modified file opens
+  ##      (step 2) — **once**;
+  ##      and the changed-files list and the coverage table end up naming the
+  ##      same file (§2.1, "two views of one selection").
+  ##
+  ## Steps 3 and 5 belong to the replay data behind the review and are not
+  ## this routine's to perform.
+  ##
+  ## *Idempotence* (Layout-System.md, "DeepReview and the Layout",
+  ## obligation 3) is the reason the last group is guarded: re-entering a
+  ## review — which every path does whenever its data is re-synced — refreshes
+  ## the data but does not open a second tab, does not drag the reviewer back
+  ## to the first file, and does not re-focus over a tab they switched to.
   ##
   ## `activity` may be nil — a host whose layout has no Agent Activity panel
-  ## still gets a navigable review.
-  populateReviewActivity(activity, coverage, functionsTraced)
-  result = vcs.openFirstReviewFile(open)
+  ## still gets a navigable review.  An empty changeset does not count as
+  ## entering: a dataset that arrives later still opens its first file.
+  if vcs.isNil:
+    return VCSOpenAction(kind: voaNone, index: -1)
+  let selected = vcs.applyReviewDataset(dataset, wantedTraceContextId)
+  populateReviewActivity(activity, dataset.coverageRows(),
+                         dataset.functionsTraced)
+  if not vcs.reviewEntered.val and selected >= 0:
+    vcs.reviewEntered.val = true
+    if focus != nil:
+      focus()
+    result = vcs.openReviewFile(selected, open)
   discard syncActivitySelectionFromVCS(vcs, activity)

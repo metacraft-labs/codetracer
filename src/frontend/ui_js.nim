@@ -2291,6 +2291,26 @@ proc onTraceLoaded(
     else:
       await data.openNewEditorView(programTab, ViewSource)
 
+  # DeepReview-GUI.md §1, launch method 2: "Open a trace that is associated
+  # with a diff."  A trace recorded with `ct record --with-diff` carries its
+  # structured diff in the trace folder, and every stage up to here already
+  # forwarded it — `ct run` as `--diff <path>`, `index/args.nim` into
+  # `StartOptions.diff`, `index/traces.nim` into this very message — but the
+  # renderer used to drop it, so the launch method existed on paper only.
+  # It enters the review through the same routine `ct --deepreview` and the
+  # agentic handoff use.
+  if response.withDiff and not response.diff.isNil and
+      response.diff.files.len > 0:
+    await waitForLayoutGround(data)
+    let reviewedProgram = $baseName(data.trace.program)
+    vcs.startReviewForTraceDiff(
+      data, response.diff,
+      title = "Review: " & reviewedProgram,
+      # The open recording *is* the run under review, so it is the review's
+      # one trace context.
+      traceLabel = reviewedProgram,
+      recordingId = $data.trace.recordingId)
+
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 

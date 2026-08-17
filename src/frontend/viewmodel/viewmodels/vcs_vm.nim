@@ -236,6 +236,25 @@ type
     ## whole selection model into this ViewModel: the Monaco diff tab is a
     ## dispatcher over `selectHunk` and owns no selection state of its own.
     lastHunkClickOrdinal*: Signal[int]
+    ## True once this panel has *entered* a review — that is, once the
+    ## review-entry routine has focused the review's panels and opened its
+    ## first modified file for it.
+    ##
+    ## `codetracer-specs/GUI/Layout-And-Navigation/Layout-System.md`,
+    ## "DeepReview and the Layout", obligation 3: "re-entering a review on a
+    ## layout persisted from an earlier review session must not accumulate
+    ## duplicate tabs or re-focus over a selection the user has since changed
+    ## within the same session."  Every launch path re-runs review entry
+    ## whenever its data is re-synced (the agentic launcher re-syncs on every
+    ## product-panel sync; `tryInitLayout` re-runs on every layout mount), so
+    ## the "do this once" half of the routine needs a memory.
+    ##
+    ## It lives on the ViewModel rather than as a module-level `var` in the
+    ## host (where DR-R1 first put it) for two reasons: a global cannot be
+    ## reset between headless tests and cannot distinguish two panels, and the
+    ## idempotence obligation is only assertable at all if the flag is
+    ## reachable from a headless test.
+    reviewEntered*: Signal[bool]
     loadingMore*: Signal[bool]  ## true while next commit page is being fetched
 
     fileCount*: Memo[int]
@@ -393,6 +412,12 @@ proc setTraceContexts*(vm: VCSVM;
 
 proc setSelectedTraceContextId*(vm: VCSVM; id: int) =
   vm.selectedTraceContextId.val = id
+
+proc currentTraceContextId*(vm: VCSVM): int =
+  ## Reader for `selectedTraceContextId`, so hosts that do not import IsoNim's
+  ## signal accessors (`ui/vcs.nim` is one) can mirror the review-wide
+  ## selection onto `Data` without reaching into the signal.
+  vm.selectedTraceContextId.val
 
 proc hasTraceContextChoice*(vm: VCSVM): bool =
   ## Whether the header should offer the trace-context selector at all.
@@ -754,6 +779,9 @@ proc clearPanel*(vm: VCSVM) =
   vm.hunkToolbarVisible.val = false
   vm.hunkCopyFeedback.val = false
   vm.lastHunkClickOrdinal.val = -1
+  # A cleared panel is no longer in a review, so the next review that starts
+  # on it must open its first file again.
+  vm.reviewEntered.val = false
   vm.loadingMore.val = false
 
 proc createVCSVM*(): VCSVM =
@@ -792,6 +820,7 @@ proc createVCSVM*(): VCSVM =
       hunkToolbarVisible: createSignal(false),
       hunkCopyFeedback: createSignal(false),
       lastHunkClickOrdinal: createSignal(-1),
+      reviewEntered: createSignal(false),
       loadingMore: createSignal(false),
       fileCount: fileCount,
       selectedHunkCount: selectedHunkCount,

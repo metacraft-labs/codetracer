@@ -261,6 +261,24 @@ const
     # DeepReview-GUI.md §2.1, so its rendering is that panel's business.  The
     # focus half rides in `deepreview_layout_test.nim` (also listed).
     "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim",
+    # DR-R7 — one review-entry routine for all three launch paths.  The three
+    # ways into a review (`ct --deepreview`, a trace with an associated diff,
+    # the agentic handoff) used to configure review state their own way, and
+    # the agentic one additionally reached into the standalone DeepReview
+    # panel.  This file drives each path's *production* projection over the
+    # same `sample-review.json` fixture, feeds each result to the one entry
+    # routine, and asserts the three review states agree; it also pins
+    # Layout-System.md's idempotence obligation (re-entry opens no second tab
+    # and does not override the reviewer's own file selection), which matters
+    # because `syncProductPanels` re-enters on every sync.
+    #
+    # Its second suite is a source contract, native only: the launch paths
+    # live in `ui_js.nim` / `ui/vcs.nim` / `ui/agentic_session_launcher.nim`,
+    # which need Electron and GoldenLayout, so reading them is the only way to
+    # assert headlessly that they call the shared routine rather than
+    # re-implementing review entry.  Same reason `deepreview_layout_test.nim`
+    # (listed above) carries one.
+    "src/tests/gui/tests/deepreview/deepreview_entry_test.nim",
     # #603 (M38) — the re-record queue's decision model.  Both encode the two
     # "never hang" invariants: a failed save must abort loudly, and dirty files
     # with nothing in flight is unreachable-by-waiting.  Note

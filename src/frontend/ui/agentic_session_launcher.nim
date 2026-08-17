@@ -27,7 +27,6 @@ const
   AgentActivityId* = 7901
   AgentWorkspaceId* = 7901
   VcsId* = 7901
-  DeepReviewId* = 7901
   CaptionId* = 7901
   ProductLauncherName* = "CodeTracerAgenticSessionLauncher"
   DefaultM7Scenario* =
@@ -226,45 +225,87 @@ proc workspaceRows(vm: AgenticSessionVM): seq[ActivityFileEntry] =
       totalLines: if file.totalLines > 0: file.totalLines else: 1,
       hasFlow: file.hasFlow)
 
-proc diffLineType(line: string): cstring =
-  if line.startsWith("+") and not line.startsWith("+++"): cstring"added"
-  elif line.startsWith("-") and not line.startsWith("---"): cstring"removed"
-  else: cstring"context"
-
-proc deepReviewHunks(vm: AgenticSessionVM): seq[DeepReviewHunk] =
-  var oldLine = 0
-  var newLine = 0
-  var hunk = DeepReviewHunk(oldStart: 1, oldCount: 1, newStart: 1,
-    newCount: 1, lines: @[])
-  for line in vm.activeEditorContent.val.splitLines():
-    if line.startsWith("@@"):
+proc deepReviewHunks(rows: seq[VCSDiffFileRow]; path: string):
+    seq[DeepReviewHunk] =
+  ## The session's diff for ``path``, as review-dataset hunks.
+  ##
+  ## The source is ``AgenticSessionVM.vcs.diffFiles`` — the per-file diff the
+  ## VM projects from the agent's own output (a Harbor ``fileDiff`` REST call,
+  ## an ACP diff event, or an evidence file entry).  It used to be
+  ## ``activeEditorContent`` re-parsed as a patch, which meant *every* file of
+  ## a multi-file changeset received the diff of whichever file the editor
+  ## happened to be showing.
+  result = @[]
+  for file in rows:
+    if file.path != path:
       continue
-    let kind = line.diffLineType()
-    case $kind
-    of "added":
-      inc newLine
-      hunk.lines.add DeepReviewHunkLine(`type`: kind, content: cstring line,
-        oldLine: 0, newLine: newLine)
-    of "removed":
-      inc oldLine
-      hunk.lines.add DeepReviewHunkLine(`type`: kind, content: cstring line,
-        oldLine: oldLine, newLine: 0)
-    else:
-      inc oldLine
-      inc newLine
-      hunk.lines.add DeepReviewHunkLine(`type`: kind, content: cstring line,
-        oldLine: oldLine, newLine: newLine)
-  result = @[hunk]
+    for hunk in file.hunks:
+      var converted = DeepReviewHunk(lines: @[])
+      for line in hunk.lines:
+        # `VCSDiffLineRow` spells the kinds "add"/"delete"/"context" and
+        # carries the `@@` header as a "hunk" row; `DeepReviewHunkLine.type`
+        # is documented as one of "context"/"added"/"removed" and keeps the
+        # header in the hunk's own start/count fields.
+        let kind =
+          case line.lineType
+          of "add", "added": "added"
+          of "delete", "deleted", "removed": "removed"
+          of "hunk": ""
+          else: "context"
+        if kind.len == 0:
+          continue
+        converted.lines.add DeepReviewHunkLine(
+          `type`: cstring kind,
+          content: cstring line.content,
+          oldLine: line.oldLine,
+          newLine: line.newLine)
+      # A `VCSHunkRow` projected from an agent's diff text carries no `@@`
+      # range, so the range is derived from the lines it does carry rather
+      # than left at 0,0 (which renders as "@@ -0,0 +0,0 @@").
+      converted.oldStart = if hunk.oldStart > 0: hunk.oldStart else: 0
+      converted.newStart = if hunk.newStart > 0: hunk.newStart else: 0
+      converted.oldCount = hunk.oldCount
+      converted.newCount = hunk.newCount
+      for line in converted.lines:
+        if line.oldLine > 0:
+          if converted.oldStart == 0:
+            converted.oldStart = line.oldLine
+          if hunk.oldCount == 0:
+            converted.oldCount += 1
+        if line.newLine > 0:
+          if converted.newStart == 0:
+            converted.newStart = line.newLine
+          if hunk.newCount == 0:
+            converted.newCount += 1
+      result.add converted
+    return
 
 proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
+  ## The agentic session's evidence as a review dataset — the same
+  ## ``DeepReviewData`` shape ``ct --deepreview`` loads from disk, so the two
+  ## paths differ in where the dataset came from and in nothing else.
+  ##
+  ## The changeset, the title and the trace-context labels come from
+  ## ``AgenticSessionVM.agenticReviewDataset``, which is what the review-entry
+  ## routine will project this back into: building both from one projection is
+  ## what keeps the panel's changeset and the review's changeset identical by
+  ## construction rather than by review.
   let vm = launcher.vm
   let session = launcher.activeEntry()
+  let dataset = vm.agenticReviewDataset()
+  let diffRows = vm.vcs.diffFiles.val
   var files: seq[DeepReviewFileData] = @[]
-  for file in vm.vcs.changedFiles.val:
+  for file in dataset.files:
     files.add DeepReviewFileData(
       path: cstring file.path,
       contentHash: cstring"",
-      sourceContent: cstring vm.activeEditorContent.val,
+      # Only the file the editor is actually showing has its full text here;
+      # the others carry none rather than a copy of that one's text.  It is
+      # what context expansion reads, so a wrong answer reveals another
+      # file's lines.
+      sourceContent: cstring(
+        if file.path == vm.activeEditorPath.val: vm.activeEditorContent.val
+        else: ""),
       symbols: @[],
       coverage: @[],
       functions: @[],
@@ -272,29 +313,30 @@ proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
       flow: @[],
       flags: DeepReviewFileFlags(
         hasSymbols: false,
-        hasCoverage: vm.vcs.deepReviewMode.val,
-        hasFlow: vm.vcs.deepReviewMode.val,
+        hasCoverage: false,
+        hasFlow: false,
         isUnreachable: false,
         isPartial: false),
       diff: DeepReviewFileDiff(
         status: cstring file.status,
         linesAdded: file.additions,
         linesRemoved: file.deletions,
-        hunks: vm.deepReviewHunks()))
+        hunks: deepReviewHunks(diffRows, file.path)))
+  var contexts: seq[DeepReviewTraceContext] = @[]
+  for ctx in dataset.traceContexts:
+    contexts.add DeepReviewTraceContext(
+      id: ctx.id,
+      label: cstring ctx.label,
+      recordingId: cstring(
+        if session.evidence.traceId.len > 0: session.evidence.traceId
+        else: "trace-m7-001"))
   DeepReviewData(
     commitSha: cstring session.taskId,
     baseCommitSha: cstring"",
     collectionTimeMs: 0,
     recordingCount: if vm.vcs.deepReviewMode.val: 1 else: 0,
-    sessionTitle: cstring("DeepReview: " & session.captionForSession()),
-    traceContexts: @[DeepReviewTraceContext(id: 1,
-      label: cstring(
-        if vm.deepReview.traceContexts.val.len > 0:
-          vm.deepReview.traceContexts.val[0].label
-        else: "recorded test"),
-      recordingId: cstring(
-        if session.evidence.traceId.len > 0: session.evidence.traceId
-        else: "trace-m7-001"))],
+    sessionTitle: cstring dataset.title,
+    traceContexts: contexts,
     files: files,
     callTrace: DeepReviewCallTrace(nodes: @[]))
 
@@ -310,12 +352,19 @@ proc ensurePanel(content: Content; id: int) =
   data.openLayoutTab(content, id = id)
 
 proc ensureAgenticPanels*(includeDeepReview: bool) =
+  ## The panels an agentic session needs on screen.
+  ##
+  ## ``includeDeepReview`` no longer opens a DeepReview *panel*: a review is
+  ## rendered by the Editor, the VCS panel and the Agent Activity panel
+  ## (DeepReview-GUI.md §7, "There is no separate 'DeepReview mode' that
+  ## replaces the UI"), all three of which are opened above regardless.  The
+  ## flag is kept because a review still needs the VCS and Agent Activity
+  ## panels present, and because callers pass it to say "this session has
+  ## review evidence".
   ensurePanel(Content.CaptionBarProgress, CaptionId)
   ensurePanel(Content.AgentActivity, AgentActivityId)
   ensurePanel(Content.AgentWorkspace, AgentWorkspaceId)
   ensurePanel(Content.VCS, VcsId)
-  if includeDeepReview:
-    ensurePanel(Content.DeepReview, DeepReviewId)
 
 proc syncCaption(launcher: AgenticSessionLauncher) =
   let session = launcher.activeEntry()
@@ -413,21 +462,29 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   vcs.tryMountIsoNimVCSPanel(comp.id)
 
 proc syncDeepReview(launcher: AgenticSessionLauncher) =
+  ## The agentic handoff into DeepReview — Agentic-Coding-Integration.md §4.4,
+  ## "Completion Handoff to DeepReview".
+  ##
+  ## Two halves used to live here, and only the first survives.  The *data*
+  ## half publishes the session's evidence as the review dataset every panel
+  ## reads.  The second half configured the standalone review panel directly
+  ## — its view mode, its selected file, its trace context, its execution
+  ## index — which is both the surface DeepReview-GUI.md §7 forbids
+  ## and a second set of conventions for state the review already owns (that
+  ## is how the panel's trace-context id and
+  ## `Data.deepReviewSelectedTraceContextId` came to disagree).
+  ##
+  ## What replaces it is the entry routine every other launch path uses.  The
+  ## agent's route into DeepReview is the CLI (§1.1), and `ct agent evidence`
+  ## reaches this handoff through `AgenticSessionVM.handleAgentEvidenceRpc*`;
+  ## from here on it is indistinguishable from `ct --deepreview`.
   data.deepReviewActive = true
-  data.deepReviewSelectedFileIndex = 0
   data.deepReviewData = launcher.deepReviewData()
   data.startOptions.deepReview = data.deepReviewData
   data.startOptions.withDeepReview = true
-  let comp = DeepReviewComponent(
-    data.ui.componentMapping[Content.DeepReview][DeepReviewId])
-  comp.drData = data.deepReviewData
-  comp.glEmbedded = true
-  comp.viewMode = Unified
-  comp.selectedFileIndex = 0
-  comp.selectedTraceContextId = 1
-  comp.selectedExecutionIndex = 0
-  comp.selectedIteration = 0
-  comp.requestDeepReviewPanelRefresh()
+  # Safe on every sync: entry (focus, open the first file) happens once, and
+  # a re-sync only refreshes the data and keeps the reviewer's selection.
+  vcs.startDeepReviewNavigation(data)
 
 proc syncEditor(launcher: AgenticSessionLauncher) =
   let path = cstring launcher.vm.activeEditorPath.val

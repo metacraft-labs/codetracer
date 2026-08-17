@@ -536,113 +536,17 @@ proc ensureVCSDataLoaded(self: VCSComponent) =
     if self.isGitRepo:
       self.startFileWatching()
 
-proc currentReviewTitle(self: VCSComponent): string =
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return ""
-  if not drData.sessionTitle.isNil and ($drData.sessionTitle).len > 0:
-    return $drData.sessionTitle
-  let commitDisplay =
-    if drData.commitSha.len > 12:
-      ($drData.commitSha)[0 ..< 12] & "..."
-    else:
-      safeStr(drData.commitSha)
-  "Review: " & commitDisplay
-
-proc reviewTraceContexts(self: VCSComponent): seq[VCSTraceContextRow] =
-  ## Project the review's declared trace contexts into the VCS header's rows.
+proc reviewDataset(self: VCSComponent): ReviewDataset =
+  ## The review this panel is showing, as the ViewModel layer's dataset.
   ##
-  ## DeepReview-GUI.md §2 houses the trace-context selector in this panel's
-  ## header; ``DeepReviewData.traceContexts`` is its only source, and a
-  ## context with no label would render an unpickable blank option, so it is
-  ## given the id as a fallback name rather than dropped (dropping it would
-  ## silently renumber the reviewer's choices).
-  result = @[]
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return
-  for ctx in drData.traceContexts:
-    let label = safeStr(ctx.label)
-    result.add(VCSTraceContextRow(
-      id: ctx.id,
-      label: if label.len > 0: label else: "Trace " & $ctx.id,
-    ))
-
-proc deepReviewRows(self: VCSComponent): seq[VCSFileRow] =
-  result = @[]
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return
-  for i, file in drData.files:
-    var coverageExecuted = 0
-    for cov in file.coverage:
-      if cov.executed:
-        coverageExecuted += 1
-    let coverageText =
-      if file.coverage.len > 0:
-        $coverageExecuted & "/" & $file.coverage.len
-      else:
-        ""
-    let status =
-      if not file.diff.isNil and ($file.diff.status).len > 0:
-        safeStr(file.diff.status)
-      else:
-        "M"
-    result.add(VCSFileRow(
-      status: status,
-      path: safeStr(file.path),
-      baseName: basename(file.path),
-      additions: if file.diff.isNil: 0 else: file.diff.linesAdded,
-      deletions: if file.diff.isNil: 0 else: file.diff.linesRemoved,
-      coverageText: coverageText,
-      selected: i == self.data.deepReviewSelectedFileIndex,
-    ))
-
-proc reviewCoverageRows(self: VCSComponent):
-    seq[AgentDeepReviewFileCoverage] =
-  ## Project the review's per-file coverage into the Agent Activity panel's
-  ## DeepReview rows — DeepReview-GUI.md §2.1, "Per-file coverage — one row
-  ## per file in the review, aligned with the VCS panel's Changed Files rows".
-  ##
-  ## The alignment is literal: this walks ``deepReviewData.files`` in the same
-  ## order ``deepReviewRows`` does, so row *i* of the coverage table and row
-  ## *i* of the Changed Files list describe the same file.  ``coveredLines`` /
-  ## ``totalLines`` come from ``DeepReviewFileData.coverage``
-  ## (``DeepReviewLineCoverage.executed``) and ``hasFlow`` from whether the
-  ## export recorded any function flow for the file; nothing is invented.
-  result = @[]
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return
-  for file in drData.files:
-    var executed = 0
-    for cov in file.coverage:
-      if cov.executed:
-        executed += 1
-    result.add(AgentDeepReviewFileCoverage(
-      path: safeStr(file.path),
-      coveredLines: executed,
-      totalLines: file.coverage.len,
-      hasFlow: file.flow.len > 0,
-    ))
-
-proc reviewTracedFunctions(self: VCSComponent): int =
-  ## Distinct functions the review's recordings carry a flow for.
-  ##
-  ## ``DeepReviewFunctionFlow`` is *one execution* of a function, so several
-  ## entries can share a ``functionKey``; counting entries would report four
-  ## "functions traced" for three functions called four times.  Keys are
-  ## qualified by path because a key is only unique within its file.
-  var seen: seq[string] = @[]
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return 0
-  for file in drData.files:
-    for flow in file.flow:
-      let key = safeStr(file.path) & ":" & safeStr(flow.functionKey)
-      if key notin seen:
-        seen.add(key)
-  seen.len
+  ## The projection itself lives in ``viewmodel/viewmodels/review_entry`` —
+  ## one generic routine instantiated here over the renderer's
+  ## ``DeepReviewData`` and in the headless tests over the native copy of the
+  ## same type — so the session title, the changed-file rows, the trace
+  ## contexts, the per-file coverage and the traced-function count are derived
+  ## by exactly the same code whichever launch path filled
+  ## ``data.deepReviewData`` (DeepReview-GUI.md §7).
+  reviewDatasetFrom(self.data.deepReviewData)
 
 proc gitChangedRows(self: VCSComponent): seq[VCSFileRow] =
   result = @[]
@@ -691,34 +595,25 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   if vm.isNil:
     return
   if self.isDeepReviewMode():
-    let reviewRows = self.deepReviewRows()
-    let contexts = self.reviewTraceContexts()
-    vm.setDeepReviewMode(true)
-    # DeepReview-GUI.md §2: the VCS panel header owns the review's session
-    # title *and* its stats.  The stats summarise only what the dataset
-    # carries — file count and total +/-; coverage and test results belong to
-    # the Agent Activity panel (§2.1) and `DeepReviewData` has no
-    # test-results field to read at all.
-    vm.setHeader(self.currentReviewTitle(),
-                 statsText = reviewStatsText(reviewRows))
-    # The selector is the same control for the whole review, so the selection
-    # lives on `Data` next to the data it indexes rather than on this panel.
-    vm.setTraceContexts(contexts)
-    let selectedContext = resolveTraceContextId(
-      contexts, self.data.deepReviewSelectedTraceContextId)
-    self.data.deepReviewSelectedTraceContextId = selectedContext
-    vm.setSelectedTraceContextId(selectedContext)
-    vm.setGitRepoState(true)
     # The view-mode toggle is live in review mode too (VCS-Panel.md, "View
     # mode toggle"), so the VM must carry the component's current position:
     # without this the toggle rendered but changed nothing, because the click
     # resolver reads `VCSVM.viewMode`.
     vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
-    vm.setBranchState("", @[], false)
-    vm.setCommits(@[], @[])
-    vm.setChangedFiles(reviewRows)
-    vm.setUnifiedDiff(false, @[])
-    vm.setHunkState(@[], false, false)
+    # One routine applies the dataset, whichever launch path produced it, and
+    # it is the same routine `startReviewNavigation` enters the review with.
+    # It also decides the selection: a re-sync keeps the file the reviewer is
+    # looking at rather than resetting to the first one.
+    let selectedIndex = applyReviewDataset(
+      vm, self.reviewDataset(), self.data.deepReviewSelectedTraceContextId)
+    # The legacy carriers follow the ViewModel rather than driving it.  Both
+    # are review-wide (a review has one selected file and one selected trace
+    # context however many VCS panels exist), which is why they live on `Data`
+    # — and why the agentic path setting the standalone panel's context id
+    # without setting this one could make the two surfaces disagree.
+    if selectedIndex >= 0:
+      self.data.deepReviewSelectedFileIndex = selectedIndex
+    self.data.deepReviewSelectedTraceContextId = vm.currentTraceContextId()
     return
 
   self.ensureVCSDataLoaded()
@@ -828,6 +723,9 @@ proc handleVCSFileSelection(self: VCSComponent; index: int;
   if vm.isNil:
     return
   if self.isDeepReviewMode():
+    # The VM is the selection's home — a re-sync carries it across by path —
+    # so the click is recorded there first and the legacy index follows.
+    discard selectReviewRow(vm, index)
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
     self.syncDeepReviewPanelSelection()
@@ -876,74 +774,133 @@ proc handleTraceContextSelection(self: VCSComponent; id: int) =
   ## is DR-R6, which is blocked on that gap.
   if not self.isDeepReviewMode():
     return
+  let vm = self.ensureVCSVM()
+  if not vm.isNil:
+    vm.setSelectedTraceContextId(id)
   self.data.deepReviewSelectedTraceContextId = id
   self.syncLegacyVCSIntoVM()
   let component = self.data.ui.componentMapping[Content.DeepReview][0]
   if not component.isNil:
     deepreview.setDeepReviewTraceContext(DeepReviewComponent(component), id)
 
+proc focusDockedPanel(data: Data; content: Content) =
+  ## Make ``content``'s panel the visible tab of whichever stack hosts it.
+  ##
+  ## Layout-System.md, "DeepReview and the Layout", obligation 2 — "Focus, not
+  ## relocation": "the three review panels stay wherever the user put them,
+  ## but the stack hosting each is retargeted at it ... No panel is moved
+  ## between stacks and no stack is created for one."  A layout with no such
+  ## panel is left alone rather than having one grafted in.
+  ##
+  ## The startup path performs the same retarget on the layout *config* before
+  ## GoldenLayout is built (``deepreview_layout.focusReviewFileList`` /
+  ## ``focusReviewActivityPane``); this is the same rule for the launch paths
+  ## whose layout is already live.
+  if data.isNil or data.ui.layout.isNil:
+    return
+  for _, component in data.ui.componentMapping[content]:
+    if component.isNil or component.layoutItem.isNil or
+        component.layoutItem.parent.isNil:
+      continue
+    component.layoutItem.parent.setActiveContentItem(component.layoutItem)
+    return
+
 proc startReviewNavigation*(self: VCSComponent) =
-  ## Review entry, step 2 — "The first modified file opens in the editor"
-  ## (DeepReview-GUI.md §7, "Transition into a Review").
+  ## Enter a review on this panel — the host half of the one review-entry
+  ## routine (``review_entry.enterReview``).
   ##
-  ## …and step 4 — "The Agent Activity panel's DeepReview section populates
-  ## with coverage and test results".  §2.1 is emphatic that this is a
-  ## DeepReview feature rather than an agentic-coding one: "It must not
-  ## require a live agent session: a review launched from the CLI over an
-  ## exported dataset must populate it too."  Both steps therefore run from
-  ## one routine (``review_entry.enterReview``), so there is no path that can
-  ## open a review with the third pillar left empty.
+  ## DeepReview-GUI.md §7, "Transition into a Review", is performed in full by
+  ## a single call: the VCS panel populates with the changeset (step 1), the
+  ## Agent Activity panel's DeepReview section populates (step 4 — §2.1: "It
+  ## must not require a live agent session"), the three panels are focused,
+  ## and the first modified file opens in the editor (step 2).  There is no
+  ## path that can reach a review with one of those left undone, because there
+  ## is only one path.
   ##
-  ## The decision and the selection bookkeeping live in
-  ## ``viewmodel/viewmodels/review_entry``; this proc supplies the changeset
-  ## and the GoldenLayout side effect.  DR-R7 routes the other two launch
-  ## paths (a diff-associated trace, the agentic handoff) through the same
-  ## step.
+  ## This proc supplies what the ViewModel layer cannot: the review dataset
+  ## behind ``data.deepReviewData`` and the GoldenLayout side effects.  All
+  ## three launch paths (``ct --deepreview``, a trace with an associated diff,
+  ## the agentic handoff) arrive here through ``startDeepReviewNavigation``.
   if self.isNil or not self.isDeepReviewMode():
     return
   let vm = self.ensureVCSVM()
   if vm.isNil:
     return
-  # The list and the editor must agree on which file is under review, so the
-  # legacy selection index moves with the VM's row selection.
-  self.data.deepReviewSelectedFileIndex = 0
-  self.syncLegacyVCSIntoVM()
   # The coverage table's clicks come back through this component.
   agent_activity_deepreview.onActivityReviewFileSelected =
     proc(path: string) = self.handleActivityFileSelection(path)
+  let dataset = self.reviewDataset()
   discard enterReview(
     vm,
     ensureAgentActivityDeepReviewVM(),
-    self.reviewCoverageRows(),
-    self.reviewTracedFunctions(),
-    proc(action: VCSOpenAction) = self.dispatchOpenAction(action))
+    dataset,
+    proc(action: VCSOpenAction) = self.dispatchOpenAction(action),
+    proc() =
+      focusDockedPanel(self.data, Content.VCS)
+      focusDockedPanel(self.data, Content.AgentActivity),
+    self.data.deepReviewSelectedTraceContextId)
+  # The legacy carriers follow the ViewModel (see `syncLegacyVCSIntoVM`).
+  self.data.deepReviewSelectedFileIndex =
+    max(vm.reviewRowIndexForPath(selectedReviewPath(vm)), 0)
+  self.data.deepReviewSelectedTraceContextId = vm.currentTraceContextId()
   self.syncDeepReviewPanelSelection()
 
-var deepReviewNavigationDone = false
-  ## One-shot guard for `startDeepReviewNavigation`.  Its caller
-  ## (`ui_js.tryInitLayout`) runs on every layout mount attempt, and the review
-  ## must open its first file *once*: re-running it would drag the reviewer
-  ## back to the first file every time the layout is re-initialised.
-
 proc startDeepReviewNavigation*(data: Data) =
-  ## Find the docked VCS panel of the current layout and run the review-entry
-  ## navigation step on it.
+  ## The single host entry point for a review, whichever launch path started
+  ## it: find the docked VCS panel of the current layout and enter the review
+  ## on it.
   ##
   ## Requires a mounted GoldenLayout — `openLayoutTab` walks `data.ui.layout`
-  ## — so the caller must not invoke it before `initLayout` has run.
-  if deepReviewNavigationDone:
+  ## — so callers must not invoke it before `initLayout` has run.  It is
+  ## deliberately safe to call repeatedly: `enterReview` refreshes the review's
+  ## data every time and performs the *entry* (focus, open the first file)
+  ## exactly once per panel, which is Layout-System.md's obligation 3.  DR-R1
+  ## enforced that with a module-level `var` here; the flag now lives on the
+  ## panel's own ViewModel, where a headless test can observe it and where two
+  ## panels cannot share one answer.
+  ##
+  ## The review-mode check comes first: a call that arrives with no review
+  ## data must not count as an entry, or the real review that starts a moment
+  ## later would find the one-shot already spent (which is exactly what the
+  ## old ordering did).
+  if data.isNil or not data.deepReviewActive or data.deepReviewData.isNil:
     return
-  if data.isNil or data.ui.layout.isNil:
+  if data.ui.layout.isNil:
     return
   for _, component in data.ui.componentMapping[Content.VCS]:
     let vcsComponent = cast[VCSComponent](component)
     if vcsComponent.isNil:
       continue
-    deepReviewNavigationDone = true
     vcsComponent.startReviewNavigation()
     return
   cerror "vcs: startDeepReviewNavigation: no docked VCS panel in the layout; " &
     "the review starts with no file open"
+
+proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
+                              traceLabel: string; recordingId: string) =
+  ## Launch method 2 of DeepReview-GUI.md §1: the opened trace is associated
+  ## with a diff, so the session *is* a review of that diff.
+  ##
+  ## It publishes the assembled dataset exactly where the other two paths
+  ## publish theirs and then calls the one entry routine, so nothing
+  ## downstream — the VCS panel, the diff tabs, the Agent Activity section —
+  ## can tell which launch path it was.
+  ##
+  ## A review that is already active is left alone: a trace opened *into* a
+  ## running review (`ct --deepreview` loads no trace today, but a session can
+  ## gain one) must not have its exported dataset replaced by the bare diff.
+  if data.isNil or diff.isNil or diff.files.len == 0:
+    return
+  if data.deepReviewActive and not data.deepReviewData.isNil:
+    return
+  data.deepReviewData = reviewDataForTraceDiff(
+    diff, title, traceLabel, recordingId)
+  if data.deepReviewData.files.len == 0:
+    data.deepReviewData = nil
+    return
+  data.deepReviewActive = true
+  data.startOptions.deepReview = data.deepReviewData
+  startDeepReviewNavigation(data)
 
 proc tryMountIsoNimVCSPanel*(componentId: int) =
   when defined(js):

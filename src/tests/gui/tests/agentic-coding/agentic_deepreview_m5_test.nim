@@ -2,7 +2,7 @@
 
 import std/[json, os, osproc, sequtils, strutils, times, unittest]
 
-import isonim/core/[owner, signals]
+import isonim/core/[computation, owner, signals]
 import nim_acp
 import nim_agents
 
@@ -10,8 +10,9 @@ import agent_evidence
 import agent_service
 import backend/mock_backend
 import store/[replay_data_store, types]
-import viewmodels/[agent_activity_vm, agent_workspace_vm, agentic_session_vm,
-  deepreview_vm, editor_vm, vcs_vm]
+import viewmodels/[agent_activity_deepreview_vm, agent_activity_vm,
+  agent_workspace_vm, agentic_session_vm, deepreview_vm, editor_vm,
+  review_entry, vcs_vm]
 
 type
   M5Fixture = object
@@ -188,8 +189,15 @@ suite "agentic coding M5 evidence handoff":
       check f.vcs.deepReviewMode.val
       check f.vcs.changedFiles.val.len == 1
       check f.vcs.changedFiles.val[0].path == "src/feature.nim"
+      # DR-R7: these two are what the review's Monaco diff tabs are built
+      # from.  `ui/agentic_session_launcher.deepReviewData` turns each row of
+      # `diffFiles` into that file's `DeepReviewFileDiff.hunks`, so a
+      # changeset of several files gets several diffs instead of the active
+      # editor's text repeated for every one.
       check f.vcs.unifiedDiffActive.val
       check f.vcs.diffFiles.val[0].path == f.vcs.changedFiles.val[0].path
+      check f.vcs.diffFiles.val[0].hunks[0].lines.anyIt(
+        it.content.contains("42"))
       check f.deepReview.hasData.val
       check f.deepReview.viewMode.val == drpvmUnified
       check f.deepReview.files.val.len == f.vcs.changedFiles.val.len
@@ -201,6 +209,88 @@ suite "agentic coding M5 evidence handoff":
       check f.deepReview.files.val.mapIt(it.path) ==
         f.deepReview.unifiedFiles.val.mapIt(it.path)
       check f.activity.messages.val.anyIt(it.content.contains("DeepReview"))
+
+  test "test_agentic_handoff_needs_no_deepreview_component":
+    ## DR-R7.  The M5 handoff must reach full review state with no standalone
+    ## DeepReview panel involved.
+    ##
+    ## `DeepReview-GUI.md` §7: "There is no separate 'DeepReview mode' that
+    ## replaces the UI" — a review is the Editor, the VCS panel and the Agent
+    ## Activity panel.  Until DR-R7 the handoff ended by dereferencing
+    ## `data.ui.componentMapping[Content.DeepReview][DeepReviewId]` and
+    ## configuring that component's view mode, selected file, trace context,
+    ## execution index and iteration; it would have failed outright without
+    ## one, and its trace-context id was set *there* rather than on the
+    ## review, so the two surfaces could disagree.
+    ##
+    ## Two halves, because the handoff spans two layers:
+    ##   * the ViewModel layer reaches the whole review state — this test;
+    ##   * the launcher constructs no component — the source contract below,
+    ##     since the launcher itself needs Electron to run.
+    createRoot proc(dispose: proc()) =
+      var f = makeFixture()
+      defer:
+        delEnv("CODETRACER_AGENT_EVIDENCE_RPC_PATH")
+        f.cleanup()
+        dispose()
+
+      let rpcPath = f.worktree / ".codetracer" / "agent-evidence-rpc.json"
+      let (_, code) = runAgentEvidenceCli(f, rpcPath)
+      check code == 0
+      check f.vm.handleAgentEvidenceRpcFile(rpcPath)
+
+      # The review dataset the launcher publishes, from the same projection it
+      # builds its `DeepReviewData` with.
+      let dataset = f.vm.agenticReviewDataset()
+      check dataset.title.contains("DeepReview")
+      check dataset.files.len == 1
+      check dataset.files[0].path == "src/feature.nim"
+      check dataset.traceContexts.len == 1
+      check dataset.traceContexts[0].label == "m5 integration test"
+
+      # …fed to the one review-entry routine, on the panels a review actually
+      # uses.  Nothing here can even name a `DeepReviewComponent`: this is the
+      # ViewModel layer.
+      let activity = createAgentActivityDeepReviewVM(f.store)
+      let panel = createVCSVM()
+      var documents: seq[string] = @[]
+      var focusCalls = 0
+      discard enterReview(
+        panel, activity, dataset,
+        proc(action: VCSOpenAction) = documents.add(action.documentKey),
+        proc() = focusCalls += 1)
+
+      # §7 step 1 — the VCS panel carries the changeset and the review's run.
+      check panel.deepReviewMode.val
+      check panel.changedFiles.val.len == 1
+      check panel.changedFiles.val[0].path == "src/feature.nim"
+      check panel.changedFiles.val[0].selected
+      check panel.statsText.val.len > 0
+      check panel.traceContexts.val[0].label == "m5 integration test"
+      check panel.currentTraceContextId() == panel.traceContexts.val[0].id
+      # §7 step 2 — the first modified file opens, and the panels are focused.
+      check documents == @["diff:file:src/feature.nim"]
+      check focusCalls == 1
+      # §7 step 4 / §2.1 — the Agent Activity panel's DeepReview section, for
+      # a session that reported no coverage: populated and honest, not blank.
+      check activity.reviewActive.val
+      check activity.sectionVisible.val
+      check activity.fileCoverage.val.len == 1
+      check activity.fileCoverage.val[0].path == "src/feature.nim"
+      check activity.selectedFilePath.val == "src/feature.nim"
+      check not activity.testResultsAvailable.val
+
+  test "the M5 handoff constructs no DeepReview panel (source contract)":
+    ## The other half: `ui/agentic_session_launcher.nim` runs inside Electron,
+    ## so what it *does* can only be asserted by reading it.  Same pattern as
+    ## `src/tests/gui/tests/layout/deepreview_layout_test.nim`'s source
+    ## contract, and as the DR-R7 suite in
+    ## `src/tests/gui/tests/deepreview/deepreview_entry_test.nim`.
+    let launcher = readFile("src/frontend/ui/agentic_session_launcher.nim")
+    check not launcher.contains("DeepReviewComponent")
+    check not launcher.contains("ensurePanel(Content.DeepReview")
+    check not launcher.contains("requestDeepReviewPanelRefresh")
+    check launcher.contains("vcs.startDeepReviewNavigation(data)")
 
   test "test_agentic_deepreview_handoff_error_states":
     createRoot proc(dispose: proc()) =

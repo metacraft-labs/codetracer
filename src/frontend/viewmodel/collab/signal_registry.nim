@@ -449,6 +449,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "How far each hunk's context is expanded is a local reading position.",
     requiresStableId = true,
     stableIdNote = "Would need stable diff hunk ids if synchronized.")
+  entries.addEntry("VCSVM", "reviewEntered", vscRendererLocal,
+    "Whether this panel already ran review entry; a local one-shot that " &
+    "keeps re-entry from re-opening tabs or re-focusing panels.")
   entries.addEntry("VCSVM", "lastHunkClickOrdinal", vscRendererLocal,
     "Shift-click anchor for hunk range selection; a local pointer gesture.",
     requiresStableId = true,

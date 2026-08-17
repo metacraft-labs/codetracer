@@ -877,6 +877,75 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
+  // DR-R7: one launch, all three panels
+  // -----------------------------------------------------------------------
+
+  // e2e_ct_deepreview_launch_populates_all_three_panels.
+  //
+  // DeepReview-GUI.md §7, "Transition into a Review", is a list of five things
+  // that happen when a review starts, and §1.1 makes the CLI the path an agent
+  // uses: "Launching over a dataset must load the recordings the dataset
+  // references and populate the three panels from them. A review that opens
+  // with empty panels is a defect, not a degraded mode."
+  //
+  // Each of the three panels already has its own test above (Test 2 for the
+  // changed-files list, Test 5b for the editor tab, and the Agent Activity
+  // section in agent-activity-deepreview.spec.ts). This one asserts that ONE
+  // launch reaches all three at once, which is the property DR-R7 makes true
+  // of every launch path rather than only of this one.
+  //
+  // HONEST SCOPE: this test passes against the code as it stood before DR-R7
+  // as well as after — DR-R1 and DR-R3 made the `--deepreview` path do all
+  // three. It is a regression guard for the convergence, not new coverage of
+  // it. What DR-R7 adds is that the other two launch paths reach the same
+  // state, and neither is launchable from Playwright here: the agentic handoff
+  // needs a live Agent Harbor server (agentic-coding/agentic-worktree.spec.ts)
+  // and the diff-associated trace needs a recording made with
+  // `ct record --with-diff`. Both are covered headlessly instead, in
+  // src/tests/gui/tests/deepreview/deepreview_entry_test.nim
+  // (test_all_launch_paths_reach_the_same_review_state) and
+  // src/tests/gui/tests/agentic-coding/agentic_deepreview_m5_test.nim
+  // (test_agentic_handoff_needs_no_deepreview_component).
+  test("Test 25: one launch populates and focuses all three review panels", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1500);
+
+    // Pillar 1 — the VCS panel: populated with the changeset, and the visible
+    // tab of its stack (§2: "The VCS panel must be the visible tab of
+    // whichever stack hosts it when a review starts").
+    const activeTitles = await dr.activeTabTitles();
+    expect(activeTitles).toContain("VCS");
+    await expect(dr.vcsPanel()).toBeVisible();
+    await expect(dr.vcsReviewStats()).toContainText("3 files");
+    const files = await dr.fileItems();
+    expect(files.length).toBe(3);
+
+    // Pillar 2 — the Editor: the first modified file is open as a diff tab,
+    // and it is the active tab of the editor area (§7 step 2).
+    const firstTitle = DeepReviewPage.diffTabTitle("src/main.rs");
+    expect(activeTitles).toContain(firstTitle);
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
+
+    // Pillar 3 — the Agent Activity panel: its DeepReview section is visible,
+    // expanded, and showing this changeset's coverage (§2.1). No agent ran:
+    // the dataset alone fills it.
+    expect(activeTitles).toContain("AGENT ACTIVITY");
+    await expect(dr.reviewActivitySection()).toBeVisible();
+    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
+    await expect(dr.reviewActivityFileRows()).toHaveCount(3);
+
+    // ...and all of it happened additively: no standard panel was displaced
+    // to make room for the review (issue #610).
+    const allTitles = await dr.layoutTabTitles();
+    for (const expected of ["FILES", "STATE", "CALLTRACE", "EVENT LOG"]) {
+      expect(allTitles, `missing standard panel: ${expected}`).toContain(
+        expected,
+      );
+    }
+  });
+
+  // -----------------------------------------------------------------------
   // Tests 14-16: Context expansion in the diff tab (DR-R5)
   // -----------------------------------------------------------------------
 
