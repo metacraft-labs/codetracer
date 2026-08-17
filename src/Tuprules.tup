@@ -23,6 +23,31 @@ NIM_COMMON_FLAGS=\
 
 ROOT = $(TUP_CWD)/../../
 
+# The Nim search path for every binary this build produces.
+#
+# On the runquota entries at the end of the list: `src/ct/codetracer.nim`
+# imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
+# `import runquota_process`, so every `ct` build needs runquota's libraries
+# here. They are declared in this file, rather than left to a config file,
+# because neither config that mentions runquota is consulted for this compile:
+#
+#   * `src/ct_test/nim.cfg` and `src/ct_test/config.nims` are read only when the
+#     PROJECT DIRECTORY is `src/ct_test` -- which is how
+#     `ci/test/m16-release-gate.sh` compiles the ct_test suites, so there they
+#     are load-bearing and must stay. Tup's project directory is `src/ct`, a
+#     SIBLING of `src/ct_test`, and Nim reads config files from the project
+#     directory and its ANCESTORS only, so they contribute nothing to `ct`.
+#   * the repo-root `config.nims` IS read here (it is an ancestor) and does
+#     carry a runquota block -- but its two sources are `getEnv("RUNQUOTA_SRC")`
+#     and the `../runquota` sibling checkout. Tup sanitizes the environment down
+#     to the `export` list further down this file, which does not name
+#     `RUNQUOTA_SRC`, so under tup only the sibling checkout can ever resolve.
+#
+# Listing them here makes the tup build state its own dependency instead of
+# inheriting it from a config whose env half is stripped. It does NOT remove the
+# need for the checkout: `$(ROOT)/../runquota` still has to exist, which is what
+# `scripts/require-siblings.sh` checks for by name and what the `siblings:`
+# lists in .github/workflows/codetracer.yml provision.
 NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/libs/NimYAML\
 --path:$(ROOT)/libs/asynctools\
@@ -52,7 +77,15 @@ NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/../nim-everywhere/src\
 --path:$(ROOT)/../nim-acp/src\
 --path:$(ROOT)/../nim-agent-harbor/src\
---path:$(ROOT)/../nim-agents/src
+--path:$(ROOT)/../nim-agents/src\
+--path:$(ROOT)/../runquota/libs/runquota_process/src\
+--path:$(ROOT)/../runquota/libs/runquota_core/src\
+--path:$(ROOT)/../runquota/libs/runquota_host/src\
+--path:$(ROOT)/../runquota/libs/runquota_host_linux/src\
+--path:$(ROOT)/../runquota/libs/runquota_host_macos/src\
+--path:$(ROOT)/../runquota/libs/runquota_host_windows/src\
+--path:$(ROOT)/../runquota/libs/runquota_codec/src\
+--path:$(ROOT)/../runquota/libs/runquota_protocol/src
 
 NIM_DEBUG_FLAGS=\
 $(NIM_COMMON_FLAGS)\

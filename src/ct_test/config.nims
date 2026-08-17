@@ -1,3 +1,9 @@
+# SCOPE: this file is read only when the project directory is `src/ct_test`
+# (the ct_test suites compiled by ci/test/m16-release-gate.sh). It is NOT read
+# for the `ct` binary, whose project directory is the sibling `src/ct`. See the
+# SCOPE note at the top of nim.cfg beside this file for the full explanation and
+# for where `ct` gets these same dependencies (issue #641).
+#
 # RUNQUOTA_SRC fallback for the runquota_process import paths.
 #
 # nim.cfg (next to this file) lists the runquota library paths relative to a

@@ -11,7 +11,7 @@
 # sits next to `<workspace>/isonim`, `<workspace>/io-mon`, ... and both build
 # drivers reach across by relative path:
 #
-#   * Nim   -- `src/Tuprules.tup:47-55` passes `--path:$(ROOT)/../<sibling>/src`
+#   * Nim   -- `src/Tuprules.tup:72-88` passes `--path:$(ROOT)/../<sibling>/src`
 #              unconditionally, and `config.nims` adds the same directories
 #              through `addPathIfDir`.
 #   * Cargo -- `src/db-backend/Cargo.toml` declares `path = "../../../
@@ -96,6 +96,37 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # nim-agent-harbor, nim-agents) -- intersected with what a build here has
 # actually been observed to need.
 #
+# `runquota` was added to that tier after issue #641. `src/ct/codetracer.nim`
+# imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
+# `import runquota_process`, so every `ct` build needs it somehow.
+#
+# The two build drivers get it from different places, and that is the whole
+# reason this entry is worded the way it is:
+#
+#   * tup (the Linux default) takes its Nim search path from
+#     `src/Tuprules.tup`'s NIM_REPO_PATH_FLAGS, whose runquota entries are
+#     `$(ROOT)/../runquota/...`. Tup also sanitizes the environment down to that
+#     file's `export` list, which does NOT name RUNQUOTA_SRC. On this driver the
+#     sibling checkout is the ONLY way in.
+#   * reprobuild (Darwin/Windows, opt-in on Linux) resolves runquota as a nix
+#     flake input, with RUNQUOTA_SRC as its repo-path alias (`repro.nim`'s
+#     CodeTracerNixSiblingInputs / CodeTracerRepoEnvAliases). This driver does
+#     not strictly need a checkout at all.
+#
+# The override column is nonetheless left EMPTY, i.e. the checkout is required
+# on both drivers. Honouring RUNQUOTA_SRC here would make this check pass on the
+# strength of a variable tup strips, and hand the tup lane back precisely the
+# `cannot open file: runquota_process` that this entry exists to pre-empt --
+# a false green on the one driver that actually needed the warning. Requiring
+# the checkout keeps ONE workspace-completeness rule that holds on every driver,
+# which is also how every other `--path` sibling in NIM_REPO_PATH_FLAGS is
+# handled. The cost is that a reprobuild-only build now wants a checkout it
+# could have done without; CODETRACER_SKIP_SIBLING_CHECK=1 is the escape hatch.
+#
+# All four jobs that reach `just build-once` (visual-replay-regression-gate,
+# test-ui-tests, viewmodel-tests, cross-process-linux) provision it in
+# .github/workflows/codetracer.yml.
+#
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
 # zero exit. `isonim-tui` / `isonim-gpui` / `nim-termctl` / `nim-pty` are on
@@ -110,12 +141,16 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 required_siblings=(
 	'isonim|src/isonim.nim|ISONIM_SRC|the reactive UI framework the whole renderer is written against (223 `import isonim/...` sites); also the source `build-tailwind.sh` extracts utility classes from'
 	'nim-agents|src/nim_agents.nim||`import nim_agents` in src/frontend/viewmodel/agent_service.nim and the agentic-session UI'
-	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:54"
-	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:53 puts on the Nim search path"
-	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:52 puts on the Nim search path"
+	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:79"
+	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:78 puts on the Nim search path"
+	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:77 puts on the Nim search path"
 	'codetracer-trace-format-nim|src/codetracer_ct_print_lib.nim|CODETRACER_TRACE_FORMAT_NIM_SRC|`ct print` (src/ct/cli/print_trace.nim) imports codetracer_trace_writer/* and codetracer_ct_print_lib'
 	'codetracer-trace-format|codetracer_trace_types/Cargo.toml||five `path = "../../../codetracer-trace-format/..."` dependencies in src/db-backend/Cargo.toml; cargo cannot even parse the manifest without them'
 	'codetracer-native-recorder|ct_emulator/src/ct_emulator/emulator_wasm_api.nim|CT_CODETRACER_NATIVE_RECORDER_SIBLING|src/db-backend/build.rs compiles the Nim MCR emulator from ct_emulator/ and links it as lib${CT_MCR_EMULATOR_LINK_NAME}.so; without it the db-backend link fails with 81 undefined `mcr*` symbols'
+	# Override column deliberately empty -- see the RUNQUOTA_SRC discussion in
+	# the tier notes above. Accepting the env var here would green this check on
+	# the tup driver, which strips it.
+	'runquota|libs/runquota_process/src/runquota_process.nim||`import runquota_process` in src/ct_test/process_exec.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test; src/Tuprules.tup puts libs/runquota_*/src on the Nim search path'
 )
 
 advisory_siblings=(
@@ -123,10 +158,10 @@ advisory_siblings=(
 	'nim-stackable-hooks|src/stackable_hooks.nim|NIM_STACKABLE_HOOKS_SRC|`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim'
 	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's dependency queue imports \`shm_queue\`"
 	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's writer imports \`shm_gset/transport\` (the symptom config.nims:74-77 documents)"
-	"isonim-tui|src||src/Tuprules.tup:48 puts it on the Nim search path"
-	"isonim-gpui|src||src/Tuprules.tup:49 puts it on the Nim search path"
-	"nim-termctl|src||src/Tuprules.tup:50 puts it on the Nim search path"
-	"nim-pty|src||src/Tuprules.tup:51 puts it on the Nim search path"
+	"isonim-tui|src||src/Tuprules.tup:73 puts it on the Nim search path"
+	"isonim-gpui|src||src/Tuprules.tup:74 puts it on the Nim search path"
+	"nim-termctl|src||src/Tuprules.tup:75 puts it on the Nim search path"
+	"nim-pty|src||src/Tuprules.tup:76 puts it on the Nim search path"
 )
 
 if [ -n "${CODETRACER_STRICT_SIBLING_CHECK:-}" ]; then
