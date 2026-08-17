@@ -81,8 +81,14 @@
 // "not available for this dataset" — an exported DeepReview dataset carries
 // no test results, so the card must read as absent data rather than as a
 // green run.  Muted and italic: neither pass-green nor fail-red.
+// "not available for this dataset" — the exported review carries no test
+// results, so this must read as absence rather than as a passing suite.
+//
+// Distinguished by the italics and the wording, NOT by colour: it inherits
+// `.activity-dr-card-detail`'s secondary grey deliberately.  Restating the
+// colour here would be a no-op, and there is no pass-green in this
+// stylesheet to contrast against — only the failure state is coloured.
 .activity-dr-card-unavailable
-  color var(--text-secondary, #8e8f92)
   font-style italic
 
 // --- File table ---
