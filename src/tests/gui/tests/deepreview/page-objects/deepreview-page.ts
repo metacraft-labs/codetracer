@@ -246,24 +246,39 @@ export class DeepReviewPage {
    * The unified-diff editor tabs opened from the VCS panel's Changed Files
    * list (DeepReview-GUI.md §3/§4: "Clicking a file opens it in the editor").
    *
-   * A diff tab is a VCS panel instance that renders only a diff — it has no
-   * Changed Files section — which is what distinguishes it from the docked
-   * VCS panel that lists the changeset.
+   * Since DR-R4 a diff tab is a Monaco document of its own
+   * (``Content.UnifiedDiff``), not a second VCS panel instance —
+   * VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the standard
+   * CodeTracer Monaco editor".
    */
   diffTabs(): Locator {
-    return this.page
-      .locator(".vcs-container")
-      .filter({ hasNot: this.page.locator(".vcs-changed-files") });
+    return this.page.locator(".unified-diff-container");
+  }
+
+  /**
+   * The rendered lines of the active diff tab's Monaco editor.
+   *
+   * Monaco renders the model text into ``.view-line`` elements, so this is
+   * the diff text a reader actually sees.  (Named ``diffTabLines`` rather
+   * than ``diffLines`` because ``DeepReviewFileItem.diffLines`` already means
+   * a changed-file row's "+8-3" summary.)
+   */
+  diffTabLines(): Locator {
+    return this.diffTabs().locator(".monaco-editor .view-line");
+  }
+
+  /** The `@@ -N,M +N,M @@` section dividers, as rendered lines. */
+  diffHunkHeaderLines(): Locator {
+    // `\s` rather than a literal space, and unanchored: Monaco renders runs
+    // of spaces as U+00A0 to preserve their width, and matches `hasText`
+    // regexes against the element's raw text rather than a normalized copy.
+    return this.diffTabLines().filter({ hasText: /@@\s-\d+,\d+\s\+\d+,\d+\s@@/ });
   }
 
   // -- The docked VCS panel ------------------------------------------------
 
   /**
    * The docked VCS panel — the one that lists the changeset.
-   *
-   * It is the complement of ``diffTabs()``: a review opens diff tabs that are
-   * also ``.vcs-container`` elements, so anything asserted about the panel
-   * that hosts the review's navigation must be scoped this way.
    */
   vcsPanel(): Locator {
     return this.page
@@ -350,10 +365,16 @@ export class DeepReviewPage {
     return this.reviewActivitySection().locator(".activity-dr-header");
   }
 
-  /** The diff tab showing ``filePath``'s diff, if one is open. */
+  /**
+   * The diff tab showing ``filePath``'s diff, if one is open.
+   *
+   * Matched on the file-header line of the Monaco document (DeepReview-GUI.md
+   * §4.1, "A file header with path and diff metadata"), which since DR-R4 is
+   * a line of the model rather than DOM chrome.
+   */
   diffTabFor(filePath: string): Locator {
     return this.diffTabs().filter({
-      has: this.page.locator(".deepreview-unified-file-path", {
+      has: this.page.locator(".monaco-editor .view-line", {
         hasText: filePath,
       }),
     });

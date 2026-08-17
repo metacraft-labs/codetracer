@@ -449,100 +449,185 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 10: Unified diff - file headers
+  // Tests 10-12: the review's unified diff, as a Monaco tab (DR-R4)
   // -----------------------------------------------------------------------
+  //
+  // e2e_review_unified_diff_shows_hunks_in_monaco.
+  //
+  // These three are the DR-R4 rewrite of "Test 10: unified diff shows file
+  // headers", "Test 11: added and removed lines with correct classes" and
+  // "Test 12: multiple file sections in a scrollable view".  All three used to
+  // assert on the standalone panel's DOM diff (`deepreview-unified-*`
+  // elements); they now assert on the editor tab a review opens, which
+  // VCS-Panel.md and DeepReview-GUI.md §4 both require to be "the standard
+  // CodeTracer Monaco editor".
+  //
+  // Test 12's premise changes with the surface: one tab per file means there
+  // is no multi-file scroll to assert.  It becomes "opening a second file
+  // yields a second tab, and both remain open", which is what §4.1 says
+  // instead ("Each diff tab shows a single file... a review does not
+  // concatenate every file into one scrolling document").
+  //
+  // Headless counterparts: test_diff_decorations_classify_added_removed_context,
+  // test_diff_dual_line_numbers and test_diff_decorations_are_mode_agnostic in
+  // src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim.
 
-  test("Test 10: unified diff shows file headers for all files with hunks", async ({ ctPage }) => {
+  /// Open the review file at ``index`` and wait for its Monaco tab to render.
+  async function openReviewDiffTab(
+    dr: DeepReviewPage,
+    index: number,
+    filePath: string,
+  ) {
+    await dr.fileItemByIndex(index).click();
+    const tab = dr.diffTabFor(filePath);
+    await expect(tab).toBeVisible({ timeout: 20_000 });
+    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible({
+      timeout: 20_000,
+    });
+    return tab;
+  }
+
+  test("Test 10: the review's diff tabs are Monaco documents headed by their file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    // Switch to unified diff mode.
-    await dr.switchToUnifiedDiff();
-    await wait(500);
-
-    // Verify the unified diff container is visible.
-    await expect(dr.unifiedDiff()).toBeVisible();
-
-    // All 3 files in the fixture have hunks, so we expect 3 file headers.
-    const fileHeaders = dr.unifiedFileHeaders();
-    const headerCount = await fileHeaders.count();
-    expect(headerCount).toBe(3);
-
-    // Check that file paths are displayed.
-    const filePaths = dr.unifiedFilePaths();
-    const pathTexts: string[] = [];
-    for (let i = 0; i < headerCount; i++) {
-      const text = await filePaths.nth(i).textContent();
-      pathTexts.push(text ?? "");
+    // DeepReview-GUI.md §4.1: "Each diff tab includes: A file header with path
+    // and diff metadata".  All 3 files in the fixture have hunks, so each
+    // opens a tab whose document is headed by that file.
+    for (const [index, filePath] of [
+      [0, "src/main.rs"],
+      [1, "src/utils.rs"],
+      [2, "src/config.rs"],
+    ] as [number, string][]) {
+      const tab = await openReviewDiffTab(dr, index, filePath);
+      // A real editor, not a DOM diff.
+      await expect(tab.locator(".monaco-editor")).toBeVisible();
+      const header = tab.locator(".monaco-editor .view-line", {
+        hasText: filePath,
+      });
+      await expect(header.first()).toBeVisible({ timeout: 15_000 });
     }
-    expect(pathTexts).toContain("src/main.rs");
-    expect(pathTexts).toContain("src/utils.rs");
-    expect(pathTexts).toContain("src/config.rs");
   });
 
-  // -----------------------------------------------------------------------
-  // Test 11: Unified diff - added/removed line decorations
-  // -----------------------------------------------------------------------
-
-  test("Test 11: unified diff shows added and removed lines with correct classes", async ({ ctPage }) => {
+  test("Test 11: the review's diff lines carry added / removed / context decorations", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
-    await wait(500);
+    // Per-file counts from sample-review.json.  The old test summed them
+    // because one DOM view concatenated every file; with one tab per file the
+    // same 16 added / 10 removed / 2 context lines are asserted where they
+    // belong.
+    const expected: [number, string, number, number, number][] = [
+      [0, "src/main.rs", 8, 3, 2],
+      [1, "src/utils.rs", 8, 0, 0],
+      [2, "src/config.rs", 0, 7, 0],
+    ];
 
-    // The fixture has:
-    //   src/main.rs: 3 removed, 8 added, 2 context = 13 lines
-    //   src/utils.rs: 0 removed, 8 added, 0 context = 8 lines
-    //   src/config.rs: 7 removed, 0 added, 0 context = 7 lines
-    // Total added: 16, total removed: 10, total context: 2
+    for (const [index, filePath, added, removed, context] of expected) {
+      const tab = await openReviewDiffTab(dr, index, filePath);
+      const overlays = tab.locator(".view-overlays");
+      await expect
+        .poll(async () => await overlays.locator(".ct-diff-line-added").count(), {
+          timeout: 15_000,
+        })
+        .toBe(added);
+      expect(await overlays.locator(".ct-diff-line-removed").count()).toBe(
+        removed,
+      );
+      expect(await overlays.locator(".ct-diff-line-context").count()).toBe(
+        context,
+      );
+      // Exactly one hunk per file in the fixture, rendered as a section
+      // divider (VCS-Panel.md: "Hunk headers (@@ -N,M +N,M @@) shown as
+      // section dividers").
+      expect(await overlays.locator(".ct-diff-line-hunk-header").count()).toBe(1);
 
-    const addedCount = await dr.unifiedAddedLines().count();
-    expect(addedCount).toBe(16);
-
-    const removedCount = await dr.unifiedRemovedLines().count();
-    expect(removedCount).toBe(10);
-
-    const contextCount = await dr.unifiedContextLines().count();
-    expect(contextCount).toBe(2);
+      // ...and the `+` / `-` gutter markers VCS-Panel.md requires.
+      const margin = tab.locator(".margin-view-overlays");
+      expect(await margin.locator(".ct-diff-gutter-added").count()).toBe(added);
+      expect(await margin.locator(".ct-diff-gutter-removed").count()).toBe(
+        removed,
+      );
+    }
   });
 
-  // -----------------------------------------------------------------------
-  // Test 12: Unified diff - multiple files in scroll view
-  // -----------------------------------------------------------------------
-
-  test("Test 12: unified diff shows multiple file sections in a scrollable view", async ({ ctPage }) => {
+  test("Test 12: opening a second file yields a second tab, and both stay open", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
+    // DeepReview-GUI.md §4.1: "Each diff tab shows a single file.  Cross-file
+    // navigation is the Changed Files list; a review does not concatenate
+    // every file into one scrolling document."
+    await openReviewDiffTab(dr, 0, "src/main.rs");
+    await openReviewDiffTab(dr, 1, "src/utils.rs");
+
+    expect(await dr.diffTabs().count()).toBe(2);
+    const titles = await dr.layoutTabTitles();
+    expect(titles).toContain(DeepReviewPage.diffTabTitle("src/main.rs"));
+    expect(titles).toContain(DeepReviewPage.diffTabTitle("src/utils.rs"));
+    // The second file is the focused one; the first is still open behind it.
+    expect(await dr.activeTabTitles()).toContain(
+      DeepReviewPage.diffTabTitle("src/utils.rs"),
+    );
+
+    // Each tab holds its own file's diff, with the fixture's own hunk range —
+    // not a shared, concatenated document.  Asserted one at a time because
+    // GoldenLayout hides the inactive tab and Monaco renders no lines for a
+    // hidden editor; re-selecting the first file also shows the tab was still
+    // there rather than re-created.
+    await expect(
+      dr
+        .diffTabFor("src/utils.rs")
+        .locator(".monaco-editor .view-line", { hasText: "@@ -0,0 +1,8 @@" })
+        .first(),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await openReviewDiffTab(dr, 0, "src/main.rs");
+    expect(await dr.diffTabs().count()).toBe(2);
+    await expect(
+      dr
+        .diffTabFor("src/main.rs")
+        .locator(".monaco-editor .view-line", { hasText: "@@ -2,5 +2,10 @@" })
+        .first(),
+    ).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("Test 12b: a review's diff tab keeps hunk selection but not the mutating operations", async ({ ctPage }) => {
+    // DeepReview-GUI.md §4.5: "In DeepReview mode the mutating operations
+    // (stage, discard, move to commit) are disabled — the changeset is
+    // immutable, per VCS-Panel.md 'DeepReview Mode: Commit operations:
+    // Disabled (read-only view)' — while selection and copy-as-patch remain
+    // available."
+    //
+    // Headless counterparts: "the mutating hunk operations are disabled for a
+    // review" in src/tests/gui/tests/vcs/vcs_vm_test.nim, and "the diff tab
+    // renders its hunk toolbar over the Monaco host" in
+    // src/tests/gui/tests/views/isonim_views_test.nim.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
     await wait(500);
 
-    // Verify all hunk headers are present (one per file since each has one hunk).
-    const hunkHeaders = dr.unifiedHunkHeaders();
-    const hunkCount = await hunkHeaders.count();
-    expect(hunkCount).toBe(3);
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
 
-    // Verify hunk header content (the @@ lines).
-    const firstHunkText = await hunkHeaders.nth(0).textContent();
-    expect(firstHunkText).toContain("@@ -2,5 +2,10 @@");
+    const header = dr.diffHunkHeaderLines().first();
+    await expect(header).toBeVisible({ timeout: 15_000 });
+    await header.click();
 
-    const secondHunkText = await hunkHeaders.nth(1).textContent();
-    expect(secondHunkText).toContain("@@ -0,0 +1,8 @@");
-
-    const thirdHunkText = await hunkHeaders.nth(2).textContent();
-    expect(thirdHunkText).toContain("@@ -1,7 +0,0 @@");
-
-    // Verify total lines across all files.
-    const totalLines = await dr.unifiedAllLines().count();
-    expect(totalLines).toBe(28);  // 13 + 8 + 7
-
-    // Verify the unified diff container itself is scrollable
-    // (has overflow-y auto in CSS).
-    await expect(dr.unifiedDiff()).toBeVisible();
+    await expect(tab.locator(".hunk-toolbar-count")).toHaveText(
+      "1 hunk selected",
+      { timeout: 10_000 },
+    );
+    // Copy stays.
+    await expect(tab.locator(".hunk-toolbar-button").first()).toHaveText(
+      "Copy as patch",
+    );
+    // Staging does not.
+    await expect(
+      tab.locator(".hunk-toolbar-button", { hasText: "Stage hunks" }),
+    ).toHaveCount(0);
   });
 
   // -----------------------------------------------------------------------

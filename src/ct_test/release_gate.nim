@@ -215,6 +215,20 @@ const
     "src/tests/gui/tests/vcs/vcs_vm_test.nim",
     "src/tests/gui/tests/vcs/vcs_view_test.nim",
     "src/tests/gui/tests/deepreview/deepreview_vm_test.nim",
+    # DR-R4 — the unified diff became a real Monaco tab.  The whole point of
+    # extracting `viewmodel/viewmodels/diff_document.nim` is that the diff's
+    # appearance stops being CSS on `tdiv` elements and becomes data: which
+    # lines are added / removed / context, where the `@@` dividers go, which
+    # `+` / `-` gutter marker each line carries, and what the dual old/new
+    # line numbers read.  This file asserts all of it headlessly, including
+    # VCS-Panel.md's rule that the builder never consults the mode.
+    #
+    # DR-R4 also grew `vcs_vm_test.nim` (already listed above) with the hunk
+    # editor: selection, shift-click ranges, ctrl-click toggling and a
+    # checked-in copy-as-patch golden.  That model used to live in
+    # `ui/vcs.nim`, where no headless test could reach it, so porting the
+    # renderer could have deleted a specified capability silently.
+    "src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim",
     # DR-R3 — the Agent Activity panel as DeepReview's third pillar.  The
     # panel's ViewModel, view and component all existed and were all wired to
     # nothing: the only caller of `setCoverageSummary` / `setTestResults` /

@@ -21,6 +21,8 @@
 ##   git-log page fetch is in progress.  The view shows a subtle loading row
 ##   at the bottom of the commit list until it flips back to false.
 
+import std/strutils
+
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
@@ -177,6 +179,14 @@ type
     selectedHunks*: Signal[seq[(int, int)]]
     hunkToolbarVisible*: Signal[bool]
     hunkCopyFeedback*: Signal[bool]
+    ## Flat ordinal of the last singly-clicked hunk header — the anchor a
+    ## shift-click range extends from (VCS-Panel.md, "Hunk Selection":
+    ## "Shift-click to select a range of hunks").  -1 means "no anchor yet".
+    ##
+    ## It lives here rather than on the host component because DR-R4 moved the
+    ## whole selection model into this ViewModel: the Monaco diff tab is a
+    ## dispatcher over `selectHunk` and owns no selection state of its own.
+    lastHunkClickOrdinal*: Signal[int]
     loadingMore*: Signal[bool]  ## true while next commit page is being fetched
 
     fileCount*: Memo[int]
@@ -409,6 +419,207 @@ proc setHunkState*(vm: VCSVM; selected: openArray[(int, int)];
 proc setLoadingMore*(vm: VCSVM; loading: bool) =
   vm.loadingMore.val = loading
 
+# ---------------------------------------------------------------------------
+# Hunk editor (VCS-Panel.md, "Hunk Editor")
+# ---------------------------------------------------------------------------
+#
+# The whole selection model lives here, in pure code over ``VCSDiffFileRow``.
+#
+# Until DR-R4 it lived in ``ui/vcs.nim`` over the raw ``DeepReviewData`` of a
+# DOM-rendered diff panel, which made it unreachable without a browser and tied
+# it to one renderer.  The Monaco diff tab is a dispatcher over ``selectHunk``
+# and ``buildPatchFromSelectedHunks``; it holds no selection state of its own,
+# so there is exactly one model and the hunk editor survives the port
+# (DeepReview-GUI.md §4.5: "the hunk editor is a *constraint on the diff tab,
+# not an optional extra*").
+#
+# ``VCSDiffFileRow.fileIndex`` — not the row's position in ``diffFiles`` — is
+# the file identity a selection pair names, because the row list omits files
+# that carry no hunks.  Every lookup below goes through it.
+
+proc fileRowByIndex*(files: openArray[VCSDiffFileRow]; fileIndex: int): int =
+  ## Position in ``files`` of the row whose ``fileIndex`` is ``fileIndex``,
+  ## or -1.
+  for i, file in files:
+    if file.fileIndex == fileIndex:
+      return i
+  -1
+
+proc flatHunkOrdinal*(files: openArray[VCSDiffFileRow];
+                      fileIndex, hunkIndex: int): int {.noSideEffect.} =
+  ## Position of a (fileIndex, hunkIndex) pair in the flat sequence of every
+  ## hunk in the document, counting files in render order.  Shift-click ranges
+  ## are expressed in these ordinals because a range can span files.
+  result = 0
+  for file in files:
+    if file.fileIndex == fileIndex:
+      return result + hunkIndex
+    result += file.hunks.len
+
+proc hunkPairFromOrdinal*(files: openArray[VCSDiffFileRow]; ordinal: int):
+    (int, int) {.noSideEffect.} =
+  ## Inverse of ``flatHunkOrdinal``.  Returns (-1, -1) when the ordinal names
+  ## no hunk, so a caller walking a range can skip rather than invent a pair;
+  ## the DOM implementation returned (0, 0) there, which named a real hunk.
+  if ordinal < 0:
+    return (-1, -1)
+  var remaining = ordinal
+  for file in files:
+    if remaining < file.hunks.len:
+      return (file.fileIndex, remaining)
+    remaining -= file.hunks.len
+  (-1, -1)
+
+proc isHunkSelected*(vm: VCSVM; fileIndex, hunkIndex: int): bool =
+  for pair in vm.selectedHunks.val:
+    if pair[0] == fileIndex and pair[1] == hunkIndex:
+      return true
+  false
+
+proc clearHunkSelection*(vm: VCSVM) =
+  vm.selectedHunks.val = @[]
+  vm.hunkToolbarVisible.val = false
+
+proc toggleHunkSelection*(vm: VCSVM; fileIndex, hunkIndex: int) =
+  ## VCS-Panel.md, "Hunk Selection": "Ctrl-click to toggle individual hunk
+  ## selection".
+  var selected = vm.selectedHunks.val
+  var found = -1
+  for i in 0 ..< selected.len:
+    if selected[i][0] == fileIndex and selected[i][1] == hunkIndex:
+      found = i
+      break
+  if found >= 0:
+    selected.delete(found)
+  else:
+    selected.add((fileIndex, hunkIndex))
+  vm.selectedHunks.val = selected
+  vm.hunkToolbarVisible.val = selected.len > 0
+
+proc selectHunkRange*(vm: VCSVM; fromOrdinal, toOrdinal: int) =
+  ## VCS-Panel.md, "Hunk Selection": "Shift-click to select a range of hunks".
+  ## Additive, like the DOM implementation: an existing selection is extended
+  ## rather than replaced.
+  let files = vm.diffFiles.val
+  let lo = min(fromOrdinal, toOrdinal)
+  let hi = max(fromOrdinal, toOrdinal)
+  var selected = vm.selectedHunks.val
+  for ordinal in lo .. hi:
+    let pair = hunkPairFromOrdinal(files, ordinal)
+    if pair[0] < 0:
+      continue
+    if not vm.isHunkSelected(pair[0], pair[1]) and pair notin selected:
+      selected.add(pair)
+  vm.selectedHunks.val = selected
+  vm.hunkToolbarVisible.val = selected.len > 0
+
+proc selectHunk*(vm: VCSVM; fileIndex, hunkIndex: int;
+                 shiftKey = false; ctrlKey = false) =
+  ## The single entry point a diff surface calls when a hunk header is clicked.
+  ##
+  ## VCS-Panel.md, "Hunk Selection": "Click a hunk header to select it.
+  ## Shift-click to select a range of hunks. Ctrl-click to toggle individual
+  ## hunk selection."  A plain click on the sole selected hunk deselects it,
+  ## which is what makes a click a toggle for a single-hunk selection.
+  let files = vm.diffFiles.val
+  let ordinal = flatHunkOrdinal(files, fileIndex, hunkIndex)
+  if shiftKey and vm.lastHunkClickOrdinal.val >= 0:
+    vm.selectHunkRange(vm.lastHunkClickOrdinal.val, ordinal)
+  elif ctrlKey:
+    vm.toggleHunkSelection(fileIndex, hunkIndex)
+  else:
+    if vm.selectedHunks.val.len == 1 and vm.isHunkSelected(fileIndex, hunkIndex):
+      vm.clearHunkSelection()
+    else:
+      vm.clearHunkSelection()
+      vm.selectedHunks.val = @[(fileIndex, hunkIndex)]
+      vm.hunkToolbarVisible.val = true
+  vm.lastHunkClickOrdinal.val = ordinal
+
+proc setHunkCopyFeedback*(vm: VCSVM; copied: bool) =
+  vm.hunkCopyFeedback.val = copied
+
+proc mutatingHunkOpsEnabled*(vm: VCSVM): bool =
+  ## Whether the hunk operations that *change* the repository (stage/unstage,
+  ## discard, move to commit) may be offered.
+  ##
+  ## VCS-Panel.md, "DeepReview Mode": "Commit operations: Disabled (read-only
+  ## view)" — a review's changeset is immutable, and the repository the review
+  ## describes need not even be the one the process was started in.
+  ##
+  ## This is deliberately NOT consulted by the diff renderer.  VCS-Panel.md,
+  ## "Unified Diff View (Shared)": "The diff rendering code does NOT check
+  ## which mode is active — it simply renders whatever data is provided."  The
+  ## mode question belongs to the toolbar's *operations*, not to how a line is
+  ## drawn.
+  not vm.deepReviewMode.val
+
+proc buildPatchFromSelectedHunks*(vm: VCSVM): string =
+  ## The selected hunks as a unified diff patch — VCS-Panel.md, "Hunk
+  ## Operations": "Copy — copy selected hunks to clipboard (as patch format)".
+  ##
+  ## Byte-for-byte the output of the pre-DR-R4 implementation in
+  ## ``ui/vcs.nim``: files are grouped in order of first appearance in the
+  ## selection, each group emits the three ``diff --git`` / ``---`` / ``+++``
+  ## header lines, hunks follow in selection order with an ``@@`` header and
+  ## one ``+`` / ``-`` / space-prefixed line each, and the whole thing is
+  ## newline-joined with a trailing newline.  The golden in
+  ## ``src/tests/gui/tests/vcs/vcs_vm_test.nim`` pins it.
+  ##
+  ## One deliberate difference, in a case the old code could only reach with a
+  ## corrupt selection: when *no* selected pair names a file that is present,
+  ## the old version returned a lone "\n" (an empty patch that the caller then
+  ## copied to the clipboard).  This one returns "", so there is nothing to
+  ## copy.
+  let files = vm.diffFiles.val
+  let selected = vm.selectedHunks.val
+  if selected.len == 0:
+    return ""
+
+  # Group selected hunks by file index, preserving order of first appearance.
+  var fileHunks: seq[(int, seq[int])] = @[]
+  for pair in selected:
+    let fi = pair[0]
+    let hi = pair[1]
+    var found = false
+    for j in 0 ..< fileHunks.len:
+      if fileHunks[j][0] == fi:
+        fileHunks[j][1].add(hi)
+        found = true
+        break
+    if not found:
+      fileHunks.add((fi, @[hi]))
+
+  var parts: seq[string] = @[]
+  for entry in fileHunks:
+    let rowIndex = fileRowByIndex(files, entry[0])
+    if rowIndex < 0:
+      continue
+    let file = files[rowIndex]
+    let path = file.path
+
+    parts.add("diff --git a/" & path & " b/" & path)
+    parts.add("--- a/" & path)
+    parts.add("+++ b/" & path)
+
+    for hi in entry[1]:
+      if hi < 0 or hi >= file.hunks.len:
+        continue
+      let hunk = file.hunks[hi]
+      parts.add("@@ -" & $hunk.oldStart & "," & $hunk.oldCount &
+                " +" & $hunk.newStart & "," & $hunk.newCount & " @@")
+      for line in hunk.lines:
+        let prefix =
+          case line.lineType
+          of "added": "+"
+          of "removed": "-"
+          else: " "
+        parts.add(prefix & line.content)
+
+  if parts.len == 0:
+    return ""
+  result = parts.join("\n") & "\n"
+
 proc clearPanel*(vm: VCSVM) =
   vm.deepReviewMode.val = false
   vm.headerTitle.val = ""
@@ -432,6 +643,7 @@ proc clearPanel*(vm: VCSVM) =
   vm.selectedHunks.val = @[]
   vm.hunkToolbarVisible.val = false
   vm.hunkCopyFeedback.val = false
+  vm.lastHunkClickOrdinal.val = -1
   vm.loadingMore.val = false
 
 proc createVCSVM*(): VCSVM =
@@ -468,6 +680,7 @@ proc createVCSVM*(): VCSVM =
       selectedHunks: selectedHunks,
       hunkToolbarVisible: createSignal(false),
       hunkCopyFeedback: createSignal(false),
+      lastHunkClickOrdinal: createSignal(-1),
       loadingMore: createSignal(false),
       fileCount: fileCount,
       selectedHunkCount: selectedHunkCount,

@@ -4,7 +4,7 @@ import
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   frame_viewer, pixel_history, shader_debug, video_player,
-  vcs,
+  vcs, unified_diff,
   agent_activity, agent_activity_deepreview, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
@@ -882,12 +882,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # container.tab.contentItem reference to golden layout item
         lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-      if state.content == Content.VCS:
+      if state.content == Content.UnifiedDiff:
         let component = data.ui.componentMapping[state.content][state.id]
         if not component.isNil:
-          let vcsComp = VCSComponent(component)
-          if not vcsComp.diffTarget.isNil and ($vcsComp.diffTarget).startsWith("diff:"):
-            let target = ($vcsComp.diffTarget)[5 .. ^1]
+          let diffComp = UnifiedDiffComponent(component)
+          if not diffComp.diffTarget.isNil and ($diffComp.diffTarget).startsWith("diff:"):
+            let target = ($diffComp.diffTarget)[5 .. ^1]
             if target == "Working Tree":
               tab.setTitle("Diff: Working Tree")
             elif target.startsWith("file:"):
@@ -951,6 +951,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.CommandPalette,
       Content.DeepReview,
       Content.VCS,
+      Content.UnifiedDiff,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
       Content.AgentWorkspace,
@@ -1143,6 +1144,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if state.content == Content.VCS:
           vcs.syncLegacyVCSIntoVM(VCSComponent(component))
           vcs.tryMountIsoNimVCSPanel(component.id)
+
+        # A unified diff is an editor-area *document*, not a second VCS panel
+        # (VCS-Panel.md, "Unified Diff View (Editor Integration)"): the sync
+        # parses the target's hunks into the tab's ViewModel and the mount
+        # creates the Monaco instance over them.
+        if state.content == Content.UnifiedDiff:
+          unified_diff.syncIntoVM(UnifiedDiffComponent(component))
+          unified_diff.tryMountUnifiedDiffTab(component.id)
 
         if state.content == Content.AgentActivity:
           agent_activity.syncLegacyAgentActivityIntoVM(

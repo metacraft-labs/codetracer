@@ -390,9 +390,6 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   launcher.vm.vcs.setGitRepoState(true)
   launcher.vm.vcs.setBranchState("agent-worktree", ["agent-worktree"], false)
   launcher.vm.vcs.setCommits([], [])
-  launcher.vm.vcs.setUnifiedDiff(launcher.vm.vcs.unifiedDiffActive.val,
-    launcher.vm.vcs.diffFiles.val)
-  launcher.vm.vcs.setHunkState([], false, false)
   if not data.ui.componentMapping[Content.VCS].hasKey(VcsId):
     return
   let comp = VCSComponent(data.ui.componentMapping[Content.VCS][VcsId])
@@ -407,10 +404,11 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   comp.isGitRepo = true
   comp.errorMessage = cstring""
   comp.changedFiles = launcher.vm.changedRows()
-  comp.unifiedDiffActive = launcher.vm.vcs.unifiedDiffActive.val
-  comp.gitDiffData = launcher.deepReviewData()
-  comp.selectedHunks = @[]
-  comp.hunkToolbarVisible = false
+  # The session's diff is not rendered inside this panel: a unified diff is an
+  # editor-area Monaco document of its own (VCS-Panel.md, "Unified Diff View
+  # (Editor Integration)"), opened by clicking a changed file.  The data
+  # behind it is `data.deepReviewData`, which `syncDeepReview` below sets from
+  # the same source this used to copy in here.
   comp.syncLegacyVCSIntoVM()
   vcs.tryMountIsoNimVCSPanel(comp.id)
 

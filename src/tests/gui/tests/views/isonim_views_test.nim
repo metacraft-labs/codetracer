@@ -81,6 +81,7 @@ import views/isonim_agent_activity_deepreview_view
 import views/isonim_agent_workspace_view
 import views/isonim_deepreview_view
 import views/isonim_vcs_view
+import views/isonim_unified_diff_view
 import views/isonim_welcome_screen_view
 import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
@@ -11352,13 +11353,17 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
-  test "test_vcs_unified_diff_tab":
-    ## A panel instance that IS a diff — a "View Diff" tab, or the inline
-    ## review diff of an agentic session — shows the diff and nothing else.
+  test "test_vcs_panel_is_never_a_diff_surface":
+    ## DR-R4: a unified diff is an editor-area Monaco document
+    ## (``Content.UnifiedDiff``), not a second instance of this panel —
+    ## VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the
+    ## standard CodeTracer Monaco editor".
     ##
-    ## This is the `unifiedDiffActive` case.  It is deliberately NOT what the
-    ## "Unified Diff" view-mode toggle does; see the test below.  (Formerly
-    ## named `test_vcs_unified_diff_inline`, from when the two were one flag.)
+    ## This replaces ``test_vcs_unified_diff_tab``, which asserted that the
+    ## panel renders the diff itself when ``unifiedDiffActive`` is set.  That
+    ## branch is gone; the assertion that remains is that setting the flag
+    ## cannot bring a DOM diff back into the panel, and that the panel keeps
+    ## its own chrome (#561: the diff must never replace the commit history).
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
@@ -11368,17 +11373,13 @@ suite "IsoNim VCS Panel — structure":
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
 
-      let diff = findByClass(panel, "deepreview-unified-diff")
-      let filePath = findByClass(panel, "deepreview-unified-file-path")
-      check findByClass(panel, "vcs-changed-files") == nil
-      check diff != nil
-      check filePath != nil
-      check filePath.textContent == "src/main.nim"
-      check findAllByClass(diff, "deepreview-unified-line").len == 2
-      check findByClass(panel, "vcs-commit-history") == nil
-      # A diff tab carries none of the docked panel's chrome.
-      check findByClass(panel, "vcs-branch-picker") == nil
-      check findByClass(panel, "vcs-diff-toggle") == nil
+      check findByClass(panel, "deepreview-unified-diff") == nil
+      check findByClass(panel, "deepreview-unified-line") == nil
+      check findByClass(panel, "deepreview-unified-file-path") == nil
+      # ...and the panel is still the panel.
+      check findByClass(panel, "vcs-commit-history") != nil
+      check findByClass(panel, "vcs-branch-picker") != nil
+      check findByClass(panel, "vcs-diff-toggle") != nil
 
       dispose()
 
@@ -11524,31 +11525,61 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
-  test "unified diff renders toolbar selection and hunk callback":
+  test "the diff tab renders its hunk toolbar over the Monaco host":
+    ## DR-R4's rewrite of "unified diff renders toolbar selection and hunk
+    ## callback", retargeted from the deleted DOM renderer to the diff tab's
+    ## chrome.
+    ##
+    ## The tab is a Monaco editor, so its *body* has no DOM to assert on here
+    ## — the document and its decorations are covered headlessly in
+    ## ``src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim``.  What this
+    ## covers is the chrome: the host element Monaco mounts into, and the hunk
+    ## editor's toolbar driven by the same ``VCSVM`` signals the selection
+    ## model writes.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var selectedHunk = (-1, -1)
-      let callbacks = VCSCallbacks(
-        onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
-          (discard shiftKey; discard ctrlKey; selectedHunk = (fileIdx, hunkIdx)),
+      var copied = 0
+      var cleared = 0
+      let callbacks = isonim_unified_diff_view.UnifiedDiffCallbacks(
+        onCopySelectedHunks: proc() = copied += 1,
+        onClearSelectedHunks: proc() = cleared += 1,
       )
 
-      vm.setGitRepoState(true)
-      vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
-      vm.setHunkState(@[(0, 0)], toolbarVisible = true, copyFeedback = false)
+      let panel = isonim_unified_diff_view.renderUnifiedDiffTab(
+        r, vm, "unifiedDiffEditor-7", callbacks)
 
-      let panel = renderUnifiedDiff(r, vm, callbacks)
+      # The Monaco host is present and empty: the editor attaches to it.
+      let host = findByClass(panel, "unified-diff-editor")
+      check host != nil
+      check host.attributes["id"] == "unifiedDiffEditor-7"
+      # No selection yet, so no toolbar.
+      check findByClass(panel, "hunk-toolbar") == nil
 
+      # Selection made through the ViewModel's own entry point — the one the
+      # Monaco tab calls — drives the toolbar.
+      vm.selectHunk(0, 0)
       check findByClass(panel, "hunk-toolbar-count").textContent ==
         "1 hunk selected"
-      check findByClass(panel, "deepreview-unified-file-path").textContent ==
-        "src/main.nim"
-      check findAllByClass(panel, "deepreview-unified-line").len == 2
 
-      findByClass(panel, "deepreview-unified-hunk-header").fireEvent("click")
-      check selectedHunk == (0, 0)
+      findAllByClass(panel, "hunk-toolbar-button")[0].fireEvent("click")
+      check copied == 1
+
+      vm.setHunkCopyFeedback(true)
+      check findAllByClass(panel, "hunk-toolbar-button")[0].textContent ==
+        "Copied!"
+
+      # Normal version control offers staging; a review does not
+      # (VCS-Panel.md, "DeepReview Mode": "Commit operations: Disabled").
+      check "Stage hunks" in panel.textContent
+      vm.setDeepReviewMode(true)
+      check "Stage hunks" notin panel.textContent
+      # ...and the read-only affordances survive the mode.
+      check findByClass(panel, "hunk-toolbar-count") != nil
+      let buttons = findAllByClass(panel, "hunk-toolbar-button")
+      buttons[^1].fireEvent("click")
+      check cleared == 1
 
       dispose()
 

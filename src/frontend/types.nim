@@ -769,12 +769,12 @@ type
     deletions*: int
 
   VCSComponent* = ref object of Component
-    diffTarget*: cstring
-      ## Empty/nil for the docked VCS panel.  For a panel opened as an
-      ## editor-area diff tab this is the layout path identifying the diff
-      ## target (``diff:file:<path>`` / ``diff:commit:<hash>[:<path>]``),
-      ## and it is what makes repeat clicks on the same target focus the
-      ## existing tab instead of stacking duplicates.
+    ## The docked VCS panel: branch picker, commit history, changed files.
+    ##
+    ## It is never a diff surface.  A unified diff is its own editor-area
+    ## document (``UnifiedDiffComponent``) — VCS-Panel.md, "Unified Diff View
+    ## (Editor Integration)" — and this panel only decides what a click on a
+    ## changed file opens (``VCSVM.openActionFor``).
     openFileMode*: bool
       ## View-mode toggle for the docked panel (VCS-Panel.md "View mode
       ## toggle").  ``false`` — the spec's ``defaultView: "unified-diff"`` —
@@ -804,24 +804,6 @@ type
       ## ID of the debounce ``windowSetTimeout``. -1 when idle.
     debounceActive*: bool
       ## True while the 1-second debounce window is open.
-    # Unified diff from git state (Task #69).
-    unifiedDiffActive*: bool
-      ## True when the "Unified Diff" toggle is active in normal git mode.
-    gitDiffData*: DeepReviewData
-      ## Populated on-demand with parsed ``git diff HEAD`` output so that
-      ## the DeepReview unified diff renderer can be reused.
-    # Hunk editor state (hunk selection + actions).
-    selectedHunks*: seq[(int, int)]
-      ## Selected (fileIndex, hunkIndex) pairs for hunk operations.
-    hunkToolbarVisible*: bool
-      ## True when at least one hunk is selected and the action toolbar
-      ## should be displayed.
-    lastHunkClickIndex*: int
-      ## Index into ``selectedHunks``-eligible list used for Shift-click
-      ## range selection. Stores the flat hunk ordinal of the last
-      ## single-clicked hunk header.
-    hunkCopyFeedback*: bool
-      ## Briefly true after a successful "Copy as patch" to show feedback.
     # Commit graph pagination state.
     commitOffset*: int
       ## Number of commits already fetched; used as the --skip argument when
@@ -844,6 +826,44 @@ type
       ## also why nothing in the panel could ever be clicked: every element was
       ## detached again before a click could land on it.
       ## Reset wherever ``commitOffset`` is reset.
+
+  UnifiedDiffComponent* = ref object of Component
+    ## One unified-diff editor tab: a Monaco document showing the diff for a
+    ## single target.
+    ##
+    ## VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the
+    ## standard CodeTracer Monaco editor".  Before DR-R4 this was a second
+    ## ``VCSComponent`` instance rendering nested ``tdiv`` elements, which had
+    ## no find, no cross-document selection, no minimap and no surface for the
+    ## Omniscience decorations DR-R6 adds.
+    ##
+    ## The component owns the *data* and the Monaco instance.  The selection
+    ## model and the patch builder live in ``VCSVM`` (see
+    ## ``viewmodel/viewmodels/vcs_vm.nim``), so there is one hunk-editor model
+    ## rather than one per surface.
+    diffTarget*: cstring
+      ## The layout path identifying what this tab shows —
+      ## ``diff:file:<path>``, ``diff:commit:<hash>[:<path>]`` or
+      ## ``diff:Working Tree``.  It is the tab's identity: asking for the same
+      ## target again focuses this tab instead of stacking a duplicate.
+    diffData*: DeepReviewData
+      ## Parsed hunks for the target.  Filled from the review dataset when the
+      ## session is a review and from ``git diff`` otherwise — VCS-Panel.md,
+      ## "Data Sources and Instantiation Modes".
+    reviewBacked*: bool
+      ## True when ``diffData`` came from ``deepReviewData`` rather than from
+      ## live git.  Drives *only* whether the mutating hunk operations are
+      ## offered ("Commit operations: Disabled (read-only view)"); the diff
+      ## rendering never consults it, per "Unified Diff View (Shared)".
+    initialized*: bool
+    editor*: MonacoEditor
+      ## The Monaco instance, or nil before the container exists.
+    editorInitialized*: bool
+    decorationCollection*: js
+      ## Monaco decorations collection holding the per-line diff decorations.
+    lineLabels*: seq[cstring]
+      ## Dual old/new line-number labels, one per model line, handed to
+      ## Monaco's ``lineNumbers`` callback.
 
   ViewKind* =       enum ViewTable, ViewLine, ViewPie
 
@@ -2538,9 +2558,9 @@ method independentTabPath*(self: Component): cstring {.base.} =
   ## never be mistaken for an independent tab.
   cstring""
 
-method independentTabPath*(self: VCSComponent): cstring =
-  ## A VCS panel opened for a diff target is identified by that target, so a
-  ## second `View Diff` on the same file focuses the tab that already shows it.
+method independentTabPath*(self: UnifiedDiffComponent): cstring =
+  ## A diff tab is identified by the target it shows, so a second `View Diff`
+  ## on the same file focuses the tab that already shows it (#611).
   if self.diffTarget.isNil: cstring"" else: self.diffTarget
 
 method restart*(self: Component) {.base.} =

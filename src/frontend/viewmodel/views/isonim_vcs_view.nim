@@ -82,10 +82,6 @@ type
     ## ``id`` is the ``VCSTraceContextRow.id`` of the chosen context.
     onSetTraceContext*: proc(id: int)
     onRefresh*: proc()
-    onSelectHunk*: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool)
-    onCopySelectedHunks*: proc()
-    onStageSelectedHunks*: proc()
-    onClearSelectedHunks*: proc()
     onOpenFileDiff*: proc(target: string)
 
 # ---------------------------------------------------------------------------
@@ -98,13 +94,6 @@ proc statusClass*(status: string): string =
   of "D", "deleted": "vcs-status-deleted"
   of "M", "modified": "vcs-status-modified"
   else: "vcs-status-other"
-
-proc diffStatusClass*(status: string): string =
-  case status
-  of "A", "added": "deepreview-diff-status deepreview-diff-added"
-  of "D", "deleted": "deepreview-diff-status deepreview-diff-deleted"
-  of "M", "modified": "deepreview-diff-status deepreview-diff-modified"
-  else: "deepreview-diff-status"
 
 proc statusLabel*(status: string): string =
   case status
@@ -132,26 +121,6 @@ proc fileRowClass*(selected: bool): string =
 
 proc toggleButtonClass*(active: bool): string =
   if active: "vcs-toggle-button vcs-toggle-active" else: "vcs-toggle-button"
-
-proc hunkClass*(selected: bool): string =
-  if selected: "deepreview-unified-hunk hunk-selected"
-  else: "deepreview-unified-hunk"
-
-proc diffLineClass*(lineType: string): string =
-  case lineType
-  of "added": "deepreview-unified-line deepreview-unified-line-added"
-  of "removed": "deepreview-unified-line deepreview-unified-line-removed"
-  else: "deepreview-unified-line deepreview-unified-line-context"
-
-proc fileStatsText*(additions, deletions: int): string =
-  if additions == 0 and deletions == 0: ""
-  else: "+" & $additions & " -" & $deletions
-
-proc hunkHeaderText*(hunk: VCSHunkRow): string =
-  fmt"@@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@"
-
-proc hunkToolbarText*(count: int): string =
-  $count & " hunk" & (if count == 1: "" else: "s") & " selected"
 
 proc abbreviateRelTime*(t: string): string =
   ## Convert a git ``%cr`` relative-time string to a compact abbreviated form.
@@ -259,11 +228,6 @@ proc invokeOpenFileDiff(callbacks: VCSCallbacks; target: string) =
   if callbacks.onOpenFileDiff != nil:
     callbacks.onOpenFileDiff(target)
 
-proc invokeSelectHunk(callbacks: VCSCallbacks; fileIdx, hunkIdx: int;
-                      shiftKey, ctrlKey: bool) =
-  if callbacks.onSelectHunk != nil:
-    callbacks.onSelectHunk(fileIdx, hunkIdx, shiftKey, ctrlKey)
-
 # ---------------------------------------------------------------------------
 # IntersectionObserver sentinel (JS only)
 # ---------------------------------------------------------------------------
@@ -307,23 +271,6 @@ when defined(js):
 
   proc setInnerHtml(r: WebRenderer; node: Element; html: string) =
     node.innerHTML = cstring(html)
-
-# ---------------------------------------------------------------------------
-# Hunk-click attachment (needs native event for Shift/Ctrl detection)
-# ---------------------------------------------------------------------------
-
-proc attachHunkClick(r: MockRenderer; header: MockNode; callbacks: VCSCallbacks;
-                     fileIdx, hunkIdx: int) =
-  r.addEventListener(header, "click", proc() =
-    callbacks.invokeSelectHunk(fileIdx, hunkIdx, false, false))
-
-when defined(js):
-  proc attachHunkClick(r: WebRenderer; header: isonim_dom.Element;
-                       callbacks: VCSCallbacks; fileIdx, hunkIdx: int) =
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeSelectHunk(fileIdx, hunkIdx, ev.shiftKey(), ev.ctrlOrMetaKey())
-        ev.preventDefault())
 
 proc attachFileDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
   r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
@@ -998,102 +945,6 @@ proc renderChangedFiles[R](r: R; vm: VCSVM;
       r.appendRenderedChild(list, renderChangedFileRow(r, callbacks, i, file))
   panel
 
-# ---------------------------------------------------------------------------
-# Unified diff (hunk editor)
-# ---------------------------------------------------------------------------
-
-proc renderHunkToolbar[R](r: R; vm: VCSVM;
-                          callbacks: VCSCallbacks): auto =
-  ui(r):
-    tdiv(class = "hunk-toolbar"):
-      span(class = "hunk-toolbar-count"):
-        text hunkToolbarText(vm.selectedHunkCount.val)
-      tdiv(class = "hunk-toolbar-actions"):
-        tdiv(class = "hunk-toolbar-button",
-             onclick = proc() =
-               if callbacks.onCopySelectedHunks != nil:
-                 callbacks.onCopySelectedHunks()):
-          text (if vm.hunkCopyFeedback.val: "Copied!" else: "Copy as patch")
-        tdiv(class = "hunk-toolbar-button",
-             onclick = proc() =
-               if callbacks.onStageSelectedHunks != nil:
-                 callbacks.onStageSelectedHunks()):
-          text "Stage hunks"
-        tdiv(class = "hunk-toolbar-button hunk-toolbar-button-subtle",
-             onclick = proc() =
-               if callbacks.onClearSelectedHunks != nil:
-                 callbacks.onClearSelectedHunks()):
-          text "Clear"
-
-proc renderDiffLine[R](r: R; line: VCSDiffLineRow): auto =
-  let oldText = if line.oldLine > 0: $line.oldLine else: ""
-  let newText = if line.newLine > 0: $line.newLine else: ""
-  let prefix = case line.lineType
-    of "added": "+"
-    of "removed": "-"
-    else: " "
-  ui(r):
-    tdiv(class = diffLineClass(line.lineType)):
-      span(class = "deepreview-unified-gutter-old"):
-        text oldText
-      span(class = "deepreview-unified-gutter-new"):
-        text newText
-      span(class = "deepreview-unified-line-prefix"):
-        text prefix
-      span(class = "deepreview-unified-line-content"):
-        text line.content
-
-proc renderDiffHunk[R](r: R; fileIndex, hunkIdx: int; hunk: VCSHunkRow;
-                       callbacks: VCSCallbacks): auto =
-  var header: typeof(r.createElement("div"))
-  let node = ui(r):
-    tdiv(class = hunkClass(hunk.selected)):
-      tdiv(ref = header,
-           class = "deepreview-unified-hunk-header hunk-header-selectable"):
-        if hunk.selected:
-          span(class = "hunk-selection-indicator"):
-            text "v"
-        text hunkHeaderText(hunk)
-  for line in hunk.lines:
-    r.appendRenderedChild(node, renderDiffLine(r, line))
-  r.attachHunkClick(header, callbacks, fileIndex, hunkIdx)
-  node
-
-proc renderDiffFile[R](r: R; file: VCSDiffFileRow;
-                       callbacks: VCSCallbacks): auto =
-  let fileIndex = file.fileIndex
-  let stats = fileStatsText(file.additions, file.deletions)
-  let node = ui(r):
-    tdiv(class = "deepreview-unified-file",
-         `data-file-index` = $fileIndex):
-      tdiv(class = "deepreview-unified-file-header"):
-        span(class = diffStatusClass(file.status)):
-          text statusLabel(file.status)
-        span(class = "deepreview-unified-file-path"):
-          text file.path
-        span(class = "deepreview-unified-file-stats"):
-          text stats
-  for hunkIdx, hunk in file.hunks:
-    r.appendRenderedChild(node, renderDiffHunk(r, fileIndex, hunkIdx, hunk,
-                                               callbacks))
-  node
-
-proc renderUnifiedDiff*[R](r: R; vm: VCSVM;
-                          callbacks: VCSCallbacks): auto =
-  let panel = ui(r):
-    tdiv(class = "deepreview-unified-diff")
-  if vm.hunkToolbarVisible.val and vm.selectedHunkCount.val > 0:
-    r.appendRenderedChild(panel, renderHunkToolbar(r, vm, callbacks))
-  if vm.diffFiles.val.len == 0:
-    let empty = ui(r):
-      tdiv(class = "deepreview-unified-empty"):
-        text VCSNoDiffText
-    r.appendRenderedChild(panel, empty)
-  else:
-    for file in vm.diffFiles.val:
-      r.appendRenderedChild(panel, renderDiffFile(r, file, callbacks))
-  panel
-
 proc renderDiffToggle[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                          showRefresh: bool): auto =
   ## The view-mode switch described in VCS-Panel.md ("View mode toggle").
@@ -1200,11 +1051,6 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
       r.appendRenderedChild(body, renderChangedFiles(r, vm, callbacks))
     elif not vm.isGitRepo.val:
       r.appendRenderedChild(body, renderNoRepo(r, vm))
-    elif vm.unifiedDiffActive.val:
-      # This panel instance IS a diff — a dedicated "View Diff" tab, or the
-      # inline review diff of an agentic session.  It shows the diff and
-      # nothing else: no branch picker, no view-mode toggle, no history.
-      r.appendRenderedChild(body, renderUnifiedDiff(r, vm, callbacks))
     else:
       r.appendRenderedChild(body, renderBranchPicker(r, vm, callbacks))
       r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks,

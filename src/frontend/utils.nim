@@ -569,10 +569,22 @@ proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
     forceRedraw: true,)
   data.registerComponent(result, Content.Filesystem)
 
+proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
+  ## One unified-diff editor tab.  ``diffTarget`` is filled in by
+  ## ``openLayoutTab`` from the layout path the request carried, which is also
+  ## the tab's reuse key.
+  result = UnifiedDiffComponent(
+    id: id,
+    diffTarget: cstring"",
+    reviewBacked: false,
+    initialized: false,
+    editorInitialized: false,
+    lineLabels: @[])
+  data.registerComponent(result, Content.UnifiedDiff)
+
 proc makeVCSComponent*(data: Data, id: int): VCSComponent =
   result = VCSComponent(
     id: id,
-    diffTarget: cstring"",
     currentBranch: cstring"",
     branches: @[],
     commits: @[],
@@ -1035,6 +1047,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.AgentActivityDeepReview: data.makeAgentActivityDeepReviewComponent(id)
   of Content.RequestPanel:    data.makeRequestPanelComponent(id)
   of Content.VCS:             data.makeVCSComponent(id)
+  of Content.UnifiedDiff:     data.makeUnifiedDiffComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")
@@ -1309,9 +1322,10 @@ proc openLayoutTab*(
           data.generateId(content)
 
       let comp = data.makeComponent(content, newId, layoutPath)
-      if content == Content.VCS:
-        let vcsComp = cast[VCSComponent](comp)
-        vcsComp.diffTarget = layoutPath
+      if content == Content.UnifiedDiff:
+        # The tab's identity: `independentTabPath` reads it back so a second
+        # request for the same diff focuses this tab (#611).
+        cast[UnifiedDiffComponent](comp).diffTarget = layoutPath
       comp
     else:
       data.ui.editors[layoutPath]

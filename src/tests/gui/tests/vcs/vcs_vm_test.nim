@@ -311,6 +311,232 @@ suite "VCSVM trace contexts and review stats (DR-R2)":
 
       dispose()
 
+suite "VCSVM hunk editor (DR-R4)":
+  ## VCS-Panel.md, "Hunk Editor": per-hunk selection, shift-click ranges,
+  ## ctrl-click toggling and copy-as-patch.
+  ##
+  ## Until DR-R4 every one of those lived in ``ui/vcs.nim`` over the raw
+  ## ``DeepReviewData`` of a DOM-rendered panel — JS-only, browser-only, and
+  ## tied to the renderer being replaced.  DeepReview-GUI.md §4.5 makes the
+  ## hunk editor "a *constraint on the diff tab, not an optional extra*", so
+  ## the model moved into this ViewModel and the Monaco tab became a
+  ## dispatcher over it.  These tests are what says the capability survived.
+
+  proc hunkFixture(): seq[VCSDiffFileRow] =
+    ## Two files, two hunks each.  Flat ordinals: (0,0)=0, (0,1)=1, (1,0)=2,
+    ## (1,1)=3.
+    @[
+      VCSDiffFileRow(
+        fileIndex: 0, status: "M", path: "src/parser.rs",
+        additions: 3, deletions: 2,
+        hunks: @[
+          VCSHunkRow(oldStart: 40, oldCount: 2, newStart: 40, newCount: 3,
+            lines: @[
+              VCSDiffLineRow(lineType: "context",
+                             content: "fn parse(input: &str) {",
+                             oldLine: 40, newLine: 40),
+              VCSDiffLineRow(lineType: "removed",
+                             content: "  match parse(input) {", oldLine: 41),
+              VCSDiffLineRow(lineType: "added",
+                             content: "  let token = parse(input);",
+                             newLine: 41),
+              VCSDiffLineRow(lineType: "added", content: "  match token {",
+                             newLine: 42),
+            ]),
+          VCSHunkRow(oldStart: 80, oldCount: 1, newStart: 81, newCount: 1,
+            lines: @[
+              VCSDiffLineRow(lineType: "removed", content: "  legacy();",
+                             oldLine: 80),
+              VCSDiffLineRow(lineType: "added", content: "  modern();",
+                             newLine: 81),
+            ]),
+        ]),
+      VCSDiffFileRow(
+        fileIndex: 1, status: "A", path: "src/lexer.rs",
+        additions: 2, deletions: 0,
+        hunks: @[
+          VCSHunkRow(oldStart: 0, oldCount: 0, newStart: 1, newCount: 1,
+            lines: @[VCSDiffLineRow(lineType: "added", content: "mod lexer;",
+                                    newLine: 1)]),
+          VCSHunkRow(oldStart: 0, oldCount: 0, newStart: 9, newCount: 1,
+            lines: @[VCSDiffLineRow(lineType: "added",
+                                    content: "pub fn lex() {}", newLine: 9)]),
+        ]),
+    ]
+
+  proc diffVM(): VCSVM =
+    result = createVCSVM()
+    result.setUnifiedDiff(true, hunkFixture())
+
+  test "test_hunk_selection_drives_the_shared_vcs_vm_state":
+    ## VCS-Panel.md, "Hunk Selection": "Click a hunk header to select it.
+    ## Shift-click to select a range of hunks."
+    ##
+    ## Driven only through ``selectHunk`` — the entry point the Monaco tab
+    ## calls — and asserted only on this ViewModel's own signals and on the
+    ## memo the toolbar renders (``selectedHunkCount``).  The tab holds no
+    ## selection state of its own, so this is the one model: a port that
+    ## introduced a second one would leave these signals empty and the toolbar
+    ## unrendered, which is what the Playwright counterpart
+    ## (``e2e_unified_diff_hunk_selection_and_copy``) observes.
+    createRoot proc(dispose: proc()) =
+      let vm = diffVM()
+
+      check vm.selectedHunks.val.len == 0
+      check not vm.hunkToolbarVisible.val
+      check vm.lastHunkClickOrdinal.val == -1
+
+      vm.selectHunk(0, 1)
+      check vm.selectedHunks.val == @[(0, 1)]
+      check vm.hunkToolbarVisible.val
+      check vm.selectedHunkCount.val == 1
+      # The anchor a shift-click extends from is the flat ordinal of the hunk
+      # just clicked, not a row index: a range can span files.
+      check vm.lastHunkClickOrdinal.val == 1
+
+      vm.selectHunk(1, 0, shiftKey = true)
+      check vm.selectedHunks.val == @[(0, 1), (1, 0)]
+      check vm.hunkToolbarVisible.val
+      check vm.selectedHunkCount.val == 2
+      check vm.lastHunkClickOrdinal.val == 2
+
+      dispose()
+
+  test "flat ordinals round-trip across files":
+    ## Shift-click ranges are expressed in ordinals, so the two conversions
+    ## have to agree — including for a row list whose ``fileIndex`` values are
+    ## not its positions, which is what happens whenever the changeset carries
+    ## a file with no hunks.
+    let files = hunkFixture()
+    check flatHunkOrdinal(files, 0, 0) == 0
+    check flatHunkOrdinal(files, 0, 1) == 1
+    check flatHunkOrdinal(files, 1, 0) == 2
+    check flatHunkOrdinal(files, 1, 1) == 3
+    for ordinal in 0 .. 3:
+      let pair = hunkPairFromOrdinal(files, ordinal)
+      check flatHunkOrdinal(files, pair[0], pair[1]) == ordinal
+    # An ordinal that names no hunk resolves to "nothing", so a range walk
+    # skips it instead of selecting hunk (0, 0) by accident.
+    check hunkPairFromOrdinal(files, 4) == (-1, -1)
+    check hunkPairFromOrdinal(files, -1) == (-1, -1)
+
+    var sparse = hunkFixture()
+    sparse[1].fileIndex = 3
+    check flatHunkOrdinal(sparse, 3, 0) == 2
+    check hunkPairFromOrdinal(sparse, 3) == (3, 1)
+
+  test "ctrl-click toggles one hunk and a plain click on the sole selection clears it":
+    ## VCS-Panel.md, "Hunk Selection": "Ctrl-click to toggle individual hunk
+    ## selection."  The plain-click behaviour is the pre-DR-R4 one, preserved:
+    ## clicking the only selected hunk deselects it.
+    createRoot proc(dispose: proc()) =
+      let vm = diffVM()
+
+      vm.selectHunk(0, 0, ctrlKey = true)
+      vm.selectHunk(1, 1, ctrlKey = true)
+      check vm.selectedHunks.val == @[(0, 0), (1, 1)]
+
+      vm.selectHunk(0, 0, ctrlKey = true)
+      check vm.selectedHunks.val == @[(1, 1)]
+      check vm.hunkToolbarVisible.val
+
+      vm.selectHunk(1, 1, ctrlKey = true)
+      check vm.selectedHunks.val.len == 0
+      check not vm.hunkToolbarVisible.val
+
+      vm.selectHunk(0, 1)
+      check vm.selectedHunks.val == @[(0, 1)]
+      vm.selectHunk(0, 1)
+      check vm.selectedHunks.val.len == 0
+      check not vm.hunkToolbarVisible.val
+
+      dispose()
+
+  test "test_copy_as_patch_output_is_unchanged_by_the_monaco_port":
+    ## VCS-Panel.md, "Hunk Operations": "Copy — copy selected hunks to
+    ## clipboard (as patch format)".
+    ##
+    ## The golden below is the output of the *pre-DR-R4* builder
+    ## (``VCSComponent.buildPatchFromSelectedHunks`` in ``ui/vcs.nim``),
+    ## derived from its code rather than from the new one: files grouped in
+    ## order of first appearance in the selection, three header lines each,
+    ## hunks in selection order, one ``+``/``-``/space-prefixed line per diff
+    ## line, newline-joined with a trailing newline.  A patch a user pipes into
+    ## ``git apply`` must not change shape because the diff moved to Monaco.
+    createRoot proc(dispose: proc()) =
+      let vm = diffVM()
+
+      vm.selectHunk(0, 1)
+      vm.selectHunk(1, 0, ctrlKey = true)
+      check vm.selectedHunks.val == @[(0, 1), (1, 0)]
+
+      const goldenPatch =
+        "diff --git a/src/parser.rs b/src/parser.rs\n" &
+        "--- a/src/parser.rs\n" &
+        "+++ b/src/parser.rs\n" &
+        "@@ -80,1 +81,1 @@\n" &
+        "-  legacy();\n" &
+        "+  modern();\n" &
+        "diff --git a/src/lexer.rs b/src/lexer.rs\n" &
+        "--- a/src/lexer.rs\n" &
+        "+++ b/src/lexer.rs\n" &
+        "@@ -0,0 +1,1 @@\n" &
+        "+mod lexer;\n"
+
+      check vm.buildPatchFromSelectedHunks() == goldenPatch
+
+      dispose()
+
+  test "copy-as-patch groups by file and keeps context lines space-prefixed":
+    ## The other half of the format: two hunks of one file share a single set
+    ## of ``diff --git`` / ``---`` / ``+++`` headers, and a context line is
+    ## emitted with a leading space so the patch applies.
+    createRoot proc(dispose: proc()) =
+      let vm = diffVM()
+
+      vm.selectHunk(0, 0)
+      vm.selectHunk(0, 1, ctrlKey = true)
+
+      const goldenPatch =
+        "diff --git a/src/parser.rs b/src/parser.rs\n" &
+        "--- a/src/parser.rs\n" &
+        "+++ b/src/parser.rs\n" &
+        "@@ -40,2 +40,3 @@\n" &
+        " fn parse(input: &str) {\n" &
+        "-  match parse(input) {\n" &
+        "+  let token = parse(input);\n" &
+        "+  match token {\n" &
+        "@@ -80,1 +81,1 @@\n" &
+        "-  legacy();\n" &
+        "+  modern();\n"
+
+      check vm.buildPatchFromSelectedHunks() == goldenPatch
+      # Nothing selected is nothing to copy — not an empty patch that would
+      # land on the clipboard.
+      vm.clearHunkSelection()
+      check vm.buildPatchFromSelectedHunks() == ""
+
+      dispose()
+
+  test "the mutating hunk operations are disabled for a review":
+    ## VCS-Panel.md, "DeepReview Mode": "Commit operations: Disabled
+    ## (read-only view)" — while DeepReview-GUI.md §4.5 keeps "selection and
+    ## copy-as-patch ... available".
+    createRoot proc(dispose: proc()) =
+      let vm = diffVM()
+
+      check vm.mutatingHunkOpsEnabled()
+
+      vm.setDeepReviewMode(true)
+      check not vm.mutatingHunkOpsEnabled()
+
+      # Selection and copy are unaffected by the mode.
+      vm.selectHunk(1, 0)
+      check vm.selectedHunks.val == @[(1, 0)]
+      check vm.buildPatchFromSelectedHunks().len > 0
+
+      dispose()
+
 suite "VCSVM":
 
   test "hunk state drives toolbar and copy feedback":

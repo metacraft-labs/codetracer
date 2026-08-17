@@ -302,7 +302,17 @@ type
     FrameViewer = 42,
     PixelHistory = 43,
     ShaderDebug = 44,
-    VideoPlayer = 45
+    VideoPlayer = 45,
+    ## An editor-area tab holding one unified diff, as a Monaco document.
+    ##
+    ## GUI/Core-Panes/VCS-Panel.md, "Unified Diff View (Editor Integration)":
+    ## "clicking a file in the Changed Files list opens a special editor tab
+    ## that shows the file's diff: Uses the standard CodeTracer Monaco
+    ## editor".  It is a content kind of its own rather than a second instance
+    ## of `VCS` because it is a *document*, keyed by its diff target, and
+    ## shares nothing with the docked panel's branch picker and commit
+    ## history.
+    UnifiedDiff = 46
 
   ConnectionLossReason* = enum
     ConnectionLossNone,
