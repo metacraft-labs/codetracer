@@ -776,6 +776,21 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
     # A caller with no text at all attributes none of it.
     check dataset.reviewFileDiffs(@[]).allIt(it.sourceContent == "")
 
+    # A nameless row must not collect the text either.  The rule used to be a
+    # bare `file.path == sourceContentPath`, so when malformed evidence left
+    # both empty the empty-string match handed that row the text — and on the
+    # agentic path the text is the PATCH, not the file's source, so a row with
+    # no name was given a patch to display as its content.  The guard on
+    # `sourceContentPath.len > 0` is what refuses that, and without this check
+    # removing the guard passes every other test in this file.
+    let nameless = ReviewDataset(files: @[
+      ReviewFile(path: "", status: "M"),
+      ReviewFile(path: "src/main.rs", status: "M")])
+    let namelessDiffs = nameless.reviewFileDiffs(@[], "", "patch text")
+    check namelessDiffs.len == 2
+    check namelessDiffs[0].sourceContent == ""
+    check namelessDiffs[1].sourceContent == ""
+
 when not defined(js):
   ## Source contract — the wiring the behavioural suite cannot reach.
   ##
