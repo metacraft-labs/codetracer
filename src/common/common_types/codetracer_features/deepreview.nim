@@ -11,6 +11,36 @@
 type
   DeepReviewData* = ref object
     ## Top-level container for a complete DeepReview export.
+    ##
+    ## MISSING DATA — test results.  DeepReview-GUI.md §2.1 lists "Test
+    ## results — tests run, passed, failed, and aggregate duration" among what
+    ## the Agent Activity panel's DeepReview section shows, but this type
+    ## carries no test-name, pass/fail or duration field anywhere, and neither
+    ## does the exporter that produces it
+    ## (``codetracer-native-backend/src/deepreview/json_export.rs``,
+    ## ``DeepReviewData``).  A review launched from ``ct --deepreview`` over an
+    ## exported dataset therefore has nothing to fill that row with, and the
+    ## Agent Activity pane renders an explicit "not available for this
+    ## dataset" state rather than a zeroed roll-up that would read as "all
+    ## tests passed" (DR-R3 in
+    ## ``codetracer-specs/DeepReview/DeepReview-GUI.milestones.org``).
+    ##
+    ## Closing the gap needs, in ``codetracer-native-backend``:
+    ##   * a ``TestResultData { testName, passed, durationMs, traceContextId }``
+    ##     record — the same four fields
+    ##     ``Agentic-Coding-Integration.md`` §5.1's
+    ##     ``DeepReviewUpdate::TestCompleted`` already streams during a live
+    ##     agent session, so a dataset-backed review and a session-backed one
+    ##     describe test runs identically;
+    ##   * a ``testResults: Vec<TestResultData>`` field on the exported
+    ##     ``DeepReviewData``, written by ``ct-rr-support deepreview collect``
+    ##     from the runs it recorded;
+    ##   * the mirrored ``testResults*: seq[DeepReviewTestResult]`` here, read
+    ##     by ``vcs.reviewCoverageRows``' neighbour and pushed through
+    ##     ``review_entry.populateReviewActivity``.
+    ## Adjacent to M42b (``Pxor-Bugs.milestones.org``) — same repo, same
+    ## neighbourhood — but a separate change: M42b is about loading the
+    ## recordings, this is about carrying a fact the recordings already know.
     commitSha*: langstring
     baseCommitSha*: langstring
     collectionTimeMs*: int

@@ -221,6 +221,57 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
     check updated.findStackWithContent(VcsContentId){
       "activeItemIndex"}.getInt(-1) == 0
 
+  test "the Agent Activity panel becomes the visible tab of its stack":
+    ## DR-R3 / Layout-System.md, "DeepReview and the Layout", obligation 2:
+    ## the stack hosting each of the three review panels is retargeted at it,
+    ## "so the changed-file list, the diff tab and the review's coverage/test
+    ## summary are the visible tabs rather than being hidden behind siblings".
+    ##
+    ## In the bundled layout AGENT ACTIVITY is the SECOND tab of the CALLTRACE
+    ## stack, so DeepReview's third pillar came up hidden behind the call
+    ## trace even once it had coverage data in it.
+    let updated = addDeepReviewSurface(bundledLayout())
+    let activityStack = updated.findStackWithContent(AgentActivityContentId)
+    check not activityStack.isNil
+    let ids = stackContentIds(activityStack)
+    let activityIndex = ids.find(AgentActivityContentId)
+    check activityIndex >= 0
+    check activityStack{"activeItemIndex"}.getInt(-1) == activityIndex
+    # Sanity: the bundled layout really does bury it, so this asserts the fix
+    # rather than a stack that happened to hold AGENT ACTIVITY first.
+    check activityIndex > 0
+    check bundledLayout().findStackWithContent(AgentActivityContentId){
+      "activeItemIndex"}.isNil
+
+  test "focusing the activity pane adds no panel and moves none":
+    ## "No panel is moved between stacks and no stack is created for one."
+    let original = bundledLayout()
+    let once = addDeepReviewSurface(original)
+    check sorted(contentIdsInLayout(once)) ==
+      sorted(contentIdsInLayout(original) & @[DeepReviewContentId])
+    # The Agent Activity panel is still in the stack the user's layout put it
+    # in, with the same siblings in the same order.
+    check stackContentIds(once.findStackWithContent(AgentActivityContentId)) ==
+      stackContentIds(original.findStackWithContent(AgentActivityContentId))
+    check addDeepReviewSurface(once) == once
+
+  test "a layout with no Agent Activity panel is left alone":
+    ## Focus only: DR-R3 does not materialise a missing pane, and must not
+    ## invent an activeItemIndex for a stack it does not own.
+    let layout = wrap(makeRow("100%", [
+      makeStack([makeComponent(FilesystemContentId, "filesystemComponent"),
+                 makeComponent(VcsContentId, "vCSComponent-0")]),
+      makeStack([
+        makeComponent(EditorViewContentId, "main.rs", EditorComponentName),
+        makeComponent(LowLevelCodeContentId, "lowLevelCodeComponent-0"),
+      ]),
+    ]))
+    let updated = addDeepReviewSurface(layout)
+    check updated.findStackWithContent(AgentActivityContentId).isNil
+    check not layoutHasContent(updated, AgentActivityContentId)
+    check updated.findStackWithContent(EditorViewContentId){
+      "activeItemIndex"}.isNil
+
   test "a layout without a VCS panel is left alone":
     ## ``focusReviewFileList`` must not invent an activeItemIndex for stacks
     ## it does not own — that would silently re-target the user's editor.

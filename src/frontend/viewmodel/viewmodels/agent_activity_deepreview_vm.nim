@@ -21,6 +21,42 @@
 ##                            with run / pass / fail counts and the
 ##                            aggregate duration.  Updated by
 ##                            ``setTestResults``.
+## - ``testResultsAvailable`` — whether anything has actually reported
+##                            a test run.  False by default and after a
+##                            review is entered over a dataset that
+##                            carries no tests; ``setTestResults`` flips
+##                            it true.  It exists because
+##                            ``DeepReviewData``
+##                            (``common/common_types/codetracer_features/
+##                            deepreview.nim``) has *no* test-result
+##                            field at all — no test name, no pass/fail,
+##                            no duration — so a CLI-launched review has
+##                            nothing to fill this row with.  Rendering
+##                            "0 run / 0 passed / all passing" in that
+##                            case would read as "every test passed",
+##                            which is a fabricated fact; the view paints
+##                            an explicit "not available for this
+##                            dataset" state instead
+##                            (DeepReview-GUI.milestones.org, DR-R3,
+##                            "A data gap to record, not to paper over").
+## - ``reviewActive``       — true once a review dataset has populated
+##                            the pane.  The section is part of the
+##                            Agent Activity panel and must stay out of
+##                            the way of a normal debugging session, so
+##                            it paints only when a review put something
+##                            in it (DeepReview-GUI.md §2.1: "The section
+##                            is part of the existing Agent Activity
+##                            panel").
+## - ``selectedFilePath``   — path of the file selected in the per-file
+##                            coverage table.  DeepReview-GUI.md §2.1:
+##                            "Selecting a file in either the VCS panel
+##                            or the per-file coverage table should agree
+##                            with the other; they are two views of one
+##                            selection."  The selection is expressed as
+##                            a *path* rather than an index because the
+##                            two tables are independent projections of
+##                            the changeset and only the path is common
+##                            to both.
 ## - ``fileCoverage``       — ``seq[AgentDeepReviewFileCoverage]`` —
 ##                            one row per file the panel knows about.
 ##                            Updated by ``setFileCoverage``.
@@ -52,6 +88,17 @@
 ## - ``notificationCount``  — len of the notifications seq; used by
 ##                            tests + the "Recent Activity" header
 ##                            badge.
+## - ``sectionVisible``     — whether the DeepReview section should
+##                            paint at all: true once a review is
+##                            active or any data (file coverage,
+##                            notifications) has arrived.  The view
+##                            hides the whole container otherwise, so a
+##                            normal debugging session's Agent Activity
+##                            panel is unchanged.
+## - ``selectedFileIndex``  — index of ``selectedFilePath`` within
+##                            ``fileCoverage``, or -1 when the selected
+##                            path has no row (an empty selection, or a
+##                            file the coverage table does not carry).
 ##
 ## Actions:
 ## - ``setCoverageSummary`` — bulk replace the coverage summary
@@ -101,14 +148,19 @@ type
     # -- Mutable state --
     coverageSummary*: Signal[AgentDeepReviewCoverageSummary]
     testResults*: Signal[AgentDeepReviewTestResults]
+    testResultsAvailable*: Signal[bool]
     fileCoverage*: Signal[seq[AgentDeepReviewFileCoverage]]
     notifications*: Signal[seq[AgentDeepReviewNotification]]
     isExpanded*: Signal[bool]
+    reviewActive*: Signal[bool]
+    selectedFilePath*: Signal[string]
 
     # -- Derived state --
     coveragePercent*: Memo[float]
     hasFailures*: Memo[bool]
     notificationCount*: Memo[int]
+    sectionVisible*: Memo[bool]
+    selectedFileIndex*: Memo[int]
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -124,7 +176,34 @@ proc setCoverageSummary*(vm: AgentActivityDeepReviewVM;
 proc setTestResults*(vm: AgentActivityDeepReviewVM;
                      results: AgentDeepReviewTestResults) =
   ## Bulk replace the test-result roll-up.
+  ##
+  ## Calling this *is* the statement that test results are known — only a
+  ## producer that ran tests has counts to publish — so it flips
+  ## ``testResultsAvailable``.  There is deliberately no way to publish
+  ## counts while leaving the row marked unavailable: that combination
+  ## would be the fabricated zero this flag exists to prevent.
   vm.testResults.val = results
+  vm.testResultsAvailable.val = true
+
+proc setTestResultsUnavailable*(vm: AgentActivityDeepReviewVM) =
+  ## Declare that nothing has reported test results — the state a review
+  ## launched over an exported ``.dr`` dataset is in, because
+  ## ``DeepReviewData`` carries no test-result fields.  Resets the counts
+  ## too so a stale roll-up cannot show through the unavailable label.
+  vm.testResults.val = AgentDeepReviewTestResults()
+  vm.testResultsAvailable.val = false
+
+proc setReviewActive*(vm: AgentActivityDeepReviewVM; active: bool) =
+  ## Mark the pane as belonging to a live review, which is what makes the
+  ## DeepReview section paint inside the Agent Activity panel.
+  vm.reviewActive.val = active
+
+proc setSelectedFilePath*(vm: AgentActivityDeepReviewVM; path: string) =
+  ## Move the per-file coverage table's selection.  Accepts any path,
+  ## including one with no row: ``selectedFileIndex`` then reports -1 and
+  ## no row paints as selected, which is the honest rendering of "the
+  ## selected file has no coverage row".
+  vm.selectedFilePath.val = path
 
 proc setFileCoverage*(vm: AgentActivityDeepReviewVM;
                       entries: openArray[AgentDeepReviewFileCoverage]) =
@@ -181,9 +260,12 @@ proc createAgentActivityDeepReviewVM*(
   withViewModel proc(dispose: proc()): AgentActivityDeepReviewVM =
     let coverageSummary = createSignal(AgentDeepReviewCoverageSummary())
     let testResults = createSignal(AgentDeepReviewTestResults())
+    let testResultsAvailable = createSignal(false)
     let fileCoverage = createSignal(newSeq[AgentDeepReviewFileCoverage]())
     let notifications = createSignal(newSeq[AgentDeepReviewNotification]())
     let isExpanded = createSignal(false)
+    let reviewActive = createSignal(false)
+    let selectedFilePath = createSignal("")
 
     let coveragePercent = createMemo[float] proc(): float =
       coverageSummary.val.coveragePercent
@@ -194,15 +276,33 @@ proc createAgentActivityDeepReviewVM*(
     let notificationCount = createMemo[int] proc(): int =
       notifications.val.len
 
+    let sectionVisible = createMemo[bool] proc(): bool =
+      reviewActive.val or fileCoverage.val.len > 0 or notifications.val.len > 0
+
+    let selectedFileIndex = createMemo[int] proc(): int =
+      let wanted = selectedFilePath.val
+      if wanted.len == 0:
+        return -1
+      let rows = fileCoverage.val
+      for i in 0 ..< rows.len:
+        if rows[i].path == wanted:
+          return i
+      -1
+
     AgentActivityDeepReviewVM(
       store: store,
       coverageSummary: coverageSummary,
       testResults: testResults,
+      testResultsAvailable: testResultsAvailable,
       fileCoverage: fileCoverage,
       notifications: notifications,
       isExpanded: isExpanded,
+      reviewActive: reviewActive,
+      selectedFilePath: selectedFilePath,
       coveragePercent: coveragePercent,
       hasFailures: hasFailures,
       notificationCount: notificationCount,
+      sectionVisible: sectionVisible,
+      selectedFileIndex: selectedFileIndex,
       disposeProc: dispose,
     )

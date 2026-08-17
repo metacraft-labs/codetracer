@@ -304,6 +304,52 @@ export class DeepReviewPage {
     return this.vcsPanel().locator(".vcs-review-stats");
   }
 
+  // -- Agent Activity panel: the review's DeepReview section ---------------
+
+  /**
+   * The AGENT ACTIVITY panel — DeepReview's third pillar.
+   *
+   * DeepReview-GUI.md §2.1: "The Agent Activity panel is the third pillar,
+   * not an adjacent feature... The section is part of the existing Agent
+   * Activity panel. It is not a separate panel and does not get its own
+   * layout slot."
+   */
+  agentActivityPanel(): Locator {
+    return this.page.locator(".agent-ha-container");
+  }
+
+  /** The DeepReview section rendered inside the AGENT ACTIVITY panel. */
+  reviewActivitySection(): Locator {
+    return this.agentActivityPanel().locator(".activity-dr-container");
+  }
+
+  /** The section's coverage summary card. */
+  reviewActivityCoverageCard(): Locator {
+    return this.reviewActivitySection().locator(".activity-dr-card-coverage");
+  }
+
+  /** The section's test-results card. */
+  reviewActivityTestsCard(): Locator {
+    return this.reviewActivitySection().locator(".activity-dr-card-tests");
+  }
+
+  /** One row per file in the section's per-file coverage table. */
+  reviewActivityFileRows(): Locator {
+    return this.reviewActivitySection().locator(".activity-dr-files-row");
+  }
+
+  /** The selected row of the per-file coverage table. */
+  reviewActivitySelectedFileRow(): Locator {
+    return this.reviewActivitySection().locator(
+      ".activity-dr-files-row-selected",
+    );
+  }
+
+  /** The section's collapse/expand header. */
+  reviewActivityHeader(): Locator {
+    return this.reviewActivitySection().locator(".activity-dr-header");
+  }
+
   /** The diff tab showing ``filePath``'s diff, if one is open. */
   diffTabFor(filePath: string): Locator {
     return this.diffTabs().filter({

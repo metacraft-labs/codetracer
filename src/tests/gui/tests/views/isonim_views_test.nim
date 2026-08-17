@@ -10204,6 +10204,180 @@ suite "IsoNim Agent Activity DeepReview Panel — interactions":
       dispose()
 
 # ---------------------------------------------------------------------------
+# DR-R3 — the section inside the Agent Activity panel
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Agent Activity DeepReview Panel — review rendering (DR-R3)":
+
+  test "the tests card says the dataset carries no test results":
+    ## DeepReview-GUI.milestones.org DR-R3: "the row must render an honest
+    ## 'not available for this dataset' state, not a fabricated zero".
+    ## `DeepReviewData` has no test-result fields at all, so a CLI-launched
+    ## review has nothing to put here — and "0/0 · all passing" would report
+    ## a green suite that never ran.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      let testsCard = findByClass(panel, "activity-dr-card-tests")
+      check testsCard != nil
+
+      check findByClass(testsCard, "activity-dr-card-value").textContent ==
+        AgentActivityDeepReviewTestsUnavailableValueText
+      let detail = findByClass(testsCard, "activity-dr-card-detail")
+      check detail.textContent == AgentActivityDeepReviewTestsUnavailableText
+      check detail.textContent != "all passing"
+      check AgentActivityDeepReviewTestsUnavailableClass in
+        detail.attributes["class"]
+      # Not the failure branch either — absent data is neither red nor green.
+      check "activity-dr-card-warn" notin detail.attributes["class"]
+
+      # A live agent session reporting a run replaces it with real counts.
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 4, testsPassed: 4, testsFailed: 0))
+      check findByClass(testsCard, "activity-dr-card-value").textContent ==
+        "4/4"
+      check findByClass(testsCard, "activity-dr-card-detail").textContent ==
+        "all passing"
+
+      dispose()
+
+  test "the section stays hidden until a review populates it":
+    ## §2.1 puts the section inside the Agent Activity panel, which every
+    ## standard layout already has — so outside a review it must take up no
+    ## room in a normal debugging session's panel.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      # The panel's root element IS the section container.
+      let container = renderAgentActivityDeepReviewPanel(r, vm)
+      check AgentActivityDeepReviewInactiveModifier in
+        container.attributes["class"].split(' ')
+      check AgentActivityDeepReviewHiddenModifier in
+        container.attributes["class"].split(' ')
+
+      vm.setReviewActive(true)
+      check AgentActivityDeepReviewInactiveModifier notin
+        container.attributes["class"].split(' ')
+      check AgentActivityDeepReviewHiddenModifier notin
+        container.attributes["class"].split(' ')
+
+      dispose()
+
+  test "the selected coverage row is highlighted and reports clicks":
+    ## §2.1: "Selecting a file in either the VCS panel or the per-file
+    ## coverage table should agree with the other; they are two views of one
+    ## selection."  This is the coverage table's half: it shows which file is
+    ## under review, and a click on a row reports that file to the host.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+      var reported = ""
+      let callbacks = AgentActivityDeepReviewCallbacks(
+        onSelectFile: proc(path: string) = (reported = path))
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm, callbacks)
+      vm.setFileCoverage([
+        makeAdrFile("src/main.rs", 15, 17),
+        makeAdrFile("src/utils.rs", 5, 7),
+      ])
+
+      var rows = findAllByClass(panel, "activity-dr-files-row")
+      check rows.len == 2
+      for row in rows:
+        check AgentActivityDeepReviewFileRowSelectedClass notin
+          row.attributes["class"]
+
+      vm.setSelectedFilePath("src/utils.rs")
+      rows = findAllByClass(panel, "activity-dr-files-row")
+      check AgentActivityDeepReviewFileRowSelectedClass notin
+        rows[0].attributes["class"]
+      check AgentActivityDeepReviewFileRowSelectedClass in
+        rows[1].attributes["class"]
+
+      rows[0].fireEvent("click")
+      check reported == "src/main.rs"
+
+      dispose()
+
+  test "with no host attached a coverage-row click still moves the selection":
+    ## The VM-level fallback, mirroring `invokeSetTraceContext` in the VCS
+    ## view: the MockRenderer path must be exercisable without a host.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      vm.setFileCoverage([
+        makeAdrFile("src/main.rs", 15, 17),
+        makeAdrFile("src/utils.rs", 5, 7),
+      ])
+      findAllByClass(panel, "activity-dr-files-row")[1].fireEvent("click")
+      check vm.selectedFilePath.val == "src/utils.rs"
+      check vm.selectedFileIndex.val == 1
+
+      dispose()
+
+suite "IsoNim Agent Activity Panel — hosts the DeepReview section (DR-R3)":
+
+  test "a panel with no review VM renders no DeepReview section":
+    ## Regression guard for normal debugging: passing no DeepReview VM must
+    ## leave the Agent Activity panel exactly as it was.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityPanel(r, vm, componentId = 71)
+      let host = findByClass(panel, AgentActivityDeepReviewHostClass)
+      check host != nil
+      check host.children.len == 0
+      check findByClass(panel, "activity-dr-container") == nil
+
+      dispose()
+
+  test "the DeepReview section renders inside the Agent Activity panel":
+    ## §2.1: "The section is part of the existing Agent Activity panel.  It is
+    ## not a separate panel and does not get its own layout slot."  Before
+    ## DR-R3 the section existed only as `Content.AgentActivityDeepReview`, a
+    ## panel no layout declares — so it never rendered in a real review.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let drVm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityPanel(
+        r, vm, componentId = 72, deepReviewVm = drVm)
+      let host = findByClass(panel, AgentActivityDeepReviewHostClass)
+      check host != nil
+      check findByClass(host, "activity-dr-container") != nil
+      # Outside a review the host takes no space at all.
+      check "hidden" in host.attributes["class"]
+
+      drVm.setFileCoverage([makeAdrFile("src/main.rs", 15, 17)])
+      drVm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: 15, totalLinesUncovered: 2,
+        coveragePercent: 88.2, functionsTraced: 2))
+      drVm.setReviewActive(true)
+      drVm.setExpanded(true)
+
+      check "hidden" notin host.attributes["class"]
+      check findAllByClass(host, "activity-dr-files-row").len == 1
+      check findByClass(host, "activity-dr-card-coverage").textContent
+        .contains("88.2%")
+      # The conversation surface is untouched by any of this.
+      check findByClass(panel, AgentActivityConversationClass) != nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
 # VM defaults / formatting helpers
 # ---------------------------------------------------------------------------
 

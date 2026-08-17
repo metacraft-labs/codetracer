@@ -215,6 +215,23 @@ const
     "src/tests/gui/tests/vcs/vcs_vm_test.nim",
     "src/tests/gui/tests/vcs/vcs_view_test.nim",
     "src/tests/gui/tests/deepreview/deepreview_vm_test.nim",
+    # DR-R3 — the Agent Activity panel as DeepReview's third pillar.  The
+    # panel's ViewModel, view and component all existed and were all wired to
+    # nothing: the only caller of `setCoverageSummary` / `setTestResults` /
+    # `setFileCoverage` in the repository was a storybook fixture, so the
+    # section rendered an empty shell in every real review.  The suite added
+    # here drives review entry over the same `sample-review.json` fixture the
+    # Playwright suites use and asserts the coverage summary, the per-file
+    # table, the honest "no test results in this dataset" state, and that the
+    # coverage table and the VCS panel's Changed Files list stay one
+    # selection.  The file existed before DR-R3 and was NOT listed here, so it
+    # was gated by nothing at all — the same gap DR-R1 kept finding.
+    #
+    # The view half rides in `isonim_views_test.nim` (already listed above):
+    # the section now renders *inside* the Agent Activity panel, per
+    # DeepReview-GUI.md §2.1, so its rendering is that panel's business.  The
+    # focus half rides in `deepreview_layout_test.nim` (also listed).
+    "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim",
     # #603 (M38) — the re-record queue's decision model.  Both encode the two
     # "never hang" invariants: a failed save must abort loudly, and dirty files
     # with nothing in flight is unreachable-by-waiting.  Note

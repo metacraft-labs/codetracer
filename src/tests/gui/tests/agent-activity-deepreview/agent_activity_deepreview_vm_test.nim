@@ -25,12 +25,14 @@
 ## Compile and run:
 ##   nim c -r src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim
 
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/agent_activity_deepreview_vm
+import viewmodels/review_entry
+import viewmodels/vcs_vm
 
 const AgenticSessionFixtureJson =
   staticRead("../agentic-coding/fixtures/agent-session.json")
@@ -428,5 +430,272 @@ suite "AgentActivityDeepReviewVM isExpanded":
       vm.setExpanded(true)
       vm.setExpanded(true)
       check vm.isExpanded.val
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# DR-R3: the Agent Activity panel as DeepReview's third pillar
+# ---------------------------------------------------------------------------
+#
+# `codetracer-specs/DeepReview/DeepReview-GUI.md` §2.1: "In DeepReview mode the
+# panel gains a DeepReview section showing … Coverage summary … Per-file
+# coverage … The section is populated from the same review dataset that drives
+# the VCS panel and the editor.  It must not require a live agent session: a
+# review launched from the CLI over an exported dataset must populate it too."
+#
+# The dataset is the same `sample-review.json` the Playwright suite launches
+# CodeTracer over and the same fixture `deepreview/deepreview_vm_test.nim`
+# drives the VCS side of review entry with, so both halves of §2.1's "two views
+# of one selection" are described against one changeset.
+#
+# The projection below mirrors `reviewCoverageRows` / `deepReviewRows` in
+# `src/frontend/ui/vcs.nim`, which walk the JS `DeepReviewData` object and are
+# therefore not importable here.
+
+proc drFixtureDirPath(): string {.compileTime.} =
+  let p = currentSourcePath()
+  var cut = p.rfind('/')
+  let backslash = p.rfind('\\')
+  if backslash > cut:
+    cut = backslash
+  p[0 .. cut] & "../deepreview/fixtures/"
+
+const SampleReviewJson = staticRead(drFixtureDirPath() & "sample-review.json")
+const EmptyReviewJson = staticRead(drFixtureDirPath() & "empty-review.json")
+
+proc coverageRowsFromFixture(fixture: string):
+    seq[AgentDeepReviewFileCoverage] =
+  ## Project a DeepReview export's `files[].coverage` into the Agent Activity
+  ## pane's per-file coverage rows, the way `vcs.nim`'s `reviewCoverageRows`
+  ## does: one row per file in the changeset, `coveredLines` = the lines the
+  ## recording executed, `totalLines` = the lines the export carries coverage
+  ## for, `hasFlow` = the file has at least one recorded function flow.
+  result = @[]
+  let data = parseJson(fixture)
+  if not data.hasKey("files"):
+    return
+  for file in data["files"].items:
+    var executed = 0
+    var covered = 0
+    if file.hasKey("coverage"):
+      for cov in file["coverage"].items:
+        covered += 1
+        if cov{"executed"}.getBool(false):
+          executed += 1
+    result.add(AgentDeepReviewFileCoverage(
+      path: file{"path"}.getStr(""),
+      coveredLines: executed,
+      totalLines: covered,
+      hasFlow: file.hasKey("flow") and file["flow"].len > 0,
+    ))
+
+proc tracedFunctionsFromFixture(fixture: string): int =
+  ## Distinct function keys the export carries a recorded flow for.  Mirrors
+  ## `vcs.nim`'s `reviewTracedFunctions`.
+  var seen: seq[string] = @[]
+  let data = parseJson(fixture)
+  if not data.hasKey("files"):
+    return 0
+  for file in data["files"].items:
+    if not file.hasKey("flow"):
+      continue
+    for flow in file["flow"].items:
+      let key = file{"path"}.getStr("") & ":" & flow{"functionKey"}.getStr("")
+      if key notin seen:
+        seen.add(key)
+  seen.len
+
+proc vcsRowsFromFixture(fixture: string): seq[VCSFileRow] =
+  ## The VCS panel's own changed-file rows for the same changeset — the other
+  ## half of §2.1's "two views of one selection".
+  result = @[]
+  let data = parseJson(fixture)
+  if not data.hasKey("files"):
+    return
+  for file in data["files"].items:
+    let path = file{"path"}.getStr("")
+    let slash = path.rfind('/')
+    let diff = file{"diff"}
+    result.add(VCSFileRow(
+      status: if diff != nil: diff{"status"}.getStr("M") else: "M",
+      path: path,
+      baseName: if slash >= 0: path[slash + 1 .. ^1] else: path,
+      additions: if diff == nil: 0 else: diff{"linesAdded"}.getInt(0),
+      deletions: if diff == nil: 0 else: diff{"linesRemoved"}.getInt(0),
+      selected: false,
+    ))
+
+suite "Agent Activity DeepReview — populated by a review (DR-R3)":
+
+  test "the fixture projection matches the review dataset":
+    ## Guards the tests below: if the fixture loses its files or its coverage,
+    ## they must fail loudly rather than assert about an empty changeset.
+    let rows = coverageRowsFromFixture(SampleReviewJson)
+    check rows.len == 3
+    check rows[0].path == "src/main.rs"
+    check rows[0].coveredLines == 15
+    check rows[0].totalLines == 17
+    check rows[0].hasFlow
+    check rows[1].path == "src/utils.rs"
+    check rows[1].coveredLines == 5
+    check rows[1].totalLines == 7
+    check rows[2].path == "src/config.rs"
+    check rows[2].totalLines == 0
+    check not rows[2].hasFlow
+    check tracedFunctionsFromFixture(SampleReviewJson) == 3
+    check coverageRowsFromFixture(EmptyReviewJson).len == 0
+
+  test "test_review_entry_populates_agent_activity_coverage":
+    ## §2.1: "Coverage summary — aggregate executed / total lines and
+    ## percentage for the changeset" and "Per-file coverage — one row per file
+    ## in the review, aligned with the VCS panel's Changed Files rows".
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let activity = createAgentActivityDeepReviewVM(store)
+      let vcs = createVCSVM()
+      vcs.setDeepReviewMode(true)
+      vcs.setChangedFiles(vcsRowsFromFixture(SampleReviewJson))
+
+      var documents: seq[string] = @[]
+      discard enterReview(
+        vcs, activity,
+        coverageRowsFromFixture(SampleReviewJson),
+        tracedFunctionsFromFixture(SampleReviewJson),
+        proc(a: VCSOpenAction) =
+          if a.documentKey notin documents:
+            documents.add(a.documentKey))
+
+      # Aggregate coverage across the changeset: 15/17 + 5/7 + 0/0.
+      check activity.coverageSummary.val.totalLinesCovered == 20
+      check activity.coverageSummary.val.totalLinesUncovered == 4
+      check abs(activity.coveragePercent.val - 83.3333) < 0.01
+      check activity.coverageSummary.val.functionsTraced == 3
+
+      # One row per file in the changeset, in the changeset's order.
+      check activity.fileCoverage.val.len == 3
+      check activity.fileCoverage.val[0].path == "src/main.rs"
+      check activity.fileCoverage.val[0].coveredLines == 15
+      check activity.fileCoverage.val[0].totalLines == 17
+      check activity.fileCoverage.val[0].hasFlow
+      check activity.fileCoverage.val[2].path == "src/config.rs"
+      check not activity.fileCoverage.val[2].hasFlow
+
+      # The section is only shown once a review has data to put in it, and a
+      # review opens it — collapsed is the right default beside an agent
+      # conversation, not beside a review.
+      check activity.reviewActive.val
+      check activity.sectionVisible.val
+      check activity.isExpanded.val
+
+      # Review entry still opens the first file (DR-R1) — the two steps run
+      # from one routine.
+      check documents == @["diff:file:src/main.rs"]
+
+      dispose()
+
+  test "test_cli_review_without_agent_session_populates_the_pane":
+    ## §2.1: "It must not require a live agent session: a review launched from
+    ## the CLI over an exported dataset must populate it too."  Nothing here
+    ## constructs an agent session, publishes an ACP notification or appends a
+    ## single feed row — the dataset alone fills the pane.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let activity = createAgentActivityDeepReviewVM(store)
+
+      populateReviewActivity(
+        activity,
+        coverageRowsFromFixture(SampleReviewJson),
+        tracedFunctionsFromFixture(SampleReviewJson))
+
+      check activity.fileCoverage.val.len == 3
+      check activity.coverageSummary.val.totalLinesCovered == 20
+      check abs(activity.coveragePercent.val - 83.3333) < 0.01
+      check activity.reviewActive.val
+      # No agent ran, so there is no activity feed: the pane is populated
+      # from the dataset, not from a notification stream.
+      check activity.notificationCount.val == 0
+
+      dispose()
+
+  test "test_agent_activity_reports_absent_test_results_honestly":
+    ## §2.1 lists test results, but `DeepReviewData` carries none — there is
+    ## no test-name, pass/fail or duration field in the exported type (see
+    ## `src/common/common_types/codetracer_features/deepreview.nim`).  The row
+    ## must therefore say so; "0 run, 0 passed" reads as "all tests passed".
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let activity = createAgentActivityDeepReviewVM(store)
+
+      # Unavailable is the *default*: a pane nobody has told about a test run
+      # must not claim a green run either.
+      check not activity.testResultsAvailable.val
+
+      populateReviewActivity(
+        activity,
+        coverageRowsFromFixture(SampleReviewJson),
+        tracedFunctionsFromFixture(SampleReviewJson))
+
+      check not activity.testResultsAvailable.val
+      check activity.testResults.val.testsRun == 0
+      check activity.testResults.val.testsPassed == 0
+      check not activity.hasFailures.val
+
+      # A live agent session reporting a run flips the flag — the state is a
+      # real fact about the data, not a constant.
+      activity.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 3, testsPassed: 3, testsFailed: 0, totalDurationMs: 12))
+      check activity.testResultsAvailable.val
+
+      # …and a second review entry over a dataset with no tests must not
+      # silently erase what the session reported.
+      populateReviewActivity(
+        activity,
+        coverageRowsFromFixture(SampleReviewJson),
+        tracedFunctionsFromFixture(SampleReviewJson))
+      check activity.testResultsAvailable.val
+      check activity.testResults.val.testsRun == 3
+
+      dispose()
+
+  test "test_agent_activity_file_selection_agrees_with_vcs":
+    ## §2.1: "Selecting a file in either the VCS panel or the per-file
+    ## coverage table should agree with the other; they are two views of one
+    ## selection."
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let activity = createAgentActivityDeepReviewVM(store)
+      let vcs = createVCSVM()
+      vcs.setDeepReviewMode(true)
+      vcs.setChangedFiles(vcsRowsFromFixture(SampleReviewJson))
+
+      discard enterReview(
+        vcs, activity,
+        coverageRowsFromFixture(SampleReviewJson),
+        tracedFunctionsFromFixture(SampleReviewJson),
+        nil)
+
+      # Review entry leaves both views on the first file.
+      check vcs.changedFiles.val[0].selected
+      check activity.selectedFilePath.val == "src/main.rs"
+      check activity.selectedFileIndex.val == 0
+
+      # Coverage table -> VCS panel.
+      check selectActivityReviewFile(vcs, activity, "src/utils.rs")
+      check activity.selectedFilePath.val == "src/utils.rs"
+      check activity.selectedFileIndex.val == 1
+      check vcs.changedFiles.val[1].selected
+      check not vcs.changedFiles.val[0].selected
+
+      # VCS panel -> coverage table.
+      check selectReviewRow(vcs, 2)
+      check syncActivitySelectionFromVCS(vcs, activity)
+      check activity.selectedFilePath.val == "src/config.rs"
+      check activity.selectedFileIndex.val == 2
+      check vcs.changedFiles.val[2].selected
+
+      # A path the review does not contain moves neither view.
+      check not selectActivityReviewFile(vcs, activity, "src/absent.rs")
+      check activity.selectedFilePath.val == "src/config.rs"
+      check vcs.changedFiles.val[2].selected
 
       dispose()

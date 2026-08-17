@@ -18,8 +18,16 @@ import
   ui_imports
 
 import deepreview
+# DeepReview's third pillar.  The pane's VM lives in
+# `ui/agent_activity_deepreview.nim`; the dependency is one-way (that module
+# never imports this one) and the coverage-table -> VCS-panel direction of the
+# shared selection travels back through its `onActivityReviewFileSelected`
+# hook, installed by `startReviewNavigation` below.
+import agent_activity_deepreview
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/review_entry
+from ../viewmodel/store/types as vm_store_types import
+  AgentDeepReviewFileCoverage
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -1063,6 +1071,52 @@ proc deepReviewRows(self: VCSComponent): seq[VCSFileRow] =
       selected: i == self.data.deepReviewSelectedFileIndex,
     ))
 
+proc reviewCoverageRows(self: VCSComponent):
+    seq[AgentDeepReviewFileCoverage] =
+  ## Project the review's per-file coverage into the Agent Activity panel's
+  ## DeepReview rows — DeepReview-GUI.md §2.1, "Per-file coverage — one row
+  ## per file in the review, aligned with the VCS panel's Changed Files rows".
+  ##
+  ## The alignment is literal: this walks ``deepReviewData.files`` in the same
+  ## order ``deepReviewRows`` does, so row *i* of the coverage table and row
+  ## *i* of the Changed Files list describe the same file.  ``coveredLines`` /
+  ## ``totalLines`` come from ``DeepReviewFileData.coverage``
+  ## (``DeepReviewLineCoverage.executed``) and ``hasFlow`` from whether the
+  ## export recorded any function flow for the file; nothing is invented.
+  result = @[]
+  let drData = self.data.deepReviewData
+  if drData.isNil:
+    return
+  for file in drData.files:
+    var executed = 0
+    for cov in file.coverage:
+      if cov.executed:
+        executed += 1
+    result.add(AgentDeepReviewFileCoverage(
+      path: safeStr(file.path),
+      coveredLines: executed,
+      totalLines: file.coverage.len,
+      hasFlow: file.flow.len > 0,
+    ))
+
+proc reviewTracedFunctions(self: VCSComponent): int =
+  ## Distinct functions the review's recordings carry a flow for.
+  ##
+  ## ``DeepReviewFunctionFlow`` is *one execution* of a function, so several
+  ## entries can share a ``functionKey``; counting entries would report four
+  ## "functions traced" for three functions called four times.  Keys are
+  ## qualified by path because a key is only unique within its file.
+  var seen: seq[string] = @[]
+  let drData = self.data.deepReviewData
+  if drData.isNil:
+    return 0
+  for file in drData.files:
+    for flow in file.flow:
+      let key = safeStr(file.path) & ":" & safeStr(flow.functionKey)
+      if key notin seen:
+        seen.add(key)
+  seen.len
+
 proc gitChangedRows(self: VCSComponent): seq[VCSFileRow] =
   result = @[]
   for file in self.changedFiles:
@@ -1277,9 +1331,34 @@ proc handleVCSFileSelection(self: VCSComponent; index: int;
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
     self.syncDeepReviewPanelSelection()
+    # DeepReview-GUI.md §2.1: the Changed Files list and the Agent Activity
+    # panel's per-file coverage table are "two views of one selection", so a
+    # click here moves the coverage table's highlight too.
+    discard syncActivitySelectionFromVCS(
+      vm, ensureAgentActivityDeepReviewVM())
   else:
     vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
   self.dispatchOpenAction(vm.openActionFor(index, path, target, status))
+
+proc handleActivityFileSelection(self: VCSComponent; path: string) =
+  ## The reviewer clicked a row of the Agent Activity panel's per-file
+  ## coverage table — the other direction of §2.1's "two views of one
+  ## selection".
+  ##
+  ## It resolves to the same gesture a click in the Changed Files list is
+  ## (§3: "clicking a file opens that file's review representation"), so it
+  ## goes through ``handleVCSFileSelection`` rather than only moving a
+  ## highlight.
+  if self.isNil or not self.isDeepReviewMode():
+    return
+  let vm = self.ensureVCSVM()
+  if vm.isNil:
+    return
+  let index = vm.reviewRowIndexForPath(path)
+  if index < 0:
+    return
+  let row = vm.openActionForRow(index)
+  self.handleVCSFileSelection(index, row.path, row.target, row.status)
 
 proc handleTraceContextSelection(self: VCSComponent; id: int) =
   ## The reviewer picked a trace context in this panel's header
@@ -1307,6 +1386,14 @@ proc startReviewNavigation*(self: VCSComponent) =
   ## Review entry, step 2 — "The first modified file opens in the editor"
   ## (DeepReview-GUI.md §7, "Transition into a Review").
   ##
+  ## …and step 4 — "The Agent Activity panel's DeepReview section populates
+  ## with coverage and test results".  §2.1 is emphatic that this is a
+  ## DeepReview feature rather than an agentic-coding one: "It must not
+  ## require a live agent session: a review launched from the CLI over an
+  ## exported dataset must populate it too."  Both steps therefore run from
+  ## one routine (``review_entry.enterReview``), so there is no path that can
+  ## open a review with the third pillar left empty.
+  ##
   ## The decision and the selection bookkeeping live in
   ## ``viewmodel/viewmodels/review_entry``; this proc supplies the changeset
   ## and the GoldenLayout side effect.  DR-R7 routes the other two launch
@@ -1321,8 +1408,15 @@ proc startReviewNavigation*(self: VCSComponent) =
   # legacy selection index moves with the VM's row selection.
   self.data.deepReviewSelectedFileIndex = 0
   self.syncLegacyVCSIntoVM()
-  discard vm.openFirstReviewFile(proc(action: VCSOpenAction) =
-    self.dispatchOpenAction(action))
+  # The coverage table's clicks come back through this component.
+  agent_activity_deepreview.onActivityReviewFileSelected =
+    proc(path: string) = self.handleActivityFileSelection(path)
+  discard enterReview(
+    vm,
+    ensureAgentActivityDeepReviewVM(),
+    self.reviewCoverageRows(),
+    self.reviewTracedFunctions(),
+    proc(action: VCSOpenAction) = self.dispatchOpenAction(action))
   self.syncDeepReviewPanelSelection()
 
 var deepReviewNavigationDone = false

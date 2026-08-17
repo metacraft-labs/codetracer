@@ -58,7 +58,7 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/agent_activity_deepreview_vm import
   AgentActivityDeepReviewVM, createAgentActivityDeepReviewVM,
   setCoverageSummary, setTestResults, setFileCoverage,
-  appendNotification, clearNotifications, setExpanded
+  appendNotification, clearNotifications, setExpanded, setSelectedFilePath
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_agent_activity_deepreview_view import
@@ -177,6 +177,28 @@ var agentActivityDeepReviewComponentRef: AgentActivityDeepReviewComponent
 var isoNimAgentActivityDeepReviewMountedIds {.used.}: JsAssoc[int, bool] =
   JsAssoc[int, bool]{}
 
+var onActivityReviewFileSelected*: proc(path: string) {.closure.}
+  ## Host hook for a click on a row of the per-file coverage table.
+  ##
+  ## DeepReview-GUI.md §2.1: the coverage table and the VCS panel's Changed
+  ## Files list are "two views of one selection", so a click here has to move
+  ## the VCS panel's selection and open the file the same way a click there
+  ## would.  That behaviour belongs to ``ui/vcs.nim``, which already imports
+  ## this module — the hook is what keeps the dependency one-way instead of
+  ## making the two modules import each other.  Installed by
+  ## ``vcs.startReviewNavigation``; nil outside a review, in which case the
+  ## click only moves this pane's own selection.
+
+proc dispatchActivityFileSelection*(path: string) =
+  ## Route a coverage-row click to whatever host installed
+  ## ``onActivityReviewFileSelected``, falling back to moving this pane's own
+  ## selection so the row highlight still follows the click when no review is
+  ## driving the panel.
+  if onActivityReviewFileSelected != nil:
+    onActivityReviewFileSelected(path)
+  elif not agentActivityDeepReviewVMInstance.isNil:
+    agentActivityDeepReviewVMInstance.setSelectedFilePath(path)
+
 proc tryMountIsoNimAgentActivityDeepReviewPanel*()
 
 # ---------------------------------------------------------------------------
@@ -288,10 +310,22 @@ proc syncLegacyAgentActivityDeepReviewIntoVM*(
   ## through this without exploding.
   if agentActivityDeepReviewVMInstance.isNil or self.isNil:
     return
+  # An empty legacy component has nothing to say, and saying it would erase a
+  # review's data: since DR-R3 this VM is also filled directly from the review
+  # dataset (`review_entry.populateReviewActivity`), with no legacy component
+  # involved at all.  A bulk-replace from a component that has received no
+  # notification would blank the pane the review just populated.
+  if self.fileEntries.len == 0 and self.recentNotifications.len == 0:
+    return
   agentActivityDeepReviewVMInstance.setCoverageSummary(
     legacySummaryToVm(self.drSummary))
-  agentActivityDeepReviewVMInstance.setTestResults(
-    legacyTestResultsToVm(self.drSummary))
+  # `setTestResults` asserts that test results are KNOWN, so it is called only
+  # when a test actually ran.  Publishing the zeroed roll-up would render
+  # "0/0 - all passing", i.e. a green suite that never ran; the VM's
+  # unavailable state is the honest rendering (DR-R3).
+  if self.drSummary.testsRun > 0:
+    agentActivityDeepReviewVMInstance.setTestResults(
+      legacyTestResultsToVm(self.drSummary))
   agentActivityDeepReviewVMInstance.setFileCoverage(
     legacyFileEntriesToVm(self.fileEntries))
   # Replace the notifications signal in one shot — clear and re-append
@@ -313,14 +347,24 @@ proc initAgentActivityDeepReviewVMWithStore*(store: ReplayDataStore) =
   ## ``SessionViewModel``).  Called from
   ## ``ui_js.configureMiddleware``.  If a stub-backed instance
   ## already exists (created by ``initAgentActivityDeepReviewVM``
-  ## before the real backend was available) it is replaced so the
-  ## panel uses the real backend.
-  if agentActivityDeepReviewVMInstance != nil:
-    clog "AgentActivityDeepReviewVM: replacing existing instance with shared-store version"
-    isoNimAgentActivityDeepReviewMountedIds = JsAssoc[int, bool]{}
+  ## before the real backend was available) it is *re-pointed* at the
+  ## shared store rather than replaced.
+  ##
+  ## Re-pointing rather than replacing matters since DR-R3: the DeepReview
+  ## section is rendered inside the Agent Activity panel
+  ## (DeepReview-GUI.md §2.1), which mounts against whichever VM instance
+  ## existed at mount time.  Swapping the instance underneath it left the
+  ## mounted section bound to an orphaned VM, so a review populated one
+  ## object while the DOM watched another.  ``store`` is a plain field this
+  ## VM only carries — every signal is written by its setters — so
+  ## re-pointing loses nothing.
   agentActivityDeepReviewVMStore = store
-  agentActivityDeepReviewVMInstance = createAgentActivityDeepReviewVM(store)
-  clog "AgentActivityDeepReviewVM: parallel ViewModel instance created (shared store)"
+  if agentActivityDeepReviewVMInstance != nil:
+    agentActivityDeepReviewVMInstance.store = store
+    clog "AgentActivityDeepReviewVM: existing instance re-pointed at the shared store"
+  else:
+    agentActivityDeepReviewVMInstance = createAgentActivityDeepReviewVM(store)
+    clog "AgentActivityDeepReviewVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimAgentActivityDeepReviewPanel()
 
 proc initAgentActivityDeepReviewVM*() =
@@ -351,6 +395,19 @@ proc initAgentActivityDeepReviewVM*() =
     createAgentActivityDeepReviewVM(agentActivityDeepReviewVMStore)
   clog "AgentActivityDeepReviewVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimAgentActivityDeepReviewPanel()
+
+proc ensureAgentActivityDeepReviewVM*(): AgentActivityDeepReviewVM =
+  ## The pane's single VM, created on first use.
+  ##
+  ## Needed because the DeepReview section is rendered inside the Agent
+  ## Activity panel (DeepReview-GUI.md §2.1) and that panel mounts long
+  ## before — and, on the ``ct --deepreview`` path, entirely without —
+  ## ``configureMiddleware``.  Before DR-R3 the VM was only ever constructed
+  ## by an ``AgentActivityDeepReviewComponent``, and no layout declares one,
+  ## which is one of the reasons the third pillar was never populated.
+  if agentActivityDeepReviewVMInstance.isNil:
+    initAgentActivityDeepReviewVM()
+  agentActivityDeepReviewVMInstance
 
 # ---------------------------------------------------------------------------
 # Mount helper — Web only

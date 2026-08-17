@@ -28,6 +28,16 @@
 .status-modified
     color: #e09f3e
 
+// DeepReview's third pillar renders inside this panel (DeepReview-GUI.md
+// §2.1: "The section is part of the existing Agent Activity panel").  The
+// host itself carries `hidden` until a review populates the section, so a
+// normal debugging session's panel is laid out exactly as before — it does
+// not even contribute the container's flex `gap`.
+.agent-ha-deepreview-host
+  flex: 0 0 auto
+  max-height: 45%
+  overflow-y: auto
+
 .agent-ha-container
   box-sizing: border-box
   height: 100%

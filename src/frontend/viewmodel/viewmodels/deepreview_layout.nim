@@ -214,6 +214,39 @@ proc focusReviewFileList*(layout: JsonNode): bool {.discardable.} =
     return focusReviewFileList(layout["root"])
   false
 
+proc focusReviewActivityPane*(layout: JsonNode): bool {.discardable.} =
+  ## Make the Agent Activity panel the *visible* tab of whichever stack hosts
+  ## it — DeepReview's third pillar.
+  ##
+  ## `codetracer-specs/GUI/Layout-And-Navigation/Layout-System.md`, "DeepReview
+  ## and the Layout", obligation 2: "the three review panels stay wherever the
+  ## user put them, but the stack hosting each is retargeted at it so the
+  ## changed-file list, the diff tab and the review's coverage/test summary are
+  ## the visible tabs rather than being hidden behind siblings.  No panel is
+  ## moved between stacks and no stack is created for one."
+  ##
+  ## This is the coverage/test summary half.  In the bundled default layout the
+  ## Agent Activity panel is the second tab of the CALLTRACE stack, so a review
+  ## came up with its coverage summary hidden behind the call trace.
+  ##
+  ## Only the *focus* is changed: no panel is added, moved or removed, and a
+  ## layout with no Agent Activity panel is left alone (obligation 4's
+  ## materialisation case is deliberately not taken here — DR-R3 is scoped to
+  ## focus).  Mutates ``layout`` in place; returns true when a panel was found
+  ## and focused.
+  if layout.isNil or layout.kind != JObject:
+    return false
+  if layout{"type"}.getStr("") == "stack" and
+      focusStackChildWithContent(layout, AgentActivityContentId):
+    return true
+  if layout.hasKey("content") and layout["content"].kind == JArray:
+    for child in layout["content"].items:
+      if focusReviewActivityPane(child):
+        return true
+  if layout.hasKey("root"):
+    return focusReviewActivityPane(layout["root"])
+  false
+
 proc makeDeepReviewStack(withSize: bool): JsonNode =
   result = %*{
     "type": "stack",
@@ -244,6 +277,9 @@ proc addDeepReviewSurface*(layout: JsonNode): JsonNode =
   ##   * The stack hosting the VCS panel is retargeted at it, so the review's
   ##     Modified Files list is the tab the reviewer actually sees — see
   ##     ``focusReviewFileList``.
+  ##   * The stack hosting the Agent Activity panel is retargeted at it for the
+  ##     same reason — see ``focusReviewActivityPane``.  Focus only: no panel
+  ##     is moved between stacks and no stack is created.
   ##
   ## Nothing is ever removed, so every standard panel the user's layout
   ## declares survives the transition into DeepReview mode.
@@ -254,8 +290,9 @@ proc addDeepReviewSurface*(layout: JsonNode): JsonNode =
     return
   # Applied before the early idempotent return: re-entering DeepReview on a
   # layout persisted from a previous review session must still bring the
-  # Modified Files list to the front.
+  # Modified Files list and the review's coverage summary to the front.
   focusReviewFileList(result)
+  focusReviewActivityPane(result)
   if containsDeepReview(result["root"]):
     return
 
