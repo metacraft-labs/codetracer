@@ -56,8 +56,18 @@
 // A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
 // and gains a marked left edge, the way the DOM renderer's `.hunk-selected`
 // did.
+//
+// Monaco puts every line class on ONE element, so an unscoped selection
+// background here sits at the same specificity as `.ct-diff-line-added` and,
+// being declared later, wins — a selected added line would lose its green.
+// The DOM renderer did not have that problem: its `.hunk-selected` was on the
+// parent hunk container, so each child line's kind colour painted over it.
+// Restrict the wash to lines that have no kind colour of their own, and let
+// the left edge carry selection everywhere else.
 .ct-diff-hunk-selected
   box-shadow inset 0.1875em 0 0 0 #569cd6
+
+.ct-diff-line-context.ct-diff-hunk-selected
   background-color rgba(86, 156, 214, 0.08)
 
 // --- Gutter markers ------------------------------------------------------
