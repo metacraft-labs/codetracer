@@ -92,6 +92,52 @@ type
     traceContexts*: seq[VCSTraceContextRow]
     functionsTraced*: int
 
+  ReviewHunkLine* = object
+    ## One line of one hunk of a review's per-file diff.
+    ##
+    ## `kind` is spelled the way `DeepReviewHunkLine.type` is documented —
+    ## "context" / "added" / "removed" — because that is what the review's
+    ## consumers (`ui/unified_diff.nim`, `ui/deepreview.nim`) switch on.  The
+    ## `VCSDiffLineRow` spellings ("add"/"delete", and a "hunk" row carrying
+    ## the `@@` header) are normalised into it by `reviewHunksFor`.
+    kind*: string
+    content*: string
+    oldLine*: int
+    newLine*: int
+
+  ReviewHunk* = object
+    ## One hunk of a review's per-file diff, as a plain value.
+    oldStart*: int
+    oldCount*: int
+    newStart*: int
+    newCount*: int
+    lines*: seq[ReviewHunkLine]
+
+  ReviewFileDiff* = object
+    ## The per-file half of a review dataset: everything the review's diff tab
+    ## for *one* file renders, keyed by the path it belongs to.
+    ##
+    ## It is a separate value from `ReviewFile` (which is what the three panels
+    ## render — a row, a coverage entry) because the two have different
+    ## producers: every launch path fills in a `ReviewFile`, but only a path
+    ## that carries a diff per file can fill in this.  Keeping the path on it
+    ## is deliberate: the defect this type exists to prevent was a projection
+    ## that returned hunks *without* knowing which file it was asked about, so
+    ## every file of a changeset received the first file's diff.  A consumer
+    ## can now check the answer it got names the file it asked for.
+    path*: string
+    status*: string
+    additions*: int
+    deletions*: int
+    sourceContent*: string
+      ## The file's full text, or "" when this review does not carry it.
+      ##
+      ## It is what context expansion reveals from (DeepReview-GUI.md §4.2),
+      ## so a wrong answer here shows another file's lines inside this file's
+      ## diff.  Empty is the honest answer; a copy of some other file's text
+      ## is not.
+    hunks*: seq[ReviewHunk]
+
 proc `==`*(a, b: ReviewFile): bool {.noSideEffect.} =
   a.path == b.path and a.baseName == b.baseName and a.status == b.status and
     a.additions == b.additions and a.deletions == b.deletions and
@@ -216,6 +262,102 @@ proc reviewDatasetFrom*[T](drData: T): ReviewDataset =
       totalLines: file.coverage.len,
       hasFlow: file.flow.len > 0))
   result.functionsTraced = tracedFunctions.len
+
+# ---------------------------------------------------------------------------
+# The per-file half of a review dataset
+# ---------------------------------------------------------------------------
+
+proc reviewHunksFor*(rows: openArray[VCSDiffFileRow]; path: string):
+    seq[ReviewHunk] {.noSideEffect.} =
+  ## The hunks `rows` carries **for `path`**, and for no other file.
+  ##
+  ## The `path` argument is the whole point.  Before DR-R7 the agentic
+  ## launcher's equivalent took no file at all: it parsed the active editor's
+  ## text as a patch once per changeset, so every file of a multi-file review
+  ## was handed whichever file the editor happened to be showing — a reviewer
+  ## opening a deleted `config.rs` was shown `main.rs`'s modification.  This
+  ## keys off the row that names the file, so a file with no row in `rows` gets
+  ## *no* hunks rather than someone else's.
+  ##
+  ## The first row naming `path` wins: `VCSDiffFileRow` is one entry per file
+  ## of one changeset (`fileIndex` numbers them), so a second row for the same
+  ## path would be a duplicate of the first rather than more of its diff.
+  result = @[]
+  for file in rows:
+    if file.path != path:
+      continue
+    for hunk in file.hunks:
+      var converted = ReviewHunk(lines: @[])
+      for line in hunk.lines:
+        # `VCSDiffLineRow` spells the kinds "add"/"delete"/"context" and
+        # carries the `@@` header as a "hunk" row; `DeepReviewHunkLine.type`
+        # is documented as one of "context"/"added"/"removed" and keeps the
+        # header in the hunk's own start/count fields.
+        let kind =
+          case line.lineType
+          of "add", "added": "added"
+          of "delete", "deleted", "removed": "removed"
+          of "hunk": ""
+          else: "context"
+        if kind.len == 0:
+          continue
+        converted.lines.add ReviewHunkLine(
+          kind: kind,
+          content: line.content,
+          oldLine: line.oldLine,
+          newLine: line.newLine)
+      # A `VCSHunkRow` projected from an agent's diff text carries no `@@`
+      # range, so the range is derived from the lines it does carry rather
+      # than left at 0,0 (which renders as "@@ -0,0 +0,0 @@").
+      converted.oldStart = if hunk.oldStart > 0: hunk.oldStart else: 0
+      converted.newStart = if hunk.newStart > 0: hunk.newStart else: 0
+      converted.oldCount = hunk.oldCount
+      converted.newCount = hunk.newCount
+      for line in converted.lines:
+        if line.oldLine > 0:
+          if converted.oldStart == 0:
+            converted.oldStart = line.oldLine
+          if hunk.oldCount == 0:
+            converted.oldCount += 1
+        if line.newLine > 0:
+          if converted.newStart == 0:
+            converted.newStart = line.newLine
+          if hunk.newCount == 0:
+            converted.newCount += 1
+      result.add converted
+    return
+
+proc reviewFileDiffs*(dataset: ReviewDataset;
+                      rows: openArray[VCSDiffFileRow];
+                      sourceContentPath = "";
+                      sourceContentText = ""): seq[ReviewFileDiff] =
+  ## The review's per-file diffs, one per file of `dataset`, in the changeset's
+  ## order — the value `ui/agentic_session_launcher.deepReviewData` turns into
+  ## `DeepReviewFileData`/`DeepReviewFileDiff` by copying fields.
+  ##
+  ## It lives here, on the ViewModel layer, rather than in the launcher because
+  ## the launcher is JS-only (it needs Electron, GoldenLayout and the DOM) and
+  ## therefore unreachable from a headless test — which is how the "every file
+  ## gets the first file's hunks" defect survived unnoticed.  Everything that
+  ## *decides* anything is in here; what stays in the launcher is a field-for-
+  ## field conversion into the `cstring` flavour of `DeepReviewData`.
+  ##
+  ## `sourceContentPath` / `sourceContentText` are the one file whose full text
+  ## the caller has (for the agentic path: whatever the editor is showing).
+  ## Only that file receives it — see `ReviewFileDiff.sourceContent`.
+  result = @[]
+  for file in dataset.files:
+    result.add ReviewFileDiff(
+      path: file.path,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      sourceContent:
+        if sourceContentPath.len > 0 and file.path == sourceContentPath:
+          sourceContentText
+        else:
+          "",
+      hunks: reviewHunksFor(rows, file.path))
 
 proc selectReviewRow*(vm: VCSVM; index: int): bool {.discardable.} =
   ## Mark row `index` of the changed-files list as the selected one.

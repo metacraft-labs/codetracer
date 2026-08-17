@@ -445,6 +445,29 @@ proc agenticReviewDataset*(vm: AgenticSessionVM): ReviewDataset =
              else: "recorded test"))
   result.functionsTraced = 0
 
+proc agenticReviewFileDiffs*(vm: AgenticSessionVM; dataset: ReviewDataset):
+    seq[ReviewFileDiff] =
+  ## The per-file diffs of the review an agentic session hands over — the
+  ## other half of `agenticReviewDataset`, and the half the review's Monaco
+  ## diff tabs are built from.
+  ##
+  ## The source is `vcs.diffFiles`: the per-file diff this VM projected from
+  ## the agent's own output (a Harbor `fileDiff` REST call, an ACP diff event,
+  ## or an evidence file entry).  It used to be `activeEditorContent` re-parsed
+  ## as a patch inside `ui/agentic_session_launcher.nim`, which meant *every*
+  ## file of a multi-file changeset received the diff of whichever file the
+  ## editor happened to be showing.  Pairing each file with its own row is what
+  ## `reviewHunksFor` enforces; being on the ViewModel is what makes it
+  ## assertable without Electron.
+  ##
+  ## The full text of the one file the editor is showing is passed along for
+  ## context expansion (DeepReview-GUI.md §4.2); the other files carry none
+  ## rather than a copy of that one's text.
+  if vm.isNil:
+    return @[]
+  reviewFileDiffs(dataset, vm.vcs.diffFiles.val,
+                  vm.activeEditorPath.val, vm.activeEditorContent.val)
+
 proc handleAgentEvidenceNotification*(vm: AgenticSessionVM;
     notification: AgentEvidenceNotification): bool =
   vm.service.registerAgentEvidence(notification)

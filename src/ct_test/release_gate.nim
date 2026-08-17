@@ -272,6 +272,19 @@ const
     # and does not override the reviewer's own file selection), which matters
     # because `syncProductPanels` re-enters on every sync.
     #
+    # It also carries the per-file half of a review dataset, which DR-R7 fixed
+    # but did not test: `deepReviewHunks` took only the ViewModel, so every
+    # file of a review was handed whichever file the editor happened to be
+    # showing — a reviewer opening a deleted `config.rs` was shown `main.rs`'s
+    # modification, and context expansion revealed `main.rs`'s text inside it.
+    # `test_every_review_file_gets_its_own_diff` drives a three-file changeset
+    # (a modification, an addition and a deletion) through the projection that
+    # rule now lives in and asserts each file gets its own hunks, its own
+    # source content, and none of its neighbours'.  A one-file changeset cannot
+    # distinguish those, which is why the only end-to-end assertion that
+    # existed (`agentic-worktree.spec.ts`, and it needs a live Harbor server)
+    # did not guard it.
+    #
     # Its second suite is a source contract, native only: the launch paths
     # live in `ui_js.nim` / `ui/vcs.nim` / `ui/agentic_session_launcher.nim`,
     # which need Electron and GoldenLayout, so reading them is the only way to

@@ -35,7 +35,7 @@
 ## construct a `ReplayDataStore`: the review projections, the entry routine and
 ## the diff-to-dataset conversion are all real production code.
 
-import std/[json, strutils, unittest]
+import std/[json, sequtils, strutils, unittest]
 
 import isonim/core/[computation, owner, signals]
 
@@ -231,11 +231,14 @@ proc traceDiffLaunchDataset(): ReviewDataset =
     reviewDataForTraceDiff(fixtureTraceDiff(SampleReviewJson),
                            "Review: parser cleanup"))
 
-proc agenticLaunchDataset(): ReviewDataset =
-  ## The agentic handoff: an `AgenticSessionVM` carrying the session's
-  ## evidence, projected by `agenticReviewDataset` — the projection
-  ## `ui/agentic_session_launcher.deepReviewData` builds its `DeepReviewData`
-  ## from before publishing it to the same host entry point.
+proc agenticLaunchVM(): AgenticSessionVM =
+  ## An `AgenticSessionVM` carrying the fixture changeset as a finished
+  ## session's recorded evidence, exactly as `ct agent evidence` delivers it.
+  ##
+  ## Returned rather than consumed on the spot because the agentic handoff has
+  ## *two* projections off this VM — the changeset (`agenticReviewDataset`) and
+  ## the per-file diffs (`agenticReviewFileDiffs`) — and both are production
+  ## code the launcher calls.
   let mock = newMockBackendService()
   let store = createReplayDataStore(mock.toBackendService())
   let vm = createAgenticSessionVM(
@@ -259,7 +262,14 @@ proc agenticLaunchDataset(): ReviewDataset =
   store.agentSessions.val = state
   # Production: this is what the `ct agent evidence` RPC ends up calling.
   doAssert vm.applyDeepReviewEvidence(state.sessions[0])
-  vm.agenticReviewDataset()
+  vm
+
+proc agenticLaunchDataset(): ReviewDataset =
+  ## The agentic handoff: the session's evidence projected by
+  ## `agenticReviewDataset` — the projection
+  ## `ui/agentic_session_launcher.deepReviewData` builds its `DeepReviewData`
+  ## from before publishing it to the same host entry point.
+  agenticLaunchVM().agenticReviewDataset()
 
 type EnteredReview = object
   ## Everything a reviewer can observe after a review starts, captured from
@@ -331,6 +341,22 @@ proc changeset(dataset: ReviewDataset):
 proc paths(rows: seq[VCSFileRow]): seq[string] =
   for row in rows:
     result.add(row.path)
+
+proc diffLines(diff: ReviewFileDiff): seq[string] =
+  ## Every line of every hunk of one file's diff, as `"<kind> <content>"` — the
+  ## text a reviewer reads in that file's diff tab, flattened so two files'
+  ## diffs can be compared for being genuinely different rather than the same
+  ## diff shown twice.
+  ##
+  ## Lines with no content at all are skipped: an evidence patch is a string
+  ## ending in a newline, so splitting it yields one trailing empty element
+  ## that the diff-row parser reports as an empty context line.  It carries no
+  ## information about *which* file's diff this is, which is what these
+  ## assertions are about.
+  for hunk in diff.hunks:
+    for line in hunk.lines:
+      if line.content.len > 0:
+        result.add(line.kind & " " & line.content)
 
 proc checkEnteredState(entered: EnteredReview; launchPath: string) =
   ## The review state every launch path must reach — everything except the
@@ -619,6 +645,137 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
     check data.files[2].path == "src/config.rs"
     check data.files[2].diff.status == "D"
 
+  test "test_every_review_file_gets_its_own_diff":
+    ## DeepReview-GUI.md §4: the review's per-file view shows "the diff for
+    ## *that* file"; §2.1 requires the VCS panel's changed-files list and what
+    ## the editor shows to be "two views of one selection".  Both are false if
+    ## the projection cannot tell the files apart.
+    ##
+    ## Before DR-R7 it could not: `agentic_session_launcher.deepReviewHunks`
+    ## took only the ViewModel and parsed `activeEditorContent` once per
+    ## changeset, so **every** file of a review was handed whichever file the
+    ## editor happened to be showing — a reviewer opening the deleted
+    ## `src/config.rs` was shown `src/main.rs`'s modification, and context
+    ## expansion revealed `src/main.rs`'s text inside it.  DR-R7 fixed the rule
+    ## but left it in the JS-only launcher, where nothing headless could reach
+    ## it; `agenticReviewFileDiffs` / `reviewHunksFor` are that same rule on the
+    ## ViewModel, and this is the test the fix never had.
+    ##
+    ## Three files whose diffs genuinely differ — a modification, an addition
+    ## and a deletion — because a one-file changeset cannot distinguish "each
+    ## file's own diff" from "the first file's diff, three times".
+    createRoot proc(dispose: proc()) =
+      let vm = agenticLaunchVM()
+      let dataset = vm.agenticReviewDataset()
+      # Production: what `ui/agentic_session_launcher.deepReviewData` builds
+      # every `DeepReviewFileData` of the published review from.
+      let diffs = vm.agenticReviewFileDiffs(dataset)
+
+      # 1. One entry per file of the changeset, each naming the file it
+      #    describes, in the changeset's order — so the review's Nth diff tab
+      #    belongs to the VCS panel's Nth row.
+      check diffs.len == 3
+      check diffs.mapIt(it.path) ==
+        @["src/main.rs", "src/utils.rs", "src/config.rs"]
+      check diffs.mapIt(it.path) == dataset.files.mapIt(it.path)
+      check diffs.mapIt(it.status) == @["M", "A", "D"]
+
+      # 2. Each entry carries *that file's* hunks.  Asserted both ways round:
+      #    the file's own change is present, and its neighbours' changes are
+      #    not — the second half is what the old rule violated.
+      check diffs[0].hunks.len == 1
+      check diffs[0].diffLines().anyIt(it.contains("let y = x * 3;"))
+      check not diffs[0].diffLines().anyIt(it.contains("format_output"))
+      check not diffs[0].diffLines().anyIt(it.contains("DEFAULT_TIMEOUT"))
+
+      check diffs[1].hunks.len == 1
+      check diffs[1].diffLines().anyIt(it.contains("format_output"))
+      check not diffs[1].diffLines().anyIt(it.contains("let y = x * 3;"))
+      check not diffs[1].diffLines().anyIt(it.contains("DEFAULT_TIMEOUT"))
+      # An added file is added lines and nothing else.
+      check diffs[1].diffLines().allIt(it.startsWith("added "))
+
+      check diffs[2].hunks.len == 1
+      check diffs[2].diffLines().anyIt(it.contains("DEFAULT_TIMEOUT"))
+      check not diffs[2].diffLines().anyIt(it.contains("format_output"))
+      check not diffs[2].diffLines().anyIt(it.contains("let y = x * 3;"))
+      # A deleted file is removed lines and nothing else.
+      check diffs[2].diffLines().allIt(it.startsWith("removed "))
+
+      # 3. …and no two of them are the same diff.  Stated directly, because
+      #    "every file got the first file's hunks" is exactly the state where
+      #    all three of these are equal.
+      check diffs[0].diffLines() != diffs[1].diffLines()
+      check diffs[0].diffLines() != diffs[2].diffLines()
+      check diffs[1].diffLines() != diffs[2].diffLines()
+
+      # 4. Source content follows the same rule, and had the same defect.  It
+      #    is what context expansion reveals from (§4.2), so handing a file
+      #    another file's text shows the reviewer lines that are not in the
+      #    file they are reading.  Only the file the editor is actually showing
+      #    has text here; the others carry none rather than a copy of that
+      #    one's.
+      check vm.activeEditorPath.val == "src/main.rs"
+      check diffs[0].sourceContent == vm.activeEditorContent.val
+      check diffs[0].sourceContent.len > 0
+      check diffs[1].sourceContent == ""
+      check diffs[2].sourceContent == ""
+
+      dispose()
+
+  test "a file the review's diffs do not mention gets no hunks at all":
+    ## The complement of the test above, on the projection itself: asked about
+    ## a file no row describes, the answer must be *empty*, not the nearest
+    ## row's diff.  Under the old rule it was the first file's diff, which is
+    ## how a review whose diff data covered only some files still rendered a
+    ## diff for all of them.
+    let rows = @[
+      VCSDiffFileRow(fileIndex: 0, path: "src/main.rs", status: "M",
+        hunks: @[VCSHunkRow(oldStart: 2, oldCount: 1, newStart: 2, newCount: 1,
+          lines: @[
+            VCSDiffLineRow(lineType: "delete", content: "-  let y = x * 2;",
+              oldLine: 3, newLine: 0),
+            VCSDiffLineRow(lineType: "add", content: "+  let y = x * 3;",
+              oldLine: 0, newLine: 3)])]),
+      VCSDiffFileRow(fileIndex: 1, path: "src/utils.rs", status: "A",
+        hunks: @[VCSHunkRow(lines: @[
+          VCSDiffLineRow(lineType: "hunk", content: "@@ -0,0 +1,1 @@"),
+          VCSDiffLineRow(lineType: "add", content: "+pub fn format_output() {}",
+            oldLine: 0, newLine: 1)])])]
+
+    # The file it is asked about, not the first one.
+    let utils = rows.reviewHunksFor("src/utils.rs")
+    check utils.len == 1
+    check utils[0].lines.len == 1
+    check utils[0].lines[0].kind == "added"
+    check utils[0].lines[0].content == "+pub fn format_output() {}"
+    # The `@@` row is not a diff line; it is the range, and a hunk row that
+    # carries no range gets one derived from the lines it does carry.
+    check utils[0].newStart == 1
+    check utils[0].newCount == 1
+
+    check rows.reviewHunksFor("src/main.rs").len == 1
+    check rows.reviewHunksFor("src/main.rs")[0].lines.len == 2
+    check rows.reviewHunksFor("src/main.rs")[0].oldStart == 2
+
+    # …and a file with no row of its own.
+    check rows.reviewHunksFor("src/config.rs").len == 0
+    check rows.reviewHunksFor("").len == 0
+
+  test "only the file whose text the review carries gets source content":
+    ## `reviewFileDiffs` decides this, so it is asserted on the projection
+    ## itself as well as through the agentic VM above: a review that knows one
+    ## file's text must not attribute it to the rest of the changeset.
+    let dataset = ReviewDataset(files: @[
+      ReviewFile(path: "src/main.rs", status: "M"),
+      ReviewFile(path: "src/utils.rs", status: "A")])
+    let diffs = dataset.reviewFileDiffs(@[], "src/utils.rs", "the utils text")
+    check diffs.len == 2
+    check diffs[0].sourceContent == ""
+    check diffs[1].sourceContent == "the utils text"
+    # A caller with no text at all attributes none of it.
+    check dataset.reviewFileDiffs(@[]).allIt(it.sourceContent == "")
+
 when not defined(js):
   ## Source contract — the wiring the behavioural suite cannot reach.
   ##
@@ -673,6 +830,23 @@ when not defined(js):
       check body.contains("data.deepReviewActive = true")
       check body.contains("data.deepReviewData = launcher.deepReviewData()")
       check body.contains("data.startOptions.deepReview = data.deepReviewData")
+
+    test "the launcher projects the review's per-file diffs, it does not decide them":
+      ## The behavioural half is `test_every_review_file_gets_its_own_diff`
+      ## above.  This is the wiring half: the launcher needs Electron to run,
+      ## so reading it is the only headless way to assert that the per-file
+      ## rule lives where a test can reach it.
+      ##
+      ## `deepReviewData` must build every file's diff from the ViewModel's
+      ## `agenticReviewFileDiffs` and re-type the result, with no per-file
+      ## decision of its own — in particular no second `activeEditorContent`
+      ## parse, which is the rule that gave every file the first file's hunks.
+      let body = bodyOf(LauncherPath, "proc deepReviewData(")
+      check body.contains("agenticReviewFileDiffs(dataset)")
+      check not body.contains("activeEditorContent")
+      check not body.contains("activeEditorPath")
+      let whole = source(LauncherPath)
+      check not whole.contains("proc deepReviewHunks(")
 
     test "the CLI launch path enters the review through the same routine":
       ## `ct --deepreview` cannot open a tab from `onStartDeepReview` itself

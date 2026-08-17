@@ -248,6 +248,31 @@ suite "agentic coding M5 evidence handoff":
       check dataset.traceContexts.len == 1
       check dataset.traceContexts[0].label == "m5 integration test"
 
+      # …and the per-file half of that same review — what the launcher turns
+      # into each `DeepReviewFileData`, and therefore what the file's Monaco
+      # diff tab renders.  The diff here came out of a real `ct agent evidence`
+      # run over a real git worktree, so this is the whole chain: recorded
+      # change -> evidence -> `vcs.diffFiles` -> the review's own diff.
+      #
+      # This changeset has one file, so it cannot distinguish "each file's own
+      # diff" from "the first file's diff for everyone" — the multi-file case
+      # is `test_every_review_file_gets_its_own_diff` in
+      # `src/tests/gui/tests/deepreview/deepreview_entry_test.nim`.
+      let fileDiffs = f.vm.agenticReviewFileDiffs(dataset)
+      check fileDiffs.len == 1
+      check fileDiffs[0].path == "src/feature.nim"
+      check fileDiffs[0].status == dataset.files[0].status
+      check fileDiffs[0].hunks.len == 1
+      check fileDiffs[0].hunks[0].lines.anyIt(
+        it.kind == "added" and it.content.contains("42"))
+      check fileDiffs[0].hunks[0].lines.anyIt(
+        it.kind == "removed" and it.content.contains("= 1"))
+      # The kinds are the ones `DeepReviewHunkLine.type` is documented to
+      # carry; the `VCSDiffLineRow` spellings ("add"/"delete"/"hunk") must not
+      # leak into the review.
+      check fileDiffs[0].hunks[0].lines.allIt(
+        it.kind in ["context", "added", "removed"])
+
       # …fed to the one review-entry routine, on the panels a review actually
       # uses.  Nothing here can even name a `DeepReviewComponent`: this is the
       # ViewModel layer.

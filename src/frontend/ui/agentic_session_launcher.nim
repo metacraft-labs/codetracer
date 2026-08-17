@@ -20,7 +20,7 @@ import ../viewmodel/agent_service
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/store/types
 import ../viewmodel/viewmodels/[agent_activity_vm, agent_workspace_vm,
-  agentic_session_vm, deepreview_vm, editor_vm, vcs_vm]
+  agentic_session_vm, deepreview_vm, editor_vm, review_entry, vcs_vm]
 import agent_activity, agent_workspace, caption_bar_progress, deepreview, vcs
 
 const
@@ -225,87 +225,54 @@ proc workspaceRows(vm: AgenticSessionVM): seq[ActivityFileEntry] =
       totalLines: if file.totalLines > 0: file.totalLines else: 1,
       hasFlow: file.hasFlow)
 
-proc deepReviewHunks(rows: seq[VCSDiffFileRow]; path: string):
-    seq[DeepReviewHunk] =
-  ## The session's diff for ``path``, as review-dataset hunks.
+proc toDeepReviewHunks(hunks: seq[ReviewHunk]): seq[DeepReviewHunk] =
+  ## The ViewModel's `ReviewHunk` values in the ``cstring`` flavour of
+  ## ``DeepReviewHunk`` the renderer's ``DeepReviewData`` is made of.
   ##
-  ## The source is ``AgenticSessionVM.vcs.diffFiles`` — the per-file diff the
-  ## VM projects from the agent's own output (a Harbor ``fileDiff`` REST call,
-  ## an ACP diff event, or an evidence file entry).  It used to be
-  ## ``activeEditorContent`` re-parsed as a patch, which meant *every* file of
-  ## a multi-file changeset received the diff of whichever file the editor
-  ## happened to be showing.
+  ## Field-for-field and nothing else: *which* hunks a file gets, how a
+  ## `VCSDiffLineRow` kind maps onto a `DeepReviewHunkLine.type` and how a
+  ## missing ``@@`` range is derived are all decided by
+  ## ``review_entry.reviewHunksFor``, which is headless and tested
+  ## (``src/tests/gui/tests/deepreview/deepreview_entry_test.nim``).  This
+  ## conversion exists only because ``DeepReviewHunk`` is a ``common_types``
+  ## type that exists twice — once with ``langstring = cstring`` and once with
+  ## ``langstring = string`` — so no ViewModel module can name it.
   result = @[]
-  for file in rows:
-    if file.path != path:
-      continue
-    for hunk in file.hunks:
-      var converted = DeepReviewHunk(lines: @[])
-      for line in hunk.lines:
-        # `VCSDiffLineRow` spells the kinds "add"/"delete"/"context" and
-        # carries the `@@` header as a "hunk" row; `DeepReviewHunkLine.type`
-        # is documented as one of "context"/"added"/"removed" and keeps the
-        # header in the hunk's own start/count fields.
-        let kind =
-          case line.lineType
-          of "add", "added": "added"
-          of "delete", "deleted", "removed": "removed"
-          of "hunk": ""
-          else: "context"
-        if kind.len == 0:
-          continue
-        converted.lines.add DeepReviewHunkLine(
-          `type`: cstring kind,
-          content: cstring line.content,
-          oldLine: line.oldLine,
-          newLine: line.newLine)
-      # A `VCSHunkRow` projected from an agent's diff text carries no `@@`
-      # range, so the range is derived from the lines it does carry rather
-      # than left at 0,0 (which renders as "@@ -0,0 +0,0 @@").
-      converted.oldStart = if hunk.oldStart > 0: hunk.oldStart else: 0
-      converted.newStart = if hunk.newStart > 0: hunk.newStart else: 0
-      converted.oldCount = hunk.oldCount
-      converted.newCount = hunk.newCount
-      for line in converted.lines:
-        if line.oldLine > 0:
-          if converted.oldStart == 0:
-            converted.oldStart = line.oldLine
-          if hunk.oldCount == 0:
-            converted.oldCount += 1
-        if line.newLine > 0:
-          if converted.newStart == 0:
-            converted.newStart = line.newLine
-          if hunk.newCount == 0:
-            converted.newCount += 1
-      result.add converted
-    return
+  for hunk in hunks:
+    var converted = DeepReviewHunk(
+      oldStart: hunk.oldStart,
+      oldCount: hunk.oldCount,
+      newStart: hunk.newStart,
+      newCount: hunk.newCount,
+      lines: @[])
+    for line in hunk.lines:
+      converted.lines.add DeepReviewHunkLine(
+        `type`: cstring line.kind,
+        content: cstring line.content,
+        oldLine: line.oldLine,
+        newLine: line.newLine)
+    result.add converted
 
 proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
   ## The agentic session's evidence as a review dataset — the same
   ## ``DeepReviewData`` shape ``ct --deepreview`` loads from disk, so the two
   ## paths differ in where the dataset came from and in nothing else.
   ##
-  ## The changeset, the title and the trace-context labels come from
-  ## ``AgenticSessionVM.agenticReviewDataset``, which is what the review-entry
-  ## routine will project this back into: building both from one projection is
-  ## what keeps the panel's changeset and the review's changeset identical by
-  ## construction rather than by review.
-  let vm = launcher.vm
+  ## Everything is projected on the ViewModel: the changeset, the title and the
+  ## trace-context labels by ``AgenticSessionVM.agenticReviewDataset``, and the
+  ## per-file diffs (each file's own hunks, and the source text of the one file
+  ## the editor is showing) by ``AgenticSessionVM.agenticReviewFileDiffs``.
+  ## This proc only re-types them.  That split is deliberate: this module needs
+  ## Electron to run, so anything deciding anything here is untestable — which
+  ## is how "every file received the first file's hunks" went unnoticed.
   let session = launcher.activeEntry()
-  let dataset = vm.agenticReviewDataset()
-  let diffRows = vm.vcs.diffFiles.val
+  let dataset = launcher.vm.agenticReviewDataset()
   var files: seq[DeepReviewFileData] = @[]
-  for file in dataset.files:
+  for file in launcher.vm.agenticReviewFileDiffs(dataset):
     files.add DeepReviewFileData(
       path: cstring file.path,
       contentHash: cstring"",
-      # Only the file the editor is actually showing has its full text here;
-      # the others carry none rather than a copy of that one's text.  It is
-      # what context expansion reads, so a wrong answer reveals another
-      # file's lines.
-      sourceContent: cstring(
-        if file.path == vm.activeEditorPath.val: vm.activeEditorContent.val
-        else: ""),
+      sourceContent: cstring file.sourceContent,
       symbols: @[],
       coverage: @[],
       functions: @[],
@@ -321,7 +288,7 @@ proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
         status: cstring file.status,
         linesAdded: file.additions,
         linesRemoved: file.deletions,
-        hunks: deepReviewHunks(diffRows, file.path)))
+        hunks: toDeepReviewHunks(file.hunks)))
   var contexts: seq[DeepReviewTraceContext] = @[]
   for ctx in dataset.traceContexts:
     contexts.add DeepReviewTraceContext(
@@ -334,7 +301,7 @@ proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
     commitSha: cstring session.taskId,
     baseCommitSha: cstring"",
     collectionTimeMs: 0,
-    recordingCount: if vm.vcs.deepReviewMode.val: 1 else: 0,
+    recordingCount: if launcher.vm.vcs.deepReviewMode.val: 1 else: 0,
     sessionTitle: cstring dataset.title,
     traceContexts: contexts,
     files: files,
