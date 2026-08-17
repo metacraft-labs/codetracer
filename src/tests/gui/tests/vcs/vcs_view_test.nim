@@ -309,10 +309,17 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
       dispose()
 
   test "a normal git session shows neither the selector nor the stats":
-    ## The regression guard for the shared header: DR-R2 adds two elements to
-    ## a header both modes render, and VCS-Panel.md's "Normal Development
-    ## Mode" has neither recordings nor a fixed changeset.  Neither element
-    ## may appear — or take space — in a live working-tree session.
+    ## Regression guard for the panel's header region.  `renderHeader` is
+    ## reached only from the review branch of `renderVCSPanelImpl` — the normal
+    ## branch renders `renderBranchPicker` instead — so DR-R2's two elements
+    ## cannot leak into a git session today.  The guard is against a future
+    ## refactor that unifies the two headers: VCS-Panel.md's "Normal
+    ## Development Mode" watches a live working tree, with no recordings to
+    ## choose between and no fixed changeset to summarise, so neither element
+    ## may appear — or take space — there.
+    ##
+    ## This test therefore passes before DR-R2 as well as after.  It is a
+    ## guard, not evidence that the feature works.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()

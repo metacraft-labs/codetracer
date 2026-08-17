@@ -191,10 +191,12 @@ test.describe("VCS unified diff", () => {
     ctPage,
   }) => {
     // DR-R2 added the review's trace-context selector and stats to the VCS
-    // panel header, which both modes render.  VCS-Panel.md, "Normal
-    // Development Mode": the panel then watches a live working tree — there
-    // are no recordings to choose between and no fixed changeset to
-    // summarise, so neither element may appear or take space here.
+    // panel's header region.  `renderHeader` is reached only from the review
+    // branch today, so they cannot leak here; this guards a future refactor
+    // that unifies the two headers.  VCS-Panel.md, "Normal Development Mode":
+    // the panel then watches a live working tree — there are no recordings to
+    // choose between and no fixed changeset to summarise, so neither element
+    // may appear or take space here.  Passes before DR-R2 as well as after.
     //
     // Headless counterpart: "a normal git session shows neither the selector
     // nor the stats" in src/tests/gui/tests/vcs/vcs_view_test.nim.
