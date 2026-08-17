@@ -1080,6 +1080,24 @@ test.describe("DeepReview GUI - main features", () => {
     await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
       timeout: 15_000,
     });
+
+    // Closing the tab must drop its ViewModel and its source cache, so
+    // reopening the same file starts unexpanded.  This is the only coverage
+    // of the `closeLayoutTab` -> `forgetUnifiedDiffTab` wiring: the tab
+    // component is JS-only and cannot be reached headlessly, so without these
+    // four lines the test's own title would be asserting nothing.
+    const mainTabHeader = ctPage
+      .locator(".lm_tab")
+      .filter({ hasText: /^Diff:\s*main\.rs/ })
+      .first();
+    await mainTabHeader.locator(".lm_close_tab").click();
+    await expect(mainTabHeader).toHaveCount(0, { timeout: 20_000 });
+
+    const reopened = await openMainDiffTab(dr);
+    await expect(
+      reopened.locator(".monaco-editor .view-lines"),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(DeepReviewPage.revealedDecorations(reopened)).toHaveCount(0);
   });
 
   // -----------------------------------------------------------------------
