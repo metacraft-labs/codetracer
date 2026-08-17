@@ -1477,6 +1477,23 @@ jobs:
         with:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Clone runquota sibling
+        # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
+        # ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
+        # `import runquota_process`. On the tup driver this checkout is the only
+        # source of those modules: src/Tuprules.tup's NIM_REPO_PATH_FLAGS names
+        # `$(ROOT)/../runquota/...`, and tup's environment allowlist in that
+        # same file omits RUNQUOTA_SRC, so the dev shell export cannot stand in
+        # for it. Cloned here rather than via the two composite actions above
+        # because neither owns this dependency (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Build frontend (needed by gated Playwright stage)
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
@@ -1597,6 +1614,21 @@ jobs:
         # zero-test guard that fails if they all skip (so a missing recorder
         # cannot masquerade as a pass).
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
+
+      - name: Clone runquota sibling
+        # The `just build-once` step below compiles `ct`, whose import chain
+        # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
+        # src/ct_test/process_exec.nim) starts with `import runquota_process`.
+        # Under tup the checkout is the only way those modules resolve --
+        # NIM_REPO_PATH_FLAGS points at `$(ROOT)/../runquota/...` and tup's
+        # environment allowlist omits RUNQUOTA_SRC (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
 
       - name: Build ct (needed by the CLI dispatch tests)
         # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
@@ -2352,6 +2384,14 @@ jobs:
         # (setup-nix). Nix is provisioned here for both the macOS sibling
         # ``nix develop`` builds and the ct build + Playwright run, which now
         # all go through codetracer's dev shell.
+        #
+        # ``runquota`` is listed because the macOS leg runs ``just build-once``
+        # and `ct` imports ``runquota_process`` through
+        # src/ct_test/process_exec.nim. On Darwin build-once selects the
+        # reprobuild driver, which could resolve runquota from its nix flake
+        # input alone -- but scripts/require-siblings.sh requires the checkout
+        # on every driver so there is a single workspace-completeness rule (the
+        # tup driver has no other way in; see the notes in that script).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -2366,6 +2406,7 @@ jobs:
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
             codetracer-native-backend=dev
+            runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
@@ -2744,6 +2785,16 @@ jobs:
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
+        #
+        # `runquota` is on the list because this gate runs `just build-once`,
+        # which compiles `ct`, which pulls in src/ct_test/process_exec.nim ->
+        # `import runquota_process`. Under the tup driver this CHECKOUT is the
+        # only way those modules resolve: NIM_REPO_PATH_FLAGS points at
+        # `$(ROOT)/../runquota/...`, and tup's environment allowlist in
+        # src/Tuprules.tup does not carry RUNQUOTA_SRC, so the dev shell's
+        # export of it never reaches `nim`. Its absence is what made this job
+        # die on `cannot open file: runquota_process` (issue #641), fifteen
+        # minutes into the Nim compile rather than here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -2767,6 +2818,7 @@ jobs:
             codetracer-native-recorder=dev
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
+            runquota=dev
 
       - name: Run visual replay regression gate
         env:
