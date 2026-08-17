@@ -604,10 +604,10 @@ template renderVariableRowImpl(r, vm, item,
   ##         div.ct-origin-inline-chain[display: block when expanded]
   ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
   ##           div.ct-origin-inline-chain-terminator
-  ##         div.ct-history-inline-container[display: block when expanded]
-  ##           div.ct-history-inline-row (one per history entry)
-  ##             div.history-location : "{rrTicks}"
-  ##             div.history-value    : "{value}"
+  ##       div.ct-history-inline-container[display: block when expanded]  ← sibling of atom/compound-parent
+  ##         div.ct-history-inline-row (one per history entry)
+  ##           div.history-location : "{rrTicks}"
+  ##           div.history-value    : "{value}"
   ##
   ## Per spec §3.2.1 + M4 deliverable #3, the badge is appended to the
   ## value cell on every row. The placeholder variant (spec §3.2.1
@@ -622,7 +622,7 @@ template renderVariableRowImpl(r, vm, item,
   let onToggle = onToggleExpand(vm, item)
   let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
   let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
-  ui(r):
+  let rowResult = ui(r):
     tdiv(class = rowClass(item),
          `data-variable-name` = item().name,
          padding_left = rowPaddingLeft(item, 16),
@@ -678,10 +678,15 @@ template renderVariableRowImpl(r, vm, item,
                display = (if rowExpanded(vm, item()): "block" else: "none"),
                ref = chainContainer):
             discard
-          tdiv(class = "ct-history-inline-container ct-mt-2",
-               display = (if item().isHistoryExpanded: "block" else: "none"),
-               ref = historyContainer):
-            discard
+      # History container is a sibling of atomOrCompoundClass — placed
+      # outside it so that expanding history does not push the name/value
+      # layout out of line. Populated after the ui() block via
+      # renderHistoryRows (indexEach on item().history).
+      tdiv(class = "ct-history-inline-container ct-mt-2",
+           display = (if item().isHistoryExpanded: "block" else: "none"),
+           ref = historyContainer):
+        discard
+  rowResult
 
 proc renderVariableRow*(r: MockRenderer; vm: StateVM;
                         item: proc(): VariableViewState): MockNode =

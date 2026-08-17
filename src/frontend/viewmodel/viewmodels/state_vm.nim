@@ -339,7 +339,11 @@ proc removeWatch*(vm: StateVM; expression: string) =
     vm.watchExpressions.val = exprs
 
 proc toggleHistory*(vm: StateVM; expression: string) =
-  var h = vm.expandedHistories.val
+  # Build a fresh HashSet to avoid same-reference equality on the JS target.
+  # See updateHistory for full explanation.
+  var h = initHashSet[string]()
+  for x in vm.expandedHistories.val:
+    h.incl(x)
   if expression in h:
     h.excl(expression)
     vm.expandedHistories.val = h
@@ -358,7 +362,14 @@ proc updateHistory*(vm: StateVM; expression: string;
   ## `toggleHistory` records in `expandedHistories` and which
   ## `state_view.flattenVariables` reads back. A mismatch here silently
   ## renders an empty history container.
-  var h = vm.valueHistory.val
+  ##
+  ## Creates a fresh table rather than mutating in-place: on the JS target,
+  ## signals use reference equality (state.value == value), so mutating the
+  ## existing table and writing it back suppresses the reactive notification.
+  let oldH = vm.valueHistory.val
+  var h = initTable[string, seq[ValueHistoryRow]]()
+  for k in oldH.keys:
+    h[k] = oldH[k]
   h[expression] = rows
   vm.valueHistory.val = h
 
