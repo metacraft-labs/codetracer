@@ -95,6 +95,21 @@ type
     deletions*: int
     hunks*: seq[VCSHunkRow]
 
+  VCSTraceContextRow* = object
+    ## One selectable trace context of a review session — the control
+    ## DeepReview-GUI.md §2 houses in the VCS panel header ("Trace context
+    ## selector → The VCS panel header, populated only in DeepReview mode").
+    ##
+    ## It mirrors ``DeepReviewTraceContext`` (``common_types/
+    ## codetracer_features/deepreview.nim``) reduced to what the header
+    ## renders: the id the selection is expressed in, and the label shown in
+    ## the dropdown.  It is deliberately a local row type rather than the
+    ## store's ``DeepReviewTraceContextEntry`` so that this VM keeps depending
+    ## on nothing but IsoNim — the standalone panel that owns that entry type
+    ## is deleted in DR-R8.
+    id*: int
+    label*: string
+
   VCSViewMode* = enum
     ## What clicking a file row in the docked panel does — the "View mode
     ## toggle" of `codetracer-specs/GUI/Core-Panes/VCS-Panel.md`.
@@ -124,6 +139,17 @@ type
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
     headerIcon*: Signal[string]
+    ## Summary line for the review the header describes — file count and the
+    ## changeset's total +/-.  Empty in normal version-control mode, where the
+    ## header describes a live working tree rather than a fixed changeset.
+    statsText*: Signal[string]
+    ## The review's selectable trace contexts, in export order.  Empty in
+    ## normal version-control mode: a working tree has no recordings behind
+    ## it.  DeepReview-GUI.md §6: "The selected trace context can be changed
+    ## without leaving the review, from the selector in the VCS panel header".
+    traceContexts*: Signal[seq[VCSTraceContextRow]]
+    ## Id of the currently selected entry of ``traceContexts``.
+    selectedTraceContextId*: Signal[int]
     isGitRepo*: Signal[bool]
     errorMessage*: Signal[string]
     currentBranch*: Signal[string]
@@ -190,6 +216,9 @@ proc `==`*(a, b: VCSDiffFileRow): bool {.noSideEffect.} =
     a.path == b.path and a.additions == b.additions and
     a.deletions == b.deletions and a.hunks == b.hunks
 
+proc `==`*(a, b: VCSTraceContextRow): bool {.noSideEffect.} =
+  a.id == b.id and a.label == b.label
+
 proc `==`*(a, b: VCSOpenAction): bool {.noSideEffect.} =
   a.kind == b.kind and a.index == b.index and a.path == b.path and
     a.target == b.target and a.status == b.status
@@ -247,12 +276,68 @@ proc openActionForRow*(vm: VCSVM; index: int): VCSOpenAction =
   let row = rows[index]
   vm.openActionFor(index, row.path, "file:" & row.path, row.status)
 
+proc reviewStatsText*(files: openArray[VCSFileRow]): string {.noSideEffect.} =
+  ## The review summary the VCS panel header shows next to the session title
+  ## — DeepReview-GUI.md §2, "Session title / stats → The VCS panel header".
+  ##
+  ## Only what a review dataset actually carries is summarised: the number of
+  ## changed files and the changeset's total added/removed line counts, both
+  ## of which come from ``DeepReviewData.files[].diff``.  Coverage and test
+  ## results deliberately do NOT appear here: they belong to the Agent
+  ## Activity panel (§2.1, DR-R3), and ``DeepReviewData`` carries no
+  ## test-results field at all, so a "tests 0/0" stat would be invented
+  ## rather than reported.
+  if files.len == 0:
+    return ""
+  var additions = 0
+  var deletions = 0
+  for file in files:
+    additions += file.additions
+    deletions += file.deletions
+  result = $files.len & (if files.len == 1: " file" else: " files")
+  if additions > 0 or deletions > 0:
+    result.add(" +" & $additions & " -" & $deletions)
+
+proc resolveTraceContextId*(contexts: openArray[VCSTraceContextRow];
+                            wanted: int): int {.noSideEffect.} =
+  ## The trace context that should be selected given a caller's preference.
+  ##
+  ## ``wanted`` is honoured when it names one of ``contexts``; otherwise the
+  ## first context wins, because "the first entry is selected by default"
+  ## (``DeepReviewTraceContext``'s own contract).  A review with no contexts
+  ## resolves to 0, which no option carries, so nothing renders as selected.
+  for ctx in contexts:
+    if ctx.id == wanted:
+      return wanted
+  if contexts.len > 0: contexts[0].id else: 0
+
 proc setDeepReviewMode*(vm: VCSVM; active: bool) =
   vm.deepReviewMode.val = active
 
-proc setHeader*(vm: VCSVM; title: string; icon = "\239\132\166") =
+proc setHeader*(vm: VCSVM; title: string; icon = "\239\132\166";
+                statsText = "") =
+  ## ``statsText`` mirrors ``DeepReviewVM.setHeader``'s third argument.  It
+  ## defaults to empty so the normal version-control callers clear it: the
+  ## review summary must not survive into a live working-tree session.
   vm.headerTitle.val = title
   vm.headerIcon.val = icon
+  vm.statsText.val = statsText
+
+proc setTraceContexts*(vm: VCSVM;
+                       contexts: openArray[VCSTraceContextRow]) =
+  vm.traceContexts.val = @contexts
+
+proc setSelectedTraceContextId*(vm: VCSVM; id: int) =
+  vm.selectedTraceContextId.val = id
+
+proc hasTraceContextChoice*(vm: VCSVM): bool =
+  ## Whether the header should offer the trace-context selector at all.
+  ##
+  ## Review mode only — the control has no meaning for a working tree — and
+  ## only when there is something to choose between: a review that declares a
+  ## single context would render a dropdown whose every option is the current
+  ## one.
+  vm.deepReviewMode.val and vm.traceContexts.val.len >= 2
 
 proc setGitRepoState*(vm: VCSVM; isRepo: bool; errorMessage = "") =
   vm.isGitRepo.val = isRepo
@@ -328,6 +413,9 @@ proc clearPanel*(vm: VCSVM) =
   vm.deepReviewMode.val = false
   vm.headerTitle.val = ""
   vm.headerIcon.val = "\239\132\166"
+  vm.statsText.val = ""
+  vm.traceContexts.val = @[]
+  vm.selectedTraceContextId.val = 0
   vm.isGitRepo.val = false
   vm.errorMessage.val = ""
   vm.currentBranch.val = ""
@@ -361,6 +449,9 @@ proc createVCSVM*(): VCSVM =
       deepReviewMode: createSignal(false),
       headerTitle: createSignal(""),
       headerIcon: createSignal("\239\132\166"),
+      statsText: createSignal(""),
+      traceContexts: createSignal(newSeq[VCSTraceContextRow]()),
+      selectedTraceContextId: createSignal(0),
       isGitRepo: createSignal(false),
       errorMessage: createSignal(""),
       currentBranch: createSignal(""),

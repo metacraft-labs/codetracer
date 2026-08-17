@@ -713,20 +713,36 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 23: DR-6 - Trace context selector is present
+  // Test 23: the trace context selector lives in the VCS panel header
   // -----------------------------------------------------------------------
 
-  test("Test 23: trace context selector is visible with correct options", async ({ ctPage }) => {
+  // e2e_review_trace_selector_lives_in_the_vcs_panel — the rewrite of
+  // "Test 23: trace context selector is visible with correct options"
+  // (DR-R2), retargeted from the standalone DeepReview panel's header to the
+  // VCS panel's.
+  //
+  // DeepReview-GUI.md §2 assigns the control to the VCS panel header
+  // ("Trace context selector | The VCS panel header, populated only in
+  // DeepReview mode"), and §6 requires the selected context be changeable
+  // "without leaving the review, from the selector in the VCS panel header".
+  // Before DR-R2 the VCS panel rendered no select element in any mode.
+  //
+  // Headless counterparts:
+  //   test_vcs_panel_renders_trace_selector_in_review_mode and
+  //   test_vcs_trace_selector_change_updates_selection in
+  //   src/tests/gui/tests/vcs/vcs_view_test.nim.
+  test("Test 23: the trace context selector lives in the VCS panel header", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    // The fixture has 2 trace contexts, so the selector should be visible.
-    await expect(dr.traceContextSelector()).toBeVisible();
-    await expect(dr.traceContextSelect()).toBeVisible();
+    // The fixture has 2 trace contexts, so the selector should be visible —
+    // in the VCS panel.
+    await expect(dr.vcsTraceContextSelector()).toBeVisible();
+    await expect(dr.vcsTraceContextSelect()).toBeVisible();
 
     // Verify the dropdown has the correct number of options.
-    const options = dr.traceContextSelect().locator("option");
+    const options = dr.vcsTraceContextSelect().locator("option");
     const optionCount = await options.count();
     expect(optionCount).toBe(2);
 
@@ -736,21 +752,43 @@ test.describe("DeepReview GUI - main features", () => {
 
     const secondLabel = await options.nth(1).textContent();
     expect(secondLabel).toContain("previous run");
+
+    // The selection is live: picking the second context is reflected by the
+    // control. (What that selection re-draws is DR-R6's job and is blocked on
+    // M42b — `--deepreview` loads no recording to switch to.)
+    await dr.vcsTraceContextSelect().selectOption("1");
+    await wait(500);
+    expect(await dr.vcsTraceContextSelect().inputValue()).toBe("1");
   });
 
   // -----------------------------------------------------------------------
-  // Test 24: DR-6 - Header shows session title
+  // Test 24: the VCS panel header shows the session title and review stats
   // -----------------------------------------------------------------------
 
-  test("Test 24: header bar displays the session title", async ({ ctPage }) => {
+  // Companion of Test 23 and the second half of
+  // e2e_review_trace_selector_lives_in_the_vcs_panel: the rewrite of
+  // "Test 24: header bar displays the session title" (DR-R2), retargeted to
+  // the VCS panel header, which DeepReview-GUI.md §2 makes the owner of the
+  // "Session title / stats" review element.
+  //
+  // Headless counterpart: "the review stats render in the header" in
+  // src/tests/gui/tests/vcs/vcs_view_test.nim.
+  test("Test 24: the VCS panel header displays the session title and stats", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
     // The fixture has sessionTitle "DeepReview: parser cleanup".
-    await expect(dr.sessionTitle()).toBeVisible();
-    const titleText = await dr.sessionTitle().textContent();
+    await expect(dr.vcsReviewTitle()).toBeVisible();
+    const titleText = await dr.vcsReviewTitle().textContent();
     expect(titleText).toContain("DeepReview: parser cleanup");
+
+    // ...and the changeset summary: 3 files, +16 -10 across the fixture's
+    // three files (main.rs +8-3, utils.rs +8-0, config.rs +0-7).
+    await expect(dr.vcsReviewStats()).toBeVisible();
+    const statsText = await dr.vcsReviewStats().textContent();
+    expect(statsText).toContain("3 files");
+    expect(statsText).toContain("+16 -10");
   });
 
   // -----------------------------------------------------------------------

@@ -195,6 +195,122 @@ suite "VCSVM open-action resolver (DR-R1)":
 
       dispose()
 
+suite "VCSVM trace contexts and review stats (DR-R2)":
+  ## DeepReview-GUI.md §2 assigns the trace-context selector and the review's
+  ## session title/stats to the VCS panel header, and §6 requires that "the
+  ## selected trace context can be changed without leaving the review, from
+  ## the selector in the VCS panel header".  Before DR-R2 `VCSVM` carried no
+  ## trace-context state at all — the control existed only inside the
+  ## standalone DeepReview panel DR-R8 deletes.
+
+  proc reviewContexts(): seq[VCSTraceContextRow] =
+    ## The two contexts of
+    ## `src/tests/gui/tests/deepreview/fixtures/sample-review.json`.
+    @[
+      VCSTraceContextRow(id: 0, label: "latest passing run"),
+      VCSTraceContextRow(id: 1, label: "previous run"),
+    ]
+
+  test "test_vcs_vm_holds_trace_contexts_and_selection":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setDeepReviewMode(true)
+
+      # A panel that has never seen a review offers no choice.
+      check vm.traceContexts.val.len == 0
+      check not vm.hasTraceContextChoice()
+
+      vm.setTraceContexts(reviewContexts())
+      vm.setSelectedTraceContextId(1)
+
+      check vm.traceContexts.val.len == 2
+      check vm.traceContexts.val[0].label == "latest passing run"
+      check vm.traceContexts.val[1] == VCSTraceContextRow(
+        id: 1, label: "previous run")
+      check vm.selectedTraceContextId.val == 1
+      check vm.hasTraceContextChoice()
+
+      vm.clearPanel()
+      check vm.traceContexts.val.len == 0
+      check vm.selectedTraceContextId.val == 0
+      check not vm.hasTraceContextChoice()
+
+      dispose()
+
+  test "the selector is a review-only control":
+    ## VCS-Panel.md, "Normal Development Mode": the panel then watches a live
+    ## working tree, which has no recordings behind it.  The header must not
+    ## offer a trace context there even if one was left over from a review.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setTraceContexts(reviewContexts())
+
+      check not vm.deepReviewMode.val
+      check not vm.hasTraceContextChoice()
+
+      vm.setDeepReviewMode(true)
+      check vm.hasTraceContextChoice()
+
+      # A review that declares a single context has nothing to choose
+      # between; the dropdown would offer only the current selection.
+      vm.setTraceContexts(@[VCSTraceContextRow(id: 0, label: "only run")])
+      check not vm.hasTraceContextChoice()
+
+      dispose()
+
+  test "the selected context falls back to the review's first":
+    ## `DeepReviewTraceContext`: "The first entry is selected by default."  A
+    ## stored selection that no longer names a declared context (a different
+    ## review was loaded, or nothing has been chosen yet) must not leave the
+    ## dropdown showing nothing as selected.
+    let contexts = reviewContexts()
+    check resolveTraceContextId(contexts, 1) == 1
+    check resolveTraceContextId(contexts, 0) == 0
+    check resolveTraceContextId(contexts, 99) == 0
+    check resolveTraceContextId(
+      @[VCSTraceContextRow(id: 7, label: "seven")], 0) == 7
+    check resolveTraceContextId(@[], 3) == 0
+
+  test "the review stats summarise the changeset the panel shows":
+    ## DeepReview-GUI.md §2, "Session title / stats → The VCS panel header".
+    ## Only what the review dataset carries is summarised — file count and
+    ## the changeset's total +/-.  `DeepReviewData` has no test-results
+    ## field, so no test stat is reported rather than a plausible zero.
+    let rows = @[
+      VCSFileRow(status: "M", path: "src/main.rs", baseName: "main.rs",
+                 additions: 8, deletions: 3),
+      VCSFileRow(status: "A", path: "src/utils.rs", baseName: "utils.rs",
+                 additions: 8, deletions: 0),
+      VCSFileRow(status: "D", path: "src/config.rs", baseName: "config.rs",
+                 additions: 0, deletions: 7),
+    ]
+    check reviewStatsText(rows) == "3 files +16 -10"
+    check reviewStatsText(rows[0 .. 0]) == "1 file +8 -3"
+    # A changeset with no line counts still reports its size.
+    check reviewStatsText(@[VCSFileRow(status: "M", path: "a")]) == "1 file"
+    # An empty review has nothing to say, and says nothing.
+    check reviewStatsText([]) == ""
+
+  test "the header setter carries the stats and clears them by default":
+    ## Mirrors `DeepReviewVM.setHeader`'s third argument.  The default matters
+    ## as much as the value: a panel that leaves review mode must not keep
+    ## describing the review's changeset.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+
+      vm.setHeader("Review: parser cleanup", statsText = "3 files +16 -10")
+      check vm.headerTitle.val == "Review: parser cleanup"
+      check vm.statsText.val == "3 files +16 -10"
+
+      vm.setHeader("main")
+      check vm.statsText.val == ""
+
+      vm.setHeader("Review", statsText = "1 file")
+      vm.clearPanel()
+      check vm.statsText.val == ""
+
+      dispose()
+
 suite "VCSVM":
 
   test "hunk state drives toolbar and copy feedback":

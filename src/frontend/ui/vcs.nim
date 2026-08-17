@@ -1014,6 +1014,25 @@ proc currentReviewTitle(self: VCSComponent): string =
       safeStr(drData.commitSha)
   "Review: " & commitDisplay
 
+proc reviewTraceContexts(self: VCSComponent): seq[VCSTraceContextRow] =
+  ## Project the review's declared trace contexts into the VCS header's rows.
+  ##
+  ## DeepReview-GUI.md §2 houses the trace-context selector in this panel's
+  ## header; ``DeepReviewData.traceContexts`` is its only source, and a
+  ## context with no label would render an unpickable blank option, so it is
+  ## given the id as a fallback name rather than dropped (dropping it would
+  ## silently renumber the reviewer's choices).
+  result = @[]
+  let drData = self.data.deepReviewData
+  if drData.isNil:
+    return
+  for ctx in drData.traceContexts:
+    let label = safeStr(ctx.label)
+    result.add(VCSTraceContextRow(
+      id: ctx.id,
+      label: if label.len > 0: label else: "Trace " & $ctx.id,
+    ))
+
 proc deepReviewRows(self: VCSComponent): seq[VCSFileRow] =
   result = @[]
   let drData = self.data.deepReviewData
@@ -1126,8 +1145,23 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   if vm.isNil:
     return
   if self.isDeepReviewMode():
+    let reviewRows = self.deepReviewRows()
+    let contexts = self.reviewTraceContexts()
     vm.setDeepReviewMode(true)
-    vm.setHeader(self.currentReviewTitle())
+    # DeepReview-GUI.md §2: the VCS panel header owns the review's session
+    # title *and* its stats.  The stats summarise only what the dataset
+    # carries — file count and total +/-; coverage and test results belong to
+    # the Agent Activity panel (§2.1) and `DeepReviewData` has no
+    # test-results field to read at all.
+    vm.setHeader(self.currentReviewTitle(),
+                 statsText = reviewStatsText(reviewRows))
+    # The selector is the same control for the whole review, so the selection
+    # lives on `Data` next to the data it indexes rather than on this panel.
+    vm.setTraceContexts(contexts)
+    let selectedContext = resolveTraceContextId(
+      contexts, self.data.deepReviewSelectedTraceContextId)
+    self.data.deepReviewSelectedTraceContextId = selectedContext
+    vm.setSelectedTraceContextId(selectedContext)
     vm.setGitRepoState(true)
     # The view-mode toggle is live in review mode too (VCS-Panel.md, "View
     # mode toggle"), so the VM must carry the component's current position:
@@ -1136,7 +1170,7 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
     vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
     vm.setBranchState("", @[], false)
     vm.setCommits(@[], @[])
-    vm.setChangedFiles(self.deepReviewRows())
+    vm.setChangedFiles(reviewRows)
     vm.setUnifiedDiff(false, @[])
     vm.setHunkState(@[], false, false)
     return
@@ -1144,7 +1178,12 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   self.ensureVCSDataLoaded()
   vm.setDeepReviewMode(false)
   vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
+  # `setHeader` clears the review stats; the trace contexts are cleared
+  # explicitly.  Neither belongs to a live working tree, and a panel can move
+  # out of review mode (VCS-Panel.md, "Data Sources and Instantiation Modes").
   vm.setHeader(safeStr(self.currentBranch))
+  vm.setTraceContexts(@[])
+  vm.setSelectedTraceContextId(0)
   vm.setGitRepoState(self.isGitRepo, safeStr(self.errorMessage))
   vm.setBranchState(safeStr(self.currentBranch),
                     self.branches.mapIt(safeStr(it)),
@@ -1241,6 +1280,28 @@ proc handleVCSFileSelection(self: VCSComponent; index: int;
   else:
     vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
   self.dispatchOpenAction(vm.openActionFor(index, path, target, status))
+
+proc handleTraceContextSelection(self: VCSComponent; id: int) =
+  ## The reviewer picked a trace context in this panel's header
+  ## (DeepReview-GUI.md §6: "The selected trace context can be changed without
+  ## leaving the review").
+  ##
+  ## The selection is review-wide, so it is stored on ``Data`` and pushed to
+  ## the DeepReview panel, which owns the Monaco decorations drawn from the
+  ## selected run.
+  ##
+  ## NOTE (M42b): the review's recordings are not loaded — `--deepreview`
+  ## forces an empty recording id — so switching context cannot yet change
+  ## the *data* any panel shows.  What this milestone delivers is the control
+  ## and its state; re-driving the overlay from the newly selected recording
+  ## is DR-R6, which is blocked on that gap.
+  if not self.isDeepReviewMode():
+    return
+  self.data.deepReviewSelectedTraceContextId = id
+  self.syncLegacyVCSIntoVM()
+  let component = self.data.ui.componentMapping[Content.DeepReview][0]
+  if not component.isNil:
+    deepreview.setDeepReviewTraceContext(DeepReviewComponent(component), id)
 
 proc startReviewNavigation*(self: VCSComponent) =
   ## Review entry, step 2 — "The first modified file opens in the editor"
@@ -1354,6 +1415,8 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
       onToggleUnifiedDiff: proc() =
         component.openFileMode = not component.openFileMode
         component.syncLegacyVCSIntoVM(),
+      onSetTraceContext: proc(id: int) =
+        component.handleTraceContextSelection(id),
       onRefresh: proc() =
         if component.isDiffTab():
           component.loadGitDiffForUnifiedView()

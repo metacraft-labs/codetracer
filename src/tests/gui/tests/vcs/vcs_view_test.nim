@@ -43,6 +43,16 @@ proc findAllByClass(node: MockNode; className: string): seq[MockNode] =
   result = @[]
   findAllByClass(node, className, result)
 
+proc findAllByTag(node: MockNode; tag: string; acc: var seq[MockNode]) =
+  if node.kind == mnkElement and node.tag == tag:
+    acc.add(node)
+  for child in node.children:
+    findAllByTag(child, tag, acc)
+
+proc findAllByTag(node: MockNode; tag: string): seq[MockNode] =
+  result = @[]
+  findAllByTag(node, tag, result)
+
 proc containsText(node: MockNode; needle: string): bool =
   ## Whole-subtree text search.  ``textContent`` on the panel root is the
   ## concatenation of every descendant's text, which is exactly what the
@@ -143,5 +153,182 @@ suite "VCS panel — review mode view (DR-R1)":
         # a click *opens*, never what the panel renders (issue #561).
         check findByClass(panel, "vcs-changed-files") != nil
         check findByClass(panel, "deepreview-unified-diff") == nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# The trace-context selector and the review stats (DR-R2)
+# ---------------------------------------------------------------------------
+#
+# DeepReview-GUI.md §2 assigns both to the VCS panel header:
+#   "Trace context selector | The VCS panel header, populated only in
+#    DeepReview mode"
+#   "Session title / stats   | The VCS panel header"
+# and §6 requires the selected context be changeable "without leaving the
+# review, from the selector in the VCS panel header".  Until DR-R2 the control
+# existed only in the standalone DeepReview panel (`isonim_deepreview_view`),
+# and the VCS panel rendered no `select` element in any mode.
+
+const TraceContexts = @[
+  VCSTraceContextRow(id: 0, label: "latest passing run"),
+  VCSTraceContextRow(id: 1, label: "previous run"),
+]
+
+proc populateReviewPanelWithContexts(vm: VCSVM) =
+  populateReviewPanel(vm)
+  vm.setHeader("Review: parser cleanup", statsText = "3 files +16 -10")
+  vm.setTraceContexts(TraceContexts)
+  vm.setSelectedTraceContextId(1)
+
+suite "VCS panel — trace-context selector in the header (DR-R2)":
+
+  test "test_vcs_panel_renders_trace_selector_in_review_mode":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      populateReviewPanelWithContexts(vm)
+
+      let selector = findByClass(panel, "vcs-review-trace-selector")
+      check selector != nil
+      let selects = findAllByTag(panel, "select")
+      check selects.len == 1
+      if selects.len == 1:
+        let options = findAllByTag(selects[0], "option")
+        check options.len == 2
+        check options[0].textContent == "latest passing run"
+        check options[1].textContent == "previous run"
+        check options[0].attributes.getOrDefault("value", "") == "0"
+        check options[1].attributes.getOrDefault("value", "") == "1"
+        # The selected context is the one marked, and only that one: an
+        # attribute that is merely present marks an option selected in a real
+        # browser, so an empty `selected=""` on the others would select all.
+        check not options[0].attributes.hasKey("selected")
+        check options[1].attributes.getOrDefault("selected", "") == "selected"
+
+      # It sits in the header, alongside the session title, not in the file
+      # list (§2's "The VCS panel header").
+      let header = findByClass(panel, "vcs-branch-picker")
+      check header != nil
+      if header != nil:
+        check findByClass(header, "vcs-review-trace-selector") != nil
+        check findByClass(header, "vcs-branch-name").textContent ==
+          "Review: parser cleanup"
+
+      dispose()
+
+  test "a review with fewer than two contexts offers no selector":
+    ## A dropdown whose only option is the current selection is not a choice.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      populateReviewPanel(vm)
+      vm.setTraceContexts(@[VCSTraceContextRow(id: 0, label: "only run")])
+
+      check findByClass(panel, "vcs-review-trace-selector") == nil
+      check findAllByTag(panel, "select").len == 0
+
+      vm.setTraceContexts(TraceContexts)
+      check findByClass(panel, "vcs-review-trace-selector") != nil
+
+      dispose()
+
+  test "test_vcs_trace_selector_change_updates_selection":
+    ## The control has to *do* something.  The MockRenderer path exercises the
+    ## view's VM-level fallback (no host callback registered); the host
+    ## callback path is asserted below.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      populateReviewPanelWithContexts(vm)
+      check vm.selectedTraceContextId.val == 1
+
+      let selects = findAllByTag(panel, "select")
+      check selects.len == 1
+      if selects.len == 1:
+        r.setInputValue(selects[0], "0")
+        selects[0].fireEvent("change")
+        check vm.selectedTraceContextId.val == 0
+
+        # ...and the re-render marks the newly chosen option.
+        let options = findAllByTag(panel, "option")
+        check options.len == 2
+        check options[0].attributes.getOrDefault("selected", "") == "selected"
+        check not options[1].attributes.hasKey("selected")
+
+      dispose()
+
+  test "the host callback receives the chosen context id":
+    ## `onSetTraceContext` follows the `onToggleUnifiedDiff` pattern: when a
+    ## host is wired the host decides, because switching context has effects
+    ## outside this panel (the review's decorations).
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var reported = -1
+      let callbacks = VCSCallbacks(
+        onSetTraceContext: proc(id: int) = (reported = id))
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      populateReviewPanelWithContexts(vm)
+
+      let selects = findAllByTag(panel, "select")
+      check selects.len == 1
+      if selects.len == 1:
+        r.setInputValue(selects[0], "0")
+        selects[0].fireEvent("change")
+
+      check reported == 0
+      # The host owns the write-back; the view must not have guessed it.
+      check vm.selectedTraceContextId.val == 1
+
+      dispose()
+
+  test "the review stats render in the header":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      populateReviewPanelWithContexts(vm)
+
+      let stats = findByClass(panel, "vcs-review-stats")
+      check stats != nil
+      if stats != nil:
+        check stats.textContent == "3 files +16 -10"
+
+      # A review with no stats to report renders no empty row.
+      vm.setHeader("Review: parser cleanup")
+      check findByClass(panel, "vcs-review-stats") == nil
+
+      dispose()
+
+  test "a normal git session shows neither the selector nor the stats":
+    ## The regression guard for the shared header: DR-R2 adds two elements to
+    ## a header both modes render, and VCS-Panel.md's "Normal Development
+    ## Mode" has neither recordings nor a fixed changeset.  Neither element
+    ## may appear — or take space — in a live working-tree session.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[])
+      # Even with review state left over from a previous session on this VM.
+      vm.setTraceContexts(TraceContexts)
+
+      check findByClass(panel, "vcs-review-trace-selector") == nil
+      check findByClass(panel, "vcs-review-stats") == nil
+      check findAllByTag(panel, "select").len == 0
+      check findByClass(panel, "vcs-commit-history") != nil
 
       dispose()

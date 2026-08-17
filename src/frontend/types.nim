@@ -1955,6 +1955,13 @@ type
       ## (file list) and the DeepReview component (diff view).  Updated
       ## by VCS clicks and read by the DeepReview component to determine
       ## which file's diff to render.
+    deepReviewSelectedTraceContextId*: int
+      ## Id of the selected entry of ``deepReviewData.traceContexts``, shared
+      ## the same way: the selector lives in the VCS panel header
+      ## (DeepReview-GUI.md §2) but the selection describes the review, not
+      ## one panel, so it is stored next to the data it indexes.  Zero means
+      ## "not chosen yet"; the VCS panel resolves that to the first declared
+      ## context, which the export contract says is the default.
 
     # Multi-replay-window architecture (M0): session management.
     # During the migration the first (and only) session mirrors the

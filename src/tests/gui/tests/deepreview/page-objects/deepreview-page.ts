@@ -256,6 +256,54 @@ export class DeepReviewPage {
       .filter({ hasNot: this.page.locator(".vcs-changed-files") });
   }
 
+  // -- The docked VCS panel ------------------------------------------------
+
+  /**
+   * The docked VCS panel — the one that lists the changeset.
+   *
+   * It is the complement of ``diffTabs()``: a review opens diff tabs that are
+   * also ``.vcs-container`` elements, so anything asserted about the panel
+   * that hosts the review's navigation must be scoped this way.
+   */
+  vcsPanel(): Locator {
+    return this.page
+      .locator(".vcs-container")
+      .filter({ has: this.page.locator(".vcs-changed-files") });
+  }
+
+  /**
+   * The trace-context selector in the VCS panel header.
+   *
+   * DeepReview-GUI.md §2: "Trace context selector | The VCS panel header,
+   * populated only in DeepReview mode". Scoped to the VCS panel on purpose —
+   * the standalone DeepReview panel renders its own copy of this control
+   * until DR-R8 deletes it, and a page-wide locator would match both.
+   */
+  vcsTraceContextSelector(): Locator {
+    return this.vcsPanel().locator(".vcs-review-trace-selector");
+  }
+
+  /** The trace-context dropdown inside the VCS panel header. */
+  vcsTraceContextSelect(): Locator {
+    return this.vcsPanel().locator(".vcs-review-trace-select");
+  }
+
+  /**
+   * The review's session title in the VCS panel header.
+   *
+   * DeepReview-GUI.md §2: "Session title / stats | The VCS panel header".
+   * The header reuses the branch-name element; in review mode it carries the
+   * review title instead of a branch.
+   */
+  vcsReviewTitle(): Locator {
+    return this.vcsPanel().locator(".vcs-branch-name");
+  }
+
+  /** The review stats (file count and total +/-) in the VCS panel header. */
+  vcsReviewStats(): Locator {
+    return this.vcsPanel().locator(".vcs-review-stats");
+  }
+
   /** The diff tab showing ``filePath``'s diff, if one is open. */
   diffTabFor(filePath: string): Locator {
     return this.diffTabs().filter({
@@ -278,38 +326,47 @@ export class DeepReviewPage {
 
   // -- Header --------------------------------------------------------------
 
+  // The header accessors below are scoped to the standalone DeepReview panel
+  // for the same reason as the diff markup above: DR-R2 moved the review's
+  // trace-context selector and stats into the VCS panel header, where they
+  // adopt the panel-agnostic `deepreview-stats` / `deepreview-trace-select`
+  // rules rather than duplicating them. Two surfaces therefore carry those
+  // classes until DR-R8 deletes this panel, and a page-wide locator would
+  // match both. The VCS panel's copies have their own accessors
+  // (`vcsTraceContextSelect`, `vcsReviewStats`, …).
+
   /** The header bar showing commit info and summary stats. */
   header(): Locator {
-    return this.page.locator(".deepreview-header");
+    return this.inPanel(".deepreview-header");
   }
 
   /** The commit SHA display in the header. */
   commitDisplay(): Locator {
-    return this.page.locator(".deepreview-commit");
+    return this.inPanel(".deepreview-commit");
   }
 
   /** The stats display (file count, recording count, time). */
   statsDisplay(): Locator {
-    return this.page.locator(".deepreview-stats");
+    return this.inPanel(".deepreview-stats");
   }
 
   // -- Session title -------------------------------------------------------
 
   /** The session title displayed in the header bar. */
   sessionTitle(): Locator {
-    return this.page.locator(".deepreview-session-title");
+    return this.inPanel(".deepreview-session-title");
   }
 
   // -- Trace context selector ----------------------------------------------
 
   /** The trace context selector container. */
   traceContextSelector(): Locator {
-    return this.page.locator(".deepreview-trace-selector");
+    return this.inPanel(".deepreview-trace-selector");
   }
 
   /** The trace context dropdown element. */
   traceContextSelect(): Locator {
-    return this.page.locator(".deepreview-trace-select");
+    return this.inPanel(".deepreview-trace-select");
   }
 
   /**

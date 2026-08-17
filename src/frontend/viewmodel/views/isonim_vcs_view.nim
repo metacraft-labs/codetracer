@@ -78,6 +78,9 @@ type
     ## commit's accordion.
     onSelectFile*: proc(index: int; path, target, status: string)
     onToggleUnifiedDiff*: proc()
+    ## The review's trace-context selector changed (DeepReview mode only).
+    ## ``id`` is the ``VCSTraceContextRow.id`` of the chosen context.
+    onSetTraceContext*: proc(id: int)
     onRefresh*: proc()
     onSelectHunk*: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool)
     onCopySelectedHunks*: proc()
@@ -237,6 +240,16 @@ proc invokeToggleUnifiedDiff(vm: VCSVM; callbacks: VCSCallbacks) =
     # reported in issue #561.
     vm.viewMode.val =
       if vm.viewMode.val == vmUnifiedDiff: vmOpenFile else: vmUnifiedDiff
+
+proc invokeSetTraceContext(vm: VCSVM; callbacks: VCSCallbacks; id: int) =
+  ## Follows the ``invokeToggleUnifiedDiff`` pattern: the host owns the real
+  ## effect (re-deriving the review overlay from the newly selected
+  ## recording), and the VM-level fallback keeps the control exercisable from
+  ## the MockRenderer path, where no host callback is registered.
+  if callbacks.onSetTraceContext != nil:
+    callbacks.onSetTraceContext(id)
+  else:
+    vm.setSelectedTraceContextId(id)
 
 proc invokeRefresh(callbacks: VCSCallbacks) =
   if callbacks.onRefresh != nil:
@@ -509,14 +522,88 @@ proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
       r.appendRenderedChild(dropdown, renderBranchOption(r, vm, callbacks, branch))
   panel
 
-proc renderHeader[R](r: R; vm: VCSVM): auto =
-  ui(r):
-    tdiv(class = "vcs-branch-picker"):
+proc parseControlInt(value: string; fallback: int): int =
+  try:
+    parseInt(value)
+  except ValueError:
+    fallback
+
+proc readSelectedInt(r: MockRenderer; node: MockNode; fallback: int): int =
+  parseControlInt(r.inputValue(node), fallback)
+
+when defined(js):
+  proc selectValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+
+  proc readSelectedInt(r: WebRenderer; node: isonim_dom.Element;
+                       fallback: int): int =
+    parseControlInt($isonim_dom.Node(node).selectValue(), fallback)
+
+proc renderTraceContextOption[R](r: R; ctx: VCSTraceContextRow;
+                                 isSelected: bool): auto =
+  ## One entry of the trace-context dropdown.
+  ##
+  ## ``selected`` is applied imperatively rather than through the DSL because
+  ## an attribute is either present or absent: rendering ``selected=""`` for
+  ## the unselected options would mark every one of them selected in a real
+  ## browser.
+  let node = ui(r):
+    option(value = $ctx.id):
+      text ctx.label
+  if isSelected:
+    r.setAttribute(node, "selected", "selected")
+  node
+
+proc renderTraceContextSelector[R](r: R; vm: VCSVM;
+                                   callbacks: VCSCallbacks): auto =
+  ## The review's trace-context selector — DeepReview-GUI.md §2, "Trace
+  ## context selector → The VCS panel header, populated only in DeepReview
+  ## mode", and §6: "The selected trace context can be changed without leaving
+  ## the review, from the selector in the VCS panel header".
+  ##
+  ## The ``deepreview-trace-selector`` / ``deepreview-trace-select`` classes
+  ## are the panel-agnostic rules from
+  ## ``styles/components/deepreview.styl``; they are *adopted* here rather
+  ## than duplicated under a new name (the VCS panel already renders the
+  ## ``deepreview-unified-*`` diff markup the same way).  The ``vcs-review-*``
+  ## classes carry only this panel's own layout, and give tests a selector
+  ## that cannot also match the standalone panel's copy of the control while
+  ## that panel still exists.
+  var traceSelect: typeof(r.createElement("select"))
+  let selectedId = vm.selectedTraceContextId.val
+  let node = ui(r):
+    tdiv(class = "deepreview-trace-selector vcs-review-trace-selector"):
+      select(ref = traceSelect,
+             class = "deepreview-trace-select vcs-review-trace-select",
+             onchange = proc() =
+               vm.invokeSetTraceContext(
+                 callbacks, readSelectedInt(r, traceSelect, selectedId)))
+  for ctx in vm.traceContexts.val:
+    r.appendRenderedChild(
+      traceSelect, renderTraceContextOption(r, ctx, ctx.id == selectedId))
+  node
+
+proc renderHeader[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+  ## The panel header.  In review mode it also carries the two review-only
+  ## elements DeepReview-GUI.md §2 assigns to it — the trace-context selector
+  ## and the session stats.  Both are gated on ``deepReviewMode`` so a normal
+  ## version-control session renders exactly what it rendered before: no
+  ## selector, no stats row, no extra vertical space.
+  var picker: typeof(r.createElement("div"))
+  let node = ui(r):
+    tdiv(ref = picker, class = "vcs-branch-picker"):
       tdiv(class = "vcs-branch-current"):
         span(class = "vcs-branch-icon"):
           text vm.headerIcon.val
         span(class = "vcs-branch-name"):
           text vm.headerTitle.val
+  if vm.hasTraceContextChoice():
+    r.appendRenderedChild(picker, renderTraceContextSelector(r, vm, callbacks))
+  if vm.deepReviewMode.val and vm.statsText.val.len > 0:
+    let stats = ui(r):
+      span(class = "deepreview-stats vcs-review-stats"):
+        text vm.statsText.val
+    r.appendRenderedChild(picker, stats)
+  node
 
 proc renderNoRepo[R](r: R; vm: VCSVM): auto =
   ui(r):
@@ -1103,7 +1190,7 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
     saveCommitListScroll(body)
     r.clearChildren(body)
     if vm.deepReviewMode.val:
-      r.appendRenderedChild(body, renderHeader(r, vm))
+      r.appendRenderedChild(body, renderHeader(r, vm, callbacks))
       # The reviewer must be able to choose between the two representations
       # DeepReview-GUI.md §1 promises (unified diff / full file); the switch
       # is the VCS panel's, per §2 "Mode switcher → the VCS panel's view mode

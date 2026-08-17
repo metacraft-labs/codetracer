@@ -423,11 +423,16 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("ReplVM", ["displayMode"])
 
   entries.addMany("VCSVM",
-    ["deepReviewMode", "headerTitle", "headerIcon", "isGitRepo",
+    ["deepReviewMode", "headerTitle", "headerIcon", "statsText",
+     "traceContexts", "isGitRepo",
      "errorMessage", "currentBranch", "branches", "commits", "changedFiles",
      "diffFiles"],
     vscBackendAuthoritative,
     "VCS rows/status are local repository facts.")
+  entries.addEntry("VCSVM", "selectedTraceContextId", vscRendererLocal,
+    "Review trace-context selection is outside replay session sync.",
+    requiresStableId = true,
+    stableIdNote = "Would need stable trace-context id if synchronized.")
   entries.addMany("VCSVM", ["branchDropdownOpen", "unifiedDiffActive",
                             "hunkToolbarVisible", "hunkCopyFeedback"],
     vscRendererLocal,

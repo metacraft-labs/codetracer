@@ -103,6 +103,30 @@
   overflow-y: auto
 
 // ---------------------------------------------------------------------------
+// Review header extras (DeepReview mode only)
+// ---------------------------------------------------------------------------
+//
+// The trace-context selector and the review stats that DeepReview-GUI.md §2
+// houses in this panel's header.  Only layout lives here: the control's own
+// appearance comes from the panel-agnostic `.deepreview-trace-select` /
+// `.deepreview-stats` rules in components/deepreview.styl, which these
+// elements also carry, so nothing is duplicated.  A normal version-control
+// session renders neither element, so neither rule can take space there.
+
+.vcs-review-trace-selector
+  padding-top: 0.25em
+
+  .vcs-review-trace-select
+    width: 100%
+    // The panel is narrow; a long "latest passing run" label must shrink
+    // rather than push the panel into a horizontal scroll.
+    min-width: 0
+
+.vcs-review-stats
+  display: block
+  padding: 0.25em 0.5em 0 0.5em
+
+// ---------------------------------------------------------------------------
 // Section headers
 // ---------------------------------------------------------------------------
 

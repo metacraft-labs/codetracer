@@ -186,4 +186,24 @@ test.describe("VCS unified diff", () => {
     await expect(ctPage.locator(".vcs-commit-list").first()).toBeVisible();
     await expect(ctPage.locator(".vcs-commit-header").first()).toBeVisible();
   });
+
+  test("a normal git session gets no review header extras", async ({
+    ctPage,
+  }) => {
+    // DR-R2 added the review's trace-context selector and stats to the VCS
+    // panel header, which both modes render.  VCS-Panel.md, "Normal
+    // Development Mode": the panel then watches a live working tree — there
+    // are no recordings to choose between and no fixed changeset to
+    // summarise, so neither element may appear or take space here.
+    //
+    // Headless counterpart: "a normal git session shows neither the selector
+    // nor the stats" in src/tests/gui/tests/vcs/vcs_view_test.nim.
+    await openVcsPanel(ctPage);
+
+    await expect(ctPage.locator(".vcs-review-trace-selector")).toHaveCount(0);
+    await expect(ctPage.locator(".vcs-review-trace-select")).toHaveCount(0);
+    await expect(ctPage.locator(".vcs-review-stats")).toHaveCount(0);
+    // The header itself is intact — the branch picker still names the branch.
+    await expect(ctPage.locator(".vcs-branch-picker").first()).toBeVisible();
+  });
 });

@@ -205,6 +205,13 @@ const
     # deleted-file rule), `vcs_view_test.nim` the review-mode render branch,
     # and the review-entry suite of `deepreview_vm_test.nim` the startup step
     # over the same `sample-review.json` fixture the Playwright suite uses.
+    #
+    # DR-R2 grew the same two VCS files rather than adding new ones: the
+    # review's trace-context selector and stats moved out of the standalone
+    # panel into the VCS panel header, so `vcs_vm_test.nim` also covers the
+    # header's trace-context state and `vcs_view_test.nim` also covers the
+    # selector's rendering, its change handler, and the guard that neither
+    # element appears in a normal version-control session.
     "src/tests/gui/tests/vcs/vcs_vm_test.nim",
     "src/tests/gui/tests/vcs/vcs_view_test.nim",
     "src/tests/gui/tests/deepreview/deepreview_vm_test.nim",
