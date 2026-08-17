@@ -11076,7 +11076,7 @@ suite "IsoNim VCS Panel — structure":
       let callbacks = VCSCallbacks(
         onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
           (expandedCommit = index; expandModifiers = (ctrl, shift)),
-        onSelectFile: proc(index: int; path: string; target: string) =
+        onSelectFile: proc(index: int; path, target, status: string) =
           (discard index; discard target; selectedFile = path),
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
@@ -11155,7 +11155,7 @@ suite "IsoNim VCS Panel — structure":
       let r = MockRenderer()
       var selected = -1
       let callbacks = VCSCallbacks(
-        onSelectFile: proc(index: int; path: string; target: string) =
+        onSelectFile: proc(index: int; path, target, status: string) =
           (discard path; discard target; selected = index),
       )
       let panel = renderVCSPanel(r, vm, callbacks)
@@ -11273,7 +11273,7 @@ suite "IsoNim VCS Panel — structure":
       var selectedFile = ""
       var openedDiff = ""
       let callbacks = VCSCallbacks(
-        onSelectFile: proc(index: int; path: string; target: string) =
+        onSelectFile: proc(index: int; path, target, status: string) =
           (discard index; discard target; selectedFile = path),
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
@@ -11328,7 +11328,7 @@ suite "IsoNim VCS Panel — structure":
       var rowTarget = ""
       var rowPath = ""
       let callbacks = VCSCallbacks(
-        onSelectFile: proc(index: int; path: string; target: string) =
+        onSelectFile: proc(index: int; path, target, status: string) =
           (discard index; rowPath = path; rowTarget = target),
       )
       let panel = renderVCSPanel(r, vm, callbacks)

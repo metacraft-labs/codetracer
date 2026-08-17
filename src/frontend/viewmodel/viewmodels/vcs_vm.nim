@@ -102,6 +102,24 @@ type
                    ## `vcs.defaultView: "unified-diff"`)
     vmOpenFile     ## open the file itself in the editor
 
+  VCSOpenActionKind* = enum
+    ## What a click on a changed-file row resolves to.
+    voaNone        ## nothing to open (no such row, or a row with no path)
+    voaDiffTab     ## open/focus the unified diff tab for `target`
+    voaSourceFile  ## open/focus the file itself in the editor
+
+  VCSOpenAction* = object
+    ## The decision a file-row click makes, as data.
+    ##
+    ## It is data rather than an effect so the decision is testable without a
+    ## browser: the host (`ui/vcs.nim`) is a dispatcher over this value and
+    ## owns only the GoldenLayout/Monaco side effects.
+    kind*: VCSOpenActionKind
+    index*: int     ## row index the click came from
+    path*: string   ## file path as the row reports it
+    target*: string ## diff target (`file:<path>`, `commit:<hash>:<path>`, …)
+    status*: string ## diff status letter of the row ("M", "A", "D", "R", …)
+
   VCSVM* = ref object of ViewModel
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
@@ -171,6 +189,63 @@ proc `==`*(a, b: VCSDiffFileRow): bool {.noSideEffect.} =
   a.fileIndex == b.fileIndex and a.status == b.status and
     a.path == b.path and a.additions == b.additions and
     a.deletions == b.deletions and a.hunks == b.hunks
+
+proc `==`*(a, b: VCSOpenAction): bool {.noSideEffect.} =
+  a.kind == b.kind and a.index == b.index and a.path == b.path and
+    a.target == b.target and a.status == b.status
+
+proc isDeletedStatus*(status: string): bool {.noSideEffect.} =
+  ## True for the diff statuses that mean "this path is gone from the new
+  ## tree".  Git reports the letter; the DeepReview export and some of the
+  ## panel's own helpers use the spelled-out word, so both are accepted.
+  status == "D" or status == "deleted"
+
+proc documentKey*(action: VCSOpenAction): string {.noSideEffect.} =
+  ## The identity of the editor document this action asks for.
+  ##
+  ## It is what makes "opening a file that is already open focuses the
+  ## existing tab" work: the host keys diff tabs by `diff:<target>`
+  ## (`Component.independentTabPath`, matched in `utils.openLayoutTab`) and
+  ## source tabs by the editor tab path (matched in `utils.openTab`), so two
+  ## clicks on one row must produce one key.
+  case action.kind
+  of voaNone: ""
+  of voaDiffTab: "diff:" & action.target
+  of voaSourceFile: action.path
+
+proc openActionFor*(vm: VCSVM; index: int; path, target, status: string):
+    VCSOpenAction =
+  ## Resolve what clicking a changed-file row does.  Pure: no signals are
+  ## written, nothing is opened.
+  ##
+  ## This is the single decision point for both normal version control and
+  ## DeepReview mode — DeepReview-GUI.md §3: "clicking a file opens it in the
+  ## editor, in the representation the view mode toggle currently selects …
+  ## it works identically in normal VCS mode and in DeepReview mode".
+  ##
+  ## Deleted files are the one case the two specs are silent about, and
+  ## DR-R1 decides it here: a file with status `D` has no content in the new
+  ## tree, so it always resolves to the diff tab that shows the removal,
+  ## never to an "open file" for a path that no longer exists.
+  if path.len == 0 and target.len == 0:
+    return VCSOpenAction(kind: voaNone, index: index)
+  let diffTarget = if target.len > 0: target else: "file:" & path
+  let wantsSource = vm.viewMode.val == vmOpenFile and not isDeletedStatus(status)
+  VCSOpenAction(
+    kind: if wantsSource: voaSourceFile else: voaDiffTab,
+    index: index,
+    path: path,
+    target: diffTarget,
+    status: status)
+
+proc openActionForRow*(vm: VCSVM; index: int): VCSOpenAction =
+  ## `openActionFor` for a row of the panel's own changed-files list — the
+  ## list DeepReview mode renders, and the one the review-entry step walks.
+  let rows = vm.changedFiles.val
+  if index < 0 or index >= rows.len:
+    return VCSOpenAction(kind: voaNone, index: index)
+  let row = rows[index]
+  vm.openActionFor(index, row.path, "file:" & row.path, row.status)
 
 proc setDeepReviewMode*(vm: VCSVM; active: bool) =
   vm.deepReviewMode.val = active

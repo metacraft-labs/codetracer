@@ -71,8 +71,12 @@ type
     ## is the same diff target the row's "View Diff" button dispatches
     ## (``file:<path>`` or ``commit:<hash>:<path>``), so the host can honour
     ## the unified-diff view mode without having to re-derive which commit the
-    ## row belonged to.
-    onSelectFile*: proc(index: int; path: string; target: string)
+    ## row belonged to.  ``status`` is the row's diff status letter: the open
+    ## decision needs it (a deleted file has no source to open — see
+    ## ``VCSVM.openActionFor``), and only the row knows it, since row indices
+    ## mean different things in the changed-files list and in an expanded
+    ## commit's accordion.
+    onSelectFile*: proc(index: int; path, target, status: string)
     onToggleUnifiedDiff*: proc()
     onRefresh*: proc()
     onSelectHunk*: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool)
@@ -219,9 +223,9 @@ proc invokeToggleCommitExpand(vm: VCSVM; callbacks: VCSCallbacks;
       vm.selectedCommitIndices.val = @[index]
 
 proc invokeSelectFile(callbacks: VCSCallbacks; index: int;
-                      path: string; target: string) =
+                      path, target, status: string) =
   if callbacks.onSelectFile != nil:
-    callbacks.onSelectFile(index, path, target)
+    callbacks.onSelectFile(index, path, target, status)
 
 proc invokeToggleUnifiedDiff(vm: VCSVM; callbacks: VCSCallbacks) =
   if callbacks.onToggleUnifiedDiff != nil:
@@ -670,13 +674,14 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
   ## independently captures its own index and path.
   let rowIndex = index
   let rowPath = file.path
+  let rowStatus = file.status
   let rowTarget = "commit:" & commitHash & ":" & rowPath
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
     tdiv(ref = rowNode, class = "vcs-accordion-file",
          onclick = proc() =
-           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget))
+           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus))
 
   r.appendRenderedChild(rowNode, renderLaneSpacer(r, continuationCells))
 
@@ -858,12 +863,13 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   ## proc parameters — a guaranteed-fresh binding per call.
   let rowIndex = index
   let rowPath = file.path
+  let rowStatus = file.status
   let rowTarget = "file:" & rowPath
   var diffBtn: typeof(r.createElement("span"))
   let row = ui(r):
     tdiv(class = fileRowClass(file.selected),
          onclick = proc() =
-           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget)):
+           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus)):
       span(class = "vcs-file-status " & statusClass(file.status)):
         text statusLabel(file.status)
       span(class = "vcs-file-name"):
@@ -1001,20 +1007,30 @@ proc renderUnifiedDiff*[R](r: R; vm: VCSVM;
       r.appendRenderedChild(panel, renderDiffFile(r, file, callbacks))
   panel
 
-proc renderDiffToggle[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+proc renderDiffToggle[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
+                         showRefresh: bool): auto =
   ## The view-mode switch described in VCS-Panel.md ("View mode toggle").
   ## Active = clicking a file opens a unified diff tab; inactive = it opens the
   ## file itself.  It changes only what a click *does*, never what this panel
   ## renders — the commit history stays put either way.
-  ui(r):
-    tdiv(class = "vcs-diff-toggle"):
+  ##
+  ## ``showRefresh`` is false in DeepReview mode: VCS-Panel.md, "DeepReview
+  ## Mode" — "File watching: Disabled — the changeset is immutable", so
+  ## offering a manual refresh of a static changeset would be a lie.
+  var row: typeof(r.createElement("div"))
+  let node = ui(r):
+    tdiv(ref = row, class = "vcs-diff-toggle"):
       tdiv(class = toggleButtonClass(vm.viewMode.val == vmUnifiedDiff),
            onclick = proc() =
              vm.invokeToggleUnifiedDiff(callbacks)):
         text "Unified Diff"
+  if showRefresh:
+    let refresh = ui(r):
       tdiv(class = "vcs-refresh",
            onclick = proc() = callbacks.invokeRefresh()):
         text "Refresh"
+    r.appendRenderedChild(row, refresh)
+  node
 
 # ---------------------------------------------------------------------------
 # Scroll-position preservation helpers
@@ -1088,6 +1104,12 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
     r.clearChildren(body)
     if vm.deepReviewMode.val:
       r.appendRenderedChild(body, renderHeader(r, vm))
+      # The reviewer must be able to choose between the two representations
+      # DeepReview-GUI.md §1 promises (unified diff / full file); the switch
+      # is the VCS panel's, per §2 "Mode switcher → the VCS panel's view mode
+      # toggle".  Refresh is suppressed: the changeset is immutable.
+      r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks,
+                                                   showRefresh = false))
       r.appendRenderedChild(body, renderChangedFiles(r, vm, callbacks))
     elif not vm.isGitRepo.val:
       r.appendRenderedChild(body, renderNoRepo(r, vm))
@@ -1098,7 +1120,8 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
       r.appendRenderedChild(body, renderUnifiedDiff(r, vm, callbacks))
     else:
       r.appendRenderedChild(body, renderBranchPicker(r, vm, callbacks))
-      r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks))
+      r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks,
+                                                   showRefresh = true))
       # Commit graph with accordion expand/collapse and infinite-scroll.
       r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
     restoreCommitListScroll(body)

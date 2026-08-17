@@ -197,6 +197,19 @@ export class DeepReviewPage {
     return this.page.locator(".deepreview-error");
   }
 
+  /**
+   * Scope a selector to the DeepReview panel itself.
+   *
+   * The panel's diff markup (``deepreview-unified-*``, ``deepreview-expand-*``,
+   * ``deepreview-flow-values``) is shared with the VCS panel's unified diff
+   * *editor tabs*, which a review now opens (DeepReview-GUI.md §3/§7). A
+   * page-wide locator would therefore mix the two surfaces together; the tabs
+   * have their own accessors below (``diffTabs``, ``diffTabFor``).
+   */
+  private inPanel(selector: string): Locator {
+    return this.container().locator(selector);
+  }
+
   // -- Surrounding GoldenLayout --------------------------------------------
 
   /**
@@ -212,6 +225,55 @@ export class DeepReviewPage {
   async layoutTabTitles(): Promise<string[]> {
     const titles = await this.page.locator(".lm_tab .lm_title").allTextContents();
     return titles.map((t) => t.trim());
+  }
+
+  /**
+   * Titles of the GoldenLayout tabs that are the *active* tab of their stack,
+   * i.e. the ones whose content is on screen.
+   *
+   * GoldenLayout marks them with ``lm_active``.
+   */
+  async activeTabTitles(): Promise<string[]> {
+    const titles = await this.page
+      .locator(".lm_tab.lm_active .lm_title")
+      .allTextContents();
+    return titles.map((t) => t.trim());
+  }
+
+  // -- Editor-area diff tabs -----------------------------------------------
+
+  /**
+   * The unified-diff editor tabs opened from the VCS panel's Changed Files
+   * list (DeepReview-GUI.md §3/§4: "Clicking a file opens it in the editor").
+   *
+   * A diff tab is a VCS panel instance that renders only a diff — it has no
+   * Changed Files section — which is what distinguishes it from the docked
+   * VCS panel that lists the changeset.
+   */
+  diffTabs(): Locator {
+    return this.page
+      .locator(".vcs-container")
+      .filter({ hasNot: this.page.locator(".vcs-changed-files") });
+  }
+
+  /** The diff tab showing ``filePath``'s diff, if one is open. */
+  diffTabFor(filePath: string): Locator {
+    return this.diffTabs().filter({
+      has: this.page.locator(".deepreview-unified-file-path", {
+        hasText: filePath,
+      }),
+    });
+  }
+
+  /**
+   * Title GoldenLayout gives a diff tab for ``filePath``.
+   *
+   * Mirrors the ``file:``-target branch of ``convertTabTitle``'s caller in
+   * ``src/frontend/ui/layout.nim``.
+   */
+  static diffTabTitle(filePath: string): string {
+    const slash = filePath.lastIndexOf("/");
+    return `Diff: ${slash >= 0 ? filePath.slice(slash + 1) : filePath}`;
   }
 
   // -- Header --------------------------------------------------------------
@@ -540,61 +602,61 @@ export class DeepReviewPage {
 
   /** The unified diff scroll container. */
   unifiedDiff(): Locator {
-    return this.page.locator(".deepreview-unified-diff");
+    return this.inPanel(".deepreview-unified-diff");
   }
 
   /** All file sections in the unified diff view. */
   unifiedFileHeaders(): Locator {
-    return this.page.locator(".deepreview-unified-file-header");
+    return this.inPanel(".deepreview-unified-file-header");
   }
 
   /** All file path spans within unified diff file headers. */
   unifiedFilePaths(): Locator {
-    return this.page.locator(".deepreview-unified-file-path");
+    return this.inPanel(".deepreview-unified-file-path");
   }
 
   /** All hunk header elements (the @@ lines). */
   unifiedHunkHeaders(): Locator {
-    return this.page.locator(".deepreview-unified-hunk-header");
+    return this.inPanel(".deepreview-unified-hunk-header");
   }
 
   /** All added lines in the unified diff. */
   unifiedAddedLines(): Locator {
-    return this.page.locator(".deepreview-unified-line-added");
+    return this.inPanel(".deepreview-unified-line-added");
   }
 
   /** All removed lines in the unified diff. */
   unifiedRemovedLines(): Locator {
-    return this.page.locator(".deepreview-unified-line-removed");
+    return this.inPanel(".deepreview-unified-line-removed");
   }
 
   /** All context lines in the unified diff. */
   unifiedContextLines(): Locator {
-    return this.page.locator(".deepreview-unified-line-context");
+    return this.inPanel(".deepreview-unified-line-context");
   }
 
   /** All lines (of any type) in the unified diff. */
   unifiedAllLines(): Locator {
-    return this.page.locator(".deepreview-unified-line");
+    return this.inPanel(".deepreview-unified-line");
   }
 
   // -- Context expansion ----------------------------------------------------
 
   /** All "Expand above/below" rows in the unified diff. */
   expandRows(): Locator {
-    return this.page.locator(".deepreview-expand-row");
+    return this.inPanel(".deepreview-expand-row");
   }
 
   /** All expanded context lines (lines added via expand buttons). */
   expandedContextLines(): Locator {
-    return this.page.locator(".deepreview-expanded-context");
+    return this.inPanel(".deepreview-expanded-context");
   }
 
   // -- Omniscience overlay (inline values on diff lines) ---------------------
 
   /** All omniscience flow value containers in the unified diff. */
   omniscienceValues(): Locator {
-    return this.page.locator(".deepreview-flow-values");
+    return this.inPanel(".deepreview-flow-values");
   }
 
   /**

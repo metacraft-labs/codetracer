@@ -7,13 +7,15 @@
 ## set, and ``glEmbedded`` is set for every ``--deepreview`` session — so no
 ## VM-level assertion could observe it.
 
-import std/[strutils, tables, unittest]
+import std/[json, strutils, tables, unittest]
 import isonim/core/[signals, computation, owner]
 import isonim/testing/mock_dom
 import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/deepreview_vm
+import viewmodels/review_entry
+import viewmodels/vcs_vm
 import views/isonim_deepreview_view
 
 proc makeStoreWithMock(autoRespond: bool = true):
@@ -413,5 +415,170 @@ suite "DeepReview view — GL-embedded panel (issue #610)":
       check vm.viewMode.val == drpvmUnified
       check findById(panel, isonim_deepreview_view.editorId(13)) == nil
       check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Review entry: opening the first modified file (DR-R1)
+# ---------------------------------------------------------------------------
+#
+# DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
+# modified file opens in the editor with unified diff view."  The step is a
+# named, reusable routine (`viewmodels/review_entry`) because DR-R7 makes all
+# three launch paths — `ct --deepreview`, opening a diff-associated trace, and
+# the agentic handoff — converge on it.
+#
+# The changeset is read from the same `sample-review.json` fixture the
+# Playwright suite launches CodeTracer over, so the headless test and the GUI
+# test are describing one dataset.  The projection below mirrors
+# `deepReviewRows` in `src/frontend/ui/vcs.nim`, which is JS-only (it walks the
+# `DeepReviewData` JS object) and therefore not importable here.
+
+proc fixtureDirPath(): string {.compileTime.} =
+  let p = currentSourcePath()
+  var cut = p.rfind('/')
+  let backslash = p.rfind('\\')
+  if backslash > cut:
+    cut = backslash
+  p[0 .. cut] & "fixtures/"
+
+const SampleReviewJson = staticRead(fixtureDirPath() & "sample-review.json")
+const EmptyReviewJson = staticRead(fixtureDirPath() & "empty-review.json")
+
+proc reviewRowsFromFixture(fixture: string): seq[VCSFileRow] =
+  ## Project a DeepReview export's `files` array into the VCS panel's changed
+  ## file rows, the way `vcs.nim`'s `deepReviewRows` does.
+  result = @[]
+  let data = parseJson(fixture)
+  if not data.hasKey("files"):
+    return
+  for file in data["files"].items:
+    let path = file{"path"}.getStr("")
+    var slash = path.rfind('/')
+    let baseName = if slash >= 0: path[slash + 1 .. ^1] else: path
+    let diff = file{"diff"}
+    var executed = 0
+    var covered = 0
+    if file.hasKey("coverage"):
+      for cov in file["coverage"].items:
+        covered += 1
+        if cov{"executed"}.getBool(false):
+          executed += 1
+    let status =
+      if diff != nil and diff{"status"}.getStr("").len > 0:
+        diff{"status"}.getStr("")
+      else:
+        "M"
+    result.add(VCSFileRow(
+      status: status,
+      path: path,
+      baseName: baseName,
+      additions: if diff == nil: 0 else: diff{"linesAdded"}.getInt(0),
+      deletions: if diff == nil: 0 else: diff{"linesRemoved"}.getInt(0),
+      coverageText: if covered > 0: $executed & "/" & $covered else: "",
+      selected: false,
+    ))
+
+suite "Review entry — the first modified file opens (DR-R1)":
+
+  test "the fixture projection matches the review dataset":
+    ## Guards the three tests below: if the fixture ever loses its files or
+    ## changes their order, they must fail loudly rather than silently assert
+    ## about an empty changeset.
+    let rows = reviewRowsFromFixture(SampleReviewJson)
+    check rows.len == 3
+    check rows[0].path == "src/main.rs"
+    check rows[0].status == "M"
+    check rows[2].status == "D"
+    check reviewRowsFromFixture(EmptyReviewJson).len == 0
+
+  test "test_review_start_opens_first_modified_file":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setDeepReviewMode(true)
+      vm.setChangedFiles(reviewRowsFromFixture(SampleReviewJson))
+
+      # Stands in for the editor area: one entry per open document, keyed by
+      # the tab identity the host uses (`independentTabPath` for a diff tab,
+      # the editor tab path for a source file), so a repeated open focuses
+      # rather than duplicates.
+      var documents: seq[string] = @[]
+      let action = vm.openFirstReviewFile(proc(a: VCSOpenAction) =
+        if a.documentKey notin documents:
+          documents.add(a.documentKey))
+
+      check documents.len == 1
+      check action.kind == voaDiffTab
+      check action.index == 0
+      check action.path == "src/main.rs"
+      check documents[0] == "diff:file:src/main.rs"
+
+      # The VCS panel's list and the editor agree on which file is under
+      # review (§7 step 1-2; VCS-Panel.md "The selected row is highlighted").
+      check vm.changedFiles.val[0].selected
+      check not vm.changedFiles.val[1].selected
+      check not vm.changedFiles.val[2].selected
+
+      dispose()
+
+  test "review start honours the view mode the toggle defaults to":
+    ## `vcs.defaultView: "unified-diff"` (VCS-Panel.md, Configuration) is the
+    ## default; a session whose toggle sits on Open File must open the file
+    ## itself instead, from the same step.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setDeepReviewMode(true)
+      vm.setChangedFiles(reviewRowsFromFixture(SampleReviewJson))
+      vm.setViewMode(vmOpenFile)
+
+      var documents: seq[string] = @[]
+      let action = vm.openFirstReviewFile(proc(a: VCSOpenAction) =
+        if a.documentKey notin documents:
+          documents.add(a.documentKey))
+
+      check documents.len == 1
+      check action.kind == voaSourceFile
+      check documents[0] == "src/main.rs"
+
+      dispose()
+
+  test "reopening an already-open file targets the same document":
+    ## DR-R1: "Opening a file that is already open focuses its existing tab
+    ## rather than opening a second one."  The host implements the focus in
+    ## `openLayoutTab` / `openTab`, both of which key on the requested
+    ## document path — so the property this layer owns is that the step asks
+    ## for a *stable* key for a given row.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setDeepReviewMode(true)
+      vm.setChangedFiles(reviewRowsFromFixture(SampleReviewJson))
+
+      var documents: seq[string] = @[]
+      let first = vm.openFirstReviewFile(proc(a: VCSOpenAction) =
+        if a.documentKey notin documents:
+          documents.add(a.documentKey))
+      let again = vm.openReviewFile(0, proc(a: VCSOpenAction) =
+        if a.documentKey notin documents:
+          documents.add(a.documentKey))
+
+      check first.documentKey == again.documentKey
+      check documents.len == 1
+
+      dispose()
+
+  test "an empty review opens nothing":
+    ## `empty-review.json` has no files; the step must not fabricate a
+    ## document or dispatch an action for a row that does not exist.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setDeepReviewMode(true)
+      vm.setChangedFiles(reviewRowsFromFixture(EmptyReviewJson))
+
+      var opens = 0
+      let action = vm.openFirstReviewFile(proc(a: VCSOpenAction) =
+        (discard a; opens += 1))
+
+      check action.kind == voaNone
+      check opens == 0
 
       dispose()

@@ -196,6 +196,18 @@ const
     # is the part no placement test could catch — the old code called no
     # placement helper at all.
     "src/tests/gui/tests/layout/deepreview_layout_test.nim",
+    # DR-R1 (DeepReview-GUI.milestones.org) — a review must be navigable:
+    # clicking a changed file opens it, a review opens its first file on
+    # startup, and the view-mode toggle is reachable in review mode.  The
+    # decision lives in `VCSVM.openActionFor` and the entry step in
+    # `viewmodels/review_entry` precisely so those three are assertable
+    # without a browser; `vcs_vm_test.nim` covers the resolver (including the
+    # deleted-file rule), `vcs_view_test.nim` the review-mode render branch,
+    # and the review-entry suite of `deepreview_vm_test.nim` the startup step
+    # over the same `sample-review.json` fixture the Playwright suite uses.
+    "src/tests/gui/tests/vcs/vcs_vm_test.nim",
+    "src/tests/gui/tests/vcs/vcs_view_test.nim",
+    "src/tests/gui/tests/deepreview/deepreview_vm_test.nim",
     # #603 (M38) — the re-record queue's decision model.  Both encode the two
     # "never hang" invariants: a failed save must abort loudly, and dirty files
     # with nothing in flight is unreachable-by-waiting.  Note

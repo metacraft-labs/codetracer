@@ -19,6 +19,7 @@ import
 
 import deepreview
 import ../viewmodel/viewmodels/vcs_vm
+import ../viewmodel/viewmodels/review_entry
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -936,6 +937,49 @@ proc basename(path: cstring): string =
 proc safeStr(s: cstring): string =
   if s.isNil: "" else: $s
 
+proc loadDeepReviewDiffForUnifiedView(self: VCSComponent): bool =
+  ## Feed a diff tab from the review dataset instead of from live git.
+  ##
+  ## VCS-Panel.md, "DeepReview Mode": "Data source: The changeset from
+  ## `deepReviewData` (files, hunks, diff metadata) — NOT from live git".  A
+  ## review dataset describes commits that need not exist in — or even relate
+  ## to — whatever repository the process happens to be started in, so asking
+  ## git for the diff of a reviewed file yields an empty tab.
+  ##
+  ## Returns false when this is not a review, or the review carries no diff
+  ## for the tab's target, so the caller can fall back to git.
+  if not self.data.deepReviewActive:
+    return false
+  let drData = self.data.deepReviewData
+  if drData.isNil:
+    return false
+  let rawTarget =
+    if not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:"):
+      ($self.diffTarget)[5 .. ^1]
+    else:
+      ""
+  if not rawTarget.startsWith("file:"):
+    return false
+  let wanted = rawTarget[5 .. ^1]
+
+  var files: seq[DeepReviewFileData] = @[]
+  for file in drData.files:
+    if safeStr(file.path) == wanted and not file.diff.isNil:
+      files.add(file)
+  if files.len == 0:
+    return false
+
+  self.gitDiffData = DeepReviewData(
+    commitSha: drData.commitSha,
+    baseCommitSha: drData.baseCommitSha,
+    collectionTimeMs: 0,
+    recordingCount: 0,
+    sessionTitle: cstring("Diff: " & wanted),
+    files: files)
+  self.selectedHunks = @[]
+  self.hunkToolbarVisible = false
+  true
+
 proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
@@ -948,7 +992,10 @@ proc ensureVCSDataLoaded(self: VCSComponent) =
       self.isGitRepo = true
       self.errorMessage = cstring""
       self.unifiedDiffActive = true
-      self.loadGitDiffForUnifiedView()
+      # A review's diff comes from the review dataset; live git is the
+      # fallback for a normal version-control diff tab.
+      if not self.loadDeepReviewDiffForUnifiedView():
+        self.loadGitDiffForUnifiedView()
     else:
       self.refreshVCSData()
       if self.isGitRepo:
@@ -1082,6 +1129,11 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
     vm.setDeepReviewMode(true)
     vm.setHeader(self.currentReviewTitle())
     vm.setGitRepoState(true)
+    # The view-mode toggle is live in review mode too (VCS-Panel.md, "View
+    # mode toggle"), so the VM must carry the component's current position:
+    # without this the toggle rendered but changed nothing, because the click
+    # resolver reads `VCSVM.viewMode`.
+    vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
     vm.setBranchState("", @[], false)
     vm.setCommits(@[], @[])
     vm.setChangedFiles(self.deepReviewRows())
@@ -1149,21 +1201,95 @@ proc absoluteRepoPath(self: VCSComponent; path: string): cstring =
   else:
     cstring($self.repositoryRoot() & "/" & path)
 
-proc handleVCSFileSelection(self: VCSComponent; index: int; path: string;
-                            target: string) =
+proc dispatchOpenAction(self: VCSComponent; action: VCSOpenAction) =
+  ## Perform the side effect a resolved ``VCSOpenAction`` names.
+  ##
+  ## Both branches focus an already-open document rather than opening a second
+  ## one: ``openLayoutTab`` matches a diff tab by ``independentTabPath`` and
+  ## ``openTab`` matches a source tab by its editor tab path.
+  case action.kind
+  of voaNone:
+    discard
+  of voaDiffTab:
+    self.openUnifiedDiffTab(action.target)
+  of voaSourceFile:
+    # VCS-005: open the file itself.  git (and the DeepReview export) hand us
+    # a repository-relative path; the editor needs an absolute one, otherwise
+    # the tab load is issued for a path that does not exist unless some
+    # already-open tab happens to end with it.
+    self.data.openTab(self.absoluteRepoPath(action.path), ViewSource)
+
+proc handleVCSFileSelection(self: VCSComponent; index: int;
+                            path, target, status: string) =
+  ## Dispatcher over ``VCSVM.openActionFor`` — the decision itself lives in
+  ## the ViewModel so it is testable without a browser
+  ## (``src/tests/gui/tests/vcs/vcs_vm_test.nim``).
+  ##
+  ## DeepReview-GUI.md §3: "Clicking a file **opens it in the editor** ...
+  ## Clicking must not merely change a selection index — clicking is the
+  ## navigation gesture, and it works identically in normal VCS mode and in
+  ## DeepReview mode."  Review mode used to return here after updating the
+  ## selection index, so a reviewer could click every changed file and never
+  ## open one.
+  let vm = self.ensureVCSVM()
+  if vm.isNil:
+    return
   if self.isDeepReviewMode():
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
     self.syncDeepReviewPanelSelection()
-    return
-  if self.openFileMode:
-    # VCS-005: open the file itself.  git hands us a repository-relative path;
-    # the editor needs an absolute one, otherwise the tab load is issued for a
-    # path that does not exist unless some already-open tab happens to end
-    # with it.
-    self.data.openTab(self.absoluteRepoPath(path), ViewSource)
   else:
-    self.openUnifiedDiffTab(target)
+    vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
+  self.dispatchOpenAction(vm.openActionFor(index, path, target, status))
+
+proc startReviewNavigation*(self: VCSComponent) =
+  ## Review entry, step 2 — "The first modified file opens in the editor"
+  ## (DeepReview-GUI.md §7, "Transition into a Review").
+  ##
+  ## The decision and the selection bookkeeping live in
+  ## ``viewmodel/viewmodels/review_entry``; this proc supplies the changeset
+  ## and the GoldenLayout side effect.  DR-R7 routes the other two launch
+  ## paths (a diff-associated trace, the agentic handoff) through the same
+  ## step.
+  if self.isNil or not self.isDeepReviewMode():
+    return
+  let vm = self.ensureVCSVM()
+  if vm.isNil:
+    return
+  # The list and the editor must agree on which file is under review, so the
+  # legacy selection index moves with the VM's row selection.
+  self.data.deepReviewSelectedFileIndex = 0
+  self.syncLegacyVCSIntoVM()
+  discard vm.openFirstReviewFile(proc(action: VCSOpenAction) =
+    self.dispatchOpenAction(action))
+  self.syncDeepReviewPanelSelection()
+
+var deepReviewNavigationDone = false
+  ## One-shot guard for `startDeepReviewNavigation`.  Its caller
+  ## (`ui_js.tryInitLayout`) runs on every layout mount attempt, and the review
+  ## must open its first file *once*: re-running it would drag the reviewer
+  ## back to the first file every time the layout is re-initialised.
+
+proc startDeepReviewNavigation*(data: Data) =
+  ## Find the docked VCS panel of the current layout and run the review-entry
+  ## navigation step on it.  A diff tab is skipped: it is showing one specific
+  ## file and is not the review's navigation surface.
+  ##
+  ## Requires a mounted GoldenLayout — `openLayoutTab` walks `data.ui.layout`
+  ## — so the caller must not invoke it before `initLayout` has run.
+  if deepReviewNavigationDone:
+    return
+  if data.isNil or data.ui.layout.isNil:
+    return
+  for _, component in data.ui.componentMapping[Content.VCS]:
+    let vcsComponent = cast[VCSComponent](component)
+    if vcsComponent.isNil or vcsComponent.isDiffTab():
+      continue
+    deepReviewNavigationDone = true
+    vcsComponent.startReviewNavigation()
+    return
+  cerror "vcs: startDeepReviewNavigation: no docked VCS panel in the layout; " &
+    "the review starts with no file open"
 
 proc handleHunkSelection(self: VCSComponent; fileIdx, hunkIdx: int;
                          shiftKey, ctrlKey: bool) =
@@ -1223,8 +1349,8 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
         component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
         component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
         component.syncLegacyVCSIntoVM(),
-      onSelectFile: proc(index: int; path: string; target: string) =
-        component.handleVCSFileSelection(index, path, target),
+      onSelectFile: proc(index: int; path, target, status: string) =
+        component.handleVCSFileSelection(index, path, target, status),
       onToggleUnifiedDiff: proc() =
         component.openFileMode = not component.openFileMode
         component.syncLegacyVCSIntoVM(),

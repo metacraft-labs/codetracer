@@ -1436,6 +1436,18 @@ proc tryInitLayout*(data: Data) =
             getCurrentExceptionMsg()
     redrawAll()
 
+    # DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
+    # modified file opens in the editor with unified diff view."
+    #
+    # It happens here rather than in `onStartDeepReview` because opening a tab
+    # needs a mounted GoldenLayout, and `CODETRACER::start-deepreview` can
+    # arrive before the document finishes loading — in which case the tree is
+    # only built on the later `onReady` pass through this proc.
+    # `startDeepReviewNavigation` is a one-shot, so a review opens its first
+    # file exactly once however many times the layout is initialised.
+    if data.deepReviewActive and not data.ui.layout.isNil:
+      vcs.startDeepReviewNavigation(data)
+
 # In both these `on` functions, we must communicate them to the ui
 
 # We receive a DAP "Response" from the index process
@@ -2444,10 +2456,10 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
-  # The DeepReview component (content 36) in the GL layout renders the
-  # unified diff view automatically.  Clicking a file in the VCS panel
-  # updates ``data.deepReviewSelectedFileIndex``, which the DeepReview
-  # component reads to decide which file's diff to display.
+  # The review's first modified file is opened by `tryInitLayout` itself, as
+  # soon as the GoldenLayout tree exists (DeepReview-GUI.md §7 step 2).  It
+  # cannot be done here: this message can arrive before the document has
+  # finished loading, and `data.ui.layout` is then still nil.
 
 
 proc onFilenamesLoaded(

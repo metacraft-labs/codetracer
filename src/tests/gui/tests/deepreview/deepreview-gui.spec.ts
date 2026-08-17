@@ -297,7 +297,21 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 5: File switching
   // -----------------------------------------------------------------------
 
-  test("Test 5: clicking a file in the VCS panel updates selection", async ({ ctPage }) => {
+  // e2e_review_click_opens_editor_tab — the rewrite of "Test 5: clicking a
+  // file in the VCS panel updates selection" (DR-R1).
+  //
+  // The selection assertions are kept: they are still correct. What they were
+  // missing is the part the reviewer actually needs — DeepReview-GUI.md §3:
+  // "Clicking a file **opens it in the editor** ... Clicking must not merely
+  // change a selection index". Before DR-R1 a click set
+  // `deepReviewSelectedFileIndex` and returned, so every file in the review
+  // could be clicked and nothing ever opened.
+  //
+  // Headless counterparts: test_vcs_open_action_in_review_mode_opens_diff_tab,
+  // test_vcs_open_action_follows_view_mode_in_review_mode and
+  // test_vcs_open_action_for_deleted_file in
+  // src/tests/gui/tests/vcs/vcs_vm_test.nim.
+  test("Test 5: clicking a file in the VCS panel opens it in the editor", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
@@ -308,14 +322,62 @@ test.describe("DeepReview GUI - main features", () => {
     const secondItem = dr.fileItemByIndex(1);
     await secondItem.click();
 
-    await wait(500);
+    await wait(1000);
 
     expect(await secondItem.isSelected()).toBe(true);
     expect(await firstItem.isSelected()).toBe(false);
 
+    // ...and the click opened that file, in the representation the view-mode
+    // toggle selects (Unified Diff is the default, VCS-Panel.md
+    // `vcs.defaultView`).
+    const secondTitle = DeepReviewPage.diffTabTitle("src/utils.rs");
+    expect(await dr.layoutTabTitles()).toContain(secondTitle);
+    expect(await dr.activeTabTitles()).toContain(secondTitle);
+    await expect(dr.diffTabFor("src/utils.rs")).toBeVisible();
+
     await firstItem.click();
-    await wait(500);
+    await wait(1000);
     expect(await firstItem.isSelected()).toBe(true);
+
+    const firstTitle = DeepReviewPage.diffTabTitle("src/main.rs");
+    expect(await dr.activeTabTitles()).toContain(firstTitle);
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
+
+    // Re-opening a file that is already open focuses its tab instead of
+    // opening a second one (DR-R1).
+    await secondItem.click();
+    await wait(1000);
+    const titles = await dr.layoutTabTitles();
+    expect(titles.filter((t) => t === secondTitle).length).toBe(1);
+    expect(titles.filter((t) => t === firstTitle).length).toBe(1);
+  });
+
+  // e2e_review_opens_a_file_on_startup (DR-R1).
+  //
+  // DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
+  // modified file opens in the editor with unified diff view." `--deepreview`
+  // used to build the layout and stop, so a review began with an empty editor.
+  //
+  // Headless counterpart: test_review_start_opens_first_modified_file in
+  // src/tests/gui/tests/deepreview/deepreview_vm_test.nim.
+  test("Test 5b: a review opens its first modified file on startup", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1500);
+
+    const firstTitle = DeepReviewPage.diffTabTitle("src/main.rs");
+    expect(await dr.layoutTabTitles()).toContain(firstTitle);
+    expect(await dr.activeTabTitles()).toContain(firstTitle);
+
+    // The tab shows that file's review diff, not an empty git diff.
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
+
+    // ...and the VCS panel's list agrees with the editor.
+    expect(await dr.fileItemByIndex(0).isSelected()).toBe(true);
+
+    // Exactly one document, for the first file only: startup opens the first
+    // modified file, not the whole changeset.
+    expect(await dr.diffTabs().count()).toBe(1);
   });
 
   // -----------------------------------------------------------------------
