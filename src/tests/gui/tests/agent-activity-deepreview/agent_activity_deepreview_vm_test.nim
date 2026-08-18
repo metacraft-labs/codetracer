@@ -718,3 +718,101 @@ suite "Agent Activity DeepReview — populated by a review (DR-R3)":
       check vcs.changedFiles.val[2].selected
 
       dispose()
+
+# ---------------------------------------------------------------------------
+# The deletion guard (DR-R8)
+# ---------------------------------------------------------------------------
+#
+# `Content.AgentActivityDeepReview` is a DIFFERENT id from the deleted
+# `Content.DeepReview`, and the names are nearly identical.  DR-R8 deletes the
+# standalone review panel; deleting this one instead would delete DR-R3's
+# entire pillar — DeepReview-GUI.md §2.1: "The Agent Activity panel is the
+# third pillar, not an adjacent feature."
+#
+# Honest scope, stated because the milestone asks for it: the *registration*
+# half of this is not falsifiable against the code as it stood before DR-R8 —
+# the pane was registered then too.  It is listed as the explicit guard
+# against deleting the wrong DeepReview, not as new coverage.  The
+# *population* half is DR-R3's and is falsifiable (before DR-R3 the pane's
+# only caller anywhere was a storybook fixture).
+
+suite "Agent Activity DeepReview survives the DR-R8 deletion":
+
+  test "test_agent_activity_deepreview_survives_the_deletion":
+    ## The behavioural half: after the deletion the pane still populates from
+    ## a review dataset, with no agent session and no standalone panel in the
+    ## picture.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let activity = createAgentActivityDeepReviewVM(store)
+      let vcs = createVCSVM()
+      vcs.setDeepReviewMode(true)
+      vcs.setChangedFiles(vcsRowsFromFixture(SampleReviewJson))
+
+      var documents: seq[string] = @[]
+      discard enterReview(
+        vcs, activity, datasetFromFixture(SampleReviewJson),
+        proc(action: VCSOpenAction) = documents.add(action.documentKey))
+
+      check activity.reviewActive.val
+      check activity.sectionVisible.val
+      check activity.fileCoverage.val.len == 3
+      check activity.coverageSummary.val.totalLinesCovered == 20
+      check activity.selectedFilePath.val == "src/main.rs"
+      # …and the Editor pillar still opens the first file from the same call.
+      check documents == @["diff:file:src/main.rs"]
+
+      dispose()
+
+when not defined(js):
+  ## The registration half is a source contract: `Content` and the panel
+  ## registry live in modules that need Electron to run, so reading them is
+  ## the only way to assert headlessly that DR-R8 removed `Content.DeepReview`
+  ## and left `Content.AgentActivityDeepReview` alone.
+  import std/os
+
+  proc contractSource(path: string): string =
+    ## `readFile` raising here is the right failure: it means a production
+    ## file this contract describes was moved or deleted.
+    readFile(path)
+
+  suite "Agent Activity DeepReview registration (source contract)":
+
+    test "the pane keeps its content id, its registration and its component":
+      let contents = contractSource(
+        "src/common/common_types/codetracer_features/frontend.nim")
+      check contents.contains("AgentActivityDeepReview = 39")
+
+      # `index/config.editModeHiddenContentIds` — the pane is a replay-only
+      # panel and must still be hidden in edit mode.
+      let config = contractSource("src/frontend/index/config.nim")
+      check config.contains("ord(Content.AgentActivityDeepReview)")
+
+      # `utils.makeComponent` — the component is still constructible.
+      let utils = contractSource("src/frontend/utils.nim")
+      check utils.contains("makeAgentActivityDeepReviewComponent")
+
+      # `ui/layout.nim` — still in the direct-mount set and still synced.
+      let layout = contractSource("src/frontend/ui/layout.nim")
+      check layout.contains("Content.AgentActivityDeepReview")
+      check layout.contains(
+        "agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel")
+
+      # The whole retained stack is still on disk.
+      for path in [
+          "src/frontend/ui/agent_activity_deepreview.nim",
+          "src/frontend/viewmodel/viewmodels/agent_activity_deepreview_vm.nim",
+          "src/frontend/viewmodel/views/isonim_agent_activity_deepreview_view.nim",
+          # DeepReviewVM is architecture, not legacy: `AgenticSessionVM`
+          # composes it, so DR-R8 retains it too.
+          "src/frontend/viewmodel/viewmodels/deepreview_vm.nim"]:
+        check fileExists(path)
+
+    test "the standalone panel's id and modules are the ones that went":
+      let contents = contractSource(
+        "src/common/common_types/codetracer_features/frontend.nim")
+      check not contents.contains("DeepReview = 36")
+
+      check not fileExists("src/frontend/ui/deepreview.nim")
+      check not fileExists(
+        "src/frontend/viewmodel/views/isonim_deepreview_view.nim")

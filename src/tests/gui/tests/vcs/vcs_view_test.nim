@@ -339,3 +339,99 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
       check findByClass(panel, "vcs-commit-history") != nil
 
       dispose()
+
+# ---------------------------------------------------------------------------
+# The reviewed commit in the Changed Files header (DR-R8)
+# ---------------------------------------------------------------------------
+#
+# DeepReview-GUI.md §3: "The section header shows the review's file count and,
+# when the changeset came from local git history, the commit it belongs to."
+#
+# This is the one review header fact DR-R2 did not migrate.  It existed only
+# in the standalone panel's own header (`ui/deepreview.nim` built it as
+# `commitSha[0 ..< 12] & "..."` and `isonim_deepreview_view` rendered it into
+# `.deepreview-commit`), so DR-R8 had to move it rather than delete it with
+# the panel.  Falsifiable against the code as it stood before DR-R8: the VCS
+# panel had no `reviewCommit` state at all and `changedFilesHeaderText`
+# rendered only the file count in review mode.
+
+suite "VCS panel — the reviewed commit in the Changed Files header (DR-R8)":
+
+  test "test_vcs_changed_files_header_names_the_reviewed_commit":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      populateReviewPanel(vm)
+      vm.setHeader("Review: parser cleanup", statsText = "2 files +16 -3",
+                   reviewCommit = "a1b2c3d4e5f6...")
+
+      let header = findByClass(panel, "vcs-changed-files-commit")
+      check header != nil
+      if header != nil:
+        # Both facts §3 names, in one header: how many files and which commit.
+        check header.textContent == " (2 files, a1b2c3d4e5f6...)"
+
+      dispose()
+
+  test "a review that names no commit shows only the file count":
+    ## §3 conditions the commit on the changeset coming from local git
+    ## history; a standalone patch has none, and inventing one — or rendering
+    ## an empty pair of parentheses — would be worse than omitting it.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      populateReviewPanel(vm)
+      vm.setHeader("Review: parser cleanup", statsText = "2 files +16 -3")
+
+      check findByClass(panel, "vcs-changed-files-commit").textContent ==
+        " (2 files)"
+
+      dispose()
+
+  test "a normal git session renders no Changed Files header at all":
+    ## Regression guard: `reviewCommit` is review state, and a live working
+    ## tree has no reviewed commit.  The normal branch of
+    ## `renderVCSPanelImpl` renders the commit graph rather than the review's
+    ## Changed Files section, so the header carrying it must be absent — even
+    ## with review state left over from a previous session on this VM.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main", reviewCommit = "deadbeefcafe...")
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[0])
+
+      check findByClass(panel, "vcs-changed-files-commit") == nil
+      check findByClass(panel, "vcs-commit-history") != nil
+
+      dispose()
+
+  test "clearPanel drops the reviewed commit with the rest of the review":
+    ## A panel can move out of review mode (VCS-Panel.md, "Data Sources and
+    ## Instantiation Modes"), and a stale commit would then describe a
+    ## changeset that is no longer on screen.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+
+      vm.setDeepReviewMode(true)
+      vm.setHeader("Review: parser cleanup", statsText = "2 files",
+                   reviewCommit = "a1b2c3d4e5f6...")
+      check vm.reviewCommit.val == "a1b2c3d4e5f6..."
+
+      vm.clearPanel()
+      check vm.reviewCommit.val == ""
+
+      # …and an ordinary `setHeader` clears it too, because its default is
+      # empty: a working-tree session must not inherit it.
+      vm.setDeepReviewMode(true)
+      vm.setHeader("Review: parser cleanup", reviewCommit = "a1b2c3d4e5f6...")
+      vm.setHeader("main")
+      check vm.reviewCommit.val == ""

@@ -47,7 +47,6 @@ import viewmodels/command_palette_vm
 import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_deepreview_vm
 import viewmodels/agent_workspace_vm
-import viewmodels/deepreview_vm
 import viewmodels/vcs_vm
 import viewmodels/welcome_screen_vm
 import viewmodels/editor_vm
@@ -79,7 +78,6 @@ import views/isonim_command_palette_view
 import views/isonim_agent_activity_view
 import views/isonim_agent_activity_deepreview_view
 import views/isonim_agent_workspace_view
-import views/isonim_deepreview_view
 import views/isonim_vcs_view
 import views/isonim_unified_diff_view
 import views/isonim_welcome_screen_view
@@ -8855,9 +8853,9 @@ suite "IsoNim Filesystem Panel — structure":
       check diff != nil
       check "hidden" in diff.attributes["class"]
 
-      let deepReview = findByClass(panel, "deepreview-file-list")
-      check deepReview != nil
-      check "hidden" in deepReview.attributes["class"]
+      # DR-R8: the panel has no deep-review list.  A review's changed files
+      # are the VCS panel's Changed Files section (DeepReview-GUI.md §2).
+      check findByClass(panel, "deepreview-file-list") == nil
 
       dispose()
 
@@ -9041,7 +9039,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
 
       dispose()
 
-  test "clicking diff and deep-review file rows invoke the open-file bridge":
+  test "clicking a diff file row invokes the open-file bridge":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
@@ -9053,24 +9051,10 @@ suite "IsoNim Filesystem Panel — tree rendering":
       vm.setDiffEntries(@[
         FilesystemDiffEntry(path: "/trace/files/changed.nim", zebra: false),
       ])
-      vm.setDeepReview(true, @[
-        FilesystemDeepReviewFile(
-          path: "/trace/files/review.nim",
-          baseName: "review.nim",
-          status: "M",
-          linesAdded: 1,
-          linesRemoved: 0,
-          coverageExecuted: 1,
-          coverageTotal: 1),
-      ])
 
       findByClass(panel, "diff-file-path").fireEvent("click")
-      findByClass(panel, "deepreview-file-item-compact").fireEvent("click")
 
-      check openedPaths == @[
-        "/trace/files/changed.nim",
-        "/trace/files/review.nim",
-      ]
+      check openedPaths == @["/trace/files/changed.nim"]
 
       dispose()
 
@@ -9147,75 +9131,6 @@ suite "IsoNim Filesystem Panel — diff + deep-review":
 
       dispose()
 
-  test "setDeepReview renders one compact row per file when active":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFilesystemVM(store)
-      let r = MockRenderer()
-
-      let panel = renderFilesystemPanel(r, vm)
-      vm.setDeepReview(true, [
-        FilesystemDeepReviewFile(
-          path: "src/a.nim", baseName: "a.nim", status: "A",
-          linesAdded: 10, linesRemoved: 0,
-          coverageExecuted: 5, coverageTotal: 10),
-        FilesystemDeepReviewFile(
-          path: "src/b.nim", baseName: "b.nim", status: "M",
-          linesAdded: 3, linesRemoved: 7,
-          coverageExecuted: 8, coverageTotal: 8),
-      ])
-
-      let dr = findByClass(panel, "deepreview-file-list")
-      check "hidden" notin dr.attributes["class"]
-      check dr.children.len == 2
-
-      let firstName = findByClass(dr.children[0], "deepreview-file-name-compact")
-      check firstName.textContent == "a.nim"
-
-      let firstStatus = findByClass(dr.children[0],
-                                    "deepreview-diff-status-compact")
-      check "deepreview-diff-added" in firstStatus.attributes["class"]
-
-      let secondStatus = findByClass(dr.children[1],
-                                     "deepreview-diff-status-compact")
-      check "deepreview-diff-modified" in secondStatus.attributes["class"]
-
-      let firstLines = findByClass(dr.children[0],
-                                   "deepreview-diff-lines-compact")
-      check firstLines.textContent == "+10/-0"
-
-      let firstCoverage = findByClass(dr.children[0],
-                                      "deepreview-coverage-compact")
-      check firstCoverage.textContent == "5/10"
-
-      dispose()
-
-  test "setDeepReview(false, ...) wipes any pending file list":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFilesystemVM(store)
-      let r = MockRenderer()
-
-      let panel = renderFilesystemPanel(r, vm)
-      vm.setDeepReview(true, [
-        FilesystemDeepReviewFile(path: "x", baseName: "x", status: "A",
-                                 linesAdded: 1, linesRemoved: 0,
-                                 coverageExecuted: 0, coverageTotal: 0),
-      ])
-      let dr = findByClass(panel, "deepreview-file-list")
-      check dr.children.len == 1
-
-      # Pass a non-empty seq with active=false; the VM must drop it.
-      vm.setDeepReview(false, [
-        FilesystemDeepReviewFile(path: "y", baseName: "y", status: "M",
-                                 linesAdded: 0, linesRemoved: 1,
-                                 coverageExecuted: 0, coverageTotal: 0),
-      ])
-      check vm.deepReviewFiles.val.len == 0
-      check "hidden" in dr.attributes["class"]
-
-      dispose()
-
 # ---------------------------------------------------------------------------
 # VM defaults / formatting helpers
 # ---------------------------------------------------------------------------
@@ -9231,8 +9146,6 @@ suite "IsoNim Filesystem Panel — vm":
       check vm.rootEntry.val.children.len == 0
       check vm.expandedPaths.val.len == 0
       check vm.diffEntries.val.len == 0
-      check not vm.deepReviewActive.val
-      check vm.deepReviewFiles.val.len == 0
       check vm.isEmpty.val
       check not vm.hasDiff.val
       check vm.totalEntryCount.val == 0
@@ -9419,13 +9332,6 @@ suite "IsoNim Filesystem Panel — vm":
                                              zebra: false)) == "a.nim"
     check diffEntryLabel(FilesystemDiffEntry(path: "main.nim",
                                              zebra: true)) == "main.nim"
-
-  test "deepReviewStatusClass maps single-letter codes to CSS modifiers":
-    check deepReviewStatusClass("A") == "deepreview-diff-added"
-    check deepReviewStatusClass("M") == "deepreview-diff-modified"
-    check deepReviewStatusClass("D") == "deepreview-diff-deleted"
-    check deepReviewStatusClass("") == ""
-    check deepReviewStatusClass("Z") == ""
 
 # ===========================================================================
 # Command Palette panel tests (§1.72 — IsoNim Migration Campaign,
@@ -11704,193 +11610,6 @@ suite "IsoNim VCS Panel — structure":
       check cleared == 1
 
       dispose()
-
-# ===========================================================================
-# DeepReview panel tests (§1.77 — deepreview Karax -> IsoNim migration,
-# mission goal #3).
-# ===========================================================================
-
-proc makeDeepReviewFileEntry(path: string; status = "M"; coverage = "2/4"):
-    DeepReviewFileEntry =
-  DeepReviewFileEntry(
-    path: path,
-    diffStatus: status,
-    linesAdded: 2,
-    linesRemoved: 1,
-    coverageText: coverage,
-    hasCoverage: true,
-    hasFlow: true,
-  )
-
-proc makeDeepReviewUnifiedFile(): DeepReviewUnifiedFileEntry =
-  DeepReviewUnifiedFileEntry(
-    fileIndex: 0,
-    path: "/repo/src/main.nim",
-    diffStatus: "M",
-    linesAdded: 1,
-    linesRemoved: 1,
-    hunks: @[
-      DeepReviewHunkEntry(
-        oldStart: 3,
-        oldCount: 2,
-        newStart: 3,
-        newCount: 2,
-        lines: @[
-          DeepReviewDiffLineEntry(
-            lineType: "removed",
-            content: "old",
-            oldLine: 3,
-          ),
-          DeepReviewDiffLineEntry(
-            lineType: "added",
-            content: "new",
-            newLine: 3,
-            values: @[
-              DeepReviewFlowValueEntry(
-                name: "x",
-                value: "42",
-                truncated: false,
-              )
-            ],
-          ),
-        ],
-      )
-    ],
-  )
-
-suite "IsoNim DeepReview Panel — structure":
-
-  test "unloaded VM renders the legacy no-data error":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-
-      let panel = renderDeepReviewPanel(r, vm, componentId = 2)
-
-      check panel.kind == mnkElement
-      check panel.attributes["class"] == DeepReviewContainerClass
-      let err = findByClass(panel, DeepReviewErrorClass)
-      check err != nil
-      check err.textContent == DeepReviewNoDataText
-
-      dispose()
-
-  test "full-files mode renders header file list editor and calltrace":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-      let panel = renderDeepReviewPanel(r, vm, componentId = 3)
-
-      vm.setHasData(true)
-      vm.setHeader("DeepReview: parser", "abcdef123456...", "1 files | 2 recordings | 9ms")
-      vm.setFiles(@[makeDeepReviewFileEntry("/repo/src/main.nim")])
-      vm.setExecutionState(0, 2, "main")
-      vm.setIterationState(0, 3)
-      vm.setCallNodes(@[
-        DeepReviewCallNodeEntry(name: "main", executionCount: 2, depth: 0),
-        DeepReviewCallNodeEntry(name: "helper", executionCount: 1, depth: 1),
-      ])
-
-      check findByClass(panel, DeepReviewHeaderClass) != nil
-      check findByClass(panel, "deepreview-session-title").textContent ==
-        "DeepReview: parser"
-      check findByClass(panel, "deepreview-stats").textContent ==
-        "1 files | 2 recordings | 9ms"
-      check findByClass(panel, DeepReviewFileListClass) != nil
-      check findByClass(panel, "deepreview-file-name").textContent == "main.nim"
-      check findByClass(panel, "deepreview-coverage-badge").textContent == "2/4"
-      check findByClass(panel, DeepReviewEditorClass).attributes["id"] ==
-        isonim_deepreview_view.editorId(3)
-      check findAllByClass(panel, "deepreview-calltrace-node").len == 2
-
-      dispose()
-
-  test "unified mode renders hunks line rows and flow values":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-      let panel = renderDeepReviewPanel(r, vm, componentId = 4)
-
-      vm.setHasData(true)
-      vm.setViewMode(drpvmUnified)
-      vm.setHeader("", "abcdef", "1 files | 1 recordings | 1ms")
-      vm.setUnifiedFiles(@[makeDeepReviewUnifiedFile()])
-
-      check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
-      check findByClass(panel, "deepreview-unified-file-path").textContent ==
-        "/repo/src/main.nim"
-      let rows = findAllByClass(panel, "deepreview-unified-line")
-      check rows.len == 2
-      check "deepreview-unified-line-removed" in rows[0].attributes["class"]
-      check "deepreview-unified-line-added" in rows[1].attributes["class"]
-      check findByClass(rows[1], "flow-parallel-value-name").textContent ==
-        "<x>"
-      check findByClass(rows[1], "flow-parallel-value-box").textContent ==
-        "42"
-
-      dispose()
-
-suite "IsoNim DeepReview Panel — interactions":
-
-  test "file mode and hunk clicks update VM and invoke callbacks":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-      var selectedFile = -1
-      var selectedMode = drpvmFullFiles
-      var selectedHunk = (-1, -1)
-      let callbacks = DeepReviewCallbacks(
-        onSelectFile: proc(index: int) = (selectedFile = index),
-        onSetViewMode: proc(mode: DeepReviewPanelViewMode) =
-          (selectedMode = mode),
-        onSelectHunk: proc(fileIdx, hunkIdx: int) =
-          (selectedHunk = (fileIdx, hunkIdx)),
-      )
-      let panel = renderDeepReviewPanel(r, vm, componentId = 5,
-                                        callbacks = callbacks)
-
-      vm.setHasData(true)
-      vm.setFiles(@[
-        makeDeepReviewFileEntry("/repo/a.nim"),
-        makeDeepReviewFileEntry("/repo/b.nim"),
-      ])
-      findAllByClass(panel, "deepreview-file-item")[1].fireEvent("click")
-      check selectedFile == 1
-      check vm.selectedFileIndex.val == 1
-
-      findAllByClass(panel, "deepreview-mode-btn")[1].fireEvent("click")
-      check selectedMode == drpvmUnified
-      check vm.viewMode.val == drpvmUnified
-
-      vm.setUnifiedFiles(@[makeDeepReviewUnifiedFile()])
-      findByClass(panel, "deepreview-unified-hunk-header").fireEvent("click")
-      check selectedHunk == (0, 0)
-
-      dispose()
-
-suite "IsoNim DeepReview Panel — helpers":
-
-  test "helper text matches the legacy selector and class surface":
-    check isonim_deepreview_view.editorId(8) == "deepreview-editor-8"
-    check isonim_deepreview_view.fileBasename("/repo/src/main.nim") ==
-      "main.nim"
-    check isonim_deepreview_view.diffStatusCssClass("A") ==
-      " deepreview-diff-added"
-    check isonim_deepreview_view.diffStatusCssClass("M") ==
-      " deepreview-diff-modified"
-    check isonim_deepreview_view.diffStatusCssClass("D") ==
-      " deepreview-diff-deleted"
-    check isonim_deepreview_view.diffLinesSummary(2, 1) == "+2 / -1"
-    check isonim_deepreview_view.fileItemClass(true) ==
-      "deepreview-file-item selected"
-    check isonim_deepreview_view.modeButtonClass(true) ==
-      "deepreview-mode-btn deepreview-mode-btn-active"
-    check isonim_deepreview_view.lineClass("added") ==
-      "deepreview-unified-line deepreview-unified-line-added"
 
 # ===========================================================================
 # Standalone IsoNim app shell tests (§5.3 — app-level structure).

@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   options, json,
-  ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
+  ui/[agent_activity, agent_activity_deepreview, agent_workspace, layout, editor, trace, event_log,
       state, calltrace, menu, status,
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
@@ -1894,8 +1894,6 @@ when not defined(ctInExtension):
         agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentWorkspaceVMWithStore"):
         agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-      initPanelVM("initDeepReviewVMWithStore"):
-        deepreview.initDeepReviewVMWithStore(activeSessionVM.store)
       initPanelVM("installAgenticWorktreeTestHooks"):
         agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
           activeSessionVM.store)
@@ -2375,16 +2373,19 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   ## Handler for ``CODETRACER::start-deepreview`` IPC message.
   ##
   ## Sets up the frontend for DeepReview offline review mode on the user's
-  ## own GoldenLayout: the review surface is *added* to the layout the
-  ## index process loaded, it does not replace it.  Every standard panel —
+  ## own GoldenLayout.  The layout the index process loaded is used as-is:
+  ## a review adds no panel and removes none, it only retargets the stacks
+  ## hosting the VCS and Agent Activity panels at them
+  ## (``deepreview_layout.focusReviewPanels``).  Every standard panel —
   ## FILES, VCS, STATE, SCRATCHPAD, CALLTRACE, AGENT ACTIVITY, EVENT LOG,
   ## TIMELINE, TERMINAL OUTPUT — therefore stays where the user put it
-  ## (issue #610).
+  ## (issue #610; DeepReview-GUI.md §7).
   ##
   ## The VCS panel detects ``data.deepReviewActive`` and populates its file
-  ## list from ``data.deepReviewData.files``; clicking a file updates
-  ## ``data.deepReviewSelectedFileIndex``, which the DeepReview component
-  ## reads to decide which file's diff to render.
+  ## list from ``data.deepReviewData.files``; clicking a file opens that
+  ## file's review representation as an ordinary editor document — a
+  ## ``Content.UnifiedDiff`` tab or the file itself, per the panel's view
+  ## mode toggle.
   ##
   ## NOTE (M42b): in ``--deepreview`` mode the index process never loads a
   ## recording (``index/args.nim`` forces ``recordingID = ""`` and
@@ -2408,9 +2409,10 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   hideWelcomeScreenSurface()
 
-  # Additive placement, mirroring `applyVisualReplayTabsToResolvedConfig`:
-  # parse the layout the index process loaded, insert one DeepReview
-  # component into the editor area, hand it back to GoldenLayout.
+  # Parse the layout the index process loaded, bring the review's panels to
+  # the front of the stacks that already host them, and hand it back to
+  # GoldenLayout.  Nothing is inserted: DeepReview has no surface of its own
+  # (DeepReview-GUI.md §7).
   var layoutNode = resolvedConfigToJsonNode(
     cast[GoldenLayoutResolvedConfig](response.layout))
   if layoutNode.isNil:
@@ -2462,7 +2464,7 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
       "openPopouts": []
     }
 
-  let reviewConfig = jsonNodeToResolvedConfig(addDeepReviewSurface(layoutNode))
+  let reviewConfig = jsonNodeToResolvedConfig(focusReviewPanels(layoutNode))
   if not reviewConfig.isNil:
     data.ui.resolvedConfig = reviewConfig
   else:

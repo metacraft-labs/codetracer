@@ -857,29 +857,6 @@ proc makeStepListComponent*(data: Data, id: int): StepListComponent =
     service: data.services.flow)
   data.registerComponent(result, Content.StepList)
 
-proc makeDeepReviewComponent*(data: Data, id: int): DeepReviewComponent =
-  ## Create a new DeepReviewComponent.
-  ## The component is populated from ``data.startOptions.deepReview``.
-  ## When ``data.deepReviewActive`` is set (i.e. the standard GL layout
-  ## is used with separate filesystem/calltrace panels), the component
-  ## is marked as ``glEmbedded`` and defaults to Unified diff view so
-  ## it renders only the unified diff without duplicate sidebars.
-  let embedded = data.deepReviewActive
-  result = DeepReviewComponent(
-    id: id,
-    drData: data.startOptions.deepReview,
-    selectedFileIndex: 0,
-    selectedExecutionIndex: 0,
-    selectedIteration: 0,
-    editorInitialized: false,
-    currentDecorationIds: jsNull,
-    decorationCollection: jsNull,
-    fileContentCache: JsAssoc[cstring, cstring]{},
-    glEmbedded: embedded,
-    viewMode: if embedded: Unified else: FullFiles
-  )
-  data.registerComponent(result, Content.DeepReview)
-
 proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent =
   ## Create a new AgentWorkspaceComponent.
   ## The component starts with an empty file list and waits for DeepReview
@@ -1033,7 +1010,6 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.StepList:        data.makeStepListComponent(id)
   of Content.LowLevelCode:    data.makeLowLevelCodeComponent(id)
   of Content.AgentActivity:   data.makeAgentActivityComponent(id)
-  of Content.DeepReview:      data.makeDeepReviewComponent(id)
   of Content.AgentWorkspace:  data.makeAgentWorkspaceComponent(id)
   of Content.CaptionBarProgress: data.makeCaptionBarProgressComponent(id)
   # Content.FrameViewer dispatch removed in M3 — see the comment above

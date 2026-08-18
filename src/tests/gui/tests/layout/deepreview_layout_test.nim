@@ -1,5 +1,5 @@
-## Headless regression tests for DeepReview layout placement — issue #610
-## (milestone M42a).
+## Headless regression tests for what starting a DeepReview session does to
+## the GoldenLayout — issue #610 (milestone M42a) and DR-R8.
 ##
 ## The reported symptom: launching ``ct --deepreview <export.json>`` replaced
 ## the whole workspace with three panels (VCS, the DeepReview diff, CALLTRACE).
@@ -9,12 +9,18 @@
 ##
 ## The cause was a hard-coded three-panel GoldenLayout literal in
 ## ``ui_js.onStartDeepReview`` assigned straight to ``data.ui.resolvedConfig``.
-## The fix makes placement additive, exactly like the visual-replay tabs:
-## ``viewmodel/viewmodels/deepreview_layout.addDeepReviewSurface`` inserts ONE
-## component into the layout the index process loaded and removes nothing.
+## M42a made placement *additive* — the literal went away and one review
+## surface was inserted into the layout the index process loaded.  DR-R8 goes
+## the rest of the way: there is no review surface to insert.  DeepReview
+## introduces no panel of its own (DeepReview-GUI.md §7, "There is no separate
+## 'DeepReview mode' that replaces the UI"), so the only thing left for the
+## layout to do is obligation 2 of Layout-System.md, "DeepReview and the
+## Layout" — "Focus, not relocation": retarget the stacks that already host
+## the VCS and Agent Activity panels at them.  That is
+## ``deepreview_layout.focusReviewPanels``.
 ##
-## Two layers are guarded here, because the placement rules alone would not
-## have caught the bug — the old code never called any placement helper at all:
+## Two layers are guarded here, because the focus rules alone would not have
+## caught the bug — the old code never called any layout helper at all:
 ##
 ##   * The behavioural suite runs on both backends against the REAL bundled
 ##     ``src/config/default_layout.json`` (embedded with ``staticRead`` so the
@@ -26,7 +32,8 @@
 ##     layout literal of its own.
 ##
 ## Spec: codetracer-specs/DeepReview/DeepReview-GUI.md (§2 view modes,
-## §7 panel placement)
+## §7 panel placement); codetracer-specs/GUI/Layout-And-Navigation/
+## Layout-System.md, "DeepReview and the Layout".
 
 import std/[algorithm, json, sequtils, unittest]
 
@@ -115,61 +122,95 @@ proc isValidLayoutShape(layout: JsonNode): bool =
     return false
   layout.layoutHasContent(FilesystemContentId)
 
-suite "#610 DeepReview layout — additive placement on the bundled default":
+suite "#610 DeepReview layout — the bundled default survives a review":
 
   test "the whole standard panel set survives DeepReview startup":
     ## The regression this milestone is about: DeepReview used to drop seven
-    ## of these nine panels.
+    ## of these nine panels.  Rewritten for DR-R8 against the entry routine
+    ## that replaced ``addDeepReviewSurface`` — the subject ("a review does
+    ## not eat the user's layout") outlives the function.
     let original = bundledLayout()
-    let updated = addDeepReviewSurface(original)
+    let updated = focusReviewPanels(original)
     let ids = contentIdsInLayout(updated)
 
     for contentId in StandardPanelContentIds:
       check ids.contains(contentId)
-    check ids.contains(DeepReviewContentId)
 
-    # Nothing was dropped and nothing but the review surface was added.
-    let originalIds = contentIdsInLayout(original)
-    check ids.len == originalIds.len + 1
+    # Nothing was dropped and — since DR-R8 — nothing was added either.
+    check ids == contentIdsInLayout(original)
+
+  test "test_review_startup_adds_no_review_panel":
+    ## DR-R8.  DeepReview-GUI.md §7: "There is no separate 'DeepReview mode'
+    ## that replaces the UI.  The same GL layout is used with different data
+    ## displayed in the existing panels."  Starting a review must therefore
+    ## produce a layout with no review surface in it at all, while still
+    ## carrying every standard panel — AGENT ACTIVITY included, because it is
+    ## the review's third pillar (§2.1) and lives in the standard layout —
+    ## and with the VCS panel focused.
+    ##
+    ## Falsifiable against the code as it stood before DR-R8: the entry
+    ## routine inserted exactly one ``Content.DeepReview`` component into the
+    ## editor area, and the suite this replaces asserted its presence.
+    let updated = focusReviewPanels(bundledLayout())
+    let ids = contentIdsInLayout(updated)
+
+    check not ids.contains(RetiredDeepReviewContentId)
+    check not updated.layoutHasContent(RetiredDeepReviewContentId)
+    check updated.findStackWithContent(RetiredDeepReviewContentId).isNil
+
+    for contentId in StandardPanelContentIds:
+      check ids.contains(contentId)
+    check ids.contains(AgentActivityContentId)
+
+    # ...and the VCS panel is the tab the reviewer actually sees.
+    let vcsStack = updated.findStackWithContent(VcsContentId)
+    check not vcsStack.isNil
+    check vcsStack{"activeItemIndex"}.getInt(-1) ==
+      stackContentIds(vcsStack).find(VcsContentId)
+
+  test "no container is created, removed or re-shaped":
+    ## The complement of the test above: "adds no panel" would still be true
+    ## of a routine that split the editor area or wrapped the root.  Since
+    ## DR-R8 the layout's *structure* is untouched; only ``activeItemIndex``
+    ## fields differ.
+    let original = bundledLayout()
+    let updated = focusReviewPanels(original)
+
+    check updated["root"]["content"].len == original["root"]["content"].len
+    var stripped = copy(updated)
+    proc dropActiveItemIndex(node: JsonNode) =
+      if node.isNil or node.kind != JObject:
+        return
+      if node.hasKey("activeItemIndex"):
+        node.delete("activeItemIndex")
+      if node.hasKey("content") and node["content"].kind == JArray:
+        for child in node["content"].items:
+          dropActiveItemIndex(child)
+      if node.hasKey("root"):
+        dropActiveItemIndex(node["root"])
+    dropActiveItemIndex(stripped)
+    check stripped == original
 
   test "placement is pure — the caller's layout is not mutated":
     let original = bundledLayout()
     let before = contentIdsInLayout(original)
-    discard addDeepReviewSurface(original)
+    discard focusReviewPanels(original)
     check contentIdsInLayout(original) == before
-    check not original.layoutHasContent(DeepReviewContentId)
+    check original.findStackWithContent(VcsContentId){"activeItemIndex"}.isNil
 
-  test "exactly one review surface is added, in the editor area":
-    let updated = addDeepReviewSurface(bundledLayout())
-    check contentIdsInLayout(updated).count(DeepReviewContentId) == 1
-
-    # The bundled layout has no editor stack, so the surface becomes a new
-    # stack at root-row index 1 — where `openNewLayoutContainer(..., isEditor
-    # = true)` creates the editor area, i.e. right of the FILES/VCS sidebar.
-    let rootChildren = updated["root"]["content"]
-    check rootChildren.len == 3
-    let editorArea = rootChildren[EditorAreaRootIndex]
-    check editorArea{"type"}.getStr("") == "stack"
-    check stackContentIds(editorArea) == @[DeepReviewContentId]
-
-    # The sidebar stays first, the debug column stays last.
-    check contentIdsInLayout(%*{"root": rootChildren[0]}) ==
-      @[FilesystemContentId, VcsContentId]
-
-  test "insertion is idempotent":
-    ## A layout persisted from a previous review session already carries the
-    ## tab; re-running placement must not accumulate duplicates.
-    let once = addDeepReviewSurface(bundledLayout())
-    let twice = addDeepReviewSurface(once)
-    let thrice = addDeepReviewSurface(twice)
-    check contentIdsInLayout(twice).count(DeepReviewContentId) == 1
-    check contentIdsInLayout(thrice) == contentIdsInLayout(once)
+  test "re-entering a review is idempotent":
+    ## A layout persisted from a previous review session must not accumulate
+    ## anything, and re-focusing must converge rather than drift.
+    let once = focusReviewPanels(bundledLayout())
+    let twice = focusReviewPanels(once)
+    let thrice = focusReviewPanels(twice)
+    check twice == once
     check thrice == once
 
   test "VCS stays in the same stack as FILES":
     ## DeepReview-GUI.md §7: the review file list is the VCS panel docked
     ## beside the file explorer, not a column of its own.
-    let updated = addDeepReviewSurface(bundledLayout())
+    let updated = focusReviewPanels(bundledLayout())
     let vcsStack = updated.findStackWithContent(VcsContentId)
     check not vcsStack.isNil
     check stackContentIds(vcsStack).contains(FilesystemContentId)
@@ -183,11 +224,11 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
     ## with the changeset data".  That panel is the VCS panel (§7 again:
     ## "DeepReview is built on the VCS panel").
     ##
-    ## In the bundled layout VCS is the SECOND tab of the sidebar stack, so
-    ## additive placement on its own left the review's only navigation surface
-    ## behind an explorer that ``--deepreview`` never populates: every
+    ## In the bundled layout VCS is the SECOND tab of the sidebar stack, so a
+    ## review that only loaded the user's layout left its only navigation
+    ## surface behind an explorer that ``--deepreview`` never populates: every
     ## ``.vcs-file-item`` was in the DOM but `display: none`.
-    let updated = addDeepReviewSurface(bundledLayout())
+    let updated = focusReviewPanels(bundledLayout())
     let vcsStack = updated.findStackWithContent(VcsContentId)
     check not vcsStack.isNil
     let ids = stackContentIds(vcsStack)
@@ -203,12 +244,10 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
   test "focusing the file list adds no panel and stays idempotent":
     ## The focus step must not be a second, sneaky placement rule.
     let original = bundledLayout()
-    let once = addDeepReviewSurface(original)
-    # Same panel multiset, plus the one review surface (document order
-    # differs — the surface is inserted at the editor-area index).
+    let once = focusReviewPanels(original)
     check sorted(contentIdsInLayout(once)) ==
-      sorted(contentIdsInLayout(original) & @[DeepReviewContentId])
-    check addDeepReviewSurface(once) == once
+      sorted(contentIdsInLayout(original))
+    check focusReviewPanels(once) == once
 
   test "a sidebar that already shows VCS first is focused at index 0":
     let layout = wrap(makeRow("100%", [
@@ -217,7 +256,7 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
         makeComponent(FilesystemContentId, "filesystemComponent"),
       ])]),
     ]))
-    let updated = addDeepReviewSurface(layout)
+    let updated = focusReviewPanels(layout)
     check updated.findStackWithContent(VcsContentId){
       "activeItemIndex"}.getInt(-1) == 0
 
@@ -230,7 +269,7 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
     ## In the bundled layout AGENT ACTIVITY is the SECOND tab of the CALLTRACE
     ## stack, so DeepReview's third pillar came up hidden behind the call
     ## trace even once it had coverage data in it.
-    let updated = addDeepReviewSurface(bundledLayout())
+    let updated = focusReviewPanels(bundledLayout())
     let activityStack = updated.findStackWithContent(AgentActivityContentId)
     check not activityStack.isNil
     let ids = stackContentIds(activityStack)
@@ -246,14 +285,14 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
   test "focusing the activity pane adds no panel and moves none":
     ## "No panel is moved between stacks and no stack is created for one."
     let original = bundledLayout()
-    let once = addDeepReviewSurface(original)
+    let once = focusReviewPanels(original)
     check sorted(contentIdsInLayout(once)) ==
-      sorted(contentIdsInLayout(original) & @[DeepReviewContentId])
+      sorted(contentIdsInLayout(original))
     # The Agent Activity panel is still in the stack the user's layout put it
     # in, with the same siblings in the same order.
     check stackContentIds(once.findStackWithContent(AgentActivityContentId)) ==
       stackContentIds(original.findStackWithContent(AgentActivityContentId))
-    check addDeepReviewSurface(once) == once
+    check focusReviewPanels(once) == once
 
   test "a layout with no Agent Activity panel is left alone":
     ## Focus only: DR-R3 does not materialise a missing pane, and must not
@@ -266,7 +305,7 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
         makeComponent(LowLevelCodeContentId, "lowLevelCodeComponent-0"),
       ]),
     ]))
-    let updated = addDeepReviewSurface(layout)
+    let updated = focusReviewPanels(layout)
     check updated.findStackWithContent(AgentActivityContentId).isNil
     check not layoutHasContent(updated, AgentActivityContentId)
     check updated.findStackWithContent(EditorViewContentId){
@@ -282,24 +321,17 @@ suite "#610 DeepReview layout — additive placement on the bundled default":
         makeComponent(LowLevelCodeContentId, "lowLevelCodeComponent-0"),
       ]),
     ]))
-    let updated = addDeepReviewSurface(layout)
+    let updated = focusReviewPanels(layout)
     for stack in [updated.findStackWithContent(FilesystemContentId),
                   updated.findStackWithContent(EditorViewContentId)]:
       check stack{"activeItemIndex"}.isNil
 
-  test "the result still satisfies the saved-layout invariant":
-    ## `isValidLayoutConfig` rejects a layout without a Filesystem panel, so
-    ## a DeepReview session can no longer produce a config that the next
-    ## ordinary launch would have to throw away.
-    let updated = addDeepReviewSurface(bundledLayout())
-    check isValidLayoutShape(updated)
-
-suite "#610 DeepReview layout — placement rules on other layouts":
-
-  test "an existing editor stack hosts the review surface":
-    ## When the user's layout already has an editor area, the diff joins it
-    ## as another tab instead of splitting the editor area in two — the same
-    ## grouping `openLayoutTab(..., isEditor = true)` performs at runtime.
+  test "an existing editor area is left exactly as the user arranged it":
+    ## Before DR-R8 the review surface joined the user's editor stack as an
+    ## extra tab.  It no longer exists, so the editor area a review starts on
+    ## is byte-for-byte the one the user saved — the review's own documents
+    ## arrive later, as ordinary editor tabs opened by
+    ## ``review_entry.openFirstReviewFile``.
     let editorStack = makeStack([
       makeComponent(EditorViewContentId, "main.rs", EditorComponentName),
       makeComponent(LowLevelCodeContentId, "lowLevelCodeComponent-0"),
@@ -312,47 +344,41 @@ suite "#610 DeepReview layout — placement rules on other layouts":
       makeColumn("80%", [editorStack]),
     ]))
 
-    let updated = addDeepReviewSurface(layout)
-    check contentIdsInLayout(updated).count(DeepReviewContentId) == 1
-    let hostStack = updated.findStackWithContent(DeepReviewContentId)
-    check stackContentIds(hostStack) == @[
-      EditorViewContentId, LowLevelCodeContentId, DeepReviewContentId]
-    # No extra container was introduced.
+    let updated = focusReviewPanels(layout)
     check updated["root"]["content"].len == 2
+    check stackContentIds(updated.findStackWithContent(EditorViewContentId)) ==
+      @[EditorViewContentId, LowLevelCodeContentId]
+    check not updated.layoutHasContent(RetiredDeepReviewContentId)
 
-  test "a non-row root is wrapped so the editor area still exists":
-    let layout = wrap(makeColumn("100%", [
-      makeStack([makeComponent(FilesystemContentId, "filesystemComponent")]),
-    ]))
-    let updated = addDeepReviewSurface(layout)
-    check updated["root"]{"type"}.getStr("") == "row"
-    check updated["root"]["content"].len == 2
-    check contentIdsInLayout(updated) ==
-      @[FilesystemContentId, DeepReviewContentId]
-
-  test "an empty root row still receives the surface":
-    let layout = wrap(makeRow("100%", []))
-    let updated = addDeepReviewSurface(layout)
-    check contentIdsInLayout(updated) == @[DeepReviewContentId]
+  test "the result still satisfies the saved-layout invariant":
+    ## `isValidLayoutConfig` rejects a layout without a Filesystem panel, so
+    ## a DeepReview session can no longer produce a config that the next
+    ## ordinary launch would have to throw away.  Rewritten for DR-R8 against
+    ## the entry routine; the invariant it names outlives the function.
+    let updated = focusReviewPanels(bundledLayout())
+    check isValidLayoutShape(updated)
 
   test "a nil or rootless layout is handled without raising":
-    check addDeepReviewSurface(nil).isNil
+    check focusReviewPanels(nil).isNil
     let rootless = %*{"settings": {}, "openPopouts": []}
-    check addDeepReviewSurface(rootless) == rootless
+    check focusReviewPanels(rootless) == rootless
 
 when not defined(js):
-  ## Source contract.  The behavioural suite above describes the placement
+  ## Source contract.  The behavioural suite above describes the focus
   ## helper; these tests describe the WIRING, which is what actually broke:
-  ## the old startup path called no placement helper at all, it pasted a
+  ## the old startup path called no layout helper at all, it pasted a
   ## layout literal over `data.ui.resolvedConfig`.  Reading the production
   ## sources is the only way to assert that headlessly — `ui_js.nim` needs
   ## Electron, GoldenLayout and the DOM to run.
-  import std/strutils
+  import std/[os, strutils]
 
   const
     UiJsPath = "src/frontend/ui_js.nim"
     StartupPath = "src/frontend/index/startup.nim"
-    DeepReviewViewPath =
+    LayoutHelperPath =
+      "src/frontend/viewmodel/viewmodels/deepreview_layout.nim"
+    DeletedPanelPath = "src/frontend/ui/deepreview.nim"
+    DeletedPanelViewPath =
       "src/frontend/viewmodel/views/isonim_deepreview_view.nim"
 
   proc source(path: string): string =
@@ -372,16 +398,16 @@ when not defined(js):
   suite "#610 DeepReview layout (source contract)":
 
     test "the index process forwards the loaded layout to the renderer":
-      ## Without this the renderer has nothing to add the review surface to.
+      ## Without this the renderer has no layout to focus.
       let body = source(StartupPath)
       let start = body.find("CODETRACER::start-deepreview")
       check start >= 0
       let payload = body[start ..< min(start + 400, body.len)]
       check payload.contains("layout: layout")
 
-    test "the renderer derives the DeepReview layout additively":
+    test "the renderer derives the review layout from the loaded one":
       let body = deepReviewStartupBody()
-      check body.contains("addDeepReviewSurface(")
+      check body.contains("focusReviewPanels(")
       check body.contains("response.layout")
       check body.contains("jsonNodeToResolvedConfig(")
 
@@ -398,9 +424,57 @@ when not defined(js):
       check not body.contains("\"label\": \"deepReviewComponent-0\"")
       check not body.contains("\"label\": \"calltraceComponent-0\"")
 
-    test "the view mode toggle is not suppressed for GL-embedded panels":
-      ## `glEmbedded` is true for the whole `--deepreview` session, so the
-      ## `if not vm.glEmbedded.val:` guard made Full Files mode unreachable.
-      let body = source(DeepReviewViewPath)
-      check body.contains("deepreview-mode-toggle")
-      check not body.contains("if not vm.glEmbedded.val:")
+    test "test_review_startup_inserts_no_component":
+      ## DR-R8's source half.  "Adds no review panel" must be true of the
+      ## helper's *code*, not only of the bundled layout it was measured on:
+      ## the helper no longer builds a component node at all, and the startup
+      ## path no longer opens one.
+      let helper = source(LayoutHelperPath)
+      check not helper.contains("makeDeepReviewComponentNode")
+      # The name may still appear in prose explaining what was removed; what
+      # must not exist is a definition or a call.
+      check not helper.contains("proc addDeepReviewSurface")
+      check not helper.contains("addDeepReviewSurface(")
+      check not helper.contains("\"type\": \"component\"")
+      check helper.contains("proc focusReviewPanels*")
+
+      let body = deepReviewStartupBody()
+      check not body.contains("addDeepReviewSurface")
+      check not body.contains("Content.DeepReview")
+
+    test "the standalone DeepReview panel and its view are gone":
+      ## The deletion itself, asserted where a stale checkout would notice:
+      ## both modules must be absent, and no production module may import
+      ## them.  `fileExists` rather than `readFile` because absence is the
+      ## assertion here.
+      check not fileExists(DeletedPanelPath)
+      check not fileExists(DeletedPanelViewPath)
+      for path in [UiJsPath, "src/frontend/ui/vcs.nim",
+                   "src/frontend/ui/layout.nim",
+                   "src/frontend/ui/agentic_session_launcher.nim",
+                   "src/frontend/utils.nim"]:
+        let body = source(path)
+        check not body.contains("isonim_deepreview_view")
+        check not body.contains("Content.DeepReview")
+
+    test "Content.AgentActivityDeepReview — the OTHER DeepReview — stays":
+      ## The trap DR-R8 names explicitly: `Content.AgentActivityDeepReview` is
+      ## a different id from the deleted `Content.DeepReview`, and it is the
+      ## review's third pillar (DeepReview-GUI.md §2.1).  Deleting it would
+      ## delete a required surface.
+      let contents = source(
+        "src/common/common_types/codetracer_features/frontend.nim")
+      check contents.contains("AgentActivityDeepReview = 39")
+      check not contents.contains("DeepReview = 36")
+
+      let config = source("src/frontend/index/config.nim")
+      check config.contains("ord(Content.AgentActivityDeepReview)")
+      check not config.contains("ord(Content.DeepReview)")
+
+      let layout = source("src/frontend/ui/layout.nim")
+      check layout.contains("Content.AgentActivityDeepReview")
+
+      let utils = source("src/frontend/utils.nim")
+      check utils.contains(
+        "of Content.AgentActivityDeepReview: " &
+        "data.makeAgentActivityDeepReviewComponent(id)")

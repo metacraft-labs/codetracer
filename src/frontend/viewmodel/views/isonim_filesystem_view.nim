@@ -34,18 +34,11 @@
 ##     div.diff-files-list                          (when hasDiff)
 ##       div.diff-file-path[.path-even|.path-odd]
 ##                                       (one per FilesystemDiffEntry)
-##     div.deepreview-file-list             (when deepReviewActive)
-##       div.deepreview-file-item-compact   (one per deep-review row)
-##         span.deepreview-diff-status-compact[.deepreview-diff-…]
-##         span.deepreview-file-name-compact
-##         span.deepreview-diff-lines-compact[.deepreview-diff-…]
-##         span.deepreview-coverage-compact
 ##
 ## Reactive surface:
-## - One outer ``createRenderEffect`` rebuilds the tree, the diff
-##   list, the deep-review list, and toggles the empty-state placeholder
-##   whenever any source signal (``rootEntry`` / ``expandedPaths`` /
-##   ``diffEntries`` / ``deepReviewActive`` / ``deepReviewFiles``)
+## - One outer ``createRenderEffect`` rebuilds the tree and the diff
+##   list, and toggles the empty-state placeholder whenever any source
+##   signal (``rootEntry`` / ``expandedPaths`` / ``diffEntries``)
 ##   changes.  Mirrors the trace_log / scratchpad pattern (DSL builds
 ##   the static shell, imperative renderer ops inside the effect
 ##   handle the dynamic content).
@@ -150,15 +143,6 @@ proc diffEntryLabel*(entry: FilesystemDiffEntry): string =
   else:
     p[slashIdx + 1 .. ^1]
 
-proc deepReviewStatusClass*(status: string): string =
-  ## Map the single-letter status code (``"A"``/``"M"``/``"D"``) to the
-  ## CSS suffix the legacy ``deepreview-diff-…`` rule expects.
-  case status
-  of "A": "deepreview-diff-added"
-  of "M": "deepreview-diff-modified"
-  of "D": "deepreview-diff-deleted"
-  else: ""
-
 proc iconClass*(entry: FilesystemEntryNode): string =
   ## Add the devicon / custom file-icon class directly to the icon slot.
   ## The legacy jstree renderer did this on its theme icon span; keeping the
@@ -246,7 +230,7 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
   ## Render the Filesystem panel for the Mock renderer.
   ##
   ## The static shell (outer container + filesystem wrapper +
-  ## tree + empty-overlay + diff-files-list + deepreview-file-list) is
+  ## tree + empty-overlay + diff-files-list) is
   ## built once via the DSL.  A single outer ``createRenderEffect``
   ## rebuilds the dynamic content whenever any source signal changes.
   var treeContainer: MockNode
@@ -254,7 +238,6 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
   var loadingContainer: MockNode
   var filesystemContainer: MockNode
   var diffContainer: MockNode
-  var deepReviewContainer: MockNode
 
   let panel = ui(r):
     tdiv(class = FilesystemContainerClass):
@@ -267,15 +250,13 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
           text "Loading..."
       tdiv(ref = diffContainer, class = "diff-files-list"):
         discard
-      tdiv(ref = deepReviewContainer, class = "deepreview-file-list"):
-        discard
 
   createRenderEffect proc() =
     # -- Tree --
     let isLoading = vm.loadingState.val == lsLoading
     let root = vm.rootEntry.val
     let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
-      vm.diffEntries.val.len == 0 and vm.deepReviewFiles.val.len == 0
+      vm.diffEntries.val.len == 0
     r.clearChildren(treeContainer)
     if root.text.len > 0 and root.text != "/":
       let node = renderMockEntry(r, vm, root)
@@ -326,49 +307,6 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
                onclick = proc() = vm.openFile(pathLocal)):
             text rowLabelLocal
         r.appendChild(diffContainer, row)
-
-    # -- Deep-review list --
-    let drFiles = vm.deepReviewFiles.val
-    let drActive = vm.deepReviewActive.val
-    r.clearChildren(deepReviewContainer)
-    if not drActive or drFiles.len == 0:
-      r.setAttribute(deepReviewContainer, "class",
-                     "deepreview-file-list hidden")
-    else:
-      r.setAttribute(deepReviewContainer, "class", "deepreview-file-list")
-      for file in drFiles:
-        # Materialise every value the DSL touches into local non-lent
-        # vars — the DSL emits closures for ``text`` slots, and those
-        # closures cannot capture an iterator's ``lent
-        # FilesystemDeepReviewFile`` directly.
-        let statusCls = deepReviewStatusClass(file.status)
-        let statusFull =
-          if statusCls.len > 0:
-            "deepreview-diff-status-compact " & statusCls
-          else:
-            "deepreview-diff-status-compact"
-        let linesFull =
-          if statusCls.len > 0:
-            "deepreview-diff-lines-compact " & statusCls
-          else:
-            "deepreview-diff-lines-compact"
-        let statusLocal = file.status
-        let nameLocal = file.baseName
-        let linesText = "+" & $file.linesAdded & "/-" & $file.linesRemoved
-        let coverageText = $file.coverageExecuted & "/" & $file.coverageTotal
-        let pathLocal = file.path
-        let row = ui(r):
-          tdiv(class = "deepreview-file-item-compact",
-               onclick = proc() = vm.openFile(pathLocal)):
-            span(class = statusFull):
-              text statusLocal
-            span(class = "deepreview-file-name-compact"):
-              text nameLocal
-            span(class = linesFull):
-              text linesText
-            span(class = "deepreview-coverage-compact"):
-              text coverageText
-        r.appendChild(deepReviewContainer, row)
 
   panel
 
@@ -492,14 +430,13 @@ when defined(js):
                               vm: FilesystemVM): isonim_dom.Element =
     ## Render the Filesystem panel for the real DOM.  Same dispatch
     ## shape as the Mock variant — outer wrapper plus a render-effect
-    ## that rebuilds the tree / diff / deep-review lists and toggles
+    ## that rebuilds the tree / diff lists and toggles
     ## the empty-state placeholder.
     var treeContainer: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
     var loadingContainer: isonim_dom.Element
     var filesystemContainer: isonim_dom.Element
     var diffContainer: isonim_dom.Element
-    var deepReviewContainer: isonim_dom.Element
 
     let panel = ui(r):
       tdiv(id = "filesystemComponent", class = FilesystemContainerClass):
@@ -520,15 +457,13 @@ when defined(js):
             text "Loading..."
         tdiv(ref = diffContainer, class = "diff-files-list"):
           discard
-        tdiv(ref = deepReviewContainer, class = "deepreview-file-list"):
-          discard
 
     createRenderEffect proc() =
       # -- Tree --
       let isLoading = vm.loadingState.val == lsLoading
       let root = vm.rootEntry.val
       let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
-        vm.diffEntries.val.len == 0 and vm.deepReviewFiles.val.len == 0
+        vm.diffEntries.val.len == 0
       clearWebChildren(treeContainer)
       if root.text.len > 0 and root.text != "/":
         let node = renderWebEntry(vm, root, 1, true)
@@ -583,62 +518,6 @@ when defined(js):
             ev.stopPropagation()
             vm.openFile(path))
           isonim_dom.appendChild(isonim_dom.Node(diffContainer),
-                                 isonim_dom.Node(row))
-
-      # -- Deep-review list --
-      let drFiles = vm.deepReviewFiles.val
-      let drActive = vm.deepReviewActive.val
-      clearWebChildren(deepReviewContainer)
-      if not drActive or drFiles.len == 0:
-        isonim_dom.setAttribute(deepReviewContainer, cstring"class",
-                                cstring"deepreview-file-list hidden")
-      else:
-        isonim_dom.setAttribute(deepReviewContainer, cstring"class",
-                                cstring"deepreview-file-list")
-        for file in drFiles:
-          let statusCls = deepReviewStatusClass(file.status)
-          let row = createWebElement("div", "deepreview-file-item-compact")
-          let path = file.path
-          isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                      proc(ev: isonim_dom.Event) =
-            ev.preventDefault()
-            ev.stopPropagation()
-            vm.openFile(path))
-          let statusFull =
-            if statusCls.len > 0:
-              "deepreview-diff-status-compact " & statusCls
-            else:
-              "deepreview-diff-status-compact"
-          let statusSpan = createWebTextElement("span", file.status,
-                                                statusFull)
-          isonim_dom.appendChild(isonim_dom.Node(row),
-                                 isonim_dom.Node(statusSpan))
-
-          let nameSpan = createWebTextElement("span", file.baseName,
-                                              "deepreview-file-name-compact")
-          isonim_dom.appendChild(isonim_dom.Node(row),
-                                 isonim_dom.Node(nameSpan))
-
-          let linesFull =
-            if statusCls.len > 0:
-              "deepreview-diff-lines-compact " & statusCls
-            else:
-              "deepreview-diff-lines-compact"
-          let linesSpan = createWebTextElement(
-            "span",
-            "+" & $file.linesAdded & "/-" & $file.linesRemoved,
-            linesFull)
-          isonim_dom.appendChild(isonim_dom.Node(row),
-                                 isonim_dom.Node(linesSpan))
-
-          let coverageSpan = createWebTextElement(
-            "span",
-            $file.coverageExecuted & "/" & $file.coverageTotal,
-            "deepreview-coverage-compact")
-          isonim_dom.appendChild(isonim_dom.Node(row),
-                                 isonim_dom.Node(coverageSpan))
-
-          isonim_dom.appendChild(isonim_dom.Node(deepReviewContainer),
                                  isonim_dom.Node(row))
 
     panel

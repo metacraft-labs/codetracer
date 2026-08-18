@@ -6,9 +6,10 @@
 ##
 ## In DeepReview mode (``data.deepReviewActive``), the panel switches to
 ## showing the review's changed files from ``data.deepReviewData.files``
-## instead of git data.  Clicking a file updates
-## ``data.deepReviewSelectedFileIndex`` which the DeepReview component reads
-## to decide which file's diff to render.
+## instead of git data.  Clicking a file opens that file's review
+## representation in the editor and records the choice in
+## ``data.deepReviewSelectedFileIndex``, which the Agent Activity panel's
+## per-file coverage table follows (DeepReview-GUI.md §2.1).
 ##
 ## Git data is fetched with structured `git` argv calls via Node.js
 ## `child_process` (available in Electron's renderer process with
@@ -23,7 +24,6 @@ import
   ui_imports
 
 import git_cli
-import deepreview
 # DeepReview's third pillar.  The pane's VM lives in
 # `ui/agent_activity_deepreview.nim`; the dependency is one-way (that module
 # never imports this one) and the coverage-table -> VCS-panel direction of the
@@ -582,11 +582,6 @@ proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
       connectors: gr.connectors,
     ))
 
-proc syncDeepReviewPanelSelection(self: VCSComponent) =
-  let component = self.data.ui.componentMapping[Content.DeepReview][0]
-  if not component.isNil:
-    deepreview.syncLegacyDeepReviewIntoVM(DeepReviewComponent(component))
-
 proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   if self.isNil:
     return
@@ -608,9 +603,8 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
       vm, self.reviewDataset(), self.data.deepReviewSelectedTraceContextId)
     # The legacy carriers follow the ViewModel rather than driving it.  Both
     # are review-wide (a review has one selected file and one selected trace
-    # context however many VCS panels exist), which is why they live on `Data`
-    # — and why the agentic path setting the standalone panel's context id
-    # without setting this one could make the two surfaces disagree.
+    # context however many VCS panels exist), which is why they live on
+    # `Data`.
     if selectedIndex >= 0:
       self.data.deepReviewSelectedFileIndex = selectedIndex
     self.data.deepReviewSelectedTraceContextId = vm.currentTraceContextId()
@@ -619,9 +613,10 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   self.ensureVCSDataLoaded()
   vm.setDeepReviewMode(false)
   vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
-  # `setHeader` clears the review stats; the trace contexts are cleared
-  # explicitly.  Neither belongs to a live working tree, and a panel can move
-  # out of review mode (VCS-Panel.md, "Data Sources and Instantiation Modes").
+  # `setHeader` clears the review stats and the reviewed commit; the trace
+  # contexts are cleared explicitly.  None of the three belongs to a live
+  # working tree, and a panel can move out of review mode (VCS-Panel.md,
+  # "Data Sources and Instantiation Modes").
   vm.setHeader(safeStr(self.currentBranch))
   vm.setTraceContexts(@[])
   vm.setSelectedTraceContextId(0)
@@ -728,7 +723,6 @@ proc handleVCSFileSelection(self: VCSComponent; index: int;
     discard selectReviewRow(vm, index)
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
-    self.syncDeepReviewPanelSelection()
     # DeepReview-GUI.md §2.1: the Changed Files list and the Agent Activity
     # panel's per-file coverage table are "two views of one selection", so a
     # click here moves the coverage table's highlight too.
@@ -763,9 +757,8 @@ proc handleTraceContextSelection(self: VCSComponent; id: int) =
   ## (DeepReview-GUI.md §6: "The selected trace context can be changed without
   ## leaving the review").
   ##
-  ## The selection is review-wide, so it is stored on ``Data`` and pushed to
-  ## the DeepReview panel, which owns the Monaco decorations drawn from the
-  ## selected run.
+  ## The selection is review-wide, so it is stored on ``Data`` alongside the
+  ## dataset it indexes rather than inside one panel.
   ##
   ## NOTE (M42b): the review's recordings are not loaded — `--deepreview`
   ## forces an empty recording id — so switching context cannot yet change
@@ -779,9 +772,6 @@ proc handleTraceContextSelection(self: VCSComponent; id: int) =
     vm.setSelectedTraceContextId(id)
   self.data.deepReviewSelectedTraceContextId = id
   self.syncLegacyVCSIntoVM()
-  let component = self.data.ui.componentMapping[Content.DeepReview][0]
-  if not component.isNil:
-    deepreview.setDeepReviewTraceContext(DeepReviewComponent(component), id)
 
 proc focusDockedPanel(data: Data; content: Content) =
   ## Make ``content``'s panel the visible tab of whichever stack hosts it.
@@ -843,7 +833,6 @@ proc startReviewNavigation*(self: VCSComponent) =
   self.data.deepReviewSelectedFileIndex =
     max(vm.reviewRowIndexForPath(selectedReviewPath(vm)), 0)
   self.data.deepReviewSelectedTraceContextId = vm.currentTraceContextId()
-  self.syncDeepReviewPanelSelection()
 
 proc startDeepReviewNavigation*(data: Data) =
   ## The single host entry point for a review, whichever launch path started

@@ -185,16 +185,20 @@ const
     # `isValidLayoutConfig` before GoldenLayout ever sees it, which is how
     # this defect stayed invisible.
     "src/tests/gui/tests/layout/layout_config_roundtrip_test.nim",
-    # #610 (M42a) — DeepReview replacing the whole GoldenLayout.  Launching
-    # `ct --deepreview` pasted a hard-coded three-panel preset over
+    # #610 (M42a) and DR-R8 — what starting a review does to the layout.
+    # Launching `ct --deepreview` pasted a hard-coded three-panel preset over
     # `data.ui.resolvedConfig`, so FILES, STATE, SCRATCHPAD, AGENT ACTIVITY,
     # EVENT LOG, TIMELINE and TERMINAL OUTPUT were gone for the session and
-    # the user's own layout was ignored.  The behavioural half asserts that
-    # additive placement keeps every panel of the REAL bundled
-    # `src/config/default_layout.json`; the native-only source-contract half
-    # asserts the startup path is actually wired through that helper, which
-    # is the part no placement test could catch — the old code called no
-    # placement helper at all.
+    # the user's own layout was ignored.  M42a made placement additive; DR-R8
+    # removed the thing being placed, because DeepReview has no panel of its
+    # own (DeepReview-GUI.md §7), leaving only Layout-System.md's "focus, not
+    # relocation" obligation.  The behavioural half asserts that a review
+    # keeps every panel of the REAL bundled `src/config/default_layout.json`,
+    # adds none, re-shapes no container, and focuses the VCS and Agent
+    # Activity panels; the native-only source-contract half asserts the
+    # startup path is actually wired through that helper and that the deleted
+    # panel is really gone, which is the part no layout test could catch —
+    # the old code called no layout helper at all.
     "src/tests/gui/tests/layout/deepreview_layout_test.nim",
     # DR-R1 (DeepReview-GUI.milestones.org) — a review must be navigable:
     # clicking a changed file opens it, a review opens its first file on
@@ -260,6 +264,15 @@ const
     # the section now renders *inside* the Agent Activity panel, per
     # DeepReview-GUI.md §2.1, so its rendering is that panel's business.  The
     # focus half rides in `deepreview_layout_test.nim` (also listed).
+    #
+    # DR-R8 added its deletion guard here rather than to a new file:
+    # `Content.AgentActivityDeepReview` is a DIFFERENT id from the deleted
+    # `Content.DeepReview` and the names are nearly identical, so the suite
+    # that owns this pane is where "we deleted the other one" belongs.  It
+    # asserts the pane still populates from a dataset after the deletion, and
+    # — as a native-only source contract — that its content id, registration,
+    # component and whole module stack survive while the standalone panel's
+    # id and modules are the ones that went.
     "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim",
     # DR-R7 — one review-entry routine for all three launch paths.  The three
     # ways into a review (`ct --deepreview`, a trace with an associated diff,

@@ -647,11 +647,15 @@ test.describe("Visual Review — DeepReview", () => {
   test.use({ launchMode: "deepreview", deepreviewJsonPath: reviewPath });
 
   test("10 DeepReview layout", async ({ ctPage }) => {
-    // Wait for either DeepReview file items or the GL layout to appear.
+    // Wait for the review's changed-file rows or the GL layout to appear.
     // DeepReview mode may take time to parse the JSON and render.
+    //
+    // Retargeted in DR-R8 from `.deepreview-file-item-compact` — a row of the
+    // deleted standalone panel's file list — to the VCS panel's, which owns
+    // the changed-files list (DeepReview-GUI.md §2).
     try {
       await ctPage.waitForSelector(
-        ".deepreview-file-item-compact, .lm_goldenlayout",
+        ".vcs-file-item, .lm_goldenlayout",
         { timeout: 45_000 },
       );
     } catch {

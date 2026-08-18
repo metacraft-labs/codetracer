@@ -26,7 +26,6 @@ import viewmodel/viewmodels/[
   calltrace_vm,
   command_palette_vm,
   debug_controls_vm,
-  deepreview_vm,
   editor_vm,
   errors_vm,
   event_log_vm,
@@ -67,7 +66,6 @@ import viewmodel/views/[
   isonim_command_palette_view,
   isonim_debug_controls_view,
   isonim_debug_shell_view,
-  isonim_deepreview_view,
   isonim_editor_view,
   isonim_errors_view,
   isonim_event_log_view,
@@ -813,56 +811,6 @@ proc applyAgentWorkspace(vm: AgentWorkspaceVM) =
   ])
   vm.setNotificationCount(3)
 
-proc applyDeepReview(vm: DeepReviewVM) =
-  vm.setHasData(true)
-  vm.setHeader("noir-space-ship", "HEAD 23686aaa", "164 changed lines")
-  vm.setTraceContexts([
-    DeepReviewTraceContextEntry(id: 1, label: "Noir replay"),
-    DeepReviewTraceContextEntry(id: 2, label: "Unit tests"),
-  ])
-  vm.setFiles([
-    DeepReviewFileEntry(path: "src/main.nr", diffStatus: "M",
-                        linesAdded: 8, linesRemoved: 2,
-                        coverageText: "90%", hasCoverage: true,
-                        hasFlow: true),
-    DeepReviewFileEntry(path: "src/shield.nr", diffStatus: "M",
-                        linesAdded: 11, linesRemoved: 4,
-                        coverageText: "81%", hasCoverage: true,
-                        hasFlow: true),
-  ])
-  vm.setExecutionState(0, 1, "main")
-  vm.setIterationState(0, 3)
-  vm.setViewMode(drpvmUnified)
-  vm.setUnifiedFiles([
-    DeepReviewUnifiedFileEntry(fileIndex: 0, path: "src/shield.nr",
-                               diffStatus: "M", linesAdded: 11,
-                               linesRemoved: 4, hunks: @[
-      DeepReviewHunkEntry(oldStart: 54, oldCount: 6, newStart: 54, newCount: 7,
-                          lines: @[
-        DeepReviewDiffLineEntry(lineType: "context",
-                                content: "fn iterate_asteroids(masses) {",
-                                oldLine: 54, newLine: 54),
-        DeepReviewDiffLineEntry(lineType: "added",
-                                content: "  let remaining_shield = calculate_damage(...);",
-                                oldLine: 0, newLine: 58,
-                                values: @[DeepReviewFlowValueEntry(
-                                  name: "remaining_shield", value: "9900")]),
-        DeepReviewDiffLineEntry(lineType: "removed",
-                                content: "  return remaining_shield - damage;",
-                                oldLine: 59, newLine: 0),
-        DeepReviewDiffLineEntry(lineType: "added",
-                                content: "  return max(0, remaining_shield - damage);",
-                                oldLine: 0, newLine: 59,
-                                values: @[DeepReviewFlowValueEntry(
-                                  name: "damage", value: "2000")]),
-      ]),
-    ]),
-  ])
-  vm.setCallNodes([
-    DeepReviewCallNodeEntry(name: "main", executionCount: 1, depth: 0),
-    DeepReviewCallNodeEntry(name: "calculate_damage", executionCount: 12, depth: 1),
-  ])
-
 proc applyAgentActivityDeepReview(vm: AgentActivityDeepReviewVM) =
   vm.setExpanded(true)
   vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
@@ -1327,13 +1275,6 @@ proc mountAgentWorkspace(container: isonim_dom.Element; fixture: string): Dispos
     mountIsoNimAgentWorkspacePanel(container, vm, 103)
     return proc() = vm.dispose())
 
-proc mountDeepReview(container: isonim_dom.Element; fixture: string): DisposeProc =
-  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
-    let vm = createDeepReviewVM(store)
-    if fixture != "empty": vm.applyDeepReview()
-    mountIsoNimDeepReviewPanel(container, vm, 104)
-    return proc() = vm.dispose())
-
 proc mountWelcome(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createWelcomeScreenVM(store)
@@ -1692,7 +1633,6 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "calltrace-editor": mountCalltraceEditor(container, f)
     of "command-palette": mountCommandPalette(container, f)
     of "debug-controls": mountDebugControls(container, f)
-    of "deepreview": mountDeepReview(container, f)
     of "editor": mountEditor(container, f)
     of "errors": mountErrors(container, f)
     of "event-log": mountEventLog(container, f)

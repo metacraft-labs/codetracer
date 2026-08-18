@@ -1,37 +1,42 @@
 /**
- * Page object for the DeepReview GUI component.
+ * Page object for a DeepReview session, activated via the
+ * ``--deepreview <path>`` CLI argument.
  *
- * Encapsulates all selectors and common interactions for the DeepReview
- * standalone view, which is activated via the ``--deepreview <path>`` CLI
- * argument. The component renders:
+ * DeepReview has NO panel of its own. It is a combination of features of
+ * three surfaces that exist independently of it
+ * (``codetracer-specs/DeepReview/DeepReview-GUI.md`` §7):
  *
- * - A header bar with commit info and statistics.
- * - A file list in the VCS panel (class ``vcs-file-item``) with per-file
- *   coverage badges and diff status indicators.
- * - A unified diff view with coverage overlays and omniscience values.
- * - A call trace tree panel.
+ * 1. The **VCS panel** — the changed-files list (``vcs-file-*``), the view
+ *    mode toggle (``vcs-diff-toggle``), and the review's session title,
+ *    stats and trace-context selector in its header (§2, §3).
+ * 2. The **Editor** — a review's file opens as an ordinary editor document:
+ *    a ``Content.UnifiedDiff`` Monaco tab (``unified-diff-container``) or
+ *    the source file itself, depending on the toggle (§4, §5).
+ * 3. The **Agent Activity panel** — the review's coverage summary, test
+ *    results and per-file coverage table, in its DeepReview section
+ *    (``activity-dr-*``) (§2.1).
  *
- * In GL-embedded mode, the file list lives in the VCS panel rather than in
- * the DeepReview component itself. Selectors for file items use the
- * ``vcs-file-*`` CSS classes from ``src/frontend/ui/vcs.nim``. The call
- * trace likewise lives in the GL CALLTRACE panel, not inside the DeepReview
- * component — those two columns are the only things ``glEmbedded``
- * suppresses.
+ * Until DR-R8 there was also a standalone ``DEEP REVIEW`` GL panel with its
+ * own header, file list, Monaco instance, sliders and call trace, addressed
+ * through ``.deepreview-container``. It is deleted, and every accessor that
+ * pointed into it is gone from this file. What its capabilities became:
  *
- * NOTE: this block used to say that Full Files mode and the mode toggle
- * were "not available in GL-embedded mode". That was never a design
- * decision — it documented issue #610, in which DeepReview startup replaced
- * the whole GoldenLayout with a three-panel preset and the view hid its own
- * mode toggle behind ``glEmbedded``, which is set for every ``--deepreview``
- * session. Both are fixed: startup now ADDS the review surface to the
- * user's layout (so FILES, STATE, SCRATCHPAD, CALLTRACE, AGENT ACTIVITY,
- * EVENT LOG, TIMELINE and TERMINAL OUTPUT are all present), and the mode
- * toggle renders in every mode.
+ * | was (panel)                       | is now                              |
+ * | --------------------------------- | ----------------------------------- |
+ * | ``.deepreview-file-list``         | ``fileItems()`` — the VCS panel     |
+ * | ``.deepreview-session-title``     | ``vcsReviewTitle()``                |
+ * | ``.deepreview-stats``             | ``vcsReviewStats()``                |
+ * | ``.deepreview-trace-select``      | ``vcsTraceContextSelect()``         |
+ * | ``.deepreview-mode-toggle``       | ``modeToggle()`` — the VCS panel    |
+ * | ``.deepreview-unified-*``         | ``diffTabs()`` — a Monaco document  |
+ * | ``.deepreview-expand-row``        | ``expandAboveLine`` / ``…BelowLine``|
+ * | ``.deepreview-calltrace``         | the standard CALLTRACE panel        |
+ * | its coverage / inline decorations | the Agent Activity section (§2.1)   |
  *
- * Still outstanding, and the reason some Full Files assertions below remain
- * skipped: in ``--deepreview`` mode the index process never loads a
- * recording, so the replay-backed panels are present but empty and the
- * Monaco inline-value decorations have no data to show.
+ * Still outstanding: in ``--deepreview`` mode the index process never loads a
+ * recording (M42b), so the replay-backed panels are present but empty and the
+ * Monaco inline-value decorations have no data to show. That is why the
+ * Omniscience assertions remain out of this suite; DR-R6 owns them.
  */
 
 import type { Locator, Page } from "@playwright/test";
@@ -140,43 +145,11 @@ export class DeepReviewFileItem {
 }
 
 // ---------------------------------------------------------------------------
-// Call trace node
-// ---------------------------------------------------------------------------
-
-/** Represents a single node in the call trace tree. */
-export class DeepReviewCallTraceNode {
-  readonly page: Page;
-  readonly root: Locator;
-
-  constructor(page: Page, root: Locator) {
-    this.page = page;
-    this.root = root;
-  }
-
-  /** Get the function name for this call trace node. */
-  async name(): Promise<string> {
-    return (
-      (await this.root.locator(".deepreview-calltrace-name").first().textContent()) ?? ""
-    );
-  }
-
-  /** Get the execution count text (e.g. " x1"). */
-  async countText(): Promise<string> {
-    return (
-      (await this.root.locator(".deepreview-calltrace-count").first().textContent()) ?? ""
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Main page object
 // ---------------------------------------------------------------------------
 
 /**
- * Page object for the full DeepReview view.
- *
- * Provides access to all sub-components: header, file list, editor area
- * (sliders and Monaco decorations), and the call trace panel.
+ * Page object for a DeepReview session across the three panels that host it.
  */
 export class DeepReviewPage {
   readonly page: Page;
@@ -185,42 +158,18 @@ export class DeepReviewPage {
     this.page = page;
   }
 
-  // -- Container -----------------------------------------------------------
-
-  /** The top-level DeepReview container. */
-  container(): Locator {
-    return this.page.locator(".deepreview-container");
-  }
-
-  /** The error message shown when no data is loaded. */
-  errorMessage(): Locator {
-    return this.page.locator(".deepreview-error");
-  }
-
-  /**
-   * Scope a selector to the DeepReview panel itself.
-   *
-   * The panel's diff markup (``deepreview-unified-*``, ``deepreview-expand-*``,
-   * ``deepreview-flow-values``) is shared with the VCS panel's unified diff
-   * *editor tabs*, which a review now opens (DeepReview-GUI.md §3/§7). A
-   * page-wide locator would therefore mix the two surfaces together; the tabs
-   * have their own accessors below (``diffTabs``, ``diffTabFor``).
-   */
-  private inPanel(selector: string): Locator {
-    return this.container().locator(selector);
-  }
-
   // -- Surrounding GoldenLayout --------------------------------------------
 
   /**
    * Titles of every GoldenLayout tab currently attached.
    *
-   * DeepReview is one panel inside the user's layout, not a replacement for
-   * it (issue #610), so the standard panel titles must be present alongside
-   * the review surface. Titles come from ``convertTabTitle``
+   * A review is data loaded into the layout the user already has, not a
+   * replacement for it (issue #610), and since DR-R8 it adds no panel at all.
+   * The standard panel titles must therefore all be present, and "DEEP
+   * REVIEW" must not be. Titles come from ``convertTabTitle``
    * (``src/frontend/ui/layout.nim``): "FILES", "VCS", "STATE",
    * "SCRATCHPAD", "CALLTRACE", "AGENT ACTIVITY", "EVENT LOG", "TIMELINE",
-   * "TERMINAL OUTPUT", "DEEP REVIEW".
+   * "TERMINAL OUTPUT".
    */
   async layoutTabTitles(): Promise<string[]> {
     const titles = await this.page.locator(".lm_tab .lm_title").allTextContents();
@@ -338,9 +287,7 @@ export class DeepReviewPage {
    * The trace-context selector in the VCS panel header.
    *
    * DeepReview-GUI.md §2: "Trace context selector | The VCS panel header,
-   * populated only in DeepReview mode". Scoped to the VCS panel on purpose —
-   * the standalone DeepReview panel renders its own copy of this control
-   * until DR-R8 deletes it, and a page-wide locator would match both.
+   * populated only in DeepReview mode".
    */
   vcsTraceContextSelector(): Locator {
     return this.vcsPanel().locator(".vcs-review-trace-selector");
@@ -439,76 +386,14 @@ export class DeepReviewPage {
     return `Diff: ${slash >= 0 ? filePath.slice(slash + 1) : filePath}`;
   }
 
-  // -- Header --------------------------------------------------------------
-
-  // The header accessors below are scoped to the standalone DeepReview panel
-  // for the same reason as the diff markup above: DR-R2 moved the review's
-  // trace-context selector and stats into the VCS panel header, where they
-  // adopt the panel-agnostic `deepreview-stats` / `deepreview-trace-select`
-  // rules rather than duplicating them. Two surfaces therefore carry those
-  // classes until DR-R8 deletes this panel, and a page-wide locator would
-  // match both. The VCS panel's copies have their own accessors
-  // (`vcsTraceContextSelect`, `vcsReviewStats`, …).
-
-  /** The header bar showing commit info and summary stats. */
-  header(): Locator {
-    return this.inPanel(".deepreview-header");
-  }
-
-  /** The commit SHA display in the header. */
-  commitDisplay(): Locator {
-    return this.inPanel(".deepreview-commit");
-  }
-
-  /** The stats display (file count, recording count, time). */
-  statsDisplay(): Locator {
-    return this.inPanel(".deepreview-stats");
-  }
-
-  // -- Session title -------------------------------------------------------
-
-  /** The session title displayed in the header bar. */
-  sessionTitle(): Locator {
-    return this.inPanel(".deepreview-session-title");
-  }
-
-  // -- Trace context selector ----------------------------------------------
-
-  /** The trace context selector container. */
-  traceContextSelector(): Locator {
-    return this.inPanel(".deepreview-trace-selector");
-  }
-
-  /** The trace context dropdown element. */
-  traceContextSelect(): Locator {
-    return this.inPanel(".deepreview-trace-select");
-  }
+  // -- File list (the VCS panel's Changed Files section) --------------------
 
   /**
-   * Set the trace context via the exposed test helper.
-   * @param id The trace context id to select.
-   */
-  async setTraceContext(id: number): Promise<void> {
-    await this.page.evaluate(
-      (val) => {
-        const fn = (window as any).__deepreviewSetTraceContext;
-        if (typeof fn === "function") {
-          fn(val);
-        } else {
-          throw new Error("__deepreviewSetTraceContext not found on window");
-        }
-      },
-      id,
-    );
-  }
-
-  // -- File list (VCS panel) ------------------------------------------------
-
-  /**
-   * The file list container in the VCS panel.
+   * The changed-files list.
    *
-   * In GL-embedded mode the file list is rendered by the VCS panel
-   * using the ``vcs-file-list`` class.
+   * DeepReview-GUI.md §2: "Modified files list | The **VCS panel**'s Changed
+   * Files section (§3)".  It is rendered by ``src/frontend/ui/vcs.nim`` with
+   * the ``vcs-file-*`` classes in review mode exactly as in normal git mode.
    */
   fileList(): Locator {
     return this.page.locator(".vcs-file-list");
@@ -528,368 +413,129 @@ export class DeepReviewPage {
     );
   }
 
-  // -- Editor area ---------------------------------------------------------
+  // -- View mode toggle (the VCS panel) ------------------------------------
+  //
+  // VCS-Panel.md, "View mode toggle", and DeepReview-GUI.md §2: "Mode
+  // switcher | The VCS panel's **view mode toggle**".  It is ONE switch, not
+  // a pair of buttons: active means a file click opens a unified-diff tab,
+  // inactive means it opens the file itself.  The standalone panel's
+  // two-button `.deepreview-mode-toggle` is gone with the panel.
 
-  /** The editor area (contains sliders and the Monaco editor div). */
-  editorArea(): Locator {
-    return this.page.locator(".deepreview-editor-area");
-  }
-
-  /** The Monaco editor container div. */
-  editor(): Locator {
-    return this.page.locator(".deepreview-editor");
-  }
-
-  // -- Execution slider ----------------------------------------------------
-
-  /** The execution slider container. */
-  executionSlider(): Locator {
-    return this.page.locator(".deepreview-slider").first();
-  }
-
-  /** The execution slider <input type="range"> element. */
-  executionSliderInput(): Locator {
-    return this.executionSlider().locator(".deepreview-slider-input");
-  }
-
-  /** The execution slider info label (e.g. "1/3 (main)"). */
-  executionSliderInfo(): Locator {
-    return this.executionSlider().locator(".deepreview-slider-info");
-  }
-
-  /** The execution slider label text (e.g. "Execution:"). */
-  executionSliderLabel(): Locator {
-    return this.executionSlider().locator(".deepreview-slider-label");
-  }
-
-  /**
-   * Set the execution slider to a specific value.
-   *
-   * Uses the Playwright ``fill`` approach for range inputs: we evaluate
-   * a script to set the value and dispatch an ``input`` event, since
-   * ``fill`` does not work for range inputs.
-   */
-  async setExecutionSliderValue(value: number): Promise<void> {
-    // Karax's event handling for range inputs can make programmatic
-    // ``dispatchEvent`` calls unreliable. Instead, call the exposed
-    // test helper which directly updates the component state and
-    // triggers a Karax re-render.
-    await this.page.evaluate(
-      (val) => {
-        const fn = (window as any).__deepreviewSetExecution;
-        if (typeof fn === "function") {
-          fn(val);
-        } else {
-          throw new Error("__deepreviewSetExecution not found on window");
-        }
-      },
-      value,
-    );
-  }
-
-  // -- Loop slider ---------------------------------------------------------
-
-  /**
-   * The loop iteration slider container.
-   *
-   * The loop slider is the second ``.deepreview-slider`` element, but it is
-   * only rendered when the selected file has loop data. If absent, the locator
-   * will have count 0.
-   */
-  loopSlider(): Locator {
-    // The loop slider is rendered after the execution slider. Both have
-    // the class ``deepreview-slider``, but the loop slider has the label
-    // "Iteration:". We locate it by looking for the label text.
-    return this.page
-      .locator(".deepreview-slider")
-      .filter({ has: this.page.locator(".deepreview-slider-label", { hasText: "Iteration:" }) });
-  }
-
-  /** The loop slider <input type="range"> element. */
-  loopSliderInput(): Locator {
-    return this.loopSlider().locator(".deepreview-slider-input");
-  }
-
-  /** The loop slider info text (e.g. "1/6"). */
-  loopSliderInfo(): Locator {
-    return this.loopSlider().locator(".deepreview-slider-info");
-  }
-
-  /** Set the loop slider to a specific value. */
-  async setLoopSliderValue(value: number): Promise<void> {
-    // Karax's event handling for range inputs can make programmatic
-    // ``dispatchEvent`` calls unreliable. Instead, call the exposed
-    // test helper which directly updates the component state and
-    // triggers a Karax re-render.
-    await this.page.evaluate(
-      (val) => {
-        const fn = (window as any).__deepreviewSetIteration;
-        if (typeof fn === "function") {
-          fn(val);
-        } else {
-          throw new Error("__deepreviewSetIteration not found on window");
-        }
-      },
-      value,
-    );
-  }
-
-  // -- Coverage decorations ------------------------------------------------
-
-  /**
-   * Get all elements matching a Monaco decoration class.
-   *
-   * Monaco applies CSS classes to whole-line decorations via
-   * ``<div class="... deepreview-line-executed ...">``. This method
-   * locates elements by their decoration class name.
-   *
-   * Note: Monaco only renders lines that are visible in the viewport,
-   * so the count may be less than the total number of decorated lines
-   * if the editor needs scrolling.
-   */
-  decoratedLines(decorationClass: string): Locator {
-    return this.page.locator(`.${decorationClass}`);
-  }
-
-  /** Lines with the ``deepreview-line-executed`` decoration. */
-  executedLines(): Locator {
-    return this.decoratedLines("deepreview-line-executed");
-  }
-
-  /** Lines with the ``deepreview-line-unreachable`` decoration. */
-  unreachableLines(): Locator {
-    return this.decoratedLines("deepreview-line-unreachable");
-  }
-
-  /** Lines with the ``deepreview-line-partial`` decoration. */
-  partialLines(): Locator {
-    return this.decoratedLines("deepreview-line-partial");
-  }
-
-  // -- Diff line decorations (Full Files mode) -----------------------------
-
-  /** Lines with the ``deepreview-diff-line-added`` decoration (green border). */
-  diffAddedLines(): Locator {
-    return this.decoratedLines("deepreview-diff-line-added");
-  }
-
-  /** Lines with the ``deepreview-diff-line-modified`` decoration (yellow border). */
-  diffModifiedLines(): Locator {
-    return this.decoratedLines("deepreview-diff-line-modified");
-  }
-
-  // -- Inline value decorations --------------------------------------------
-
-  /**
-   * Get all inline variable value decorations.
-   *
-   * These are Monaco ``afterContent`` decorations with the class
-   * ``deepreview-inline-value``. Each contains text like
-   * ``"  // x = 10, y = 20"``.
-   */
-  inlineValues(): Locator {
-    return this.page.locator(".deepreview-inline-value");
-  }
-
-  // -- Call trace panel ----------------------------------------------------
-
-  /** The call trace panel container. */
-  callTracePanel(): Locator {
-    return this.page.locator(".deepreview-calltrace");
-  }
-
-  /** The "Call Trace" header text. */
-  callTraceHeader(): Locator {
-    return this.page.locator(".deepreview-calltrace-header");
-  }
-
-  /** The "No call trace data" message shown when call trace is absent. */
-  callTraceEmpty(): Locator {
-    return this.page.locator(".deepreview-calltrace-empty");
-  }
-
-  /** The call trace body (contains tree nodes). */
-  callTraceBody(): Locator {
-    return this.page.locator(".deepreview-calltrace-body");
-  }
-
-  /** All call trace tree nodes. */
-  async callTraceNodes(): Promise<DeepReviewCallTraceNode[]> {
-    const locators = await this.page.locator(".deepreview-calltrace-node").all();
-    return locators.map((loc) => new DeepReviewCallTraceNode(this.page, loc));
-  }
-
-  /** All call trace entry rows (name + count, including children). */
-  callTraceEntries(): Locator {
-    return this.page.locator(".deepreview-calltrace-entry");
-  }
-
-  // -- View mode toggle ----------------------------------------------------
-
-  /** The view mode toggle container. */
+  /** The view-mode toggle row in the VCS panel. */
   modeToggle(): Locator {
-    return this.page.locator(".deepreview-mode-toggle");
+    return this.vcsPanel().locator(".vcs-diff-toggle");
   }
 
-  /** The "Full Files" mode toggle button. */
-  fullFilesButton(): Locator {
-    return this.page.locator(".deepreview-mode-btn", { hasText: "Full Files" });
+  /** The toggle's clickable switch. */
+  modeToggleButton(): Locator {
+    return this.modeToggle().locator(".vcs-toggle-button");
   }
 
-  /** The "Unified Diff" mode toggle button. */
-  unifiedDiffButton(): Locator {
-    return this.page.locator(".deepreview-mode-btn", { hasText: "Unified Diff" });
+  /** True when the toggle is in its Unified Diff position. */
+  async isUnifiedDiffMode(): Promise<boolean> {
+    const classes = (await this.modeToggleButton().getAttribute("class")) ?? "";
+    return classes.includes("vcs-toggle-active");
   }
 
   /**
-   * Switch to Unified Diff mode via the exposed test helper.
-   * Falls back to clicking the button if the helper is unavailable.
+   * Put the toggle in its Unified Diff position, clicking only if needed.
+   *
+   * Driven through the real control rather than a `window.__deepreview*`
+   * test helper: those helpers lived on the deleted panel, and the toggle is
+   * a user-facing switch that an E2E test should exercise as a user does.
    */
   async switchToUnifiedDiff(): Promise<void> {
-    await this.page.evaluate(() => {
-      const fn = (window as any).__deepreviewSetViewMode;
-      if (typeof fn === "function") {
-        fn("unified");
-      } else {
-        throw new Error("__deepreviewSetViewMode not found on window");
-      }
-    });
+    if (!(await this.isUnifiedDiffMode())) {
+      await this.modeToggleButton().click();
+    }
   }
 
-  /**
-   * Switch to Full Files mode via the exposed test helper.
-   */
+  /** Put the toggle in its Open File ("Full Files") position. */
   async switchToFullFiles(): Promise<void> {
-    await this.page.evaluate(() => {
-      const fn = (window as any).__deepreviewSetViewMode;
-      if (typeof fn === "function") {
-        fn("fullfiles");
-      } else {
-        throw new Error("__deepreviewSetViewMode not found on window");
-      }
-    });
+    if (await this.isUnifiedDiffMode()) {
+      await this.modeToggleButton().click();
+    }
   }
 
-  // -- Unified diff view ----------------------------------------------------
+  // -- Editor-area source tabs ---------------------------------------------
 
-  /** The unified diff scroll container. */
-  unifiedDiff(): Locator {
-    return this.inPanel(".deepreview-unified-diff");
-  }
-
-  /** All file sections in the unified diff view. */
-  unifiedFileHeaders(): Locator {
-    return this.inPanel(".deepreview-unified-file-header");
-  }
-
-  /** All file path spans within unified diff file headers. */
-  unifiedFilePaths(): Locator {
-    return this.inPanel(".deepreview-unified-file-path");
-  }
-
-  /** All hunk header elements (the @@ lines). */
-  unifiedHunkHeaders(): Locator {
-    return this.inPanel(".deepreview-unified-hunk-header");
-  }
-
-  /** All added lines in the unified diff. */
-  unifiedAddedLines(): Locator {
-    return this.inPanel(".deepreview-unified-line-added");
-  }
-
-  /** All removed lines in the unified diff. */
-  unifiedRemovedLines(): Locator {
-    return this.inPanel(".deepreview-unified-line-removed");
-  }
-
-  /** All context lines in the unified diff. */
-  unifiedContextLines(): Locator {
-    return this.inPanel(".deepreview-unified-line-context");
-  }
-
-  /** All lines (of any type) in the unified diff. */
-  unifiedAllLines(): Locator {
-    return this.inPanel(".deepreview-unified-line");
-  }
-
-  // -- Context expansion ----------------------------------------------------
-
-  /** All "Expand above/below" rows in the unified diff. */
-  expandRows(): Locator {
-    return this.inPanel(".deepreview-expand-row");
-  }
-
-  /** All expanded context lines (lines added via expand buttons). */
-  expandedContextLines(): Locator {
-    return this.inPanel(".deepreview-expanded-context");
-  }
-
-  // -- Omniscience overlay (inline values on diff lines) ---------------------
-
-  /** All omniscience flow value containers in the unified diff. */
-  omniscienceValues(): Locator {
-    return this.inPanel(".deepreview-flow-values");
+  /**
+   * The plain source tab for ``filePath``, if one is open.
+   *
+   * Full Files Mode (DeepReview-GUI.md §5) opens the file itself in the
+   * standard editor rather than a diff document, so it is located by the
+   * editor component's own container rather than by ``diffTabs()``.
+   */
+  sourceTabs(): Locator {
+    return this.page.locator("[id^='editorComponent']");
   }
 
   /**
-   * Expand context above a specific hunk via the exposed test helper.
-   * @param fileIdx 0-based file index
-   * @param hunkIdx 0-based hunk index within the file
+   * Lines the editor decorated as changed while a review is active
+   * (DeepReview-GUI.md §5.1, "Per-file diff overlays").
+   *
+   * ``ui/editor.nim``'s ``deepReviewDiffStyleLines`` emits ``line-diff-added``
+   * for a pure-addition hunk and ``line-diff-modified`` for a hunk that also
+   * removes.  These replace the deleted panel's own
+   * ``deepreview-diff-line-*`` decorations.
    */
-  async expandAbove(fileIdx: number, hunkIdx: number): Promise<void> {
-    await this.page.evaluate(
-      ({ fi, hi }) => {
-        const fn = (window as any).__deepreviewExpandAbove;
-        if (typeof fn === "function") {
-          fn(fi, hi);
-        } else {
-          throw new Error("__deepreviewExpandAbove not found on window");
-        }
-      },
-      { fi: fileIdx, hi: hunkIdx },
-    );
+  editorDiffAddedLines(): Locator {
+    return this.page.locator(".view-overlays .line-diff-added");
   }
 
-  /**
-   * Expand context below a specific hunk via the exposed test helper.
-   * @param fileIdx 0-based file index
-   * @param hunkIdx 0-based hunk index within the file
-   */
-  async expandBelow(fileIdx: number, hunkIdx: number): Promise<void> {
-    await this.page.evaluate(
-      ({ fi, hi }) => {
-        const fn = (window as any).__deepreviewExpandBelow;
-        if (typeof fn === "function") {
-          fn(fi, hi);
-        } else {
-          throw new Error("__deepreviewExpandBelow not found on window");
-        }
-      },
-      { fi: fileIdx, hi: hunkIdx },
-    );
+  /** Lines the editor decorated as modified while a review is active. */
+  editorDiffModifiedLines(): Locator {
+    return this.page.locator(".view-overlays .line-diff-modified");
+  }
+
+  // -- Diff-tab line decorations -------------------------------------------
+  //
+  // Since DR-R4 the unified diff is a Monaco document, so its "added",
+  // "removed" and "context" lines are whole-line decorations on the overlay
+  // layer (`viewmodels/diff_document.nim`) rather than `tdiv` elements
+  // carrying `deepreview-unified-line-*`.
+
+  /** Whole-line decorations of ``tab``'s added lines. */
+  static diffTabAddedLines(tab: Locator): Locator {
+    return tab.locator(".view-overlays .ct-diff-line-added");
+  }
+
+  /** Whole-line decorations of ``tab``'s removed lines. */
+  static diffTabRemovedLines(tab: Locator): Locator {
+    return tab.locator(".view-overlays .ct-diff-line-removed");
+  }
+
+  /** Whole-line decorations of ``tab``'s context lines. */
+  static diffTabContextLines(tab: Locator): Locator {
+    return tab.locator(".view-overlays .ct-diff-line-context");
+  }
+
+  /** The `@@ -N,M +N,M @@` section dividers of ``tab``, as rendered lines. */
+  static diffHunkHeaderLinesIn(tab: Locator): Locator {
+    // See `diffHunkHeaderLines` for why the regex avoids a literal space.
+    return tab
+      .locator(".monaco-editor .view-line")
+      .filter({ hasText: /@@\s-\d+,\d+\s\+\d+,\d+\s@@/ });
   }
 
   // -- Convenience ---------------------------------------------------------
 
   /**
-   * Wait for the DeepReview container to appear in the DOM.
+   * Wait for the review to be on screen.
    *
-   * This is the primary readiness signal: once ``.deepreview-container``
-   * exists, the component has rendered its initial state.
+   * The readiness signal is the VCS panel's Changed Files section: a review
+   * populates it as step 1 of DeepReview-GUI.md §7, "Transition into a
+   * Review", and it is the reviewer's primary navigation surface (§2: "The
+   * VCS panel must be the **visible** tab of whichever stack hosts it when a
+   * review starts").
+   *
+   * It replaces the deleted panel's ``.deepreview-container``, which was the
+   * old signal.  Note that this waits for the SECTION, not for rows: an empty
+   * review legitimately has none, and the empty-data tests assert exactly
+   * that.
    */
   async waitForReady(timeoutMs = 15000): Promise<void> {
-    await this.page.waitForSelector(".deepreview-container", { timeout: timeoutMs });
-  }
-
-  /**
-   * Wait for the Monaco editor to initialise inside the DeepReview view.
-   *
-   * Monaco is lazily initialised after the DOM container renders, so
-   * ``.view-lines`` (Monaco's rendered line container) may appear slightly
-   * after ``.deepreview-container``.
-   */
-  async waitForEditorReady(timeoutMs = 20000): Promise<void> {
-    await this.page.waitForSelector(".deepreview-editor .view-lines", {
+    await this.page.waitForSelector(".vcs-container .vcs-changed-files", {
       timeout: timeoutMs,
     });
   }

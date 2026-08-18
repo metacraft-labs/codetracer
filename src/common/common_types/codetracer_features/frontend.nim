@@ -293,7 +293,21 @@ type
     StepList = 33,
     NoInfo = 34,
     AgentActivity = 35,
-    DeepReview = 36,
+    ## Ordinal 36 was `DeepReview`, the standalone review panel.  That panel
+    ## is deleted: DeepReview introduces no panel of its own — it is a
+    ## combination of features of the Editor, the VCS panel and the Agent
+    ## Activity panel (codetracer-specs/DeepReview/DeepReview-GUI.md §7).
+    ##
+    ## The member survives only to keep `Content` a contiguous ordinal, which
+    ## `Components.componentMapping` needs (`array[Content, ...]`), exactly as
+    ## `FrameViewer` does after its own retirement.  It has no
+    ## `makeComponent` arm, so a stale persisted layout that still names it
+    ## logs through `renderer.createUIComponent`'s `ValueError` guard and
+    ## leaves an empty tab instead of resurrecting a review surface.  Nothing
+    ## emits it: `--deepreview` layouts are never persisted
+    ## (`renderer.saveConfig`) and the agentic launcher stopped opening one in
+    ## DR-R7.  Do not reuse the ordinal for a different panel.
+    RetiredDeepReviewPanel = 36,
     AgentWorkspace = 37,
     CaptionBarProgress = 38,
     AgentActivityDeepReview = 39,

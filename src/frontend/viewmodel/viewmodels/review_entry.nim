@@ -88,6 +88,14 @@ type
     ## produced it: `ct --deepreview <PATH>`, opening a trace that carries an
     ## associated diff, or the agentic handoff (DeepReview-GUI.md §1).
     title*: string
+    commit*: string
+      ## The commit the changeset belongs to, already abbreviated for display
+      ## (`<12 hex>...`), or empty when the dataset names none.
+      ##
+      ## DeepReview-GUI.md §3: "The section header shows the review's file
+      ## count and, when the changeset came from local git history, the commit
+      ## it belongs to."  Abbreviated here, in the one shared projection,
+      ## rather than in a view, so every launch path shows the same form.
     files*: seq[ReviewFile]
     traceContexts*: seq[VCSTraceContextRow]
     functionsTraced*: int
@@ -194,6 +202,20 @@ proc coverageRows*(dataset: ReviewDataset): seq[AgentDeepReviewFileCoverage] =
       totalLines: file.totalLines,
       hasFlow: file.hasFlow))
 
+proc abbreviatedCommit*(commitSha: string): string =
+  ## The display form of a review's commit: the first twelve hex characters
+  ## and an ellipsis, or the whole thing when it is already short enough.
+  ##
+  ## Carried over verbatim from the deleted standalone panel's header
+  ## (`ui/deepreview.nim`, `commitDisplay`) so the fact it showed is not lost
+  ## with it — DR-R2 moved the session title and the stats into the VCS panel
+  ## header but left this one behind.  Its specified home is the VCS panel's
+  ## Changed Files section header (DeepReview-GUI.md §3).
+  if commitSha.len > 12:
+    commitSha[0 ..< 12] & "..."
+  else:
+    commitSha
+
 proc reviewDatasetFrom*[T](drData: T): ReviewDataset =
   ## Project an exported/assembled review dataset (`DeepReviewData`) into the
   ## ViewModel layer's `ReviewDataset`.
@@ -212,7 +234,7 @@ proc reviewDatasetFrom*[T](drData: T): ReviewDataset =
   ## no `diff` record is reported as modified with no counts rather than
   ## dropped, because dropping it would silently renumber the changeset.
   if drData.isNil:
-    return ReviewDataset(title: "", files: @[], traceContexts: @[])
+    return ReviewDataset(title: "", commit: "", files: @[], traceContexts: @[])
 
   let sessionTitle = $drData.sessionTitle
   let commitSha = $drData.commitSha
@@ -223,6 +245,7 @@ proc reviewDatasetFrom*[T](drData: T): ReviewDataset =
       "Review: " & commitSha[0 ..< 12] & "..."
     else:
       "Review: " & commitSha
+  result.commit = abbreviatedCommit(commitSha)
 
   result.traceContexts = @[]
   for ctx in drData.traceContexts:
@@ -560,7 +583,8 @@ proc applyReviewDataset*(vcs: VCSVM; dataset: ReviewDataset;
   # *and* its stats.  The stats summarise only what the dataset carries — file
   # count and total +/-; coverage and test results belong to the Agent
   # Activity panel (§2.1).
-  vcs.setHeader(dataset.title, statsText = reviewStatsText(rows))
+  vcs.setHeader(dataset.title, statsText = reviewStatsText(rows),
+                reviewCommit = dataset.commit)
   vcs.setTraceContexts(dataset.traceContexts)
   # An unknown or unset preference resolves to the review's first context,
   # which is what `DeepReviewTraceContext`'s own contract says the default is

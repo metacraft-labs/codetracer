@@ -3,14 +3,21 @@
 ## Unit tests for FilesystemVM — the ViewModel for the Filesystem panel.
 ##
 ## Verifies:
-## - Initial-state defaults (rootEntry, expandedPaths, diff/deep-review,
+## - Initial-state defaults (rootEntry, expandedPaths, diff,
 ##   isEmpty/hasDiff/totalEntryCount memos).
 ## - setRoot / clearRoot (filesystem-loaded event flow + session reset).
 ## - toggleExpanded / expandPath / collapsePath / isExpanded
 ##   (twisty / jstree-open-state mirror).
 ## - setDiffEntries (legacy ``data.startOptions.diff.files`` read).
-## - setDeepReview (legacy ``deepReviewActive`` / ``deepReviewData`` pair,
-##   including the wipe-on-deactivate guarantee).
+##
+## DR-R8 removed ``setDeepReview`` / ``deepReviewFiles`` /
+## ``FilesystemDeepReviewFile`` and the "FilesystemVM deep review" suite that
+## covered them.  They were dead: no production code ever called the setter,
+## so the compact one-line-per-file list the panel's view rendered from them
+## was permanently empty.  The review's changed-file list is the VCS panel's
+## (DeepReview-GUI.md §2, "Modified files list | The VCS panel's Changed Files
+## section"), covered by ``src/tests/gui/tests/vcs/vcs_view_test.nim`` and
+## ``vcs_vm_test.nim``.
 ##
 ## Co-located per the Test-Co-Location-Convention so the panel's
 ## ViewModel tests live alongside the panel module's surface area in
@@ -256,15 +263,13 @@ suite "FilesystemVM initial state":
 
       dispose()
 
-  test "expanded set + diff + deep-review default to empty":
+  test "expanded set + diff default to empty":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
 
       check vm.expandedPaths.val.len == 0
       check vm.diffEntries.val.len == 0
-      check not vm.deepReviewActive.val
-      check vm.deepReviewFiles.val.len == 0
 
       dispose()
 
@@ -367,18 +372,6 @@ suite "FilesystemVM setRoot / clearRoot":
       openedPath = ""
       vm.openFile("")
       check openedPath == ""
-
-      dispose()
-
-  test "isEmpty stays true when only deep-review is empty":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFilesystemVM(store)
-
-      vm.setDeepReview(true)
-      check vm.isEmpty.val
-      check vm.deepReviewActive.val
-      check vm.deepReviewFiles.val.len == 0
 
       dispose()
 
@@ -695,57 +688,5 @@ suite "FilesystemVM diff entries":
       vm.setDiffEntries([])
       check vm.diffEntries.val.len == 0
       check not vm.hasDiff.val
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# deep review
-# ---------------------------------------------------------------------------
-
-suite "FilesystemVM deep review":
-
-  test "setDeepReview(true, files) stores the file list":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFilesystemVM(store)
-
-      vm.setDeepReview(true, [
-        FilesystemDeepReviewFile(path: "a", baseName: "a", status: "A",
-                                 linesAdded: 1, linesRemoved: 0,
-                                 coverageExecuted: 0, coverageTotal: 0),
-        FilesystemDeepReviewFile(path: "b", baseName: "b", status: "M",
-                                 linesAdded: 0, linesRemoved: 1,
-                                 coverageExecuted: 0, coverageTotal: 0),
-      ])
-
-      check vm.deepReviewActive.val
-      check vm.deepReviewFiles.val.len == 2
-      check vm.deepReviewFiles.val[0].status == "A"
-      check vm.deepReviewFiles.val[1].status == "M"
-      check not vm.isEmpty.val
-
-      dispose()
-
-  test "setDeepReview(false, files) wipes any pending list":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFilesystemVM(store)
-
-      vm.setDeepReview(true, [
-        FilesystemDeepReviewFile(path: "x", baseName: "x", status: "A",
-                                 linesAdded: 1, linesRemoved: 0,
-                                 coverageExecuted: 0, coverageTotal: 0),
-      ])
-      check vm.deepReviewFiles.val.len == 1
-
-      # Pass a non-empty seq with active=false; the VM must drop it
-      # rather than leaking a stale list.
-      vm.setDeepReview(false, [
-        FilesystemDeepReviewFile(path: "y", baseName: "y", status: "M",
-                                 linesAdded: 0, linesRemoved: 1,
-                                 coverageExecuted: 0, coverageTotal: 0),
-      ])
-      check not vm.deepReviewActive.val
-      check vm.deepReviewFiles.val.len == 0
 
       dispose()

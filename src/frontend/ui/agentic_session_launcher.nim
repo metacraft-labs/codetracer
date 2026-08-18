@@ -21,7 +21,7 @@ import ../viewmodel/store/replay_data_store
 import ../viewmodel/store/types
 import ../viewmodel/viewmodels/[agent_activity_vm, agent_workspace_vm,
   agentic_session_vm, deepreview_vm, editor_vm, review_entry, vcs_vm]
-import agent_activity, agent_workspace, caption_bar_progress, deepreview, vcs
+import agent_activity, agent_workspace, caption_bar_progress, vcs
 
 const
   AgentActivityId* = 7901

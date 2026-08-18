@@ -1090,3 +1090,31 @@ else
 
   &::placeholder
     color: colors-ui-text-primary-body
+
+// ---------------------------------------------------------------------------
+// Diff line highlighting in DeepReview mode
+// ---------------------------------------------------------------------------
+//
+// Applied by ``ui/editor.nim``'s ``deepReviewDiffStyleLines`` (via the
+// existing ``styleLines`` / ``deltaDecorations`` pattern) when a source file
+// is opened while a review is active and the review data carries hunks for
+// it — DeepReview-GUI.md §5.1, "Full Files Mode ... diff highlights applied
+// to the modified lines".  Added lines in a pure-addition hunk are green,
+// added lines in a hunk that also removes are yellow.
+//
+// Same green/yellow palette as the unified diff tab
+// (``components/unified_diff.styl``) so the two representations of one
+// changeset read alike.  Moved here from the deleted
+// ``components/deepreview.styl`` (DR-R8); the editor is their only consumer.
+
+.line-diff-added
+  background-color: rgba(63, 185, 80, 0.18)
+  border-left: 0.1875em solid #3fb950
+
+.line-diff-modified
+  background-color: rgba(210, 153, 34, 0.18)
+  border-left: 0.1875em solid #d29922
+
+.line-diff-removed
+  background-color: rgba(248, 81, 73, 0.18)
+  border-left: 0.1875em solid #f85149

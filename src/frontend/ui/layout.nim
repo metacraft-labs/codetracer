@@ -1,6 +1,6 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
-  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
+  state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   frame_viewer, pixel_history, shader_debug, video_player,
@@ -956,7 +956,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
-      Content.DeepReview,
       Content.VCS,
       Content.UnifiedDiff,
       Content.AgentActivity,
@@ -1142,11 +1141,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           command.syncLegacyCommandPaletteIntoVM(
             CommandPaletteComponent(component))
           command.tryMountIsoNimCommandPalettePanel()
-
-        if state.content == Content.DeepReview:
-          deepreview.syncLegacyDeepReviewIntoVM(
-            DeepReviewComponent(component))
-          deepreview.tryMountIsoNimDeepReviewPanel(component.id)
 
         if state.content == Content.VCS:
           vcs.syncLegacyVCSIntoVM(VCSComponent(component))

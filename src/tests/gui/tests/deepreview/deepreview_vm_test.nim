@@ -1,11 +1,22 @@
 ## Unit tests for ``DeepReviewVM``.
 ##
-## The last suite renders the real IsoNim DeepReview view through
-## ``MockRenderer`` rather than asserting on VM state alone.  It lives here
-## because the defect it guards (issue #610) is a *view* decision keyed off a
-## VM flag: the mode toggle used to be suppressed whenever ``glEmbedded`` was
-## set, and ``glEmbedded`` is set for every ``--deepreview`` session — so no
-## VM-level assertion could observe it.
+## ``DeepReviewVM`` is the review's data holder.  It is composed by
+## ``AgenticSessionVM`` (an agentic session owns a review), and since DR-R8 it
+## has no view of its own: the standalone DeepReview panel is deleted and the
+## review's three surfaces are the Editor, the VCS panel and the Agent
+## Activity panel (DeepReview-GUI.md §7).  The suites below therefore assert
+## VM state and the review-entry step, not a rendered panel.
+##
+## Removed with the panel: the "DeepReview view — GL-embedded panel (issue
+## #610)" suite, which rendered ``isonim_deepreview_view`` through
+## ``MockRenderer`` to assert the panel's own view-mode toggle and its own
+## editor area.  Both migrated in DR-R1/DR-R4 and are covered where they now
+## live — the toggle's rendering and its click by
+## ``test_vcs_panel_renders_view_mode_toggle_in_review_mode`` and "toggling
+## the switch in review mode moves the view mode"
+## (``src/tests/gui/tests/vcs/vcs_view_test.nim``), and what the mode makes a
+## click *open* by ``test_vcs_open_action_follows_view_mode_in_review_mode``
+## (``src/tests/gui/tests/vcs/vcs_vm_test.nim``).
 
 import std/[json, strutils, tables, unittest]
 import isonim/core/[signals, computation, owner]
@@ -16,7 +27,6 @@ import store/replay_data_store
 import viewmodels/deepreview_vm
 import viewmodels/review_entry
 import viewmodels/vcs_vm
-import views/isonim_deepreview_view
 
 proc makeStoreWithMock(autoRespond: bool = true):
     tuple[store: ReplayDataStore, mock: MockBackendService] =
@@ -336,87 +346,6 @@ proc findById(node: MockNode; id: string): MockNode =
     if found != nil:
       return found
   nil
-
-proc populateEmbeddedPanel(vm: DeepReviewVM) =
-  ## Minimum state for a GL-embedded review panel with something to show.
-  vm.setHasData(true)
-  vm.setGlEmbedded(true)
-  vm.setHeader("DeepReview: parser", "abcdef123456...",
-               "1 files | 1 recordings | 9ms")
-  vm.setFiles(@[makeFile("/repo/src/main.rs")])
-  vm.setViewMode(drpvmUnified)
-
-suite "DeepReview view — GL-embedded panel (issue #610)":
-
-  test "the view mode toggle is rendered even when GL-embedded":
-    ## `glEmbedded` is true for the whole `--deepreview` session, so hiding
-    ## the toggle behind it made Full Files mode permanently unreachable.
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-      let panel = renderDeepReviewPanel(r, vm, componentId = 11)
-
-      populateEmbeddedPanel(vm)
-
-      check vm.glEmbedded.val
-      check findByClass(panel, "deepreview-mode-toggle") != nil
-      check findAllByClass(panel, "deepreview-mode-btn").len == 2
-
-      dispose()
-
-  test "picking Full Files switches the embedded editor area":
-    ## The toggle has to *do* something: `glEmbedded` legitimately drops the
-    ## panel's own file list and calltrace columns (the VCS and CALLTRACE
-    ## panels own those), but the editor area must still honour the mode.
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-      var reportedMode = drpvmUnified
-      let callbacks = DeepReviewCallbacks(
-        onSetViewMode: proc(mode: DeepReviewPanelViewMode) =
-          (reportedMode = mode))
-      let panel = renderDeepReviewPanel(r, vm, componentId = 12,
-                                        callbacks = callbacks)
-
-      populateEmbeddedPanel(vm)
-      check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
-      check findById(panel, isonim_deepreview_view.editorId(12)) == nil
-
-      findAllByClass(panel, "deepreview-mode-btn")[0].fireEvent("click")
-
-      check vm.viewMode.val == drpvmFullFiles
-      check reportedMode == drpvmFullFiles
-      let editorHost = findById(panel, isonim_deepreview_view.editorId(12))
-      check editorHost != nil
-      check editorHost.attributes.getOrDefault("class", "") ==
-        DeepReviewEditorClass
-      check findByClass(panel, DeepReviewUnifiedDiffClass) == nil
-      # The duplicated columns stay suppressed — that part of `glEmbedded`
-      # is correct and must not regress.
-      check findByClass(panel, DeepReviewFileListClass) == nil
-      check findByClass(panel, "deepreview-calltrace") == nil
-
-      dispose()
-
-  test "switching back to Unified restores the diff surface":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createDeepReviewVM(store)
-      let r = MockRenderer()
-      let panel = renderDeepReviewPanel(r, vm, componentId = 13)
-
-      populateEmbeddedPanel(vm)
-      findAllByClass(panel, "deepreview-mode-btn")[0].fireEvent("click")
-      check findById(panel, isonim_deepreview_view.editorId(13)) != nil
-
-      findAllByClass(panel, "deepreview-mode-btn")[1].fireEvent("click")
-      check vm.viewMode.val == drpvmUnified
-      check findById(panel, isonim_deepreview_view.editorId(13)) == nil
-      check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
-
-      dispose()
 
 # ---------------------------------------------------------------------------
 # Review entry: opening the first modified file (DR-R1)

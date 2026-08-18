@@ -411,6 +411,10 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
     ## which is now the single projection all three launch paths use.
     let dataset = cliLaunchDataset()
     check dataset.title == "DeepReview: parser cleanup"
+    # DR-R8: the reviewed commit, abbreviated the way the deleted standalone
+    # panel's header abbreviated it, so moving the fact to the VCS panel's
+    # Changed Files header (DeepReview-GUI.md §3) did not change what it says.
+    check dataset.commit == "a1b2c3d4e5f6..."
     check dataset.files.len == 3
     check dataset.files[0].path == "src/main.rs"
     check dataset.files[0].baseName == "main.rs"
@@ -900,3 +904,50 @@ when not defined(js):
       let launcher = source(LauncherPath)
       check not launcher.contains("setCoverageSummary")
       check not launcher.contains("data.deepReviewSelectedFileIndex")
+
+# ---------------------------------------------------------------------------
+# The reviewed commit reaches the VCS panel (DR-R8)
+# ---------------------------------------------------------------------------
+
+suite "Review entry carries the reviewed commit (DR-R8)":
+
+  test "test_review_entry_puts_the_commit_in_the_vcs_header":
+    ## DeepReview-GUI.md §3.  The fact lived only in the deleted standalone
+    ## panel's header; DR-R2 migrated the session title and the stats but not
+    ## this, so DR-R8 moved it rather than losing it with the panel.
+    ##
+    ## Falsifiable against the code as it stood before DR-R8: `ReviewDataset`
+    ## had no `commit` field and `VCSVM` no `reviewCommit` signal.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      let store = createReplayDataStore(mock.toBackendService())
+      let vcs = createVCSVM()
+      let activity = createAgentActivityDeepReviewVM(store)
+
+      discard enterReview(vcs, activity, cliLaunchDataset(), nil)
+
+      check vcs.reviewCommit.val == "a1b2c3d4e5f6..."
+
+      dispose()
+
+  test "a review whose dataset names no commit carries none":
+    ## Launch path 2 (a trace with an associated diff) and the agentic handoff
+    ## both review uncommitted or patch-only changesets, so `commit` is empty
+    ## and the header must say nothing rather than invent a sha.
+    check abbreviatedCommit("") == ""
+    check abbreviatedCommit("abc123") == "abc123"
+    check abbreviatedCommit("a1b2c3d4e5f6a1b2c3d4") == "a1b2c3d4e5f6..."
+
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      let store = createReplayDataStore(mock.toBackendService())
+      let vcs = createVCSVM()
+      let activity = createAgentActivityDeepReviewVM(store)
+
+      var dataset = cliLaunchDataset()
+      dataset.commit = ""
+      discard enterReview(vcs, activity, dataset, nil)
+
+      check vcs.reviewCommit.val == ""
+
+      dispose()

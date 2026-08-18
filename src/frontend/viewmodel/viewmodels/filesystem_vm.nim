@@ -25,24 +25,11 @@
 ##                             tree when the recording carries a diff
 ##                             (the legacy ``diff-files-list``).  Empty
 ##                             seq disables the section.
-## - ``deepReviewActive``    — true while the deep-review surface is
-##                             active.  Mirrors the legacy
-##                             ``data.deepReviewActive`` flag — when
-##                             set, the IsoNim view renders the
-##                             compact one-line-per-file list instead
-##                             of the standard tree.
-## - ``deepReviewFiles``     — flat list of files surfaced by the
-##                             deep-review surface (mirrors
-##                             ``data.deepReviewData.files``).  The
-##                             view renders one ``deepreview-file-item-
-##                             compact`` row per entry with status,
-##                             basename, line counts, and coverage.
 ##
 ## Derived:
 ## - ``isEmpty``             — convenience for the empty-state
 ##                             placeholder (true when ``rootEntry``
-##                             carries no children AND no diff entries
-##                             AND no deep-review entries).
+##                             carries no children AND no diff entries).
 ## - ``hasDiff``             — true when ``diffEntries`` is non-empty.
 ## - ``totalEntryCount``     — total entry count across the tree (used
 ##                             by tests).
@@ -63,10 +50,6 @@
 ## - ``setDiffEntries``      — bulk-replace the diff list (mirrors the
 ##                             legacy ``data.startOptions.diff.files``
 ##                             read inside the Karax method).
-## - ``setDeepReview``       — toggle the deep-review surface on /
-##                             off + push the file list (mirrors the
-##                             legacy ``deepReviewActive`` /
-##                             ``deepReviewData`` pair).
 ##
 ## ``string`` / ``bool`` / ``seq`` are used everywhere so the same
 ## value works on both native (``test-vm-native``) and JS
@@ -85,32 +68,6 @@ import ../store/[replay_data_store, types]
 import ../../../common/trace_source_paths
 
 type
-  FilesystemDeepReviewFile* = object
-    ## Compact row the deep-review surface renders.  Mirrors the
-    ## fields the legacy ``deepReviewData.files`` walk consumed
-    ## (status badge, basename, line counts, coverage).  Carrying the
-    ## already-derived ``baseName`` keeps the view free of path-parsing
-    ## logic so the same shape works on both native and JS backends.
-    ##
-    ## ``path``        — full source path the row links to.  Click
-    ##                   opens it via the bridge.
-    ## ``baseName``    — display name (legacy view used
-    ##                   ``rfind('/')`` to derive it).
-    ## ``status``      — single-letter diff status (``"A"`` / ``"M"`` /
-    ##                   ``"D"`` / ``""``).
-    ## ``linesAdded`` /
-    ## ``linesRemoved`` — diff-line counts.  Both zero hides the badge.
-    ## ``coverageExecuted`` /
-    ## ``coverageTotal`` — coverage summary.  ``coverageTotal == 0``
-    ##                    hides the summary span.
-    path*: string
-    baseName*: string
-    status*: string
-    linesAdded*: int
-    linesRemoved*: int
-    coverageExecuted*: int
-    coverageTotal*: int
-
   FilesystemVM* = ref object of ViewModel
     ## Reactive state for the Filesystem panel.
     store*: ReplayDataStore
@@ -120,8 +77,6 @@ type
     loadingState*: Signal[LoadingState]
     expandedPaths*: Signal[HashSet[string]]
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
-    deepReviewActive*: Signal[bool]
-    deepReviewFiles*: Signal[seq[FilesystemDeepReviewFile]]
     onOpenFile*: proc(path: string)
       ## Called by file-row click handlers. The legacy component wires this to
       ## ``data.openTab(path, ViewSource)`` so CTFS-imported traces resolve
@@ -134,20 +89,6 @@ type
     isEmpty*: Memo[bool]
     hasDiff*: Memo[bool]
     totalEntryCount*: Memo[int]
-
-proc `==`*(a, b: FilesystemDeepReviewFile): bool {.noSideEffect.} =
-  ## Explicit equality so ``Signal[seq[FilesystemDeepReviewFile]]``
-  ## compiles under Nim's side-effect inference.  Mirrors the
-  ## ``FilesystemEntryNode`` / ``FilesystemDiffEntry`` overrides in
-  ## ``store/types.nim`` (same root cause: the default structural
-  ## ``==`` is inferred as side-effecting because the value type
-  ## carries ``string`` fields whose ``==`` triggers the same
-  ## inference walk).
-  a.path == b.path and a.baseName == b.baseName and
-    a.status == b.status and a.linesAdded == b.linesAdded and
-    a.linesRemoved == b.linesRemoved and
-    a.coverageExecuted == b.coverageExecuted and
-    a.coverageTotal == b.coverageTotal
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -301,17 +242,6 @@ proc setDiffEntries*(vm: FilesystemVM;
   ## hide the section.
   vm.diffEntries.val = @entries
 
-proc setDeepReview*(vm: FilesystemVM; active: bool;
-                    files: openArray[FilesystemDeepReviewFile] = @[]) =
-  ## Toggle the deep-review surface.  When ``active`` is false the
-  ## file list is wiped regardless of ``files`` so a stale list can't
-  ## leak through.
-  vm.deepReviewActive.val = active
-  if active:
-    vm.deepReviewFiles.val = @files
-  else:
-    vm.deepReviewFiles.val = @[]
-
 proc expandToFile*(vm: FilesystemVM; filePath: string) =
   ## Reveal ``filePath`` by expanding every folder between the tree root
   ## and it.
@@ -350,23 +280,19 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
   ## ``vm.dispose()``.  Sets every signal to its empty/inert default
   ## so the view renders the empty-state placeholder on first paint.
   withViewModel proc(dispose: proc()): FilesystemVM =
-    # The recursive ``FilesystemEntryNode`` plus the diff / deep-review
-    # value types carry explicit ``{.noSideEffect.}`` ``==`` overrides
-    # (see ``store/types.nim`` and the ``FilesystemDeepReviewFile``
-    # override above).  Without those, the signal write path would not
+    # The recursive ``FilesystemEntryNode`` and the diff value type carry
+    # explicit ``{.noSideEffect.}`` ``==`` overrides (see
+    # ``store/types.nim``).  Without those, the signal write path would not
     # compile under Nim's side-effect inference for compound types.
     let rootEntry = createSignal(emptyEntry())
     let loadingState = createSignal(lsLoading)
     let expandedPaths = createSignal(initHashSet[string]())
     let diffEntries = createSignal(newSeq[FilesystemDiffEntry]())
-    let deepReviewActive = createSignal(false)
-    let deepReviewFiles = createSignal(newSeq[FilesystemDeepReviewFile]())
 
     let isEmpty = createMemo[bool] proc(): bool =
       let r = rootEntry.val
       let rootEmpty = r.text.len == 0 and r.children.len == 0
-      rootEmpty and diffEntries.val.len == 0 and
-        deepReviewFiles.val.len == 0
+      rootEmpty and diffEntries.val.len == 0
 
     let hasDiff = createMemo[bool] proc(): bool =
       diffEntries.val.len > 0
@@ -380,8 +306,6 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
       loadingState: loadingState,
       expandedPaths: expandedPaths,
       diffEntries: diffEntries,
-      deepReviewActive: deepReviewActive,
-      deepReviewFiles: deepReviewFiles,
       isEmpty: isEmpty,
       hasDiff: hasDiff,
       totalEntryCount: totalEntryCount,

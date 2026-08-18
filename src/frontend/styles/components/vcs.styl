@@ -107,11 +107,16 @@
 // ---------------------------------------------------------------------------
 //
 // The trace-context selector and the review stats that DeepReview-GUI.md §2
-// houses in this panel's header.  Only layout lives here: the control's own
-// appearance comes from the panel-agnostic `.deepreview-trace-select` /
-// `.deepreview-stats` rules in components/deepreview.styl, which these
-// elements also carry, so nothing is duplicated.  A normal version-control
-// session renders neither element, so neither rule can take space there.
+// houses in this panel's header.  A normal version-control session renders
+// neither element, so neither rule can take space there.
+//
+// The elements carry BOTH a `vcs-review-*` class (the layout rules below,
+// which are specific to this narrow panel) and a panel-agnostic
+// `deepreview-*` class (the appearance rules further down, which say what the
+// control looks like anywhere it is used).  Those appearance rules used to
+// live in `components/deepreview.styl` alongside the standalone review panel;
+// DR-R8 deleted that panel, and its stylesheet with it, so the three rules
+// that still had a consumer moved here — this panel is now their only one.
 
 .vcs-review-trace-selector
   padding-top: 0.25em
@@ -125,6 +130,39 @@
 .vcs-review-stats
   display: block
   padding: 0.25em 0.5em 0 0.5em
+
+// Panel-agnostic appearance of the two header controls, moved verbatim from
+// the deleted `components/deepreview.styl`.  The dropdown matches the GL tab
+// styling: dark background, light text, compact sizing consistent with the
+// header bar height.
+
+.deepreview-stats
+  font-size: 12px
+  color: var(--text-secondary, #8e8f92)
+
+.deepreview-trace-selector
+  display: flex
+  align-items: center
+  flex-shrink: 0
+
+.deepreview-trace-select
+  font-family: "SpaceMono", monospace
+  font-size: 12px
+  color: #cccccc
+  background-color: #3c3c3c
+  border: 1px solid var(--border-color, #3a3b44)
+  border-radius: 3px
+  padding: 2px 8px
+  height: 24px
+  cursor: pointer
+  outline: none
+  appearance: auto
+
+  &:hover
+    background-color: #4a4a4a
+
+  &:focus
+    border-color: #007acc
 
 // ---------------------------------------------------------------------------
 // Section headers
@@ -750,9 +788,6 @@
 .hunk-selected
   border-left: 0.1875em solid #569cd6
   background: rgba(86, 156, 214, 0.08)
-
-  .deepreview-unified-hunk-header
-    background: rgba(86, 156, 214, 0.15)
 
 .hunk-selection-indicator
   display: inline-block

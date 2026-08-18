@@ -524,7 +524,6 @@ proc editModeHiddenContentIds(): seq[int] =
     ord(Content.TraceLog),
     ord(Content.AgentActivity),
     ord(Content.AgentActivityDeepReview),
-    ord(Content.DeepReview),
     # Content.FrameViewer removed in M3 — pane no longer dispatched.
     ord(Content.PixelHistory),
     ord(Content.ShaderDebug),

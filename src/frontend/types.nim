@@ -1039,51 +1039,6 @@ type
     # lastScrollFireTime*: int64
     service*: FlowService
 
-  DeepReviewViewMode* = enum
-    ## Controls which view is active in the DeepReview component.
-    FullFiles,  ## Single-file Monaco editor view (original behaviour).
-    Unified     ## Unified diff view showing all files as a scrollable
-                ## list of hunks with added/removed/context line decorations.
-
-  DeepReviewComponent* = ref object of Component
-    ## Standalone DeepReview viewer.
-    ## Displays coverage, inline values, and call trace from a
-    ## DeepReview JSON export without requiring a debugger connection.
-    drData*: DeepReviewData
-    selectedFileIndex*: int
-    selectedExecutionIndex*: int
-    selectedIteration*: int
-    editor*: MonacoEditor
-    editorInitialized*: bool
-    currentDecorationIds*: js
-    decorationCollection*: js
-    fileContentCache*: JsAssoc[cstring, cstring]
-    viewMode*: DeepReviewViewMode
-    selectedTraceContextId*: int
-      ## Currently selected trace context id (index into
-      ## ``drData.traceContexts``). Defaults to 0 (first context).
-    ## Per-file, per-hunk expansion state. Outer key is file index,
-    ## inner key is hunk index. Each entry stores how many extra lines
-    ## have been expanded above and below the hunk.
-    expandAbove*: JsAssoc[cstring, JsAssoc[cstring, int]]
-    expandBelow*: JsAssoc[cstring, JsAssoc[cstring, int]]
-    glEmbedded*: bool
-      ## When true, the component is embedded inside a Golden Layout
-      ## panel alongside separate filesystem and calltrace panels.
-      ## The render method skips its own file-list and calltrace
-      ## sidebars, showing only the unified diff / editor area.
-    # Hunk editor state (hunk selection + actions).
-    drSelectedHunks*: seq[(int, int)]
-      ## Selected (fileIndex, hunkIndex) pairs for hunk operations.
-    drHunkToolbarVisible*: bool
-      ## True when at least one hunk is selected and the action toolbar
-      ## should be displayed.
-    drLastHunkClickIndex*: int
-      ## Flat ordinal of the last single-clicked hunk header, used for
-      ## Shift-click range selection.
-    drHunkCopyFeedback*: bool
-      ## Briefly true after "Copy as patch" to show feedback.
-
   AgentWorkspaceComponent* = ref object of Component
     ## Agent workspace view showing the agent's working directory files
     ## with DeepReview coverage annotations and test coverage overlay.
@@ -1964,17 +1919,20 @@ type
     pendingReRecord*:       JsObject
 
     # DeepReview data: populated when DeepReview mode is active.
-    # Stored at the Data level so that all panels (editor, filesystem,
-    # calltrace) can access it without going through a dedicated
-    # DeepReviewComponent. Set from data.startOptions.deepReview in
-    # onStartDeepReview.
+    # Stored at the Data level because a review has no panel of its own —
+    # the Editor, the VCS panel and the Agent Activity panel each read it
+    # (DeepReview-GUI.md §7).  Set from data.startOptions.deepReview in
+    # onStartDeepReview, or from a diff-associated trace / an agentic
+    # session handoff (ui/vcs.startDeepReviewNavigation).
     deepReviewActive*:      bool
     deepReviewData*:        DeepReviewData
     deepReviewSelectedFileIndex*: int
-      ## Index into ``deepReviewData.files`` shared between the VCS panel
-      ## (file list) and the DeepReview component (diff view).  Updated
-      ## by VCS clicks and read by the DeepReview component to determine
-      ## which file's diff to render.
+      ## Index into ``deepReviewData.files`` of the review's currently
+      ## selected file.  It describes the review rather than one panel —
+      ## the VCS panel's Changed Files list and the Agent Activity panel's
+      ## per-file coverage table are "two views of one selection"
+      ## (DeepReview-GUI.md §2.1) — so it is stored next to the data it
+      ## indexes.
     deepReviewSelectedTraceContextId*: int
       ## Id of the selected entry of ``deepReviewData.traceContexts``, shared
       ## the same way: the selector lives in the VCS panel header

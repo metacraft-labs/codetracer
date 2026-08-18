@@ -150,8 +150,16 @@ proc abbreviateRelTime*(t: string): string =
   numStr & abbr
 
 proc changedFilesHeaderText(vm: VCSVM): string =
+  ## DeepReview-GUI.md §3: "The section header shows the review's file count
+  ## and, when the changeset came from local git history, the commit it
+  ## belongs to."  A standalone patch names no commit, and then only the file
+  ## count is shown.
   if vm.deepReviewMode.val:
-    " (" & $vm.fileCount.val & " files)"
+    let commit = vm.reviewCommit.val
+    if commit.len > 0:
+      " (" & $vm.fileCount.val & " files, " & commit & ")"
+    else:
+      " (" & $vm.fileCount.val & " files)"
   elif vm.selectedCommitIndices.val.len == 1:
     let idx = vm.selectedCommitIndices.val[0]
     if idx >= 0 and idx < vm.commits.val.len:
@@ -508,13 +516,14 @@ proc renderTraceContextSelector[R](r: R; vm: VCSVM;
   ## the review, from the selector in the VCS panel header".
   ##
   ## The ``deepreview-trace-selector`` / ``deepreview-trace-select`` classes
-  ## are the panel-agnostic rules from
-  ## ``styles/components/deepreview.styl``; they are *adopted* here rather
-  ## than duplicated under a new name (the VCS panel already renders the
-  ## ``deepreview-unified-*`` diff markup the same way).  The ``vcs-review-*``
-  ## classes carry only this panel's own layout, and give tests a selector
-  ## that cannot also match the standalone panel's copy of the control while
-  ## that panel still exists.
+  ## carry the control's panel-agnostic appearance and the ``vcs-review-*``
+  ## classes this panel's own layout.  The former were adopted from the
+  ## standalone DeepReview panel rather than duplicated under a new name; that
+  ## panel is deleted (DR-R8) and its stylesheet with it, so the rules now
+  ## live in ``styles/components/vcs.styl`` and this is their only consumer.
+  ## The two-class split is kept because it is a real one: "what the dropdown
+  ## looks like" and "how wide it may grow inside a narrow sidebar" are
+  ## separate concerns.
   var traceSelect: typeof(r.createElement("select"))
   let selectedId = vm.selectedTraceContextId.val
   let node = ui(r):

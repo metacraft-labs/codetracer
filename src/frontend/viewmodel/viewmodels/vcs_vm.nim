@@ -183,6 +183,15 @@ type
     ## changeset's total +/-.  Empty in normal version-control mode, where the
     ## header describes a live working tree rather than a fixed changeset.
     statsText*: Signal[string]
+    ## The commit the review's changeset belongs to, already abbreviated for
+    ## display, or empty when the dataset names none — DeepReview-GUI.md §3:
+    ## "The section header shows the review's file count and, when the
+    ## changeset came from local git history, the commit it belongs to."
+    ##
+    ## Review mode only.  In normal version-control mode the Changed Files
+    ## header names the *selected commit* of the history list instead, which
+    ## it reads straight from `commits` / `selectedCommitIndices`.
+    reviewCommit*: Signal[string]
     ## The review's selectable trace contexts, in export order.  Empty in
     ## normal version-control mode: a working tree has no recordings behind
     ## it.  DeepReview-GUI.md §6: "The selected trace context can be changed
@@ -398,13 +407,15 @@ proc setDeepReviewMode*(vm: VCSVM; active: bool) =
   vm.deepReviewMode.val = active
 
 proc setHeader*(vm: VCSVM; title: string; icon = "\239\132\166";
-                statsText = "") =
-  ## ``statsText`` mirrors ``DeepReviewVM.setHeader``'s third argument.  It
-  ## defaults to empty so the normal version-control callers clear it: the
-  ## review summary must not survive into a live working-tree session.
+                statsText = ""; reviewCommit = "") =
+  ## ``statsText`` mirrors ``DeepReviewVM.setHeader``'s third argument, and
+  ## ``reviewCommit`` its second.  Both default to empty so the normal
+  ## version-control callers clear them: neither the review summary nor the
+  ## reviewed commit must survive into a live working-tree session.
   vm.headerTitle.val = title
   vm.headerIcon.val = icon
   vm.statsText.val = statsText
+  vm.reviewCommit.val = reviewCommit
 
 proc setTraceContexts*(vm: VCSVM;
                        contexts: openArray[VCSTraceContextRow]) =
@@ -759,6 +770,7 @@ proc clearPanel*(vm: VCSVM) =
   vm.headerTitle.val = ""
   vm.headerIcon.val = "\239\132\166"
   vm.statsText.val = ""
+  vm.reviewCommit.val = ""
   vm.traceContexts.val = @[]
   vm.selectedTraceContextId.val = 0
   vm.isGitRepo.val = false
@@ -800,6 +812,7 @@ proc createVCSVM*(): VCSVM =
       headerTitle: createSignal(""),
       headerIcon: createSignal("\239\132\166"),
       statsText: createSignal(""),
+      reviewCommit: createSignal(""),
       traceContexts: createSignal(newSeq[VCSTraceContextRow]()),
       selectedTraceContextId: createSignal(0),
       isGitRepo: createSignal(false),

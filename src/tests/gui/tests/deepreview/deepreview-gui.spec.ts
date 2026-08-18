@@ -4,13 +4,17 @@
  * These tests verify that the ``--deepreview <path>`` CLI argument correctly
  * loads a DeepReview JSON export file and renders it in the CodeTracer GUI.
  *
- * The test plan is documented in:
- *   src/frontend/tests/deepreview_test_plan.nim
+ * Headless counterparts live in
+ * ``src/tests/gui/tests/deepreview/``, ``src/tests/gui/tests/vcs/``,
+ * ``src/tests/gui/tests/layout/`` and
+ * ``src/tests/gui/tests/agent-activity-deepreview/``; per
+ * ``codetracer-specs/Testing/Testing-Guidelines.md`` every GUI test here has
+ * one.
  *
  * The tests launch CodeTracer in DeepReview mode using a JSON fixture and
- * interact with the standalone review view that displays coverage, inline
- * variable values, function execution sliders, loop iteration sliders,
- * and a call trace tree.
+ * interact with the three panels a review lives in — the VCS panel, the
+ * Editor, and the Agent Activity panel.  DeepReview has no panel of its own
+ * (DeepReview-GUI.md §7); the standalone one was deleted in DR-R8.
  *
  * Prerequisites:
  *   - A working ``ct`` Electron build (set CODETRACER_E2E_CT_PATH or use
@@ -62,21 +66,45 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 1: CLI argument parsing
   // -----------------------------------------------------------------------
 
-  test("Test 1: CLI argument parsing - deepreview container renders", async ({ ctPage }) => {
+  // Retargeted in DR-R8 from the deleted panel's own header
+  // (`.deepreview-container` / `.deepreview-commit` / `.deepreview-stats`) to
+  // the VCS panel, which DeepReview-GUI.md §2 makes the owner of "Session
+  // title / stats" and §3 the owner of the Changed Files header that names
+  // the reviewed commit.
+  //
+  // One assertion changed rather than moved: the panel's stats line read
+  // "3 files | 2 recordings | 1542ms", and the VCS header's reads
+  // "3 files +16 -10".  That is DR-R2's recorded decision — "The stats line
+  // reports two numbers, not four" — because a review dataset's recording
+  // count and collection time describe how the dataset was *made*, not what
+  // the changeset is.  The two numbers that describe the changeset are
+  // asserted here and in Test 24.
+  //
+  // Headless counterparts:
+  //   test_vcs_changed_files_header_names_the_reviewed_commit in
+  //   src/tests/gui/tests/vcs/vcs_view_test.nim, and
+  //   test_review_entry_puts_the_commit_in_the_vcs_header in
+  //   src/tests/gui/tests/deepreview/deepreview_entry_test.nim.
+  test("Test 1: a review names its commit and its changeset in the VCS panel", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
 
-    await expect(dr.container()).toBeVisible();
-    await expect(dr.errorMessage()).toBeHidden();
+    await expect(dr.vcsPanel()).toBeVisible();
 
-    const commitText = await dr.commitDisplay().textContent();
+    // §3: "The section header shows the review's file count and ... the
+    // commit it belongs to."  The fixture's commitSha, abbreviated.
+    const commitText = await dr
+      .vcsPanel()
+      .locator(".vcs-changed-files-commit")
+      .textContent();
     expect(commitText).toBeTruthy();
     expect(commitText).toContain("a1b2c3d4e5f6...");
+    expect(commitText).toContain("3 files");
 
-    const statsText = await dr.statsDisplay().textContent();
+    // §2: "Session title / stats | The VCS panel header".
+    const statsText = await dr.vcsReviewStats().textContent();
     expect(statsText).toContain("3 files");
-    expect(statsText).toContain("2 recordings");
-    expect(statsText).toContain("1542ms");
+    expect(statsText).toContain("+16 -10");
   });
 
   // -----------------------------------------------------------------------
@@ -111,11 +139,78 @@ test.describe("DeepReview GUI - main features", () => {
       expect(titles, `missing standard panel: ${expected}`).toContain(expected);
     }
 
-    // ...and the review surface itself, exactly once.
-    expect(titles.filter((t) => t === "DEEP REVIEW").length).toBe(1);
+    // ...and NO review surface, because DeepReview introduces no panel of its
+    // own (DeepReview-GUI.md §7: "There is no separate 'DeepReview mode' that
+    // replaces the UI").  This assertion was `.toBe(1)` until DR-R8 deleted
+    // the panel; it is the same guard pointed the other way.
+    expect(titles.filter((t) => t === "DEEP REVIEW").length).toBe(0);
 
-    // The mode toggle is part of the panel in every mode.
+    // The mode switcher is the VCS panel's view mode toggle (§2: "Mode
+    // switcher | The VCS panel's view mode toggle"), which DR-R1 made render
+    // in review mode.
     await expect(dr.modeToggle()).toBeVisible();
+  });
+
+  // -----------------------------------------------------------------------
+  // Test 1c: no selector of the deleted panel resolves
+  // -----------------------------------------------------------------------
+
+  // e2e_no_deepreview_panel_selectors_resolve.
+  //
+  // Test 1b asserts the review adds no TAB; this asserts it renders no
+  // element of the deleted panel anywhere in the document, and — in the same
+  // breath — that the Agent Activity panel's DeepReview section, whose name
+  // is nearly identical and which is the review's third pillar (§2.1), is
+  // still there.  Falsifiable before DR-R8: all four selectors resolved.
+  //
+  // Headless counterparts:
+  //   test_review_startup_adds_no_review_panel in
+  //   src/tests/gui/tests/layout/deepreview_layout_test.nim, and
+  //   test_agent_activity_deepreview_survives_the_deletion in
+  //   src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim.
+  test("Test 1c: no standalone DeepReview panel selector resolves", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1500);
+
+    for (const selector of [
+      ".deepreview-container",
+      ".deepreview-file-list",
+      ".deepreview-calltrace",
+      ".deepreview-inline-value",
+      // The panel's own header, diff renderer, sliders and mode toggle went
+      // with it; each capability's new home is asserted by its own test.
+      ".deepreview-header",
+      ".deepreview-unified-diff",
+      ".deepreview-slider",
+      ".deepreview-mode-toggle",
+    ]) {
+      await expect(
+        ctPage.locator(selector),
+        `deleted DeepReview panel selector still resolves: ${selector}`,
+      ).toHaveCount(0);
+    }
+
+    // The panel's test hooks went with it too — nothing may still be driving
+    // a deleted surface from `window`.
+    const hooks = await ctPage.evaluate(() =>
+      [
+        "__deepreviewSetViewMode",
+        "__deepreviewSetExecution",
+        "__deepreviewSetIteration",
+        "__deepreviewSetTraceContext",
+        "__deepreviewExpandAbove",
+        "__deepreviewExpandBelow",
+      ].filter((name) => typeof (window as never as Record<string, unknown>)[name] === "function"),
+    );
+    expect(hooks).toEqual([]);
+
+    // ...while the OTHER DeepReview — the Agent Activity panel's section, a
+    // different Content id with a nearly identical name — is still rendered
+    // and still populated (§2.1).
+    await expect(dr.reviewActivitySection()).toBeVisible();
+    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
+    await expect(dr.reviewActivityFileRows()).toHaveCount(3);
   });
 
   // -----------------------------------------------------------------------
@@ -237,61 +332,27 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 3: Coverage highlighting
+  // Tests 3 and 4 were deleted with the panel (DR-R8)
   // -----------------------------------------------------------------------
-
-  // Skip: Full Files mode is reachable again (issue #610), but the Monaco
-  // coverage/inline-value decorations it asserts need a loaded recording, and
-  // `--deepreview` mode does not load one yet (M42b). Restore with the trace
-  // plumbing, not with the layout fix.
-  test.skip("Test 3: coverage decorations are applied to the editor", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await dr.waitForEditorReady();
-    await wait(2000);
-
-    const executedCount = await dr.executedLines().count();
-    expect(executedCount).toBeGreaterThan(0);
-
-    const unreachableCount = await dr.unreachableLines().count();
-    expect(unreachableCount).toBeGreaterThan(0);
-
-    const partialCount = await dr.partialLines().count();
-    expect(partialCount).toBeGreaterThan(0);
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 4: Inline variable values
-  // -----------------------------------------------------------------------
-
-  // Skip: Full Files mode is reachable again (issue #610), but the Monaco
-  // coverage/inline-value decorations it asserts need a loaded recording, and
-  // `--deepreview` mode does not load one yet (M42b). Restore with the trace
-  // plumbing, not with the layout fix.
-  test.skip("Test 4: inline variable values appear as decorations", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await dr.waitForEditorReady();
-    await wait(2000);
-
-    const inlineCount = await dr.inlineValues().count();
-    expect(inlineCount).toBeGreaterThan(0);
-
-    const normalize = (s: string) => s.replace(/\u00a0/g, " ");
-
-    const allInlineTexts: string[] = [];
-    const inlineLocators = await dr.inlineValues().all();
-    for (const loc of inlineLocators) {
-      const text = await loc.textContent();
-      if (text) allInlineTexts.push(normalize(text));
-    }
-    const combined = allInlineTexts.join(" | ");
-    const hasKnownVar =
-      combined.includes("x =") ||
-      combined.includes("y =") ||
-      combined.includes("result =");
-    expect(hasKnownVar).toBe(true);
-  });
+  //
+  // "Test 3: coverage decorations are applied to the editor" and "Test 4:
+  // inline variable values appear as decorations" both drove the standalone
+  // panel's private Monaco instance, and both were `test.skip` on M42b.
+  //
+  // Neither capability is lost, and neither belonged here:
+  //
+  //   * Coverage is the Agent Activity panel's (DeepReview-GUI.md §2.1,
+  //     "Coverage summary ... Per-file coverage"), asserted by Test 25 below
+  //     and by tests/agent-activity-deepreview/agent-activity-deepreview.spec.ts.
+  //     The `deepreview-line-executed` / `-unreachable` Monaco decorations the
+  //     deleted test looked for still exist, drawn by `ui/agent_workspace.nim`
+  //     over the agent's workspace editor, and are located by
+  //     tests/agentic-coding/page-objects/agentic-page.ts.
+  //   * Inline values as `// x = 10` text comments are FORBIDDEN — §7: "The
+  //     inline variable values MUST NOT be rendered as text comments ... they
+  //     must use the standard CodeTracer Omniscience visual style".  Test 4
+  //     asserted exactly the forbidden rendering.  The correct one is DR-R6's,
+  //     blocked on M42b.
 
   // -----------------------------------------------------------------------
   // Test 5: File switching
@@ -381,72 +442,19 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 6: Execution slider
+  // Tests 6 and 7 were deleted with the panel (DR-R8)
   // -----------------------------------------------------------------------
-
-  // Skip: the execution slider renders in Full Files mode again (issue #610),
-  // but it is driven by per-function flow data that `--deepreview` mode has no
-  // recording behind yet (M42b).
-  test.skip("Test 6: execution slider navigates between function executions", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await dr.waitForEditorReady();
-    await wait(500);
-
-    await expect(dr.executionSlider()).toBeVisible();
-
-    const initialInfo = await dr.executionSliderInfo().textContent();
-    expect(initialInfo).toBeTruthy();
-    expect(initialInfo).toContain("1/3");
-    expect(initialInfo).toContain("main");
-
-    await dr.setExecutionSliderValue(1);
-    await wait(500);
-
-    const secondInfo = await dr.executionSliderInfo().textContent();
-    expect(secondInfo).toContain("2/3");
-    expect(secondInfo).toContain("main");
-
-    await dr.setExecutionSliderValue(2);
-    await wait(500);
-
-    const thirdInfo = await dr.executionSliderInfo().textContent();
-    expect(thirdInfo).toContain("3/3");
-    expect(thirdInfo).toContain("compute");
-
-    await dr.setExecutionSliderValue(0);
-    await wait(300);
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 7: Loop iteration slider
-  // -----------------------------------------------------------------------
-
-  // Skip: the loop slider renders in Full Files mode again (issue #610), but
-  // it is driven by per-loop iteration data that `--deepreview` mode has no
-  // recording behind yet (M42b).
-  test.skip("Test 7: loop slider is visible and navigable for files with loops", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await dr.waitForEditorReady();
-    await wait(500);
-
-    const loopSlider = dr.loopSlider();
-    await expect(loopSlider).toBeVisible();
-
-    const initialInfo = await dr.loopSliderInfo().textContent();
-    expect(initialInfo).toBeTruthy();
-    expect(initialInfo).toContain("1/6");
-
-    await dr.setLoopSliderValue(3);
-    await wait(500);
-
-    const updatedInfo = await dr.loopSliderInfo().textContent();
-    expect(updatedInfo).toContain("4/6");
-
-    await dr.setLoopSliderValue(0);
-    await wait(300);
-  });
+  //
+  // "Test 6: execution slider navigates between function executions" and
+  // "Test 7: loop slider is visible and navigable for files with loops" drove
+  // `.deepreview-slider` through `window.__deepreviewSetExecution` /
+  // `__deepreviewSetIteration`.  Both were `test.skip` on M42b.
+  //
+  // The sliders were the panel's execution-index and iteration selectors, and
+  // DR-R8's inventory lists them as deleted "subject to DR-R6a's decision on
+  // where the invocation selector lives".  DR-R6 is blocked on M42b — the
+  // data behind them is not loaded at all — so there is nothing to retarget
+  // them at yet, and a review's flow overlays are DR-R6's deliverable.
 
   // -----------------------------------------------------------------------
   // Tests 10-12: the review's unified diff, as a Monaco tab (DR-R4)
@@ -631,76 +639,115 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 13: Mode toggle switches between views
+  // Test 13: Mode toggle switches what a file click opens
   // -----------------------------------------------------------------------
 
-  // Re-enabled with the #610 fix: the mode toggle used to be hidden behind
-  // `glEmbedded`, which is set for every `--deepreview` session, so Full
-  // Files mode was unreachable. GL-embedded panels default to Unified Diff
-  // (the file list and call tree live in the VCS / CALLTRACE panels), so the
-  // starting mode differs from the standalone panel's.
+  // Retargeted in DR-R8 from the deleted panel's two-button
+  // `.deepreview-mode-toggle` (which swapped the panel's own DOM diff for its
+  // own Monaco instance) to the VCS panel's view mode toggle, which is where
+  // DeepReview-GUI.md §2 puts the mode switcher and what VCS-Panel.md, "View
+  // mode toggle", defines it to do: "A switch at the top-right of the Changed
+  // Files section controls what happens when a file is clicked".
   //
-  // Headless counterpart: the "DeepReview view — GL-embedded panel" suite in
-  //   src/tests/gui/tests/deepreview/deepreview_vm_test.nim
-  test("Test 13: mode toggle switches between full files and unified diff views", async ({ ctPage }) => {
+  // The subject is unchanged and no assertion is weakened: the toggle exists,
+  // it moves, and the two positions produce the two representations §1
+  // promises — a unified diff tab and the full file.  What changed is that
+  // both representations are now ordinary EDITOR DOCUMENTS rather than two
+  // states of one panel, which is the whole of DR-R4.
+  //
+  // Headless counterparts:
+  //   test_vcs_panel_renders_view_mode_toggle_in_review_mode and "toggling the
+  //   switch in review mode moves the view mode" in
+  //   src/tests/gui/tests/vcs/vcs_view_test.nim;
+  //   test_vcs_open_action_follows_view_mode_in_review_mode in
+  //   src/tests/gui/tests/vcs/vcs_vm_test.nim.
+  test("Test 13: the mode toggle switches between the diff tab and the file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    // The toggle is present at all.
+    // The toggle is present at all, and a review starts on Unified Diff
+    // (§7 step 2: "The first modified file opens in the editor with unified
+    // diff view").
     await expect(dr.modeToggle()).toBeVisible();
-    await expect(dr.fullFilesButton()).toBeVisible();
-    await expect(dr.unifiedDiffButton()).toBeVisible();
+    await expect(dr.modeToggleButton()).toBeVisible();
+    expect(await dr.isUnifiedDiffMode()).toBe(true);
 
-    // GL-embedded default is Unified Diff.
-    await expect(dr.unifiedDiff()).toBeVisible();
+    // Unified Diff position: clicking a file opens its diff document.
+    await dr.fileItemByIndex(0).click();
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible({ timeout: 20_000 });
 
-    // Switch to full files: the Monaco host div appears and the unified
-    // diff goes away.
+    // Flip it: the switch reports the other position...
     await dr.switchToFullFiles();
-    await wait(1000);
+    await wait(500);
+    expect(await dr.isUnifiedDiffMode()).toBe(false);
 
-    await expect(dr.editor()).toBeVisible();
-    await expect(dr.unifiedDiff()).toHaveCount(0);
+    // ...and a click now resolves to the file itself rather than to a diff
+    // document, so no `Diff:`-titled tab appears for the file just clicked.
+    //
+    // HONEST SCOPE: the source tab that *should* appear instead does not,
+    // because `--deepreview` loads no recording and the editor has no source
+    // text to open (M42b) — the same gap that keeps Tests 19-21 skipped.  The
+    // assertion below is therefore the strongest one this harness can make,
+    // and it is still falsifiable: it fails if the toggle stops changing what
+    // a click opens.  That the Open File position resolves to
+    // `voaSourceFile` with target `file:src/utils.rs` IS asserted, headlessly
+    // and completely, by test_vcs_open_action_follows_view_mode_in_review_mode
+    // in src/tests/gui/tests/vcs/vcs_vm_test.nim.
+    await dr.fileItemByIndex(1).click();
+    await wait(1500);
+    const titles = await dr.layoutTabTitles();
+    expect(titles).not.toContain(DeepReviewPage.diffTabTitle("src/utils.rs"));
 
-    // Switch back.
+    // Flip back: the switch returns, and so does the diff-opening behaviour.
     await dr.switchToUnifiedDiff();
     await wait(500);
+    expect(await dr.isUnifiedDiffMode()).toBe(true);
 
-    await expect(dr.unifiedDiff()).toBeVisible();
+    await dr.fileItemByIndex(1).click();
+    await expect(dr.diffTabFor("src/utils.rs")).toBeVisible({ timeout: 20_000 });
   });
 
   // -----------------------------------------------------------------------
-  // Test 19: Diff decorations in Full Files Mode
+  // Tests 19-21: per-file diff overlays in Full Files Mode
   // -----------------------------------------------------------------------
+  //
+  // DeepReview-GUI.md §5.1: "Full Files Mode ... the normal CodeTracer editor
+  // with complete file contents loaded and diff highlights applied to the
+  // modified lines."
+  //
+  // Retargeted in DR-R8 from the deleted panel's own Monaco instance and its
+  // `deepreview-diff-line-*` decorations to the STANDARD editor's, which
+  // `ui/editor.nim`'s `deepReviewDiffStyleLines` draws as `line-diff-added` /
+  // `line-diff-modified`.  That code has always been the specified home (§5.1
+  // assigns the overlays to "The Editor, on the full file"); it simply never
+  // fired, because before DR-R1 no editor tab was ever opened in review mode.
+  //
+  // Still `test.skip`, for the reason they were skipped before and not for a
+  // new one: the overlays are drawn over the file's real source text, and
+  // `--deepreview` mode loads no recording to supply it (M42b).  Restore them
+  // with the trace plumbing.  They are kept rather than deleted precisely
+  // because the capability survived the deletion — deleting them would drop
+  // the only end-to-end coverage §5.1 will ever have.
 
-  // Skip: Full Files mode is reachable again (issue #610), but these assert
-  // Monaco diff decorations that need the file's real source text, which
-  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 19: diff decorations appear in Full Files Mode for modified file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
+    await dr.switchToFullFiles();
+    await dr.fileItemByIndex(0).click();
     await wait(2000);
 
     // The first file (src/main.rs) has status "M" with both removed and
     // added lines, so the added lines should get "modified" (yellow)
     // decorations. The hunk has 8 added lines at newLine 3-10.
-    const modifiedCount = await dr.diffModifiedLines().count();
+    const modifiedCount = await dr.editorDiffModifiedLines().count();
     expect(modifiedCount).toBeGreaterThan(0);
   });
 
-  // -----------------------------------------------------------------------
-  // Test 20: Added lines have green decoration class
-  // -----------------------------------------------------------------------
-
-  // Skip: Full Files mode is reachable again (issue #610), but these assert
-  // Monaco diff decorations that need the file's real source text, which
-  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 20: added lines have green decoration class for purely added file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
+    await dr.switchToFullFiles();
     await wait(500);
 
     // Switch to the second file (src/utils.rs) which has status "A" — all
@@ -710,30 +757,24 @@ test.describe("DeepReview GUI - main features", () => {
     await secondItem.click();
     await wait(1000);
 
-    const addedCount = await dr.diffAddedLines().count();
+    const addedCount = await dr.editorDiffAddedLines().count();
     expect(addedCount).toBeGreaterThan(0);
 
     // Verify at least one element actually has the correct CSS class.
-    const firstAdded = dr.diffAddedLines().first();
+    const firstAdded = dr.editorDiffAddedLines().first();
     const classes = await firstAdded.getAttribute("class");
-    expect(classes).toContain("deepreview-diff-line-added");
+    expect(classes).toContain("line-diff-added");
   });
 
-  // -----------------------------------------------------------------------
-  // Test 21: Diff decorations are removed when switching files
-  // -----------------------------------------------------------------------
-
-  // Skip: Full Files mode is reachable again (issue #610), but these assert
-  // Monaco diff decorations that need the file's real source text, which
-  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 21: diff decorations are removed when switching to a file without diff data", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
-    await wait(500);
+    await dr.switchToFullFiles();
+    await dr.fileItemByIndex(0).click();
+    await wait(1000);
 
     // Start on the first file (src/main.rs, modified) — should have diff decorations.
-    const initialModified = await dr.diffModifiedLines().count();
+    const initialModified = await dr.editorDiffModifiedLines().count();
     expect(initialModified).toBeGreaterThan(0);
 
     // Switch to the second file (src/utils.rs, added) — decorations should
@@ -744,10 +785,10 @@ test.describe("DeepReview GUI - main features", () => {
 
     // src/utils.rs is purely added, so it should have added decorations
     // but no modified decorations.
-    const addedCount = await dr.diffAddedLines().count();
+    const addedCount = await dr.editorDiffAddedLines().count();
     expect(addedCount).toBeGreaterThan(0);
 
-    const modifiedCount = await dr.diffModifiedLines().count();
+    const modifiedCount = await dr.editorDiffModifiedLines().count();
     expect(modifiedCount).toBe(0);
 
     // Switch to the third file (src/config.rs, deleted) — all lines are
@@ -757,8 +798,8 @@ test.describe("DeepReview GUI - main features", () => {
     await thirdItem.click();
     await wait(1000);
 
-    const deletedAdded = await dr.diffAddedLines().count();
-    const deletedModified = await dr.diffModifiedLines().count();
+    const deletedAdded = await dr.editorDiffAddedLines().count();
+    const deletedModified = await dr.editorDiffModifiedLines().count();
     expect(deletedAdded).toBe(0);
     expect(deletedModified).toBe(0);
   });
@@ -767,9 +808,14 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 22: DR-6 - Mode switch preserves file selection
   // -----------------------------------------------------------------------
 
-  // Re-enabled with the #610 fix (see Test 13). File selection is owned by
-  // the VCS panel in GL-embedded mode, so this asserts that toggling the
-  // view mode does not disturb it.
+  // DeepReview-GUI.md §2: "Switching modes should preserve the current file
+  // and the closest available location within that file whenever possible."
+  // File selection is owned by the VCS panel, so this asserts that flipping
+  // the view mode does not disturb it.
+  //
+  // Retargeted in DR-R8 from `window.__deepreviewSetViewMode` (a hook on the
+  // deleted panel) to the VCS panel's real toggle.  Subject and assertions
+  // unchanged.
   test("Test 22: mode switch preserves the selected file index", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -1170,120 +1216,39 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 17: Omniscience overlay - inline values appear on diff lines
+  // Tests 17 and 18 were deleted with the panel (DR-R8)
   // -----------------------------------------------------------------------
-
-  test("Test 17: omniscience inline values appear on unified diff lines with flow data", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await wait(500);
-
-    await dr.switchToUnifiedDiff();
-    await wait(500);
-
-    // The fixture has flow data for src/main.rs and src/utils.rs. Lines
-    // in the unified diff that match flow step line numbers should have
-    // an omniscience overlay span appended.
-    const omniscienceCount = await dr.omniscienceValues().count();
-    expect(omniscienceCount).toBeGreaterThan(0);
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 18: Omniscience overlay - values match fixture flow data
-  // -----------------------------------------------------------------------
-
-  test("Test 18: omniscience inline values match the flow data from the fixture", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await wait(500);
-
-    await dr.switchToUnifiedDiff();
-    await wait(500);
-
-    const normalize = (s: string) => s.replace(/\u00a0/g, " ");
-
-    const allTexts: string[] = [];
-    const locators = await dr.omniscienceValues().all();
-    for (const loc of locators) {
-      const text = await loc.textContent();
-      if (text) allTexts.push(normalize(text));
-    }
-    const combined = allTexts.join(" | ");
-
-    // From the fixture flow data for src/main.rs (first execution):
-    //   line 2: x = 10
-    //   line 3: x = 10, y = 20
-    //   line 4: result = 55
-    //   line 10: result = 55
-    // For src/utils.rs (format_output execution):
-    //   line 2: trimmed = "hello world"
-    //   line 6: result = "[hello world]"
-    // Lines 2, 3, 4 of main.rs are in the hunk (newLine 2, 3, 4).
-    // Line 10 of main.rs is also in the hunk (newLine 10).
-    //
-    // Flow values are now rendered using the standard flow CSS classes:
-    //   <span class="flow-parallel-value-name"><x></span>
-    //   <span class="flow-parallel-value-box">10</span>
-    // so textContent reads as "<x>10" rather than "x = 10".
-    expect(combined).toContain("<x>");
-    expect(combined).toContain("10");
-    expect(combined).toContain("<y>");
-    expect(combined).toContain("20");
-    expect(combined).toContain("<result>");
-    expect(combined).toContain("55");
-
-    // Verify src/utils.rs flow values are also present.
-    expect(combined).toContain("<trimmed>");
-  });
+  //
+  // "Test 17: omniscience inline values appear on unified diff lines with
+  // flow data" and "Test 18: omniscience inline values match the flow data
+  // from the fixture" both located `.deepreview-flow-values` inside the
+  // standalone panel's DOM diff.  That surface is gone, and it is not the
+  // surface the spec asks for: §7 requires flow data on a review's diff to be
+  // "rendered using the same visualization system as normal debugging
+  // (`flowStyleLines`, `applyEventualStylesLines`)" — Monaco decorations on
+  // the diff tab, not spans the review renders itself.
+  //
+  // Nothing converts `DeepReviewFunctionFlow` into a `FlowUpdate` yet, so no
+  // line of the Monaco diff tab carries a flow annotation to assert on.  That
+  // adapter is DR-R6, which is BLOCKED on M42b (`--deepreview` loads no
+  // recording), and DR-R6 owns the rewritten tests.  Retargeting them now
+  // would mean asserting a surface that does not exist; leaving them pointed
+  // at the deleted panel would mean a suite that cannot pass.
 
   // -----------------------------------------------------------------------
-  // Test 8: Call trace panel
+  // Test 8 was deleted with the panel (DR-R8)
   // -----------------------------------------------------------------------
+  //
+  // "Test 8: call trace panel renders the tree with correct structure" drove
+  // `.deepreview-calltrace`, the panel's own call-tree column, and was
+  // already `test.skip`.
+  //
+  // DeepReview-GUI.md §2 assigns the call tree to "The existing CALLTRACE
+  // panel", and DR-R8's inventory deletes the panel's column for exactly that
+  // reason: "The CALLTRACE panel owns this."  That panel has its own suites;
+  // it shows nothing in a CLI-launched review only because `--deepreview`
+  // loads no recording (M42b) — the same reason this test was skipped.
 
-  // Skip: Call trace panel is rendered by a separate GL panel in GL-embedded
-  // mode, not by the DeepReview component itself.
-  // Restore when the calltrace GL panel is testable.
-  test.skip("Test 8: call trace panel renders the tree with correct structure", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await wait(500);
-
-    await expect(dr.callTracePanel()).toBeVisible();
-
-    const headerText = await dr.callTraceHeader().textContent();
-    expect(headerText).toContain("Call Trace");
-
-    await expect(dr.callTraceEmpty()).toBeHidden();
-
-    await expect(dr.callTraceBody()).toBeVisible();
-
-    const entries = dr.callTraceEntries();
-    const entryCount = await entries.count();
-    expect(entryCount).toBeGreaterThanOrEqual(1);
-
-    const firstEntryText = await entries.first().textContent();
-    expect(firstEntryText).toContain("main");
-    expect(firstEntryText).toContain("x1");
-
-    let foundCompute = false;
-    let foundFormatOutput = false;
-    for (let i = 0; i < entryCount; i++) {
-      const text = await entries.nth(i).textContent();
-      if (text?.includes("compute")) foundCompute = true;
-      if (text?.includes("format_output")) foundFormatOutput = true;
-    }
-    expect(foundCompute).toBe(true);
-    expect(foundFormatOutput).toBe(true);
-
-    for (let i = 0; i < entryCount; i++) {
-      const text = await entries.nth(i).textContent();
-      if (text?.includes("compute")) {
-        const style = await entries.nth(i).getAttribute("style");
-        expect(style).toContain("16px");
-        break;
-      }
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1301,25 +1266,36 @@ test.describe("DeepReview GUI - empty data handling", () => {
   test.describe("empty files array", () => {
     test.use({ launchMode: "deepreview", deepreviewJsonPath: emptyReviewPath });
 
+    // Retargeted in DR-R8 from the deleted panel's container and header to the
+    // VCS panel, which owns the changed-files list and the review header
+    // (DeepReview-GUI.md §2, §3).  Same subject: an empty review must load
+    // without erroring and must say it has nothing in it.
     test("Test 9a: renders without errors when files array is empty", async ({ ctPage }) => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
 
-      await expect(dr.container()).toBeVisible();
-      await expect(dr.errorMessage()).toBeHidden();
+      await expect(dr.vcsPanel()).toBeVisible();
+      // No error surface anywhere: the panel renders its empty state, not a
+      // failure.
+      await expect(ctPage.locator(".deepreview-error")).toHaveCount(0);
+      await expect(dr.vcsPanel().locator(".vcs-error")).toHaveCount(0);
 
-      const commitText = await dr.commitDisplay().textContent();
+      // The Changed Files header still names the review's commit, which the
+      // empty fixture carries even though it lists no files.
+      const commitText = await dr
+        .vcsPanel()
+        .locator(".vcs-changed-files-commit")
+        .textContent();
       expect(commitText).toBeTruthy();
-
-      const statsText = await dr.statsDisplay().textContent();
-      expect(statsText).toContain("0 files");
+      expect(commitText).toContain("0 files");
 
       const items = await dr.fileItems();
       expect(items.length).toBe(0);
 
-      // Note: the execution slider only renders in Full Files mode; the
-      // GL-embedded default is Unified Diff. The empty state is verified by
-      // the 0 file items above.
+      // `reviewStatsText` returns "" for a changeset with no files, so no
+      // stats element is rendered rather than one reading "0 files +0 -0" —
+      // see `vcs_vm.reviewStatsText`.
+      await expect(dr.vcsReviewStats()).toHaveCount(0);
     });
   });
 
@@ -1330,20 +1306,13 @@ test.describe("DeepReview GUI - empty data handling", () => {
   test.describe("missing call trace", () => {
     test.use({ launchMode: "deepreview", deepreviewJsonPath: noCalltracePath });
 
-    // Skip: the call tree is rendered by the GL CALLTRACE panel, not by the
-    // DeepReview component, and that panel has no data until `--deepreview`
-    // mode loads a recording (M42b).
-    test.skip("Test 9b: renders without crash when callTrace is null", async ({ ctPage }) => {
-      const dr = new DeepReviewPage(ctPage);
-      await dr.waitForReady();
-
-      await expect(dr.container()).toBeVisible();
-
-      await expect(dr.callTracePanel()).toBeVisible();
-      await expect(dr.callTraceEmpty()).toBeVisible();
-      const emptyText = await dr.callTraceEmpty().textContent();
-      expect(emptyText).toContain("No call trace data");
-    });
+    // "Test 9b: renders without crash when callTrace is null" was deleted in
+    // DR-R8 with the panel: it asserted `.deepreview-calltrace-empty`, the
+    // panel's own "No call trace data" placeholder.  The call tree belongs to
+    // the CALLTRACE panel (DeepReview-GUI.md §2), which has its own suites.
+    // The no-crash half of its subject is covered by Test 9c below, which
+    // launches over the very same `no-calltrace-review.json` fixture and
+    // asserts the review still comes up populated.
 
     test("Test 9c: file without coverage shows '--' badge", async ({ ctPage }) => {
       const dr = new DeepReviewPage(ctPage);
@@ -1378,16 +1347,40 @@ test.describe("DeepReview comprehensive workflow", () => {
   test.describe("full workflow", () => {
     test.use({ launchMode: "deepreview", deepreviewJsonPath: sampleReviewPath });
 
+    // Retargeted in DR-R8, step by step, from the deleted panel to the three
+    // panels a review actually lives in.  Every step of the original survives
+    // and none is weakened; three change surface:
+    //
+    //   * Step 1-2 (session title) moves from `.deepreview-session-title` to
+    //     the VCS panel header (§2, "Session title / stats").
+    //   * Steps 5-6 (hunks with added/removed counts) move from the panel's
+    //     `deepreview-unified-line-*` DOM to the Monaco diff tab's whole-line
+    //     decorations (§4, DR-R4).  The counts are per FILE now rather than
+    //     summed across the changeset, because a review opens one diff
+    //     document per file rather than one scrolling list of all of them —
+    //     so the assertion is 8 added / 3 removed for src/main.rs instead of
+    //     16 / 10 across three files, and it is checked for the second file
+    //     too so the total is still accounted for.
+    //   * Steps 7-8 (context expansion) move to the diff tab's expand control
+    //     lines (§4.2, DR-R5).
+    //
+    // Step 9 (Omniscience inline values) is dropped rather than retargeted:
+    // the panel drew them itself, §7 forbids that rendering, and the correct
+    // one — Monaco flow decorations from a `FlowUpdate` — does not exist yet.
+    // DR-R6 owns it and is blocked on M42b.  This is recorded here rather
+    // than silently: it is the one assertion of this test that has no home
+    // today.
     test("DR-8: full end-to-end workflow through all DeepReview features", async ({ ctPage }) => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
+      await wait(1000);
 
-      // Step 1-2: Verify header shows session title.
-      await expect(dr.sessionTitle()).toBeVisible();
-      const titleText = await dr.sessionTitle().textContent();
+      // Step 1-2: the review names itself in the VCS panel header.
+      await expect(dr.vcsReviewTitle()).toBeVisible();
+      const titleText = await dr.vcsReviewTitle().textContent();
       expect(titleText).toContain("DeepReview: parser cleanup");
 
-      // Step 3: Verify VCS panel file list shows 3 files with correct diff statuses.
+      // Step 3: the VCS panel lists 3 files with the right diff statuses.
       const items = await dr.fileItems();
       expect(items.length).toBe(3);
 
@@ -1400,7 +1393,7 @@ test.describe("DeepReview comprehensive workflow", () => {
       // Verify the first file is selected by default.
       expect(await items[0].isSelected()).toBe(true);
 
-      // Step 4: Click the second file in the VCS panel and verify selection.
+      // Step 4: click the second file and verify the selection moves.
       await wait(500);
 
       const secondItem = dr.fileItemByIndex(1);
@@ -1410,70 +1403,64 @@ test.describe("DeepReview comprehensive workflow", () => {
       expect(await secondItem.isSelected()).toBe(true);
       expect(await dr.fileItemByIndex(0).isSelected()).toBe(false);
 
-      // Step 5: Unified Diff is the GL-embedded default mode.
-      await expect(dr.unifiedDiff()).toBeVisible();
+      // Step 5: a review starts in Unified Diff mode, and a click opened the
+      // file's diff as a Monaco document.
+      expect(await dr.isUnifiedDiffMode()).toBe(true);
+      const utilsTab = dr.diffTabFor("src/utils.rs");
+      await expect(utilsTab).toBeVisible({ timeout: 20_000 });
 
-      // Step 6: Verify hunks are rendered with correct added/removed counts.
-      // Totals across all files: 16 added, 10 removed.
-      const addedCount = await dr.unifiedAddedLines().count();
-      expect(addedCount).toBe(16);
+      // Step 6: hunks render with the right added/removed line counts.
+      // src/utils.rs is a pure addition: +8, -0.
+      await expect(
+        DeepReviewPage.diffTabAddedLines(utilsTab),
+      ).toHaveCount(8, { timeout: 15_000 });
+      await expect(DeepReviewPage.diffTabRemovedLines(utilsTab)).toHaveCount(0);
+      await expect(
+        DeepReviewPage.diffHunkHeaderLinesIn(utilsTab),
+      ).toHaveCount(1);
 
-      const removedCount = await dr.unifiedRemovedLines().count();
-      expect(removedCount).toBe(10);
+      // ...and src/main.rs is a modification: +8, -3, in one hunk.
+      await dr.fileItemByIndex(0).click();
+      const mainTab = dr.diffTabFor("src/main.rs");
+      await expect(mainTab).toBeVisible({ timeout: 20_000 });
+      await expect(
+        DeepReviewPage.diffTabAddedLines(mainTab),
+      ).toHaveCount(8, { timeout: 15_000 });
+      await expect(DeepReviewPage.diffTabRemovedLines(mainTab)).toHaveCount(3);
+      await expect(
+        DeepReviewPage.diffHunkHeaderLinesIn(mainTab),
+      ).toHaveCount(1);
 
-      // Verify all 3 hunk headers are present.
-      const hunkHeaders = dr.unifiedHunkHeaders();
-      expect(await hunkHeaders.count()).toBe(3);
+      // Step 7-8: expanding context above the hunk reveals lines that were
+      // hidden, and they arrive marked as revealed.
+      await expect(
+        DeepReviewPage.revealedDecorations(mainTab),
+      ).toHaveCount(0);
 
-      // Step 7-8: Expand context above the first hunk and verify expanded
-      // lines appear.
-      const initialExpanded = await dr.expandedContextLines().count();
-      expect(initialExpanded).toBe(0);
+      const expandAbove = DeepReviewPage.expandAboveLine(mainTab);
+      await expect(expandAbove).toHaveCount(1, { timeout: 15_000 });
+      await expandAbove.click();
 
-      await dr.expandAbove(0, 0);
+      await expect(
+        DeepReviewPage.revealedDecorations(mainTab),
+      ).toHaveCount(1, { timeout: 15_000 });
+      // A revealed line is an ordinary context line of the document — DR-R5's
+      // rule that expansion adds no fourth, inert line kind.
+      await expect(
+        DeepReviewPage.diffTabContextLines(mainTab).first(),
+      ).toBeAttached();
+
+      // Step 10: switch trace context from the VCS panel header.
+      await expect(dr.vcsTraceContextSelect()).toBeVisible();
+      const options = dr.vcsTraceContextSelect().locator("option");
+      expect(await options.count()).toBe(2);
+      await dr.vcsTraceContextSelect().selectOption("1");
       await wait(500);
+      expect(await dr.vcsTraceContextSelect().inputValue()).toBe("1");
 
-      const expandedCount = await dr.expandedContextLines().count();
-      expect(expandedCount).toBeGreaterThan(0);
-
-      // Verify expanded lines have the context class.
-      const expandedClasses = await dr.expandedContextLines().first().getAttribute("class");
-      expect(expandedClasses).toContain("deepreview-unified-line-context");
-
-      // Step 9: Verify Omniscience inline values on diff lines.
-      const omniscienceCount = await dr.omniscienceValues().count();
-      expect(omniscienceCount).toBeGreaterThan(0);
-
-      const normalize = (s: string) => s.replace(/\u00a0/g, " ");
-      const allOmnTexts: string[] = [];
-      const omnLocators = await dr.omniscienceValues().all();
-      for (const loc of omnLocators) {
-        const text = await loc.textContent();
-        if (text) allOmnTexts.push(normalize(text));
-      }
-      const combinedOmn = allOmnTexts.join(" | ");
-      // Flow values use standard flow CSS classes; textContent reads
-      // "<x>10" rather than the old "x = 10" format.
-      expect(combinedOmn).toContain("<x>");
-      expect(combinedOmn).toContain("10");
-      expect(combinedOmn).toContain("<y>");
-      expect(combinedOmn).toContain("20");
-
-      // Step 10: Switch trace context if the selector is available.
-      const selectorVisible = await dr.traceContextSelector().isVisible();
-      if (selectorVisible) {
-        const options = dr.traceContextSelect().locator("option");
-        const optionCount = await options.count();
-        expect(optionCount).toBe(2);
-
-        // Switch to the second trace context.
-        await dr.setTraceContext(1);
-        await wait(500);
-      }
-
-      // Note: the mode toggle and Full Files mode are covered by Test 13
-      // since the #610 fix. The Monaco diff/inline-value decorations remain
-      // uncovered because `--deepreview` mode loads no recording yet (M42b).
+      // ...and the third pillar is populated from the same dataset (§2.1).
+      await expect(dr.reviewActivitySection()).toBeVisible();
+      await expect(dr.reviewActivityFileRows()).toHaveCount(3);
     });
   });
 
@@ -1488,21 +1475,27 @@ test.describe("DeepReview comprehensive workflow", () => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
 
-      // Verify no crash: container visible, no error message.
-      await expect(dr.container()).toBeVisible();
-      await expect(dr.errorMessage()).toBeHidden();
+      // Verify no crash: the review's navigation surface is up and no error
+      // is showing.
+      await expect(dr.vcsPanel()).toBeVisible();
+      await expect(dr.vcsPanel().locator(".vcs-error")).toHaveCount(0);
+      await expect(ctPage.locator(".deepreview-error")).toHaveCount(0);
 
-      // Verify no file items in the VCS panel.
+      // Verify no file items in the VCS panel...
       const items = await dr.fileItems();
       expect(items.length).toBe(0);
 
-      // Verify stats reflect empty data.
-      const statsText = await dr.statsDisplay().textContent();
-      expect(statsText).toContain("0 files");
+      // ...and that the header reports it rather than leaving the count blank.
+      const commitText = await dr
+        .vcsPanel()
+        .locator(".vcs-changed-files-commit")
+        .textContent();
+      expect(commitText).toContain("0 files");
 
-      // Note: the execution slider only renders in Full Files mode; the
-      // GL-embedded default is Unified Diff. The empty state is verified by
-      // the 0 file items and stats above.
+      // An empty review opens no editor document either — §7 step 2 has no
+      // first modified file to open.  Covered headlessly by "an empty review
+      // opens nothing" in deepreview_vm_test.nim.
+      await expect(dr.diffTabs()).toHaveCount(0);
     });
   });
 
@@ -1517,9 +1510,10 @@ test.describe("DeepReview comprehensive workflow", () => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
 
-      // Verify the container renders without errors.
-      await expect(dr.container()).toBeVisible();
-      await expect(dr.errorMessage()).toBeHidden();
+      // Verify the review renders without errors.
+      await expect(dr.vcsPanel()).toBeVisible();
+      await expect(dr.vcsPanel().locator(".vcs-error")).toHaveCount(0);
+      await expect(ctPage.locator(".deepreview-error")).toHaveCount(0);
 
       // Verify the VCS panel file list works (1 file in the fixture).
       const items = await dr.fileItems();
@@ -1528,9 +1522,12 @@ test.describe("DeepReview comprehensive workflow", () => {
       const name = await items[0].name();
       expect(name).toBe("lib.rs");
 
-      // Note: Call trace panel is rendered by a separate GL panel in
-      // GL-embedded mode. Calltrace assertions are skipped here; they
-      // will be restored when the calltrace GL panel is testable.
+      // Note: the call tree belongs to the CALLTRACE panel
+      // (DeepReview-GUI.md §2), which is present in the layout — the review
+      // adds and removes nothing — but empty until `--deepreview` loads a
+      // recording (M42b).
+      const titles = await dr.layoutTabTitles();
+      expect(titles).toContain("CALLTRACE");
     });
   });
 });

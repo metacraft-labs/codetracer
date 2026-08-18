@@ -1,4 +1,4 @@
-## Additive GoldenLayout placement for the DeepReview review surface.
+## GoldenLayout focus preset for a DeepReview session.
 ##
 ## DeepReview (``ct --deepreview <export.json>``) used to *replace* the
 ## user's GoldenLayout with a hand-rolled three-panel preset (VCS +
@@ -9,19 +9,26 @@
 ## while ``deepReviewActive``; the index-side layout loader rejects any
 ## saved layout that lost its Filesystem panel).  See issue #610.
 ##
-## The fix mirrors what ``visual_replay_layout`` already does for the MCR
-## visual-replay tabs: placement is **additive**.  The user's own layout is
-## kept intact and a single DeepReview surface is inserted into the editor
-## area, exactly where ``data.openLayoutTab(Content.DeepReview,
-## DeepReviewId, isEditor = true)`` would put it when the agentic session
-## launcher opens the same panel on a live debug layout
-## (``ui/agentic_session_launcher.nim``).  That launcher is the reference
-## implementation this module reproduces for the startup path.
+## What replaced it is *nothing at all*: a review adds no component to the
+## layout.  DeepReview-GUI.md §7 — "There is no separate 'DeepReview mode'
+## that replaces the UI.  The same GL layout is used with different data
+## displayed in the existing panels" — and the review's three surfaces (the
+## Editor, the VCS panel and the Agent Activity panel) all exist
+## independently of it.  Until DR-R8 this module also *inserted* a
+## standalone ``Content.DeepReview`` surface into the editor area; that
+## panel and its insertion are gone.
 ##
-## All helpers operate on parsed ``JsonNode`` trees, so the placement rules
-## are testable headlessly — no Electron, no GoldenLayout, no DOM.  The
-## bridge to the live JS config object is
-## ``ui_js.resolvedConfigToJsonNode`` / ``jsonNodeToResolvedConfig``.
+## What remains is obligation 2 of
+## ``codetracer-specs/GUI/Layout-And-Navigation/Layout-System.md``,
+## "DeepReview and the Layout" — "Focus, not relocation": the stack hosting
+## each review panel is retargeted at it so the changed-file list and the
+## review's coverage/test summary are the visible tabs rather than being
+## hidden behind siblings.  No panel is added, moved or removed.
+##
+## All helpers operate on parsed ``JsonNode`` trees, so the rules are
+## testable headlessly — no Electron, no GoldenLayout, no DOM.  The bridge
+## to the live JS config object is ``ui_js.resolvedConfigToJsonNode`` /
+## ``jsonNodeToResolvedConfig``.
 ##
 ## Spec: codetracer-specs/DeepReview/DeepReview-GUI.md (§2 view modes,
 ## §7 panel placement)
@@ -47,38 +54,22 @@ export
   EditorComponentName
 
 const
-  ## ``Content.DeepReview`` in
-  ## ``common/common_types/codetracer_features/frontend.nim``.  Kept as a
-  ## literal because this module must stay compilable on both the native
-  ## and the JavaScript backends without dragging in the frontend types.
-  DeepReviewContentId* = 36
+  ## The ordinal a *retired* ``Content.DeepReview`` had in
+  ## ``common/common_types/codetracer_features/frontend.nim``.  The enum
+  ## member is gone (DR-R8) and nothing produces this id any more; the
+  ## constant survives only so the regression tests can assert that a
+  ## review adds no component carrying it, and so a layout persisted by an
+  ## older build is recognisably stale rather than mysterious.
+  RetiredDeepReviewContentId* = 36
 
   ## ``Content.Scratchpad``, ``Content.AgentActivity``, ``Content.Timeline``
   ## and ``Content.TerminalOutput`` — exported so tests can assert the full
-  ## standard panel set survives insertion.
+  ## standard panel set survives a review.
   ScratchpadContentId* = 17
   AgentActivityContentId* = 35
   TimelineContentId* = 19
   TerminalOutputContentId* = 24
   VcsContentId* = 41
-
-  ## Label GoldenLayout shows for the inserted tab.  Must match
-  ## ``convertComponentLabel(Content.DeepReview, 0)`` in
-  ## ``frontend/utils.nim`` — ``ui/deepreview.nim`` looks the mount
-  ## container up by exactly this id (``deepReviewComponent-{id}``).
-  DeepReviewComponentLabel* = "deepReviewComponent-0"
-
-  ## Where a fresh editor-area container is inserted.  ``openNewLayoutContainer``
-  ## (``frontend/utils.nim``) uses index 1 of the root row for
-  ## ``isEditor = true``, i.e. immediately to the right of the sidebar
-  ## column.  Mirroring the constant keeps startup placement and
-  ## runtime tab opening in agreement.
-  EditorAreaRootIndex* = 1
-
-  ## Width given to a freshly inserted DeepReview column.  The bundled
-  ## default layout sizes its sidebar at 20% and leaves the debug column
-  ## unsized, so GoldenLayout distributes the remainder.
-  DeepReviewStackSize* = "50%"
 
 proc isComponentNode(node: JsonNode): bool {.inline.} =
   node.kind == JObject and node{"type"}.getStr("") == "component"
@@ -88,78 +79,6 @@ proc componentContentId(node: JsonNode): int {.inline.} =
     -1
   else:
     node{"componentState"}{"content"}.getInt(-1)
-
-proc componentNameOf(node: JsonNode): string {.inline.} =
-  ## Component name lives under ``componentName`` in legacy persisted
-  ## layouts and under ``componentType`` in GoldenLayout v2 — accept both.
-  let name = node{"componentName"}.getStr("")
-  if name.len > 0: name else: node{"componentType"}.getStr("")
-
-proc makeDeepReviewComponentNode*(): JsonNode =
-  ## The GoldenLayout node for the DeepReview review surface.  ``id`` is 0
-  ## because the panel is a singleton in the layout; the agentic launcher
-  ## uses its own ``DeepReviewId`` for the runtime-opened instance.
-  %*{
-    "type": "component",
-    "componentType": "genericUiComponent",
-    "componentName": "genericUiComponent",
-    "componentState": {
-      "id": 0,
-      "label": DeepReviewComponentLabel,
-      "content": DeepReviewContentId
-    },
-    "title": "genericUiComponent"
-  }
-
-proc containsDeepReview(node: JsonNode): bool =
-  ## Depth-first search for an already-placed DeepReview component.  This is
-  ## what makes ``addDeepReviewSurface`` idempotent: a layout persisted from
-  ## a previous DeepReview session already carries the tab and must not gain
-  ## a second one.
-  if node.isNil or node.kind != JObject:
-    return false
-  if isComponentNode(node):
-    return componentContentId(node) == DeepReviewContentId
-  if node.hasKey("content") and node["content"].kind == JArray:
-    for child in node["content"].items:
-      if containsDeepReview(child):
-        return true
-  false
-
-proc stackHostsEditor(stack: JsonNode): bool =
-  ## True if the stack is an editor-area stack — it hosts either the
-  ## dedicated ``editorComponent`` type or a generic component whose content
-  ## is ``EditorView`` (2) or ``LowLevelCode`` (18).  Persisted layouts do
-  ## carry editor tabs, so preferring an existing editor stack keeps the
-  ## DeepReview diff beside the user's source tabs instead of splitting the
-  ## editor area in two.
-  if stack.kind != JObject or stack{"type"}.getStr("") != "stack":
-    return false
-  if not stack.hasKey("content") or stack["content"].kind != JArray:
-    return false
-  for child in stack["content"].items:
-    if not isComponentNode(child):
-      continue
-    if componentNameOf(child) == EditorComponentName:
-      return true
-    let contentId = componentContentId(child)
-    if contentId == EditorViewContentId or contentId == LowLevelCodeContentId:
-      return true
-  false
-
-proc findEditorStack(node: JsonNode): JsonNode =
-  ## Depth-first search for the first editor stack.  Returns a reference
-  ## into ``node`` (so callers can append to it) or ``nil``.
-  if node.isNil or node.kind != JObject:
-    return nil
-  if stackHostsEditor(node):
-    return node
-  if node.hasKey("content") and node["content"].kind == JArray:
-    for child in node["content"].items:
-      let hit = findEditorStack(child)
-      if not hit.isNil:
-        return hit
-  nil
 
 proc focusStackChildWithContent(stack: JsonNode; contentId: int): bool =
   ## Point a stack's ``activeItemIndex`` at the child hosting ``contentId``.
@@ -247,84 +166,36 @@ proc focusReviewActivityPane*(layout: JsonNode): bool {.discardable.} =
     return focusReviewActivityPane(layout["root"])
   false
 
-proc makeDeepReviewStack(withSize: bool): JsonNode =
-  result = %*{
-    "type": "stack",
-    "content": [makeDeepReviewComponentNode()]
-  }
-  if withSize:
-    result["size"] = %DeepReviewStackSize
-
-proc addDeepReviewSurface*(layout: JsonNode): JsonNode =
-  ## Insert the DeepReview review surface into ``layout``, additively.
+proc focusReviewPanels*(layout: JsonNode): JsonNode =
+  ## The whole of what starting a review does to a layout: bring the VCS
+  ## panel and the Agent Activity panel to the front of the stacks that
+  ## already host them.  Nothing is added, moved or removed.
   ##
-  ## The function is pure: ``layout`` is not mutated and the returned tree
-  ## is a deep copy carrying the addition.
+  ## This is the "focus-and-populate preset" the reconciled
+  ## ``Layout-System.md`` permits — "a preset that brings the three review
+  ## panels (Editor, VCS, Agent Activity) to the front.  What there is not,
+  ## and must never be, is a preset that installs a bespoke review surface
+  ## or substitutes a reduced layout."  The Editor half is not a layout
+  ## operation at all: the review opens its first modified file as an
+  ## ordinary editor document (``review_entry.openFirstReviewFile``), which
+  ## GoldenLayout focuses the way it focuses any newly opened tab.
   ##
-  ## Placement rules:
-  ##   * If the layout already hosts a DeepReview component anywhere, the
-  ##     copy is returned untouched (idempotent — a layout persisted from a
-  ##     previous review session must not accumulate duplicate tabs).
-  ##   * If an editor stack exists, the surface joins it as another tab, the
-  ##     way ``openLayoutTab(..., isEditor = true)`` groups editor-area
-  ##     documents.
-  ##   * Otherwise a new stack is inserted into the root row at
-  ##     ``EditorAreaRootIndex``, which is where ``openNewLayoutContainer``
-  ##     creates the editor area when none exists — to the right of the
-  ##     FILES/VCS sidebar and to the left of the debug panels.
-  ##   * A non-row root (a bare column or stack) is wrapped in a row so the
-  ##     "editor area is root-row index 1" invariant continues to hold.
-  ##   * The stack hosting the VCS panel is retargeted at it, so the review's
-  ##     Modified Files list is the tab the reviewer actually sees — see
-  ##     ``focusReviewFileList``.
-  ##   * The stack hosting the Agent Activity panel is retargeted at it for the
-  ##     same reason — see ``focusReviewActivityPane``.  Focus only: no panel
-  ##     is moved between stacks and no stack is created.
+  ## Pure: ``layout`` is not mutated and the returned tree is a deep copy
+  ## carrying the retargeting.  Idempotent by construction — writing the
+  ## same ``activeItemIndex`` twice is the same layout.
   ##
-  ## Nothing is ever removed, so every standard panel the user's layout
-  ## declares survives the transition into DeepReview mode.
+  ## Until DR-R8 this routine was ``addDeepReviewSurface`` and *also*
+  ## inserted a standalone ``Content.DeepReview`` component into the editor
+  ## area.  That panel is deleted (DeepReview-GUI.md §7: "There is no
+  ## separate 'DeepReview mode' that replaces the UI"), so there is nothing
+  ## left to place.
   if layout.isNil:
     return layout
   result = copy(layout)
   if not result.hasKey("root") or result["root"].kind != JObject:
     return
-  # Applied before the early idempotent return: re-entering DeepReview on a
-  # layout persisted from a previous review session must still bring the
-  # Modified Files list and the review's coverage summary to the front.
   focusReviewFileList(result)
   focusReviewActivityPane(result)
-  if containsDeepReview(result["root"]):
-    return
-
-  let editorStack = findEditorStack(result["root"])
-  if not editorStack.isNil:
-    editorStack["content"].add(makeDeepReviewComponentNode())
-    return
-
-  let root = result["root"]
-  if root{"type"}.getStr("") == "row" and root.hasKey("content") and
-      root["content"].kind == JArray:
-    let children = root["content"]
-    var inserted = newJArray()
-    let target = min(EditorAreaRootIndex, children.len)
-    for i, child in children.getElems:
-      if i == target:
-        inserted.add(makeDeepReviewStack(withSize = true))
-      inserted.add(child)
-    if target >= children.len:
-      inserted.add(makeDeepReviewStack(withSize = true))
-    root["content"] = inserted
-    return
-
-  # Root is not a row (a bare column or a single stack).  Synthesise a row
-  # so the editor area still lands at root-row index 1.
-  let originalRoot = copy(root)
-  result["root"] = %*{
-    "type": "row",
-    "size": "100%",
-    "isClosable": false,
-    "content": [originalRoot, makeDeepReviewStack(withSize = true)]
-  }
 
 proc layoutHasContent*(layout: JsonNode; contentId: int): bool =
   ## Convenience predicate for tests and callers that only care whether a

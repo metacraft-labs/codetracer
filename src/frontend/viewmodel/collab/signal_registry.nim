@@ -449,6 +449,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "How far each hunk's context is expanded is a local reading position.",
     requiresStableId = true,
     stableIdNote = "Would need stable diff hunk ids if synchronized.")
+  entries.addEntry("VCSVM", "reviewCommit", vscBackendAuthoritative,
+    "The commit a review's changeset belongs to is a fact of the dataset.")
   entries.addEntry("VCSVM", "reviewEntered", vscRendererLocal,
     "Whether this panel already ran review entry; a local one-shot that " &
     "keeps re-entry from re-opening tabs or re-focusing panels.")
@@ -491,13 +493,13 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("DeepReviewVM", ["selectedFile", "fileCount"])
 
   entries.addMany("FilesystemVM",
-    ["rootEntry", "diffEntries", "deepReviewActive", "deepReviewFiles"],
+    ["rootEntry", "diffEntries"],
     vscBackendAuthoritative,
     "Filesystem tree/diff contents are local repository facts.")
   entries.addEntry("FilesystemVM", "expandedPaths", vscSharedSessionViewState,
     "Filesystem expansion can be shared as logical path state.",
     requiresStableId = true,
-    stableIdNote = "Paths may be enough for files, but virtual/deep-review nodes need stable ids.")
+    stableIdNote = "Paths may be enough for files, but virtual nodes need stable ids.")
   entries.addDerived("FilesystemVM", ["isEmpty", "hasDiff", "totalEntryCount"])
 
   entries.addMany("AgentActivityVM",
