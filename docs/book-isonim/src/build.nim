@@ -18,8 +18,7 @@ when defined(js):
   {.error: "build.nim is a C-target (SSG) entry; not for the JS target".}
 
 import std/os
-import build_site
-import core/docs_tokens
+import docs_scaffold
 import ./docs_config
 import ./theme_tokens
 import ./redirects
@@ -29,15 +28,13 @@ const legacySummaryPath = "../book/src/SUMMARY.md"
   ## authoritative list of legacy published pages the redirects preserve.
 
 when isMainModule:
-  let tokensCss = emitTokensCss(metacraftDocsTokenLayer(), designSystemTokens())
-  let n = buildSite(contentDir = "content", cfg = bookDocsConfig(),
-                    docsTokensCss = tokensCss,
-                    # M1: compile this book's own JS mount entry (embeds THIS
-                    # site's content) into the hashed `assets/app.js` the pages
-                    # reference via `bookDocsConfig().appScriptHref`.
-                    clientEntry = "src/main.nim")
-  if dirExists("static"):
-    copyDir("static", "public" / "assets")
+  # The framework's `buildDocsSite` scaffold does the SSG build, prepends the
+  # design-system token CSS onto the composed stylesheet (framework default +
+  # this site ships no `style.css` of its own), compiles this book's JS mount
+  # entry into the hashed `assets/app.js`, and copies `static/` verbatim.
+  let n = buildDocsSite(bookDocsConfig(),
+                        docsTokensCss = metacraftDocsTokensCss(),
+                        clientEntry = "src/main.nim")
   # Post-build: emit legacy-URL redirect artifacts (meta-refresh *.html
   # stubs + a _redirects manifest) so every old mdBook deep link still
   # resolves. Runs AFTER buildSite (which wipes+rebuilds public/) so the

@@ -55,6 +55,7 @@ echo "docs.sh: sibling layout as seen from docs/book-isonim:"
 SIBLINGS_ABS="$(cd "$REPO_ROOT/.." && pwd)"
 cat >docs/book-isonim/nim.cfg <<NIMCFG
 --path:"$SIBLINGS_ABS/isonim-docs/src"
+--path:"$SIBLINGS_ABS/codetracer-design-system/nim"
 --path:"$SIBLINGS_ABS/isonim/src"
 --path:"$SIBLINGS_ABS/nim-everywhere/src"
 --path:"$SIBLINGS_ABS/nim-faststreams"

@@ -11,25 +11,22 @@
 ## optional first arg is the port (default 8000).
 
 import std/[os, strutils, asyncdispatch]
-import dev_server
-import core/docs_tokens
+import docs_scaffold
 import ./docs_config
 import ./theme_tokens
 
-export dev_server
+export docs_scaffold
 
 proc newDocsDevServer*(contentDir = "content";
                        assetsDirs = @["assets", "static"]): DevServer =
-  ## This book's themed live-reload dev server. Exposed so a test drives the
-  ## exact `just dev-docs` wiring without binding a socket.
-  newDevServer(contentDir = contentDir, cfg = bookDocsConfig(),
-               assetsDirs = assetsDirs,
-               docsTokensCss = docsTokensCssLive(),
-               tokensCssProvider = (proc(): string = docsTokensCssLive()),
-               watchPaths = @[docsDesignSystemPath],
-               # M1: serve this book's compiled JS mount entry at /assets/app.js
-               # (compiled lazily on first request), so dev matches the built site.
-               clientEntry = "src/main.nim")
+  ## This book's themed live-reload dev server via the framework `docsDevServer`
+  ## scaffold, wiring the shared design-system token provider for hot reload.
+  ## Exposed so a test drives the exact `just dev-docs` wiring without binding a
+  ## socket.
+  docsDevServer(bookDocsConfig(), contentDir = contentDir, assetsDirs = assetsDirs,
+                tokensCssProvider = (proc(): string = docsTokensCssLive()),
+                watchPaths = @[docsDesignSystemPath],
+                clientEntry = "src/main.nim")
 
 when isMainModule:
   let port = if paramCount() >= 1: parseInt(paramStr(1)) else: 8000
