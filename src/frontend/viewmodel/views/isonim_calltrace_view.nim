@@ -284,6 +284,26 @@ when defined(js):
   proc eventKeyCode(ev: isonim_dom.Event): int {.importjs: "(#.keyCode || 0)".}
   proc scrollTop(node: isonim_dom.Element): float {.importjs: "(#.scrollTop || 0)".}
 
+  # DOM helpers for measuring the actual rendered row height.
+  # `querySelector` returns null when no match is found; the importjs guard
+  # (`|| null`) prevents undefined leaking into Nim's nil-check path.
+  proc calltraceQuerySelector(el: isonim_dom.Element; sel: cstring): isonim_dom.Element
+    {.importjs: "(#.querySelector(#) || null)".}
+  proc calltraceElementHeight(el: isonim_dom.Element): float
+    {.importjs: "#.getBoundingClientRect().height".}
+
+  proc measureCallRowHeight(linesContainer: isonim_dom.Element): float =
+    ## Return the rendered CSS-pixel height of the first calltrace row found
+    ## inside `linesContainer`.  Returns 0.0 if no rows have been rendered yet.
+    ## The result reflects the current font-size (em/rem) so it stays correct
+    ## after zooming or theme changes.
+    let row = linesContainer.calltraceQuerySelector(cstring".calltrace-call-line")
+    if isonim_dom.isNodeNil(isonim_dom.Node(row)):
+      return 0.0
+    result = row.calltraceElementHeight()
+
+  proc calltraceSetTimeout(fn: proc(); delay: int) {.importjs: "setTimeout(#, #)", discardable.}
+
   proc appendTraceLine(svg: isonim_dom.Element; x1, y1, x2, y2: float) =
     let line = createSvgElement(cstring"line")
     isonim_dom.setAttribute(line, cstring"x1", cstring($x1))
@@ -518,16 +538,29 @@ when defined(js):
           let query = inputNode.inputValue()
           vm.setSearchQuery($query))
 
-  proc wireScrollContainer(scrollContainer: isonim_dom.Element;
+  proc wireScrollContainer(scrollContainer, linesContainer: isonim_dom.Element;
                             vm: CalltraceVM) =
     ## Wire scroll events to the VM. The DSL renderer-API `onscroll`
     ## variant exists, but the handler needs access to `scrollTop` from
     ## the element, so this is attached imperatively.
-    const CALL_HEIGHT_PX = 24.0
+    ##
+    ## The row height is measured from the DOM on every scroll event so that
+    ## the row-index calculation is always consistent with the actual
+    ## em/rem-derived row height, regardless of zoom level or theme changes.
+    ## If no rows have been rendered yet (height = 0), the cached VM value
+    ## is used as a fallback to avoid a divide-by-zero.
     isonim_dom.addEventListener(isonim_dom.Node(scrollContainer),
       cstring"scroll",
       proc(ev: isonim_dom.Event) =
-        vm.scroll(int64(scrollContainer.scrollTop() / CALL_HEIGHT_PX)))
+        let h = measureCallRowHeight(linesContainer)
+        let rowH = if h > 0.0: h else: vm.rowHeightPx.val
+        # Keep the VM's cached row height in sync; setRowHeightPx only
+        # updates the signal when the delta exceeds 0.5 px so this is
+        # a no-op on every scroll tick where the height is stable.
+        if h > 0.0:
+          vm.setRowHeightPx(h)
+        if rowH > 0.0:
+          vm.scroll(int64(scrollContainer.scrollTop() / rowH)))
 
   proc renderTraceSvg(r: WebRenderer; svgContainer: isonim_dom.Element;
                       vm: CalltraceVM) =
@@ -605,29 +638,29 @@ when defined(js):
              class = "local-calltrace-view"):
           tdiv(ref = innerContainer,
                class = "local-calltrace",
-               height = $(vm.store.calltrace.totalCallsCount.val.int * 24) & "px"):
+               height = $(int(float(vm.store.calltrace.totalCallsCount.val.int) * vm.rowHeightPx.val)) & "px"):
             tdiv(ref = linesContainer, class = "calltrace-lines",
-                 transform = "translateY(0px)"):
+                 transform = "translateY(" & $(int(vm.store.calltrace.startLineIndex.val.float * vm.rowHeightPx.val)) & "px)"):
               discard
         tdiv(class = "calltrace-loading",
              id = "calltrace-toggle-loading-0",
              display = displayIf(vm.isLoading.val)):
           text "Loading..."
 
-    # Render the full window the store currently holds, not a
-    # viewport-height-based slice.  The legacy Karax calltrace view
-    # virtualised rendering by leveraging `translateY` and the DOM scroll
-    # container (`#calltraceScroll-0`); the IsoNim view does not yet
-    # implement that scroll-window translation, so a slicing memo here
-    # would render only the first 25 lines and the remaining ~65 would
-    # never enter the DOM.  That broke calltrace navigation for DB traces
-    # (Python / Ruby sudoku): after a search-result click the calltrace
-    # cursor moves inside the loaded section but the visible 25 rows
-    # stayed at the top of the section, so Playwright's `findEntry` (which
-    # only sees `.calltrace-call-line` elements that are in the DOM)
-    # never observed the navigated function.  See:
-    # `vm.visibleLines` (calltrace_vm.nim) — the slicing memo that the
-    # Mock renderer still uses for its viewport-aware unit tests, and
+    # Render the full window the store currently holds.  The `.calltrace-lines`
+    # container is positioned with `translateY(startLineIndex * 24px)` so the
+    # rendered window sits at the correct offset inside the virtual scroll area
+    # (`.local-calltrace` at `totalCallsCount * 24px` tall).  This mirrors the
+    # legacy Karax translateY-based virtual scrolling.
+    #
+    # All lines in the current store window are kept in the DOM so Playwright's
+    # `findEntry` (which queries `.calltrace-call-line` elements) can see them.
+    # For traces with ≤ FULL_WINDOW_CAP (500) calls the auto-load effect loads
+    # the entire trace at startIndex=0, so translateY(0) applies naturally.
+    # For larger traces only a scrolled window is loaded; translateY positions
+    # it correctly.  See:
+    # `vm.visibleLines` (calltrace_vm.nim) — the slicing memo the Mock renderer
+    # uses for viewport-aware unit tests, and
     # `syncCalltraceData` (calltrace.nim) — which feeds the store.
     svgContainer = createSvgElement(cstring"svg")
     isonim_dom.setAttribute(svgContainer, cstring"id", cstring"svg-content-0")
@@ -644,10 +677,24 @@ when defined(js):
       proc(item: proc(): CallLine, index: int): isonim_dom.Element =
         renderCallLineRowWeb(r, vm, item))
 
+    # Measure actual row height after each data update so the virtual-scroll
+    # math (container height and translateY) stays accurate when the font size
+    # changes due to zoom or theme changes.  The effect subscribes to
+    # `calltrace.lines` so it fires whenever new rows arrive.  We defer the
+    # DOM read by one tick (setTimeout 0) to let `indexEach` finish adding
+    # the new row elements before we query their bounding rect.
+    createEffect proc() =
+      discard vm.store.calltrace.lines.val  # reactive dependency
+      calltraceSetTimeout(proc() =
+        let h = measureCallRowHeight(linesContainer)
+        if h > 0.0:
+          vm.setRowHeightPx(h)
+      , 0)
+
     renderSearchResultsList(r, resultsContainer, vm)
     renderTraceSvg(r, svgContainer, vm)
     wireSearchForm(formEl, inputEl, vm)
-    wireScrollContainer(scrollContainer, vm)
+    wireScrollContainer(scrollContainer, linesContainer, vm)
 
     panel
 
