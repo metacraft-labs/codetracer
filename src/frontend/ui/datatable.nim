@@ -93,7 +93,13 @@ proc measureRenderedRowHeight(self: DataTableComponent): int =
   result = self.rowHeight
 
 proc visibleViewportRows(self: DataTableComponent): int =
-  let viewportHeight = measuredNodeHeight(self.tableScrollBody())
+  # Measure from the .data-table flex-item (tableViewport) rather than the
+  # scroll body's inline style, so the count reflects the event log's actual
+  # rendered height and stays correct after panel resize.
+  var viewportHeight = measuredNodeHeight(self.tableViewport())
+  if viewportHeight <= 0:
+    # Fall back to the scroll body if the viewport isn't measurable yet.
+    viewportHeight = measuredNodeHeight(self.tableScrollBody())
   let rowHeight = self.measureRenderedRowHeight()
 
   if viewportHeight <= 0 or rowHeight <= 0:
@@ -113,11 +119,18 @@ proc syncScrollerMeasurements(self: DataTableComponent) =
   if rowHeight <= 0:
     return
 
-  # Scroller keeps its own cached row height; update it before remeasuring so
-  # zoom/font-size changes don't leave a stale virtual scroll range behind.
+  # Scroller keeps its own cached row height and viewport height; update both
+  # before remeasuring so zoom/font-size/resize changes don't leave stale
+  # virtual scroll dimensions behind.
   scroller.s.rowHeight = rowHeight
   scroller.s.heights.row = rowHeight
   scroller.s.autoHeight = false
+
+  let scrollBodyHeight = measuredNodeHeight(self.tableScrollBody())
+  if scrollBodyHeight > 0:
+    # Tell the Scroller the current viewport height so measure() uses the
+    # correct value rather than re-reading from a potentially stale DOM state.
+    scroller.s.heights.viewport = scrollBodyHeight
 
 proc rowSemanticKind(event: ProgramEvent): string =
   if not event.semanticKind.isNil and event.semanticKind.len > 0:
@@ -201,7 +214,31 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
       scrollBody.style.maxHeight = cstring(fmt"{scrollBodyHeight}px")
       self.scrollAreaHeight = containerHeight
       discard self.context.columns.adjust()
+
+      # Capture the current first-visible row BEFORE syncScrollerMeasurements
+      # updates self.rowHeight to the post-zoom value.  self.rowHeight holds the
+      # cached height from the previous render cycle (the old row height), so
+      # dividing scrollTop by it gives the correct pre-zoom starting row index.
+      # We use this to restore the same starting row after zoom regardless of
+      # direction (zoom-in makes rows taller; zoom-out makes them shorter).
+      let currentScrollTop = scrollBody.toJs.scrollTop.to(int)
+      let oldRowHeight = self.rowHeight  # cached pre-zoom height (0 on first call)
+
       self.syncScrollerMeasurements()
+
+      # Reposition scrollTop so the same first visible row stays at the top
+      # after zoom.  On the very first resize (oldRowHeight = 0, no rows yet)
+      # we skip this and let the Scroller start from the top.
+      if self.rowsCount > 0 and oldRowHeight > 0:
+        let newRowH = self.measureRenderedRowHeight()
+        if newRowH > 0:
+          let startRow = currentScrollTop div oldRowHeight
+          let virtualHeight = self.rowsCount * newRowH
+          let maxScrollTop = max(0, virtualHeight - scrollBodyHeight)
+          # startRow * newRowH preserves the position; clamp so we never
+          # overshoot the end of the virtual area (zoom-out near the bottom).
+          scrollBody.toJs.scrollTop = min(startRow * newRowH, maxScrollTop)
+
       let scroller = self.context.scroller
       if not scroller.isNil and scroller.toJs != jsUndefined:
         scroller.measure()
