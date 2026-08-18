@@ -700,6 +700,9 @@ proc renderVariableRow*(r: MockRenderer; vm: StateVM;
   row
 
 when defined(js):
+  proc scrollNodeToBottom(el: isonim_dom.Element)
+      {.importjs: "(function(el){el.scrollTop=el.scrollHeight;})(#)".}
+
   proc renderVariableRow*(r: WebRenderer; vm: StateVM;
                           item: proc(): VariableViewState): isonim_dom.Element =
     var chainContainer, historyContainer: isonim_dom.Element
@@ -707,6 +710,13 @@ when defined(js):
                                     chainContainer, historyContainer)
     renderOriginChainLines(r, chainContainer, item, vm)
     renderHistoryRows(r, historyContainer, item)
+    # Scroll the history container to the bottom whenever rows arrive or grow.
+    # Reads item().history to track the signal; fires after indexEach updates.
+    createRenderEffect(proc() =
+      let h = item().history
+      if h.len > 0 and
+         not isonim_dom.isNodeNil(isonim_dom.Node(historyContainer)):
+        scrollNodeToBottom(historyContainer))
     # Wire the right-click context menu on the row's outer element so
     # the spec §3.1 entry-point "right-click → Show value origin"
     # surfaces through ``showContextMenu`` — the same primitive
