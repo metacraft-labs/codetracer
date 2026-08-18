@@ -198,8 +198,40 @@ const
     # Activity panels; the native-only source-contract half asserts the
     # startup path is actually wired through that helper and that the deleted
     # panel is really gone, which is the part no layout test could catch —
-    # the old code called no layout helper at all.
+    # the old code called no layout helper at all.  It also carries
+    # Layout-System.md obligation 4 — an absent Agent Activity panel is
+    # materialised rather than left missing — including the placement rule
+    # that keeps the materialised pillar out of the stack hosting the VCS
+    # panel, since two tabs of one stack cannot both be the visible one.
     "src/tests/gui/tests/layout/deepreview_layout_test.nim",
+    # RV-2 — a review over a dataset opens the EDITOR layout, not the
+    # debugging one.  `ct review <PATH>` loads no recording at all, so the
+    # debugging layout's EVENT LOG, CALLTRACE, TIMELINE and TERMINAL OUTPUT
+    # panels came up present but EMPTY, which reads as missing data
+    # (DeepReview-GUI.md §1.1).  The behavioural half runs the real hidden-set
+    # rule and the real sanitiser over the real bundled
+    # `src/config/default_layout.json`; the native-only source-contract half
+    # asserts the wiring the rule alone cannot catch — the editor layout and
+    # its loader both already existed and the review launch simply did not use
+    # them.  It also pins the two boundaries RV-2 must not cross: launch
+    # methods 2 and 3 (which HAVE a recording) keep the debugging layout, and
+    # the review still enters through the one shared routine.
+    #
+    # Separate from `deepreview_layout_test.nim` because that file's subject
+    # is what a review does to whatever layout it is given ("focus, not
+    # relocation"); this one's subject is WHICH layout it is given.
+    #
+    # It also carries the follow-up RV-2's own suites could not see, because
+    # every one of them asserted over the BUNDLED layout: the file a review
+    # actually reads is `default_edit_layout.json`, which edit mode WRITES
+    # through a sanitiser that deletes `Content.AgentActivity`.  A hidden set
+    # can decline to remove a panel; it cannot restore one the file never had.
+    # The "PERSISTED edit layout" suite runs the whole chain — the bytes edit
+    # mode saves, read back by the review loader, prepared by the renderer —
+    # and asserts all three pillars come out of it visible at once.  Every
+    # stage was individually correct, which is why asserting on stages missed
+    # it.
+    "src/tests/gui/tests/layout/review_layout_test.nim",
     # DR-R1 (DeepReview-GUI.milestones.org) — a review must be navigable:
     # clicking a changed file opens it, a review opens its first file on
     # startup, and the view-mode toggle is reachable in review mode.  The

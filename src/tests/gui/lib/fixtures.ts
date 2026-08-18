@@ -36,7 +36,9 @@ import {
   ensureDefaultConfig,
   ensureDefaultLayout,
   resetAutoHideState,
+  resetEditLayout,
   restoreUserLayout,
+  seedEditLayout,
 } from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
@@ -296,6 +298,32 @@ interface CodetracerOptions {
    * does not undo them.
    */
   preserveAutoHideState: boolean;
+  /**
+   * A JSON layout file to install as `default_edit_layout.json` before
+   * launching.
+   *
+   * This is how a spec launches over a **pre-existing** saved layout instead
+   * of the bundled default. It matters because `default_edit_layout.json` is
+   * shared by two modes with different panel requirements: edit mode WRITES
+   * it through a sanitiser that deletes `Content.AgentActivity`, and — since
+   * RV-2 — `ct review <PATH>` READS it. A review launched on a fresh config
+   * directory therefore exercises the fallback path (the bundled debugging
+   * layout, sanitised), never the file a real user's review opens.
+   *
+   * Setting this implies `preserveEditLayout`: the file is installed after
+   * the reset, not erased by it.
+   */
+  editLayoutPath: string;
+  /**
+   * Keep whatever `default_edit_layout.json` is already on disk.
+   *
+   * The launch fixture normally deletes it alongside the layout reset, so an
+   * edit-mode session in an earlier test of the same worker cannot change
+   * which layout a later launch opens. Specs that write the file themselves
+   * in a fixture-free `beforeEach` (which runs BEFORE `ctPage`) set this so
+   * the reset does not undo them.
+   */
+  preserveEditLayout: boolean;
 }
 
 /**
@@ -1731,6 +1759,8 @@ export const test = base.extend<
   visualReplayTrace: [false, { option: true }],
   visualReplayTracePath: ["", { option: true }],
   preserveAutoHideState: [false, { option: true }],
+  editLayoutPath: ["", { option: true }],
+  preserveEditLayout: [false, { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -1804,6 +1834,8 @@ export const test = base.extend<
         newTracePolicy,
         testOpenFolderDialogPath,
         preserveAutoHideState,
+        editLayoutPath: seedEditLayoutFrom,
+        preserveEditLayout,
       },
       use,
       testInfo,
@@ -1825,6 +1857,22 @@ export const test = base.extend<
         // pins a panel leaves it pinned for every later test in the worker.
         if (!preserveAutoHideState) {
           resetAutoHideState();
+        }
+        // ...and the saved EDIT layout is the third piece. Since RV-2 a
+        // `ct review` launch reads `default_edit_layout.json`, so an
+        // edit-mode test earlier in this worker would otherwise decide which
+        // layout a later review opens — an ordering dependence, and the one
+        // that hid a missing AGENT ACTIVITY panel from the whole suite.
+        const seedsEditLayout = seedEditLayoutFrom.length > 0;
+        if (!preserveEditLayout && !seedsEditLayout) {
+          resetEditLayout();
+        }
+        if (seedsEditLayout) {
+          // Launch over a layout a PREVIOUS session left behind. Reset first
+          // so a stale `.broken` sibling from an earlier test cannot confuse
+          // the recovery assertions.
+          resetEditLayout();
+          seedEditLayout(seedEditLayoutFrom);
         }
       } catch (ex) {
         // Non-fatal: a missing bundled layout file would surface as a

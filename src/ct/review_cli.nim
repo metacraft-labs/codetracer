@@ -335,7 +335,8 @@ func planReviewCli*(args: openArray[string]): ReviewPlan =
 func reviewNeedsRawDispatch*(args: openArray[string]): bool =
   ## Whether a `ct review …` line must be handled before confutils sees argv.
   ##
-  ## Exactly the flag-carrying verbs, and nothing else.  `collect` and
+  ## The flag-carrying verbs and the help tokens, and nothing else.
+  ## `collect` and
   ## `inspect` take options that are not ct's own (`--repo`, `--diff-file`,
   ## `--preset`, …) and confutils rejects every dash-prefixed token it does not
   ## recognise, so they are intercepted; `export` is here only to be refused
@@ -352,8 +353,18 @@ func reviewNeedsRawDispatch*(args: openArray[string]): bool =
   ## positionals are still refused — confutils answers them with "The
   ## subcommand 'review' does not accept additional arguments", the same
   ## diagnostic `ct edit` gives.
-  args.len >= 2 and args[0] == "review" and
-    args[1] in ["collect", "inspect", "export"]
+  ##
+  ## The help tokens are intercepted for the same reason the flag-carrying
+  ## verbs are: confutils only knows the shape it was declared with, so
+  ## `ct review --help` printed `ct review <reviewPath>` and never mentioned
+  ## `collect` or `inspect` at all.  A user who asks a command group for help
+  ## and is shown one third of it has been told the other two do not exist.
+  ## `ReviewUsage` — which bare `ct review` already prints — is the whole
+  ## group, so routing help at it is the fix rather than teaching confutils to
+  ## describe subcommands it does not have.
+  if args.len < 2 or args[0] != "review":
+    return false
+  args[1] in ["collect", "inspect", "export"] or isHelpToken(args[1])
 
 when not defined(js):
   import std/[os, osproc]

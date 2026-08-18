@@ -111,35 +111,51 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 1b: The review surface is added to the layout, not swapped for it
+  // Test 1b: A review over a dataset opens the EDITOR layout
   // -----------------------------------------------------------------------
 
-  test("Test 1b: DeepReview startup keeps the full standard panel set", async ({ ctPage }) => {
-    // Issue #610. DeepReview used to paste a hard-coded three-panel preset
-    // (VCS + DeepReview + CALLTRACE) over the resolved GoldenLayout config,
-    // so seven standard panels disappeared for the whole session and the
-    // user's own layout was ignored. Placement is additive now.
+  test("Test 1b: a dataset review opens the editor layout", async ({ ctPage }) => {
+    // RV-2 (DeepReview-GUI.md §1.1): "`ct review` opens the editor layout, not
+    // the debugging layout ... The editor layout omits the panels a dataset
+    // cannot populate (EVENT LOG, CALLTRACE, TIMELINE, TERMINAL OUTPUT), so a
+    // review does not present empty panels that imply missing data."
     //
-    // Headless counterpart:
-    //   src/tests/gui/tests/layout/deepreview_layout_test.nim
+    // This test used to assert the opposite — that all nine panels of the
+    // DEBUGGING layout survived — as the end-to-end half of issue #610, whose
+    // subject was a hard-coded three-panel preset that erased the user's
+    // layout. That subject survives intact and is asserted below: nothing is
+    // erased, the review's own three surfaces are all present, and no bespoke
+    // review panel is installed. What changed is which layout is loaded in the
+    // first place, and #610's guarantee is now carried by the editor layout
+    // being a real user layout rather than a preset invented for reviews.
+    //
+    // Headless counterparts:
+    //   src/tests/gui/tests/layout/review_layout_test.nim (which layout)
+    //   src/tests/gui/tests/layout/deepreview_layout_test.nim (what a review
+    //   does to whatever layout it is given)
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(1000);
 
     const titles = await dr.layoutTabTitles();
 
-    for (const expected of [
-      "FILES",
-      "VCS",
-      "STATE",
-      "SCRATCHPAD",
+    // DeepReview's three pillars, all present (DeepReview-GUI.md §7). The
+    // Editor is the diff tab the review opened, asserted by its own tests.
+    for (const expected of ["FILES", "VCS", "AGENT ACTIVITY"]) {
+      expect(titles, `missing review panel: ${expected}`).toContain(expected);
+    }
+
+    // The panels `ct review` cannot fill are not on screen at all, rather
+    // than on screen and empty.
+    for (const absent of [
       "CALLTRACE",
-      "AGENT ACTIVITY",
       "EVENT LOG",
       "TIMELINE",
       "TERMINAL OUTPUT",
     ]) {
-      expect(titles, `missing standard panel: ${expected}`).toContain(expected);
+      expect(titles, `replay-only panel present in a review: ${absent}`).not.toContain(
+        absent,
+      );
     }
 
     // ...and NO review surface, because DeepReview introduces no panel of its
@@ -984,10 +1000,16 @@ test.describe("DeepReview GUI - main features", () => {
     await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
     await expect(dr.reviewActivityFileRows()).toHaveCount(3);
 
-    // ...and all of it happened additively: no standard panel was displaced
-    // to make room for the review (issue #610).
+    // ...and all of it happened additively: nothing the editor layout
+    // declares was displaced to make room for the review (issue #610).
+    // FILES is the check that matters — `index/config.isValidLayoutConfig`
+    // rejects a layout that lost it, so a review that dropped it would poison
+    // the next ordinary launch too. STATE, CALLTRACE and EVENT LOG used to be
+    // listed here; RV-2 moved the dataset launch onto the editor layout, which
+    // does not declare them at all, so their absence is now the requirement
+    // (asserted in Test 1b) rather than the regression.
     const allTitles = await dr.layoutTabTitles();
-    for (const expected of ["FILES", "STATE", "CALLTRACE", "EVENT LOG"]) {
+    for (const expected of ["FILES", "VCS", "AGENT ACTIVITY"]) {
       expect(allTitles, `missing standard panel: ${expected}`).toContain(
         expected,
       );
@@ -1526,11 +1548,15 @@ test.describe("DeepReview comprehensive workflow", () => {
       expect(name).toBe("lib.rs");
 
       // Note: the call tree belongs to the CALLTRACE panel
-      // (DeepReview-GUI.md §2), which is present in the layout — the review
-      // adds and removes nothing — but empty until `--deepreview` loads a
-      // recording (M42b).
+      // (DeepReview-GUI.md §2), and a dataset launch loads no recording, so
+      // RV-2 keeps that panel out of the layout entirely rather than showing
+      // it empty. This assertion was `toContain("CALLTRACE")` while the
+      // dataset launch still opened the debugging layout; the fixture's point
+      // — a review with no calltrace data loads and works — is unchanged and
+      // is asserted above.
       const titles = await dr.layoutTabTitles();
-      expect(titles).toContain("CALLTRACE");
+      expect(titles).not.toContain("CALLTRACE");
+      expect(titles).toContain("VCS");
     });
   });
 });

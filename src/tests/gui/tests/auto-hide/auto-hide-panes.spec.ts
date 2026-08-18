@@ -839,12 +839,16 @@ test.describe("Pinning FILES does not reset the layout", () => {
     launchMode: "edit",
     editFolderPath: editTestFolder,
     preserveAutoHideState: true,
+    preserveEditLayout: true,
   });
 
   // Edit mode is used because the `ctPage` fixture copies the bundled default
   // over `default_layout.json` on every setup (`lib/layout-reset.ts`), which
-  // would erase the scenario before the app saw it.  It leaves
-  // `default_edit_layout.json` alone.
+  // would erase the scenario before the app saw it.  `preserveEditLayout`
+  // makes it leave `default_edit_layout.json` alone: the fixture resets that
+  // file too now (a `ct review` launch reads it since RV-2), and this
+  // `beforeEach` runs before the fixture, so without the opt-out the seeded
+  // scenario would be deleted before the app ever saw it.
   test.beforeEach(() => {
     removeIfPresent(editLayoutPath + ".broken");
     // A saved layout with NO Filesystem component in the GoldenLayout tree —

@@ -163,12 +163,23 @@ export class DeepReviewPage {
    * Titles of every GoldenLayout tab currently attached.
    *
    * A review is data loaded into the layout the user already has, not a
-   * replacement for it (issue #610), and since DR-R8 it adds no panel at all.
-   * The standard panel titles must therefore all be present, and "DEEP
-   * REVIEW" must not be. Titles come from ``convertTabTitle``
-   * (``src/frontend/ui/layout.nim``): "FILES", "VCS", "STATE",
-   * "SCRATCHPAD", "CALLTRACE", "AGENT ACTIVITY", "EVENT LOG", "TIMELINE",
-   * "TERMINAL OUTPUT".
+   * replacement for it (issue #610), and it installs no surface of its own —
+   * so "DEEP REVIEW" must never appear among these.
+   *
+   * WHICH titles are expected depends on the layout the launch opened, and
+   * since RV-2 that is no longer "all of them". A dataset review
+   * (`ct review <PATH>`) opens the EDITOR layout, which deliberately omits
+   * the panels a dataset cannot populate — "CALLTRACE", "EVENT LOG",
+   * "TIMELINE", "TERMINAL OUTPUT", "STATE" and "SCRATCHPAD" are *required to
+   * be absent* there (DeepReview-GUI.md §1.1), and asserting their presence
+   * is asserting the defect RV-2 fixed. What every review must show is the
+   * three pillars: "FILES"/"VCS" and "AGENT ACTIVITY". Launch methods 2 and 3
+   * have a recording and keep the debugging layout, where the replay panels
+   * do belong.
+   *
+   * Titles come from ``convertTabTitle`` (``src/frontend/ui/layout.nim``),
+   * which upper-cases and splits the ``Content`` enum name, with "FILES" and
+   * "VCS" special-cased.
    */
   async layoutTabTitles(): Promise<string[]> {
     const titles = await this.page.locator(".lm_tab .lm_title").allTextContents();

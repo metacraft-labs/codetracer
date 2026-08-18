@@ -99,6 +99,66 @@ export function resetAutoHideState(): void {
 }
 
 /**
+ * Where the EDIT-mode layout is persisted.
+ *
+ * `index/window.onSaveConfig` writes here whenever an edit-mode session ends,
+ * and — since RV-2 — `index/config.loadReviewLayoutConfig` READS it when
+ * `ct review <PATH>` launches. One file, two modes, and edit mode's save-side
+ * sanitiser (`editModeHiddenContentIds`) strips `Content.AgentActivity`, which
+ * is DeepReview's third pillar. So "what a review actually opens" depends on
+ * whether an edit-mode session has ever run — which, until these helpers
+ * existed, no E2E test could set up or even observe.
+ */
+export function editLayoutPath(): string {
+  const { userLayoutDir } = currentLayoutPaths();
+  return path.join(userLayoutDir, "default_edit_layout.json");
+}
+
+/**
+ * Drop any saved edit-mode layout so the next launch starts from the
+ * bundled default.
+ *
+ * This is the third piece of the saved arrangement, after `default_layout.json`
+ * and `auto_hide_state.json`, and it needs the same treatment for the same
+ * reason: `XDG_CONFIG_HOME` is shared by every test in a worker, so an
+ * edit-mode spec that runs before a review spec leaves its layout behind and
+ * the review silently opens a *different* layout than it does when run alone.
+ * That ordering dependence is precisely how a missing AGENT ACTIVITY panel
+ * stayed invisible to the suite.
+ *
+ * Specs that write the file themselves in a fixture-free `beforeEach` (layout
+ * recovery, auto-hide pinning) opt out via the `preserveEditLayout` fixture
+ * option, because that hook runs BEFORE `ctPage` is instantiated.
+ */
+export function resetEditLayout(): void {
+  const target = editLayoutPath();
+  for (const victim of [target, target + ".broken"]) {
+    if (fs.existsSync(victim)) {
+      fs.unlinkSync(victim);
+    }
+  }
+}
+
+/**
+ * Install `sourcePath` as the saved edit-mode layout, so a launch under test
+ * reads a layout that a *previous session* would have left behind.
+ *
+ * The point is to exercise the pre-existing-file case: a review over a layout
+ * edit mode has already sanitised is the common case for any real user, and it
+ * is not reachable from a fresh `mkdtemp` config directory.
+ */
+export function seedEditLayout(sourcePath: string): void {
+  const { userLayoutDir } = currentLayoutPaths();
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`Seed edit layout not found at ${sourcePath}`);
+  }
+  if (!fs.existsSync(userLayoutDir)) {
+    fs.mkdirSync(userLayoutDir, { recursive: true });
+  }
+  fs.copyFileSync(sourcePath, editLayoutPath());
+}
+
+/**
  * Restore the user's original layout from the backup.
  * Call this from `test.afterAll()`.
  */

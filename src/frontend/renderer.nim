@@ -148,12 +148,13 @@ proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, edi
 
 proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # kout layoutConfig.toJs
-  # DeepReview is a transient standalone mode whose layout contains only
-  # the VCS / DeepReview / calltrace panels.  Persisting it would clobber
-  # the user's real debug `default_layout.json`, so the next ordinary
-  # `ct` trace launch would come up missing the filesystem / editor /
-  # event-log / state / terminal / scratchpad panels.  Never persist the
-  # DeepReview layout.
+  # A review runs on a layout that is not the debugging one: since RV-2 the
+  # dataset launch opens the EDITOR layout, which deliberately omits EVENT
+  # LOG, CALLTRACE, TIMELINE, TERMINAL OUTPUT, STATE and SCRATCHPAD
+  # (DeepReview-GUI.md §1.1).  This proc always saves under the name
+  # `default_layout`, so persisting it would clobber the user's real debug
+  # layout and the next ordinary `ct` trace launch would come up missing
+  # those panels.  Never persist a review's layout.
   if data.deepReviewActive:
     return
   let isEditMode = data.ui.mode == EditMode

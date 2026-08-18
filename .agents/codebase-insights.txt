@@ -1216,3 +1216,73 @@ retired: it is the internal ct → Electron wire.
 `.dr` chunks, because the GUI reads JSON and the `export` step that used to
 bridge them is one of the retired commands. `ct review DIR` resolves the JSON
 inside the directory.
+
+- 2026-08-18 (RV-2): `ct review <PATH>` opens the EDITOR layout, not the
+  debugging one. `index/startup.init`'s `withDeepReview` branch calls
+  `index/config.loadReviewLayoutConfig` over
+  `userLayoutDir / "default_edit_layout.json"` and forwards THAT in
+  `CODETRACER::start-deepreview`; it no longer forwards the `layout` argument
+  `init` was handed. A dataset launch loads no recording, so EVENT LOG,
+  CALLTRACE, TIMELINE and TERMINAL OUTPUT used to come up present but empty.
+
+  Two traps live here:
+
+  * `editModeHiddenContentIds()` hides `Content.AgentActivity` and
+    `Content.AgentActivityDeepReview` — DeepReview's THIRD PILLAR. A review
+    therefore uses `reviewModeHiddenContentIds()`, which is the edit-mode set
+    minus `reviewPillarContentIds()`. Never "just reuse the edit set" for a
+    review: it deletes the Agent Activity panel and silently makes
+    `deepreview_layout.focusReviewActivityPane` a no-op.
+
+    That derived set is NECESSARY BUT NOT SUFFICIENT, and the difference is
+    the whole trap. It only stops the LOADER removing the panel. The same
+    file is WRITTEN by `index/window.onSaveConfig` through
+    `sanitizeEditLayoutJson`, whose hidden set *does* contain AgentActivity —
+    so once a user has opened a folder in edit mode, `default_edit_layout.json`
+    holds FILES + VCS and nothing else, and there is no panel for the hidden
+    set to spare. `deepreview_layout.ensureReviewActivityPane` (run first by
+    `focusReviewPanels`) puts an absent pillar back, in a slot of its OWN:
+    dropping it into the FILES/VCS stack would hide the VCS panel, because
+    the activity pane is focused last and two tabs of one stack cannot both
+    be visible.
+
+    General shape, worth remembering: one file shared by two modes with
+    different panel requirements, where one mode's SAVE is the other mode's
+    LOAD. Reasoning about the read path alone is not enough.
+  * CodeTracer ships NO `default_edit_layout.json` (`src/config/` has only
+    `default_layout.json`), so the edit-layout loader ALWAYS takes its
+    fallback on a fresh install. The fallback reads the debugging layout and
+    sanitises it, which is fine — but the loader's `resetLayoutToDefault`
+    paths (corrupt / unrepairable / incompatible file) used to return the
+    debugging layout RAW. They now go through
+    `resetHiddenPanelLayoutToDefault`, which applies the caller's hidden set.
+    Any new recovery path in that loader must do the same.
+
+  Only the dataset launch changed. A trace with an associated diff
+  (`vcs.startReviewForTraceDiff`) and the agentic handoff
+  (`agentic_session_launcher.syncDeepReview`) enter the review from the
+  renderer, on the layout the session already has, and keep the debugging
+  layout — they have a recording, so those panels are populated.
+  `renderer.saveConfig` still refuses to persist any layout while
+  `deepReviewActive`, which is what stops a review's reduced layout being
+  written over the user's `default_layout.json` (and what makes the
+  materialised pillar above ephemeral — nothing is written to disk).
+
+- 2026-08-18: GUI E2E tests share ONE `XDG_CONFIG_HOME` per Playwright worker
+  (`lib/fixtures.ts` mkdtemps it at module scope). So anything a test leaves
+  in `~/.config/codetracer` is input to every later test in that worker. The
+  `ctPage` fixture resets all three pieces of the saved arrangement before a
+  launch: `default_layout.json` (`ensureDefaultLayout`), `auto_hide_state.json`
+  (`resetAutoHideState`) and — since a `ct review` launch reads it —
+  `default_edit_layout.json` (`resetEditLayout`). Specs that seed one of those
+  themselves must do it in a fixture-free `beforeEach` (which runs BEFORE the
+  fixture) *and* opt out: `preserveAutoHideState` / `preserveEditLayout`.
+  To launch over a layout a previous session would have written, use the
+  `editLayoutPath` option instead of hand-writing the file.
+
+- 2026-08-18 (RV-2): `ct review --help` / `-h` / `help` are intercepted by
+  `reviewNeedsRawDispatch` and answered with `ReviewUsage`. Left to confutils
+  they printed `ct review <reviewPath>` — the declared shape of the LAUNCH
+  form only — and never named `collect` or `inspect`. `reviewNeedsRawDispatch`
+  still keys on the exact token, so `ct review ./help` launches a dataset in a
+  directory called `help`.

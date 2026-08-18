@@ -111,12 +111,35 @@ suite "ct review — dispatch":
     # and the Electron tooling inject.  Intercepting it too would silently
     # drop them.
     check not reviewNeedsRawDispatch(@["review", "/tmp/review.json"])
-    check not reviewNeedsRawDispatch(@["review", "--help"])
     check not reviewNeedsRawDispatch(@["review"])
     check reviewNeedsRawDispatch(@["review", "collect", "--output", "/tmp/o"])
     check reviewNeedsRawDispatch(@["review", "inspect", "/tmp/o"])
     check reviewNeedsRawDispatch(@["review", "export", "/tmp/o"])
     check not reviewNeedsRawDispatch(@["edit", "collect"])
+
+  test "asking_the_group_for_help_gets_the_whole_group":
+    # RV-2, from RV-1's verification.  `--help` used to be left to confutils,
+    # which knows only the shape `review` was declared with and answered
+    # `ct review <reviewPath>` — never naming `collect` or `inspect`.  Only
+    # bare `ct review` printed the group usage, so the two other commands of
+    # the group were undiscoverable from the group itself.
+    check reviewNeedsRawDispatch(@["review", "--help"])
+    check reviewNeedsRawDispatch(@["review", "-h"])
+    check reviewNeedsRawDispatch(@["review", "help"])
+    # ...and what they get is the whole group.
+    for tokens in [@["review", "--help"], @["review", "-h"],
+                   @["review", "help"]]:
+      let plan = planReviewCli(tokens)
+      check plan.kind == rpkUsage
+    # A dataset path that merely *looks* like a help token is not one; only
+    # the exact tokens are intercepted, so `ct review ./help` still launches.
+    check not reviewNeedsRawDispatch(@["review", "./help"])
+    check not reviewNeedsRawDispatch(@["review", "--helpful"])
+
+  test "the_group_usage_names_every_command_of_the_group":
+    check ReviewUsage.contains("ct review <PATH>")
+    check ReviewUsage.contains("ct review collect")
+    check ReviewUsage.contains("ct review inspect")
 
   test "a_global_option_after_the_dataset_path_is_left_to_confutils":
     # Regression: the interception used to claim the launch form as soon as a

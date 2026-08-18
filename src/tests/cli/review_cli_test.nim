@@ -96,6 +96,21 @@ suite "ct review — the shipped binary":
     check run.output.contains("review")
     check not run.output.contains("no such subcommand")
 
+  test "review_help_describes_the_whole_command_group":
+    # RV-2, from RV-1's verification.  `--help` used to be answered by
+    # confutils, which knows only the shape `review` was DECLARED with, so it
+    # printed `ct review <reviewPath>` and never mentioned `collect` or
+    # `inspect`.  The two other commands of the group were undiscoverable from
+    # the group itself — only bare `ct review` (an error path) listed them.
+    for tokens in [@["review", "--help"], @["review", "-h"],
+                   @["review", "help"]]:
+      let run = runCt(tokens)
+      checkpoint($tokens & ": " & run.output)
+      check run.exitCode == 0
+      check run.output.contains("ct review <PATH>")
+      check run.output.contains("ct review collect")
+      check run.output.contains("ct review inspect")
+
   test "review_with_no_argument_reports_usage_and_fails":
     let run = runCt(@["review"])
     checkpoint(run.output)

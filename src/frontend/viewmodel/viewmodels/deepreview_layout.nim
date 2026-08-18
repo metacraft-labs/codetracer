@@ -71,6 +71,14 @@ const
   TerminalOutputContentId* = 24
   VcsContentId* = 41
 
+  ## ``Content.AgentActivityDeepReview`` — the review's coverage/test summary.
+  ## DeepReview-GUI.md §2.1 renders it INSIDE the Agent Activity panel ("It is
+  ## not a separate panel and does not get its own layout slot"), but a layout
+  ## persisted by an older build may host it as a pane of its own, so it is a
+  ## different id from ``AgentActivityContentId`` and its presence does not
+  ## make the third pillar present.
+  AgentActivityDeepReviewContentId* = 39
+
 proc isComponentNode(node: JsonNode): bool {.inline.} =
   node.kind == JObject and node{"type"}.getStr("") == "component"
 
@@ -149,10 +157,12 @@ proc focusReviewActivityPane*(layout: JsonNode): bool {.discardable.} =
   ## came up with its coverage summary hidden behind the call trace.
   ##
   ## Only the *focus* is changed: no panel is added, moved or removed, and a
-  ## layout with no Agent Activity panel is left alone (obligation 4's
-  ## materialisation case is deliberately not taken here — DR-R3 is scoped to
-  ## focus).  Mutates ``layout`` in place; returns true when a panel was found
-  ## and focused.
+  ## layout with no Agent Activity panel is left alone.  Putting an absent
+  ## pillar back is obligation 4's business and belongs to
+  ## ``ensureReviewActivityPane`` below, which ``focusReviewPanels`` runs
+  ## first; keeping the two apart is what lets this routine stay a pure
+  ## retarget.  Mutates ``layout`` in place; returns true when a panel was
+  ## found and focused.
   if layout.isNil or layout.kind != JObject:
     return false
   if layout{"type"}.getStr("") == "stack" and
@@ -166,10 +176,119 @@ proc focusReviewActivityPane*(layout: JsonNode): bool {.discardable.} =
     return focusReviewActivityPane(layout["root"])
   false
 
+const AgentActivityPaneLabel* = "agentActivityComponent-0"
+  ## The ``componentState.label`` the bundled ``src/config/default_layout.json``
+  ## gives the Agent Activity pane.  A materialised pane reuses it verbatim so
+  ## a layout the review put the pillar back into is indistinguishable from one
+  ## that always had it — including to ``ui/layout.nim``, which derives the tab
+  ## title from ``componentState.content`` and the component id from the label.
+
+proc makeAgentActivityPane(): JsonNode =
+  ## One Agent Activity component node, in the shape ``ui/layout.nim``
+  ## registers and ``createUIComponents`` walks: the ``genericUiComponent``
+  ## type (one of the two ``layout_config_repair.knownComponentTypes``; an
+  ## unregistered type throws a ``TypeError`` out of ``loadLayout``) plus a
+  ## ``componentState`` carrying the content ordinal.
+  %*{
+    "type": "component",
+    "componentType": "genericUiComponent",
+    "componentName": "genericUiComponent",
+    "componentState": {
+      "id": 0,
+      "label": AgentActivityPaneLabel,
+      "content": AgentActivityContentId
+    },
+    "title": "genericUiComponent"
+  }
+
+proc ensureReviewActivityPane*(layout: JsonNode): bool {.discardable.} =
+  ## Put DeepReview's third pillar back when the layout being reviewed has no
+  ## Agent Activity panel at all.
+  ##
+  ## `codetracer-specs/GUI/Layout-And-Navigation/Layout-System.md`, "DeepReview
+  ## and the Layout", obligation 4: "**Absent panels are materialised, not
+  ## substituted** — if the user's layout has no VCS or Agent Activity panel at
+  ## all, the review may add one ... It may not rebuild the layout around it."
+  ##
+  ## WHY THIS IS NOT AN EDGE CASE.  Since RV-2 a dataset review opens the
+  ## *edit-mode* layout file, and edit mode's save-side sanitiser deletes
+  ## ``Content.AgentActivity`` (``index/config.editModeHiddenContentIds``) —
+  ## correctly, an editing session has no agent review data.  RV-2's derived
+  ## review hidden set stops the *loader* from removing the panel, but a hidden
+  ## set can only decline to delete something; it cannot restore a panel that
+  ## the file it is reading never contained.  For every user who has ever
+  ## opened a folder in edit mode, ``default_edit_layout.json`` holds FILES and
+  ## VCS and nothing else — so without this the pillar is simply absent and
+  ## ``focusReviewActivityPane`` is a silent no-op.
+  ##
+  ## WHERE IT GOES, and why not "as a tab in an existing stack".  The saved
+  ## edit layout has exactly one stack, and that stack hosts the VCS panel.
+  ## DeepReview-GUI.md §2 requires the VCS panel to be "the visible tab of
+  ## whichever stack hosts it when a review starts" and obligation 2 requires
+  ## the same of the Agent Activity panel; two tabs of one stack cannot both be
+  ## visible, and ``focusReviewPanels`` focuses the activity pane last, so a
+  ## pillar added to that stack would hide the VCS panel behind itself.  The
+  ## materialised pane therefore gets a slot of its own beside the user's
+  ## arrangement.  That is also the arrangement a fresh install already gets:
+  ## sanitising the bundled layout for a review empties the CALLTRACE stack
+  ## down to AGENT ACTIVITY alone, so a review looks the same whether or not
+  ## the user has opened edit mode.
+  ##
+  ## Nothing is removed, moved or re-ordered: every existing panel keeps its
+  ## stack, its stack-mates and their order, which is what separates
+  ## "materialised" from "rebuilt". ``visual_replay_layout``'s
+  ## ``wrapWithVisualReplayColumn`` takes the same additive fallback for the
+  ## same reason.
+  ##
+  ## Idempotent (obligation 3): a layout that already declares the panel —
+  ## anywhere, in any stack — is left untouched, so re-entering a review can
+  ## never accumulate a second one.  Mutates ``layout`` in place; returns true
+  ## when a pane was added.
+  if layout.isNil or layout.kind != JObject:
+    return false
+  if not layout.hasKey("root") or layout["root"].kind != JObject:
+    return false
+  if layoutContainsContentId(layout, AgentActivityContentId):
+    return false
+
+  let root = layout["root"]
+  let activityStack = %*{
+    "type": "stack",
+    "content": [makeAgentActivityPane()]
+  }
+  let rootType = root{"type"}.getStr("")
+
+  # No explicit `size`: GoldenLayout shares the space left over by siblings
+  # that do declare one, which is exactly how the fresh-install review layout
+  # already sits beside a 20%-wide FILES/VCS column.
+  if rootType == "row" and root.hasKey("content") and
+      root["content"].kind == JArray:
+    root["content"].add(%*{"type": "column", "content": [activityStack]})
+    return true
+  if rootType == "column" and root.hasKey("content") and
+      root["content"].kind == JArray:
+    # A column root grows downward, so the pillar becomes a strip under the
+    # user's panes rather than a column beside them — the shape the bundled
+    # layout already uses for its EVENT LOG stack.
+    root["content"].add(activityStack)
+    return true
+
+  # The root is a bare stack or a bare component: there is no container to add
+  # a sibling to, so synthesise the row that GoldenLayout would have had. The
+  # original root is carried across untouched as the row's first child.
+  layout["root"] = %*{
+    "type": "row",
+    "size": "100%",
+    "isClosable": false,
+    "content": [copy(root), %*{"type": "column", "content": [activityStack]}]
+  }
+  true
+
 proc focusReviewPanels*(layout: JsonNode): JsonNode =
-  ## The whole of what starting a review does to a layout: bring the VCS
-  ## panel and the Agent Activity panel to the front of the stacks that
-  ## already host them.  Nothing is added, moved or removed.
+  ## The whole of what starting a review does to a layout: put DeepReview's
+  ## third pillar back if the layout has none, then bring the VCS panel and
+  ## the Agent Activity panel to the front of the stacks that host them.
+  ## Nothing is removed, moved or re-ordered.
   ##
   ## This is the "focus-and-populate preset" the reconciled
   ## ``Layout-System.md`` permits — "a preset that brings the three review
@@ -181,8 +300,14 @@ proc focusReviewPanels*(layout: JsonNode): JsonNode =
   ## GoldenLayout focuses the way it focuses any newly opened tab.
   ##
   ## Pure: ``layout`` is not mutated and the returned tree is a deep copy
-  ## carrying the retargeting.  Idempotent by construction — writing the
-  ## same ``activeItemIndex`` twice is the same layout.
+  ## carrying the retargeting.  Idempotent by construction — writing the same
+  ## ``activeItemIndex`` twice is the same layout, and
+  ## ``ensureReviewActivityPane`` declines to add a pillar that is already
+  ## there.
+  ##
+  ## ORDER MATTERS.  The pillar is materialised *before* either focus step, so
+  ## a materialised pane is focused by the same rule as a pre-existing one and
+  ## there is no second code path that could focus it differently.
   ##
   ## Until DR-R8 this routine was ``addDeepReviewSurface`` and *also*
   ## inserted a standalone ``Content.DeepReview`` component into the editor
@@ -194,6 +319,7 @@ proc focusReviewPanels*(layout: JsonNode): JsonNode =
   result = copy(layout)
   if not result.hasKey("root") or result["root"].kind != JObject:
     return
+  ensureReviewActivityPane(result)
   focusReviewFileList(result)
   focusReviewActivityPane(result)
 

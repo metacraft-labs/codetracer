@@ -143,13 +143,26 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     # DeepReview component layout.
     debugPrint "start deepreview mode"
     await started()
-    # Forward the loaded GoldenLayout config.  DeepReview used to build its
-    # own three-panel preset in the renderer and drop everything else for
-    # the session (issue #610); it now *adds* the review surface to this
-    # layout, so the user's panels survive.
+    # Load and forward the EDITOR layout, not the debugging one this proc was
+    # handed (RV-2; DeepReview-GUI.md §1.1).  `ct review <PATH>` never loads a
+    # recording, so the debugging layout's EVENT LOG, CALLTRACE, TIMELINE and
+    # TERMINAL OUTPUT panels came up present but empty — which reads as
+    # missing data.  The editor layout omits exactly those, and
+    # `loadReviewLayoutConfig` keeps the Agent Activity panel an editing
+    # session would also hide, because it is the review's third pillar.
+    #
+    # This is still the same user layout file an editing session opens; the
+    # renderer then *adds* nothing and removes nothing (issue #610), it only
+    # brings the review's panels to the front of the stacks that host them.
+    #
+    # Only the dataset launch reaches this branch.  A review over a
+    # diff-associated trace, and an agentic handoff, enter from the renderer
+    # with a recording loaded, and keep the debugging layout.
+    let reviewLayout = await mainWindow.loadReviewLayoutConfig(
+      string(userLayoutDir / "default_edit_layout.json"))
     mainWindow.webContents.send "CODETRACER::start-deepreview", js{
       config: data.config,
-      layout: layout,
+      layout: reviewLayout,
       startOptions: data.startOptions
     }
     # DeepReview is a normal window with a session tab bar, so its "+" opens a

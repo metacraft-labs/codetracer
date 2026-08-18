@@ -530,6 +530,36 @@ proc editModeHiddenContentIds(): seq[int] =
     ord(Content.VideoPlayer)
   ]
 
+proc reviewPillarContentIds(): seq[int] =
+  ## The panels a DeepReview session is assembled from and must therefore
+  ## keep, even though an *editing* session hides them.
+  ##
+  ## DeepReview-GUI.md: "DeepReview introduces no panel of its own.  It is a
+  ## combination of features of three existing surfaces: 1. the Editor,
+  ## 2. the VCS panel, 3. the Agent Activity panel".  The Editor
+  ## (`Content.EditorView`) and the VCS panel (`Content.VCS`) are not in
+  ## `editModeHiddenContentIds` to begin with — an editing session has both —
+  ## so the Agent Activity panel and the DeepReview section that renders
+  ## inside it are the whole of the difference between the two modes.
+  ##
+  ## `Content.AgentActivityDeepReview` is a DIFFERENT id from the retired
+  ## `Content.DeepReview` (36); see the note on the `Content` enum.  It is
+  ## listed here because a saved layout may host it as a pane of its own.
+  @[
+    ord(Content.AgentActivity),
+    ord(Content.AgentActivityDeepReview)
+  ]
+
+proc reviewModeHiddenContentIds(): seq[int] =
+  ## Edit mode's hidden set, minus DeepReview's own pillars — RV-2.
+  ##
+  ## The rule itself lives in `index/layout_config_repair` so it can be
+  ## exercised without electron or `fs`
+  ## (`src/tests/gui/tests/layout/review_layout_test.nim`); this proc supplies
+  ## the two `Content` ordinals by name so they exist in exactly one place.
+  layout_config_repair.reviewModeHiddenContentIds(
+    editModeHiddenContentIds(), reviewPillarContentIds())
+
 proc stringifyJson(value: js): cstring {.importjs: "JSON.stringify(#)".}
 
 proc sanitizeEditLayoutJson*(raw: cstring): cstring =
@@ -724,23 +754,55 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
       errorPrint "index: load layout config error: ", errCopy
       quit(1)
 
-proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
-  ## Load edit mode layout configuration from file
+proc resetHiddenPanelLayoutToDefault(filename: string;
+                                     hiddenContents: seq[int]): Future[js] {.async.} =
+  ## `resetLayoutToDefault` for a mode that hides panels.
+  ##
+  ## `resetLayoutToDefault` hands back the bundled `default_layout.json` —
+  ## the DEBUGGING layout, EVENT LOG / CALLTRACE / TIMELINE / TERMINAL OUTPUT
+  ## and all.  Returning that raw to an edit-mode or review-mode caller
+  ## restores exactly the panels those modes exclude, which is the failure
+  ## RV-2's fourth deliverable asks about ("Confirm `loadEditLayoutConfig`'s
+  ## fallback does not silently reintroduce the debugging layout").  The
+  ## *absent-file* fallback below always sanitised; these reset paths — a
+  ## corrupt, unrepairable or incompatible layout file — did not, so a single
+  ## bad byte in `default_edit_layout.json` turned a review back into a
+  ## debugging window with panels no dataset can fill.
+  ##
+  ## Every recovery path therefore ends in the same sanitiser as the happy
+  ## path, with the caller's own hidden set.
+  let config = await resetLayoutToDefault(filename)
+  if config.isNil:
+    # `resetLayoutToDefault` exits rather than returning nil, but a nil here
+    # must not become a crash inside the sanitiser.
+    return config
+  return sanitizeEditLayoutConfig(
+    config, ord(Content.EditorView), hiddenContents)
+
+proc loadEditLayoutConfig*(main: js, filename: string;
+                           hiddenContents: seq[int] = editModeHiddenContentIds()):
+                          Future[js] {.async.} =
+  ## Load a layout for a mode that hides the replay-only panels.
+  ##
+  ## `hiddenContents` defaults to edit mode's set; `loadReviewLayoutConfig`
+  ## below passes the review's, which is the same set minus DeepReview's own
+  ## pillars.  The two modes share this loader rather than a copy of it so a
+  ## fix to one (the reset paths above, say) cannot reach only one of them.
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
     let parsed = parseLayoutJson(data, "Edit layout config JSON parse error")
     if parsed.isNil:
-      return await resetLayoutToDefault(filename)
+      return await resetHiddenPanelLayoutToDefault(filename, hiddenContents)
     let config = await repairAndPersistLayout(parsed, filename, "edit layout")
     if config.isNil:
-      return await resetLayoutToDefault(filename)
+      return await resetHiddenPanelLayoutToDefault(filename, hiddenContents)
     # Validate the loaded config structure
     let autoHide = await loadAutoHideState()
     if not isValidLayoutConfig(config, autoHide):
       warnPrint "Edit layout config is invalid or incompatible: ", filename
-      return await resetLayoutToDefault(filename)
+      return await resetHiddenPanelLayoutToDefault(filename, hiddenContents)
     return sanitizeEditLayoutConfig(
-      config, ord(Content.EditorView), editModeHiddenContentIds())
+      config, ord(Content.EditorView), hiddenContents)
   else:
     # Edit mode layout file doesn't exist yet - use default debug layout as fallback
     let defaultLayoutFile = userLayoutDir / "default_layout.json"
@@ -749,17 +811,17 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
       let parsedDefault = parseLayoutJson(defaultData,
         "Default layout config JSON parse error")
       if parsedDefault.isNil:
-        return await resetLayoutToDefault(defaultLayoutFile)
+        return await resetHiddenPanelLayoutToDefault(defaultLayoutFile, hiddenContents)
       let config = await repairAndPersistLayout(
         parsedDefault, defaultLayoutFile, "replay layout")
       if config.isNil:
-        return await resetLayoutToDefault(defaultLayoutFile)
+        return await resetHiddenPanelLayoutToDefault(defaultLayoutFile, hiddenContents)
       let autoHide = await loadAutoHideState()
       if not isValidLayoutConfig(config, autoHide):
         warnPrint "Default layout config is invalid: ", defaultLayoutFile
-        return await resetLayoutToDefault(defaultLayoutFile)
+        return await resetHiddenPanelLayoutToDefault(defaultLayoutFile, hiddenContents)
       return sanitizeEditLayoutConfig(
-        ensureReplayLayoutPanels(config), ord(Content.EditorView), editModeHiddenContentIds())
+        ensureReplayLayoutPanels(config), ord(Content.EditorView), hiddenContents)
     else:
       # Fall back to the bundled default layout
       let errCopy = await fsCopyFileWithErr(
@@ -767,10 +829,32 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
         cstring(filename)
       )
       if errCopy.isNil:
-        return await loadEditLayoutConfig(main, filename)
+        return await loadEditLayoutConfig(main, filename, hiddenContents)
       else:
         errorPrint "index: load edit layout config error: ", errCopy
         quit(1)
+
+proc loadReviewLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
+  ## Load the layout a DeepReview session over an exported dataset opens in.
+  ##
+  ## RV-2 / DeepReview-GUI.md §1.1: "`ct review` opens the editor layout, not
+  ## the debugging layout.  A review over a dataset is an editing-and-reading
+  ## task, not a replay session.  The editor layout omits the panels a dataset
+  ## cannot populate (EVENT LOG, CALLTRACE, TIMELINE, TERMINAL OUTPUT), so a
+  ## review does not present empty panels that imply missing data."
+  ##
+  ## It is the *edit-mode* layout, read from the same
+  ## `default_edit_layout.json` an editing session uses — a review adds no
+  ## layout of its own, exactly as it adds no panel of its own
+  ## (DeepReview-GUI.md §7).  The one difference is the hidden set: the Agent
+  ## Activity panel is the review's third pillar and must survive.
+  ##
+  ## Only the *dataset* launch (`ct review <PATH>`) comes here.  A review over
+  ## a diff-associated trace, and an agentic handoff that recorded one, keep
+  ## the debugging layout: they have a recording, so those panels are
+  ## populated and belong.  Neither passes through this loader — they enter
+  ## the review from the renderer, on the layout the session already has.
+  return await loadEditLayoutConfig(main, filename, reviewModeHiddenContentIds())
 
 proc loadValues*(a: js, id: cstring): JsAssoc[cstring, cstring] =
   var fields = JsAssoc[cstring, js]{}

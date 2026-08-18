@@ -417,10 +417,25 @@ else:
         "proc editModeHiddenContentIds(): seq[int] =")
       check sanitizeBody.contains("sanitizeLayoutConfig(config, editorContent, hiddenContents)")
 
-      # Every edit-mode call site — the save path and both load paths — hands
-      # the sanitiser the editor content id AND the hidden set.
+      # Every edit-mode call site — the save path, both load paths and (since
+      # RV-2) the reset path — hands the sanitiser the editor content id AND a
+      # hidden set.
+      #
+      # RV-2 turned the hidden set into a *parameter* of
+      # `loadEditLayoutConfig`, defaulting to `editModeHiddenContentIds()`, so
+      # a review can share the loader with its own set (edit mode's, minus
+      # DeepReview's Agent Activity pillar).  The three edit-mode paths inside
+      # the loader therefore spell it `hiddenContents` and the save path still
+      # names the set directly.  The count is asserted per spelling rather
+      # than in total so neither can quietly become zero.
       check source.count(
-        "ord(Content.EditorView), editModeHiddenContentIds())") == 3
+        "ord(Content.EditorView), editModeHiddenContentIds())") == 1
+      check source.count("ord(Content.EditorView), hiddenContents)") == 3
+
+      # The parameter defaults to the edit-mode set, so every edit-mode caller
+      # keeps the set it always had without naming it.
+      check source.contains(
+        "hiddenContents: seq[int] = editModeHiddenContentIds()")
 
     test "delegated ct edit opens a populated edit session":
       let indexSource = readFile(IndexPath)

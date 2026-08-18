@@ -211,7 +211,11 @@ test.beforeAll(() => {
 // Test: Normal operation with valid layout (sanity check)
 test.describe("Normal operation with valid layout", () => {
   // Use default (hopefully valid) layout
-  test.use({ launchMode: "edit", editFolderPath: testFolder });
+  // This whole file manages `default_edit_layout.json` itself — backing it
+  // up, corrupting it, restoring it — so the launch fixture must not reset it
+  // out from under the scenario. (The reset exists because a review now reads
+  // that file too; see `layout-reset.resetEditLayout`.)
+  test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
   test("app loads normally with valid layout", async ({ ctPage }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
@@ -265,7 +269,11 @@ test.describe("Recovery from corrupted JSON", () => {
   // Recovery tests can be flaky when running sequentially due to
   // Playwright fixture lifecycle interactions.
   test.describe.configure({ retries: 2 });
-  test.use({ launchMode: "edit", editFolderPath: testFolder });
+  // This whole file manages `default_edit_layout.json` itself — backing it
+  // up, corrupting it, restoring it — so the launch fixture must not reset it
+  // out from under the scenario. (The reset exists because a review now reads
+  // that file too; see `layout-reset.resetEditLayout`.)
+  test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
   test("app recovers from corrupted layout JSON", async ({ ctPage }) => {
     const layoutPath = defaultEditLayoutPath;
@@ -290,7 +298,11 @@ test.describe("Recovery from corrupted JSON", () => {
 
 test.describe("Recovery from invalid structure", () => {
   test.describe.configure({ retries: 2 });
-  test.use({ launchMode: "edit", editFolderPath: testFolder });
+  // This whole file manages `default_edit_layout.json` itself — backing it
+  // up, corrupting it, restoring it — so the launch fixture must not reset it
+  // out from under the scenario. (The reset exists because a review now reads
+  // that file too; see `layout-reset.resetEditLayout`.)
+  test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
   test("app recovers from layout with missing root", async ({ ctPage }) => {
     const layoutPath = defaultEditLayoutPath;
@@ -312,7 +324,11 @@ test.describe("Recovery from invalid structure", () => {
 
 test.describe("Recovery from missing type", () => {
   test.describe.configure({ retries: 2 });
-  test.use({ launchMode: "edit", editFolderPath: testFolder });
+  // This whole file manages `default_edit_layout.json` itself — backing it
+  // up, corrupting it, restoring it — so the launch fixture must not reset it
+  // out from under the scenario. (The reset exists because a review now reads
+  // that file too; see `layout-reset.resetEditLayout`.)
+  test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
   test("app recovers from layout root missing type property", async ({ ctPage }) => {
     const layoutPath = defaultEditLayoutPath;
@@ -358,7 +374,11 @@ test.describe("Recovery from missing type", () => {
 
 test.describe("Recovery from an out-of-range activeItemIndex", () => {
   test.describe.configure({ retries: 2 });
-  test.use({ launchMode: "edit", editFolderPath: testFolder });
+  // This whole file manages `default_edit_layout.json` itself — backing it
+  // up, corrupting it, restoring it — so the launch fixture must not reset it
+  // out from under the scenario. (The reset exists because a review now reads
+  // that file too; see `layout-reset.resetEditLayout`.)
+  test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
   test.beforeEach(() => {
     backupLayoutFile(defaultEditLayoutPath);
@@ -407,7 +427,11 @@ test.describe("Recovery from an out-of-range activeItemIndex", () => {
 
 test.describe("Recovery from an unknown componentType", () => {
   test.describe.configure({ retries: 2 });
-  test.use({ launchMode: "edit", editFolderPath: testFolder });
+  // This whole file manages `default_edit_layout.json` itself — backing it
+  // up, corrupting it, restoring it — so the launch fixture must not reset it
+  // out from under the scenario. (The reset exists because a review now reads
+  // that file too; see `layout-reset.resetEditLayout`.)
+  test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
   test.beforeEach(() => {
     backupLayoutFile(defaultEditLayoutPath);

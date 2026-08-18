@@ -2372,13 +2372,11 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
 proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions, layout=js)) =
   ## Handler for ``CODETRACER::start-deepreview`` IPC message.
   ##
-  ## Sets up the frontend for DeepReview offline review mode on the user's
-  ## own GoldenLayout.  The layout the index process loaded is used as-is:
-  ## a review adds no panel and removes none, it only retargets the stacks
-  ## hosting the VCS and Agent Activity panels at them
-  ## (``deepreview_layout.focusReviewPanels``).  Every standard panel —
-  ## FILES, VCS, STATE, SCRATCHPAD, CALLTRACE, AGENT ACTIVITY, EVENT LOG,
-  ## TIMELINE, TERMINAL OUTPUT — therefore stays where the user put it
+  ## Sets up the frontend for DeepReview offline review mode on the layout the
+  ## index process loaded, which is used as-is: a review adds no panel and
+  ## removes none, it only retargets the stacks hosting the VCS and Agent
+  ## Activity panels at them (``deepreview_layout.focusReviewPanels``).  Every
+  ## panel that layout declares therefore stays where the user put it
   ## (issue #610; DeepReview-GUI.md §7).
   ##
   ## The VCS panel detects ``data.deepReviewActive`` and populates its file
@@ -2387,12 +2385,15 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   ## ``Content.UnifiedDiff`` tab or the file itself, per the panel's view
   ## mode toggle.
   ##
-  ## NOTE (M42b): in ``--deepreview`` mode the index process never loads a
-  ## recording (``index/args.nim`` forces ``recordingID = ""`` and
-  ## ``index/startup.nim`` returns before ``CODETRACER::init``), so the
-  ## replay-backed panels come up present but EMPTY.  Populating them needs
-  ## the exporter to emit a resolvable ``traceContexts[].recordingId`` and
-  ## the startup path to load that recording — tracked separately.
+  ## NOTE (RV-2): the layout that arrives here for a *dataset* launch is the
+  ## EDITOR layout, not the debugging one (``index/config.loadReviewLayoutConfig``).
+  ## A dataset launch loads no recording at all — ``index/args.nim`` forces
+  ## ``recordingID = ""`` and ``index/startup.nim`` returns before
+  ## ``CODETRACER::init`` — so the replay-backed panels used to come up present
+  ## but EMPTY, which reads as missing data.  They are now simply not in the
+  ## layout (DeepReview-GUI.md §1.1).  The other two launch methods have a
+  ## recording, do not pass through this handler, and keep the debugging
+  ## layout with those panels populated.
   data.startOptions.loading = false
   data.startOptions.withDeepReview = true
   data.config = response.config

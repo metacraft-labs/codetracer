@@ -294,9 +294,25 @@ suite "#610 DeepReview layout — the bundled default survives a review":
       stackContentIds(original.findStackWithContent(AgentActivityContentId))
     check focusReviewPanels(once) == once
 
-  test "a layout with no Agent Activity panel is left alone":
-    ## Focus only: DR-R3 does not materialise a missing pane, and must not
-    ## invent an activeItemIndex for a stack it does not own.
+  test "test_a_layout_with_no_agent_activity_panel_gets_the_pillar_back":
+    ## Layout-System.md, "DeepReview and the Layout", obligation 4: "**Absent
+    ## panels are materialised, not substituted** — if the user's layout has
+    ## no VCS or Agent Activity panel at all, the review may add one ... It may
+    ## not rebuild the layout around it."
+    ##
+    ## This test asserted the OPPOSITE until RV-2's follow-up ("a layout with
+    ## no Agent Activity panel is left alone"), on the reasoning that DR-R3 was
+    ## scoped to focus.  That was defensible while the review opened the
+    ## DEBUGGING layout, which always declares the panel: the absent case was
+    ## rare.  RV-2 moved the dataset launch onto `default_edit_layout.json`,
+    ## and edit mode's save-side sanitiser DELETES `Content.AgentActivity`
+    ## (`index/config.editModeHiddenContentIds`) — so for every user who has
+    ## ever opened a folder in edit mode, the file a review reads has no Agent
+    ## Activity panel in it at all, and "left alone" means the review comes up
+    ## missing one of the three surfaces it is assembled from.
+    ##
+    ## Focusing cannot fix that: `focusReviewActivityPane` can only retarget a
+    ## stack at a panel that is already there.  The pillar has to be put back.
     let layout = wrap(makeRow("100%", [
       makeStack([makeComponent(FilesystemContentId, "filesystemComponent"),
                  makeComponent(VcsContentId, "vCSComponent-0")]),
@@ -305,15 +321,193 @@ suite "#610 DeepReview layout — the bundled default survives a review":
         makeComponent(LowLevelCodeContentId, "lowLevelCodeComponent-0"),
       ]),
     ]))
+    check not layoutHasContent(layout, AgentActivityContentId)
+
     let updated = focusReviewPanels(layout)
-    check updated.findStackWithContent(AgentActivityContentId).isNil
-    check not layoutHasContent(updated, AgentActivityContentId)
+    check layoutHasContent(updated, AgentActivityContentId)
+
+    # ...and it is the visible tab of wherever it landed, which is the whole
+    # point of putting it back (obligation 2).
+    let activityStack = updated.findStackWithContent(AgentActivityContentId)
+    check not activityStack.isNil
+    check activityStack{"activeItemIndex"}.getInt(-1) ==
+      stackContentIds(activityStack).find(AgentActivityContentId)
+
+    # Nothing the user arranged was displaced to make room (obligation 1) and
+    # no stack the review does not own had an activeItemIndex invented for it.
+    for contentId in contentIdsInLayout(layout):
+      check contentIdsInLayout(updated).contains(contentId)
     check updated.findStackWithContent(EditorViewContentId){
       "activeItemIndex"}.isNil
+
+  test "test_the_materialised_pillar_does_not_hide_the_vcs_panel":
+    ## The trap in obligation 4's "add one as a tab in an existing stack".
+    ##
+    ## The saved edit layout is FILES + VCS in ONE stack and nothing else (it
+    ## is the bundled default with every panel edit mode hides removed).  Drop
+    ## AGENT ACTIVITY into that stack and the two obligations collide:
+    ## `focusReviewActivityPane` runs after `focusReviewFileList`, so the last
+    ## write to `activeItemIndex` wins and the VCS panel — which
+    ## DeepReview-GUI.md §2 requires to be "the visible tab of whichever stack
+    ## hosts it when a review starts" — ends up hidden behind the pillar that
+    ## was just added.  Two panels in one stack cannot both be visible.
+    ##
+    ## So the materialised pillar gets a slot of its own beside the user's
+    ## arrangement rather than inside the stack that hosts a sibling pillar.
+    let layout = wrap(makeRow("100%", [
+      makeColumn("20%", [makeStack([
+        makeComponent(FilesystemContentId, "filesystemComponent"),
+        makeComponent(VcsContentId, "vCSComponent-0"),
+      ])]),
+    ]))
+    let updated = focusReviewPanels(layout)
+
+    let vcsStack = updated.findStackWithContent(VcsContentId)
+    let activityStack = updated.findStackWithContent(AgentActivityContentId)
+    check not vcsStack.isNil
+    check not activityStack.isNil
+    # Different stacks — the only arrangement in which both can be visible.
+    check activityStack != vcsStack
+    check not stackContentIds(vcsStack).contains(AgentActivityContentId)
+    # Both are the visible tab of their own stack.
+    check vcsStack{"activeItemIndex"}.getInt(-1) ==
+      stackContentIds(vcsStack).find(VcsContentId)
+    check activityStack{"activeItemIndex"}.getInt(-1) ==
+      stackContentIds(activityStack).find(AgentActivityContentId)
+    # FILES keeps its stack, its stack-mate and its order.
+    check stackContentIds(vcsStack) == @[FilesystemContentId, VcsContentId]
+
+  test "test_materialising_the_pillar_is_idempotent":
+    ## Obligation 3: "re-entering a review on a layout persisted from an
+    ## earlier review session must not accumulate duplicate tabs".  A second
+    ## review over the same layout must find the pillar already there and add
+    ## nothing.
+    let layout = wrap(makeRow("100%", [
+      makeColumn("20%", [makeStack([
+        makeComponent(FilesystemContentId, "filesystemComponent"),
+        makeComponent(VcsContentId, "vCSComponent-0"),
+      ])]),
+    ]))
+    let once = focusReviewPanels(layout)
+    let twice = focusReviewPanels(once)
+    check twice == once
+    var activityCount = 0
+    for contentId in contentIdsInLayout(twice):
+      if contentId == AgentActivityContentId:
+        activityCount += 1
+    check activityCount == 1
+
+  test "test_materialisation_leaves_a_loadable_layout":
+    ## The result is handed straight to GoldenLayout, so it must satisfy the
+    ## same invariants a saved layout does: a typed root, the Filesystem panel
+    ## `index/config.isValidLayoutConfig` insists on, and stacks whose
+    ## `activeItemIndex` is in range (`Stack.init` throws otherwise).
+    let layout = wrap(makeRow("100%", [
+      makeColumn("20%", [makeStack([
+        makeComponent(FilesystemContentId, "filesystemComponent"),
+        makeComponent(VcsContentId, "vCSComponent-0"),
+      ])]),
+    ]))
+    let updated = focusReviewPanels(layout)
+    check isValidLayoutShape(updated)
+
+    proc everyActiveItemIndexInRange(node: JsonNode): bool =
+      if node.isNil or node.kind != JObject:
+        return true
+      if node{"type"}.getStr("") == "stack" and node.hasKey("activeItemIndex"):
+        let count =
+          if node.hasKey("content") and node["content"].kind == JArray:
+            node["content"].len
+          else:
+            0
+        let index = node["activeItemIndex"].getInt(-1)
+        if index < 0 or index >= count:
+          return false
+      if node.hasKey("content") and node["content"].kind == JArray:
+        for child in node["content"].items:
+          if not everyActiveItemIndexInRange(child):
+            return false
+      if node.hasKey("root"):
+        return everyActiveItemIndexInRange(node["root"])
+      true
+    check everyActiveItemIndexInRange(updated)
+
+    # The materialised component carries everything `createUIComponents` and
+    # GoldenLayout's `bindComponent` read off a node: a registered component
+    # type, and a `componentState` with the content ordinal and a label.
+    let activityStack = updated.findStackWithContent(AgentActivityContentId)
+    check not activityStack.isNil
+    var pane: JsonNode = nil
+    if not activityStack.isNil:
+      for child in activityStack{"content"}.getElems:
+        if child{"componentState"}{"content"}.getInt(-1) == AgentActivityContentId:
+          pane = child
+    check not pane.isNil
+    check pane{"type"}.getStr("") == "component"
+    check pane{"componentType"}.getStr("") == "genericUiComponent"
+    check pane{"componentState"}{"label"}.getStr("").len > 0
+
+  test "test_a_rootless_stack_layout_still_gets_the_pillar":
+    ## A user can close panes until the root itself is a single stack.  The
+    ## pillar cannot go inside it — that is the VCS collision again — so the
+    ## root is wrapped in a row, which is the same fallback
+    ## `visual_replay_layout.wrapWithVisualReplayColumn` takes and is not
+    ## "rebuilding the layout around it": every panel keeps its stack, its
+    ## stack-mates and their order.
+    let layout = wrap(makeStack([
+      makeComponent(FilesystemContentId, "filesystemComponent"),
+      makeComponent(VcsContentId, "vCSComponent-0"),
+    ]))
+    let updated = focusReviewPanels(layout)
+    check layoutHasContent(updated, AgentActivityContentId)
+    check updated["root"]["type"].getStr("") == "row"
+    let vcsStack = updated.findStackWithContent(VcsContentId)
+    check stackContentIds(vcsStack) == @[FilesystemContentId, VcsContentId]
+    check updated.findStackWithContent(AgentActivityContentId) != vcsStack
+
+  test "test_a_column_root_gets_the_pillar_as_a_strip_below":
+    ## A root can just as well be a column — GoldenLayout's root is whatever
+    ## the user's last drag left behind.  Adding a *column* to a column would
+    ## nest a container for no reason, so the pillar joins it as a stack: a
+    ## strip under the user's panes, which is the shape the bundled layout
+    ## already uses for its EVENT LOG stack.
+    let layout = wrap(makeColumn("100%", [
+      makeStack([makeComponent(FilesystemContentId, "filesystemComponent"),
+                 makeComponent(VcsContentId, "vCSComponent-0")]),
+    ]))
+    let updated = focusReviewPanels(layout)
+    check updated["root"]["type"].getStr("") == "column"
+    check updated["root"]["content"].len == 2
+    check layoutHasContent(updated, AgentActivityContentId)
+    let activityStack = updated.findStackWithContent(AgentActivityContentId)
+    check activityStack != updated.findStackWithContent(VcsContentId)
+    check stackContentIds(activityStack) == @[AgentActivityContentId]
+    check isValidLayoutShape(updated)
+
+  test "test_a_docked_review_section_pane_does_not_block_the_pillar":
+    ## `Content.AgentActivityDeepReview` (39) is the review's coverage/test
+    ## summary, which §2.1 renders INSIDE the Agent Activity panel — "It is not
+    ## a separate panel and does not get its own layout slot".  A layout
+    ## persisted by an older build may still host it as a pane of its own, and
+    ## that pane is not the panel: `focusReviewActivityPane` looks for 35, so a
+    ## layout carrying only 39 is still a layout with no third pillar.
+    let layout = wrap(makeRow("100%", [
+      makeStack([makeComponent(FilesystemContentId, "filesystemComponent"),
+                 makeComponent(VcsContentId, "vCSComponent-0")]),
+      makeStack([makeComponent(AgentActivityDeepReviewContentId, "review")]),
+    ]))
+    let updated = focusReviewPanels(layout)
+    check layoutHasContent(updated, AgentActivityContentId)
+    check layoutHasContent(updated, AgentActivityDeepReviewContentId)
 
   test "a layout without a VCS panel is left alone":
     ## ``focusReviewFileList`` must not invent an activeItemIndex for stacks
     ## it does not own — that would silently re-target the user's editor.
+    ##
+    ## The pillar IS materialised into this layout (it declares no Agent
+    ## Activity panel either), so the assertion is specifically that the
+    ## stacks the user arranged are untouched by it: only the stack the
+    ## review added carries an ``activeItemIndex``.
     let layout = wrap(makeRow("100%", [
       makeStack([makeComponent(FilesystemContentId, "filesystemComponent")]),
       makeStack([
@@ -325,6 +519,8 @@ suite "#610 DeepReview layout — the bundled default survives a review":
     for stack in [updated.findStackWithContent(FilesystemContentId),
                   updated.findStackWithContent(EditorViewContentId)]:
       check stack{"activeItemIndex"}.isNil
+    check updated.findStackWithContent(AgentActivityContentId){
+      "activeItemIndex"}.getInt(-1) == 0
 
   test "an existing editor area is left exactly as the user arranged it":
     ## Before DR-R8 the review surface joined the user's editor stack as an
@@ -332,6 +528,14 @@ suite "#610 DeepReview layout — the bundled default survives a review":
     ## is byte-for-byte the one the user saved — the review's own documents
     ## arrive later, as ordinary editor tabs opened by
     ## ``review_entry.openFirstReviewFile``.
+    ##
+    ## This layout declares no Agent Activity panel, so the review does add a
+    ## container for the materialised pillar (obligation 4).  The assertion
+    ## that used to read `root.content.len == 2` is therefore restated as what
+    ## it was really guarding — the user's own containers survive unchanged,
+    ## in place, in order — plus the new requirement that exactly ONE was
+    ## added and that it holds nothing but the pillar.  Weaker would be to
+    ## drop the count; this is the count plus their contents.
     let editorStack = makeStack([
       makeComponent(EditorViewContentId, "main.rs", EditorComponentName),
       makeComponent(LowLevelCodeContentId, "lowLevelCodeComponent-0"),
@@ -345,7 +549,17 @@ suite "#610 DeepReview layout — the bundled default survives a review":
     ]))
 
     let updated = focusReviewPanels(layout)
-    check updated["root"]["content"].len == 2
+    # The user's two columns, still the first two children of the root and
+    # still holding exactly what they held.  The editor column is compared
+    # verbatim; the sidebar column differs only by the `activeItemIndex` the
+    # review writes onto the VCS stack, so it is compared by contents.
+    check updated["root"]["content"].len == 3
+    check contentIdsInLayout(%*{"root": updated["root"]["content"][0]}) ==
+      @[FilesystemContentId, VcsContentId]
+    check updated["root"]["content"][1] == layout["root"]["content"][1]
+    # The third is the review's, and holds the pillar and nothing else.
+    check contentIdsInLayout(%*{"root": updated["root"]["content"][2]}) ==
+      @[AgentActivityContentId]
     check stackContentIds(updated.findStackWithContent(EditorViewContentId)) ==
       @[EditorViewContentId, LowLevelCodeContentId]
     check not updated.layoutHasContent(RetiredDeepReviewContentId)
@@ -388,9 +602,17 @@ when not defined(js):
 
   proc deepReviewStartupBody(): string =
     ## The body of `onStartDeepReview`, up to the next top-level `proc`.
+    ##
+    ## A missing anchor raises with the anchor in the message rather than
+    ## slicing at -1 and dying with a bare `IndexDefect` — same reasoning as
+    ## `review_layout_test.sectionBetween`: the anchor is a production
+    ## spelling, and renaming it is the routine change that breaks this.
     let body = source(UiJsPath)
     let start = body.find("proc onStartDeepReview*")
-    check start >= 0
+    if start < 0:
+      raise newException(ValueError,
+        "source-contract anchor not found in " & UiJsPath &
+        ": \"proc onStartDeepReview*\" — renamed, moved or removed")
     let rest = body[start .. ^1]
     let stop = rest.find("\nproc ", 1)
     if stop < 0: rest else: rest[0 ..< stop]
@@ -399,11 +621,18 @@ when not defined(js):
 
     test "the index process forwards the loaded layout to the renderer":
       ## Without this the renderer has no layout to focus.
+      ##
+      ## RV-2 changed *which* layout is loaded — the dataset launch loads the
+      ## editor layout (`reviewLayout`) rather than forwarding the debugging
+      ## layout `init` was handed — but not that one is loaded and forwarded,
+      ## which is what this test is for.  Which loader produces it, and that
+      ## the other two launch methods keep the debugging layout, is
+      ## `review_layout_test.nim`'s subject.
       let body = source(StartupPath)
       let start = body.find("CODETRACER::start-deepreview")
       check start >= 0
       let payload = body[start ..< min(start + 400, body.len)]
-      check payload.contains("layout: layout")
+      check payload.contains("layout: reviewLayout")
 
     test "the renderer derives the review layout from the loaded one":
       let body = deepReviewStartupBody()
@@ -424,19 +653,33 @@ when not defined(js):
       check not body.contains("\"label\": \"deepReviewComponent-0\"")
       check not body.contains("\"label\": \"calltraceComponent-0\"")
 
-    test "test_review_startup_inserts_no_component":
+    test "test_review_startup_inserts_no_review_surface_component":
       ## DR-R8's source half.  "Adds no review panel" must be true of the
       ## helper's *code*, not only of the bundled layout it was measured on:
-      ## the helper no longer builds a component node at all, and the startup
-      ## path no longer opens one.
+      ## the helper builds no review surface, and the startup path opens none.
+      ##
+      ## RESTATED, not relaxed.  DR-R8 spelled this "builds no component node
+      ## at all", which was an exact proxy while the helper only ever focused.
+      ## Layout-System.md obligation 4 now requires it to build exactly ONE —
+      ## the Agent Activity pillar, when the layout being reviewed has none —
+      ## so the proxy is replaced by the property it stood for: every
+      ## component this module constructs is a STANDARD panel, never a surface
+      ## of DeepReview's own.  Counting the node literals is what keeps that
+      ## from drifting: a second one cannot appear unnoticed.
       let helper = source(LayoutHelperPath)
       check not helper.contains("makeDeepReviewComponentNode")
       # The name may still appear in prose explaining what was removed; what
       # must not exist is a definition or a call.
       check not helper.contains("proc addDeepReviewSurface")
       check not helper.contains("addDeepReviewSurface(")
-      check not helper.contains("\"type\": \"component\"")
+      check helper.count("\"type\": \"component\"") == 1
+      check helper.contains("\"content\": AgentActivityContentId")
+      check not helper.contains("\"content\": RetiredDeepReviewContentId")
       check helper.contains("proc focusReviewPanels*")
+      # ...and the one node it builds is only ever reached from the
+      # materialisation, which is itself gated on the pillar being absent.
+      check helper.count("makeAgentActivityPane()") == 2
+      check helper.contains("if layoutContainsContentId(layout, AgentActivityContentId):")
 
       let body = deepReviewStartupBody()
       check not body.contains("addDeepReviewSurface")

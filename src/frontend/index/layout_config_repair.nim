@@ -59,6 +59,39 @@ proc knownComponentTypes*(): seq[cstring] =
   ## The allow-list `repairLayoutConfig` validates ``componentType`` against.
   @[EditorComponentType, GenericUiComponentType]
 
+proc reviewModeHiddenContentIds*(editModeHidden: seq[int];
+                                 reviewPillars: seq[int]): seq[int] =
+  ## Which panels a **review** layout hides: edit mode's set, minus the
+  ## panels a review is *built out of*.
+  ##
+  ## RV-2 (``codetracer-specs/DeepReview/Review-Command.milestones.org``):
+  ## a review over an exported dataset opens the EDITOR layout, not the
+  ## debugging one — "The editor layout omits the panels a dataset cannot
+  ## populate (EVENT LOG, CALLTRACE, TIMELINE, TERMINAL OUTPUT), so a review
+  ## does not present empty panels that imply missing data"
+  ## (DeepReview-GUI.md §1.1).
+  ##
+  ## Reusing edit mode's hidden set verbatim would go one panel too far.
+  ## ``index/config.editModeHiddenContentIds`` hides ``Content.AgentActivity``
+  ## and ``Content.AgentActivityDeepReview``, because an *editing* session has
+  ## no agent review data — but the Agent Activity panel is DeepReview's third
+  ## pillar (DeepReview-GUI.md, "DeepReview introduces no panel of its own ...
+  ## 3. The Agent Activity panel"), and hiding it would delete a required
+  ## surface *and* silently turn ``deepreview_layout.focusReviewActivityPane``
+  ## into a no-op.  So the review's own pillars are subtracted back out.
+  ##
+  ## A set difference rather than a second hand-maintained list: the two modes
+  ## must not drift apart panel by panel, and a panel added to edit mode's
+  ## hidden set is a panel a dataset cannot populate either.  The caller
+  ## supplies both sides by ``Content`` name
+  ## (``index/config.reviewModeHiddenContentIds``), so the ordinals live in
+  ## exactly one place; this module stays dependency-free so the rule is
+  ## exercisable headlessly (``src/tests/gui/tests/layout/
+  ## review_layout_test.nim``).
+  for contentId in editModeHidden:
+    if contentId notin reviewPillars:
+      result.add(contentId)
+
 # ---------------------------------------------------------------------------
 # Save-side sanitisation
 # ---------------------------------------------------------------------------
