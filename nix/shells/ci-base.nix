@@ -86,6 +86,32 @@ with pkgs;
     which
     procps
 
+    # direnv is a hard build dependency, not a developer convenience:
+    # src/db-backend/build.rs shells out to `direnv exec <recorder-root>
+    # bash ct_emulator/build_native_api.sh` to materialise the generated
+    # C sources before the Rust build, and scripts/build-siblings.sh
+    # builds every sibling repo through `direnv exec` so each one gets
+    # its own flake's toolchain. The lint-rust CI job also runs
+    # `nix develop ... -c direnv allow <recorder>`.
+    #
+    # It was never declared here, so those calls only ever worked by
+    # accident, when the self-hosted runner happened to leak a direnv
+    # from its ambient PATH. Once that stopped, lint-rust died with
+    # `direnv: not found` / exit 127 (observed in run 30726348404, where
+    # `Setup dev env` had otherwise succeeded in every job) — and because
+    # test-non-gui and every build job used to declare `needs: lint-rust`,
+    # that single missing binary silently skipped the entire test suite.
+    direnv
+
+    # jq parses the `needs` payload in ci/verdict/required-jobs.sh. That
+    # gate runs on a stock GitHub-hosted runner (where jq is preinstalled)
+    # precisely so it does not depend on this shell — but `ci/lint/bash.sh`
+    # lints ci/**/*.sh from in here, and anyone reproducing a CI script
+    # locally does so from in here too. Declaring it keeps this shell able
+    # to run the repo's own CI scripts, which is the whole point of the
+    # exercise that added direnv above.
+    jq
+
     # C/C++ + linkers used by tup, nim's gcc backend, and Rust crates
     # with native dependencies. CMake/Ninja/GTest/Catch2 are exercised by
     # `just test-ct-providers`' real C/C++ provider fixtures.
@@ -178,8 +204,47 @@ with pkgs;
   ++ pkgs.lib.optionals (!stdenv.isDarwin) [
     # Tup is Linux-only (FUSE-based sandboxing). On Darwin we fall
     # back to a different build path that doesn't need tup.
+    #
+    # `fuse` (FUSE 2) is deliberately NOT here: it ships `fusermount`, and
+    # nothing in this repo spawns it. tup links `libfuse3.so.4`.
+    #
+    # `fuse3` IS here, and the reason is worth stating precisely, because a
+    # plausible-sounding argument for dropping it is wrong. nixpkgs patches
+    # libfuse to try the absolute path `/run/wrappers/bin/fusermount3` — a
+    # NixOS `security.wrappers` setuid binary that a devShell cannot
+    # provide — and that much is true. But that is only the FIRST of two
+    # attempts. `fusermount_posix_spawn` in libfuse 3.17.4 then falls back
+    # to `posix_spawnp("fusermount3", …)`: a BARE name, no slash, so PATH
+    # *is* searched and the store copy below *is* consulted (verified by
+    # disassembly — the two call sites load `.rodata` 0x2bde1
+    # "/run/wrappers/bin/fusermount3" and 0x2bdf3 "fusermount3" — and under
+    # strace, which shows the PATH copy being execve'd). tup's own literal
+    # has the same shape: nixpkgs' `fusermount-setuid.patch` is headed
+    # "Tup needs a setuid fusermount which may be outside $PATH" and does
+    # `access("/run/wrappers/bin/fusermount3", X_OK) == 0 ? absolute : bare`.
+    #
+    # So this entry is not inert. What it cannot do is make the helper
+    # setuid, which is what unprivileged FUSE mounting ultimately needs:
+    # on a host without the setuid wrapper it upgrades
+    #
+    #   posix_spawn(p)() for fusermount3 failed: No such file or directory
+    #   tup error: Timed out waiting for the FUSE file-system to be ready.
+    #   tup error: Unable to mount FUSE on .tup/mnt
+    #
+    # (run 30726348404, `cross-process-linux`) into a permission error that
+    # names the real requirement — the honest failure, and a strictly better
+    # one. It does not by itself grant the mount.
+    #
+    # The remaining gap is a host capability, not a package: the system must
+    # provide the setuid wrapper (`programs.fuse` /
+    # `security.wrappers.fusermount3` on NixOS, the distribution's `fuse3`
+    # elsewhere) and a container must be given /dev/fuse. Neither is
+    # expressible here; both belong to whoever owns the `eph-linux-x64`
+    # runner image. `scripts/require-fuse-mount-helper.sh`, called by
+    # `scripts/build-once.sh`, checks for them and reports what is missing
+    # by name instead of letting it surface three layers down.
     tup
-    fuse
+    fuse3
 
     # ctRemote is the codetracer remote replay helper used by some
     # CI lanes' integration tests. Not currently packaged for

@@ -1,111 +1,84 @@
 name: Setup isonim siblings
 description: |
-  Clones the IsoNim sibling repos (isonim, isonim-tui, isonim-gpui,
+  Clone the IsoNim-family sibling repos (isonim, isonim-tui, isonim-gpui,
   nim-everywhere, nim-termctl, nim-pty, nim-acp, nim-agent-harbor,
-  nim-agents) next to the codetracer checkout so the dev-shell Nim
-  builds can resolve
+  nim-agents) next to the codetracer checkout so the Nim builds can
+  resolve
 
-    --path:"../isonim/src"          (et al.)
+    addPathIfDir(workspaceRoot / "isonim/src")   (et al.)
 
-  as declared in codetracer's top-level ``nim.cfg``.  Also seeds an
+  as declared in codetracer's top-level ``config.nims``. Also seeds an
   empty ``build/tailwind-styles.json`` in the isonim checkout so
-  ``isonim/dsl/tailwind.nim`` 's compile-time staticRead falls
-  through to its ``{}`` fallback instead of erroring out (its
-  ``try/except`` wrapper cannot catch ``staticRead`` errors).
+  ``isonim/dsl/tailwind.nim``'s compile-time staticRead falls through to
+  its ``{}`` fallback instead of erroring out (its ``try/except``
+  wrapper cannot catch ``staticRead`` errors).
 
   In-sandbox Nix derivations stage these inputs through
-  ``prepareIsonimSiblings`` in ``nix/packages/default.nix``; this
-  action is for workflow steps that run nim *outside* the Nix
-  sandbox (dev-build, appimage-build, ...).
+  ``prepareIsonimSiblings`` in ``nix/packages/default.nix``; this action
+  is for workflow steps that run nim *outside* the Nix sandbox
+  (dev-build, appimage-build, ...).
+
+  THIS ACTION CLONES NOTHING ITSELF. It is a wrapper: the sibling names
+  go to the shared ``clone-siblings`` action, which is the single
+  approved mechanism for "what revision of sibling repo X does this
+  commit use?" (see the NO SECOND SIBLING-CLONING ACTION note at the top
+  of metacraft-github-actions/clone-siblings/action.yml, and
+  codetracer-specs/Testing/Cross-Repo-CI-Integration.md). It used to be
+  nine hand-rolled clone steps at a hard-coded ``ref: dev`` — a second
+  cloning implementation that no lock, no warning and no audit could
+  see. ``ci/test/sibling-provisioning-test.sh`` now fails if a composite
+  action in this repo grows one again.
+
+  ``clone-siblings`` is called directly rather than through
+  ``setup-dev-env`` (the shape ``setup-db-backend-siblings`` uses)
+  because most of this action's call sites run it BEFORE their own
+  ``Install Nix`` step, and one runs only on the macOS leg.
+  ``setup-dev-env`` would install Nix as a side effect of cloning nine
+  repos, which is a change to those jobs' setup order rather than to
+  their sibling provisioning. ``setup-dev-env`` delegates sibling
+  cloning to ``clone-siblings`` anyway, so this is the same mechanism
+  with one less side effect.
+
+  WHY ``=dev`` AND NOT A BARE NAME. A bare entry resolves the revision
+  from the per-commit workspace lock, which is the reproducible form and
+  the target state. It is not reachable yet: the workspace tooling
+  currently publishes per-repo participation records for this repo's
+  commits rather than a monolithic ``reprobuild.workspace.lock.v1``
+  document, and the resolver reads those as an ABSENT lock —
+
+    resolve-sibling-rev: no workspace lock found for codetracer
+      Ignored 1 routed per-repo participation record(s): ...
+
+  so every bare entry would fail the job outright. The five IsoNim-family
+  repos additionally had to become members of codetracer's workspace
+  project before any lock could name them, which they now are. When the
+  tooling publishes a workspace-lock document again, dropping the nine
+  ``=dev`` suffixes is the whole change; until then ``clone-siblings``
+  emits a ``::warning::`` per entry saying, correctly, that these pin
+  nothing.
 
 inputs:
   gh-token:
-    description: GitHub App token for clone-repo
+    description: GitHub App token used to clone the sibling repos.
     required: true
 
 runs:
   using: composite
   steps:
-    - name: Clone isonim
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+    - name: Clone isonim siblings
+      uses: metacraft-labs/metacraft-github-actions/clone-siblings@main
       with:
-        repo: metacraft-labs/isonim
-        ref: dev
-        path: ${{ github.workspace }}/../isonim
         gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone isonim-tui
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/isonim-tui
-        ref: dev
-        path: ${{ github.workspace }}/../isonim-tui
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone isonim-gpui
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/isonim-gpui
-        ref: dev
-        path: ${{ github.workspace }}/../isonim-gpui
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone nim-everywhere
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/nim-everywhere
-        ref: dev
-        path: ${{ github.workspace }}/../nim-everywhere
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone nim-termctl
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/nim-termctl
-        ref: dev
-        path: ${{ github.workspace }}/../nim-termctl
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone nim-pty
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/nim-pty
-        ref: dev
-        path: ${{ github.workspace }}/../nim-pty
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone nim-acp
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/nim-acp
-        ref: dev
-        path: ${{ github.workspace }}/../nim-acp
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone nim-agent-harbor
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/nim-agent-harbor
-        ref: dev
-        path: ${{ github.workspace }}/../nim-agent-harbor
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Clone nim-agents
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/nim-agents
-        ref: dev
-        path: ${{ github.workspace }}/../nim-agents
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
+        siblings: |
+          isonim=dev
+          isonim-tui=dev
+          isonim-gpui=dev
+          nim-everywhere=dev
+          nim-termctl=dev
+          nim-pty=dev
+          nim-acp=dev
+          nim-agent-harbor=dev
+          nim-agents=dev
 
     - name: Seed isonim tailwind-styles.json placeholder
       shell: bash

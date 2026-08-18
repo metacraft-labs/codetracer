@@ -80,6 +80,45 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Test 1b: The review surface is added to the layout, not swapped for it
+  // -----------------------------------------------------------------------
+
+  test("Test 1b: DeepReview startup keeps the full standard panel set", async ({ ctPage }) => {
+    // Issue #610. DeepReview used to paste a hard-coded three-panel preset
+    // (VCS + DeepReview + CALLTRACE) over the resolved GoldenLayout config,
+    // so seven standard panels disappeared for the whole session and the
+    // user's own layout was ignored. Placement is additive now.
+    //
+    // Headless counterpart:
+    //   src/tests/gui/tests/layout/deepreview_layout_test.nim
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1000);
+
+    const titles = await dr.layoutTabTitles();
+
+    for (const expected of [
+      "FILES",
+      "VCS",
+      "STATE",
+      "SCRATCHPAD",
+      "CALLTRACE",
+      "AGENT ACTIVITY",
+      "EVENT LOG",
+      "TIMELINE",
+      "TERMINAL OUTPUT",
+    ]) {
+      expect(titles, `missing standard panel: ${expected}`).toContain(expected);
+    }
+
+    // ...and the review surface itself, exactly once.
+    expect(titles.filter((t) => t === "DEEP REVIEW").length).toBe(1);
+
+    // The mode toggle is part of the panel in every mode.
+    await expect(dr.modeToggle()).toBeVisible();
+  });
+
+  // -----------------------------------------------------------------------
   // Test 2: File list sidebar rendering
   // -----------------------------------------------------------------------
 
@@ -89,6 +128,27 @@ test.describe("DeepReview GUI - main features", () => {
 
     const items = await dr.fileItems();
     expect(items.length).toBe(3);
+
+    // The list must be VISIBLE when the review opens, not merely present in
+    // the DOM. DeepReview-GUI.md §2 lists the "Modified Files panel" as a
+    // shared workspace element whose purpose is to "Navigate within the
+    // review set", drawn beside the review surface; §3 makes it "shared by
+    // both DeepReview modes"; §5.2 states "Full Files Mode relies on the
+    // Modified Files panel for cross-file navigation"; and §7's startup
+    // sequence begins "1. The VCS panel populates with the changeset data".
+    //
+    // Regression: additive layout placement (issue #610 / M42a) left the VCS
+    // panel as the *inactive* second tab behind FILES, so every
+    // `.vcs-file-item` rendered under `display: none`. Reading textContent
+    // still worked — which is why this test passed — but nothing could be
+    // clicked, and Tests 5, 22 and DR-8 timed out on "element is not
+    // visible". Fixed in viewmodel/viewmodels/deepreview_layout.nim
+    // (`focusReviewFileList`); headless counterpart in
+    // src/tests/gui/tests/layout/deepreview_layout_test.nim.
+    await expect(dr.fileList()).toBeVisible();
+    for (const item of items) {
+      await expect(item.root).toBeVisible();
+    }
 
     const expectedBasenames = ["main.rs", "utils.rs", "config.rs"];
     for (let i = 0; i < expectedBasenames.length; i++) {
@@ -180,8 +240,10 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 3: Coverage highlighting
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco editor) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but the Monaco
+  // coverage/inline-value decorations it asserts need a loaded recording, and
+  // `--deepreview` mode does not load one yet (M42b). Restore with the trace
+  // plumbing, not with the layout fix.
   test.skip("Test 3: coverage decorations are applied to the editor", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -202,8 +264,10 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 4: Inline variable values
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco editor) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but the Monaco
+  // coverage/inline-value decorations it asserts need a loaded recording, and
+  // `--deepreview` mode does not load one yet (M42b). Restore with the trace
+  // plumbing, not with the layout fix.
   test.skip("Test 4: inline variable values appear as decorations", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -233,7 +297,21 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 5: File switching
   // -----------------------------------------------------------------------
 
-  test("Test 5: clicking a file in the VCS panel updates selection", async ({ ctPage }) => {
+  // e2e_review_click_opens_editor_tab — the rewrite of "Test 5: clicking a
+  // file in the VCS panel updates selection" (DR-R1).
+  //
+  // The selection assertions are kept: they are still correct. What they were
+  // missing is the part the reviewer actually needs — DeepReview-GUI.md §3:
+  // "Clicking a file **opens it in the editor** ... Clicking must not merely
+  // change a selection index". Before DR-R1 a click set
+  // `deepReviewSelectedFileIndex` and returned, so every file in the review
+  // could be clicked and nothing ever opened.
+  //
+  // Headless counterparts: test_vcs_open_action_in_review_mode_opens_diff_tab,
+  // test_vcs_open_action_follows_view_mode_in_review_mode and
+  // test_vcs_open_action_for_deleted_file in
+  // src/tests/gui/tests/vcs/vcs_vm_test.nim.
+  test("Test 5: clicking a file in the VCS panel opens it in the editor", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
@@ -244,22 +322,71 @@ test.describe("DeepReview GUI - main features", () => {
     const secondItem = dr.fileItemByIndex(1);
     await secondItem.click();
 
-    await wait(500);
+    await wait(1000);
 
     expect(await secondItem.isSelected()).toBe(true);
     expect(await firstItem.isSelected()).toBe(false);
 
+    // ...and the click opened that file, in the representation the view-mode
+    // toggle selects (Unified Diff is the default, VCS-Panel.md
+    // `vcs.defaultView`).
+    const secondTitle = DeepReviewPage.diffTabTitle("src/utils.rs");
+    expect(await dr.layoutTabTitles()).toContain(secondTitle);
+    expect(await dr.activeTabTitles()).toContain(secondTitle);
+    await expect(dr.diffTabFor("src/utils.rs")).toBeVisible();
+
     await firstItem.click();
-    await wait(500);
+    await wait(1000);
     expect(await firstItem.isSelected()).toBe(true);
+
+    const firstTitle = DeepReviewPage.diffTabTitle("src/main.rs");
+    expect(await dr.activeTabTitles()).toContain(firstTitle);
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
+
+    // Re-opening a file that is already open focuses its tab instead of
+    // opening a second one (DR-R1).
+    await secondItem.click();
+    await wait(1000);
+    const titles = await dr.layoutTabTitles();
+    expect(titles.filter((t) => t === secondTitle).length).toBe(1);
+    expect(titles.filter((t) => t === firstTitle).length).toBe(1);
+  });
+
+  // e2e_review_opens_a_file_on_startup (DR-R1).
+  //
+  // DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
+  // modified file opens in the editor with unified diff view." `--deepreview`
+  // used to build the layout and stop, so a review began with an empty editor.
+  //
+  // Headless counterpart: test_review_start_opens_first_modified_file in
+  // src/tests/gui/tests/deepreview/deepreview_vm_test.nim.
+  test("Test 5b: a review opens its first modified file on startup", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1500);
+
+    const firstTitle = DeepReviewPage.diffTabTitle("src/main.rs");
+    expect(await dr.layoutTabTitles()).toContain(firstTitle);
+    expect(await dr.activeTabTitles()).toContain(firstTitle);
+
+    // The tab shows that file's review diff, not an empty git diff.
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
+
+    // ...and the VCS panel's list agrees with the editor.
+    expect(await dr.fileItemByIndex(0).isSelected()).toBe(true);
+
+    // Exactly one document, for the first file only: startup opens the first
+    // modified file, not the whole changeset.
+    expect(await dr.diffTabs().count()).toBe(1);
   });
 
   // -----------------------------------------------------------------------
   // Test 6: Execution slider
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (execution slider) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: the execution slider renders in Full Files mode again (issue #610),
+  // but it is driven by per-function flow data that `--deepreview` mode has no
+  // recording behind yet (M42b).
   test.skip("Test 6: execution slider navigates between function executions", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -295,8 +422,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 7: Loop iteration slider
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (loop slider) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: the loop slider renders in Full Files mode again (issue #610), but
+  // it is driven by per-loop iteration data that `--deepreview` mode has no
+  // recording behind yet (M42b).
   test.skip("Test 7: loop slider is visible and navigable for files with loops", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -321,137 +449,234 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 10: Unified diff - file headers
+  // Tests 10-12: the review's unified diff, as a Monaco tab (DR-R4)
   // -----------------------------------------------------------------------
+  //
+  // e2e_review_unified_diff_shows_hunks_in_monaco.
+  //
+  // These three are the DR-R4 rewrite of "Test 10: unified diff shows file
+  // headers", "Test 11: added and removed lines with correct classes" and
+  // "Test 12: multiple file sections in a scrollable view".  All three used to
+  // assert on the standalone panel's DOM diff (`deepreview-unified-*`
+  // elements); they now assert on the editor tab a review opens, which
+  // VCS-Panel.md and DeepReview-GUI.md §4 both require to be "the standard
+  // CodeTracer Monaco editor".
+  //
+  // Test 12's premise changes with the surface: one tab per file means there
+  // is no multi-file scroll to assert.  It becomes "opening a second file
+  // yields a second tab, and both remain open", which is what §4.1 says
+  // instead ("Each diff tab shows a single file... a review does not
+  // concatenate every file into one scrolling document").
+  //
+  // Headless counterparts: test_diff_decorations_classify_added_removed_context,
+  // test_diff_dual_line_numbers and test_diff_decorations_are_mode_agnostic in
+  // src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim.
 
-  test("Test 10: unified diff shows file headers for all files with hunks", async ({ ctPage }) => {
+  /// Open the review file at ``index`` and wait for its Monaco tab to render.
+  async function openReviewDiffTab(
+    dr: DeepReviewPage,
+    index: number,
+    filePath: string,
+  ) {
+    await dr.fileItemByIndex(index).click();
+    const tab = dr.diffTabFor(filePath);
+    await expect(tab).toBeVisible({ timeout: 20_000 });
+    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible({
+      timeout: 20_000,
+    });
+    return tab;
+  }
+
+  test("Test 10: the review's diff tabs are Monaco documents headed by their file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    // Switch to unified diff mode.
-    await dr.switchToUnifiedDiff();
-    await wait(500);
-
-    // Verify the unified diff container is visible.
-    await expect(dr.unifiedDiff()).toBeVisible();
-
-    // All 3 files in the fixture have hunks, so we expect 3 file headers.
-    const fileHeaders = dr.unifiedFileHeaders();
-    const headerCount = await fileHeaders.count();
-    expect(headerCount).toBe(3);
-
-    // Check that file paths are displayed.
-    const filePaths = dr.unifiedFilePaths();
-    const pathTexts: string[] = [];
-    for (let i = 0; i < headerCount; i++) {
-      const text = await filePaths.nth(i).textContent();
-      pathTexts.push(text ?? "");
+    // DeepReview-GUI.md §4.1: "Each diff tab includes: A file header with path
+    // and diff metadata".  All 3 files in the fixture have hunks, so each
+    // opens a tab whose document is headed by that file.
+    for (const [index, filePath] of [
+      [0, "src/main.rs"],
+      [1, "src/utils.rs"],
+      [2, "src/config.rs"],
+    ] as [number, string][]) {
+      const tab = await openReviewDiffTab(dr, index, filePath);
+      // A real editor, not a DOM diff.
+      await expect(tab.locator(".monaco-editor")).toBeVisible();
+      const header = tab.locator(".monaco-editor .view-line", {
+        hasText: filePath,
+      });
+      await expect(header.first()).toBeVisible({ timeout: 15_000 });
     }
-    expect(pathTexts).toContain("src/main.rs");
-    expect(pathTexts).toContain("src/utils.rs");
-    expect(pathTexts).toContain("src/config.rs");
   });
 
-  // -----------------------------------------------------------------------
-  // Test 11: Unified diff - added/removed line decorations
-  // -----------------------------------------------------------------------
-
-  test("Test 11: unified diff shows added and removed lines with correct classes", async ({ ctPage }) => {
+  test("Test 11: the review's diff lines carry added / removed / context decorations", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
-    await wait(500);
+    // Per-file counts from sample-review.json.  The old test summed them
+    // because one DOM view concatenated every file; with one tab per file the
+    // same 16 added / 10 removed / 2 context lines are asserted where they
+    // belong.
+    const expected: [number, string, number, number, number][] = [
+      [0, "src/main.rs", 8, 3, 2],
+      [1, "src/utils.rs", 8, 0, 0],
+      [2, "src/config.rs", 0, 7, 0],
+    ];
 
-    // The fixture has:
-    //   src/main.rs: 3 removed, 8 added, 2 context = 13 lines
-    //   src/utils.rs: 0 removed, 8 added, 0 context = 8 lines
-    //   src/config.rs: 7 removed, 0 added, 0 context = 7 lines
-    // Total added: 16, total removed: 10, total context: 2
+    for (const [index, filePath, added, removed, context] of expected) {
+      const tab = await openReviewDiffTab(dr, index, filePath);
+      const overlays = tab.locator(".view-overlays");
+      await expect
+        .poll(async () => await overlays.locator(".ct-diff-line-added").count(), {
+          timeout: 15_000,
+        })
+        .toBe(added);
+      expect(await overlays.locator(".ct-diff-line-removed").count()).toBe(
+        removed,
+      );
+      expect(await overlays.locator(".ct-diff-line-context").count()).toBe(
+        context,
+      );
+      // Exactly one hunk per file in the fixture, rendered as a section
+      // divider (VCS-Panel.md: "Hunk headers (@@ -N,M +N,M @@) shown as
+      // section dividers").
+      expect(await overlays.locator(".ct-diff-line-hunk-header").count()).toBe(1);
 
-    const addedCount = await dr.unifiedAddedLines().count();
-    expect(addedCount).toBe(16);
-
-    const removedCount = await dr.unifiedRemovedLines().count();
-    expect(removedCount).toBe(10);
-
-    const contextCount = await dr.unifiedContextLines().count();
-    expect(contextCount).toBe(2);
+      // ...and the `+` / `-` gutter markers VCS-Panel.md requires.
+      const margin = tab.locator(".margin-view-overlays");
+      expect(await margin.locator(".ct-diff-gutter-added").count()).toBe(added);
+      expect(await margin.locator(".ct-diff-gutter-removed").count()).toBe(
+        removed,
+      );
+    }
   });
 
-  // -----------------------------------------------------------------------
-  // Test 12: Unified diff - multiple files in scroll view
-  // -----------------------------------------------------------------------
-
-  test("Test 12: unified diff shows multiple file sections in a scrollable view", async ({ ctPage }) => {
+  test("Test 12: opening a second file yields a second tab, and both stay open", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
+    // DeepReview-GUI.md §4.1: "Each diff tab shows a single file.  Cross-file
+    // navigation is the Changed Files list; a review does not concatenate
+    // every file into one scrolling document."
+    await openReviewDiffTab(dr, 0, "src/main.rs");
+    await openReviewDiffTab(dr, 1, "src/utils.rs");
+
+    expect(await dr.diffTabs().count()).toBe(2);
+    const titles = await dr.layoutTabTitles();
+    expect(titles).toContain(DeepReviewPage.diffTabTitle("src/main.rs"));
+    expect(titles).toContain(DeepReviewPage.diffTabTitle("src/utils.rs"));
+    // The second file is the focused one; the first is still open behind it.
+    expect(await dr.activeTabTitles()).toContain(
+      DeepReviewPage.diffTabTitle("src/utils.rs"),
+    );
+
+    // Each tab holds its own file's diff, with the fixture's own hunk range —
+    // not a shared, concatenated document.  Asserted one at a time because
+    // GoldenLayout hides the inactive tab and Monaco renders no lines for a
+    // hidden editor; re-selecting the first file also shows the tab was still
+    // there rather than re-created.
+    await expect(
+      dr
+        .diffTabFor("src/utils.rs")
+        .locator(".monaco-editor .view-line", { hasText: "@@ -0,0 +1,8 @@" })
+        .first(),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await openReviewDiffTab(dr, 0, "src/main.rs");
+    expect(await dr.diffTabs().count()).toBe(2);
+    await expect(
+      dr
+        .diffTabFor("src/main.rs")
+        .locator(".monaco-editor .view-line", { hasText: "@@ -2,5 +2,10 @@" })
+        .first(),
+    ).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("Test 12b: a review's diff tab keeps hunk selection but not the mutating operations", async ({ ctPage }) => {
+    // DeepReview-GUI.md §4.5: "In DeepReview mode the mutating operations
+    // (stage, discard, move to commit) are disabled — the changeset is
+    // immutable, per VCS-Panel.md 'DeepReview Mode: Commit operations:
+    // Disabled (read-only view)' — while selection and copy-as-patch remain
+    // available."
+    //
+    // Headless counterparts: "the mutating hunk operations are disabled for a
+    // review" in src/tests/gui/tests/vcs/vcs_vm_test.nim, and "the diff tab
+    // renders its hunk toolbar over the Monaco host" in
+    // src/tests/gui/tests/views/isonim_views_test.nim.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
     await wait(500);
 
-    // Verify all hunk headers are present (one per file since each has one hunk).
-    const hunkHeaders = dr.unifiedHunkHeaders();
-    const hunkCount = await hunkHeaders.count();
-    expect(hunkCount).toBe(3);
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
 
-    // Verify hunk header content (the @@ lines).
-    const firstHunkText = await hunkHeaders.nth(0).textContent();
-    expect(firstHunkText).toContain("@@ -2,5 +2,10 @@");
+    const header = dr.diffHunkHeaderLines().first();
+    await expect(header).toBeVisible({ timeout: 15_000 });
+    await header.click();
 
-    const secondHunkText = await hunkHeaders.nth(1).textContent();
-    expect(secondHunkText).toContain("@@ -0,0 +1,8 @@");
-
-    const thirdHunkText = await hunkHeaders.nth(2).textContent();
-    expect(thirdHunkText).toContain("@@ -1,7 +0,0 @@");
-
-    // Verify total lines across all files.
-    const totalLines = await dr.unifiedAllLines().count();
-    expect(totalLines).toBe(28);  // 13 + 8 + 7
-
-    // Verify the unified diff container itself is scrollable
-    // (has overflow-y auto in CSS).
-    await expect(dr.unifiedDiff()).toBeVisible();
+    await expect(tab.locator(".hunk-toolbar-count")).toHaveText(
+      "1 hunk selected",
+      { timeout: 10_000 },
+    );
+    // Copy stays.
+    await expect(tab.locator(".hunk-toolbar-button").first()).toHaveText(
+      "Copy as patch",
+    );
+    // Staging does not.
+    await expect(
+      tab.locator(".hunk-toolbar-button", { hasText: "Stage hunks" }),
+    ).toHaveCount(0);
   });
 
   // -----------------------------------------------------------------------
   // Test 13: Mode toggle switches between views
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode and mode toggle are not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
-  test.skip("Test 13: mode toggle switches between full files and unified diff views", async ({ ctPage }) => {
+  // Re-enabled with the #610 fix: the mode toggle used to be hidden behind
+  // `glEmbedded`, which is set for every `--deepreview` session, so Full
+  // Files mode was unreachable. GL-embedded panels default to Unified Diff
+  // (the file list and call tree live in the VCS / CALLTRACE panels), so the
+  // starting mode differs from the standalone panel's.
+  //
+  // Headless counterpart: the "DeepReview view — GL-embedded panel" suite in
+  //   src/tests/gui/tests/deepreview/deepreview_vm_test.nim
+  test("Test 13: mode toggle switches between full files and unified diff views", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
     await wait(500);
 
-    // Default mode should be Full Files (editor is visible, no unified diff).
-    await expect(dr.editor()).toBeVisible();
+    // The toggle is present at all.
+    await expect(dr.modeToggle()).toBeVisible();
+    await expect(dr.fullFilesButton()).toBeVisible();
+    await expect(dr.unifiedDiffButton()).toBeVisible();
 
-    // Switch to unified diff.
+    // GL-embedded default is Unified Diff.
+    await expect(dr.unifiedDiff()).toBeVisible();
+
+    // Switch to full files: the Monaco host div appears and the unified
+    // diff goes away.
+    await dr.switchToFullFiles();
+    await wait(1000);
+
+    await expect(dr.editor()).toBeVisible();
+    await expect(dr.unifiedDiff()).toHaveCount(0);
+
+    // Switch back.
     await dr.switchToUnifiedDiff();
     await wait(500);
 
     await expect(dr.unifiedDiff()).toBeVisible();
-
-    // Switch back to full files.
-    await dr.switchToFullFiles();
-    await wait(500);
-
-    // The editor area should be back. The editor div is present.
-    await expect(dr.editor()).toBeVisible();
   });
 
   // -----------------------------------------------------------------------
   // Test 19: Diff decorations in Full Files Mode
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco diff decorations) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but these assert
+  // Monaco diff decorations that need the file's real source text, which
+  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 19: diff decorations appear in Full Files Mode for modified file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -469,8 +694,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 20: Added lines have green decoration class
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco diff decorations) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but these assert
+  // Monaco diff decorations that need the file's real source text, which
+  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 20: added lines have green decoration class for purely added file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -497,8 +723,9 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 21: Diff decorations are removed when switching files
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode (Monaco diff decorations) is not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
+  // Skip: Full Files mode is reachable again (issue #610), but these assert
+  // Monaco diff decorations that need the file's real source text, which
+  // `--deepreview` mode has no recording to supply yet (M42b).
   test.skip("Test 21: diff decorations are removed when switching to a file without diff data", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -540,12 +767,12 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 22: DR-6 - Mode switch preserves file selection
   // -----------------------------------------------------------------------
 
-  // Skip: Full Files mode and mode toggle are not available in GL-embedded mode.
-  // Restore when the VCS panel's "Open File" mode is implemented.
-  test.skip("Test 22: mode switch preserves the selected file index", async ({ ctPage }) => {
+  // Re-enabled with the #610 fix (see Test 13). File selection is owned by
+  // the VCS panel in GL-embedded mode, so this asserts that toggling the
+  // view mode does not disturb it.
+  test("Test 22: mode switch preserves the selected file index", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
-    await dr.waitForEditorReady();
     await wait(500);
 
     // Select the second file (src/utils.rs).
@@ -571,20 +798,36 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 23: DR-6 - Trace context selector is present
+  // Test 23: the trace context selector lives in the VCS panel header
   // -----------------------------------------------------------------------
 
-  test("Test 23: trace context selector is visible with correct options", async ({ ctPage }) => {
+  // e2e_review_trace_selector_lives_in_the_vcs_panel — the rewrite of
+  // "Test 23: trace context selector is visible with correct options"
+  // (DR-R2), retargeted from the standalone DeepReview panel's header to the
+  // VCS panel's.
+  //
+  // DeepReview-GUI.md §2 assigns the control to the VCS panel header
+  // ("Trace context selector | The VCS panel header, populated only in
+  // DeepReview mode"), and §6 requires the selected context be changeable
+  // "without leaving the review, from the selector in the VCS panel header".
+  // Before DR-R2 the VCS panel rendered no select element in any mode.
+  //
+  // Headless counterparts:
+  //   test_vcs_panel_renders_trace_selector_in_review_mode and
+  //   test_vcs_trace_selector_change_updates_selection in
+  //   src/tests/gui/tests/vcs/vcs_view_test.nim.
+  test("Test 23: the trace context selector lives in the VCS panel header", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    // The fixture has 2 trace contexts, so the selector should be visible.
-    await expect(dr.traceContextSelector()).toBeVisible();
-    await expect(dr.traceContextSelect()).toBeVisible();
+    // The fixture has 2 trace contexts, so the selector should be visible —
+    // in the VCS panel.
+    await expect(dr.vcsTraceContextSelector()).toBeVisible();
+    await expect(dr.vcsTraceContextSelect()).toBeVisible();
 
     // Verify the dropdown has the correct number of options.
-    const options = dr.traceContextSelect().locator("option");
+    const options = dr.vcsTraceContextSelect().locator("option");
     const optionCount = await options.count();
     expect(optionCount).toBe(2);
 
@@ -594,106 +837,336 @@ test.describe("DeepReview GUI - main features", () => {
 
     const secondLabel = await options.nth(1).textContent();
     expect(secondLabel).toContain("previous run");
+
+    // The selection is live: picking the second context is reflected by the
+    // control. (What that selection re-draws is DR-R6's job and is blocked on
+    // M42b — `--deepreview` loads no recording to switch to.)
+    await dr.vcsTraceContextSelect().selectOption("1");
+    await wait(500);
+    expect(await dr.vcsTraceContextSelect().inputValue()).toBe("1");
   });
 
   // -----------------------------------------------------------------------
-  // Test 24: DR-6 - Header shows session title
+  // Test 24: the VCS panel header shows the session title and review stats
   // -----------------------------------------------------------------------
 
-  test("Test 24: header bar displays the session title", async ({ ctPage }) => {
+  // Companion of Test 23 and the second half of
+  // e2e_review_trace_selector_lives_in_the_vcs_panel: the rewrite of
+  // "Test 24: header bar displays the session title" (DR-R2), retargeted to
+  // the VCS panel header, which DeepReview-GUI.md §2 makes the owner of the
+  // "Session title / stats" review element.
+  //
+  // Headless counterpart: "the review stats render in the header" in
+  // src/tests/gui/tests/vcs/vcs_view_test.nim.
+  test("Test 24: the VCS panel header displays the session title and stats", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
     // The fixture has sessionTitle "DeepReview: parser cleanup".
-    await expect(dr.sessionTitle()).toBeVisible();
-    const titleText = await dr.sessionTitle().textContent();
+    await expect(dr.vcsReviewTitle()).toBeVisible();
+    const titleText = await dr.vcsReviewTitle().textContent();
     expect(titleText).toContain("DeepReview: parser cleanup");
+
+    // ...and the changeset summary: 3 files, +16 -10 across the fixture's
+    // three files (main.rs +8-3, utils.rs +8-0, config.rs +0-7).
+    await expect(dr.vcsReviewStats()).toBeVisible();
+    const statsText = await dr.vcsReviewStats().textContent();
+    expect(statsText).toContain("3 files");
+    expect(statsText).toContain("+16 -10");
   });
 
   // -----------------------------------------------------------------------
-  // Test 14: Context expansion - expand buttons visible
+  // DR-R7: one launch, all three panels
   // -----------------------------------------------------------------------
 
-  test("Test 14: expand buttons are visible around hunks in unified diff", async ({ ctPage }) => {
+  // e2e_ct_deepreview_launch_populates_all_three_panels.
+  //
+  // DeepReview-GUI.md §7, "Transition into a Review", is a list of five things
+  // that happen when a review starts, and §1.1 makes the CLI the path an agent
+  // uses: "Launching over a dataset must load the recordings the dataset
+  // references and populate the three panels from them. A review that opens
+  // with empty panels is a defect, not a degraded mode."
+  //
+  // Each of the three panels already has its own test above (Test 2 for the
+  // changed-files list, Test 5b for the editor tab, and the Agent Activity
+  // section in agent-activity-deepreview.spec.ts). This one asserts that ONE
+  // launch reaches all three at once, which is the property DR-R7 makes true
+  // of every launch path rather than only of this one.
+  //
+  // HONEST SCOPE: this test passes against the code as it stood before DR-R7
+  // as well as after — DR-R1 and DR-R3 made the `--deepreview` path do all
+  // three. It is a regression guard for the convergence, not new coverage of
+  // it. What DR-R7 adds is that the other two launch paths reach the same
+  // state, and neither is launchable from Playwright here: the agentic handoff
+  // needs a live Agent Harbor server (agentic-coding/agentic-worktree.spec.ts)
+  // and the diff-associated trace needs a recording made with
+  // `ct record --with-diff`. Both are covered headlessly instead, in
+  // src/tests/gui/tests/deepreview/deepreview_entry_test.nim
+  // (test_all_launch_paths_reach_the_same_review_state) and
+  // src/tests/gui/tests/agentic-coding/agentic_deepreview_m5_test.nim
+  // (test_agentic_handoff_needs_no_deepreview_component).
+  test("Test 25: one launch populates and focuses all three review panels", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(1500);
+
+    // Pillar 1 — the VCS panel: populated with the changeset, and the visible
+    // tab of its stack (§2: "The VCS panel must be the visible tab of
+    // whichever stack hosts it when a review starts").
+    const activeTitles = await dr.activeTabTitles();
+    expect(activeTitles).toContain("VCS");
+    await expect(dr.vcsPanel()).toBeVisible();
+    await expect(dr.vcsReviewStats()).toContainText("3 files");
+    const files = await dr.fileItems();
+    expect(files.length).toBe(3);
+
+    // Pillar 2 — the Editor: the first modified file is open as a diff tab,
+    // and it is the active tab of the editor area (§7 step 2).
+    const firstTitle = DeepReviewPage.diffTabTitle("src/main.rs");
+    expect(activeTitles).toContain(firstTitle);
+    await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
+
+    // Pillar 3 — the Agent Activity panel: its DeepReview section is visible,
+    // expanded, and showing this changeset's coverage (§2.1). No agent ran:
+    // the dataset alone fills it.
+    expect(activeTitles).toContain("AGENT ACTIVITY");
+    await expect(dr.reviewActivitySection()).toBeVisible();
+    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
+    await expect(dr.reviewActivityFileRows()).toHaveCount(3);
+
+    // ...and all of it happened additively: no standard panel was displaced
+    // to make room for the review (issue #610).
+    const allTitles = await dr.layoutTabTitles();
+    for (const expected of ["FILES", "STATE", "CALLTRACE", "EVENT LOG"]) {
+      expect(allTitles, `missing standard panel: ${expected}`).toContain(
+        expected,
+      );
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Tests 14-16: Context expansion in the diff tab (DR-R5)
+  // -----------------------------------------------------------------------
+
+  // e2e_diff_tab_expand_reveals_context — the rewrite of "Test 14: expand
+  // buttons are visible around hunks", "Test 15: clicking expand above
+  // reveals additional context lines" and "Test 16: clicking expand below".
+  //
+  // Same three scenarios, retargeted from the standalone DeepReview panel's
+  // `deepreview-expand-*` DOM to the Monaco diff tab, which is where
+  // DeepReview-GUI.md §4.2 puts them:
+  //
+  //   "The user can reveal surrounding unchanged lines around the changed
+  //    regions.  Required controls: Expand surrounding context above a
+  //    visible region / Expand surrounding context below a visible region /
+  //    Repeated expansion loads more file content instead of merely
+  //    uncovering lines that were already fetched."
+  //
+  //   "Context expansion is incremental loading.  Newly revealed lines become
+  //    normal code lines in the diff tab and can receive Omniscience overlays
+  //    when matching DeepReview data exists."
+  //
+  // The old tests asserted only that *some* lines appeared; these assert
+  // WHICH — the revealed line numbers and their text — because the arithmetic
+  // being migrated is the clamping at a file's first and last line, and a
+  // count-only assertion passes with every off-by-one it can make.
+  //
+  // Falsifiable against the ported code: before DR-R5 the diff tab had no
+  // expand controls at all (the capability lived only in `ui/deepreview.nim`,
+  // the panel DR-R8 deletes), so every locator below found nothing.
+  //
+  // Fixture geometry, from `sample-review.json` — src/main.rs has one hunk at
+  // new lines 2..11 in a 25-line file, so:
+  //   above: exactly ONE hidden line (line 1, "fn main() {"), after which no
+  //          further expansion above is possible;
+  //   below: lines 12..25 hidden, so one step reveals 12..21 and a further
+  //          step is still offered.
+  // That asymmetry is deliberate — it exercises the clamp in one direction
+  // and the "more remains" branch in the other within a single fixture.
+  //
+  // Headless counterparts:
+  //   test_context_expansion_window_reveals_lines_above_and_below and
+  //   test_context_expansion_clamps_at_file_boundaries in
+  //   src/tests/gui/tests/vcs/vcs_context_expansion_test.nim;
+  //   test_context_expansion_state_is_per_hunk_and_per_file in
+  //   src/tests/gui/tests/vcs/vcs_vm_test.nim.
+
+  /// Open src/main.rs's diff tab and wait for Monaco to render its lines.
+  async function openMainDiffTab(dr: DeepReviewPage) {
+    await dr.fileItemByIndex(0).click();
+    const tab = dr.diffTabFor("src/main.rs");
+    await expect(tab).toBeVisible({ timeout: 20_000 });
+    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible({
+      timeout: 20_000,
+    });
+    return tab;
+  }
+
+  test("Test 14: the diff tab offers expand controls around a hunk with hidden neighbours", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
-    await wait(500);
+    const tab = await openMainDiffTab(dr);
 
-    // The fixture has sourceContent for all 3 files. The first file
-    // (src/main.rs) has a hunk starting at newLine 2, so there is 1 line
-    // above (line 1 "fn main() {") to expand, and lines below (12+).
-    // We expect expand rows to be present in the unified diff.
-    const expandRows = dr.expandRows();
-    const expandCount = await expandRows.count();
-    expect(expandCount).toBeGreaterThan(0);
+    // VCS-Panel.md, "Unified Diff View (Editor Integration)": "Context
+    // expansion controls (Expand N lines above/below)".  Both directions are
+    // offered: main.rs's hunk has one hidden line above it and fourteen below.
+    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveCount(1, {
+      timeout: 15_000,
+    });
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(1);
 
-    // Verify the expand label text is correct.
-    const firstExpandText = await expandRows.first().textContent();
-    expect(firstExpandText).toContain("Expand 10 lines");
+    // The control names how much a click reveals, and the number is the step
+    // the ViewModel actually advances by (`ContextExpandStep`).
+    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveText(
+      /Expand\s+10\s+lines\s+above/,
+    );
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveText(
+      /Expand\s+10\s+lines\s+below/,
+    );
+
+    // Nothing is revealed until a control is pressed.
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(0);
   });
 
-  // -----------------------------------------------------------------------
-  // Test 15: Context expansion - clicking expand above reveals lines
-  // -----------------------------------------------------------------------
-
-  test("Test 15: clicking expand above reveals additional context lines", async ({ ctPage }) => {
+  test("Test 15: clicking expand above reveals the lines preceding the hunk", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
-    await wait(500);
+    const tab = await openMainDiffTab(dr);
 
-    // Before expanding, no expanded context lines should exist.
-    const initialExpanded = await dr.expandedContextLines().count();
-    expect(initialExpanded).toBe(0);
+    // The hunk starts at new line 2, so line 1 is not in the diff and its
+    // number is absent from the gutter before expanding.
+    const before = await DeepReviewPage.diffLineNumbers(tab);
+    expect(before).not.toContain("1 1");
 
-    // Expand above the first hunk of the first file (src/main.rs).
-    // The hunk starts at newLine 2, and there is 1 line above (line 1).
-    // So expanding should reveal 1 context line ("fn main() {").
-    await dr.expandAbove(0, 0);
-    await wait(500);
+    await DeepReviewPage.expandAboveLine(tab).click();
 
-    const expandedCount = await dr.expandedContextLines().count();
-    expect(expandedCount).toBeGreaterThan(0);
+    // Exactly one line exists above the hunk, so exactly one is revealed —
+    // the clamp, asserted through the UI it protects.
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(1, {
+      timeout: 15_000,
+    });
 
-    // The expanded line should be a context line (not added/removed).
-    const expandedLine = dr.expandedContextLines().first();
-    const classes = await expandedLine.getAttribute("class");
-    expect(classes).toContain("deepreview-unified-line-context");
+    // ...and it is the right one: line 1 of src/main.rs, by number and by
+    // text.  A revealed line is unchanged, so it carries the same old and new
+    // number.
+    const after = await DeepReviewPage.diffLineNumbers(tab);
+    expect(after).toContain("1 1");
+    await expect(
+      // Monaco renders runs of spaces as U+00A0, so the regex uses `\s`
+      // rather than a literal space (the same trap DR-R4 hit on `@@`).
+      tab.locator(".monaco-editor .view-line", { hasText: /fn\s+main\(\)\s+\{/ }),
+    ).toHaveCount(1);
+
+    // §4.2: "Newly revealed lines become normal code lines in the diff tab"
+    // — the revealed line is decorated as context, not as a fourth kind, so
+    // it is eligible for the Omniscience overlay DR-R6 draws on context lines.
+    await expect(
+      tab.locator(".view-overlays .ct-diff-line-context.ct-diff-line-revealed"),
+    ).toHaveCount(1);
+
+    // Nothing further is hidden above, so the control is gone — a user cannot
+    // press a button that can no longer act.
+    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveCount(0);
   });
 
-  // -----------------------------------------------------------------------
-  // Test 16: Context expansion - clicking expand below reveals lines
-  // -----------------------------------------------------------------------
-
-  test("Test 16: clicking expand below reveals additional context lines", async ({ ctPage }) => {
+  test("Test 16: clicking expand below reveals further content on each click", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    await dr.switchToUnifiedDiff();
+    const tab = await openMainDiffTab(dr);
+
+    await DeepReviewPage.expandBelowLine(tab).click();
+
+    // The hunk ends at new line 11 and the file has 25 lines, so one step
+    // reveals lines 12..21.
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(10, {
+      timeout: 15_000,
+    });
+    const afterFirst = await DeepReviewPage.diffLineNumbers(tab);
+    expect(afterFirst).toContain("12 12");
+    expect(afterFirst).toContain("21 21");
+    expect(afterFirst).not.toContain("22 22");
+    // Line 12 of main.rs is the closing brace of `fn main`.
+    await expect(
+      tab.locator(".view-overlays .ct-diff-line-revealed"),
+    ).toHaveCount(10);
+
+    // §4.2's third required control: "Repeated expansion loads more file
+    // content instead of merely uncovering lines that were already fetched."
+    // Four lines remain (22..25), so a second click reveals those four rather
+    // than re-revealing the first ten.
+    await DeepReviewPage.expandBelowLine(tab).click();
+    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(14, {
+      timeout: 15_000,
+    });
+    const afterSecond = await DeepReviewPage.diffLineNumbers(tab);
+    expect(afterSecond).toContain("22 22");
+    expect(afterSecond).toContain("25 25");
+
+    // The file is exhausted, so the control disappears.
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(0);
+  });
+
+  test("Test 16b: expansion is per hunk and per file, and resets when the tab closes", async ({ ctPage }) => {
+    // DR-R5: "Expansion state resets when the tab is closed and does not leak
+    // between files."  Each diff tab owns its own `VCSVM`, so a second file's
+    // tab must open unexpanded however far the first was expanded.
+    //
+    // Headless counterpart: "closing the tab resets the expansion, and it
+    // never leaks between files" in
+    // src/tests/gui/tests/vcs/vcs_vm_test.nim.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
     await wait(500);
 
-    // Expand below the first hunk of the first file (src/main.rs).
-    // The hunk ends at newLine 11, and the file has 25 lines, so
-    // expanding should reveal up to 10 more context lines.
-    await dr.expandBelow(0, 0);
-    await wait(500);
+    const mainTab = await openMainDiffTab(dr);
+    await DeepReviewPage.expandBelowLine(mainTab).click();
+    await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
+      timeout: 15_000,
+    });
 
-    const expandedCount = await dr.expandedContextLines().count();
-    expect(expandedCount).toBeGreaterThan(0);
+    // A different file's tab starts from nothing revealed.
+    await dr.fileItemByIndex(1).click();
+    const utilsTab = dr.diffTabFor("src/utils.rs");
+    await expect(utilsTab).toBeVisible({ timeout: 20_000 });
+    await expect(
+      utilsTab.locator(".monaco-editor .view-lines"),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(DeepReviewPage.revealedDecorations(utilsTab)).toHaveCount(0);
 
-    // The expanded lines should contain source content from the file.
-    const firstExpandedContent = await dr.expandedContextLines().first()
-      .locator(".deepreview-unified-line-content").textContent();
-    expect(firstExpandedContent).toBeTruthy();
-    // Line 12 of main.rs is "}" (closing brace of fn main).
-    expect(firstExpandedContent).toContain("}");
+    // ...and coming back finds main.rs still expanded: the state is on the
+    // ViewModel, so it survives the tab losing and regaining focus.
+    await dr.fileItemByIndex(0).click();
+    await expect(mainTab.locator(".monaco-editor .view-lines")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
+      timeout: 15_000,
+    });
+
+    // Closing the tab must drop its ViewModel and its source cache, so
+    // reopening the same file starts unexpanded.  This is the only coverage
+    // of the `closeLayoutTab` -> `forgetUnifiedDiffTab` wiring: the tab
+    // component is JS-only and cannot be reached headlessly, so without these
+    // four lines the test's own title would be asserting nothing.
+    const mainTabHeader = ctPage
+      .locator(".lm_tab")
+      .filter({ hasText: /^Diff:\s*main\.rs/ })
+      .first();
+    await mainTabHeader.locator(".lm_close_tab").click();
+    await expect(mainTabHeader).toHaveCount(0, { timeout: 20_000 });
+
+    const reopened = await openMainDiffTab(dr);
+    await expect(
+      reopened.locator(".monaco-editor .view-lines"),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(DeepReviewPage.revealedDecorations(reopened)).toHaveCount(0);
   });
 
   // -----------------------------------------------------------------------
@@ -844,8 +1317,9 @@ test.describe("DeepReview GUI - empty data handling", () => {
       const items = await dr.fileItems();
       expect(items.length).toBe(0);
 
-      // Note: execution slider is not rendered in GL-embedded mode.
-      // The empty state is verified by the 0 file items above.
+      // Note: the execution slider only renders in Full Files mode; the
+      // GL-embedded default is Unified Diff. The empty state is verified by
+      // the 0 file items above.
     });
   });
 
@@ -856,9 +1330,9 @@ test.describe("DeepReview GUI - empty data handling", () => {
   test.describe("missing call trace", () => {
     test.use({ launchMode: "deepreview", deepreviewJsonPath: noCalltracePath });
 
-    // Skip: Call trace panel is rendered by a separate GL panel in
-    // GL-embedded mode, not by the DeepReview component itself.
-    // Restore when the calltrace GL panel is testable.
+    // Skip: the call tree is rendered by the GL CALLTRACE panel, not by the
+    // DeepReview component, and that panel has no data until `--deepreview`
+    // mode loads a recording (M42b).
     test.skip("Test 9b: renders without crash when callTrace is null", async ({ ctPage }) => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
@@ -936,7 +1410,7 @@ test.describe("DeepReview comprehensive workflow", () => {
       expect(await secondItem.isSelected()).toBe(true);
       expect(await dr.fileItemByIndex(0).isSelected()).toBe(false);
 
-      // Step 5: In GL-embedded mode the unified diff is always shown.
+      // Step 5: Unified Diff is the GL-embedded default mode.
       await expect(dr.unifiedDiff()).toBeVisible();
 
       // Step 6: Verify hunks are rendered with correct added/removed counts.
@@ -997,9 +1471,9 @@ test.describe("DeepReview comprehensive workflow", () => {
         await wait(500);
       }
 
-      // Note: Steps 11-13 (Full Files mode, mode toggle, Monaco diff
-      // decorations) are not applicable in GL-embedded mode. They will be
-      // restored when the VCS panel's "Open File" mode is implemented.
+      // Note: the mode toggle and Full Files mode are covered by Test 13
+      // since the #610 fix. The Monaco diff/inline-value decorations remain
+      // uncovered because `--deepreview` mode loads no recording yet (M42b).
     });
   });
 
@@ -1026,8 +1500,9 @@ test.describe("DeepReview comprehensive workflow", () => {
       const statsText = await dr.statsDisplay().textContent();
       expect(statsText).toContain("0 files");
 
-      // Note: execution slider is not rendered in GL-embedded mode.
-      // The empty state is verified by the 0 file items and stats above.
+      // Note: the execution slider only renders in Full Files mode; the
+      // GL-embedded default is Unified Diff. The empty state is verified by
+      // the 0 file items and stats above.
     });
   });
 

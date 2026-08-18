@@ -149,6 +149,173 @@ const
     # it belongs in the sibling-gated `just test-no-sidecar-manifests` lane
     # rather than in this toolchain-free one.
     "src/tests/gui/tests/request-panel/request_span_conformance_test.nim",
+    # pxor bug campaign (2026-08).  Each of these pins a defect that had
+    # previously been reported fixed and was not, so the gate is the point:
+    # an ungated ViewModel test is how three of these regressed unnoticed in
+    # the first place.
+    #
+    # #612 (M44) — the Scratchpad merges repeat captures of one expression
+    # instead of appending a duplicate row.  Guards the spec behaviour in
+    # `GUI/Core-Panes/Scratchpad-Pane.md` that was never implemented.
+    # (The event-bus teardown half of #612 is guarded by
+    # `src/frontend/tests/scratchpad_add_dispatch_test.nim`, which runs in
+    # the `just test-frontend-js` lane because `communication.nim` is
+    # JS-only and cannot compile on this array's native backend.)
+    "src/tests/gui/tests/scratchpad/scratchpad_vm_test.nim",
+    # #576 (M22) — auto-expansion to the active file.  The feature did not
+    # exist; the test that was cited as its verification exercised the
+    # unrelated single-child chain collapse and never set an active file.
+    # #574 (M20) — `traceFilesRootFor` returning "" when no trace is loaded,
+    # the nil dereference that left the tree on "Loading..." forever.
+    "src/tests/gui/tests/filesystem/filesystem_vm_test.nim",
+    # #558 (M6) — value history rendering into the MOUNTED panel.  The prior
+    # test re-rendered a fresh panel, which is exactly what let a one-shot
+    # `for` inside `ui()` pass as reactive.
+    "src/frontend/viewmodel/tests/unit/test_state_value_history_toggle.nim",
+    # #608 (M41) — the saved layout breaking on the next open.  The persisted
+    # config was stripped of its editor tabs on every replay-mode save
+    # without remapping the enclosing stack's `activeItemIndex`, so
+    # GoldenLayout threw `ActiveItemIndex out of range` at restore and only
+    # `just reset-layout` recovered it.  The JS branch drives the real
+    # sanitiser/repair logic (`src/frontend/index/layout_config_repair.nim`)
+    # headlessly; the native branch asserts the production call sites still
+    # route through it and that the auto-hide state is persisted, handled and
+    # restored.  Listed here because the GUI-level `layout_resilience.spec.ts`
+    # is NOT coverage: every shape it writes is rejected by
+    # `isValidLayoutConfig` before GoldenLayout ever sees it, which is how
+    # this defect stayed invisible.
+    "src/tests/gui/tests/layout/layout_config_roundtrip_test.nim",
+    # #610 (M42a) — DeepReview replacing the whole GoldenLayout.  Launching
+    # `ct --deepreview` pasted a hard-coded three-panel preset over
+    # `data.ui.resolvedConfig`, so FILES, STATE, SCRATCHPAD, AGENT ACTIVITY,
+    # EVENT LOG, TIMELINE and TERMINAL OUTPUT were gone for the session and
+    # the user's own layout was ignored.  The behavioural half asserts that
+    # additive placement keeps every panel of the REAL bundled
+    # `src/config/default_layout.json`; the native-only source-contract half
+    # asserts the startup path is actually wired through that helper, which
+    # is the part no placement test could catch — the old code called no
+    # placement helper at all.
+    "src/tests/gui/tests/layout/deepreview_layout_test.nim",
+    # DR-R1 (DeepReview-GUI.milestones.org) — a review must be navigable:
+    # clicking a changed file opens it, a review opens its first file on
+    # startup, and the view-mode toggle is reachable in review mode.  The
+    # decision lives in `VCSVM.openActionFor` and the entry step in
+    # `viewmodels/review_entry` precisely so those three are assertable
+    # without a browser; `vcs_vm_test.nim` covers the resolver (including the
+    # deleted-file rule), `vcs_view_test.nim` the review-mode render branch,
+    # and the review-entry suite of `deepreview_vm_test.nim` the startup step
+    # over the same `sample-review.json` fixture the Playwright suite uses.
+    #
+    # DR-R2 grew the same two VCS files rather than adding new ones: the
+    # review's trace-context selector and stats moved out of the standalone
+    # panel into the VCS panel header, so `vcs_vm_test.nim` also covers the
+    # header's trace-context state and `vcs_view_test.nim` also covers the
+    # selector's rendering, its change handler, and the guard that neither
+    # element appears in a normal version-control session.
+    "src/tests/gui/tests/vcs/vcs_vm_test.nim",
+    "src/tests/gui/tests/vcs/vcs_view_test.nim",
+    "src/tests/gui/tests/deepreview/deepreview_vm_test.nim",
+    # DR-R4 — the unified diff became a real Monaco tab.  The whole point of
+    # extracting `viewmodel/viewmodels/diff_document.nim` is that the diff's
+    # appearance stops being CSS on `tdiv` elements and becomes data: which
+    # lines are added / removed / context, where the `@@` dividers go, which
+    # `+` / `-` gutter marker each line carries, and what the dual old/new
+    # line numbers read.  This file asserts all of it headlessly, including
+    # VCS-Panel.md's rule that the builder never consults the mode.
+    #
+    # DR-R4 also grew `vcs_vm_test.nim` (already listed above) with the hunk
+    # editor: selection, shift-click ranges, ctrl-click toggling and a
+    # checked-in copy-as-patch golden.  That model used to live in
+    # `ui/vcs.nim`, where no headless test could reach it, so porting the
+    # renderer could have deleted a specified capability silently.
+    "src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim",
+    # DR-R5 — context expansion in the diff tab.  Until it landed the whole
+    # capability was private procs inside `ui/deepreview.nim`, a JS-only
+    # module with no importable entry point, so the boundary arithmetic that
+    # decides how many lines exist above a hunk near the top of a file — the
+    # arithmetic that produces blank lines numbered 0 and -1 when it is wrong
+    # — was asserted by nothing.  This file asserts the window computation,
+    # its clamping at both file boundaries, the fetch-once-per-(revision,path)
+    # cache the normal-git content source needs, and that a revealed line is a
+    # plain context line of the document rather than a fourth, inert kind.
+    #
+    # DR-R5 also grew `vcs_vm_test.nim` (already listed above) with the
+    # per-hunk expansion counters, which used to be a JS-side `JsAssoc` on the
+    # component and therefore unreachable headlessly and lost on every
+    # re-render.
+    "src/tests/gui/tests/vcs/vcs_context_expansion_test.nim",
+    # DR-R3 — the Agent Activity panel as DeepReview's third pillar.  The
+    # panel's ViewModel, view and component all existed and were all wired to
+    # nothing: the only caller of `setCoverageSummary` / `setTestResults` /
+    # `setFileCoverage` in the repository was a storybook fixture, so the
+    # section rendered an empty shell in every real review.  The suite added
+    # here drives review entry over the same `sample-review.json` fixture the
+    # Playwright suites use and asserts the coverage summary, the per-file
+    # table, the honest "no test results in this dataset" state, and that the
+    # coverage table and the VCS panel's Changed Files list stay one
+    # selection.  The file existed before DR-R3 and was NOT listed here, so it
+    # was gated by nothing at all — the same gap DR-R1 kept finding.
+    #
+    # The view half rides in `isonim_views_test.nim` (already listed above):
+    # the section now renders *inside* the Agent Activity panel, per
+    # DeepReview-GUI.md §2.1, so its rendering is that panel's business.  The
+    # focus half rides in `deepreview_layout_test.nim` (also listed).
+    "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim",
+    # DR-R7 — one review-entry routine for all three launch paths.  The three
+    # ways into a review (`ct --deepreview`, a trace with an associated diff,
+    # the agentic handoff) used to configure review state their own way, and
+    # the agentic one additionally reached into the standalone DeepReview
+    # panel.  This file drives each path's *production* projection over the
+    # same `sample-review.json` fixture, feeds each result to the one entry
+    # routine, and asserts the three review states agree; it also pins
+    # Layout-System.md's idempotence obligation (re-entry opens no second tab
+    # and does not override the reviewer's own file selection), which matters
+    # because `syncProductPanels` re-enters on every sync.
+    #
+    # It also carries the per-file half of a review dataset, which DR-R7 fixed
+    # but did not test: `deepReviewHunks` took only the ViewModel, so every
+    # file of a review was handed whichever file the editor happened to be
+    # showing — a reviewer opening a deleted `config.rs` was shown `main.rs`'s
+    # modification, and context expansion revealed `main.rs`'s text inside it.
+    # `test_every_review_file_gets_its_own_diff` drives a three-file changeset
+    # (a modification, an addition and a deletion) through the projection that
+    # rule now lives in and asserts each file gets its own hunks, its own
+    # source content, and none of its neighbours'.  A one-file changeset cannot
+    # distinguish those, which is why the only end-to-end assertion that
+    # existed (`agentic-worktree.spec.ts`, and it needs a live Harbor server)
+    # did not guard it.
+    #
+    # Its second suite is a source contract, native only: the launch paths
+    # live in `ui_js.nim` / `ui/vcs.nim` / `ui/agentic_session_launcher.nim`,
+    # which need Electron and GoldenLayout, so reading them is the only way to
+    # assert headlessly that they call the shared routine rather than
+    # re-implementing review entry.  Same reason `deepreview_layout_test.nim`
+    # (listed above) carries one.
+    "src/tests/gui/tests/deepreview/deepreview_entry_test.nim",
+    # #603 (M38) — the re-record queue's decision model.  Both encode the two
+    # "never hang" invariants: a failed save must abort loudly, and dirty files
+    # with nothing in flight is unreachable-by-waiting.  Note
+    # `file_conflicts_vm_test.nim` already existed and was NOT listed here, so
+    # it was gated by nothing at all.
+    "src/tests/gui/tests/welcome-screen/file_conflicts_vm_test.nim",
+    "src/tests/gui/tests/welcome-screen/re_record_queue_vm_test.nim",
+    # #594 (M33) — the flow decoration layer must survive the window between
+    # `loadFlow` and `ct/updated-flow`, during which the flow data is nil and
+    # the computed decoration set is empty.  Replacing it with that empty set
+    # is what wiped the branch colours on every step.
+    "src/tests/gui/tests/editor/editor_decorations_test.nim",
+    # #566 (M4) — a live tracepoint results grid is refreshed in place, never
+    # rebuilt.  Rebuilding wiped the `<table>` the DataTables instance holds a
+    # reference to, on every completed move, including the jump the grid's own
+    # row click emits.
+    "src/tests/gui/tests/editor/trace_redraw_policy_test.nim",
+    # #568 (M19) — the recent-traces list was fetched only in the
+    # welcome-screen branch of `index/startup.nim`, so a process started with
+    # `ct run <program>` reached the tab bar's "+" with an empty cache and the
+    # new tab's Recent Traces panel stayed blank.  The test asserts the
+    # delivery contract exhaustively over every startup path, so a new path
+    # cannot be added without deciding how it gets its lists.
+    "src/tests/gui/tests/welcome-screen/recent_items_startup_vm_test.nim",
   ]
 
   CliRecordGateTests* = [
@@ -312,7 +479,8 @@ const ProviderGateEntries*: array[38, ProviderGateEntry] = [
     fixturePath: "src/ct_test/fixtures/nim_unittest_project",
     researchDoc: "src/ct_test/framework_research/nim-unittest.md",
     providerTest: "src/ct_test/nim_unittest_provider_test.nim",
-    sourceFiles: @["src/ct_test/frameworks/nim_unittest.nim"]),
+    sourceFiles: @["src/ct_test/frameworks/nim_unittest.nim",
+      "src/ct_test/nim_lexer.nim"]),
   ProviderGateEntry(providerId: "odin-fallback",
     fixturePath: "src/ct_test/fixtures/m12_odin_project",
     researchDoc: "src/ct_test/framework_research/odin-fixture-fallback.md",

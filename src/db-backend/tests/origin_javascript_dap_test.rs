@@ -6,23 +6,34 @@
 //!
 //! The shared per-DAP helper lives in `tests/common/origin_dap.rs`.
 //!
-//! # M16a/M16b TODO
+//! # Assertion contract
 //!
-//! The JavaScript recorder does not yet emit explicit `Assignment`
-//! events (only per-step `Value` snapshots), so the destructuring tests
-//! depend on the classifier walking the right-hand side of the source
-//! line. M16a/M16b add JS Assignment events to the recorder, which
-//! lets the destructuring tests assert FieldAccess / IndexAccess
-//! classifications more strictly. For M3 the tests assert either
-//! the FieldAccess/IndexAccess classification *or* a TrivialCopy
-//! with a confidence >= 0.7; the stricter assertion lands with M16b.
+//! Every assertion below is grounded in
+//! `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`
+//! (§7.1 universal classifier table, §7.2 JavaScript / TypeScript
+//! per-language overrides) plus the per-fixture `ANSWERS.md` that
+//! accompanies each program under `tests/fixtures/origin/javascript/`.
+//! The chain shape is asserted exactly — hop count, per-hop
+//! `OriginKind`, the source variable each hop continues into, and the
+//! terminator — because a test that only checks "the first hop is one
+//! of two acceptable kinds" cannot distinguish a correct chain from a
+//! chain that was silently truncated after its first hop.
+//!
+//! The one property from `ANSWERS.md` that is deliberately *not*
+//! asserted is `operand_snapshots` on the terminating `Computational`
+//! hop. Spec §7.1 defines a `Computational` hop's continuation as "the
+//! set of identifier leaves under the RHS"; `[11, 22]` and
+//! `{ a: 11, b: 22 }` contain no identifier leaves, so an empty
+//! operand set is what §7.1 prescribes. The `ANSWERS.md` wording that
+//! lists literal element values as operand snapshots describes a
+//! richer capture that §7.1 does not currently require.
 
 mod test_harness;
 
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
-use db_backend::task::{OriginKind, TerminatorKind};
+use db_backend::task::{OriginChain, OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
     fixture_source, load_fixture_and_query_or_skip,
@@ -110,31 +121,74 @@ fn test_origin_javascript_simple_trivial_chain() {
     assert_min_confidence(chain, 0.7, "javascript simple_trivial_chain confidence");
 }
 
+/// Assert a hop continues the chain into `expected_source_variable`.
+///
+/// The source variable is the load-bearing half of a `FieldAccess` /
+/// `IndexAccess` hop: it names the value the chain walks back into.
+/// Asserting only the `OriginKind` would accept a hop that classified
+/// correctly but pointed at the wrong receiver.
+fn assert_hop_source_variable(chain: &OriginChain, index: usize, expected: &str, context: &str) {
+    let hop = chain.hops.get(index).unwrap_or_else(|| {
+        panic!(
+            "[{}] expected at least {} hops, got {:?}",
+            context,
+            index + 1,
+            chain.hops
+        )
+    });
+    assert_eq!(
+        hop.source_variable.as_deref(),
+        Some(expected),
+        "[{}] hop {} must continue into {:?} (hop={:?})",
+        context,
+        index,
+        expected,
+        hop
+    );
+}
+
 #[test]
 fn test_origin_javascript_object_destructuring() {
     let Some(version) = require_js_recorder() else {
         return;
     };
-    // main.js line 6 is `console.log(a, b)`. Chain for `a` is
-    //   a (FieldAccess "a") -> obj -> Computational literal.
+    // `main.js` line 8 is `console.log(a, b)` — the query point named by
+    // the fixture's ANSWERS.md ("Query targets: `a` and `b` at the
+    // `console.log(a, b)` line").
     //
-    // M16a/M16b TODO: when the JS recorder emits Assignment events,
-    // tighten this to require OriginKind::FieldAccess specifically.
-    let config = js_config("object_destructuring", &version, 6, "a");
+    // Expected chain, per ANSWERS.md and spec §7.2 JavaScript row
+    // ("`const { a, b } = obj` -> two hops, kind=FieldAccess,
+    // source_variable=`obj`"):
+    //
+    //   hop 0: a   <- obj              FieldAccess    (confidence >= 0.7)
+    //   hop 1: obj <- { a: 11, b: 22 } Computational
+    //   terminator: Computational("{ a: 11, b: 22 }")
+    let config = js_config("object_destructuring", &version, 8, "a");
     let Some(result) = run_or_skip("object_destructuring", &config) else {
         return;
     };
     let chain = &result.chain;
 
-    let first_kind = chain.hops.first().map(|h| h.kind);
-    let acceptable = matches!(
-        first_kind,
-        Some(OriginKind::FieldAccess) | Some(OriginKind::TrivialCopy)
+    assert_hop_count(chain, 2, "javascript object_destructuring hops");
+    // Spec §7.2 JS row: a destructuring binding is observationally
+    // equivalent to `const a = obj.a`, so the first hop is FieldAccess —
+    // NOT the weaker TrivialCopy the pre-M16 tests also accepted.
+    assert_hop_kinds(
+        chain,
+        &[OriginKind::FieldAccess, OriginKind::Computational],
+        "javascript object_destructuring hop kinds",
     );
-    assert!(
-        acceptable,
-        "javascript object_destructuring: first hop must be FieldAccess or TrivialCopy, got {:?} (full hops={:?})",
-        first_kind, chain.hops
+    assert_hop_source_variable(chain, 0, "obj", "javascript object_destructuring");
+    // Spec §6.1.6 / §7.1: the object literal is the computational
+    // origin, so the chain must reach it rather than terminating early.
+    assert_terminator_kind(
+        chain,
+        TerminatorKind::Computational,
+        "javascript object_destructuring terminator",
+    );
+    assert_eq!(
+        chain.terminator.expression, "{ a: 11, b: 22 }",
+        "javascript object_destructuring terminator must be the object literal"
     );
     assert_min_confidence(chain, 0.7, "javascript object_destructuring confidence");
 }
@@ -144,23 +198,39 @@ fn test_origin_javascript_array_destructuring() {
     let Some(version) = require_js_recorder() else {
         return;
     };
-    // main.js line 6 is `console.log(a, b)`. Chain for `a` is
-    //   a (IndexAccess [0]) -> arr -> Computational literal.
-    let config = js_config("array_destructuring", &version, 6, "a");
+    // `main.js` line 8 is `console.log(a, b)` — the query point named by
+    // the fixture's ANSWERS.md.
+    //
+    // Expected chain, per ANSWERS.md and spec §7.2 JavaScript row
+    // ("`const [a, b] = arr` -> two hops, kind=IndexAccess,
+    // source_variable=`arr`"):
+    //
+    //   hop 0: a   <- arr       IndexAccess    (confidence >= 0.7)
+    //   hop 1: arr <- [11, 22]  Computational
+    //   terminator: Computational("[11, 22]")
+    let config = js_config("array_destructuring", &version, 8, "a");
     let Some(result) = run_or_skip("array_destructuring", &config) else {
         return;
     };
     let chain = &result.chain;
 
-    let first_kind = chain.hops.first().map(|h| h.kind);
-    let acceptable = matches!(
-        first_kind,
-        Some(OriginKind::IndexAccess) | Some(OriginKind::TrivialCopy)
+    assert_hop_count(chain, 2, "javascript array_destructuring hops");
+    // Spec §7.2 JS row: array destructuring is observationally
+    // equivalent to `const a = arr[0]`, so the first hop is IndexAccess.
+    assert_hop_kinds(
+        chain,
+        &[OriginKind::IndexAccess, OriginKind::Computational],
+        "javascript array_destructuring hop kinds",
     );
-    assert!(
-        acceptable,
-        "javascript array_destructuring: first hop must be IndexAccess or TrivialCopy, got {:?} (full hops={:?})",
-        first_kind, chain.hops
+    assert_hop_source_variable(chain, 0, "arr", "javascript array_destructuring");
+    assert_terminator_kind(
+        chain,
+        TerminatorKind::Computational,
+        "javascript array_destructuring terminator",
+    );
+    assert_eq!(
+        chain.terminator.expression, "[11, 22]",
+        "javascript array_destructuring terminator must be the array literal"
     );
     assert_min_confidence(chain, 0.7, "javascript array_destructuring confidence");
 }
@@ -170,23 +240,39 @@ fn test_origin_javascript_optional_chaining() {
     let Some(version) = require_js_recorder() else {
         return;
     };
-    // main.js line 5 is `console.log(x)`. Chain for `x` is
-    //   x (FieldAccess "field") -> obj -> Computational literal.
-    let config = js_config("optional_chaining", &version, 5, "x");
+    // `main.js` line 9 is `console.log(x)` — the query point named by
+    // the fixture's ANSWERS.md ("Query target: local `x` at the
+    // `console.log(x)` line").
+    //
+    // Expected chain, per ANSWERS.md and spec §7.1's
+    // `member_expression` row (an optional chain `obj?.field` is a
+    // member expression, so it classifies as FieldAccess and continues
+    // into the receiver):
+    //
+    //   hop 0: x   <- obj?.field    FieldAccess    (confidence >= 0.7)
+    //   hop 1: obj <- { field: 42 } Computational
+    //   terminator: Computational("{ field: 42 }")
+    let config = js_config("optional_chaining", &version, 9, "x");
     let Some(result) = run_or_skip("optional_chaining", &config) else {
         return;
     };
     let chain = &result.chain;
 
-    let first_kind = chain.hops.first().map(|h| h.kind);
-    let acceptable = matches!(
-        first_kind,
-        Some(OriginKind::FieldAccess) | Some(OriginKind::TrivialCopy)
+    assert_hop_count(chain, 2, "javascript optional_chaining hops");
+    assert_hop_kinds(
+        chain,
+        &[OriginKind::FieldAccess, OriginKind::Computational],
+        "javascript optional_chaining hop kinds",
     );
-    assert!(
-        acceptable,
-        "javascript optional_chaining: first hop must be FieldAccess or TrivialCopy, got {:?} (full hops={:?})",
-        first_kind, chain.hops
+    assert_hop_source_variable(chain, 0, "obj", "javascript optional_chaining");
+    assert_terminator_kind(
+        chain,
+        TerminatorKind::Computational,
+        "javascript optional_chaining terminator",
+    );
+    assert_eq!(
+        chain.terminator.expression, "{ field: 42 }",
+        "javascript optional_chaining terminator must be the object literal"
     );
     assert_min_confidence(chain, 0.7, "javascript optional_chaining confidence");
 }

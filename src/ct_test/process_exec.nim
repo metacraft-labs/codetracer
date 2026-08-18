@@ -33,12 +33,28 @@ type
     ## accounting ``runquota_process`` captures for free, so callers that want
     ## per-test wall time (e.g. for the CI-sharding cost model) or memory
     ## telemetry no longer have to time the call by hand.
-    output*: string                    ## combined stdout+stderr
+    output*: string                    ## combined stdout+stderr, possibly cut
     exitCode*: int
     timedOut*: bool
     durationMs*: int
     peakResidentMemoryBytes*: uint64
     processCount*: uint32
+    outputBytes*: uint64
+      ## How many bytes the child *actually* wrote, counted before the capture
+      ## bound was applied.  Equal to ``output.len`` for every run that fit.
+    truncated*: bool
+      ## ``true`` when the capture bound cut the output — i.e. ``output`` is a
+      ## PREFIX of what the child produced and the tail is gone.
+      ##
+      ## This field exists because silent truncation is a correctness hazard,
+      ## not a cosmetic one.  ``runquota_process`` stops appending at the bound
+      ## but keeps counting, so the information is available; ``CapturedRun``
+      ## used to drop it, leaving every consumer to parse a prefix as if it
+      ## were the whole answer.  For a parser that is usually a loud syntax
+      ## error, but for the *list-shaped* outputs ct_test consumes — one record
+      ## per line, ``git ls-files -z`` above all — a prefix is indistinguishable
+      ## from a complete short answer, and the loss is invisible.  Callers that
+      ## cannot tolerate a partial answer MUST check this.
 
 const
   DefaultCaptureLimit* = 16 * 1024 * 1024
@@ -85,6 +101,12 @@ proc execCaptured*(argv: openArray[string]; cwd = "";
   result.durationMs = int(completion.elapsedMillis)
   result.peakResidentMemoryBytes = completion.peakResidentMemoryBytes
   result.processCount = completion.processCount
+  # ``stdoutBytes``/``stderrBytes`` are the *pre-bound* counters the capture
+  # loop maintains, so the comparison detects truncation exactly rather than by
+  # the "output.len == limit" guess (which both misses a run that happened to
+  # end on the bound and misfires on one that did not).
+  result.outputBytes = completion.stdoutBytes + completion.stderrBytes
+  result.truncated = result.outputBytes > uint64(result.output.len)
 
 proc execCapturedShell*(command: string; cwd = "";
                         env: openArray[string] = [];

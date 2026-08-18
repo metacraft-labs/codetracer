@@ -1,4 +1,4 @@
-// NaN-payload demo (M52) — browser tier.
+// NaN-payload demo — browser tier.
 //
 // Ordinary host glue. The page drives four exported calls with bit
 // patterns it supplies as integers, and answers the module's two
@@ -11,7 +11,8 @@
 // these values: `NaN` has no payload in JS, `JSON.stringify(NaN)` is
 // `null`, and `String(-0)` is `"0"`. If this page compared floats it
 // would be asserting on the damaged copies rather than on what the
-// module produced, and would pass whether or not M52 worked.
+// module produced, and would pass whether or not the recorder preserved
+// the bits.
 //
 // This page is **not** bundled. It loads `browser_session.js` straight
 // out of the instrumenter checkout as a native ES module, so the

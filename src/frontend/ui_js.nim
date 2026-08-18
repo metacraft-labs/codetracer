@@ -178,6 +178,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
+import viewmodel/viewmodels/deepreview_layout
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
@@ -1398,11 +1399,54 @@ proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
       cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
         getCurrentExceptionMsg()
 
+proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
+  initLayout(config)
+
 proc tryInitLayout*(data: Data) =
+  ## Mount the GoldenLayout tree once both the page and the init event are in.
+  ##
+  ## `initLayout` reaches into GoldenLayout, which throws *native* JavaScript
+  ## `Error`s that Nim's `except` does not catch — so a single bad saved layout
+  ## aborted this proc half-way and `redrawAll()` below never ran, leaving a
+  ## blank window with nothing in the log.  The guard therefore has to be
+  ## written in raw JS, the same way `ui/session_switch.nim` does it.
   if data.ui.pageLoaded and data.ui.initEventReceived:
     if data.ui.layout.isNil:
-      initLayout(data.ui.resolvedConfig)
+      var ok = false
+      {.emit: """
+        try {
+          `callInitLayoutUnchecked`(`data`.ui.resolvedConfig);
+          `ok` = true;
+        } catch (e) {
+          console.error("ui_js: initLayout failed: " +
+            (e && e.message ? e.message : String(e)));
+        }
+      """.}
+      if not ok:
+        cerror "ui_js: layout initialisation failed; see the console"
+        # A blank window with only a console line is exactly the class of
+        # silent failure this pass is removing.  The notification host is
+        # rendered outside the GoldenLayout tree, so it survives this.
+        try:
+          data.viewsApi.errorMessage(cstring(
+            "The saved panel layout could not be restored. " &
+            "Reset it from the View menu if the window stays empty."))
+        except:
+          cerror "ui_js: could not report the layout failure: " &
+            getCurrentExceptionMsg()
     redrawAll()
+
+    # DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
+    # modified file opens in the editor with unified diff view."
+    #
+    # It happens here rather than in `onStartDeepReview` because opening a tab
+    # needs a mounted GoldenLayout, and `CODETRACER::start-deepreview` can
+    # arrive before the document finishes loading — in which case the tree is
+    # only built on the later `onReady` pass through this proc.
+    # `startDeepReviewNavigation` is a one-shot, so a review opens its first
+    # file exactly once however many times the layout is initialised.
+    if data.deepReviewActive and not data.ui.layout.isNil:
+      vcs.startDeepReviewNavigation(data)
 
 # In both these `on` functions, we must communicate them to the ui
 
@@ -1656,8 +1700,8 @@ when not defined(ctInExtension):
           # VM that threw during construction leaves its panel wired to a
           # stub (or to nothing), and every later symptom — an empty
           # calltrace, a state panel that never fills — is downstream of
-          # this line.  It must survive the M51 demotion of the surrounding
-          # `[PIPELINE]` progress traces.
+          # this line.  It must stay at ERROR even though the surrounding
+          # `[PIPELINE]` progress traces were demoted to DEBUG.
           cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
 
       initPanelVM("initStateVMWithStore"):
@@ -1922,7 +1966,7 @@ when not defined(ctInExtension):
             inc data.ui.status.completeMoveId
             data.ui.status.redraw()
           else:
-            # Stays at ERROR (M51 review).  The "it just arrived early"
+            # Stays at ERROR.  The "it just arrived early"
             # reading of this branch does not survive checking: the only
             # thing that registers this subscription is
             # `configureMiddleware`, and both of its call sites
@@ -2247,6 +2291,26 @@ proc onTraceLoaded(
     else:
       await data.openNewEditorView(programTab, ViewSource)
 
+  # DeepReview-GUI.md §1, launch method 2: "Open a trace that is associated
+  # with a diff."  A trace recorded with `ct record --with-diff` carries its
+  # structured diff in the trace folder, and every stage up to here already
+  # forwarded it — `ct run` as `--diff <path>`, `index/args.nim` into
+  # `StartOptions.diff`, `index/traces.nim` into this very message — but the
+  # renderer used to drop it, so the launch method existed on paper only.
+  # It enters the review through the same routine `ct --deepreview` and the
+  # agentic handoff use.
+  if response.withDiff and not response.diff.isNil and
+      response.diff.files.len > 0:
+    await waitForLayoutGround(data)
+    let reviewedProgram = $baseName(data.trace.program)
+    vcs.startReviewForTraceDiff(
+      data, response.diff,
+      title = "Review: " & reviewedProgram,
+      # The open recording *is* the run under review, so it is the review's
+      # one trace context.
+      traceLabel = reviewedProgram,
+      recordingId = $data.trace.recordingId)
+
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
@@ -2307,14 +2371,27 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   data.tryInitLayout()
 
 
-proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions)) =
+proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions, layout=js)) =
   ## Handler for ``CODETRACER::start-deepreview`` IPC message.
-  ## Sets up the frontend for DeepReview offline review mode using the
-  ## standard GL layout (filesystem, editor, calltrace panels) instead
-  ## of a monolithic DeepReview panel.  The filesystem panel detects
-  ## ``data.deepReviewActive`` and shows changed files from the review
-  ## data.  Editor tabs receive diff decorations when a file has review
-  ## data.  The calltrace panel works as normal.
+  ##
+  ## Sets up the frontend for DeepReview offline review mode on the user's
+  ## own GoldenLayout: the review surface is *added* to the layout the
+  ## index process loaded, it does not replace it.  Every standard panel —
+  ## FILES, VCS, STATE, SCRATCHPAD, CALLTRACE, AGENT ACTIVITY, EVENT LOG,
+  ## TIMELINE, TERMINAL OUTPUT — therefore stays where the user put it
+  ## (issue #610).
+  ##
+  ## The VCS panel detects ``data.deepReviewActive`` and populates its file
+  ## list from ``data.deepReviewData.files``; clicking a file updates
+  ## ``data.deepReviewSelectedFileIndex``, which the DeepReview component
+  ## reads to decide which file's diff to render.
+  ##
+  ## NOTE (M42b): in ``--deepreview`` mode the index process never loads a
+  ## recording (``index/args.nim`` forces ``recordingID = ""`` and
+  ## ``index/startup.nim`` returns before ``CODETRACER::init``), so the
+  ## replay-backed panels come up present but EMPTY.  Populating them needs
+  ## the exporter to emit a resolvable ``traceContexts[].recordingId`` and
+  ## the startup path to load that recording — tracked separately.
   data.startOptions.loading = false
   data.startOptions.withDeepReview = true
   data.config = response.config
@@ -2331,104 +2408,67 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   hideWelcomeScreenSurface()
 
-  # DeepReview GL layout: VCS panel (left) showing changed files from the
-  # review data, DeepReview component (center) rendering the unified diff
-  # for the selected file, and calltrace (right).  The VCS panel detects
-  # ``data.deepReviewActive`` and populates its file list from
-  # ``data.deepReviewData.files``.  Clicking a file updates
-  # ``data.deepReviewSelectedFileIndex`` which the DeepReview component
-  # reads to decide which file's diff to render.
-  let standardLayoutJson = cstring"""{
-    "settings": {
-      "constrainDragToContainer": true,
-      "reorderEnabled": true,
-      "popoutWholeStack": false,
-      "blockedPopoutsThrowError": true,
-      "responsiveMode": "always"
-    },
-    "dimensions": {
-      "borderWidth": 2,
-      "borderHeight": 4,
-      "headerHeight": 35,
-      "dragProxyWidth": 300,
-      "dragProxyHeight": 200
-    },
-    "root": {
-      "type": "row",
-      "size": "100%",
-      "isClosable": false,
-      "content": [
-        {
-          "type": "column",
-          "size": "20%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "size": "100%",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "vcsComponent-0",
-                    "content": 41
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "column",
-          "size": "60%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "deepReviewComponent-0",
-                    "content": 36
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "column",
-          "size": "20%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "calltraceComponent-0",
-                    "content": 6
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    "openPopouts": []
-  }"""
-  data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](JSON.parse(standardLayoutJson))
+  # Additive placement, mirroring `applyVisualReplayTabsToResolvedConfig`:
+  # parse the layout the index process loaded, insert one DeepReview
+  # component into the editor area, hand it back to GoldenLayout.
+  var layoutNode = resolvedConfigToJsonNode(
+    cast[GoldenLayoutResolvedConfig](response.layout))
+  if layoutNode.isNil:
+    # `index/config.loadLayoutConfig` never returns nil (it resets to the
+    # bundled default, or exits), so this is an emergency path only: keep
+    # DeepReview usable with the file list it depends on rather than
+    # opening an empty window.
+    cerror "onStartDeepReview: no usable layout in the start message; " &
+      "falling back to a review-only layout"
+    layoutNode = %*{
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "responsiveMode": "always"
+      },
+      "dimensions": {
+        "borderWidth": 4,
+        "borderHeight": 4,
+        "headerHeight": 32,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "root": {
+        "type": "row",
+        "size": "100%",
+        "isClosable": false,
+        "content": [
+          {
+            "type": "stack",
+            "size": "20%",
+            "content": [
+              {
+                "type": "component",
+                "componentType": "genericUiComponent",
+                "componentName": "genericUiComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "vCSComponent-0",
+                  "content": VcsContentId
+                },
+                "title": "genericUiComponent"
+              }
+            ]
+          }
+        ]
+      },
+      "openPopouts": []
+    }
 
-  # Create UI components from the standard layout config.  This walks the GL
+  let reviewConfig = jsonNodeToResolvedConfig(addDeepReviewSurface(layoutNode))
+  if not reviewConfig.isNil:
+    data.ui.resolvedConfig = reviewConfig
+  else:
+    cerror "onStartDeepReview: could not build the DeepReview layout"
+
+  # Create UI components from the resolved layout config.  This walks the GL
   # config tree and instantiates each component.  The VCS panel detects
   # deepReviewActive and shows changed files; editor tabs get diff decorations.
   data.createUIComponents()
@@ -2436,10 +2476,10 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
-  # The DeepReview component (content 36) in the GL layout renders the
-  # unified diff view automatically.  Clicking a file in the VCS panel
-  # updates ``data.deepReviewSelectedFileIndex``, which the DeepReview
-  # component reads to decide which file's diff to display.
+  # The review's first modified file is opened by `tryInitLayout` itself, as
+  # soon as the GoldenLayout tree exists (DeepReview-GUI.md §7 step 2).  It
+  # cannot be done here: this message can arrive before the document has
+  # finished loading, and `data.ui.layout` is then still nil.
 
 
 proc onFilenamesLoaded(
@@ -2795,13 +2835,20 @@ proc onSuccessfulRecord(
 proc onFailedRecord(
   sender: js,
   response: jsobject(errorMessage=cstring)) =
+  ## A build/record run failed.
+  ##
+  ## The notification is unconditional.  Routing the message *only* into the
+  ## new-record form's status meant that any user who had ever opened "Record
+  ## new trace" got zero feedback from a failed re-record: `welcomeScreen` is
+  ## created once at startup and never cleared, and `newRecord` stays non-nil
+  ## once the form has been opened, so the form is usually hidden while it
+  ## silently absorbs the error (issue #603).
+  data.viewsApi.errorMessage(response.errorMessage)
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordError
     data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
     data.ui.welcomeScreen.requestWelcomeScreenRender()
-  else:
-    data.viewsApi.errorMessage(response.errorMessage)
 
 proc onLoadingTrace(
   sender: js,
@@ -2860,6 +2907,37 @@ proc onWelcomeScreen(
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
+proc onRecentItems(
+  sender: js,
+  response: jsobject(
+    recentTraces=seq[Trace],
+    recentFolders=seq[RecentFolder],
+    recentTransactions=seq[StylusTransaction]
+  )
+) =
+  ## Fill the recent-traces / recent-folders cache on startup paths that never
+  ## render the welcome screen themselves (issue #568).
+  ##
+  ## `onWelcomeScreen` above is the only other writer of these fields, and it
+  ## only ever runs when CodeTracer was launched *into* the welcome screen.
+  ## Started with `ct run <program>`, the process reached the session tab bar's
+  ## "+" button with `data.recentTraces` still empty, and
+  ## `ui/welcome_screen.nim:syncLegacyWelcomeScreenIntoVM` mirrored that empty
+  ## list into `WelcomeScreenVM` — the Recent Traces panel of the new tab was
+  ## blank while the identical click after a welcome-screen launch listed them.
+  ##
+  ## Only the cache is written here: rendering is not forced, so this cannot
+  ## draw the welcome surface over a live debugging session.  When a welcome
+  ## screen component already exists (an empty tab is open), its ViewModel is
+  ## re-synced so a visible, already-mounted panel picks the lists up
+  ## reactively.
+  clog "welcome_screen: on recent items"
+  data.recentTraces = response.recentTraces
+  data.recentFolders = response.recentFolders
+  data.stylusTransactions = response.recentTransactions
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
+
 proc onNewNotification(sender: js, notification: Notification) =
   data.viewsApi.showNotification(notification)
 
@@ -2888,23 +2966,44 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     data.services.editor.open[response.name].changed = false
     data.services.editor.open[response.name].lastSyncedSource =
       data.services.editor.open[response.name].source
-  if data.ui.editors.hasKey(response.name):
-    let editor = data.ui.editors[response.name]
-    if not editor.tabInfo.isNil:
-      editor.tabInfo.changed = false
-      editor.tabInfo.lastSyncedSource = editor.tabInfo.source
-    editor.name = response.name
-    if not data.services.search.paths.hasKey(response.name):
-      data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
-      data.services.search.paths[response.name] = true
-    var tokens = rsplit($response.name, {'/'}, maxsplit=1)
-    var label = $response.name
-    if tokens.len >= 2:
-      label = tokens[1]
-    editor.contentItem.setTitle(cstring(label))
-    editor.contentItem.config.componentState.label = response.name
-    editor.contentItem.config.componentState.fullPath = response.name
+  # The editor-chrome updates below touch GoldenLayout internals
+  # (`contentItem.config.componentState`) that are not guaranteed to exist for
+  # every tab.  They must never be able to stop `checkPendingReRecord` from
+  # running: that call is the *only* thing that drains a queued re-record
+  # request, and a throw here left the request armed forever (issue #603).
+  try:
+    if data.ui.editors.hasKey(response.name):
+      let editor = data.ui.editors[response.name]
+      if not editor.tabInfo.isNil:
+        editor.tabInfo.changed = false
+        editor.tabInfo.lastSyncedSource = editor.tabInfo.source
+      editor.name = response.name
+      if not data.services.search.paths.hasKey(response.name):
+        data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
+        data.services.search.paths[response.name] = true
+      var tokens = rsplit($response.name, {'/'}, maxsplit=1)
+      var label = $response.name
+      if tokens.len >= 2:
+        label = tokens[1]
+      editor.contentItem.setTitle(cstring(label))
+      editor.contentItem.config.componentState.label = response.name
+      editor.contentItem.config.componentState.fullPath = response.name
+  except:
+    cerror "saved-file: could not refresh the editor tab for " &
+      $response.name & ": " & getCurrentExceptionMsg()
   checkPendingReRecord(data)
+  data.redraw()
+
+proc onSaveFileError(sender: js, response: jsobject(name=cstring, error=cstring)) =
+  ## The main process could not write a buffer to disk.
+  ##
+  ## This message had no subscriber at all: the buffer stayed dirty, a queued
+  ## re-record request stayed armed with nothing left to answer it, and the
+  ## user was told nothing (issue #603).
+  cerror "save-file-error: " & $response.name & ": " & $response.error
+  data.viewsApi.errorMessage(
+    cstring("Could not save " & $response.name & ": " & $response.error))
+  data.noteReRecordSaveOutcome(failed = true)
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =
@@ -3074,8 +3173,12 @@ proc configureIPC(data: Data) =
 
     "no-trace"
     "welcome-screen"
+    # #568: the recent-traces / recent-folders push for startup paths whose own
+    # startup message does not carry them (`index/recent_items.nim`).
+    "recent-items"
     "saved-as"
     "saved-file"
+    "save-file-error"
 
     # notifications
     "new-notification"

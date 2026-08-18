@@ -105,12 +105,12 @@ test:ui-tests:
   script:
     - nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh
 
-push-to-cachix:
+push-to-attic:
   stage: deploy
   only:
     - master
   script:
-    - nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-cachix.sh
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-attic.sh
 
 build-and-deploy-docs:
   stage: deploy

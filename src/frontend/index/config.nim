@@ -4,6 +4,7 @@ import
   ../[ config, types, lang ],
   ../lib/[ jslib, electron_lib, misc_lib ],
   ./bootstrap_cache,
+  ./layout_config_repair,
   ../../common/[ paths, ct_logging, trace_source_paths ]
 
 type
@@ -36,7 +37,18 @@ type
     path*:          cstring
     lang*:          Lang
     fileWatched*:   bool
-    ignoreNext*:    int # save
+    ## Epoch-ms deadline until which filesystem events for this file are
+    ## attributed to CodeTracer's own write and suppressed.
+    ##
+    ## This replaces an `ignoreNext: int` counter that was incremented once
+    ## per save and decremented once per event.  That only works if a write
+    ## produces exactly one event, and it does not: up to three watchers are
+    ## registered per file (`fs.watch` on the file, `fs.watch` on its
+    ## directory, `fs.watchFile` polling) and a single `writeFile` — open,
+    ## truncate, write — yields several inotify `change` events on its own.
+    ## Every surplus event walked straight past the mask and raised the
+    ## "File changed on disk" dialog for the user's *own* save (issue #603).
+    selfWriteUntilMs*: float
     waitsPrompt*:   bool
 
 var data* = ServerData(
@@ -62,16 +74,36 @@ var data* = ServerData(
   debugInstances: JsAssoc[cstring, DebugInstance]{}
 )
 
+const selfWriteSuppressionMs* = 750.0
+  ## How long after one of our own writes filesystem events for that file are
+  ## ignored.  Comfortably longer than the 250 ms `fs.watchFile` poll below,
+  ## and short enough that a real external edit made right after a save is
+  ## still picked up.
+
+proc nowMs(): float {.importjs: "Date.now()".}
+
 proc ensureServerTab(filename: cstring, lang: Lang): ServerTab =
   if not data.tabs.hasKey(filename):
     data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
   data.tabs[filename]
 
+proc suppressSelfWrite*(filename: cstring) =
+  ## Mark `filename` as being written by CodeTracer itself, so the watchers
+  ## below do not report the write back to the renderer as an external change.
+  ##
+  ## Call this both immediately before and immediately after the write: the
+  ## first arms the window for events raised while the write is in progress,
+  ## the second re-anchors it to the moment the file actually settled.
+  if data.tabs.hasKey(filename):
+    data.tabs[filename].selfWriteUntilMs = nowMs() + selfWriteSuppressionMs
+
 proc notifySourceFileChanged(filename: cstring, lang: Lang) =
   let tab = ensureServerTab(filename, lang)
-  if tab.ignoreNext > 0:
-    tab.ignoreNext = tab.ignoreNext - 1
-  elif tab.fileWatched and not tab.waitsPrompt:
+  if nowMs() < tab.selfWriteUntilMs:
+    # Our own write.  Unlike the counter this replaced, a time window absorbs
+    # an arbitrary number of events from an arbitrary number of watchers.
+    return
+  if tab.fileWatched and not tab.waitsPrompt:
     tab.waitsPrompt = true
     mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
 
@@ -210,10 +242,15 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       # Always also register the polling watcher.  This is intentional: even
       # when ``fs.watch`` *appears* to succeed, it can silently never fire on
       # certain mounts (in Playwright + Electron + tmpfs scenarios we observed
-      # zero ``change`` events).  ``fs.watchFile`` only fires when the
-      # mtime/size actually changed between polls, so registering both does
-      # not double-notify in practice; ``tab.waitsPrompt`` further dedupes
-      # the IPC.
+      # zero ``change`` events).
+      #
+      # These watchers DO double-notify.  A single ``writeFile`` (open,
+      # truncate, write) raises several inotify ``change`` events, each of
+      # which is delivered to both ``fs.watch`` registrations, and the poller
+      # can add one more.  ``tab.waitsPrompt`` only dedupes events that arrive
+      # while a prompt is already outstanding.  Suppressing our own writes is
+      # therefore ``selfWriteUntilMs``'s job, not a counter's — see
+      # ``notifySourceFileChanged`` above and issue #603.
       try:
         fs.watchFile(openedPath, js{interval: 250, persistent: false}) do (curr: js, prev: js):
           # ``curr.mtimeMs`` and ``prev.mtimeMs`` are numeric epoch ms;
@@ -330,27 +367,6 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
     quit(1)
 
-proc layoutContainsContentId(config: js; contentId: int): bool {.importjs:
-  """(function(config, contentId) {
-    const target = Number(contentId);
-    const walk = (node) => {
-      if (!node) return false;
-      const state = node.componentState || {};
-      if (node.type === 'component' && Number(state.content) === target) {
-        return true;
-      }
-      if (Array.isArray(node.content)) {
-        for (const child of node.content) {
-          if (walk(child)) return true;
-        }
-      }
-      return false;
-    };
-    return walk((config && config.root) || config);
-  })(#, #)""".}
-  ## Recursively check whether a GoldenLayout config tree contains a
-  ## component panel with the given `componentState.content` ordinal.
-
 proc ensureLayoutContentPanel(config: js; contentId: int; label: cstring): js {.importjs:
   """(function(config, contentId, label) {
     if (!config) return config;
@@ -397,6 +413,19 @@ proc ensureLayoutContentPanel(config: js; contentId: int; label: cstring): js {.
       },
       title: 'genericUiComponent'
     });
+    // Appending only grows the array, so a previously in-range
+    // activeItemIndex stays in range.  Clamp anyway: this is the same
+    // invariant that, when it was left unmaintained on the *removal* path,
+    // produced the permanently unloadable layouts of the saved-layout
+    // corruption bug.  GoldenLayout enforces it with a throw
+    // (node_modules/golden-layout/src/ts/items/stack.ts:169-171).
+    if (targetStack.activeItemIndex !== undefined &&
+        targetStack.activeItemIndex !== null) {
+      const index = Number(targetStack.activeItemIndex);
+      targetStack.activeItemIndex = Number.isFinite(index)
+        ? Math.min(Math.max(index, 0), targetStack.content.length - 1)
+        : 0;
+    }
     return config;
   })(#, #, #)""".}
   ## Ensure a core panel exists in an otherwise valid GoldenLayout config.
@@ -406,9 +435,15 @@ proc ensureLayoutContentPanel(config: js; contentId: int; label: cstring): js {.
 proc ensureReplayLayoutPanels(config: js): js =
   ensureLayoutContentPanel(config, ord(Content.Timeline), cstring"timelineComponent-0")
 
-proc isValidLayoutConfig(config: js): bool =
+proc isValidLayoutConfig(config: js; autoHideState: js = nil): bool =
   ## Check if a layout config has the minimum required structure for GoldenLayout.
   ## This helps detect corrupt or incompatible layout files from different branches.
+  ##
+  ## NOTE: this is a *compatibility* check, not a soundness check.  Everything
+  ## GoldenLayout would actually throw on is handled by `repairLayoutConfig`
+  ## (`index/layout_config_repair.nim`) before we get here — historically this
+  ## predicate was the only gate, which is why an out-of-range
+  ## `activeItemIndex` sailed straight through it and aborted startup.
   if config.isNil:
     return false
   # GoldenLayout requires at least a 'root' property with a 'type' and 'content'
@@ -426,7 +461,14 @@ proc isValidLayoutConfig(config: js): bool =
   # filesystem / editor / event-log / state / terminal panels.  Treat a
   # layout without the Filesystem panel as incompatible so the loader
   # resets it to the bundled default.
-  if not layoutContainsContentId(config, ord(Content.Filesystem)):
+  #
+  # The panel counts as present when it is pinned to a screen edge, too:
+  # `auto_hide.pinPanel` REMOVES the component from the GoldenLayout tree and
+  # keeps it in the auto-hide state instead.  Without that second lookup,
+  # pinning FILES made this predicate false and `resetLayoutToDefault`
+  # deleted the user's layout file — the "customizations silently lost"
+  # half of issue #608.
+  if not layoutHasRequiredPanel(config, autoHideState, ord(Content.Filesystem)):
     return false
   # Basic structure looks valid
   return true
@@ -454,33 +496,18 @@ proc parseLayoutJson(raw: cstring; context: string): js =
   return nil
 
 proc sanitizeEditLayoutConfig*(config: js; editorContent: int;
-                               hiddenContents: seq[int]): js {.importjs:
-  """(function(config, editorContent, hiddenContents) {
-    if (!config) return config;
-    const hidden = new Set(Array.isArray(hiddenContents)
-      ? hiddenContents.map(Number)
-      : []);
-    const clone = JSON.parse(JSON.stringify(config));
-    const walk = (node) => {
-      if (!node) return null;
-      const state = node.componentState || {};
-      if (node.type === 'component' && Number(state.content) === editorContent) {
-        return null;
-      }
-      if (node.type === 'component' && hidden.has(Number(state.content))) {
-        return null;
-      }
-      if (Array.isArray(node.content)) {
-        node.content = node.content.map(walk).filter(Boolean);
-        if (node.content.length === 0) return null;
-      }
-      return node;
-    };
-    const sanitizedRoot = walk(clone.root || clone);
-    if (!sanitizedRoot) return config;
-    if (clone.root) clone.root = sanitizedRoot;
-    return clone.root ? clone : sanitizedRoot;
-  })(#, #, #)""".}
+                               hiddenContents: seq[int]): js =
+  ## Strip per-trace editor tabs (and, in edit mode, the replay-only panels)
+  ## from a layout config before persisting it.
+  ##
+  ## The implementation lives in `index/layout_config_repair.nim` so it can be
+  ## exercised headlessly — see
+  ## `src/tests/gui/tests/layout/layout_config_roundtrip_test.nim`.  The
+  ## in-line version this replaced deleted components from stacks but never
+  ## remapped the enclosing stack's `activeItemIndex`, so every replay-mode
+  ## save of a mixed stack (editor tabs next to "NO SOURCE" / "CALLS") wrote
+  ## a layout file GoldenLayout refuses to restore — issue #608.
+  sanitizeLayoutConfig(config, editorContent, hiddenContents)
 
 proc editModeHiddenContentIds(): seq[int] =
   @[
@@ -535,10 +562,46 @@ proc sanitizeDefaultLayoutJson*(raw: cstring): cstring =
     config, ord(Content.EditorView), @[])
   return stringifyJson(sanitized)
 
+proc autoHideStatePath*(): string =
+  ## Where the pinned/auto-hidden panel set is persisted.
+  ##
+  ## Deliberately a sibling of `default_layout.json` rather than a field
+  ## inside it: pinned panels are removed from the GoldenLayout tree, so they
+  ## are not part of the GoldenLayout config and must survive the layout
+  ## sanitisers untouched.
+  userLayoutDir / "auto_hide_state.json"
+
+proc loadAutoHideState*(): Future[js] {.async.} =
+  ## Read the persisted auto-hide state, or nil when there is none.
+  ##
+  ## A missing file is the normal first-run case and is not an error.
+  var state: js = nil
+  let (raw, err) = await fsReadFileWithErr(cstring(autoHideStatePath()))
+  if err.isNil:
+    state = parseLayoutJson(raw, "Auto-hide state JSON parse error")
+  return state
+
+const bundledDefaultLayoutJson = staticRead("../../config/default_layout.json")
+  ## The default layout, compiled in, so recovering from a corrupt or
+  ## unreadable one never depends on a file being present on disk. Mirrors the
+  ## renderer-side copy in `ui/layout.nim`.
+
 proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
-  ## Delete the corrupt layout file and copy the bundled default.
+  ## Move the unusable layout file aside and copy the bundled default.
   ## Returns the fresh default config.
   warnPrint "Resetting layout to default due to corrupt/incompatible config: ", filename
+
+  # Keep a copy rather than destroying the user's arrangement outright: this
+  # path used to be reached for layouts that were merely *unrecognised*
+  # (a pinned Filesystem panel was enough), and the only trace left behind
+  # was a warning in the log.  `.broken` makes the loss recoverable and gives
+  # a bug report something to attach.
+  let brokenCopy = filename & ".broken"
+  let errBackup = await fsCopyFileWithErr(cstring(filename), cstring(brokenCopy))
+  if errBackup.isNil:
+    warnPrint "Previous layout kept for inspection at: ", brokenCopy
+  else:
+    warnPrint "Could not preserve the previous layout file: ", errBackup
 
   # Try to delete the corrupt file
   let errUnlink = await fsUnlinkWithErr(cstring(filename))
@@ -568,7 +631,7 @@ proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
       if not parsedFresh.isNil:
         return parsedFresh
 
-  # Last resort: read directly from bundled default without saving
+  # Next: read the installed default directly, without saving.
   warnPrint "Could not copy default layout, reading bundled default directly"
   let (bundledData, bundledErr) = await fsreadFileWithErr(cstring(fmt"{configDir / defaultLayoutPath}"))
   if bundledErr.isNil:
@@ -577,17 +640,70 @@ proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
     if not parsedBundled.isNil:
       return parsedBundled
 
+  # Last resort: the compiled-in copy.
+  #
+  # `configDir` points at the INSTALLED tree (`codetracerPrefix / "config"`),
+  # which does not exist in a plain `build-debug` checkout — so every branch
+  # above can legitimately fail and this proc used to `quit(1)` there, taking
+  # the whole index process down. A layout file the user cannot even see is
+  # then fatal at startup with no way back except deleting it by hand, which
+  # is the failure #608 was reported for. Recovering from a corrupt layout
+  # must never depend on a file that may not be deployed; embed it instead.
+  # `ui/layout.nim` already keeps the same compiled-in copy for the renderer
+  # side of this fallback.
+  warnPrint "No readable default layout on disk; using the compiled-in copy"
+  let parsedEmbedded = parseLayoutJson(
+    cstring(bundledDefaultLayoutJson), "Compiled-in layout config parse error")
+  if not parsedEmbedded.isNil:
+    return parsedEmbedded
+
   errorPrint "index: critical - cannot load any layout config"
   quit(1)
+
+proc repairAndPersistLayout(config: js; filename: string;
+                            context: string): Future[js] {.async.} =
+  ## Bring a just-parsed layout config back into the subset GoldenLayout
+  ## accepts and, when anything had to change, rewrite the file so the same
+  ## repair is not re-applied on every single launch.
+  ##
+  ## Returns nil when nothing usable could be salvaged — the caller then
+  ## falls back to the bundled default.
+  ##
+  ## This is the step that was missing entirely: the loader validated the
+  ## *parse* (`parseLayoutJson`) and a shallow *shape* (`isValidLayoutConfig`)
+  ## but never the semantics GoldenLayout enforces, so a file with an
+  ## out-of-range `activeItemIndex` passed every check and then threw a native
+  ## `Error` out of `loadLayout`, aborting `initLayout` half-way through.
+  let unusable: js = nil
+  let repair = repairLayoutConfig(config)
+  if not repair.ok:
+    warnPrint context, ": layout config is unusable: ", filename
+    for issue in repair.issues:
+      warnPrint "  ", issue
+    return unusable
+  if repair.changed:
+    warnPrint context, ": repaired layout config: ", filename
+    for issue in repair.issues:
+      warnPrint "  ", issue
+    let errWrite = await fsWriteFileWithErr(
+      cstring(filename), stringifyJson(repair.config))
+    if not errWrite.isNil:
+      warnPrint context, ": could not rewrite the repaired layout: ", errWrite
+  return repair.config
 
 proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
-    let config = parseLayoutJson(data, "Layout config JSON parse error")
+    let parsed = parseLayoutJson(data, "Layout config JSON parse error")
+    if parsed.isNil:
+      return await resetLayoutToDefault(filename)
+    let config = await repairAndPersistLayout(parsed, filename, "replay layout")
     if config.isNil:
       return await resetLayoutToDefault(filename)
-    # Validate the loaded config structure
-    if not isValidLayoutConfig(config):
+    # Validate the loaded config structure.  The auto-hide state is consulted
+    # so a panel the user pinned to an edge still counts as present.
+    let autoHide = await loadAutoHideState()
+    if not isValidLayoutConfig(config, autoHide):
       warnPrint "Layout config is invalid or incompatible: ", filename
       return await resetLayoutToDefault(filename)
     return ensureReplayLayoutPanels(config)
@@ -613,11 +729,15 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   ## Load edit mode layout configuration from file
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
-    let config = parseLayoutJson(data, "Edit layout config JSON parse error")
+    let parsed = parseLayoutJson(data, "Edit layout config JSON parse error")
+    if parsed.isNil:
+      return await resetLayoutToDefault(filename)
+    let config = await repairAndPersistLayout(parsed, filename, "edit layout")
     if config.isNil:
       return await resetLayoutToDefault(filename)
     # Validate the loaded config structure
-    if not isValidLayoutConfig(config):
+    let autoHide = await loadAutoHideState()
+    if not isValidLayoutConfig(config, autoHide):
       warnPrint "Edit layout config is invalid or incompatible: ", filename
       return await resetLayoutToDefault(filename)
     return sanitizeEditLayoutConfig(
@@ -627,11 +747,16 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
     let defaultLayoutFile = userLayoutDir / "default_layout.json"
     let (defaultData, defaultErr) = await fsreadFileWithErr(cstring(defaultLayoutFile))
     if defaultErr.isNil:
-      let config = parseLayoutJson(defaultData,
+      let parsedDefault = parseLayoutJson(defaultData,
         "Default layout config JSON parse error")
+      if parsedDefault.isNil:
+        return await resetLayoutToDefault(defaultLayoutFile)
+      let config = await repairAndPersistLayout(
+        parsedDefault, defaultLayoutFile, "replay layout")
       if config.isNil:
         return await resetLayoutToDefault(defaultLayoutFile)
-      if not isValidLayoutConfig(config):
+      let autoHide = await loadAutoHideState()
+      if not isValidLayoutConfig(config, autoHide):
         warnPrint "Default layout config is invalid: ", defaultLayoutFile
         return await resetLayoutToDefault(defaultLayoutFile)
       return sanitizeEditLayoutConfig(

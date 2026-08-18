@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# =============================================================================
+# M16 ct-test release gate: the toolchain-light provider matrix plus the
+# framework contract, discovery, run-store and worker-pool suites.
+#
+# CI: the `ct-test-release-gate` job in .github/workflows/codetracer.yml runs
+# this script. It needs only the codetracer dev shell (which exports
+# RUNQUOTA_SRC for the ct_test import paths) and the isonim siblings the two
+# ViewModel suites at the end build against — no recorder siblings. The
+# cross-language, recorder-dependent counterpart is ci/test/ct-providers.sh,
+# run by the `ct-test-providers` job. Both jobs are listed in
+# ci/verdict/required-jobs.txt.
+# =============================================================================
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -34,6 +46,31 @@ echo "Running representative ct-test fixture providers"
 run_nim_test src/ct_test/contracts_test.nim
 run_nim_test src/ct_test/discovery_test.nim
 run_nim_test src/ct_test/run_store_test.nim
+# Guards `ct-test test run` against the worker-heap hand-off regression that
+# made it dump core at high thread counts *after* printing a valid summary.
+#
+# Run with glibc's retired-thread-stack cache disabled, scoped to this one
+# invocation. That regression writes into a dead thread's TLS at *every* thread
+# count; only whether the page is still mapped decides whether the process dies,
+# and glibc's default 40 MiB cache keeps 20 of Nim's 2 MiB thread stacks mapped.
+# Left at the default, this guard silently depends on three unrelated numbers
+# holding still — glibc's cache size, Nim's ThreadStackSize, and the suite's unit
+# count staying above 21 (it runs min(threads, units) workers). Move any one of
+# them and the guard stops guarding while still reporting success. With the cache
+# gone the illegal write is fatal at the very first worker instead.
+#
+# That makes this gate deliberately stricter than production: an unmapped stack
+# can only expose a latent use-after-free, never invent one, so a failure seen
+# only here is a real bug in the code under test, not a gate artifact.
+#
+# The suite still makes its own unamplified 32-worker run, and that is what
+# proves the shipping configuration safe; the tunable is an amplifier on top of
+# it, not a replacement for it. Not exported script-wide on purpose: it is
+# glibc-only (a silent no-op on musl and macOS) and disabling the cache slows
+# down every thread-creating process.
+GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0 \
+	run_nim_test src/ct_test/run_orchestration_test.nim
+run_nim_test src/ct_test/nim_lexer_test.nim
 run_nim_test src/ct_test/nim_unittest_provider_test.nim
 run_nim_test src/ct_test/python_providers_test.nim
 run_nim_test src/ct_test/rust_libtest_provider_test.nim

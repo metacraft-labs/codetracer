@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NaN-payload demo (M52) — check the committed recording.
+# NaN-payload demo — check the committed recording.
 #
 # Replays `nan-payloads.ct` against the ORIGINAL, uninstrumented module
 # with `wazero run --boundary-log` and asserts two things:
@@ -119,11 +119,13 @@ for want in "${expected_bits[@]}"; do
 		echo "[verify]     ok: $want x$count"
 	fi
 done
-# A NaN that reached JSON as `null` is the pre-M52 loss; it must not be
-# in a recording made by the current producer.
+# A NaN that reached JSON as `null` is the loss this demo exists to detect:
+# a producer that carries boundary floats as JavaScript `Number`s instead of
+# as bit patterns. It must not appear in a recording made by the current
+# producer.
 if grep -q '"f":"null"' "$RECORDING/trace.json"; then
 	echo '[verify] the recording contains a NaN lost to JSON ("f":"null")' >&2
-	echo "[verify] the producer in this tree is pre-M52, or has regressed to it" >&2
+	echo "[verify] the producer in this tree carries boundary floats as JS numbers" >&2
 	failed=1
 fi
 [ "$failed" -eq 0 ] || exit 1

@@ -70,7 +70,9 @@ data.services.search.onSearchResultsUpdated = proc(self: SearchService, results:
   if not autoHideState.isNil:
     let panel = autoHideState.findPanelByContent(Content.SearchResults)
     if not panel.isNil:
-      showOverlay(panel)
+      # Idempotent reveal: this runs once per appended result batch, and
+      # `showOverlay` would toggle the panel shut on every second batch.
+      revealOverlay(panel)
   self.data.redraw()
 
 proc restart*(service: SearchService) =

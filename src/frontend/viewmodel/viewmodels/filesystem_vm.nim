@@ -76,9 +76,13 @@
 import std/[sets, sequtils]
 
 import isonim/core/[signals, computation, owner]
+# Selective import: ``isonim/core/batch`` re-exports a ``HashSet`` that
+# would otherwise collide with ``std/sets``' one in this module.
+from isonim/core/batch import untrack
 import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
+import ../../../common/trace_source_paths
 
 type
   FilesystemDeepReviewFile* = object
@@ -184,6 +188,43 @@ proc collectSmartExpansionPaths(node: FilesystemEntryNode; paths: var HashSet[st
     for child in node.children:
       collectSmartExpansionPaths(child, paths)
 
+proc collectActiveFileAncestors*(node: FilesystemEntryNode;
+                                 target: string;
+                                 acc: var seq[string]) =
+  ## Collect, **root-first**, the paths of every tree node in ``node``'s
+  ## subtree that is an ancestor directory of ``target``.
+  ##
+  ## The walk is over the REAL tree rather than over a textual split of
+  ## ``target`` because the tree's shape is not derivable from the path
+  ## alone:
+  ## - the top-level node is the synthetic "source folders" container,
+  ##   whose ``path`` is empty; it must be descended through but is not
+  ##   itself expandable,
+  ## - a self-contained trace's tree is rooted at the recorded source
+  ##   folder, not at the filesystem root,
+  ## - folders that are still lazy "Loading..." stubs carry no children
+  ##   yet, and the walk must simply stop there (the caller re-runs once
+  ##   the stub is filled).
+  ##
+  ## Root-first order matters: expanding an ancestor is what triggers
+  ## the lazy load of its children, so parents must be expanded before
+  ## the deeper nodes they reveal.
+  if target.len == 0:
+    return
+
+  let isRealAncestor = node.path.len > 0 and isAncestorPathOf(node.path, target)
+  # A node with an empty path is the synthetic container root — descend
+  # into it unconditionally, since its children carry the real paths.
+  let isSyntheticContainer = node.path.len == 0
+  if not isRealAncestor and not isSyntheticContainer:
+    return
+
+  if isRealAncestor:
+    acc.add(node.path)
+
+  for child in node.children:
+    collectActiveFileAncestors(child, target, acc)
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
@@ -271,6 +312,28 @@ proc setDeepReview*(vm: FilesystemVM; active: bool;
   else:
     vm.deepReviewFiles.val = @[]
 
+proc expandToFile*(vm: FilesystemVM; filePath: string) =
+  ## Reveal ``filePath`` by expanding every folder between the tree root
+  ## and it.
+  ##
+  ## Deliberately routed through ``expandPath`` per ancestor instead of a
+  ## single bulk ``expandedPaths`` write: ``expandPath`` fires the
+  ## ``onFolderExpanded`` bridge, which is what asks the index process
+  ## for a lazily-loaded folder's children.  A bulk write would mark the
+  ## folders expanded while leaving their subtrees as "Loading..." stubs,
+  ## so the file would still not be visible.
+  ##
+  ## Only the ancestors that exist in the tree *right now* are expanded.
+  ## Deeper ancestors that are still behind a stub become reachable when
+  ## the requested content arrives and ``setRoot`` re-runs the effect in
+  ## ``createFilesystemVM``.
+  if filePath.len == 0:
+    return
+  var ancestors: seq[string] = @[]
+  collectActiveFileAncestors(vm.rootEntry.val, filePath, ancestors)
+  for path in ancestors:
+    vm.expandPath(path)
+
 proc openFile*(vm: FilesystemVM; path: string) =
   ## Open a file entry through the installed editor bridge.
   if path.len == 0 or vm.onOpenFile.isNil:
@@ -311,7 +374,7 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     let totalEntryCount = createMemo[int] proc(): int =
       countNodes(rootEntry.val)
 
-    FilesystemVM(
+    let vm = FilesystemVM(
       store: store,
       rootEntry: rootEntry,
       loadingState: loadingState,
@@ -324,3 +387,56 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
       totalEntryCount: totalEntryCount,
       disposeProc: dispose,
     )
+
+    # Reveal the file the debugger is stopped in.
+    #
+    # This has to be reactive rather than a one-shot at ``setRoot``,
+    # because the two inputs arrive in either order and both can arrive
+    # more than once:
+    # - the index process sends ``filesystem-loaded`` BEFORE
+    #   ``trace-loaded``, so on a fresh trace the tree exists before
+    #   there is any active file;
+    # - the active file only appears after the first DAP stop, and then
+    #   changes on every step into another file;
+    # - the tree itself is re-published each time a lazily-loaded
+    #   subtree is filled in, which is how ancestors deeper than the
+    #   initial depth limit become expandable at all.
+    #
+    # ``expandedPaths`` is deliberately NOT an input (and the expansion
+    # write is ``untrack``ed so it cannot become one): a manual collapse
+    # must survive for as long as the user stays on the same file in the
+    # same tree, and a self-triggering effect would immediately undo it.
+    #
+    # Deciding whether to re-expand needs to know WHICH input woke the
+    # effect.  Signals dedupe on ``==`` before notifying, so the effect
+    # only ever runs because the debugger state or the tree genuinely
+    # changed — and the debugger state is cheap to compare, whereas
+    # comparing two trees is a full recursive walk.  So compare the
+    # debugger state, and infer "the tree changed" from its absence.
+    # That keeps the per-step cost at one small object comparison no
+    # matter how large the project is.
+    var lastActiveFile = ""
+    var lastDebugger: DebuggerState
+    createEffect proc() =
+      let debuggerState = store.debugger.val
+      # Read the tree so it is tracked as a dependency; a lazily filled
+      # subtree must re-run this effect.
+      discard rootEntry.val
+      let treeChanged = debuggerState == lastDebugger
+      lastDebugger = debuggerState
+
+      let activeFile = debuggerState.location.file
+      if activeFile.len == 0:
+        # No debugger position yet, or a synthetic frame with no source.
+        # Reset so the next real file counts as a change.
+        lastActiveFile = ""
+        return
+      if activeFile == lastActiveFile and not treeChanged:
+        # Same file, same tree — the user only stepped within the file.
+        # Do not fight a manual collapse.
+        return
+      lastActiveFile = activeFile
+      untrack proc() =
+        vm.expandToFile(activeFile)
+
+    vm

@@ -53,25 +53,39 @@ jobs:
     runs-on: [self-hosted, nixos]
 
     steps:
+      - name: Generate CI token
+        # Must precede the checkout below, not follow it. `libs/tree-sitter-nim`
+        # is a PRIVATE submodule, so a checkout with no `token:` clones it with
+        # whatever credential the runner happens to have and fails with
+        #
+        #   fatal: repository 'https://github.com/metacraft-labs/tree-sitter-nim.git/'
+        #     not found
+        #   fatal: clone of '...' into submodule path '.../libs/tree-sitter-nim' failed
+        #
+        # taking every step after it down as `skipped`. beam-flow.yml carries
+        # the same note for the same defect; this job kept the original
+        # ordering and so kept failing intermittently -- intermittently because
+        # a runner with the submodule already in its work tree gets away with
+        # it, which is why it survived this long.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout codetracer
         uses: actions/checkout@v5
         with:
           submodules: recursive
-
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Resolve sibling refs
         id: refs
@@ -106,7 +120,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.refs.outputs.recorder-ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-native-backend
@@ -117,7 +131,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-backend
           ref: ${{ steps.refs.outputs.backend-ref }}
           path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-trace-format sibling
@@ -128,7 +142,7 @@ jobs:
           repo: metacraft-labs/codetracer-trace-format
           ref: ${{ steps.refs.outputs.trace-format-ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-trace-format-nim sibling
@@ -139,7 +153,7 @@ jobs:
           repo: metacraft-labs/codetracer-trace-format-nim
           ref: ${{ steps.refs.outputs.trace-format-nim-ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Run MCR DAP flow tests

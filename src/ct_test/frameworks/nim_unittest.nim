@@ -1,7 +1,28 @@
+## OUTSTANDING VERIFICATION OBLIGATION (recorded 2026-08-14, PR #622)
+##
+## The lexical-scanner rewrite in this provider was merged on the evidence of
+## `ct-test-release-gate` alone, which passed (16m49s, run 31706159237). The
+## other gate that exercises this code, `ct-test-providers` (the "ct-test
+## cross-language provider gate"), was NOT green: it failed in 2m48s in the same
+## run, in `Setup dev env`, as part of the workspace-lock outage that PR #623
+## fixed. It therefore never reached this provider and says nothing about it
+## either way.
+##
+## So: this provider has no green `ct-test-providers` run behind it.
+## `ct-test-providers` MUST be observed green before the next change that
+## touches this file or `../nim_lexer`. Do not treat a passing
+## `ct-test-release-gate` as covering it -- the two gates have deliberately
+## different prerequisites (see the block comment above `ct-test-release-gate`
+## in `.github/workflows/codetracer.yml`), and only the providers gate drives
+## the real recorder siblings.
+##
+## Delete this note once such a run exists, and cite it.
+
 import std/[algorithm, options, os, sequtils, strutils, tables]
 
 import ../contracts
 import ../discovery
+import ../nim_lexer
 
 const
   NimUnittestProviderId* = "nim-unittest"
@@ -27,12 +48,6 @@ type
     indent: int
     selector: string
     parentSelector: string
-
-  ScanState = object
-    source: string
-    pos: int
-    line: int
-    column: int
 
 proc providerCapabilities*(): TestCapabilities =
   TestCapabilities(
@@ -104,46 +119,22 @@ proc splitTopLevelImports(raw: string): seq[string] =
       discard
   result.add raw[start .. ^1].strip
 
-proc stripLineComment(line: string): string =
-  var
-    i = 0
-    inString = false
-    quote = '\0'
-    triple = false
-  while i < line.len:
-    let ch = line[i]
-    if inString:
-      if triple:
-        if i + 2 < line.len and line[i] == quote and line[i + 1] == quote and line[i + 2] == quote:
-          i += 3
-          inString = false
-          triple = false
-          continue
-      elif ch == '\\':
-        i += 2
-        continue
-      elif ch == quote:
-        inString = false
-      inc i
-      continue
-    if ch == '#':
-      return line[0 ..< i]
-    if ch in {'"', '\''}:
-      inString = true
-      quote = ch
-      triple = i + 2 < line.len and line[i + 1] == ch and line[i + 2] == ch
-      if triple:
-        i += 3
-      else:
-        inc i
-      continue
-    inc i
-  line
-
-proc detectFrameworksInContent*(content: string): seq[NimUnitFramework] =
+proc detectFrameworksInTokens*(content: string;
+    tokens: seq[NimToken]): seq[NimUnitFramework] =
+  ## Which unittest flavours does this source import?
+  ##
+  ## The scan is line-oriented (an ``import`` clause is a statement, and the
+  ## overwhelmingly common form is a single line), but it runs over
+  ## ``maskNimNonCode`` rather than the raw text.  That is what keeps a ``#``
+  ## or a quote inside a literal from being read as code — the hand-rolled
+  ## per-line comment stripper this replaced shared the apostrophe bug that
+  ## used to break declaration scanning, and duplicated its logic besides.
+  ##
+  ## Takes the token stream rather than scanning for itself so a caller that
+  ## also needs the declarations pays for exactly one scan of the file.
   var seen = initTable[NimUnitFramework, bool]()
-  for rawLine in content.splitLines:
-    let line = stripLineComment(rawLine).strip
+  for rawLine in maskNimNonCode(content, tokens).splitLines:
+    let line = rawLine.strip
     if line.len == 0:
       continue
     if line.startsWith("import "):
@@ -163,150 +154,16 @@ proc detectFrameworksInContent*(content: string): seq[NimUnitFramework] =
     if seen.getOrDefault(framework, false):
       result.add framework
 
+proc detectFrameworksInContent*(content: string): seq[NimUnitFramework] =
+  ## Convenience wrapper for callers that only need the framework answer
+  ## (``detectProject``'s last-resort probe, and the tests).
+  detectFrameworksInTokens(content, scanNimSource(content))
+
 proc frameworkName(framework: NimUnitFramework): string =
   case framework
   of nufStdUnittest: "std/unittest"
   of nufUnittest2: "unittest2"
   of nufUnittestParallel: "unittest_parallel"
-
-proc isIdentStart(ch: char): bool =
-  ch in {'A' .. 'Z', 'a' .. 'z', '_'}
-
-proc isIdentChar(ch: char): bool =
-  ch in {'A' .. 'Z', 'a' .. 'z', '0' .. '9', '_'}
-
-proc initScanState(source: string): ScanState =
-  ScanState(source: source, pos: 0, line: 1, column: 1)
-
-proc current(state: ScanState): char =
-  if state.pos < state.source.len:
-    state.source[state.pos]
-  else:
-    '\0'
-
-proc advance(state: var ScanState) =
-  if state.pos >= state.source.len:
-    return
-  if state.source[state.pos] == '\n':
-    inc state.line
-    state.column = 1
-  else:
-    inc state.column
-  inc state.pos
-
-proc skipLineComment(state: var ScanState) =
-  while state.pos < state.source.len and state.current != '\n':
-    state.advance()
-
-proc skipBlockComment(state: var ScanState) =
-  var depth = 0
-  while state.pos < state.source.len:
-    if state.pos + 1 < state.source.len and
-        state.source[state.pos] == '#' and
-        state.source[state.pos + 1] == '[':
-      inc depth
-      state.advance()
-      state.advance()
-    elif state.pos + 1 < state.source.len and
-        state.source[state.pos] == ']' and
-        state.source[state.pos + 1] == '#':
-      state.advance()
-      state.advance()
-      dec depth
-      if depth == 0:
-        break
-    else:
-      state.advance()
-
-proc skipString(state: var ScanState) =
-  let quote = state.current
-  var triple = false
-  if state.pos + 2 < state.source.len and
-      state.source[state.pos + 1] == quote and
-      state.source[state.pos + 2] == quote:
-    triple = true
-    state.advance()
-    state.advance()
-    state.advance()
-  else:
-    state.advance()
-
-  while state.pos < state.source.len:
-    if triple:
-      if state.pos + 2 < state.source.len and
-          state.source[state.pos] == quote and
-          state.source[state.pos + 1] == quote and
-          state.source[state.pos + 2] == quote:
-        state.advance()
-        state.advance()
-        state.advance()
-        break
-      state.advance()
-    else:
-      if state.current == '\\':
-        state.advance()
-        state.advance()
-      elif state.current == quote:
-        state.advance()
-        break
-      else:
-        state.advance()
-
-proc skipWhitespace(state: var ScanState) =
-  while state.current in {' ', '\t', '\r', '\n'}:
-    state.advance()
-
-proc readIdentifier(state: var ScanState): string =
-  let start = state.pos
-  while isIdentChar(state.current):
-    state.advance()
-  state.source[start ..< state.pos]
-
-proc parseStringLiteral(state: var ScanState): Option[tuple[value: string, endColumn: int]] =
-  if state.current notin {'"', '\''}:
-    return none(tuple[value: string, endColumn: int])
-  let quote = state.current
-  var
-    value = ""
-    triple = false
-  if state.pos + 2 < state.source.len and
-      state.source[state.pos + 1] == quote and
-      state.source[state.pos + 2] == quote:
-    triple = true
-    state.advance()
-    state.advance()
-    state.advance()
-  else:
-    state.advance()
-
-  while state.pos < state.source.len:
-    if triple:
-      if state.pos + 2 < state.source.len and
-          state.source[state.pos] == quote and
-          state.source[state.pos + 1] == quote and
-          state.source[state.pos + 2] == quote:
-        state.advance()
-        state.advance()
-        state.advance()
-        return some((value, max(1, state.column - 1)))
-      value.add state.current
-      state.advance()
-    else:
-      if state.current == '\\':
-        state.advance()
-        if state.pos < state.source.len:
-          value.add state.current
-          state.advance()
-      elif state.current == quote:
-        state.advance()
-        return some((value, max(1, state.column - 1)))
-      elif state.current == '\n':
-        return none(tuple[value: string, endColumn: int])
-      else:
-        value.add state.current
-        state.advance()
-
-  none(tuple[value: string, endColumn: int])
 
 proc suiteSelector(path: seq[string]): string =
   path.join("::") & "::"
@@ -317,71 +174,155 @@ proc testSelector(path: seq[string]; name: string): string =
   else:
     path.join("::") & "::" & name
 
-proc parseNimUnittestDeclarations*(content: string): ProviderResult[seq[NimUnitDeclaration]] =
+proc parseNimUnittestDeclarations(content: string; tokens: seq[NimToken];
+    filePath = ""): ProviderResult[seq[NimUnitDeclaration]] =
+  ## Find every literal ``suite "…":`` / ``test "…":`` declaration.
+  ##
+  ## Runs over the shared Nim token stream (``ct_test/nim_lexer``) rather than
+  ## a bespoke character loop.  That is what makes the scan robust against the
+  ## constructs that can *contain* a quote or a ``#``: numeric type suffixes
+  ## (``0'u8``), character literals, raw and generalized-raw strings, nested
+  ## block comments.  Previously an apostrophe in ``10485760'i64`` opened a
+  ## phantom character literal and everything up to the next apostrophe —
+  ## typically hundreds of lines, including every declaration in between — was
+  ## skipped as if it were string content.
+  ##
+  ## Structure is still recovered from *column* alone: ``unittest``'s
+  ## ``suite``/``test`` are templates taking an indented block, so a
+  ## declaration belongs to the innermost enclosing suite that starts at a
+  ## smaller column.  A lexer cannot know more than that, and the
+  ## ``LocationProvenance`` attached to each item says so.
+  ##
+  ## The one *semantic* rule applied on top is ``when false:``.  It is the
+  ## idiomatic way to disable a block of Nim source without deleting it; the
+  ## compiler never instantiates the body, so those tests do not exist for any
+  ## runner.  Reporting them would be the mirror of the bug above — discovery
+  ## claiming cases the runner will never produce — so the block is skipped and
+  ## the skip is reported as an ``info`` diagnostic rather than hidden.
   var
-    state = initScanState(content)
     suiteStack: seq[NimUnitDeclaration] = @[]
     diagnostics: seq[TestDiagnostic] = @[]
     declarations: seq[NimUnitDeclaration] = @[]
+    index = 0
+    # Column of the innermost active ``when false:``; 0 when none is active.
+    # A single value suffices: a nested ``when false:`` is already covered by
+    # the outer one, and the block ends at the first token that dedents to or
+    # past the ``when``.
+    disabledColumn = 0
+    disabledDeclarations = 0
 
-  while state.pos < state.source.len:
-    let ch = state.current
-    if ch == '#':
-      if state.pos + 1 < state.source.len and state.source[state.pos + 1] == '[':
-        state.skipBlockComment()
-      else:
-        state.skipLineComment()
+  proc nextCode(start: int): int =
+    ## Index of the next non-comment token at or after ``start``.  Comments may
+    ## legally sit between the keyword and its name (``test # why\n  "x":``).
+    result = start
+    while result < tokens.len and tokens[result].kind == ntkComment:
+      inc result
+
+  proc isName(token: NimToken): bool =
+    ## Only a *terminated* string literal names a declaration; an unterminated
+    ## one means the file is mid-edit or malformed, and inventing a test case
+    ## from it would be a false positive.
+    token.kind == ntkString and token.terminated
+
+  while index < tokens.len:
+    let token = tokens[index]
+    var
+      keyword = ""
+      name = ""
+      endColumn = 0
+      lastIndex = index
+
+    if token.kind != ntkComment:
+      # Leaving the disabled block: the first token that is not indented past
+      # the ``when`` re-enables discovery. Comments carry no indentation
+      # meaning, so they never close the block.
+      if disabledColumn > 0 and token.column <= disabledColumn:
+        disabledColumn = 0
+      if disabledColumn == 0 and content.identIs(token, "when"):
+        let falseIndex = nextCode(index + 1)
+        if falseIndex < tokens.len and
+            content.identIs(tokens[falseIndex], "false"):
+          let colonIndex = nextCode(falseIndex + 1)
+          if colonIndex < tokens.len and
+              tokens[colonIndex].kind == ntkPunct and
+              tokens[colonIndex].ch == ':':
+            disabledColumn = token.column
+            index = colonIndex + 1
+            continue
+
+    let keywordToken =
+      if content.identIs(token, "suite"): "suite"
+      elif content.identIs(token, "test"): "test"
+      else: ""
+
+    if keywordToken.len > 0:
+      # ``suite "name":`` and the parenthesised call form ``suite("name"):``.
+      var nameIndex = nextCode(index + 1)
+      if nameIndex < tokens.len and tokens[nameIndex].kind == ntkPunct and
+          tokens[nameIndex].ch == '(':
+        nameIndex = nextCode(nameIndex + 1)
+      if nameIndex < tokens.len and tokens[nameIndex].isName:
+        keyword = keywordToken
+        name = tokens[nameIndex].value
+        endColumn = tokens[nameIndex].endColumn
+        lastIndex = nameIndex
+    elif token.kind == ntkString and token.prefix in ["suite", "test"] and
+        token.terminated:
+      # ``test"name":`` — an identifier glued to a string literal is Nim's
+      # generalized raw string literal syntax, which still calls the template.
+      keyword = token.prefix
+      name = token.value
+      endColumn = token.endColumn
+
+    if keyword.len > 0 and disabledColumn > 0:
+      inc disabledDeclarations
+      index = lastIndex + 1
       continue
-    if ch in {'"', '\''}:
-      state.skipString()
+
+    if keyword.len > 0:
+      let tokenIndent = token.column - 1
+      while suiteStack.len > 0 and suiteStack[^1].indent >= tokenIndent:
+        discard suiteStack.pop()
+      let kind = if keyword == "suite": nudSuite else: nudTest
+      let suitePath = suiteStack.mapIt(it.name)
+      let selector =
+        if kind == nudSuite:
+          suiteSelector(suitePath & @[name])
+        else:
+          testSelector(suitePath, name)
+      let parentSelector =
+        if suiteStack.len == 0: ""
+        else: suiteStack[^1].selector
+      let declaration = NimUnitDeclaration(
+        kind: kind,
+        name: name,
+        line: token.line,
+        column: token.column,
+        endColumn: endColumn,
+        indent: tokenIndent,
+        selector: selector,
+        parentSelector: parentSelector)
+      declarations.add declaration
+      if kind == nudSuite:
+        suiteStack.add declaration
+      index = lastIndex + 1
       continue
-    if isIdentStart(ch):
-      let
-        tokenLine = state.line
-        tokenColumn = state.column
-        tokenIndent = tokenColumn - 1
-        ident = state.readIdentifier()
-      if ident in ["suite", "test"]:
-        var lookahead = state
-        lookahead.skipWhitespace()
-        if lookahead.current == '(':
-          lookahead.advance()
-          lookahead.skipWhitespace()
-        let parsed = lookahead.parseStringLiteral()
-        if parsed.isSome:
-          while suiteStack.len > 0 and suiteStack[^1].indent >= tokenIndent:
-            discard suiteStack.pop()
-          let name = parsed.get.value
-          let kind =
-            if ident == "suite": nudSuite else: nudTest
-          var suitePath = suiteStack.mapIt(it.name)
-          let selector =
-            if kind == nudSuite:
-              suiteSelector(suitePath & @[name])
-            else:
-              testSelector(suitePath, name)
-          let parentSelector =
-            if suiteStack.len == 0:
-              ""
-            else:
-              suiteStack[^1].selector
-          let declaration = NimUnitDeclaration(
-            kind: kind,
-            name: name,
-            line: tokenLine,
-            column: tokenColumn,
-            endColumn: parsed.get.endColumn,
-            indent: tokenIndent,
-            selector: selector,
-            parentSelector: parentSelector)
-          declarations.add declaration
-          if kind == nudSuite:
-            suiteStack.add declaration
-          state = lookahead
-          continue
-    state.advance()
+
+    inc index
+
+  if disabledDeclarations > 0:
+    diagnostics.add diagnostic(
+      dsInfo,
+      $disabledDeclarations & " suite/test declaration(s) skipped: they are " &
+      "inside a `when false:` block and are never compiled",
+      filePath)
 
   ProviderResult[seq[NimUnitDeclaration]](diagnostics: diagnostics, value: declarations)
+
+proc parseNimUnittestDeclarations*(content: string; filePath = ""):
+    ProviderResult[seq[NimUnitDeclaration]] =
+  ## Convenience wrapper for callers that have source text but no tokens.
+  parseNimUnittestDeclarations(content, scanNimSource(content), filePath)
 
 proc itemKind(kind: NimUnitDeclarationKind): TestItemKind =
   case kind
@@ -441,12 +382,16 @@ proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[Test
       value: TestCatalog(schemaVersion: TestCatalogSchemaVersion, provider: info, items: @[], diagnostics: @[]))
 
   let content = readFile(filePath)
-  let frameworks = detectFrameworksInContent(content)
+  # Tokenize ONCE and hand the same stream to both consumers: this runs over
+  # every candidate file in a workspace, and a second scan per file is a
+  # second pass over every byte of the project's source for no new information.
+  let tokens = scanNimSource(content)
+  let frameworks = detectFrameworksInTokens(content, tokens)
   var catalogDiagnostics = unsupportedDiagnostics(filePath, frameworks)
   var items: seq[TestItem] = @[]
 
   if nufStdUnittest in frameworks:
-    let parsed = parseNimUnittestDeclarations(content)
+    let parsed = parseNimUnittestDeclarations(content, tokens, filePath)
     catalogDiagnostics.add parsed.diagnostics
     var idsBySelector = initTable[string, string]()
     for declaration in parsed.value:
@@ -480,7 +425,7 @@ proc isCandidateNimTestFile(path: string): bool =
   normalized.contains("/tests/") or filename.startsWith("test") or filename.endsWith("_test")
 
 proc nimProjectFiles(projectRoot: string): seq[string] =
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     if isCandidateNimTestFile(path):
       result.add path
   result.sort(system.cmp[string])
@@ -494,9 +439,22 @@ proc detectProject(projectRoot: string): ProviderResult[bool] =
   for kind, path in walkDir(projectRoot):
     if kind == pcFile and path.endsWith(".nimble"):
       return ProviderResult[bool](diagnostics: @[], value: true)
-  for path in walkDirRec(projectRoot):
+  # Last resort for a Nim workspace with no project marker at all: look for a
+  # unittest import in the sources themselves. This reads file contents, so it
+  # is the single most expensive probe in the registry — restricting it to the
+  # workspace's own files (rather than every ``.nim`` reachable from the root,
+  # vendored compiler checkouts included) is what keeps it affordable.
+  #
+  # A source file that cannot be read is not evidence either way; skipping it
+  # beats letting an ``IOError`` abort the whole discovery.
+  for path in walkWorkspaceFiles(projectRoot):
     if path.endsWith(".nim"):
-      let frameworks = detectFrameworksInContent(readFile(path))
+      var content = ""
+      try:
+        content = readFile(path)
+      except IOError, OSError:
+        continue
+      let frameworks = detectFrameworksInContent(content)
       if frameworks.len > 0:
         return ProviderResult[bool](diagnostics: @[], value: true)
   ProviderResult[bool](diagnostics: @[], value: false)

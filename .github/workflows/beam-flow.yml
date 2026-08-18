@@ -33,11 +33,11 @@ on:
   workflow_dispatch:
     inputs:
       beam_recorder_ref:
-        description: 'codetracer-beam-recorder ref (default: workspace lock)'
+        description: 'codetracer-beam-recorder ref (default: dev)'
         required: false
         default: ''
       trace_format_ref:
-        description: 'codetracer-trace-format ref (default: workspace lock)'
+        description: 'codetracer-trace-format ref (default: dev)'
         required: false
         default: ''
 
@@ -50,44 +50,82 @@ jobs:
     runs-on: eph-linux-x64  # CIP-5: nix job → eph-linux-x64
 
     steps:
+      - name: Generate CI token
+        # MUST precede the checkout. `submodules: recursive` pulls
+        # `libs/tree-sitter-nim`, which is PRIVATE, so an unauthenticated
+        # checkout cannot see it and the whole step dies before anything else
+        # in this workflow runs:
+        #
+        #   remote: Repository not found.
+        #   fatal: clone of 'https://github.com/metacraft-labs/tree-sitter-nim.git'
+        #     into submodule path '.../libs/tree-sitter-nim' failed
+        #
+        # This workflow is path-filtered onto BEAM-related files, so it had not
+        # been triggered in the window where anyone was watching; the ordering
+        # defect meant it could never have checked out if it had been.
+        # `cross-repo-tests.yml` already mints its token first and passes it —
+        # this is that same shape.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout codetracer
         uses: actions/checkout@v5
         with:
           submodules: recursive
-
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones the cross-repo siblings adjacent to this checkout at the
-        # workspace-lock-pinned revisions, replacing the former
+        # pinned `dev` refs, replacing the former
         # Checkout-manifests / Resolve-lock / Resolve-refs / clone-repo
         # machinery. The beam_recorder_ref / trace_format_ref
-        # workflow_dispatch inputs override the locked revisions (empty =>
-        # lock). codetracer-trace-format is also cloned as a sibling here so
-        # its workspace-locked SHA is available for the in-repo
+        # workflow_dispatch inputs override the refs (empty => `dev`).
+        # codetracer-trace-format is also cloned as a sibling here so
+        # its pinned SHA is available for the in-repo
         # libs/codetracer-trace-format swap below (the beam recorder reads
         # the in-repo path, not the sibling).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # codetracer-trace-format-nim is the second half of a MATCHED FFI PAIR
+          # and must be provisioned wherever codetracer-trace-format is built.
+          # codetracer-beam-recorder's Cargo.toml path-depends on
+          # `../codetracer-trace-format/codetracer_trace_writer_nim`, and that
+          # crate's build.rs resolves the Nim entry point as a SIBLING of
+          # codetracer-trace-format, hard-erroring when it is absent:
+          #
+          #   Nim FFI entry point not found at
+          #   .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+          #   -- is the codetracer-trace-format-nim repo checked out as a sibling?
+          #
+          # Not yet observed in THIS job only because it currently dies earlier,
+          # at `cargo: command not found` (run 31719867251, job 94513828329); the
+          # build that would hit it never starts. It is observed in the identical
+          # path-dep from codetracer-shell-recorders (run 31719867246, job
+          # 94513828226, step "Build shell trace writer").
+          #
+          # Pinned `=dev` rather than reusing `trace_format_ref`: that input names
+          # a ref in the *Rust* repo and must not be applied to a different
+          # repository. A dispatch overriding trace_format_ref therefore still
+          # moves only one half of the pair -- a pre-existing gap in this
+          # workflow's dispatch interface, recorded rather than silently widened.
           siblings: |
-            codetracer-beam-recorder=${{ github.event.inputs.beam_recorder_ref }}
-            codetracer-trace-format=${{ github.event.inputs.trace_format_ref }}
+            codetracer-beam-recorder=${{ github.event.inputs.beam_recorder_ref || 'dev' }}
+            codetracer-trace-format=${{ github.event.inputs.trace_format_ref || 'dev' }}
+            codetracer-trace-format-nim=dev
 
       - name: Swap libs/codetracer-trace-format for the pinned sibling clone
         # The beam recorder's trace shim reuses the shared CTFS writer at
         # the in-repo path libs/codetracer-trace-format. setup-dev-env
-        # cloned codetracer-trace-format at the workspace-locked (or
+        # cloned codetracer-trace-format at the pinned `dev` (or
         # dispatch-overridden) revision adjacent to this checkout; mirror
         # it into libs/ so the recorder build picks up the pinned source
         # instead of the submodule-pinned copy.

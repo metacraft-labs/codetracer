@@ -144,16 +144,68 @@ suite "DebugControlsVM canStepBackward":
 
       dispose()
 
-  test "canStepBackward is false when at minRRTicks":
+  test "canStepBackward is true on a completed replay even at minRRTicks":
+    # A finished recording is time-travellable by definition, so the
+    # position rule does not gate it. This is not a relaxation for its
+    # own sake: DB and materialized traces do not populate rr ticks at
+    # all, so `rrTicks > minRRTicks` is permanently false for them, and
+    # the DAP `initialize` capability that would otherwise carry the
+    # permission can lose the race with session-VM creation. Gating on
+    # either left the reverse-step buttons greyed out on recorded
+    # Noir/DB replays, which is the bug this rule exists to prevent.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+
+      store.setSessionMode(completedReplay)
+      store.setSupportsStepBack(false)
+      store.setTimelineRange(0'u64, 1000'u64)
+      store.setDebuggerStatus(dsIdle)
+      store.setDebuggerPosition(0'u64)
+
+      check vm.canStepBackward.val == true
+
+      dispose()
+
+  test "canStepBackward is false at the start of a historical-from-live timeline":
+    # `historicalFromLive` is the one non-live mode that is NOT inherently
+    # time-travellable — the user restored into recorded history while a
+    # live head is still being tracked — so there the position rule is
+    # what decides, and at minRRTicks there is nothing behind the cursor.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+
+      store.setSessionMode(historicalFromLive)
+      store.setSupportsStepBack(false)
+      store.setTimelineRange(0'u64, 1000'u64)
+      store.setDebuggerStatus(dsIdle)
+      store.setDebuggerPosition(0'u64)
+
+      check vm.canStepBackward.val == false
+
+      dispose()
+
+  test "canReverseContinue follows the same availability rule as canStepBackward":
+    # Regression: these were two independent predicates, and only
+    # `canStepBackward` was taught that a completed replay is always
+    # time-travellable. Reverse-continue stayed disabled on exactly the
+    # recordings the fix was written for. They answer the same question
+    # and must agree.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
 
       store.setTimelineRange(0'u64, 1000'u64)
       store.setDebuggerStatus(dsIdle)
-      store.setDebuggerPosition(0'u64)
 
-      check vm.canStepBackward.val == false
+      for mode in [completedReplay, historicalFromLive, liveMcr, liveMaterialized]:
+        for supports in [false, true]:
+          for ticks in [0'u64, 500'u64]:
+            store.setSessionMode(mode)
+            store.setSupportsStepBack(supports)
+            store.setDebuggerPosition(ticks)
+            check vm.canReverseContinue.val == vm.canStepBackward.val
 
       dispose()
 
@@ -531,12 +583,18 @@ suite "DebugControlsVM action guards":
 
       dispose()
 
-  test "stepBackward is no-op when at minRRTicks":
+  test "stepBackward is no-op at the start of a historical-from-live timeline":
+    # See "canStepBackward is false at the start of a historical-from-live
+    # timeline": on a completed replay the position no longer gates
+    # backward navigation, so `historicalFromLive` is where this guard is
+    # observable.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
       drain()
 
+      store.setSessionMode(historicalFromLive)
+      store.setSupportsStepBack(false)
       store.setTimelineRange(0'u64, 1000'u64)
       store.setDebuggerPosition(0'u64)
       store.setDebuggerStatus(dsIdle)

@@ -14,6 +14,31 @@ when defined(js):
     MenuNestedRecord, MenuNodeRecord, MenuNodeRecordKind, MenuRecordElement,
     MenuRecordFolder, MenuSearchResultRecord, MenuShellCallbacks,
     MenuShellModel, NavigationMenuId, renderMenuShellInto
+  from menu_render_gate import
+    MenuRenderGate, invalidate, menuRenderSignature, noteRendered, shouldRender
+
+  # Issue #555 — "Redraw issue on new file open".
+  #
+  # `requestMenuRender` is reached from `renderer.sharedDirectRedraw`, i.e.
+  # from EVERY `data.redraw()` in the renderer, and it used to rebuild the
+  # whole caption chrome each time.  `renderMenuShellInto` starts by clearing
+  # the `#menu` host, and the shell view is what emits `#isonim-debug-controls`
+  # and `#debug`, so each rebuild destroyed the mounted debug toolbar and
+  # forced `ui/debug.nim` to mount a new one.  A trace open issues dozens of
+  # redraws; the buttons blinked once per redraw.
+  #
+  # This gate remembers what was last committed and skips the teardown when
+  # nothing the shell renders has changed.  See `ui/menu_render_gate.nim` and
+  # `src/tests/gui/tests/session-chrome/menu_redraw_storm_test.nim`.
+  var menuShellGate = MenuRenderGate()
+
+  # `MenuComponent` is per ReplaySession (`session_switch.nim` builds one for
+  # every session) while `#menu` is a single shared host, and the shell's
+  # callbacks close over whichever component rendered it.  Two sessions can
+  # easily produce the same menu signature, so the gate must additionally be
+  # invalidated whenever the owning component changes — otherwise a session
+  # switch would leave the previous session's click handlers wired up.
+  var menuShellGateOwner: MenuComponent
 
   proc isWindowMaximizedForMenu(): bool {.importjs: "(window.outerWidth == screen.availWidth) && (window.outerHeight == screen.availHeight)".} =
     false
@@ -200,7 +225,7 @@ method onUp*(self: MenuComponent) {.async.} =
     if self.activeSearchIndex > 0:
       self.activeSearchIndex -= 1
 
-  self.data.redraw()
+  self.requestMenuRender()
 
 method onDown*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
@@ -212,15 +237,17 @@ method onDown*(self: MenuComponent) {.async.} =
     if self.activeSearchIndex < self.searchResults.len:
       self.activeSearchIndex += 1
 
-  self.data.redraw()
+  self.requestMenuRender()
 
 method onRight*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
   enterFolder(self)
+  self.requestMenuRender()
 
 method onLeft*(self: MenuComponent) {.async.} =
   self.keyNavigation = true
   closeFolder(self)
+  self.requestMenuRender()
 
 method onEnter*(self: MenuComponent) {.async.} =
   self.enterElement()
@@ -310,7 +337,9 @@ when defined(js):
         (node.menuOs and ord(MenuNodeOSMacOS)))
 
   proc activeNodeClass(self: MenuComponent; path: seq[int]): string =
-    if path.len == 0:
+    # Only highlight with the active class during keyboard navigation.
+    # Mouse hover is handled purely by CSS :hover on .ct-menu-item.
+    if path.len == 0 or not self.keyNavigation:
       return ""
     let depth = path.len - 1
     let index = path[^1]
@@ -387,7 +416,14 @@ when defined(js):
       for i in 1..<depth:
         left += cast[int](jq(cstring(fmt"#menu-nested-elements-{i}")).toJs.clientWidth)
 
-    fmt"top: {value * 28 + separators * 28 - 56}px; left: calc({left}px + {2 * depth}px)"
+    # Read the actual rendered item height so the submenu position scales
+    # correctly with MENU_FONT_SIZE (ct-menu-item uses em-based min-height).
+    # Fallback to 28 only if the DOM measurement isn't available yet.
+    let itemH = block:
+      let h = cast[int](jq(cstring"#menu-elements .ct-menu-item").toJs.offsetHeight)
+      if h > 0: h else: 28
+
+    fmt"top: {value * itemH + separators * itemH - 2 * itemH}px; left: calc({left}px + {2 * depth}px)"
 
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
     result.rootNodes = @[]
@@ -486,12 +522,25 @@ when defined(js):
       self.runAction(action)
       self.requestMenuRender()
 
-  proc wireMenuKeyboard(container: dom_api.Element; self: MenuComponent) =
+  proc ensureMenuDismissWiring(self: MenuComponent) =
+    ## Claim the click-outside-to-dismiss handler for this component.
+    ##
+    ## Kept separate from `wireMenuKeyboard` because it must run on EVERY
+    ## `requestMenuRender`, including the ones whose DOM work the render gate
+    ## skips: it is the only thing that tells the document-level handler which
+    ## `MenuComponent` is currently on screen, and a session switch changes
+    ## that without necessarily changing the rendered menu.  The per-node
+    ## listeners in `wireMenuKeyboard`, by contrast, are attached to nodes that
+    ## a skipped render leaves untouched, so re-attaching them would only
+    ## duplicate handlers.
     activeMenuComponentForDismiss = self
     if not documentMenuDismissWired:
       documentMenuDismissWired = true
       addDocumentMouseDownListener(proc(ev: dom_api.Event) =
         handleDocumentMenuMouseDown(ev))
+
+  proc wireMenuKeyboard(container: dom_api.Element; self: MenuComponent) =
+    ensureMenuDismissWiring(self)
 
     let nav = dom_api.getElementById(dom_api.document, cstring NavigationMenuId)
     if dom_api.isNodeNil(dom_api.Node(nav)):
@@ -532,7 +581,42 @@ when defined(js):
           nav.focusElement(),
         10)
 
+    # `buildMenuShellModel` is not a pure read: it refreshes `self.prepared`,
+    # `self.nameMap` and the `activePathWidths` / `activePathOffsets` maps that
+    # the keyboard-navigation code relies on.  It therefore runs on every call,
+    # including the ones whose DOM work the gate goes on to skip.
     let model = self.buildMenuShellModel()
+
+    # Issue #555: skip the teardown+rebuild when nothing the shell renders has
+    # changed.  `hostIntact` is what keeps this safe — the cache may only be
+    # trusted while the DOM it describes is still on screen, and the debug
+    # controls host is the part whose loss we specifically have to notice,
+    # because `ui/debug.nim` re-mounts the toolbar into it.
+    if not (menuShellGateOwner == self):
+      menuShellGate.invalidate()
+      menuShellGateOwner = self
+
+    let signature = menuRenderSignature(model, extra = $self.keyNavigation)
+    let hostIntact =
+      not dom_api.isNodeNil(dom_api.Node(container).firstChild) and
+      not dom_api.isNodeNil(dom_api.Node(dom_api.getElementById(
+        dom_api.document, cstring"isonim-debug-controls")))
+    if not menuShellGate.shouldRender(signature, hostIntact):
+      # The mounted chrome is already correct.  The cascade below still runs:
+      # every one of those calls is an idempotent repair that returns early
+      # when its own host is intact, and skipping them outright would stop the
+      # command palette from picking up state changes that ride the same
+      # redraw.  With the shell left alone they are now no-ops instead of
+      # forty-odd toolbar re-mounts per trace open.
+      ensureMenuDismissWiring(self)
+      requestSessionTabsRenderSoon()
+      if not self.data.startOptions.shellUi:
+        self.debug.requestDebugShellRender()
+        if not self.data.ui.commandPalette.isNil:
+          self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
+        self.debug.requestDebugControlsRender()
+      return
+
     let callbacks = MenuShellCallbacks(
       onToggleMenu: proc() =
         self.toggle()
@@ -561,6 +645,7 @@ when defined(js):
 
     let r = WebRenderer()
     renderMenuShellInto(r, container, model, callbacks)
+    menuShellGate.noteRendered(signature)
     requestSessionTabsRenderSoon()
     if not self.data.startOptions.shellUi:
       self.debug.requestDebugShellRender()
@@ -568,3 +653,5 @@ when defined(js):
         self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
       self.debug.requestDebugControlsRender()
     wireMenuKeyboard(container, self)
+    if self.keyNavigation:
+      focusNavigationSoon()

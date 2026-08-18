@@ -48,7 +48,7 @@
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  padding: 0.25em
+  padding: 0em 0.25em 0.25em 0.25em
   background: colors-ui-surface-base-panel
 
 // Styled to match .ct-input-small — consistent with other panel input fields.
@@ -98,26 +98,33 @@
   background: colors-ui-surface-primary-default
   border: 0.03125em solid colors-ui-border-primary
   border-radius: 0.375rem
+  padding: 0.25em
   max-height: 12.5em
   overflow-y: auto
 
-.vcs-branch-option
-  padding: 0.3125em 0.5em
-  cursor: pointer
-  white-space: nowrap
-  overflow: hidden
-  text-overflow: ellipsis
-  font-family: "SpaceGrotesk"
-  font-size: 0.875rem
-  color: colors-ui-text-primary-label
+// ---------------------------------------------------------------------------
+// Review header extras (DeepReview mode only)
+// ---------------------------------------------------------------------------
+//
+// The trace-context selector and the review stats that DeepReview-GUI.md §2
+// houses in this panel's header.  Only layout lives here: the control's own
+// appearance comes from the panel-agnostic `.deepreview-trace-select` /
+// `.deepreview-stats` rules in components/deepreview.styl, which these
+// elements also carry, so nothing is duplicated.  A normal version-control
+// session renders neither element, so neither rule can take space there.
 
-  &:hover
-    background: colors-ui-surface-primary-secondary-hover
-    color: colors-ui-text-primary-body
+.vcs-review-trace-selector
+  padding-top: 0.25em
 
-.vcs-branch-active-marker
-  color: #4ec9b0
-  font-weight: bold
+  .vcs-review-trace-select
+    width: 100%
+    // The panel is narrow; a long "latest passing run" label must shrink
+    // rather than push the panel into a horizontal scroll.
+    min-width: 0
+
+.vcs-review-stats
+  display: block
+  padding: 0.25em 0.5em 0 0.5em
 
 // ---------------------------------------------------------------------------
 // Section headers
@@ -175,6 +182,14 @@
   &.vcs-toggle-active
     background: colors-ui-surface-primary-secondary-hover
     color: colors-ui-text-primary-body
+
+// The refresh action shares the toggle row and is pushed to its right edge.
+// It overrides the standalone `.vcs-refresh` bottom-bar presentation below.
+.vcs-diff-toggle .vcs-refresh
+  margin-left: auto
+  padding: 0 0.5em
+  border-top: none
+  text-align: right
 
 // ---------------------------------------------------------------------------
 // Commit graph + accordion history
@@ -380,7 +395,8 @@
   flex-shrink: 0
 
 // Diff button shown on hover at the far right of a commit row.
-// Hidden by default; the parent .vcs-commit-header:hover reveals it.
+// No horizontal margin so the button's right edge aligns with the timestamp
+// right edge on adjacent (non-hovered) rows.
 .vcs-commit-diff-btn
   display: none
   flex-shrink: 0
@@ -388,7 +404,6 @@
   cursor: pointer
   width: 0.6875em
   height: 0.8125em
-  margin: 0 0.25em
   background-image: url("../../public/resources/shared/vc-open-diff.svg")
   background-repeat: no-repeat
   background-size: contain
@@ -522,10 +537,12 @@
 // align-items:stretch lets the lane spacer column fill the full row height.
 // font-size is NOT set here — the lane spacer (.vcs-commit-graph) must share
 // the same em context as the commit header rows so 1em slots stay aligned.
+// padding-left matches .vcs-commit-header so lane slots stay horizontally aligned.
 .vcs-accordion-file
   display: flex
   align-items: stretch
   padding: 0
+  padding-left: 0.5em
   cursor: pointer
 
   &:hover
@@ -533,6 +550,8 @@
 
 // Inner content area of an accordion file row (status + name + stats).
 // font-size: 0.75em is scoped here so the lane spacer sibling is unaffected.
+// min-width: 0 lets the flex item shrink below its content width so the
+// filename ellipsis truncation works correctly.
 .vcs-accordion-file-body
   flex: 1
   display: flex
@@ -540,6 +559,7 @@
   gap: 0.5em
   padding: 0.125em 0.5em
   font-size: 0.75em
+  min-width: 0
 
 // File name: takes remaining space, truncates with ellipsis.
 .vcs-accordion-file-name
@@ -792,10 +812,11 @@
   display: none
   flex-shrink: 0
   position: relative
+  order: 2
   cursor: pointer
-  width: 0.6875em
-  height: 0.8125em
-  margin: 0 0.25em
+  width: 0.6875rem
+  height: 0.8125rem
+  margin-right: 0.167em
   background-image: url("../../public/resources/shared/vc-open-diff.svg")
   background-repeat: no-repeat
   background-size: contain

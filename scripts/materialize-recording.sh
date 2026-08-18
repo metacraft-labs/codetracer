@@ -18,8 +18,9 @@
 # A committed recording is only evidence when it was made by a version
 # that no longer exists. Exactly one recording in this workspace meets
 # that bar (`codetracer-wasm-recorder`'s `legacy-encoding.ct`, made by a
-# pre-M52 `ct-instrument`) and it stays committed. Everything else is
-# produced here, from the tree the test is about to exercise.
+# `ct-instrument` that predates the current boundary-value encoding) and
+# it stays committed. Everything else is produced here, from the tree the
+# test is about to exercise.
 #
 # # The contract
 #

@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
     inputs:
       rr_backend_ref:
-        description: 'rr-backend git ref to test against (default: workspace lock)'
+        description: 'rr-backend git ref to test against (default: dev)'
         required: false
         default: ''
       shell_recorders_ref:
-        description: 'shell-recorders git ref to test against (default: workspace lock)'
+        description: 'shell-recorders git ref to test against (default: dev)'
         required: false
         default: ''
 
@@ -55,12 +55,12 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones the cross-repo siblings adjacent to this checkout at the
-        # workspace-lock-pinned revisions (recursive submodules), replacing
+        # clones the cross-repo siblings adjacent to this checkout at their
+        # pinned `dev` refs (recursive submodules), replacing
         # the former Checkout-manifests / Resolve-lock / per-sibling
         # clone-repo machinery. The rr_backend_ref workflow_dispatch input
-        # overrides codetracer-native-backend's locked revision (empty =>
-        # lock). The native-backend submodule unfold below is still bespoke
+        # overrides codetracer-native-backend's ref (empty => `dev`).
+        # The native-backend submodule unfold below is still bespoke
         # because the path:-flake-input visibility fix is specific to this
         # repo's flake.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
@@ -70,10 +70,10 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref }}
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
+            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'dev' }}
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has
@@ -206,18 +206,54 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones codetracer-shell-recorders adjacent to this checkout at the
-        # workspace-lock-pinned revision, replacing the former
+        # pinned `dev` ref, replacing the former
         # Checkout-manifests / Resolve-lock / clone-repo steps. The
-        # shell_recorders_ref workflow_dispatch input overrides the locked
-        # revision (empty => lock).
+        # shell_recorders_ref workflow_dispatch input overrides the ref
+        # (empty => `dev`).
+        #
+        # codetracer-trace-format is listed because the shell recorders' Cargo
+        # workspace path-depends on it:
+        #
+        #   error: failed to load manifest for workspace member
+        #     `.../codetracer-shell-recorders/crates/ct-shell-trace-writer`
+        #   Caused by: failed to load manifest for dependency `codetracer_trace_types`
+        #   Caused by: failed to read `.../codetracer-trace-format/codetracer_trace_types/Cargo.toml`
+        #   Caused by: No such file or directory (os error 2)
+        #
+        # It was missing from this list, not from the lock — the `rr-backend-tests`
+        # job above already names it for the same reason. The gap was invisible
+        # while this job could not get past `Setup dev env` at all.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # codetracer-trace-format-nim is the second half of a MATCHED FFI
+          # PAIR and is required whenever codetracer-trace-format is BUILT, not
+          # only when something imports the Nim library directly.
+          # `crates/ct-shell-trace-writer` path-depends on
+          # `codetracer-trace-format/codetracer_trace_writer_nim`, whose
+          # build.rs resolves the Nim entry point as a SIBLING of
+          # codetracer-trace-format and hard-errors when it is absent:
+          #
+          #   error: failed to run custom build command for
+          #     `codetracer_trace_writer_nim v0.1.0`
+          #   Nim FFI entry point not found at
+          #     .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+          #     -- is the codetracer-trace-format-nim repo checked out as a
+          #     sibling? (override with CODETRACER_TRACE_FORMAT_NIM_DIR)
+          #
+          # Observed in run 31719867246, job 94513828226, step "Build shell
+          # trace writer" -- reached only because the `=dev` pins here got this
+          # job past `Setup dev env` for the first time since 2026-08-04.
+          # Pinned by the "codetracer-trace-format implies
+          # codetracer-trace-format-nim" assertion in
+          # ci/test/sibling-provisioning-test.sh.
           siblings: |
-            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref }}
+            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Build shell trace writer
         run: |

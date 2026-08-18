@@ -78,6 +78,19 @@
 .activity-dr-card-warn
   color rgba(220, 0, 0, 0.8)
 
+// "not available for this dataset" — an exported DeepReview dataset carries
+// no test results, so the card must read as absent data rather than as a
+// green run.  Muted and italic: neither pass-green nor fail-red.
+// "not available for this dataset" — the exported review carries no test
+// results, so this must read as absence rather than as a passing suite.
+//
+// Distinguished by the italics and the wording, NOT by colour: it inherits
+// `.activity-dr-card-detail`'s secondary grey deliberately.  Restating the
+// colour here would be a no-op, and there is no pass-green in this
+// stylesheet to contrast against — only the failure state is coloured.
+.activity-dr-card-unavailable
+  font-style italic
+
 // --- File table ---
 
 .activity-dr-files
@@ -104,9 +117,16 @@
   padding 3px 12px
   font-size 12px
   color var(--text-primary, #c9c9c9)
+  cursor pointer
 
   &:hover
     background-color var(--bg-hover, #2a2b34)
+
+// The file currently under review.  DeepReview-GUI.md §2.1 — this table and
+// the VCS panel's Changed Files list are two views of one selection, so the
+// row highlight has to exist on both sides.
+.activity-dr-files-row-selected
+  background-color var(--bg-selected, #37373d)
 
 .activity-dr-files-col-name
   flex 3

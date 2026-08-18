@@ -71,7 +71,7 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
   for key, option in self.options:
     let action = self.actions[key]
     let optionDom = kdom.document.createElement("div")
-    optionDom.class = cstring"context-menu-option"
+    optionDom.class = cstring"context-menu-option ct-menu-item"
     optionDom.addEventListener(cstring"click", proc(e: Event) =
       action()
       self.dom.toJs.classList.remove("visible"))
@@ -97,7 +97,7 @@ proc loadMonacoTheme*(themeName: cstring) =
 proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.exportc.}
 proc lowAsm*(data: Data): bool
 proc highlightLine*(path: cstring, line: int)
-proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false)
+proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false): int {.discardable.}
 proc step*(data: Data, action: CtEventKind, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
 proc openLocation*(data: Data, path: cstring, line: int) {.async.}
 
@@ -274,6 +274,27 @@ proc destroyLayoutInstance(layout: GoldenLayout) {.importjs: "#.destroy()".}
 
 proc resetLayoutState*(data: Data) =
   ## Tear down the current GoldenLayout instance so createUIComponents/tryInitLayout can rebuild from scratch.
+  ##
+  ## Every component in the old `componentMapping` is unregistered first.
+  ## `data.viewsApi` survives the reset (it lives on the session, not on
+  ## `data.ui`), so components that are merely dropped from the mapping keep
+  ## their handlers subscribed on it; `createUIComponents` then registers a
+  ## fresh generation on top.  That is how a re-record or a trace reload used
+  ## to double every event handler in the app — most visibly as "Add to
+  ## Scratchpad" appending one row per accumulated generation (#612).
+  for content, mapping in data.ui.componentMapping:
+    # `componentMapping` is only populated per-Content once a layout has been
+    # built, so the entries are still nil on the very first reset.
+    if mapping.isNil:
+      continue
+    for id, component in mapping:
+      if component.isNil:
+        continue
+      try:
+        component.unregister()
+      except:
+        cwarn fmt"layout: unregister failed for {content}#{id}: {getCurrentExceptionMsg()}"
+
   if not data.ui.layout.isNil:
     try:
       destroyLayoutInstance(data.ui.layout)
@@ -1148,8 +1169,12 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     let itemContainer = kdom.document.createElement("div")
     itemContainer.classList.add("context-menu-item-container")
     newElement.classList.add("context-menu-item")
+    newElement.classList.add("ct-menu-item")
     newElement.id = cstring(fmt"menu-item-{i}")
-    newElement.innerHTML = option.name
+    let labelEl = kdom.document.createElement("span")
+    labelEl.classList.add("ct-menu-item-label")
+    labelEl.innerHTML = option.name
+    cast[dom.Element](newElement).append(cast[dom.Element](labelEl))
     newElement.onclick = proc(ev: Event) {.nimcall.} =
       let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
       if targetId.startsWith("menu-item-"):
@@ -1158,8 +1183,8 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
           contextMenuHandlers[itemIndex](ev)
       cast[kdom.Element](dom.document.getElementById("context-menu-container")).style.display = "none"
     if option.hint != "":
-      let hint = kdom.document.createElement("div")
-      hint.classList.add("context-menu-hint")
+      let hint = kdom.document.createElement("span")
+      hint.classList.add("ct-menu-item-sublabel")
       hint.id = cstring(fmt"menu-hint-{i}")
       hint.innerHTML = option.hint
       cast[dom.Element](newElement).append(cast[dom.Element](hint))
@@ -1329,6 +1354,8 @@ proc reloadOpenFileFromDisk(data: Data, targetPath: cstring) {.async.} =
 
 proc checkPendingReRecord*(data: Data)
 proc reRecordCurrent*(data: Data, projectOnly: bool)
+proc resolveFileConflict*(data: Data, action: FileConflictAction, path: cstring)
+proc abandonPendingReRecord*(data: Data, reason: string)
 
 proc updateDialog(data: Data, path: cstring) {.async.} =
   let tab =
@@ -1368,16 +1395,23 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
 
   proc handleAction(action: cstring) =
     closeDialog()
+    # Map the button to the model's vocabulary so a queued re-record request
+    # can be resolved by `resolveFileConflict` rather than by four ad-hoc
+    # branches.  Two of those branches used to clear `pendingReRecord`
+    # silently, which is one of the ways issue #603 left the UI idle.
+    let resolved =
+      if action == cstring"discard": fcaDiscardMemory
+      elif action == cstring"save": fcaSaveMemory
+      elif action == cstring"merge": fcaOpenMerge
+      else: fcaKeepEditing
     try:
-      if action == cstring"discard":
+      case resolved
+      of fcaDiscardMemory:
+        # Clear `changed` synchronously: the gate below reads it, and the
+        # reload itself completes asynchronously.
         tab.changed = false
         discard data.reloadOpenFileFromDisk(path)
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-        data.checkPendingReRecord()
-      elif action == cstring"save":
-        data.saveFiles(path)
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-      elif action == cstring"merge":
+      of fcaOpenMerge:
         let ours =
           if not tab.monacoEditor.isNil:
             tab.monacoEditor.getValue()
@@ -1389,14 +1423,18 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
           else:
             tab.source
         data.openThreeWayMergeTab(path, base, ours, diskSource)
-        data.pendingReRecord = nil
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-      else:
-        data.pendingReRecord = nil
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
+      of fcaSaveMemory, fcaKeepEditing:
+        # `fcaSaveMemory`'s saves are dispatched by `resolveFileConflict`,
+        # which saves *every* dirty buffer — the gate needs all of them.
+        discard
+      data.resolveFileConflict(resolved, path)
     except:
       cerror fmt"external-change: failed to handle {action} for {path}: {getCurrentExceptionMsg()}"
-      ipc.send "CODETRACER::no-reload-file", js{path: path}
+      # A throw here must never leave a re-record request armed with nothing
+      # left to drain it.
+      data.abandonPendingReRecord(
+        "Re-recording aborted: could not resolve the conflict for " & $path)
+    ipc.send "CODETRACER::no-reload-file", js{path: path}
 
   for action in [cstring"discard", cstring"save", cstring"merge", cstring"keep"]:
     let button = overlay.toJs.querySelector(cstring("[data-action='" & $action & "']"))
@@ -1426,14 +1464,54 @@ proc openNormalEditor* =
   # TODO
   discard
 
-proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false) =
+proc saveTargets*(data: Data): seq[SaveTarget] =
+  ## Snapshot `services.editor.open` for the pure model in `file_conflicts`.
+  ##
+  ## `open` is not a list of visible source tabs: `tabLoad` also inserts
+  ## calltrace and instruction tabs (keyed `path:functionName-key`) and it
+  ## inserts every tab straight from the IPC payload, long before the Monaco
+  ## editor component mounts.  `editorReady` records that distinction so the
+  ## save path can skip entries it cannot read a buffer from.
   for name, tab in data.services.editor.open:
-    if path.len == 0 or name == path:
-      tab.source = tab.monacoEditor.toJs.getValue().to(cstring)
-      if tab.untitled:
-        ipc.send "CODETRACER::save-untitled", js{name: name, raw: tab.source, saveAs: true}
-      else: #elif tab.changed or saveAs:
-        ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
+    if tab.isNil:
+      continue
+    result.add SaveTarget(
+      name: $name,
+      changed: tab.changed,
+      untitled: tab.untitled,
+      editorReady: not tab.monacoEditor.isNil)
+
+proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
+                        saveAs: bool): bool =
+  ## Send one save message.  Returns whether it actually went out — callers
+  ## use the count to decide whether anything can ever answer them.
+  let name = effect.target.cstring
+  if not data.services.editor.open.hasKey(name):
+    return false
+  let tab = data.services.editor.open[name]
+  if tab.isNil or tab.monacoEditor.isNil:
+    return false
+  try:
+    tab.source = tab.monacoEditor.toJs.getValue().to(cstring)
+    if effect.kind == rreSaveUntitled:
+      ipc.send "CODETRACER::save-untitled", js{name: name, raw: tab.source, saveAs: true}
+    else:
+      ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
+    result = true
+  except:
+    # A single unreadable buffer must not stop the other saves, and must not
+    # be silently counted as dispatched — see issue #603, where the very first
+    # such throw escaped `saveFiles` after the re-record queue had been armed
+    # and before anything was sent.
+    cerror fmt"saveFiles: could not save {name}: {getCurrentExceptionMsg()}"
+    result = false
+
+proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false): int {.discardable.} =
+  ## Write the modified buffers back to disk via the main process.
+  ## Returns the number of save messages dispatched.
+  for effect in saveEffects(data.saveTargets(), $path, saveAs):
+    if data.dispatchSaveEffect(effect, saveAs):
+      inc result
 
 proc buildRecordEnv(envDump: cstring): JsObject =
   ## Convert the serialized environment captured in trace metadata back into
@@ -1470,43 +1548,41 @@ proc runTests*(data: Data, options: RunTestOptions) =
     data.resetBeforeRestart()
   data.ipc.send("CODETRACER::run-test", options)
 
-proc checkPendingReRecord*(data: Data) =
-  if not data.pendingReRecord.isNil:
-    var hasDirty = false
-    for name, tab in data.services.editor.open:
-      if tab.changed:
-        hasDirty = true
-        break
-    if not hasDirty:
-      let projectOnly = data.pendingReRecord["projectOnly"].to(bool)
-      data.pendingReRecord = nil
-      data.reRecordCurrent(projectOnly)
+const reRecordWatchdogMs = 15_000
+  ## How long a queued re-record request may wait for its saves before it is
+  ## abandoned with a visible error.  The queue is only drained by
+  ## `CODETRACER::saved-file` / `CODETRACER::save-file-error`; if the main
+  ## process never answers at all — the one failure mode the gate cannot
+  ## observe — this is what keeps the UI from waiting forever in silence.
 
-proc reRecordCurrent*(data: Data, projectOnly: bool) =
-  ## Save edits and restart the recorder for the current file or project
-  ##   base args on current trace for now, but we might start a different target
-  ##   TODO: maybe rethink this more?
-  data.lastRestartKind = RestartNewTrace
+var reRecordWatchdog = -1  # app-global `setTimeout` handle, -1 when disarmed
+
+proc cancelReRecordWatchdog() =
+  if reRecordWatchdog >= 0:
+    windowClearTimeout(reRecordWatchdog)
+    reRecordWatchdog = -1
+
+proc pendingReRecordQueue(data: Data): ReRecordQueueRef =
+  ## The in-flight request, or a fresh inactive one.
+  ##
+  ## The queue lives in `Data.pendingReRecord` so its lifetime still matches
+  ## the session, and clearing that field on completion keeps the previous
+  ## "nil means nothing pending" observable intact.
+  if data.pendingReRecord.isNil:
+    ReRecordQueueRef()
+  else:
+    cast[ReRecordQueueRef](data.pendingReRecord)
+
+proc launchReRecord(data: Data, projectOnly: bool) =
+  ## Build/record a new trace for the current target.  Only reached once every
+  ## modified buffer is on disk.
+  ##
+  ## The trace can disappear while the saves are in flight (session switch,
+  ## trace teardown), so it is re-checked here rather than only at request
+  ## time.
   if data.trace.isNil:
     data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
     return
-
-  # maybe it's ok to also rebuild/re-record directly
-  # if data.ui.mode != EditMode:
-  #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
-  #   return
-
-  var hasDirty = false
-  for name, tab in data.services.editor.open:
-    if tab.changed:
-      hasDirty = true
-      break
-
-  if hasDirty:
-    data.pendingReRecord = js{projectOnly: projectOnly}
-    data.saveFiles()
-    return
-
   if data.trace.program.len == 0:
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
     return
@@ -1552,6 +1628,96 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
       projectOnly: projectOnly,
     }
   )
+
+proc applyReRecordEffects(data: Data, queue: ReRecordQueueRef,
+                          effects: seq[ReRecordEffect]) =
+  ## Perform what the pure model decided, then publish the queue state.
+  ##
+  ## Every path through the model ends in exactly one of: saves dispatched and
+  ## the queue armed, a recording launched, or a visible error/warning with the
+  ## queue cleared.  "Nothing happened and nothing was said" is not reachable
+  ## from here — that was issue #603.
+  var launch = false
+  for effect in effects:
+    case effect.kind
+    of rreSaveFile, rreSaveUntitled:
+      if not data.dispatchSaveEffect(effect, saveAs = false):
+        # The model already accounted for the buffers it knew it could not
+        # save; a failure here is a late one (the editor went away between
+        # the snapshot and the send) and must not inflate `savesInFlight`.
+        if queue.savesInFlight > 0:
+          queue.savesInFlight -= 1
+    of rreDispatchRecord:
+      launch = true
+    of rreError:
+      data.viewsApi.errorMessage(effect.message.cstring)
+    of rreWarn:
+      data.viewsApi.warnMessage(effect.message.cstring)
+
+  if queue.active:
+    data.pendingReRecord = cast[JsObject](queue)
+    # A queue that is still waiting but has nothing in flight can never be
+    # answered; fail it now rather than let the watchdog take 15 seconds.
+    if queue.savesInFlight == 0:
+      data.abandonPendingReRecord(reRecordStalledMessage)
+      return
+    cancelReRecordWatchdog()
+    reRecordWatchdog = windowSetTimeout(
+      proc = data.abandonPendingReRecord(reRecordTimedOutMessage),
+      reRecordWatchdogMs)
+  else:
+    data.pendingReRecord = nil
+    cancelReRecordWatchdog()
+
+  if launch:
+    data.launchReRecord(queue.projectOnly)
+
+proc abandonPendingReRecord*(data: Data, reason: string) =
+  ## Give up on a queued re-record request, loudly.
+  if data.pendingReRecord.isNil:
+    return
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(queue, abandonReRecord(queue[], reason))
+
+proc reRecordCurrent*(data: Data, projectOnly: bool) =
+  ## Save edits and restart the recorder for the current file or project
+  ##   base args on current trace for now, but we might start a different target
+  ##   TODO: maybe rethink this more?
+  data.lastRestartKind = RestartNewTrace
+  if data.trace.isNil:
+    data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
+    return
+
+  # maybe it's ok to also rebuild/re-record directly
+  # if data.ui.mode != EditMode:
+  #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
+  #   return
+
+  # Supersede any earlier request rather than stacking two queues.
+  cancelReRecordWatchdog()
+  let queue = ReRecordQueueRef()
+  data.applyReRecordEffects(
+    queue, requestReRecord(queue[], data.saveTargets(), projectOnly))
+
+proc noteReRecordSaveOutcome*(data: Data, failed: bool) =
+  ## Feed one `saved-file` / `save-file-error` reply into the queued request.
+  if data.pendingReRecord.isNil:
+    return
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(
+    queue, noteSaveOutcome(queue[], data.saveTargets(), failed))
+
+proc checkPendingReRecord*(data: Data) =
+  ## Called when a file finished saving successfully.
+  data.noteReRecordSaveOutcome(failed = false)
+
+proc resolveFileConflict*(data: Data, action: FileConflictAction,
+                          path: cstring) =
+  ## Apply the user's answer to the "File changed on disk" dialog, including
+  ## its effect on a queued re-record request.
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(
+    queue, applyConflictAction(queue[], action, data.saveTargets(), $path))
 
 proc restartSubsystem*(data: Data, name: cstring) =
   data.lastRestartKind = RestartSubsystem

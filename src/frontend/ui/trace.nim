@@ -164,6 +164,52 @@ proc ensureMonacoEditor(self: TraceComponent)
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig
 proc traceBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
 
+proc traceResultsDomMounted*(self: TraceComponent): bool =
+  ## Is this tracepoint's results DOM — specifically the ``<table>`` element the
+  ## live jQuery-DataTables instance was constructed against — still mounted in
+  ## the document?
+  ##
+  ## ``renderTableResults`` binds the DataTable to ``#trace-table-{id}`` and
+  ## then refuses to build another one while ``dataTable.context`` is non-nil,
+  ## so that element's presence is the only reliable signal that the grid is
+  ## still alive. Callers use it to decide between refreshing the results in
+  ## place and rebuilding the whole view zone (see ``ui/trace_redraw_policy.nim``
+  ## and issue #566).
+  if self.viewZone.isNil:
+    return false
+  let table = document.getElementById(cstring(fmt"trace-table-{self.id}"))
+  not table.isNil
+
+proc releaseDataTable*(self: TraceComponent) =
+  ## Tear the jQuery-DataTables instance down and forget everything that points
+  ## into the DOM subtree it owns.
+  ##
+  ## This MUST run before anything replaces the tracepoint's view-zone DOM.
+  ## Otherwise the instance survives with its table element detached, and since
+  ## ``renderTableResults`` only builds a table when ``context`` is nil, the
+  ## freshly created ``#trace-table-{id}`` is never populated and its
+  ## ``.chart-table`` container is never un-hidden — the grid simply vanishes
+  ## (#566).
+  if self.dataTable.isNil:
+    return
+
+  if not self.dataTable.context.isNil:
+    try:
+      # `clear()` drops the rows before `destroy()` restores the original
+      # markup; both can throw if the table node is already detached, which is
+      # precisely the situation we are cleaning up after.
+      self.dataTable.context.clear().destroy()
+    except:
+      cerror "trace: releaseDataTable: " & getCurrentExceptionMsg()
+
+  self.dataTable.context = nil
+  self.dataTable.footerDom = nil
+  self.dataTable.rowsCount = 0
+  # An `ajax` response for the table we just destroyed may still be in flight;
+  # dropping the callback makes `onUpdatedTable` discard it instead of feeding
+  # a dead instance.
+  self.tableCallback = nil
+
 proc removeMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
   #.changeViewZones(function(accessor) {
     accessor.removeZone(#);
@@ -379,6 +425,15 @@ proc doRefreshTraceTableLayout(data: TraceLayoutData) {.cdecl.} =
     data.self.refreshTraceTableLayout()
 
 method onUpdatedTable*(self: TraceComponent, response: CtUpdatedTableResponseBody) {.async.} =
+  # The DataTable that issued this request may have been torn down while the
+  # response was in flight (`releaseDataTable` nils the callback, #566).
+  # Feeding a dead instance throws inside jQuery-DataTables and aborts the rest
+  # of the update, so drop the stale response instead.
+  # Only the callback is checked: `dataTable.context` is still nil while
+  # DataTables is running the very first `ajax` call from inside its own
+  # constructor, and that first response must not be dropped.
+  if self.tableCallback.isNil:
+    return
   if response.tableUpdate.isTrace and response.tableUpdate.data.draw == self.drawId and response.tableUpdate.eventSlot == self.id:
     self.tableCallback(response.tableUpdate.data.toJs)
     self.dataTable.rowsCount = response.tableUpdate.data.recordsTotal
@@ -1634,11 +1689,24 @@ proc appendTraceViewZoneDomContent(self: TraceComponent) =
   self.viewZone.domNode.appendChild(self.renderTraceDom())
 
 proc refreshTraceViewZoneDom*(self: TraceComponent) =
+  ## Rebuild the tracepoint's view-zone DOM from scratch.
+  ##
+  ## Destructive by design — only call it when there is nothing live to
+  ## preserve (`traceResultsDomMounted() == false`); `editorAfterRedraw`
+  ## dispatches on `traceRedrawAction` to make that choice (#566).
   if self.viewZone.isNil:
     return
+  # The old DataTables instance is about to lose its table element; tear it
+  # down first so `renderTableResults` will build a new one afterwards.
+  self.releaseDataTable()
   self.viewZone.domNode.innerHTML = cstring""
   self.appendTraceViewZoneDomContent()
   self.finishTraceDomMount()
+  # `traceChartTableDom` creates the results container as `chart-table hidden`
+  # and `finishTraceDomMount` never un-hides it — `refreshTrace` is the only
+  # code that does, and it is also what re-creates the DataTable. Without this
+  # a rebuilt tracepoint showed its editor and menu but no results grid.
+  self.refreshTrace()
 
 proc bindTraceDomRefs(self: TraceComponent) =
   self.searchInput =

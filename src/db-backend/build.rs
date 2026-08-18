@@ -61,17 +61,7 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let recorder_candidate = manifest_dir.join("../../../codetracer-native-recorder");
-    if !recorder_candidate.exists() {
-        println!(
-            "cargo:warning=db-backend: sibling codetracer-native-recorder not found at {}; MCR emulator link disabled",
-            recorder_candidate.display()
-        );
-        return;
-    }
-    let recorder_root = recorder_candidate
-        .canonicalize()
-        .expect("canonicalize sibling codetracer-native-recorder repo");
+    let recorder_root = resolve_recorder_root(&manifest_dir);
     let emulator_dir = recorder_root.join("ct_emulator");
     let private_build = load_private_emulator_build(&emulator_dir);
 
@@ -94,6 +84,94 @@ fn main() {
     } else {
         build_native(&private_build, &target_arch);
     }
+}
+
+/// Locate the sibling `codetracer-native-recorder` checkout that supplies the
+/// Nim MCR emulator, or fail with a diagnostic that names the requirement.
+///
+/// ## Why this is a hard failure rather than a graceful skip
+///
+/// It used to be a skip: a missing sibling printed one `cargo:warning` and
+/// returned early, bypassing the only `cargo:rustc-link-search` /
+/// `cargo:rustc-link-lib=dylib=mcr_emulator` emits in this file. That reads
+/// like graceful degradation, but nothing on the Rust side degrades with it.
+/// `src/lib.rs` declares `pub mod emulator_ffi;` (and `emulator_origin`,
+/// `emulator_session`, `data_watch`) UNCONDITIONALLY, and `emulator_ffi.rs`
+/// declares eighty `pub fn mcr*` plus `NimMain` in one `unsafe extern "C"`
+/// block with no `#[cfg]`. Skipping the link directives therefore did not
+/// avoid the dependency — it only deferred it, from a build-script message
+/// nobody reads (tup runs cargo inside its FUSE sandbox, see
+/// `!debug_rust_cargo_db_backend` in `src/Tuprules.tup`) to eighty-one
+/// undefined symbols at the final `rustc -C link` step, attributed to the
+/// linker rather than to the missing checkout.
+///
+/// Making the optionality real instead — a `mcr-emulator` cargo feature and a
+/// `cargo:rustc-cfg=has_mcr_emulator` gating those modules — would have to
+/// gate every consumer too: `EmulatorReplaySession`, the M17/M20 origin tiers
+/// and the M22 data-watch surface are referenced from `dap_handler`,
+/// `origin_query`, `replay`, `stack_unwinder`, `task`, `main` and eight
+/// integration tests. There is no configuration in this repository that wants
+/// a db-backend without them, so the honest contract is "required", stated
+/// here where the remedy still fits on screen.
+///
+/// The search order matches `scripts/require-siblings.sh` and
+/// `scripts/detect-siblings.sh`: the canonical `CT_<NAME>_SIBLING` override
+/// first (cross-repo-builds.md §2.1), then the workspace sibling.
+fn resolve_recorder_root(manifest_dir: &Path) -> PathBuf {
+    println!("cargo:rerun-if-env-changed=CT_CODETRACER_NATIVE_RECORDER_SIBLING");
+
+    // `../../../` from `<workspace>/codetracer/src/db-backend` is the
+    // workspace root.
+    let workspace_sibling = manifest_dir.join("../../../codetracer-native-recorder");
+    let override_path = env::var_os("CT_CODETRACER_NATIVE_RECORDER_SIBLING").map(PathBuf::from);
+
+    let mut tried: Vec<String> = Vec::new();
+    for (source, candidate) in [
+        ("CT_CODETRACER_NATIVE_RECORDER_SIBLING", override_path),
+        ("workspace sibling", Some(workspace_sibling)),
+    ] {
+        let Some(candidate) = candidate else { continue };
+        // The emulator sources, not merely the directory: a clone that exists
+        // but is missing `ct_emulator/` fails later in exactly the same
+        // confusing way, so treat it the same as an absent one.
+        let emulator_dir = candidate.join("ct_emulator");
+        if emulator_dir.is_dir() {
+            return candidate
+                .canonicalize()
+                .expect("canonicalize sibling codetracer-native-recorder repo");
+        }
+        tried.push(format!("  {source}: {}/ct_emulator", candidate.display()));
+    }
+
+    // A raw literal rather than `\`-continuations: continuations strip the
+    // leading whitespace of each line, which would flatten the indentation of
+    // the copy-pasteable commands below.
+    const REMEDY: &str = r#"
+That repository supplies the Nim MCR emulator this build script compiles and
+links as lib<CT_MCR_EMULATOR_LINK_NAME>.so. Without it the crate does not
+merely lose a feature: src/lib.rs exports `emulator_ffi`, `emulator_origin`,
+`emulator_session` and `data_watch` unconditionally, so the link step fails
+with 81 undefined `mcr*` symbols.
+
+Fix it by completing the workspace:
+
+    cd <workspace> && repro ws enable codetracer
+
+or clone it directly:
+
+    git clone https://github.com/metacraft-labs/codetracer-native-recorder <workspace>/codetracer-native-recorder
+
+If the checkout lives somewhere else, point at it with
+CT_CODETRACER_NATIVE_RECORDER_SIBLING=<path>.
+
+`bash scripts/require-siblings.sh` checks this, and every other sibling the
+build resolves by relative path, before the build starts."#;
+
+    panic!(
+        "db-backend requires the sibling `codetracer-native-recorder` checkout, and it \
+         was not found.\n\nLooked for a `ct_emulator/` directory at:\n{}\n{REMEDY}",
+        tried.join("\n")
+    );
 }
 
 // =====================================================================
@@ -645,6 +723,21 @@ fn build_wasm32(private_build: &PrivateEmulatorBuild) {
         "no .c files found in {} — did Nim regeneration succeed?",
         wasm_c_dir.display()
     );
+
+    // Minimal libc stubs for POSIX process primitives (getpid) that have no
+    // provider on wasm32-unknown-unknown. They belong to the db-backend's
+    // trimmed wasm libc surface (the wasm-sysroot), so they live and compile
+    // alongside it rather than in the recorder's emulator sources. Without a
+    // definition wasm-ld leaves getpid an undefined symbol and rejects the
+    // link (see wasm-sysroot/src/wasm_libc_stubs.c for the rationale).
+    let wasm_libc_stubs = manifest_dir.join("wasm-sysroot/src/wasm_libc_stubs.c");
+    assert!(
+        wasm_libc_stubs.exists(),
+        "expected wasm libc stubs at {}",
+        wasm_libc_stubs.display()
+    );
+    println!("cargo:rerun-if-changed={}", wasm_libc_stubs.display());
+    sources.push(wasm_libc_stubs);
 
     let mut build = cc::Build::new();
     build

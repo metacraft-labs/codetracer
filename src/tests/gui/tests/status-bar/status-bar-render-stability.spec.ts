@@ -14,21 +14,34 @@
  * times per second while the app was still loading, and each pass also
  * emitted an ERROR-level log line.
  *
- * The failure that motivated this is worth recording, because the obvious
- * story about it is wrong.  When `readyOnEntryTest` timed out waiting for
- * `.location-path`, the captured DOM showed the element present, in the
- * page Playwright held (the same page whose console the run captured),
- * carrying the correct `path:line#ticks` text — and Playwright's call log
- * contained no `locator resolved to …` line at all.  A poll cannot land
- * "between children removed and children re-appended": the renderer is
- * single-threaded and `renderStatusInto` tore down and rebuilt inside one
- * task.  What it can do is never run — Playwright's locator poll is driven
- * from the page, and during the open the renderer was executing hundreds of
- * status rebuilds and 700+ `console.error` round-trips in a few seconds.
- * So the fix is to stop generating the work, not to wait more leniently:
- * the shell is now patched in place unless its *structure* changes, the
- * redraws are coalesced to one pass per task turn, and the per-render ERROR
- * log is gone.
+ * The failure that motivated this is worth recording, together with what
+ * later turned out to be wrong about it.  When `readyOnEntryTest` timed out
+ * waiting for `.location-path`, the captured DOM showed the element present,
+ * in the page Playwright held (the same page whose console the run
+ * captured), carrying the correct `path:line#ticks` text — and Playwright's
+ * call log contained no `locator resolved to …` line at all.  That was read
+ * as "the locator poll never ran, starved by hundreds of status rebuilds and
+ * 700+ `console.error` round-trips in a few seconds".
+ *
+ * **That reading is withdrawn.**  A call log holding nothing but
+ * `waiting for locator(...)` is simply what Playwright writes for a selector
+ * matching zero elements: the injected predicate in
+ * `server/frames.js::Frame.waitForSelector` sets its `log` field only when it
+ * finds something, and the caller guards with `if (log)`.  So it is the
+ * normal shape of a timeout on an element that was not there, not evidence
+ * about whether the poll ran — and `DEBUG=pw:protocol` on a reproduced
+ * failure shows the poll issuing and answering iterations throughout.  The
+ * readiness timeout is a slow launch overrunning its budget; see
+ * `lib/fixtures.ts::readyOnEntryTest` and Value-Origin-Tracking M46 for the
+ * measurement and for the part of the old evidence that is still unexplained.
+ *
+ * The churn fix stands on its own merits either way, and this file is its
+ * evidence.  Rebuilding the whole `#status` subtree on each of 60+ redraws,
+ * each with an ERROR-level log line, is work the renderer should not be doing
+ * while the app is still loading — and renderer time during the open is
+ * exactly what the readiness budget is spent on.  The shell is now patched in
+ * place unless its *structure* changes, the redraws are coalesced to one pass
+ * per task turn, and the per-render ERROR log is gone.
  *
  * **M47.**  The strip's tabs are direct children of
  * `#auto-hide-bottom-strip`.  This file is the runnable evidence for that
@@ -305,16 +318,17 @@ test.describe("status bar render stability", () => {
     ).toEqual([]);
 
     // ------------------------------------------------------------------
-    // M51: the whole ERROR bucket, not two known substrings.
+    // Assert the whole ERROR bucket, not two known substrings.
     //
     // The two assertions above are M48's, and they could only ever be
     // written as substring filters because a clean trace open used to emit
     // 713 ERROR lines — 705 of them progress traces ("creating store",
     // "mounting now", "mount COMPLETE", "synced N locals") logged through
     // `cerror` across NINE renderer modules, plus three the harness itself
-    // emitted at ERROR while reporting a healthy page.  M51 demoted them,
-    // leaving 3.  The bucket can now be asserted whole: an ERROR line that
-    // survives here is one that MEANS something.
+    // emitted at ERROR while reporting a healthy page.  Those have since
+    // been demoted to their proper levels, leaving 3.  The bucket can now be
+    // asserted whole: an ERROR line that survives here is one that MEANS
+    // something.
     //
     // Do not add to ALLOWED_STARTUP_ERRORS to make a red run green.  Each
     // entry is a genuine startup error that is filed and outlives this
@@ -325,12 +339,13 @@ test.describe("status bar render stability", () => {
         // Thrown by monaco-languageclient's `workerFactory.js` when
         // monaco's TypeScript language mode asks for a web worker and no
         // `MonacoEnvironment.getWorker` is configured for the Electron
-        // file:// renderer.  A genuine unhandled rejection, filed against
-        // M51; it degrades TS language features in the editor and is not
-        // caused by anything under test here.  Fixing it means configuring
-        // monaco's worker environment, which is not a logging change.
+        // file:// renderer.  A genuine, separately tracked unhandled
+        // rejection; it degrades TS language features in the editor and is
+        // not caused by anything under test here.  Fixing it means
+        // configuring monaco's worker environment, which is not a logging
+        // change.
         match: "Unimplemented worker javascript (workerMain.js)",
-        why: "monaco language-client worker is unconfigured in the Electron renderer — filed by M51",
+        why: "monaco language-client worker is unconfigured in the Electron renderer",
       },
     ];
 
@@ -339,9 +354,10 @@ test.describe("status bar render stability", () => {
     // switch someone debugging a failure here would reach for first — also
     // pushes `[console.log]` / `[console.debug]` lines into it, and without
     // this filter that switch would drown the assertion in ~3000 lines of
-    // the very progress traces M51 demoted.  `[console.error]` and
-    // `[pageerror]` are the two prefixes `attachErrorCollectors` uses for
-    // genuine faults, so this is exactly the ERROR bucket and nothing less.
+    // the very progress traces that were demoted to debug level.
+    // `[console.error]` and `[pageerror]` are the two prefixes that
+    // `attachErrorCollectors` uses for genuine faults, so this is exactly
+    // the ERROR bucket and nothing less.
     const errorLevel = consoleErrors.filter(
       (line) =>
         line.startsWith("[console.error]") || line.startsWith("[pageerror]"),
@@ -352,8 +368,8 @@ test.describe("status bar render stability", () => {
     expect(
       unexplained,
       "opening a trace must produce an EMPTY renderer ERROR bucket apart " +
-        "from the explicitly justified entries in ALLOWED_STARTUP_ERRORS " +
-        "(see M51).  An ERROR line here is either a real fault worth " +
+        "from the explicitly justified entries in ALLOWED_STARTUP_ERRORS. " +
+        "An ERROR line here is either a real fault worth " +
         "fixing, or a progress trace that belongs at `cdebug` — decide " +
         "which and do that, rather than widening the allowlist.\n" +
         `allowlist: ${ALLOWED_STARTUP_ERRORS.map((a) => `${a.match} (${a.why})`).join("; ")}`,

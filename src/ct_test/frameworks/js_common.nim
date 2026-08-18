@@ -81,7 +81,7 @@ proc isCandidateJsTestFile*(path: string): bool =
 proc jsFiles*(projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     let rel = normalizedRelative(projectRoot, path)
     if rel.startsWith("node_modules/") or rel.startsWith("dist/") or
         rel.startsWith("build/"):

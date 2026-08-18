@@ -140,22 +140,61 @@ const AgentActivityDeepReviewNotifsEmptyText* = "No recent notifications."
 const AgentActivityDeepReviewTestPassClass* = "activity-dr-test-pass"
 const AgentActivityDeepReviewTestFailClass* = "activity-dr-test-fail"
 
+const AgentActivityDeepReviewFileRowSelectedClass* =
+  "activity-dr-files-row-selected"
+  ## Modifier for the per-file coverage row naming the file currently
+  ## under review.  DeepReview-GUI.md §2.1: the coverage table and the
+  ## VCS panel's Changed Files list are "two views of one selection", so
+  ## the row highlight has to exist on this side too.
+
+const AgentActivityDeepReviewTestsUnavailableClass* =
+  "activity-dr-card-unavailable"
+  ## Modifier for the Tests card when nothing has reported a test run.
+
+const AgentActivityDeepReviewTestsUnavailableValueText* = "n/a"
+const AgentActivityDeepReviewTestsUnavailableText* =
+  "not available for this dataset"
+  ## What the Tests card says when no test results exist.
+  ##
+  ## An exported DeepReview dataset carries no test results at all —
+  ## ``DeepReviewData``
+  ## (``common/common_types/codetracer_features/deepreview.nim``) has no
+  ## test-name, pass/fail or duration field — so the row has nothing to
+  ## report for a CLI-launched review.  Painting the zeroed roll-up
+  ## ("0/0", "all passing") would assert that a test suite ran and was
+  ## green.  Carrying test results into an export needs a change in
+  ## ``codetracer-native-backend``'s exporter; until then this is the
+  ## honest rendering (DeepReview-GUI.milestones.org, DR-R3).
+
+const AgentActivityDeepReviewInactiveModifier* = "activity-dr-inactive"
+  ## Marks the section as belonging to no review.  Rendered alongside
+  ## ``hidden`` so the DeepReview section takes no space in a normal
+  ## debugging session's Agent Activity panel, where it is not part of
+  ## the surface the user asked for.
+
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside the render effect
 # ---------------------------------------------------------------------------
 
-proc containerClass*(isExpanded: bool): string =
+proc containerClass*(isExpanded: bool; visible: bool = true): string =
   ## Outer container class string — appends the collapsed modifier
   ## when the body is hidden.  Mirrors the legacy
   ## ``classnames("activity-dr-container", "activity-dr-collapsed":
   ## not expanded)`` pattern.  The header label and chevron stay
   ## visible even when collapsed because the panel's "fold up to
   ## just the header" affordance is the only way to re-expand it.
-  if isExpanded:
-    AgentActivityDeepReviewContainerClass
-  else:
-    AgentActivityDeepReviewContainerClass & " " &
-      AgentActivityDeepReviewCollapsedModifier
+  ##
+  ## ``visible`` is a second, coarser axis: the DeepReview section is
+  ## part of the Agent Activity panel (DeepReview-GUI.md §2.1) and must
+  ## not appear at all outside a review, so the whole container is
+  ## hidden until a review has put something in it.  Collapsed is a
+  ## user choice; invisible is "there is no review".
+  result = AgentActivityDeepReviewContainerClass
+  if not isExpanded:
+    result.add(" " & AgentActivityDeepReviewCollapsedModifier)
+  if not visible:
+    result.add(" " & AgentActivityDeepReviewInactiveModifier & " " &
+      AgentActivityDeepReviewHiddenModifier)
 
 proc bodyClass*(isExpanded: bool): string =
   ## Inner body wrapper class string — appends the ``hidden``
@@ -223,26 +262,40 @@ proc coverageDetailText*(summary: AgentDeepReviewCoverageSummary): string =
   $summary.totalLinesCovered & " covered / " &
     $summary.totalLinesUncovered & " uncovered"
 
-proc testsValueText*(results: AgentDeepReviewTestResults): string =
+proc testsValueText*(results: AgentDeepReviewTestResults;
+                     available: bool = true): string =
   ## "<passed>/<run>" value text for the tests card.  Mirrors the
   ## legacy ``fmt"{summary.testsPassed}/{summary.testsRun}"``
   ## string.
-  $results.testsPassed & "/" & $results.testsRun
+  ##
+  ## When nothing has reported a test run the card says ``n/a`` rather
+  ## than ``0/0``: an exported ``.dr`` dataset carries no test results,
+  ## and "0/0 — all passing" would report a green suite that never ran.
+  if not available:
+    AgentActivityDeepReviewTestsUnavailableValueText
+  else:
+    $results.testsPassed & "/" & $results.testsRun
 
-proc testsDetailText*(results: AgentDeepReviewTestResults): string =
+proc testsDetailText*(results: AgentDeepReviewTestResults;
+                      available: bool = true): string =
   ## Tests-card detail label.  When at least one test failed it
   ## reports ``"<n> failed"``; otherwise it reports the legacy
-  ## ``"all passing"`` string.  When no tests have been run at all
-  ## the legacy view rendered the ``all passing`` branch — keep
-  ## that behaviour so an empty panel does not flicker the warn
-  ## modifier on first paint.
-  if results.testsFailed > 0:
+  ## ``"all passing"`` string.
+  ##
+  ## The "nothing reported" case is NOT the ``all passing`` branch — see
+  ## ``AgentActivityDeepReviewTestsUnavailableText``.
+  if not available:
+    AgentActivityDeepReviewTestsUnavailableText
+  elif results.testsFailed > 0:
     $results.testsFailed & " failed"
   else:
     "all passing"
 
-proc testsDetailClass*(results: AgentDeepReviewTestResults): string =
-  if results.testsFailed > 0:
+proc testsDetailClass*(results: AgentDeepReviewTestResults;
+                       available: bool = true): string =
+  if not available:
+    "activity-dr-card-detail " & AgentActivityDeepReviewTestsUnavailableClass
+  elif results.testsFailed > 0:
     "activity-dr-card-detail activity-dr-card-warn"
   else:
     "activity-dr-card-detail"
@@ -264,6 +317,16 @@ proc fileRowCoverageText*(entry: AgentDeepReviewFileCoverage): string =
   ## Mirrors the legacy ``fmt"{entry.coveredLines}/{entry.totalLines}"``
   ## string.
   $entry.coveredLines & "/" & $entry.totalLines
+
+proc fileRowClass*(entry: AgentDeepReviewFileCoverage;
+                   selectedPath: string): string =
+  ## Class string for one per-file coverage row, carrying the selected
+  ## modifier when this row names the file currently under review.
+  if selectedPath.len > 0 and entry.path == selectedPath:
+    AgentActivityDeepReviewFileRowClass & " " &
+      AgentActivityDeepReviewFileRowSelectedClass
+  else:
+    AgentActivityDeepReviewFileRowClass
 
 proc fileRowFlowText*(entry: AgentDeepReviewFileCoverage): string =
   ## "yes" / "--" flow indicator for the per-file row.  Mirrors the
@@ -313,19 +376,52 @@ proc notificationRowClass*(notif: AgentDeepReviewNotification): string =
   parts.join(" ")
 
 # ---------------------------------------------------------------------------
+# Host callbacks
+# ---------------------------------------------------------------------------
+
+type
+  AgentActivityDeepReviewCallbacks* = object
+    ## Side effects the imperative host owns.  Mirrors
+    ## ``VCSCallbacks`` / ``DeepReviewCallbacks``: every entry may be
+    ## nil, and the view then falls back to the VM-only behaviour so the
+    ## MockRenderer path is exercisable without a host.
+    onSelectFile*: proc(path: string) {.closure.}
+      ## The reviewer clicked a row of the per-file coverage table.  The
+      ## host moves the VCS panel's selection to the same file — §2.1's
+      ## "two views of one selection" — and opens it the way a click in
+      ## the Changed Files list would.
+
+proc invokeSelectFile(vm: AgentActivityDeepReviewVM;
+                      callbacks: AgentActivityDeepReviewCallbacks;
+                      path: string) =
+  ## Route a coverage-row click to the host, or, with no host attached,
+  ## move this VM's own selection so the row highlight still follows the
+  ## click in headless renders.
+  if callbacks.onSelectFile != nil:
+    callbacks.onSelectFile(path)
+  else:
+    vm.setSelectedFilePath(path)
+
+# ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
 proc renderMockFileRow(r: MockRenderer;
-                       entry: AgentDeepReviewFileCoverage): MockNode =
+                       vm: AgentActivityDeepReviewVM;
+                       callbacks: AgentActivityDeepReviewCallbacks;
+                       entry: AgentDeepReviewFileCoverage;
+                       selectedPath: string): MockNode =
   ## Render a single file-coverage row in the headless DOM.  Mirrors
   ## the legacy ``activity-dr-files-row`` markup with three
   ## column spans (basename / coverage ratio / flow indicator).
   let base = fileBasename(entry.path)
   let coverageText = fileRowCoverageText(entry)
   let flowText = fileRowFlowText(entry)
+  let cls = fileRowClass(entry, selectedPath)
+  let path = entry.path
   let row = ui(r):
-    tdiv(class = AgentActivityDeepReviewFileRowClass):
+    tdiv(class = cls,
+         onclick = proc() = invokeSelectFile(vm, callbacks, path)):
       span(class = "activity-dr-files-col-name"):
         text base
       span(class = "activity-dr-files-col-coverage"):
@@ -357,7 +453,9 @@ proc renderMockNotifRow(r: MockRenderer;
   row
 
 proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
-    vm: AgentActivityDeepReviewVM): MockNode =
+    vm: AgentActivityDeepReviewVM;
+    callbacks: AgentActivityDeepReviewCallbacks =
+      AgentActivityDeepReviewCallbacks()): MockNode =
   ## Render the Agent Activity DeepReview pane for the Mock
   ## renderer.  Single ``ui()`` block builds the static shell;
   ## ``createRenderEffect`` blocks rebuild the dynamic content
@@ -440,7 +538,8 @@ proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
   # ----- Outer collapsed/expanded toggle ---------------------------
   createRenderEffect proc() =
     let expanded = vm.isExpanded.val
-    r.setAttribute(outerContainer, "class", containerClass(expanded))
+    r.setAttribute(outerContainer, "class",
+                   containerClass(expanded, vm.sectionVisible.val))
     r.setAttribute(bodyContainer, "class", bodyClass(expanded))
     # Chevron flips between '>' (collapsed) and 'v' (expanded).
     r.clearChildren(headerChevron)
@@ -462,6 +561,7 @@ proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
   createRenderEffect proc() =
     let summary = vm.coverageSummary.val
     let results = vm.testResults.val
+    let testsKnown = vm.testResultsAvailable.val
     # Coverage card
     r.clearChildren(coverageValue)
     let coverageVal = formatPercent(summary.coveragePercent)
@@ -475,25 +575,22 @@ proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
     r.appendChild(coverageDetail, coverageDetailNode)
     # Tests card
     r.clearChildren(testsValue)
-    let testsVal = testsValueText(results)
+    let testsVal = testsValueText(results, testsKnown)
     let testsValNode = ui(r):
       text testsVal
     r.appendChild(testsValue, testsValNode)
     r.clearChildren(testsDetail)
-    let testsDetailVal = testsDetailText(results)
+    let testsDetailVal = testsDetailText(results, testsKnown)
     let testsDetailNode = ui(r):
       text testsDetailVal
     r.appendChild(testsDetail, testsDetailNode)
-    # Failures pill — flip the warn modifier on the tests card detail.
-    if results.testsFailed > 0:
-      r.setAttribute(testsDetail, "class",
-                     "activity-dr-card-detail activity-dr-card-warn")
-    else:
-      r.setAttribute(testsDetail, "class", "activity-dr-card-detail")
+    # Failures pill / unavailable marker on the tests card detail.
+    r.setAttribute(testsDetail, "class", testsDetailClass(results, testsKnown))
 
   # ----- Per-file coverage table -----------------------------------
   createRenderEffect proc() =
     let entries = vm.fileCoverage.val
+    let selectedPath = vm.selectedFilePath.val
     # Wipe rows from the previous tick (preserve header + empty
     # placeholder which sit at the start).  Cheaper to clear and
     # rebuild because the legacy view always emits the table in
@@ -515,7 +612,7 @@ proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
       r.appendChild(filesContainer, empty)
     else:
       for entry in entries:
-        let row = renderMockFileRow(r, entry)
+        let row = renderMockFileRow(r, vm, callbacks, entry, selectedPath)
         r.appendChild(filesContainer, row)
 
   # ----- Test results list -----------------------------------------
@@ -574,10 +671,15 @@ proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
 
 when defined(js):
 
-  proc renderWebFileRow(r: WebRenderer; entry: AgentDeepReviewFileCoverage):
-      isonim_dom.Element =
+  proc renderWebFileRow(r: WebRenderer;
+                        vm: AgentActivityDeepReviewVM;
+                        callbacks: AgentActivityDeepReviewCallbacks;
+                        entry: AgentDeepReviewFileCoverage;
+                        selectedPath: string): isonim_dom.Element =
+    let path = entry.path
     ui(r):
-      tdiv(class = AgentActivityDeepReviewFileRowClass):
+      tdiv(class = fileRowClass(entry, selectedPath),
+           onclick = proc() = invokeSelectFile(vm, callbacks, path)):
         span(class = "activity-dr-files-col-name"):
           text fileBasename(entry.path)
         span(class = "activity-dr-files-col-coverage"):
@@ -598,7 +700,9 @@ when defined(js):
         text notif.label
 
   proc renderAgentActivityDeepReviewPanel*(r: WebRenderer;
-      vm: AgentActivityDeepReviewVM): isonim_dom.Element =
+      vm: AgentActivityDeepReviewVM;
+      callbacks: AgentActivityDeepReviewCallbacks =
+        AgentActivityDeepReviewCallbacks()): isonim_dom.Element =
     ## Render the Agent Activity DeepReview pane for the real DOM.
     ## Same dispatch shape as the Mock variant.
     var filesContainer: isonim_dom.Element
@@ -606,7 +710,7 @@ when defined(js):
     var notifsContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = containerClass(vm.isExpanded.val)):
+      tdiv(class = containerClass(vm.isExpanded.val, vm.sectionVisible.val)):
         tdiv(class = AgentActivityDeepReviewHeaderClass,
              onclick = proc() = vm.toggleExpanded()):
           span(class = AgentActivityDeepReviewChevronClass):
@@ -630,9 +734,12 @@ when defined(js):
               tdiv(class = "activity-dr-card-label"):
                 text "Tests"
               tdiv(class = "activity-dr-card-value"):
-                text testsValueText(vm.testResults.val)
-              tdiv(class = testsDetailClass(vm.testResults.val)):
-                text testsDetailText(vm.testResults.val)
+                text testsValueText(vm.testResults.val,
+                                    vm.testResultsAvailable.val)
+              tdiv(class = testsDetailClass(vm.testResults.val,
+                                            vm.testResultsAvailable.val)):
+                text testsDetailText(vm.testResults.val,
+                                     vm.testResultsAvailable.val)
           tdiv(ref = filesContainer,
                class = AgentActivityDeepReviewFilesClass):
             discard
@@ -646,6 +753,7 @@ when defined(js):
     # ----- Per-file coverage table -----------------------------------
     createRenderEffect proc() =
       let entries = vm.fileCoverage.val
+      let selectedPath = vm.selectedFilePath.val
       # Dynamic list host: clear the stable section and append DSL-built
       # header/row branches for the latest VM snapshot.
       r.clearChildren(filesContainer)
@@ -665,7 +773,8 @@ when defined(js):
         r.appendChild(filesContainer, empty)
       else:
         for entry in entries:
-          r.appendChild(filesContainer, renderWebFileRow(r, entry))
+          r.appendChild(filesContainer,
+                        renderWebFileRow(r, vm, callbacks, entry, selectedPath))
 
     # ----- Test results list -----------------------------------------
     createRenderEffect proc() =
@@ -715,11 +824,13 @@ when defined(js):
 
   proc mountIsoNimAgentActivityDeepReviewPanel*(
       container: isonim_dom.Element;
-      vm: AgentActivityDeepReviewVM) =
+      vm: AgentActivityDeepReviewVM;
+      callbacks: AgentActivityDeepReviewCallbacks =
+        AgentActivityDeepReviewCallbacks()) =
     ## Mount the IsoNim Agent Activity DeepReview pane as a child of
     ## ``container``.  Reactive effects handle every subsequent
     ## update — no manual redraw is needed.
     let r = WebRenderer()
-    let panel = renderAgentActivityDeepReviewPanel(r, vm)
+    let panel = renderAgentActivityDeepReviewPanel(r, vm, callbacks)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))

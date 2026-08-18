@@ -67,13 +67,21 @@ type
     ## Called when the scroll sentinel becomes visible so the next page of
     ## commits can be appended.
     onLoadMoreCommits*: proc()
-    onSelectFile*: proc(index: int; path: string)
+    ## Row click.  ``path`` is the repository-relative file path; ``target``
+    ## is the same diff target the row's "View Diff" button dispatches
+    ## (``file:<path>`` or ``commit:<hash>:<path>``), so the host can honour
+    ## the unified-diff view mode without having to re-derive which commit the
+    ## row belonged to.  ``status`` is the row's diff status letter: the open
+    ## decision needs it (a deleted file has no source to open — see
+    ## ``VCSVM.openActionFor``), and only the row knows it, since row indices
+    ## mean different things in the changed-files list and in an expanded
+    ## commit's accordion.
+    onSelectFile*: proc(index: int; path, target, status: string)
     onToggleUnifiedDiff*: proc()
+    ## The review's trace-context selector changed (DeepReview mode only).
+    ## ``id`` is the ``VCSTraceContextRow.id`` of the chosen context.
+    onSetTraceContext*: proc(id: int)
     onRefresh*: proc()
-    onSelectHunk*: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool)
-    onCopySelectedHunks*: proc()
-    onStageSelectedHunks*: proc()
-    onClearSelectedHunks*: proc()
     onOpenFileDiff*: proc(target: string)
 
 # ---------------------------------------------------------------------------
@@ -86,13 +94,6 @@ proc statusClass*(status: string): string =
   of "D", "deleted": "vcs-status-deleted"
   of "M", "modified": "vcs-status-modified"
   else: "vcs-status-other"
-
-proc diffStatusClass*(status: string): string =
-  case status
-  of "A", "added": "deepreview-diff-status deepreview-diff-added"
-  of "D", "deleted": "deepreview-diff-status deepreview-diff-deleted"
-  of "M", "modified": "deepreview-diff-status deepreview-diff-modified"
-  else: "deepreview-diff-status"
 
 proc statusLabel*(status: string): string =
   case status
@@ -120,26 +121,6 @@ proc fileRowClass*(selected: bool): string =
 
 proc toggleButtonClass*(active: bool): string =
   if active: "vcs-toggle-button vcs-toggle-active" else: "vcs-toggle-button"
-
-proc hunkClass*(selected: bool): string =
-  if selected: "deepreview-unified-hunk hunk-selected"
-  else: "deepreview-unified-hunk"
-
-proc diffLineClass*(lineType: string): string =
-  case lineType
-  of "added": "deepreview-unified-line deepreview-unified-line-added"
-  of "removed": "deepreview-unified-line deepreview-unified-line-removed"
-  else: "deepreview-unified-line deepreview-unified-line-context"
-
-proc fileStatsText*(additions, deletions: int): string =
-  if additions == 0 and deletions == 0: ""
-  else: "+" & $additions & " -" & $deletions
-
-proc hunkHeaderText*(hunk: VCSHunkRow): string =
-  fmt"@@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@"
-
-proc hunkToolbarText*(count: int): string =
-  $count & " hunk" & (if count == 1: "" else: "s") & " selected"
 
 proc abbreviateRelTime*(t: string): string =
   ## Convert a git ``%cr`` relative-time string to a compact abbreviated form.
@@ -213,15 +194,31 @@ proc invokeToggleCommitExpand(vm: VCSVM; callbacks: VCSCallbacks;
     else:
       vm.selectedCommitIndices.val = @[index]
 
-proc invokeSelectFile(callbacks: VCSCallbacks; index: int; path: string) =
+proc invokeSelectFile(callbacks: VCSCallbacks; index: int;
+                      path, target, status: string) =
   if callbacks.onSelectFile != nil:
-    callbacks.onSelectFile(index, path)
+    callbacks.onSelectFile(index, path, target, status)
 
 proc invokeToggleUnifiedDiff(vm: VCSVM; callbacks: VCSCallbacks) =
   if callbacks.onToggleUnifiedDiff != nil:
     callbacks.onToggleUnifiedDiff()
   else:
-    vm.unifiedDiffActive.val = not vm.unifiedDiffActive.val
+    # Fallback for unit tests / the mock renderer: flip the view mode, which
+    # is what the toggle controls.  It must NOT flip `unifiedDiffActive` —
+    # that would replace the commit history with a diff, the regression
+    # reported in issue #561.
+    vm.viewMode.val =
+      if vm.viewMode.val == vmUnifiedDiff: vmOpenFile else: vmUnifiedDiff
+
+proc invokeSetTraceContext(vm: VCSVM; callbacks: VCSCallbacks; id: int) =
+  ## Follows the ``invokeToggleUnifiedDiff`` pattern: the host owns the real
+  ## effect (re-deriving the review overlay from the newly selected
+  ## recording), and the VM-level fallback keeps the control exercisable from
+  ## the MockRenderer path, where no host callback is registered.
+  if callbacks.onSetTraceContext != nil:
+    callbacks.onSetTraceContext(id)
+  else:
+    vm.setSelectedTraceContextId(id)
 
 proc invokeRefresh(callbacks: VCSCallbacks) =
   if callbacks.onRefresh != nil:
@@ -230,11 +227,6 @@ proc invokeRefresh(callbacks: VCSCallbacks) =
 proc invokeOpenFileDiff(callbacks: VCSCallbacks; target: string) =
   if callbacks.onOpenFileDiff != nil:
     callbacks.onOpenFileDiff(target)
-
-proc invokeSelectHunk(callbacks: VCSCallbacks; fileIdx, hunkIdx: int;
-                      shiftKey, ctrlKey: bool) =
-  if callbacks.onSelectHunk != nil:
-    callbacks.onSelectHunk(fileIdx, hunkIdx, shiftKey, ctrlKey)
 
 # ---------------------------------------------------------------------------
 # IntersectionObserver sentinel (JS only)
@@ -280,23 +272,6 @@ when defined(js):
   proc setInnerHtml(r: WebRenderer; node: Element; html: string) =
     node.innerHTML = cstring(html)
 
-# ---------------------------------------------------------------------------
-# Hunk-click attachment (needs native event for Shift/Ctrl detection)
-# ---------------------------------------------------------------------------
-
-proc attachHunkClick(r: MockRenderer; header: MockNode; callbacks: VCSCallbacks;
-                     fileIdx, hunkIdx: int) =
-  r.addEventListener(header, "click", proc() =
-    callbacks.invokeSelectHunk(fileIdx, hunkIdx, false, false))
-
-when defined(js):
-  proc attachHunkClick(r: WebRenderer; header: isonim_dom.Element;
-                       callbacks: VCSCallbacks; fileIdx, hunkIdx: int) =
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeSelectHunk(fileIdx, hunkIdx, ev.shiftKey(), ev.ctrlOrMetaKey())
-        ev.preventDefault())
-
 proc attachFileDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
   r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
 
@@ -312,14 +287,15 @@ when defined(js):
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
   let branchName = branch
+  let isActive = branchName == vm.currentBranch.val
+  let itemClass = if isActive: "ct-menu-item ct-menu-item--active"
+                  else: "ct-menu-item"
   ui(r):
-    tdiv(class = "vcs-branch-option",
+    tdiv(class = itemClass,
          onclick = proc() =
            callbacks.invokeCheckoutBranch(branchName)):
-      if branchName == vm.currentBranch.val:
-        span(class = "vcs-branch-active-marker"):
-          text "* "
-      text branchName
+      span(class = "ct-menu-item-label"):
+        text branchName
 
 # ---------------------------------------------------------------------------
 # Commit header click with modifier-key detection
@@ -493,14 +469,88 @@ proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
       r.appendRenderedChild(dropdown, renderBranchOption(r, vm, callbacks, branch))
   panel
 
-proc renderHeader[R](r: R; vm: VCSVM): auto =
-  ui(r):
-    tdiv(class = "vcs-branch-picker"):
+proc parseControlInt(value: string; fallback: int): int =
+  try:
+    parseInt(value)
+  except ValueError:
+    fallback
+
+proc readSelectedInt(r: MockRenderer; node: MockNode; fallback: int): int =
+  parseControlInt(r.inputValue(node), fallback)
+
+when defined(js):
+  proc selectValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+
+  proc readSelectedInt(r: WebRenderer; node: isonim_dom.Element;
+                       fallback: int): int =
+    parseControlInt($isonim_dom.Node(node).selectValue(), fallback)
+
+proc renderTraceContextOption[R](r: R; ctx: VCSTraceContextRow;
+                                 isSelected: bool): auto =
+  ## One entry of the trace-context dropdown.
+  ##
+  ## ``selected`` is applied imperatively rather than through the DSL because
+  ## an attribute is either present or absent: rendering ``selected=""`` for
+  ## the unselected options would mark every one of them selected in a real
+  ## browser.
+  let node = ui(r):
+    option(value = $ctx.id):
+      text ctx.label
+  if isSelected:
+    r.setAttribute(node, "selected", "selected")
+  node
+
+proc renderTraceContextSelector[R](r: R; vm: VCSVM;
+                                   callbacks: VCSCallbacks): auto =
+  ## The review's trace-context selector — DeepReview-GUI.md §2, "Trace
+  ## context selector → The VCS panel header, populated only in DeepReview
+  ## mode", and §6: "The selected trace context can be changed without leaving
+  ## the review, from the selector in the VCS panel header".
+  ##
+  ## The ``deepreview-trace-selector`` / ``deepreview-trace-select`` classes
+  ## are the panel-agnostic rules from
+  ## ``styles/components/deepreview.styl``; they are *adopted* here rather
+  ## than duplicated under a new name (the VCS panel already renders the
+  ## ``deepreview-unified-*`` diff markup the same way).  The ``vcs-review-*``
+  ## classes carry only this panel's own layout, and give tests a selector
+  ## that cannot also match the standalone panel's copy of the control while
+  ## that panel still exists.
+  var traceSelect: typeof(r.createElement("select"))
+  let selectedId = vm.selectedTraceContextId.val
+  let node = ui(r):
+    tdiv(class = "deepreview-trace-selector vcs-review-trace-selector"):
+      select(ref = traceSelect,
+             class = "deepreview-trace-select vcs-review-trace-select",
+             onchange = proc() =
+               vm.invokeSetTraceContext(
+                 callbacks, readSelectedInt(r, traceSelect, selectedId)))
+  for ctx in vm.traceContexts.val:
+    r.appendRenderedChild(
+      traceSelect, renderTraceContextOption(r, ctx, ctx.id == selectedId))
+  node
+
+proc renderHeader[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+  ## The panel header.  In review mode it also carries the two review-only
+  ## elements DeepReview-GUI.md §2 assigns to it — the trace-context selector
+  ## and the session stats.  Both are gated on ``deepReviewMode`` so a normal
+  ## version-control session renders exactly what it rendered before: no
+  ## selector, no stats row, no extra vertical space.
+  var picker: typeof(r.createElement("div"))
+  let node = ui(r):
+    tdiv(ref = picker, class = "vcs-branch-picker"):
       tdiv(class = "vcs-branch-current"):
         span(class = "vcs-branch-icon"):
           text vm.headerIcon.val
         span(class = "vcs-branch-name"):
           text vm.headerTitle.val
+  if vm.hasTraceContextChoice():
+    r.appendRenderedChild(picker, renderTraceContextSelector(r, vm, callbacks))
+  if vm.deepReviewMode.val and vm.statsText.val.len > 0:
+    let stats = ui(r):
+      span(class = "deepreview-stats vcs-review-stats"):
+        text vm.statsText.val
+    r.appendRenderedChild(picker, stats)
+  node
 
 proc renderNoRepo[R](r: R; vm: VCSVM): auto =
   ui(r):
@@ -658,11 +708,14 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
   ## independently captures its own index and path.
   let rowIndex = index
   let rowPath = file.path
+  let rowStatus = file.status
+  let rowTarget = "commit:" & commitHash & ":" & rowPath
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
     tdiv(ref = rowNode, class = "vcs-accordion-file",
-         onclick = proc() = callbacks.invokeSelectFile(rowIndex, rowPath))
+         onclick = proc() =
+           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus))
 
   r.appendRenderedChild(rowNode, renderLaneSpacer(r, continuationCells))
 
@@ -683,7 +736,7 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
         tdiv(class = "custom-tooltip"):
           text "View Diff"
   r.appendRenderedChild(rowNode, content)
-  r.attachFileDiffClick(diffBtn, callbacks, "commit:" & commitHash & ":" & rowPath)
+  r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
 
   row
 
@@ -844,11 +897,13 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   ## proc parameters — a guaranteed-fresh binding per call.
   let rowIndex = index
   let rowPath = file.path
+  let rowStatus = file.status
+  let rowTarget = "file:" & rowPath
   var diffBtn: typeof(r.createElement("span"))
   let row = ui(r):
     tdiv(class = fileRowClass(file.selected),
          onclick = proc() =
-           callbacks.invokeSelectFile(rowIndex, rowPath)):
+           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus)):
       span(class = "vcs-file-status " & statusClass(file.status)):
         text statusLabel(file.status)
       span(class = "vcs-file-name"):
@@ -867,7 +922,7 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
       span(ref = diffBtn, class = "vcs-file-diff-btn"):
         tdiv(class = "custom-tooltip"):
           text "View Diff"
-  r.attachFileDiffClick(diffBtn, callbacks, "file:" & rowPath)
+  r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
   row
 
 proc renderChangedFiles[R](r: R; vm: VCSVM;
@@ -890,115 +945,30 @@ proc renderChangedFiles[R](r: R; vm: VCSVM;
       r.appendRenderedChild(list, renderChangedFileRow(r, callbacks, i, file))
   panel
 
-# ---------------------------------------------------------------------------
-# Unified diff (hunk editor)
-# ---------------------------------------------------------------------------
-
-proc renderHunkToolbar[R](r: R; vm: VCSVM;
-                          callbacks: VCSCallbacks): auto =
-  ui(r):
-    tdiv(class = "hunk-toolbar"):
-      span(class = "hunk-toolbar-count"):
-        text hunkToolbarText(vm.selectedHunkCount.val)
-      tdiv(class = "hunk-toolbar-actions"):
-        tdiv(class = "hunk-toolbar-button",
-             onclick = proc() =
-               if callbacks.onCopySelectedHunks != nil:
-                 callbacks.onCopySelectedHunks()):
-          text (if vm.hunkCopyFeedback.val: "Copied!" else: "Copy as patch")
-        tdiv(class = "hunk-toolbar-button",
-             onclick = proc() =
-               if callbacks.onStageSelectedHunks != nil:
-                 callbacks.onStageSelectedHunks()):
-          text "Stage hunks"
-        tdiv(class = "hunk-toolbar-button hunk-toolbar-button-subtle",
-             onclick = proc() =
-               if callbacks.onClearSelectedHunks != nil:
-                 callbacks.onClearSelectedHunks()):
-          text "Clear"
-
-proc renderDiffLine[R](r: R; line: VCSDiffLineRow): auto =
-  let oldText = if line.oldLine > 0: $line.oldLine else: ""
-  let newText = if line.newLine > 0: $line.newLine else: ""
-  let prefix = case line.lineType
-    of "added": "+"
-    of "removed": "-"
-    else: " "
-  ui(r):
-    tdiv(class = diffLineClass(line.lineType)):
-      span(class = "deepreview-unified-gutter-old"):
-        text oldText
-      span(class = "deepreview-unified-gutter-new"):
-        text newText
-      span(class = "deepreview-unified-line-prefix"):
-        text prefix
-      span(class = "deepreview-unified-line-content"):
-        text line.content
-
-proc renderDiffHunk[R](r: R; fileIndex, hunkIdx: int; hunk: VCSHunkRow;
-                       callbacks: VCSCallbacks): auto =
-  var header: typeof(r.createElement("div"))
+proc renderDiffToggle[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
+                         showRefresh: bool): auto =
+  ## The view-mode switch described in VCS-Panel.md ("View mode toggle").
+  ## Active = clicking a file opens a unified diff tab; inactive = it opens the
+  ## file itself.  It changes only what a click *does*, never what this panel
+  ## renders — the commit history stays put either way.
+  ##
+  ## ``showRefresh`` is false in DeepReview mode: VCS-Panel.md, "DeepReview
+  ## Mode" — "File watching: Disabled — the changeset is immutable", so
+  ## offering a manual refresh of a static changeset would be a lie.
+  var row: typeof(r.createElement("div"))
   let node = ui(r):
-    tdiv(class = hunkClass(hunk.selected)):
-      tdiv(ref = header,
-           class = "deepreview-unified-hunk-header hunk-header-selectable"):
-        if hunk.selected:
-          span(class = "hunk-selection-indicator"):
-            text "v"
-        text hunkHeaderText(hunk)
-  for line in hunk.lines:
-    r.appendRenderedChild(node, renderDiffLine(r, line))
-  r.attachHunkClick(header, callbacks, fileIndex, hunkIdx)
-  node
-
-proc renderDiffFile[R](r: R; file: VCSDiffFileRow;
-                       callbacks: VCSCallbacks): auto =
-  let fileIndex = file.fileIndex
-  let stats = fileStatsText(file.additions, file.deletions)
-  let node = ui(r):
-    tdiv(class = "deepreview-unified-file",
-         `data-file-index` = $fileIndex):
-      tdiv(class = "deepreview-unified-file-header"):
-        span(class = diffStatusClass(file.status)):
-          text statusLabel(file.status)
-        span(class = "deepreview-unified-file-path"):
-          text file.path
-        span(class = "deepreview-unified-file-stats"):
-          text stats
-  for hunkIdx, hunk in file.hunks:
-    r.appendRenderedChild(node, renderDiffHunk(r, fileIndex, hunkIdx, hunk,
-                                               callbacks))
-  node
-
-proc renderUnifiedDiff*[R](r: R; vm: VCSVM;
-                          callbacks: VCSCallbacks): auto =
-  let panel = ui(r):
-    tdiv(class = "deepreview-unified-diff")
-  if vm.hunkToolbarVisible.val and vm.selectedHunkCount.val > 0:
-    r.appendRenderedChild(panel, renderHunkToolbar(r, vm, callbacks))
-  if vm.diffFiles.val.len == 0:
-    let empty = ui(r):
-      tdiv(class = "deepreview-unified-empty"):
-        text VCSNoDiffText
-    r.appendRenderedChild(panel, empty)
-  else:
-    for file in vm.diffFiles.val:
-      r.appendRenderedChild(panel, renderDiffFile(r, file, callbacks))
-  panel
-
-proc renderDiffToggle[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
-  ui(r):
-    tdiv(class = "vcs-diff-toggle"):
-      tdiv(class = toggleButtonClass(vm.unifiedDiffActive.val),
+    tdiv(ref = row, class = "vcs-diff-toggle"):
+      tdiv(class = toggleButtonClass(vm.viewMode.val == vmUnifiedDiff),
            onclick = proc() =
              vm.invokeToggleUnifiedDiff(callbacks)):
         text "Unified Diff"
-
-proc renderRefresh[R](r: R; callbacks: VCSCallbacks): auto =
-  ui(r):
-    tdiv(class = "vcs-refresh",
-         onclick = proc() = callbacks.invokeRefresh()):
-      text "Refresh"
+  if showRefresh:
+    let refresh = ui(r):
+      tdiv(class = "vcs-refresh",
+           onclick = proc() = callbacks.invokeRefresh()):
+        text "Refresh"
+    r.appendRenderedChild(row, refresh)
+  node
 
 # ---------------------------------------------------------------------------
 # Scroll-position preservation helpers
@@ -1071,17 +1041,22 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
     saveCommitListScroll(body)
     r.clearChildren(body)
     if vm.deepReviewMode.val:
-      r.appendRenderedChild(body, renderHeader(r, vm))
+      r.appendRenderedChild(body, renderHeader(r, vm, callbacks))
+      # The reviewer must be able to choose between the two representations
+      # DeepReview-GUI.md §1 promises (unified diff / full file); the switch
+      # is the VCS panel's, per §2 "Mode switcher → the VCS panel's view mode
+      # toggle".  Refresh is suppressed: the changeset is immutable.
+      r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks,
+                                                   showRefresh = false))
       r.appendRenderedChild(body, renderChangedFiles(r, vm, callbacks))
     elif not vm.isGitRepo.val:
       r.appendRenderedChild(body, renderNoRepo(r, vm))
     else:
       r.appendRenderedChild(body, renderBranchPicker(r, vm, callbacks))
-      if vm.unifiedDiffActive.val:
-        r.appendRenderedChild(body, renderUnifiedDiff(r, vm, callbacks))
-      else:
-        # Commit graph with accordion expand/collapse and infinite-scroll.
-        r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
+      r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks,
+                                                   showRefresh = true))
+      # Commit graph with accordion expand/collapse and infinite-scroll.
+      r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
     restoreCommitListScroll(body)
 
   panel

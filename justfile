@@ -4,6 +4,16 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Assert that `just build` is `just build-once` plus watchers, and nothing
+# else. Executes BOTH scripts under a PATH of recording stubs (tup, webpack,
+# livereload, repro, runquotad, nix, uname) and compares the resulting command
+# traces: same host branch, same tup variant, same steps in the same order,
+# and — the assertion that catches issue #599 — no webpack invocation ordered
+# before the first tup/repro invocation. Builds nothing, needs no toolchain,
+# runs in seconds. See the header of scripts/test-build-alignment.sh.
+test-build-alignment:
+  bash scripts/test-build-alignment.sh
+
 # Build all sibling-recorder binaries that the GUI tests reach for.
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
@@ -589,6 +599,7 @@ test-ct-print:
 test:
   #!/usr/bin/env bash
   set -e
+  just test-build-alignment
   just test-rust
   just test-nimsuggest
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
@@ -663,6 +674,8 @@ test-visual-replay-gate:
   bash ci/test/visual-replay-gate.sh
 
 # Run the M16 ct-test provider matrix and release-gate checks.
+# CI runs this script in the required `ct-test-release-gate` job
+# (.github/workflows/codetracer.yml); it needs no recorder siblings.
 test-m16-release-gate:
   bash ci/test/m16-release-gate.sh
 
@@ -675,6 +688,9 @@ test-m16-release-gate:
 # already-built recorders. Run from inside the dev shell (it provides nim plus
 # the gtest/catch2/cmake/ninja toolchain and CMAKE_PREFIX_PATH / CT_TEST_C{C,XX}
 # the C/C++ providers need). See ci/test/ct-providers.sh.
+# CI runs this script in the required `ct-test-providers` job
+# (.github/workflows/codetracer.yml), which checks the recorder siblings out
+# via setup-dev-env first.
 test-ct-providers:
   bash ci/test/ct-providers.sh
 
@@ -852,8 +868,20 @@ reset-config:
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_config.yaml ~/.config/codetracer/.config.yaml
 
+# Clear every persisted layout artifact and reseed the bundled default.
+#
+# The auto-hide strip is a SECOND persisted file (#608 gave it a real handler
+# and a restore path), and `default_layout.json.broken` is the quarantined copy
+# a failed repair leaves behind.  Both must be cleared here — a `reset-layout`
+# that leaves a stale auto-hide state behind would restore panels the reseeded
+# layout knows nothing about, which is the class of inconsistency #608 was
+# reported for in the first place.
 reset-layout:
-  rm --force  ~/.config/codetracer/default_layout.json && \
+  rm --force  ~/.config/codetracer/default_layout.json \
+              ~/.config/codetracer/default_edit_layout.json \
+              ~/.config/codetracer/default_layout.json.broken \
+              ~/.config/codetracer/default_edit_layout.json.broken \
+              ~/.config/codetracer/auto_hide_state.json && \
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_layout.json ~/.config/codetracer/default_layout.json
 
@@ -998,11 +1026,20 @@ test-frontend-js:
   #!/usr/bin/env bash
   set -e
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test"' EXIT
+  scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
   node "$frontend_lang_test"
+  echo ""
+  echo "Running scratchpad add-to-scratchpad dispatch tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$scratchpad_dispatch_test" js src/frontend/tests/scratchpad_add_dispatch_test.nim
+  # `types.nim` installs a `window.data` debugging hook at import time; node
+  # has no `window`, so alias it to the global object before loading the
+  # bundle.  Nothing else in this test needs a DOM.
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$scratchpad_dispatch_test"
   echo ""
   echo "Running Nim language definition tests..."
   node src/frontend/tests/nimLanguage.test.mjs
@@ -1281,7 +1318,7 @@ test-origin-dap:
 # tree and replay it.
 #
 # These three fixtures — the imported-memory calldata demo (spec §3.3/§3.4),
-# the M52 NaN-payload demo, and the M45 four-module parity corpus — each
+# the NaN-payload demo, and the four-module parity corpus — each
 # ship a `verify.sh` that was reachable only by knowing it existed. Nothing
 # ran them, which is how one of them came to pass vacuously: its negative
 # control edited the host state in the `boundary_state.json` sidecar only,
@@ -2220,16 +2257,47 @@ test-vm-native: vm-test-prereqs
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-native-$name"
     echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
+    # Compile and run as SEPARATE steps.
+    #
+    # This used to be a single `nim c -r`, which conflated three
+    # outcomes into one bucket. `welcome_screen_vm_test` compiles
+    # perfectly and then dies at process start with
+    #
+    #     could not load: libsqlite3.so(|.0)
+    #
+    # because the test dlopen's sqlite through db_connector. The old
+    # reporting called that a "COMPILE ERROR" and then printed only
+    # lines matching `Error:` — and that diagnostic does not match, so
+    # the one line naming the missing library was thrown away and all
+    # anybody saw was `execution of an external program failed`. An
+    # environmental gap must name what is missing; this one hid it.
+    #
+    # Splitting the steps also lets the run inherit CT_LD_LIBRARY_PATH
+    # (the dev shell's sqlite/pcre/glib/openssl/zstd set) the same way
+    # `test-bpf-native-integration` already does, WITHOUT putting those
+    # libraries in front of the Nim compiler's own loader path.
+    if ! compile_output=$(nim c --hints:off \
       --path:src/frontend/viewmodel \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1); then
+      echo "COMPILE ERROR"
+      echo "$compile_output" | grep 'Error:' | head -2 | sed 's/^/    /'
+      failed=$((failed + 1))
+      continue
+    fi
+    ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
+    output=$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      "$cache/$name" 2>&1) || true
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR"
-      echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'
+      # It built, so this is not a compile error: the binary could not
+      # run, or ran and reported nothing. Either way show its whole
+      # output — the reason is in there, and filtering is what lost it
+      # last time.
+      echo "DID NOT RUN (compiled, but produced no test results)"
+      echo "$output" | head -20 | sed 's/^/    /'
       failed=$((failed + 1))
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"
@@ -2409,6 +2477,63 @@ test-ct-trace-units:
   # or suites that compile but assert nothing, must not read as green.
   if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
     echo "ERROR: no ct trace-layer test cases ran"
+    exit 1
+  fi
+  [ "$failed" -eq 0 ]
+
+# Compile + run the `ct upload` MCR-enrichment unit suites
+# (src/ct/online_sharing).
+#
+# Registered by NAME rather than by a directory glob on purpose: the two other
+# `*_test.nim` files in that directory are a wire-format suite and a live
+# upload/download/delete round-trip against the sharing service, and the latter
+# says so in its own header ("not part of any automated test runner").  Globbing
+# the directory would drag a network test into a unit lane.
+#
+# Before this recipe existed, `src/ct/online_sharing/test_mcr_enrichment.nim`
+# was run by nothing at all — 34 assertions that could not fail a build.  The
+# member-check suite added alongside it pins that `ct upload` does not replace
+# the user's recording with a lossier export just because the exporter exited 0
+# (CTFS-Binary-Format.md §5d).
+test-mcr-enrichment-units:
+  #!/usr/bin/env bash
+  set -e
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-mcr-enrichment-units.log) 2>&1
+  echo "=== ct upload MCR-enrichment unit tests ==="
+  failed=0
+  passed=0
+  total_oks=0
+  for f in src/ct/online_sharing/test_mcr_enrichment.nim \
+           src/ct/online_sharing/mcr_enrichment_member_check_test.nim; do
+    name=$(basename "$f" .nim)
+    cache="/tmp/ct-nim-cache/mcr-enrichment-$name"
+    echo -n "  $f ... "
+    output=$(nim c -r --hints:off \
+      --nimcache:"$cache" \
+      -o:"$cache/$name" \
+      "$f" 2>&1) || true
+    oks=$(echo "$output" | grep -c '\[OK\]' || true)
+    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
+    total_oks=$((total_oks + oks))
+    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
+      echo "COMPILE ERROR"
+      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ]; then
+      echo "PARTIAL ($oks OK, $fails FAILED)"
+      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    else
+      echo "OK ($oks case(s))"
+      passed=$((passed + 1))
+    fi
+  done
+  echo ""
+  echo "mcr enrichment units: $passed file(s) passed, $failed failed, $total_oks case(s)"
+  # Guard against a vacuous pass, the same way test-ct-trace-units does.
+  if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
+    echo "ERROR: no MCR-enrichment test cases ran"
     exit 1
   fi
   [ "$failed" -eq 0 ]

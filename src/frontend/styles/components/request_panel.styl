@@ -3,127 +3,35 @@
 // All colours use design-system tokens from generated/mapped.styl.
 
 .request-panel
-  font-family: "FiraCode", monospace
   height: 100%
   display: flex
   flex-direction: column
   overflow: hidden
   background: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body-subtle
-  font-size: 12px
+  font-size: 0.75rem !important
 
 // ---------------------------------------------------------------------------
-// Title bar: "Requests   N requests   [Clear]"
-// ---------------------------------------------------------------------------
-
-.request-panel-title-bar
-  display: flex
-  align-items: center
-  gap: 8px
-  padding: 8px 12px
-  flex-shrink: 0
-  background: colors-ui-surface-base-panel
-  border-bottom: 1px solid colors-ui-border-secondary
-
-.request-panel-title
-  font-size: 14px
-  font-weight: 600
-  color: colors-ui-text-primary-body
-
-// Count badge "N requests" next to the title
-.request-panel-count-badge
-  font-size: 12px
-  color: colors-ui-text-primary-label
-
-// "Clear" link at the right edge of the title bar
-.request-panel-clear-btn
-  margin-left: auto
-  font-size: 12px
-  color: colors-ui-text-primary-label
-  cursor: pointer
-  user-select: none
-
-  &:hover
-    color: colors-ui-text-primary-body
-
-// ---------------------------------------------------------------------------
-// Filter bar: [Method: All ▼]  [Status: All ▼]  [🔍 Filter by URL...]  □ XHR/Fetch only
+// Filter bar: [🔍 Find by URL...]  [Method: All ▼]  [Status: All ▼]
 // ---------------------------------------------------------------------------
 
 .request-panel-filters
   display: flex
   align-items: center
-  gap: 8px
-  padding: 6px 12px
+  gap: 0.667em
+  padding: 0.5em 1em
   flex-shrink: 0
   background: colors-ui-surface-base-panel
   border-bottom: 1px solid colors-ui-border-secondary
 
-// Pill-style filter dropdowns ("Method: All ▼", "Status: All ▼")
-.request-filter-select
-  background: colors-ui-surface-input-default
-  color: colors-ui-text-primary-body
-  border: 1px solid colors-ui-border-secondary
-  border-radius: 4px
-  height: 28px
-  font-size: 12px
-  font-family: inherit
-  padding: 0 24px 0 8px
-  cursor: pointer
-  outline: none
-  appearance: none
-  -webkit-appearance: none
-  // Inline chevron via a data-URI SVG so no extra icon file is needed
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23bbbdc0'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-position: right 8px center
-  min-width: 110px
-
-  &:focus
-    border-color: colors-ui-border-action
-
-// URL search input with magnifying-glass icon
+// URL search input — uses design-system input tokens via ct-input-panel + ct-input-search-image
+// Override height to match filter bar; font-family stays monospace for URL readability.
 .request-filter-search
   flex: 1
-  background: colors-ui-surface-input-default
-  color: colors-ui-text-primary-body
-  border: 1px solid colors-ui-border-secondary
-  border-radius: 4px
-  height: 28px
-  font-size: 12px
-  font-family: inherit
-  // Left-pad for the search icon; the icon is painted via background-image
-  padding: 0 8px 0 28px
-  outline: none
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 13 13' fill='none'%3E%3Ccircle cx='5.5' cy='5.5' r='4' stroke='%23818181' stroke-width='1.3'/%3E%3Cline x1='8.6' y1='8.6' x2='11.5' y2='11.5' stroke='%23818181' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-position: 8px center
+  font-family: "SpaceGrotesk" !important
+  height: 1.75em
+  max-height: 1.75em
 
-  &::placeholder
-    color: colors-ui-text-primary-disabled
-    opacity: 0.7
-
-  &:focus
-    border-color: colors-ui-border-action
-
-// "□ XHR/Fetch only" toggle at the right end of the filter bar
-.request-xhr-only
-  display: flex
-  align-items: center
-  gap: 5px
-  margin-left: auto
-  cursor: pointer
-  white-space: nowrap
-  color: colors-ui-text-primary-body
-  font-size: 12px
-  user-select: none
-
-  input[type="checkbox"]
-    width: 13px
-    height: 13px
-    margin: 0
-    cursor: pointer
-    accent-color: colors-ui-surface-action-primary
 
 // ---------------------------------------------------------------------------
 // Table header
@@ -132,8 +40,8 @@
 .request-table-header
   display: flex
   align-items: center
-  padding: 5px 12px
-  font-size: 11px
+  padding: 0.4167em 1em
+  font-size: 0.9167em
   font-weight: 500
   letter-spacing: 0.06em
   text-transform: uppercase
@@ -151,6 +59,7 @@
   flex: 1
   overflow-y: auto
   overflow-x: hidden
+  min-height: 0
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -159,8 +68,7 @@
 .request-row
   display: flex
   align-items: center
-  padding: 6px 12px
-  font-size: 12px
+  padding: 0.5em 1em
   cursor: pointer
   border-bottom: 1px solid colors-ui-border-secondary
   color: colors-ui-text-primary-body-subtle
@@ -176,41 +84,41 @@
 // ---------------------------------------------------------------------------
 
 .request-col-id
-  min-width: 28px
-  max-width: 28px
+  min-width: 2.3333em
+  max-width: 2.3333em
   color: colors-ui-text-primary-label
   text-align: right
-  padding-right: 12px
+  padding-right: 1em
 
 .request-col-method
-  min-width: 88px
-  max-width: 88px
+  min-width: 7.3333em
+  max-width: 7.3333em
 
 .request-col-url
   flex: 1
   overflow: hidden
   text-overflow: ellipsis
   white-space: nowrap
-  padding: 0 12px
+  padding: 0 1em
 
 .request-col-status
-  min-width: 80px
-  max-width: 80px
+  min-width: 6.6667em
+  max-width: 6.6667em
   display: flex
   justify-content: flex-end
 
 .request-col-duration
-  min-width: 72px
-  max-width: 72px
+  min-width: 6em
+  max-width: 6em
   text-align: right
   color: colors-ui-text-primary-label
 
 .request-col-size
-  min-width: 64px
-  max-width: 64px
+  min-width: 5.3333em
+  max-width: 5.3333em
   text-align: right
   color: colors-ui-text-primary-label
-  padding-right: 2px
+  padding-right: 0.1667em
 
 // ---------------------------------------------------------------------------
 // Method badges — coloured pill for each HTTP verb
@@ -219,13 +127,13 @@
 
 .request-method-badge
   display: inline-block
-  font-size: 11px
+  font-size: 0.9167em
   font-weight: 700
-  font-family: inherit
-  padding: 2px 6px
-  border-radius: 3px
+  font-family: "SpaceGrotesk"
+  padding: 0.25em 0.8333em
+  border-radius: 0.3333em
   text-transform: uppercase
-  letter-spacing: 0.02em
+  letter-spacing: 0.03em
 
 .request-method-get
   background: colors-ui-surface-alert-information
@@ -250,7 +158,7 @@
   color: colors-ui-text-primary-label
 
 // ---------------------------------------------------------------------------
-// Status codes — coloured dot + coloured number
+// Status codes — coloured number only (no bullet dot)
 // ---------------------------------------------------------------------------
 
 .request-status-success,
@@ -258,43 +166,197 @@
 .request-status-client-error,
 .request-status-server-error,
 .request-status-unknown
-  display: inline-flex
-  align-items: center
-  gap: 4px
   font-weight: 600
   white-space: nowrap
-
-  // Filled dot rendered as a pseudo-element so no extra DOM node is required
-  &::before
-    content: "●"
-    font-size: 8px
-    line-height: 1
 
 // 2xx — green
 .request-status-success
   color: colors-ui-text-success-primary
-  &::before
-    color: colors-ui-text-success-primary
 
 // 3xx — blue (information)
 .request-status-redirect
   color: colors-ui-text-information-primary
-  &::before
-    color: colors-ui-text-information-primary
 
 // 4xx — orange (warning)
 .request-status-client-error
   color: colors-ui-text-warning-primary
-  &::before
-    color: colors-ui-text-warning-primary
 
 // 5xx — red (error)
 .request-status-server-error
   color: colors-ui-text-error-primary
-  &::before
-    color: colors-ui-text-error-primary
 
 .request-status-unknown
   color: colors-ui-text-primary-label
-  &::before
+
+// ---------------------------------------------------------------------------
+// Detail panel host — always in DOM; collapses to zero when empty.
+// flex-basis is set imperatively via inline style by the resize JS logic
+// (initial value 50%, then maintained as a percentage so it scales with
+// component resizes).
+// ---------------------------------------------------------------------------
+
+.request-detail-host
+  flex-shrink: 0
+  min-height: 0
+
+// ---------------------------------------------------------------------------
+// Resize handle — draggable strip at the top of the detail panel.
+// Height is set in em so it scales with the component font-size.
+// ---------------------------------------------------------------------------
+
+.request-detail-resize-handle
+  flex-shrink: 0
+  height: 0.3333em
+  cursor: ns-resize
+  background: transparent
+
+
+// ---------------------------------------------------------------------------
+// Detail panel — shown below the table when a row is selected
+// ---------------------------------------------------------------------------
+
+.request-detail
+  height: 100%
+  display: flex
+  flex-direction: column
+  border-top: 2px solid colors-ui-border-secondary
+  overflow: hidden
+  background: colors-ui-surface-base-panel
+
+// ---------------------------------------------------------------------------
+// Detail header — method badge | URL | status text | Handler button
+// ---------------------------------------------------------------------------
+
+.request-detail-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding: 0.8333em 1em
+  background: colors-ui-surface-primary-default
+  flex-shrink: 0
+  gap: 1em
+
+.request-detail-header-left
+  display: flex
+  align-items: center
+  gap: 0.8333em
+  min-width: 0
+  overflow: hidden
+
+.request-detail-header-url
+  font-family: "FiraCode", monospace
+  font-size: 1.0833em
+  color: colors-ui-text-primary-body
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+.request-detail-header-status
+  font-size: 1.0833em
+  font-weight: 600
+  white-space: nowrap
+
+  &.request-status-success
+    color: colors-ui-text-success-primary
+
+  &.request-status-redirect
+    color: colors-ui-text-information-primary
+
+  &.request-status-client-error
+    color: colors-ui-text-warning-primary
+
+  &.request-status-server-error
+    color: colors-ui-text-error-primary
+
+  &.request-status-unknown
     color: colors-ui-text-primary-label
+
+.request-detail-header-right
+  flex-shrink: 0
+
+// Override the generic `button { flex: 0 0 1.75em }` rule so the Handler
+// button auto-sizes to its text content instead of being 1.75em wide.
+button.request-detail-handler-btn
+  flex: 0 0 auto !important
+  white-space: nowrap
+
+// ---------------------------------------------------------------------------
+// Detail tab bar
+// ---------------------------------------------------------------------------
+
+.request-detail-tabs
+  display: flex
+  align-items: flex-end
+  padding: 0 0.3333em
+  background: colors-ui-surface-base-panel
+  border-bottom: 1px solid colors-ui-border-secondary
+  flex-shrink: 0
+
+.request-detail-tab
+  padding: 0.5em 1em
+  font-family: "SpaceGrotesk"
+  color: colors-ui-text-primary-label
+  cursor: pointer
+  border-bottom: 2px solid transparent
+  user-select: none
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+.request-detail-tab--active
+  color: colors-ui-text-primary-body
+  border-bottom-color: colors-ui-surface-action-primary
+
+// ---------------------------------------------------------------------------
+// Detail content area
+// ---------------------------------------------------------------------------
+
+.request-detail-content
+  flex: 1
+  overflow-y: auto
+  overflow-x: hidden
+  padding: 1em
+
+.request-detail-section-title
+  font-size: 0.9167em
+  font-weight: 600
+  letter-spacing: 0.08em
+  text-transform: uppercase
+  color: colors-ui-text-primary-label
+  margin-bottom: 0.6667em
+
+.request-detail-row
+  display: flex
+  gap: 1.3333em
+  padding: 0.3333em 0
+
+.request-detail-key
+  color: colors-ui-text-information-primary
+  font-family: "FiraCode", monospace
+  min-width: 10em
+
+.request-detail-value
+  color: colors-ui-text-primary-body
+
+.request-detail-placeholder
+  color: colors-ui-text-primary-label
+  padding: 0.3333em 0
+
+// ---------------------------------------------------------------------------
+// Timing tab
+// ---------------------------------------------------------------------------
+
+.request-timing-row
+  display: flex
+  align-items: center
+  gap: 0.6667em
+  padding: 0.25em 0
+
+.request-timing-label
+  min-width: 6.6667em
+  color: colors-ui-text-primary-label
+
+.request-timing-value
+  color: colors-ui-text-primary-body
+  text-align: right
+  min-width: 4em

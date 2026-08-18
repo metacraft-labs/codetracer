@@ -852,7 +852,7 @@ impl CtfsReader {
     /// past bytes the container actually carries, is a
     /// [`CtfsError::Corrupt`] — never a short or zero-padded result.
     pub fn read_file_range(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>, CtfsError> {
-        let got = self.read_file_range_available(name, offset, len)?;
+        let got = self.read_range_inner(name, offset, len, /* whole_blocks_only */ true)?;
         if got.len() as u64 != len {
             return Err(CtfsError::Corrupt(format!(
                 "file '{name}': range [{offset}, {}) is not fully backed ({} of {len} bytes present)",
@@ -885,6 +885,45 @@ impl CtfsReader {
     /// record) is the caller's job — see
     /// [`crate::remote_request_spans`], which resolves it at chunk granularity.
     pub fn read_file_range_available(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>, CtfsError> {
+        self.read_range_inner(name, offset, len, /* whole_blocks_only */ false)
+    }
+
+    /// The one range-read implementation behind both the strict and the
+    /// tolerant entry point above. `whole_blocks_only` is the difference, and
+    /// it is the whole of `CTFS-Binary-Format.md` §5d's reader bound.
+    ///
+    /// # Why the two callers want different bounds
+    ///
+    /// §5d says a container's addressable blocks are the WHOLE blocks it
+    /// carries: `floor(length / block_size)`, never rounded up. Bytes past the
+    /// last whole block are the fragment a crash inside an append's tail write
+    /// leaves, or the block a live producer has not finished, and a data block
+    /// resolved there must be an error rather than content. The other two
+    /// readers of this format in the workspace enforce exactly that (the Go
+    /// reader's `resolveDataBlock`, the Nim `readInternalFile`), and this
+    /// reader did not until `whole_blocks_only` was added: on a truncated
+    /// container it read a stream's last, short data block straight out of the
+    /// partial region and reported success, so the three implementations gave
+    /// different answers about the same bytes.
+    ///
+    /// But bounding is only right for the reader that is claiming the range is
+    /// *intact*. The tolerant reader exists precisely to serve the longest
+    /// backed prefix of a container whose tail has not landed yet, and its
+    /// boundary is deliberately BYTE-granular (see its doc comment): a 2 KB
+    /// stream living inside a half-uploaded 4 KB block still yields its landed
+    /// prefix, which a whole-block rule would throw away. It never claims the
+    /// range is complete — the caller is told exactly how many bytes are real
+    /// — so it is not the reader §5d's rule is about.
+    ///
+    /// So: the strict path refuses a block outside the container's whole
+    /// blocks; the tolerant path stops there and reports the prefix.
+    fn read_range_inner(
+        &mut self,
+        name: &str,
+        offset: u64,
+        len: u64,
+        whole_blocks_only: bool,
+    ) -> Result<Vec<u8>, CtfsError> {
         let entry = self
             .files
             .get(name)
@@ -918,11 +957,25 @@ impl CtfsReader {
         for block_index in first_block..=last_block {
             let logical = usize::try_from(block_index)
                 .map_err(|_| CtfsError::Corrupt(format!("file '{name}': block index does not fit in usize")))?;
-            let data_block_num = self.resolve_block(entry.map_block, logical)?;
+            let data_block_num = self.resolve_block(entry.map_block, logical, whole_blocks_only, name)?;
             if data_block_num == 0 {
                 return Err(CtfsError::Corrupt(format!(
                     "file '{name}': unallocated block at index {logical}"
                 )));
+            }
+            // §5d's bound, applied to the DATA block — the path that is easy to
+            // miss, because the last block's slice is clamped to the requested
+            // range and so a short read out of the partial region succeeds.
+            if whole_blocks_only {
+                let whole_blocks = self.source.current_size() / block_size;
+                if data_block_num >= whole_blocks {
+                    return Err(CtfsError::Corrupt(format!(
+                        "file '{name}': data block {logical} is container block \
+                         {data_block_num}, which is outside the {whole_blocks} whole \
+                         {block_size}-byte blocks the container carries; it is truncated \
+                         or its tail write was interrupted"
+                    )));
+                }
             }
 
             // The slice of THIS block that intersects the requested range.
@@ -987,7 +1040,32 @@ impl CtfsReader {
     /// tempted to "patch around" a similar error here by treating zero
     /// pointers as data blocks, because that would silently corrupt reads
     /// of properly-written containers.
-    fn resolve_block(&self, root_map_block: u64, logical_index: usize) -> Result<u64, CtfsError> {
+    ///
+    /// # The §5d bound on the MAPPING blocks
+    ///
+    /// The strict path first gained its bound on the **data** block and stopped
+    /// there, so §5d recorded this reader as "the same bound applied in two of
+    /// three places": a mapping block sitting in the partial region was still
+    /// readable here, because `read_mapping_entry` only checks that the 8 bytes
+    /// it wants are inside `current_size()`. The Nim and Go readers refuse that,
+    /// so the implementations still disagreed about a file they now both accept.
+    ///
+    /// With the current writers' layout a mapping block is allocated after the
+    /// data blocks it covers, so this is an agreement and hardening gap rather
+    /// than a demonstrated wrong-bytes path — but a bound that holds on two of
+    /// three paths is not the bound §5d specifies, and the missing third is
+    /// exactly how the data-block gap survived the first sweep.
+    ///
+    /// Gated on `whole_blocks_only` for the same reason the data-block check is:
+    /// the tolerant reader deliberately keeps a byte-granular boundary and never
+    /// claims a range is complete.
+    fn resolve_block(
+        &self,
+        root_map_block: u64,
+        logical_index: usize,
+        whole_blocks_only: bool,
+        name: &str,
+    ) -> Result<u64, CtfsError> {
         let direct_entries = self.entries_per_block - 1; // Last entry is the indirect pointer
 
         // Determine which level the logical_index falls into and compute
@@ -1017,6 +1095,11 @@ impl CtfsReader {
         // (last entry) at each intermediate level.
         let mut current_block = root_map_block;
 
+        // §5d path 1 of 3: the entry's mapping root.
+        if whole_blocks_only {
+            self.check_block_in_whole_blocks(current_block, name, "mapping root block")?;
+        }
+
         // Follow indirect pointers to reach the target level
         for _ in 1..level {
             let indirect_ptr = self.read_mapping_entry(current_block, self.entries_per_block - 1)?;
@@ -1024,6 +1107,10 @@ impl CtfsReader {
                 return Err(CtfsError::Corrupt(
                     "null indirect pointer in mapping hierarchy".to_string(),
                 ));
+            }
+            // §5d path 2a of 3: a mapping block reached through the chain.
+            if whole_blocks_only {
+                self.check_block_in_whole_blocks(indirect_ptr, name, "chained mapping block")?;
             }
             current_block = indirect_ptr;
         }
@@ -1037,14 +1124,38 @@ impl CtfsReader {
             // Decompose `remaining` into a path of indices through the
             // sub-levels. At level L, each sub-block covers direct_entries^(L-1)
             // data blocks.
-            self.resolve_multilevel(current_block, remaining, level - 1)
+            self.resolve_multilevel(current_block, remaining, level - 1, whole_blocks_only, name)
         }
+    }
+
+    /// Refuse a block number at or past the container's whole blocks, before
+    /// any of its bytes are touched. `floor`, never rounded up — rounding up is
+    /// the one arithmetic `CTFS-Binary-Format.md` §5d forbids, because it makes
+    /// the incomplete final block addressable.
+    fn check_block_in_whole_blocks(&self, block: u64, name: &str, role: &str) -> Result<(), CtfsError> {
+        let block_size = self.block_size as u64;
+        let whole_blocks = self.source.current_size() / block_size;
+        if block >= whole_blocks {
+            return Err(CtfsError::Corrupt(format!(
+                "file '{name}': {role} is container block {block}, which is outside the \
+                 {whole_blocks} whole {block_size}-byte blocks the container carries; it is \
+                 truncated or its tail write was interrupted"
+            )));
+        }
+        Ok(())
     }
 
     /// Recursively resolve a block index through multi-level mapping.
     ///
     /// `depth` is the number of remaining levels to descend (0 = direct lookup).
-    fn resolve_multilevel(&self, map_block: u64, index: usize, depth: usize) -> Result<u64, CtfsError> {
+    fn resolve_multilevel(
+        &self,
+        map_block: u64,
+        index: usize,
+        depth: usize,
+        whole_blocks_only: bool,
+        name: &str,
+    ) -> Result<u64, CtfsError> {
         if depth == 0 {
             return self.read_mapping_entry(map_block, index);
         }
@@ -1064,8 +1175,12 @@ impl CtfsReader {
         if next_block == 0 {
             return Err(CtfsError::Corrupt("null pointer in mapping sub-block".to_string()));
         }
+        // §5d path 2b of 3: a mapping block reached by descending the hierarchy.
+        if whole_blocks_only {
+            self.check_block_in_whole_blocks(next_block, name, "child mapping block")?;
+        }
 
-        self.resolve_multilevel(next_block, sub_remaining, depth - 1)
+        self.resolve_multilevel(next_block, sub_remaining, depth - 1, whole_blocks_only, name)
     }
 
     /// Read a single u64 entry from a mapping block.
@@ -1114,7 +1229,11 @@ impl CtfsReader {
     /// tests to find a file's data block offset in the raw image.
     #[cfg(test)]
     pub(crate) fn resolve_block_for_test(&self, root_map_block: u64, logical_index: usize) -> Result<u64, CtfsError> {
-        self.resolve_block(root_map_block, logical_index)
+        // Bounded like the strict read path: these helpers exist to locate a
+        // block in a well-formed container, and a test that resolved a block
+        // outside the container's whole blocks would be asserting on bytes the
+        // container does not own.
+        self.resolve_block(root_map_block, logical_index, true, "<test>")
     }
 }
 
@@ -1417,8 +1536,8 @@ mod tests {
             let entry = in_mem.files.get(name).unwrap().clone();
             let num_blocks = (entry.size as usize).div_ceil(BLOCK_SIZE);
             for block_index in 0..num_blocks {
-                let phys = in_mem.resolve_block(entry.map_block, block_index).unwrap();
-                let phys_local = local.resolve_block(entry.map_block, block_index).unwrap();
+                let phys = in_mem.resolve_block(entry.map_block, block_index, true, name).unwrap();
+                let phys_local = local.resolve_block(entry.map_block, block_index, true, name).unwrap();
                 assert_eq!(phys, phys_local, "block {block_index} of '{name}' resolved differently");
 
                 let offset = phys * BLOCK_SIZE as u64;
@@ -1516,7 +1635,7 @@ mod tests {
             let block_size = reader.block_size as u64;
             let entry = reader.files.get("steps.dat").unwrap().clone();
             // Physical offset of the file's first (only) data block.
-            let data_block = reader.resolve_block(entry.map_block, 0).unwrap();
+            let data_block = reader.resolve_block(entry.map_block, 0, true, "steps.dat").unwrap();
             // Byte offset of "steps.dat"'s FileEntry.Size field in Block 0.
             // Files are laid out in insertion order from the entry array start;
             // "steps.dat" is the sole entry ⇒ index 0.
@@ -1738,5 +1857,149 @@ mod tests {
                 "byte mismatch in block {block_index}"
             );
         }
+    }
+    /// `CTFS-Binary-Format.md` §5d's bound on the DATA-block path.
+    ///
+    /// A container is cut so one stream's last, short data block becomes the
+    /// first *partial* block, with exactly its own bytes present — so the read
+    /// the strict path would issue is fully satisfiable out of bytes the
+    /// container does not own. Before the bound, `read_file` returned all
+    /// 12 388 bytes and reported success, while the workspace's other two
+    /// readers of this format refused the same stream by name. Measured on the
+    /// same file, produced by the Nim writer.
+    ///
+    /// Delete the `whole_blocks_only` check in `read_range_inner` and this goes
+    /// red.
+    #[test]
+    fn test_strict_read_refuses_a_data_block_in_the_partial_region() {
+        const BS: usize = 4096;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cut.ct");
+
+        let survivor: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
+        // A size whose last data block carries only 100 bytes.
+        let lost: Vec<u8> = (0..(3 * BS + 100) as u32).map(|i| ((i + 7) % 251) as u8).collect();
+        // `z.dat` is written last, so its blocks sit at the end of the image
+        // and cutting there cannot also damage `meta.dat`.
+        write_minimal_ctfs(&path, &[("meta.dat", &survivor), ("z.dat", &lost)]).unwrap();
+
+        let full = std::fs::read(&path).unwrap();
+        assert_eq!(full.len() % BS, 0, "the fixture is not block-aligned to begin with");
+        let cut = full.len() - BS + 100;
+        std::fs::write(&path, &full[..cut]).unwrap();
+
+        let mut r = CtfsReader::open(&path).unwrap();
+
+        // The survivor is untouched: the bound costs the container only what it
+        // actually lost, which is the point of bounding rather than refusing
+        // the whole file at `open`.
+        assert_eq!(
+            r.read_file("meta.dat").unwrap(),
+            survivor,
+            "a truncation that lost z.dat also cost meta.dat"
+        );
+
+        // `assert!` rather than a `match` arm that panics: `clippy::panic` is
+        // denied repo-wide (`cargo clippy --all-targets -- -D warnings` in CI),
+        // and it does not distinguish a test's deliberate abort from a
+        // production one.
+        let got = r.read_file("z.dat");
+        assert!(
+            got.is_err(),
+            "read_file returned {} bytes with no error for a stream whose last data \
+             block lies outside the container's whole blocks; the partial region was \
+             served as content",
+            got.as_ref().map(Vec::len).unwrap_or(0)
+        );
+        let msg = got.unwrap_err().to_string();
+        assert!(
+            msg.contains("truncated") && msg.contains("whole"),
+            "the refusal does not name the truncation: {msg}"
+        );
+
+        // The TOLERANT reader keeps its designed byte-granular behaviour: it
+        // reports the landed prefix rather than refusing, and never claims the
+        // range is complete. Bounding that one at block granularity would throw
+        // away a partly-landed block, which RS-M3's remote tail depends on.
+        let prefix = r.read_file_range_available("z.dat", 0, lost.len() as u64).unwrap();
+        assert_eq!(
+            prefix.len(),
+            lost.len(),
+            "the tolerant reader must still return every byte that is physically present"
+        );
+    }
+
+    /// §5d's bound on the MAPPING-block paths, which the data-block bound
+    /// left out.
+    ///
+    /// §5d recorded this reader as applying "the same bound in two of three
+    /// places": the data block was bounded, the mapping root and the mapping
+    /// blocks walked were not, because `read_mapping_entry` only checks that
+    /// the 8 bytes it wants are inside `current_size()`. On this fixture that
+    /// meant the strict reader gave a raw `... is out of bounds` for a mapping
+    /// entry, where the Nim and Go readers name the stream and say the container
+    /// is truncated — an agreement gap, and the same shape of omission that let
+    /// the data-block gap survive the first sweep.
+    ///
+    /// The container is cut exactly at `b.dat`'s mapping root, so it is the
+    /// first block outside the whole blocks while everything `a.dat` needs
+    /// survives. Delete the `check_block_in_whole_blocks` call on the mapping
+    /// root in `resolve_block` and this goes red.
+    #[test]
+    fn test_strict_read_refuses_a_mapping_root_in_the_partial_region() {
+        const BS: usize = 4096;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("map.ct");
+
+        // `a.dat` is an exact multiple of the block size and is written first,
+        // so `b.dat`'s mapping root is allocated above every block `a.dat` uses.
+        let a: Vec<u8> = (0..(3 * BS) as u32).map(|i| (i % 251) as u8).collect();
+        let b: Vec<u8> = (0..100u32).map(|i| ((i + 3) % 251) as u8).collect();
+        write_minimal_ctfs(&path, &[("a.dat", &a), ("b.dat", &b)]).unwrap();
+
+        let full = std::fs::read(&path).unwrap();
+        assert_eq!(full.len() % BS, 0, "the fixture is not block-aligned to begin with");
+
+        // Read `b.dat`'s mapping root straight out of block 0's entry array, so
+        // the cut point comes from the bytes rather than from the reader.
+        let entry_off = HEADER_SIZE + EXTENDED_HEADER_SIZE + FILE_ENTRY_SIZE; // second entry
+        let map_bytes: [u8; 8] = match full[entry_off + 8..entry_off + 16].try_into() {
+            Ok(x) => x,
+            Err(_) => unreachable!("file entry map_block field is always 8 bytes"),
+        };
+        let b_map = u64::from_le_bytes(map_bytes);
+        assert!(
+            b_map > 0 && (b_map as usize) * BS < full.len(),
+            "the fixture did not place b.dat's mapping root inside the {}-byte container (it is {b_map})",
+            full.len()
+        );
+        std::fs::write(&path, &full[..(b_map as usize) * BS]).unwrap();
+
+        let mut r = CtfsReader::open(&path).unwrap();
+
+        // The cut costs the container only b.dat.
+        assert_eq!(
+            r.read_file("a.dat").unwrap(),
+            a,
+            "a truncation at b.dat's mapping root also cost a.dat"
+        );
+
+        let got = r.read_file("b.dat");
+        assert!(
+            got.is_err(),
+            "read_file returned {} bytes with no error for a stream whose mapping root lies \
+             outside the container's whole blocks",
+            got.as_ref().map(Vec::len).unwrap_or(0)
+        );
+        let msg = got.unwrap_err().to_string();
+        assert!(
+            msg.contains("mapping root") && msg.contains("truncated") && msg.contains("whole"),
+            "the refusal does not name the mapping root and the truncation the way the Nim and \
+             Go readers do: {msg}"
+        );
+        assert!(
+            msg.contains("b.dat"),
+            "the refusal does not name the lost stream: {msg}"
+        );
     }
 }

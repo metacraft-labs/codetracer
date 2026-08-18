@@ -12,13 +12,28 @@
 ##
 ## Git data is fetched with structured `git` argv calls via Node.js
 ## `child_process` (available in Electron's renderer process with
-## nodeIntegration enabled).
+## nodeIntegration enabled) — see ``ui/git_cli.nim``.
+##
+## The panel is never itself a diff.  Clicking a changed file resolves through
+## ``VCSVM.openActionFor`` to either a source tab or a unified-diff editor tab
+## (``ui/unified_diff.nim``), which is a Monaco document of its own —
+## VCS-Panel.md, "Unified Diff View (Editor Integration)".
 
 import
   ui_imports
 
+import git_cli
 import deepreview
+# DeepReview's third pillar.  The pane's VM lives in
+# `ui/agent_activity_deepreview.nim`; the dependency is one-way (that module
+# never imports this one) and the coverage-table -> VCS-panel direction of the
+# shared selection travels back through its `onActivityReviewFileSelected`
+# hook, installed by `startReviewNavigation` below.
+import agent_activity_deepreview
 import ../viewmodel/viewmodels/vcs_vm
+import ../viewmodel/viewmodels/review_entry
+from ../viewmodel/store/types as vm_store_types import
+  AgentDeepReviewFileCoverage
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -31,56 +46,6 @@ var isoNimVCSMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
 
 proc syncLegacyVCSIntoVM*(self: VCSComponent)
 proc tryMountIsoNimVCSPanel*(componentId: int)
-
-# ---------------------------------------------------------------------------
-# Node.js child_process bindings (renderer process, nodeIntegration=true)
-# ---------------------------------------------------------------------------
-
-type
-  ExecSyncOptions = ref object
-    cwd*: cstring
-    encoding*: cstring
-    timeout*: int
-
-proc execFileSyncRaw(program: cstring, args: seq[cstring], opts: ExecSyncOptions): cstring
-  {.importjs: "require('child_process').execFileSync(#, #, #).toString()".}
-proc fsWriteFileSync(path, content: cstring) {.importjs: "require('fs').writeFileSync(#, #)".}
-proc fsUnlinkSync(path: cstring) {.importjs: "require('fs').unlinkSync(#)".}
-proc osTmpdir(): cstring {.importjs: "require('os').tmpdir()".}
-proc pathJoin(a, b: cstring): cstring {.importjs: "require('path').join(#, #)".}
-proc dateNow(): int {.importjs: "Date.now()".}
-
-proc gitExec(args: seq[cstring], cwd: cstring): cstring =
-  ## Run a git command in the given working directory.
-  ## Returns the trimmed stdout output, or an empty string on error.
-  try:
-    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
-    let raw = execFileSyncRaw(cstring"git", args, opts)
-    if raw.isNil:
-      return cstring""
-    # Trim trailing whitespace / newlines.
-    return ($raw).strip().cstring
-  except:
-    return cstring""
-
-proc applyPatchToIndex(patch, cwd: cstring) =
-  let tmpFile = pathJoin(osTmpdir(), cstring("ct-hunk-stage-" & $dateNow() & ".patch"))
-  fsWriteFileSync(tmpFile, patch)
-  try:
-    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
-    discard execFileSyncRaw(cstring"git", @[cstring"apply", cstring"--cached", tmpFile], opts)
-  except:
-    cerror "Failed to stage hunks: " & getCurrentExceptionMsg()
-  finally:
-    try:
-      fsUnlinkSync(tmpFile)
-    except:
-      discard
-
-proc isGitRepository(cwd: cstring): bool =
-  ## Check whether `cwd` is inside a git working tree.
-  let result_str = gitExec(@[cstring"rev-parse", cstring"--is-inside-work-tree"], cwd)
-  return result_str == cstring"true"
 
 # ---------------------------------------------------------------------------
 # File watching constants (Task #68)
@@ -292,6 +257,13 @@ proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
   if skip == 0:
     self.commits = @[]
 
+  # Rows appended by THIS call, so the caller can tell a full page from the
+  # last, short one. `commitOffset` used to advance by a flat `commitPageSize`
+  # whether or not any commit came back, which left the infinite-scroll
+  # sentinel with no way to know it had reached the end — see
+  # `allCommitsLoaded` in `VCSComponent`.
+  var appended = 0
+
   if raw.len > 0:
     for line in ($raw).splitLines():
       let trimmed = line.strip()
@@ -322,8 +294,10 @@ proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
         author: cstring(authorStr),
         parents: parents,
       ))
+      appended += 1
 
-  self.commitOffset = skip + commitPageSize
+  self.commitOffset = skip + appended
+  self.allCommitsLoaded = appended < commitPageSize
 
 proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
   ## Load the files changed in a specific commit with diff --stat style info.
@@ -390,12 +364,7 @@ proc loadChangedFilesForIndex*(self: VCSComponent; cwd: cstring;
   self.commitFilesCache[commitIndex] = self.changedFiles
 
 proc getWorkingDirectory(self: VCSComponent): cstring =
-  ## Determine the working directory for git commands.
-  ## Prefers `startOptions.folder`, falling back to `process.cwd()`.
-  let folder = self.data.startOptions.folder
-  if not folder.isNil and folder.len > 0:
-    return folder
-  return electronProcess.cwd()
+  gitWorkingDirectory(self.data)
 
 proc refreshVCSData*(self: VCSComponent) =
   ## Reload all VCS data from git.
@@ -423,7 +392,14 @@ proc loadMoreCommits*(self: VCSComponent) =
   ## Append the next page of commits to ``self.commits`` and push the
   ## updated list to the VM.  Guards against concurrent fetches with
   ## ``self.loadingMore``.
+  ##
+  ## The caller is an IntersectionObserver on a sentinel at the bottom of the
+  ## commit list, which fires again every time the list is rebuilt.  It is
+  ## therefore this proc's job — not the observer's — to be a no-op once the
+  ## history is exhausted; see ``allCommitsLoaded``.
   if self.loadingMore:
+    return
+  if self.allCommitsLoaded:
     return
   if not self.isGitRepo:
     return
@@ -445,219 +421,12 @@ proc resetAndRefreshVCS*(self: VCSComponent) =
     return
   self.initialized = false
   self.commitOffset = 0
+  # Paired with `commitOffset`: a fresh paging window must be allowed to fetch
+  # again, otherwise a repo that grew since the last load can never show its
+  # new commits.
+  self.allCommitsLoaded = false
   self.refreshVCSData()
   self.syncLegacyVCSIntoVM()
-
-# ---------------------------------------------------------------------------
-# Git unified diff parsing (Task #69)
-# ---------------------------------------------------------------------------
-
-proc parseGitDiffHunks(diffOutput: string): seq[DeepReviewFileData] =
-  ## Parse the output of ``git diff HEAD`` into a sequence of
-  ## ``DeepReviewFileData`` structures, each containing diff hunks in the
-  ## same format used by the DeepReview unified diff renderer.
-  ##
-  ## The parser handles the standard unified diff format:
-  ##   diff --git a/<path> b/<path>
-  ##   --- a/<path>
-  ##   +++ b/<path>
-  ##   @@ -oldStart,oldCount +newStart,newCount @@ optional header
-  ##    context line
-  ##   -removed line
-  ##   +added line
-  result = @[]
-  if diffOutput.len == 0:
-    return
-
-  var currentFile: DeepReviewFileData = nil
-  var currentHunk: DeepReviewHunk = nil
-  var oldLineNum = 0
-  var newLineNum = 0
-
-  for rawLine in diffOutput.splitLines():
-    # New file header.
-    if rawLine.startsWith("diff --git "):
-      # Flush previous file.
-      if not currentHunk.isNil and not currentFile.isNil:
-        currentFile.diff.hunks.add(currentHunk)
-        currentHunk = nil
-      if not currentFile.isNil:
-        result.add(currentFile)
-
-      # Extract path from "diff --git a/<path> b/<path>".
-      let bIdx = rawLine.find(" b/")
-      let filePath = if bIdx >= 0: rawLine[bIdx + 3 .. ^1] else: ""
-
-      currentFile = DeepReviewFileData(
-        path: cstring(filePath),
-        diff: DeepReviewFileDiff(
-          status: cstring"M",
-          linesAdded: 0,
-          linesRemoved: 0,
-          hunks: @[]),
-        symbols: @[],
-        coverage: @[],
-        functions: @[],
-        loops: @[],
-        flow: @[])
-      continue
-
-    if currentFile.isNil:
-      continue
-
-    # Detect new / deleted file markers.
-    if rawLine.startsWith("new file mode"):
-      currentFile.diff.status = cstring"A"
-      continue
-    if rawLine.startsWith("deleted file mode"):
-      currentFile.diff.status = cstring"D"
-      continue
-
-    # Skip index, --- and +++ lines.
-    if rawLine.startsWith("index ") or rawLine.startsWith("--- ") or
-       rawLine.startsWith("+++ "):
-      continue
-
-    # Hunk header: @@ -oldStart,oldCount +newStart,newCount @@
-    if rawLine.startsWith("@@ "):
-      if not currentHunk.isNil:
-        currentFile.diff.hunks.add(currentHunk)
-
-      var hunkOldStart = 0
-      var hunkOldCount = 0
-      var hunkNewStart = 0
-      var hunkNewCount = 0
-
-      # Parse the @@ line. Format: @@ -A,B +C,D @@
-      let atEnd = rawLine.find(" @@", 3)
-      if atEnd > 0:
-        let hunkRange = rawLine[3 ..< atEnd]  # e.g. "-10,5 +10,8"
-        let parts = hunkRange.split(" ")
-        if parts.len >= 2:
-          # Parse old range (-A,B or -A).
-          var oldPart = parts[0]
-          if oldPart.startsWith("-"):
-            oldPart = oldPart[1 .. ^1]
-          let oldParts = oldPart.split(",")
-          try: hunkOldStart = parseInt(oldParts[0])
-          except ValueError: discard
-          if oldParts.len > 1:
-            try: hunkOldCount = parseInt(oldParts[1])
-            except ValueError: discard
-          else:
-            hunkOldCount = 1
-
-          # Parse new range (+C,D or +C).
-          var newPart = parts[1]
-          if newPart.startsWith("+"):
-            newPart = newPart[1 .. ^1]
-          let newParts = newPart.split(",")
-          try: hunkNewStart = parseInt(newParts[0])
-          except ValueError: discard
-          if newParts.len > 1:
-            try: hunkNewCount = parseInt(newParts[1])
-            except ValueError: discard
-          else:
-            hunkNewCount = 1
-
-      currentHunk = DeepReviewHunk(
-        oldStart: hunkOldStart,
-        oldCount: hunkOldCount,
-        newStart: hunkNewStart,
-        newCount: hunkNewCount,
-        lines: @[])
-      oldLineNum = hunkOldStart
-      newLineNum = hunkNewStart
-      continue
-
-    # Diff content lines (within a hunk).
-    if currentHunk.isNil:
-      continue
-
-    if rawLine.startsWith("+"):
-      let content = rawLine[1 .. ^1]
-      currentHunk.lines.add(DeepReviewHunkLine(
-        `type`: cstring"added",
-        content: cstring(content),
-        oldLine: 0,
-        newLine: newLineNum))
-      currentFile.diff.linesAdded += 1
-      newLineNum += 1
-    elif rawLine.startsWith("-"):
-      let content = rawLine[1 .. ^1]
-      currentHunk.lines.add(DeepReviewHunkLine(
-        `type`: cstring"removed",
-        content: cstring(content),
-        oldLine: oldLineNum,
-        newLine: 0))
-      currentFile.diff.linesRemoved += 1
-      oldLineNum += 1
-    elif rawLine.startsWith(" ") or rawLine.len == 0:
-      # Context line (starts with space) or empty line within a hunk.
-      let content = if rawLine.len > 0: rawLine[1 .. ^1] else: ""
-      currentHunk.lines.add(DeepReviewHunkLine(
-        `type`: cstring"context",
-        content: cstring(content),
-        oldLine: oldLineNum,
-        newLine: newLineNum))
-      oldLineNum += 1
-      newLineNum += 1
-
-  # Flush the last hunk and file.
-  if not currentHunk.isNil and not currentFile.isNil:
-    currentFile.diff.hunks.add(currentHunk)
-  if not currentFile.isNil:
-    result.add(currentFile)
-
-proc loadGitDiffForUnifiedView(self: VCSComponent) =
-  ## Run the appropriate git diff command based on ``self.diffTarget`` and parse
-  ## the output into ``self.gitDiffData`` so the unified diff renderer can display it.
-  let cwd = self.getWorkingDirectory()
-  var args: seq[cstring] = @[]
-  var sessionTitle = cstring"Working Tree Changes"
-
-  let target = if not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:"):
-    ($self.diffTarget)[5 .. ^1]
-  else:
-    ""
-
-  if target.len == 0 or target == "Working Tree":
-    args = @[cstring"diff", cstring"HEAD"]
-    sessionTitle = cstring"Working Tree Changes"
-  elif target.startsWith("file:"):
-    let filepath = target[5 .. ^1]
-    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(filepath)]
-    sessionTitle = cstring("Diff: " & filepath)
-  elif target.startsWith("commit:"):
-    let commitPart = target[7 .. ^1]
-    let colonIdx = commitPart.find(':')
-    if colonIdx >= 0:
-      let hash = commitPart[0 ..< colonIdx]
-      let filepath = commitPart[colonIdx + 1 .. ^1]
-      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id", cstring"--root", cstring(hash), cstring"--", cstring(filepath)]
-      sessionTitle = cstring("Diff: " & filepath & " (" & hash[0 ..< min(12, hash.len)] & ")")
-    else:
-      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id", cstring"--root", cstring(commitPart)]
-      sessionTitle = cstring("Commit Diff: " & commitPart[0 ..< min(12, commitPart.len)])
-  else:
-    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(target)]
-    sessionTitle = cstring("Diff: " & target)
-
-  let raw = gitExec(args, cwd)
-  let files = parseGitDiffHunks($raw)
-
-  self.gitDiffData = DeepReviewData(
-    commitSha: cstring"HEAD",
-    baseCommitSha: cstring"",
-    collectionTimeMs: 0,
-    recordingCount: 0,
-    sessionTitle: sessionTitle,
-    files: files)
-
-  # Clear hunk selection when diff data is refreshed to avoid stale
-  # references to old hunk indices.
-  self.selectedHunks = @[]
-  self.hunkToolbarVisible = false
 
 # ---------------------------------------------------------------------------
 # File watching — auto-refresh & debounce (Task #68)
@@ -682,9 +451,6 @@ proc debouncedRefreshGitData(self: VCSComponent) =
   if snapshot != self.lastStatusSnapshot:
     self.lastStatusSnapshot = snapshot
     self.refreshVCSData()
-    # Also refresh the unified diff data if the toggle is active.
-    if self.unifiedDiffActive:
-      self.loadGitDiffForUnifiedView()
     data.redraw()
 
   # Activate debounce window.
@@ -746,152 +512,11 @@ proc isDeepReviewMode(self: VCSComponent): bool =
   ## instead of normal git data.
   self.data.deepReviewActive and not self.data.deepReviewData.isNil
 
-# ---------------------------------------------------------------------------
-# Hunk editor helpers
-# ---------------------------------------------------------------------------
-
-proc isHunkSelected(self: VCSComponent, fileIdx, hunkIdx: int): bool =
-  ## Return true if the given (fileIndex, hunkIndex) pair is in the
-  ## selected hunks list.
-  for pair in self.selectedHunks:
-    if pair[0] == fileIdx and pair[1] == hunkIdx:
-      return true
-  return false
-
-proc flatHunkOrdinal(drData: DeepReviewData, fileIdx, hunkIdx: int): int =
-  ## Compute a flat ordinal for a (fileIdx, hunkIdx) pair by counting
-  ## all hunks in files before ``fileIdx`` plus ``hunkIdx``. Used for
-  ## Shift-click range selection.
-  result = 0
-  for fi in 0 ..< drData.files.len:
-    if fi == fileIdx:
-      result += hunkIdx
-      return
-    let file = drData.files[fi]
-    if not file.diff.isNil:
-      result += file.diff.hunks.len
-
-proc hunkPairFromOrdinal(drData: DeepReviewData, ordinal: int): (int, int) =
-  ## Reverse of ``flatHunkOrdinal``: convert a flat ordinal back to
-  ## a (fileIndex, hunkIndex) pair.
-  var remaining = ordinal
-  for fi in 0 ..< drData.files.len:
-    let file = drData.files[fi]
-    let hunkCount = if file.diff.isNil: 0 else: file.diff.hunks.len
-    if remaining < hunkCount:
-      return (fi, remaining)
-    remaining -= hunkCount
-  # Fallback (should not happen with valid input).
-  return (0, 0)
-
-proc toggleHunkSelection(self: VCSComponent, fileIdx, hunkIdx: int) =
-  ## Toggle a single hunk in/out of the selection.
-  var found = -1
-  for i in 0 ..< self.selectedHunks.len:
-    if self.selectedHunks[i][0] == fileIdx and self.selectedHunks[i][1] == hunkIdx:
-      found = i
-      break
-  if found >= 0:
-    self.selectedHunks.delete(found)
-  else:
-    self.selectedHunks.add((fileIdx, hunkIdx))
-  self.hunkToolbarVisible = self.selectedHunks.len > 0
-
-proc selectHunkRange(self: VCSComponent, fromOrdinal, toOrdinal: int) =
-  ## Select all hunks between two flat ordinals (inclusive), adding
-  ## any that are not already selected.
-  let lo = min(fromOrdinal, toOrdinal)
-  let hi = max(fromOrdinal, toOrdinal)
-  let drData = self.gitDiffData
-  if drData.isNil:
-    return
-  for ord in lo .. hi:
-    let pair = hunkPairFromOrdinal(drData, ord)
-    if not self.isHunkSelected(pair[0], pair[1]):
-      self.selectedHunks.add(pair)
-  self.hunkToolbarVisible = self.selectedHunks.len > 0
-
-proc clearHunkSelection(self: VCSComponent) =
-  ## Clear all selected hunks.
-  self.selectedHunks = @[]
-  self.hunkToolbarVisible = false
-
-proc buildPatchFromSelectedHunks(self: VCSComponent): string =
-  ## Build a unified diff patch string from the currently selected hunks.
-  ## Groups hunks by file and emits proper ``diff --git`` / ``---`` /
-  ## ``+++`` headers so the output is a valid patch.
-  let drData = self.gitDiffData
-  if drData.isNil or self.selectedHunks.len == 0:
-    return ""
-
-  # Group selected hunks by file index, preserving order.
-  var fileHunks: seq[(int, seq[int])] = @[]
-  var fileMap: seq[int] = @[]  # fileIdx values in order of first appearance
-  for pair in self.selectedHunks:
-    let fi = pair[0]
-    let hi = pair[1]
-    var found = false
-    for j in 0 ..< fileMap.len:
-      if fileMap[j] == fi:
-        fileHunks[j][1].add(hi)
-        found = true
-        break
-    if not found:
-      fileMap.add(fi)
-      fileHunks.add((fi, @[hi]))
-
-  var parts: seq[string] = @[]
-  for entry in fileHunks:
-    let fi = entry[0]
-    let hunkIndices = entry[1]
-    if fi >= drData.files.len:
-      continue
-    let file = drData.files[fi]
-    let path = $file.path
-
-    parts.add("diff --git a/" & path & " b/" & path)
-    parts.add("--- a/" & path)
-    parts.add("+++ b/" & path)
-
-    for hi in hunkIndices:
-      if file.diff.isNil or hi >= file.diff.hunks.len:
-        continue
-      let hunk = file.diff.hunks[hi]
-      parts.add(fmt"@@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@")
-      for line in hunk.lines:
-        let lineType = $line.`type`
-        let prefix = case lineType
-          of "added": "+"
-          of "removed": "-"
-          else: " "
-        parts.add(prefix & $line.content)
-
-  result = parts.join("\n") & "\n"
-
-proc copySelectedHunksAsPatch(self: VCSComponent) =
-  ## Copy the selected hunks to the clipboard as a unified diff patch.
-  let patch = self.buildPatchFromSelectedHunks()
-  if patch.len > 0:
-    clipboardCopy(cstring(patch))
-    self.hunkCopyFeedback = true
-    discard windowSetTimeout(
-      proc() =
-        self.hunkCopyFeedback = false
-        data.redraw(),
-      2000)
-
-proc stageSelectedHunks(self: VCSComponent) =
-  ## Stage selected hunks by writing them to a temp file and applying
-  ## with ``git apply --cached``.
-  let patch = self.buildPatchFromSelectedHunks()
-  if patch.len == 0:
-    return
-  let cwd = self.getWorkingDirectory()
-  applyPatchToIndex(cstring(patch), cwd)
-  # Refresh data after staging.
-  self.refreshVCSData()
-  self.loadGitDiffForUnifiedView()
-  self.clearHunkSelection()
+# The hunk editor's selection model and its patch builder used to live here,
+# over the raw ``DeepReviewData`` of a DOM-rendered diff panel.  DR-R4 moved
+# them into ``VCSVM`` (``viewmodel/viewmodels/vcs_vm.nim``) so that one model
+# serves the Monaco diff tab and is testable without a browser; the docked
+# panel is not a diff surface and holds no hunk state at all.
 
 proc basename(path: cstring): string =
   let pathStr = $path
@@ -907,56 +532,21 @@ proc safeStr(s: cstring): string =
 proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
-    if not self.diffTarget.isNil and ($self.diffTarget).startsWith("diff:"):
-      self.unifiedDiffActive = true
-      self.loadGitDiffForUnifiedView()
-    else:
-      self.refreshVCSData()
-      if self.isGitRepo:
-        self.startFileWatching()
+    self.refreshVCSData()
+    if self.isGitRepo:
+      self.startFileWatching()
 
-proc currentReviewTitle(self: VCSComponent): string =
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return ""
-  if not drData.sessionTitle.isNil and ($drData.sessionTitle).len > 0:
-    return $drData.sessionTitle
-  let commitDisplay =
-    if drData.commitSha.len > 12:
-      ($drData.commitSha)[0 ..< 12] & "..."
-    else:
-      safeStr(drData.commitSha)
-  "Review: " & commitDisplay
-
-proc deepReviewRows(self: VCSComponent): seq[VCSFileRow] =
-  result = @[]
-  let drData = self.data.deepReviewData
-  if drData.isNil:
-    return
-  for i, file in drData.files:
-    var coverageExecuted = 0
-    for cov in file.coverage:
-      if cov.executed:
-        coverageExecuted += 1
-    let coverageText =
-      if file.coverage.len > 0:
-        $coverageExecuted & "/" & $file.coverage.len
-      else:
-        ""
-    let status =
-      if not file.diff.isNil and ($file.diff.status).len > 0:
-        safeStr(file.diff.status)
-      else:
-        "M"
-    result.add(VCSFileRow(
-      status: status,
-      path: safeStr(file.path),
-      baseName: basename(file.path),
-      additions: if file.diff.isNil: 0 else: file.diff.linesAdded,
-      deletions: if file.diff.isNil: 0 else: file.diff.linesRemoved,
-      coverageText: coverageText,
-      selected: i == self.data.deepReviewSelectedFileIndex,
-    ))
+proc reviewDataset(self: VCSComponent): ReviewDataset =
+  ## The review this panel is showing, as the ViewModel layer's dataset.
+  ##
+  ## The projection itself lives in ``viewmodel/viewmodels/review_entry`` —
+  ## one generic routine instantiated here over the renderer's
+  ## ``DeepReviewData`` and in the headless tests over the native copy of the
+  ## same type — so the session title, the changed-file rows, the trace
+  ## contexts, the per-file coverage and the traced-function count are derived
+  ## by exactly the same code whichever launch path filled
+  ## ``data.deepReviewData`` (DeepReview-GUI.md §7).
+  reviewDatasetFrom(self.data.deepReviewData)
 
 proc gitChangedRows(self: VCSComponent): seq[VCSFileRow] =
   result = @[]
@@ -992,41 +582,6 @@ proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
       connectors: gr.connectors,
     ))
 
-proc diffRows(self: VCSComponent): seq[VCSDiffFileRow] =
-  result = @[]
-  let drData = self.gitDiffData
-  if drData.isNil:
-    return
-  for fileIdx, file in drData.files:
-    if file.diff.isNil or file.diff.hunks.len == 0:
-      continue
-    var hunks: seq[VCSHunkRow] = @[]
-    for hunkIdx, hunk in file.diff.hunks:
-      var lines: seq[VCSDiffLineRow] = @[]
-      for line in hunk.lines:
-        lines.add(VCSDiffLineRow(
-          lineType: safeStr(line.`type`),
-          content: safeStr(line.content),
-          oldLine: line.oldLine,
-          newLine: line.newLine,
-        ))
-      hunks.add(VCSHunkRow(
-        oldStart: hunk.oldStart,
-        oldCount: hunk.oldCount,
-        newStart: hunk.newStart,
-        newCount: hunk.newCount,
-        selected: self.isHunkSelected(fileIdx, hunkIdx),
-        lines: lines,
-      ))
-    result.add(VCSDiffFileRow(
-      fileIndex: fileIdx,
-      status: safeStr(file.diff.status),
-      path: safeStr(file.path),
-      additions: file.diff.linesAdded,
-      deletions: file.diff.linesRemoved,
-      hunks: hunks,
-    ))
-
 proc syncDeepReviewPanelSelection(self: VCSComponent) =
   let component = self.data.ui.componentMapping[Content.DeepReview][0]
   if not component.isNil:
@@ -1040,19 +595,36 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   if vm.isNil:
     return
   if self.isDeepReviewMode():
-    vm.setDeepReviewMode(true)
-    vm.setHeader(self.currentReviewTitle())
-    vm.setGitRepoState(true)
-    vm.setBranchState("", @[], false)
-    vm.setCommits(@[], @[])
-    vm.setChangedFiles(self.deepReviewRows())
-    vm.setUnifiedDiff(false, @[])
-    vm.setHunkState(@[], false, false)
+    # The view-mode toggle is live in review mode too (VCS-Panel.md, "View
+    # mode toggle"), so the VM must carry the component's current position:
+    # without this the toggle rendered but changed nothing, because the click
+    # resolver reads `VCSVM.viewMode`.
+    vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
+    # One routine applies the dataset, whichever launch path produced it, and
+    # it is the same routine `startReviewNavigation` enters the review with.
+    # It also decides the selection: a re-sync keeps the file the reviewer is
+    # looking at rather than resetting to the first one.
+    let selectedIndex = applyReviewDataset(
+      vm, self.reviewDataset(), self.data.deepReviewSelectedTraceContextId)
+    # The legacy carriers follow the ViewModel rather than driving it.  Both
+    # are review-wide (a review has one selected file and one selected trace
+    # context however many VCS panels exist), which is why they live on `Data`
+    # — and why the agentic path setting the standalone panel's context id
+    # without setting this one could make the two surfaces disagree.
+    if selectedIndex >= 0:
+      self.data.deepReviewSelectedFileIndex = selectedIndex
+    self.data.deepReviewSelectedTraceContextId = vm.currentTraceContextId()
     return
 
   self.ensureVCSDataLoaded()
   vm.setDeepReviewMode(false)
+  vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
+  # `setHeader` clears the review stats; the trace contexts are cleared
+  # explicitly.  Neither belongs to a live working tree, and a panel can move
+  # out of review mode (VCS-Panel.md, "Data Sources and Instantiation Modes").
   vm.setHeader(safeStr(self.currentBranch))
+  vm.setTraceContexts(@[])
+  vm.setSelectedTraceContextId(0)
   vm.setGitRepoState(self.isGitRepo, safeStr(self.errorMessage))
   vm.setBranchState(safeStr(self.currentBranch),
                     self.branches.mapIt(safeStr(it)),
@@ -1078,38 +650,257 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
       fileEntries.add((idx, rows))
   vm.syncCommitFilesMap(fileEntries)
   vm.setChangedFiles(self.gitChangedRows())
-  vm.setUnifiedDiff(self.unifiedDiffActive, self.diffRows())
-  vm.setHunkState(self.selectedHunks, self.hunkToolbarVisible,
-                  self.hunkCopyFeedback)
+  # The docked panel is never a diff (#561): a unified diff is its own editor
+  # tab.  Both are cleared explicitly so a panel that once hosted one — the
+  # agentic session launcher used to push its review diff in here — cannot
+  # leave a stale diff behind.
+  vm.setUnifiedDiff(false, @[])
+  vm.setHunkState(@[], false, false)
 
-proc handleVCSFileSelection(self: VCSComponent; index: int; path: string) =
+proc openUnifiedDiffTab*(self: VCSComponent; target: string) =
+  ## Open (or focus) a dedicated editor-area tab showing the unified diff for
+  ## ``target`` — ``file:<path>``, ``commit:<hash>``, ``commit:<hash>:<path>``
+  ## or ``Working Tree``.  The tab is keyed by the target, so clicking the same
+  ## file twice focuses the tab that is already showing it (#611).
+  ##
+  ## The tab is a ``Content.UnifiedDiff`` document — a Monaco editor over the
+  ## assembled diff (``ui/unified_diff.nim``) — not a second instance of this
+  ## panel.  VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the
+  ## standard CodeTracer Monaco editor".
+  let newId = self.data.generateId(Content.UnifiedDiff)
+  self.data.openLayoutTab(Content.UnifiedDiff, newId, isEditor = true,
+                          path = cstring("diff:" & target))
+
+proc repositoryRoot(self: VCSComponent): cstring =
+  ## Absolute path of the git work tree root.
+  ##
+  ## Every path git reports (``diff-tree --numstat``, ``status --porcelain``,
+  ## …) is relative to this directory, while the editor addresses files by
+  ## absolute path.  The working directory is only a fallback: it is not
+  ## necessarily the repository root, so joining against it would break for
+  ## projects opened at a subdirectory.
+  let cwd = self.getWorkingDirectory()
+  let top = gitExec(@[cstring"rev-parse", cstring"--show-toplevel"], cwd)
+  if top.isNil or top.len == 0: cwd else: top
+
+proc absoluteRepoPath(self: VCSComponent; path: string): cstring =
+  if path.len == 0 or utils.isAbsolutePath(path):
+    cstring(path)
+  else:
+    cstring($self.repositoryRoot() & "/" & path)
+
+proc dispatchOpenAction(self: VCSComponent; action: VCSOpenAction) =
+  ## Perform the side effect a resolved ``VCSOpenAction`` names.
+  ##
+  ## Both branches focus an already-open document rather than opening a second
+  ## one: ``openLayoutTab`` matches a diff tab by ``independentTabPath`` and
+  ## ``openTab`` matches a source tab by its editor tab path.
+  case action.kind
+  of voaNone:
+    discard
+  of voaDiffTab:
+    self.openUnifiedDiffTab(action.target)
+  of voaSourceFile:
+    # VCS-005: open the file itself.  git (and the DeepReview export) hand us
+    # a repository-relative path; the editor needs an absolute one, otherwise
+    # the tab load is issued for a path that does not exist unless some
+    # already-open tab happens to end with it.
+    self.data.openTab(self.absoluteRepoPath(action.path), ViewSource)
+
+proc handleVCSFileSelection(self: VCSComponent; index: int;
+                            path, target, status: string) =
+  ## Dispatcher over ``VCSVM.openActionFor`` — the decision itself lives in
+  ## the ViewModel so it is testable without a browser
+  ## (``src/tests/gui/tests/vcs/vcs_vm_test.nim``).
+  ##
+  ## DeepReview-GUI.md §3: "Clicking a file **opens it in the editor** ...
+  ## Clicking must not merely change a selection index — clicking is the
+  ## navigation gesture, and it works identically in normal VCS mode and in
+  ## DeepReview mode."  Review mode used to return here after updating the
+  ## selection index, so a reviewer could click every changed file and never
+  ## open one.
+  let vm = self.ensureVCSVM()
+  if vm.isNil:
+    return
   if self.isDeepReviewMode():
+    # The VM is the selection's home — a re-sync carries it across by path —
+    # so the click is recorded there first and the legacy index follows.
+    discard selectReviewRow(vm, index)
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
     self.syncDeepReviewPanelSelection()
-    return
-  if self.unifiedDiffActive:
-    self.loadGitDiffForUnifiedView()
-  self.data.openTab(cstring(path), ViewSource)
-
-proc handleHunkSelection(self: VCSComponent; fileIdx, hunkIdx: int;
-                         shiftKey, ctrlKey: bool) =
-  let drData = self.gitDiffData
-  if shiftKey and self.lastHunkClickIndex >= 0 and not drData.isNil:
-    let currentOrd = flatHunkOrdinal(drData, fileIdx, hunkIdx)
-    self.selectHunkRange(self.lastHunkClickIndex, currentOrd)
-  elif ctrlKey:
-    self.toggleHunkSelection(fileIdx, hunkIdx)
+    # DeepReview-GUI.md §2.1: the Changed Files list and the Agent Activity
+    # panel's per-file coverage table are "two views of one selection", so a
+    # click here moves the coverage table's highlight too.
+    discard syncActivitySelectionFromVCS(
+      vm, ensureAgentActivityDeepReviewVM())
   else:
-    if self.selectedHunks.len == 1 and self.isHunkSelected(fileIdx, hunkIdx):
-      self.clearHunkSelection()
-    else:
-      self.clearHunkSelection()
-      self.selectedHunks.add((fileIdx, hunkIdx))
-      self.hunkToolbarVisible = true
-  if not drData.isNil:
-    self.lastHunkClickIndex = flatHunkOrdinal(drData, fileIdx, hunkIdx)
+    vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
+  self.dispatchOpenAction(vm.openActionFor(index, path, target, status))
+
+proc handleActivityFileSelection(self: VCSComponent; path: string) =
+  ## The reviewer clicked a row of the Agent Activity panel's per-file
+  ## coverage table — the other direction of §2.1's "two views of one
+  ## selection".
+  ##
+  ## It resolves to the same gesture a click in the Changed Files list is
+  ## (§3: "clicking a file opens that file's review representation"), so it
+  ## goes through ``handleVCSFileSelection`` rather than only moving a
+  ## highlight.
+  if self.isNil or not self.isDeepReviewMode():
+    return
+  let vm = self.ensureVCSVM()
+  if vm.isNil:
+    return
+  let index = vm.reviewRowIndexForPath(path)
+  if index < 0:
+    return
+  let row = vm.openActionForRow(index)
+  self.handleVCSFileSelection(index, row.path, row.target, row.status)
+
+proc handleTraceContextSelection(self: VCSComponent; id: int) =
+  ## The reviewer picked a trace context in this panel's header
+  ## (DeepReview-GUI.md §6: "The selected trace context can be changed without
+  ## leaving the review").
+  ##
+  ## The selection is review-wide, so it is stored on ``Data`` and pushed to
+  ## the DeepReview panel, which owns the Monaco decorations drawn from the
+  ## selected run.
+  ##
+  ## NOTE (M42b): the review's recordings are not loaded — `--deepreview`
+  ## forces an empty recording id — so switching context cannot yet change
+  ## the *data* any panel shows.  What this milestone delivers is the control
+  ## and its state; re-driving the overlay from the newly selected recording
+  ## is DR-R6, which is blocked on that gap.
+  if not self.isDeepReviewMode():
+    return
+  let vm = self.ensureVCSVM()
+  if not vm.isNil:
+    vm.setSelectedTraceContextId(id)
+  self.data.deepReviewSelectedTraceContextId = id
   self.syncLegacyVCSIntoVM()
+  let component = self.data.ui.componentMapping[Content.DeepReview][0]
+  if not component.isNil:
+    deepreview.setDeepReviewTraceContext(DeepReviewComponent(component), id)
+
+proc focusDockedPanel(data: Data; content: Content) =
+  ## Make ``content``'s panel the visible tab of whichever stack hosts it.
+  ##
+  ## Layout-System.md, "DeepReview and the Layout", obligation 2 — "Focus, not
+  ## relocation": "the three review panels stay wherever the user put them,
+  ## but the stack hosting each is retargeted at it ... No panel is moved
+  ## between stacks and no stack is created for one."  A layout with no such
+  ## panel is left alone rather than having one grafted in.
+  ##
+  ## The startup path performs the same retarget on the layout *config* before
+  ## GoldenLayout is built (``deepreview_layout.focusReviewFileList`` /
+  ## ``focusReviewActivityPane``); this is the same rule for the launch paths
+  ## whose layout is already live.
+  if data.isNil or data.ui.layout.isNil:
+    return
+  for _, component in data.ui.componentMapping[content]:
+    if component.isNil or component.layoutItem.isNil or
+        component.layoutItem.parent.isNil:
+      continue
+    component.layoutItem.parent.setActiveContentItem(component.layoutItem)
+    return
+
+proc startReviewNavigation*(self: VCSComponent) =
+  ## Enter a review on this panel — the host half of the one review-entry
+  ## routine (``review_entry.enterReview``).
+  ##
+  ## DeepReview-GUI.md §7, "Transition into a Review", is performed in full by
+  ## a single call: the VCS panel populates with the changeset (step 1), the
+  ## Agent Activity panel's DeepReview section populates (step 4 — §2.1: "It
+  ## must not require a live agent session"), the three panels are focused,
+  ## and the first modified file opens in the editor (step 2).  There is no
+  ## path that can reach a review with one of those left undone, because there
+  ## is only one path.
+  ##
+  ## This proc supplies what the ViewModel layer cannot: the review dataset
+  ## behind ``data.deepReviewData`` and the GoldenLayout side effects.  All
+  ## three launch paths (``ct --deepreview``, a trace with an associated diff,
+  ## the agentic handoff) arrive here through ``startDeepReviewNavigation``.
+  if self.isNil or not self.isDeepReviewMode():
+    return
+  let vm = self.ensureVCSVM()
+  if vm.isNil:
+    return
+  # The coverage table's clicks come back through this component.
+  agent_activity_deepreview.onActivityReviewFileSelected =
+    proc(path: string) = self.handleActivityFileSelection(path)
+  let dataset = self.reviewDataset()
+  discard enterReview(
+    vm,
+    ensureAgentActivityDeepReviewVM(),
+    dataset,
+    proc(action: VCSOpenAction) = self.dispatchOpenAction(action),
+    proc() =
+      focusDockedPanel(self.data, Content.VCS)
+      focusDockedPanel(self.data, Content.AgentActivity),
+    self.data.deepReviewSelectedTraceContextId)
+  # The legacy carriers follow the ViewModel (see `syncLegacyVCSIntoVM`).
+  self.data.deepReviewSelectedFileIndex =
+    max(vm.reviewRowIndexForPath(selectedReviewPath(vm)), 0)
+  self.data.deepReviewSelectedTraceContextId = vm.currentTraceContextId()
+  self.syncDeepReviewPanelSelection()
+
+proc startDeepReviewNavigation*(data: Data) =
+  ## The single host entry point for a review, whichever launch path started
+  ## it: find the docked VCS panel of the current layout and enter the review
+  ## on it.
+  ##
+  ## Requires a mounted GoldenLayout — `openLayoutTab` walks `data.ui.layout`
+  ## — so callers must not invoke it before `initLayout` has run.  It is
+  ## deliberately safe to call repeatedly: `enterReview` refreshes the review's
+  ## data every time and performs the *entry* (focus, open the first file)
+  ## exactly once per panel, which is Layout-System.md's obligation 3.  DR-R1
+  ## enforced that with a module-level `var` here; the flag now lives on the
+  ## panel's own ViewModel, where a headless test can observe it and where two
+  ## panels cannot share one answer.
+  ##
+  ## The review-mode check comes first: a call that arrives with no review
+  ## data must not count as an entry, or the real review that starts a moment
+  ## later would find the one-shot already spent (which is exactly what the
+  ## old ordering did).
+  if data.isNil or not data.deepReviewActive or data.deepReviewData.isNil:
+    return
+  if data.ui.layout.isNil:
+    return
+  for _, component in data.ui.componentMapping[Content.VCS]:
+    let vcsComponent = cast[VCSComponent](component)
+    if vcsComponent.isNil:
+      continue
+    vcsComponent.startReviewNavigation()
+    return
+  cerror "vcs: startDeepReviewNavigation: no docked VCS panel in the layout; " &
+    "the review starts with no file open"
+
+proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
+                              traceLabel: string; recordingId: string) =
+  ## Launch method 2 of DeepReview-GUI.md §1: the opened trace is associated
+  ## with a diff, so the session *is* a review of that diff.
+  ##
+  ## It publishes the assembled dataset exactly where the other two paths
+  ## publish theirs and then calls the one entry routine, so nothing
+  ## downstream — the VCS panel, the diff tabs, the Agent Activity section —
+  ## can tell which launch path it was.
+  ##
+  ## A review that is already active is left alone: a trace opened *into* a
+  ## running review (`ct --deepreview` loads no trace today, but a session can
+  ## gain one) must not have its exported dataset replaced by the bare diff.
+  if data.isNil or diff.isNil or diff.files.len == 0:
+    return
+  if data.deepReviewActive and not data.deepReviewData.isNil:
+    return
+  data.deepReviewData = reviewDataForTraceDiff(
+    diff, title, traceLabel, recordingId)
+  if data.deepReviewData.files.len == 0:
+    data.deepReviewData = nil
+    return
+  data.deepReviewActive = true
+  data.startOptions.deepReview = data.deepReviewData
+  startDeepReviewNavigation(data)
 
 proc tryMountIsoNimVCSPanel*(componentId: int) =
   when defined(js):
@@ -1136,6 +927,7 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
       onCheckoutBranch: proc(branch: string) =
         component.branchDropdownOpen = false
         component.commitOffset = 0
+        component.allCommitsLoaded = false
         component.selectedCommitIndices = @[]
         component.lastClickedCommitIndex = -1
         component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
@@ -1149,33 +941,18 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
         component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
         component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
         component.syncLegacyVCSIntoVM(),
-      onSelectFile: proc(index: int; path: string) =
-        component.handleVCSFileSelection(index, path),
+      onSelectFile: proc(index: int; path, target, status: string) =
+        component.handleVCSFileSelection(index, path, target, status),
       onToggleUnifiedDiff: proc() =
-        discard,
+        component.openFileMode = not component.openFileMode
+        component.syncLegacyVCSIntoVM(),
+      onSetTraceContext: proc(id: int) =
+        component.handleTraceContextSelection(id),
       onRefresh: proc() =
-        if not component.diffTarget.isNil and ($component.diffTarget).startsWith("diff:"):
-          component.loadGitDiffForUnifiedView()
-        else:
-          component.refreshVCSData()
-          if component.unifiedDiffActive:
-            component.loadGitDiffForUnifiedView()
+        component.refreshVCSData()
         component.syncLegacyVCSIntoVM(),
       onOpenFileDiff: proc(target: string) =
-        let newId = component.data.generateId(Content.VCS)
-        let tabPath = "diff:" & target
-        component.data.openLayoutTab(Content.VCS, newId, isEditor = true, path = cstring(tabPath)),
-      onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
-        component.handleHunkSelection(fileIdx, hunkIdx, shiftKey, ctrlKey),
-      onCopySelectedHunks: proc() =
-        component.copySelectedHunksAsPatch()
-        component.syncLegacyVCSIntoVM(),
-      onStageSelectedHunks: proc() =
-        component.stageSelectedHunks()
-        component.syncLegacyVCSIntoVM(),
-      onClearSelectedHunks: proc() =
-        component.clearHunkSelection()
-        component.syncLegacyVCSIntoVM(),
+        component.openUnifiedDiffTab(target),
       onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
         ## Multi-select accordion toggle.
         ## • ctrl+click  — toggle this commit in/out of the expanded set.

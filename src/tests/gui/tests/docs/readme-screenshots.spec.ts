@@ -72,21 +72,35 @@ test.describe("README animations", () => {
     await editor.clickSourceLine(8);
     await expect(ctPage.locator(".flow-parallel-value-box, .flow-inline-value-box").first()).toBeVisible({ timeout: 30000 });
 
-    // Scrub the iteration slider
+    // Scrub the iteration slider.
+    //
+    // These used to be `if (await slider.isVisible())` / `if (box)` guards,
+    // which made the whole block a silent no-op whenever the slider failed to
+    // render.  That is exactly the failure mode of #562 — the slider was
+    // created with a zero-width box and so was never `isVisible()` — and this
+    // spec tolerated it for three release cycles while the issue was reported
+    // "fixed" twice.  Assert instead: a loop screenshot without a working
+    // slider is not a screenshot worth taking.
+    //
+    // `.noUi-base` is injected by `noUiSlider.create()`; `.flow-loop-slider`
+    // is the container we create ourselves and is present even when the
+    // widget failed to initialise, so the container alone proves nothing.
     const slider = ctPage.locator(".flow-loop-slider").first();
-    if (await slider.isVisible()) {
-        const box = await slider.boundingBox();
-        if (box) {
-            await ctPage.mouse.move(box.x + 10, box.y + box.height / 2);
-            await ctPage.mouse.down();
-            await ctPage.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 50 });
-            await ctPage.mouse.up();
-            await ctPage.waitForTimeout(500);
-            await ctPage.mouse.down();
-            await ctPage.mouse.move(box.x + 10, box.y + box.height / 2, { steps: 50 });
-            await ctPage.mouse.up();
-        }
-    }
+    await expect(slider).toBeVisible({ timeout: 30000 });
+    await expect(slider.locator(".noUi-base")).toBeVisible();
+
+    const box = await slider.boundingBox();
+    expect(box, "the loop iteration slider must have a layout box").not.toBeNull();
+    expect(box!.width, "the loop iteration slider must not be zero-width (#562)").toBeGreaterThan(0);
+
+    await ctPage.mouse.move(box!.x + 10, box!.y + box!.height / 2);
+    await ctPage.mouse.down();
+    await ctPage.mouse.move(box!.x + box!.width - 10, box!.y + box!.height / 2, { steps: 50 });
+    await ctPage.mouse.up();
+    await ctPage.waitForTimeout(500);
+    await ctPage.mouse.down();
+    await ctPage.mouse.move(box!.x + 10, box!.y + box!.height / 2, { steps: 50 });
+    await ctPage.mouse.up();
     await ctPage.waitForTimeout(1000);
   });
 

@@ -13,6 +13,11 @@ fi
 
 LLDB_SYS_URL="https://github.com/metacraft-labs/lldb-sys.rs.git"
 
+# Resolved once, before anything changes directory, so the lock guard below is
+# found whether this script is invoked by path or from a sibling checkout.
+PREFLIGHT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PREFLIGHT_DIR
+
 redact_cargo_fetch_output() {
 	sed -E \
 		-e 's#(https://x-access-token:)[^@[:space:]]+(@github\.com)#\1[REDACTED]\2#g' \
@@ -49,14 +54,22 @@ fi
 cargo_auth_key="${GIT_CONFIG_KEY_0:-}"
 cargo_auth_header="${GIT_CONFIG_VALUE_0:-}"
 cargo_auth_prefix="AUTHORIZATION: basic "
-if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ]]; then
-	fail_auth_contract "auth-header-url-scope"
-fi
 if [[ $cargo_auth_header != "$cargo_auth_prefix"* ||
 	$cargo_auth_header == "$cargo_auth_prefix" ||
 	${cargo_auth_header#"$cargo_auth_prefix"} =~ [^A-Za-z0-9+/=] ]]; then
 	fail_auth_contract "auth-header-shape"
 fi
+# The base64 credential itself, with the header field name and the auth scheme
+# stripped off. Everything downstream that asks "is this the lldb-sys secret?"
+# must ask it of THIS, never of the assembled header string: RFC 9110 §5.1
+# makes field names case-insensitive, RFC 7617 §2 makes the `basic` scheme
+# token case-insensitive, and RFC 9110 §5.5 lets optional whitespace surround
+# the field value. `authorization: basic <token>`,
+# `AUTHORIZATION: Basic <token>` and `AUTHORIZATION:  basic  <token>` are all
+# wire-equivalent to the line below and all leak exactly the same secret, so a
+# byte-equality test against the assembled header would wave three of the four
+# spellings straight through.
+cargo_auth_credential="${cargo_auth_header#"$cargo_auth_prefix"}"
 if [[ ${GIT_CONFIG_KEY_1:-} != "credential.helper" ||
 	-n ${GIT_CONFIG_VALUE_1:-} ]]; then
 	fail_auth_contract "credential-helper-blocking"
@@ -96,21 +109,152 @@ if [[ -n ${CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN:-} ]]; then
 	exit 1
 fi
 
-# Ask Git itself which URL receives the header. This catches subtle widening of
-# the config key without printing the credential. The sibling and lookalike
-# URLs must not inherit lldb-sys authentication.
-if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
-	fail_auth_contract "effective-auth-header"
+# Two readings of one boundary. Both ask where the *header* this gate installs
+# may travel. Neither asks what the credential inside it is allowed to reach —
+# that is not a property this script can define, and the attempt to define it
+# was wrong.
+#
+# WHY THIS NO LONGER ASKS "DOES ANY OTHER github.com URL SEE THIS CREDENTIAL".
+# Until 2026-08-14 reading (2) did exactly that, under the invariant name
+# `auth-header-credential-leak`. The question was malformed.
+# `metacraft-labs/lldb-sys.rs` is a private repository in the *same
+# organisation* as this one, so it is reached with the org-wide CI Token
+# Provider App installation token — the same token this job passes to
+# `actions/checkout` and to `setup-dev-env`, which uses it to clone every
+# private sibling the gate builds against. There is no separate, narrower
+# "lldb-sys credential" for a wider header to leak, and there is deliberately
+# not going to be one: single-purpose minted tokens are the credentials that
+# accrue rotation debt, and the point of the org-wide App is that CI
+# credentials never need rotating. The policy is written down in
+# `metacraft-dev-guidelines/policies/ci-workflow-standards.md` under
+# "Cross-repo cloning".
+#
+# The Actions-provided `GITHUB_TOKEN` cannot stand in for the App token, which
+# is why one credential legitimately covers this repository *and* the private
+# sibling: "The token's permissions are limited to the repository that contains
+# your workflow"
+# (https://docs.github.com/en/actions/concepts/security/github_token), and
+# actions/checkout says it outright — "`${{ github.token }}` is scoped to the
+# current repository, so if you want to checkout a different repository that is
+# private you will need to provide your own PAT"
+# (https://github.com/actions/checkout#checkout-multiple-repos-private).
+#
+# So an ambient `http.https://github.com/.extraHeader` carrying this same token
+# is the provisioning mechanism working, not a leak. The old assertion failed
+# the gate precisely when the job was provisioned the way policy requires, and
+# would have passed only if someone had introduced the second, narrower token
+# that policy says not to introduce. Do not reinstate it in any form: an
+# assertion that rewards the wrong architecture is worse than no assertion.
+#
+# WHAT REMAINS TRUE AND IS CHECKED BELOW. The credential's *authority* is
+# org-wide, but the *header* is still narrowly keyed, and an org-wide token
+# handed to a host that is not github.com is a leak under any policy. Both are
+# properties this gate installs and can therefore be held to.
+same_host_probe_urls=(
+	# github.com URLs this gate does not authenticate. A match under reading
+	# (1) means `GIT_CONFIG_KEY_0` has been widened within the host.
+	"https://github.com/metacraft-labs/"
+	"https://github.com/metacraft-labs/codetracer.git"
+	"https://github.com/metacraft-labs/lldb-sys.rs.git-lookalike"
+)
+off_host_probe_urls=(
+	# Hosts that must never see this run's credential: an unrelated host, a
+	# suffix lookalike of the real one (Git matches the host component
+	# exactly, and this pins that), and the same repository path on another
+	# forge. These carry reading (2) — under reading (1) they are
+	# belt-and-braces, because only one URL-keyed slot is permitted there and
+	# any key loose enough to reach them also reaches the same-host probes.
+	"https://example.invalid/metacraft-labs/lldb-sys.rs.git"
+	"https://github.com.lookalike.invalid/metacraft-labs/lldb-sys.rs.git"
+	"https://gitlab.com/metacraft-labs/lldb-sys.rs.git"
+)
+
+# (1) Against only the configuration this gate installs — globals are
+#     /dev/null and the probe runs outside any work tree, so the inline
+#     GIT_CONFIG_* slots are the whole config stack — nothing may match. It
+#     asks Git's own URL matcher rather than comparing key strings, so it
+#     catches a widened `GIT_CONFIG_KEY_0` (say
+#     `https://github.com/metacraft-labs/`, or a host-less `http.extraHeader`
+#     that Git applies to every URL) even when the literal key check below has
+#     not run yet — which is why that check sits *after* this loop rather than
+#     before it. Ordered the other way the literal check subsumed this one
+#     entirely and nothing could ever reach here. Covered by the
+#     `auth-key-wide` and `auth-key-hostless` cases in the test.
+#
+#     `effective-auth-header` sits after this loop for the same reason, and it
+#     is a sharper instance of it. That check reads the AMBIENT config stack,
+#     so on the runner it also sees the github.com-wide `extraHeader` that
+#     `actions/checkout` persists. Against that backdrop a host-less
+#     `http.extraHeader` is the *less* specific key, so Git's matcher answers
+#     the lldb-sys URL with the ambient header instead of this gate's, and
+#     `effective-auth-header` fired first — on CI only. Reading (1) is
+#     isolated and therefore gives the same answer on a runner and on a
+#     laptop, so it must speak first; otherwise its host-less coverage is
+#     live in development and dead in the one environment the gate runs in.
+#     Both orderings fail the gate, so this is a question of which invariant
+#     is reported and of keeping this loop reachable, not of strictness.
+git_isolated_dir="$(mktemp -d)"
+if git -C "$git_isolated_dir" rev-parse --git-dir >/dev/null 2>&1; then
+	# TMPDIR inside a work tree would silently reintroduce repository config
+	# and make this reading vacuous in the other direction. Covered by
+	# the `probe-isolation` case in this script's test.
+	rm -rf "$git_isolated_dir"
+	fail_auth_contract "auth-boundary-probe-isolation"
 fi
-for unauthenticated_url in \
-	"https://github.com/metacraft-labs/" \
-	"https://github.com/metacraft-labs/codetracer.git" \
-	"https://github.com/metacraft-labs/lldb-sys.rs.git-lookalike"; do
-	if git config --get-urlmatch http.extraHeader "$unauthenticated_url" >/dev/null 2>&1; then
+for unauthenticated_url in "${same_host_probe_urls[@]}" "${off_host_probe_urls[@]}"; do
+	if git -C "$git_isolated_dir" config --get-urlmatch http.extraHeader \
+		"$unauthenticated_url" >/dev/null 2>&1; then
+		rm -rf "$git_isolated_dir"
 		fail_auth_contract "auth-header-url-boundary"
 	fi
 done
-unset unauthenticated_url
+rm -rf "$git_isolated_dir"
+unset git_isolated_dir
+
+# Ask Git itself which URL receives the header, in the real environment. This
+# catches subtle widening of the config key without printing the credential:
+# the sibling and lookalike URLs must not inherit lldb-sys authentication, and
+# the lldb-sys URL must receive this gate's header rather than an ambient one.
+# It runs after reading (1) — see the note there.
+if [[ $(git config --get-urlmatch http.extraHeader "$LLDB_SYS_URL") != "$cargo_auth_header" ]]; then
+	fail_auth_contract "effective-auth-header"
+fi
+
+# (2) In the real environment, including whatever ambient Git configuration a
+#     persistent self-hosted runner carries: no header reaching a host outside
+#     github.com may carry this run's credential. Unlike reading (1) this sees
+#     the repository config of the working directory, so it is the only reading
+#     that can catch ambient configuration pointing our token at a third party.
+#
+#     The test is on the credential, not on the header string. An earlier
+#     formulation compared the whole matched header with `==` against
+#     `AUTHORIZATION: basic <token>`, which let the very same token through as
+#     `authorization: basic <token>`, `AUTHORIZATION: Basic <token>`,
+#     `AUTHORIZATION: basic <token>  ` or `AUTHORIZATION:  basic  <token>` —
+#     four wire-valid spellings of one leak. Any header that contains the
+#     secret leaks it regardless of spelling, so containment of the credential
+#     is both the correct test and a strictly stronger one than equality of the
+#     header.
+for unauthenticated_url in "${off_host_probe_urls[@]}"; do
+	effective_header="$(git config --get-urlmatch http.extraHeader \
+		"$unauthenticated_url" 2>/dev/null || true)"
+	if [[ $effective_header == *"$cargo_auth_credential"* ]]; then
+		fail_auth_contract "auth-header-offsite-leak"
+	fi
+done
+unset unauthenticated_url effective_header
+unset same_host_probe_urls off_host_probe_urls
+
+# The literal key. Git's matcher above answers "does this credential reach a
+# URL it must not"; this answers the narrower syntactic question "is the key
+# spelled exactly as this gate installs it". They are not redundant: Git
+# normalises URLs before matching, so `http.https://github.com:443/...` is
+# semantically identical to the correct key and passes every probe above while
+# still being a key nothing in this repository writes. A rewritten key is worth
+# failing on even when it happens to be harmless today.
+if [[ $cargo_auth_key != "http.${LLDB_SYS_URL}.extraHeader" ]]; then
+	fail_auth_contract "auth-header-url-scope"
+fi
 
 # Git's URL matching intentionally applies a URL-specific header to request
 # paths below that URL (for example /info/refs). Redirects are disabled above;
@@ -235,14 +379,70 @@ fi
 # Cargo cache used by the later native-replay build and turns bad credentials,
 # a missing private revision, or an accidental return to libgit2 into an early
 # gate failure before the long CodeTracer build and GUI-test phases.
+#
+# This fetch is deliberately NOT `--locked`, and the guard below is why.
+#
+# native-backend's Cargo.lock is not a function of native-backend alone. Its
+# manifest routes `ct-dap-client` through a sibling working tree:
+#
+#     [patch.crates-io]
+#     ct-dap-client = { path = "../codetracer/libs/ct-dap-client" }
+#
+# A path dependency records no source, no checksum and no revision, so Cargo
+# writes that sibling's dependency edges into the lock verbatim. In this job the
+# sibling IS this pull request's checkout, so the hunk is a function of the tree
+# under test. `--locked` therefore asserted "native-backend was relocked after
+# the CodeTracer commit you are testing" -- an assertion no CodeTracer author
+# can satisfy from this repository, reported as "cannot update the lock file
+# because --locked was passed", which names the flag and not the cause.
+#
+# Dropping `--locked` on its own would trade that for a worse failure: Cargo
+# would silently re-resolve pinned versions and the gate would build
+# ct-native-replay against whatever crates.io serves today. So the lock is
+# re-resolved and then compared, and the comparison is stricter than `--locked`
+# in the dimension that matters: no package carrying a source may change
+# version, source or checksum, and no unpinned package may enter the graph.
+# Only path-package edges are allowed to lag, and every one of them is named.
+cargo_lock_committed="$(mktemp "${TMPDIR:-/tmp}/native-backend-lock.XXXXXX")"
+cp "$native_backend_repo/Cargo.lock" "$cargo_lock_committed"
+
 cargo_fetch_output=""
 if ! cargo_fetch_output="$(
-	cargo fetch --locked --manifest-path "$native_backend_repo/Cargo.toml" 2>&1
+	cargo fetch --manifest-path "$native_backend_repo/Cargo.toml" 2>&1
 )"; then
 	printf '%s\n' "$cargo_fetch_output" |
 		redact_cargo_fetch_output >&2
+	rm -f "$cargo_lock_committed"
 	echo "Visual replay CI could not prefetch the native-backend Cargo graph." >&2
 	exit 1
 fi
-unset cargo_fetch_output cargo_auth_header cargo_auth_key cargo_auth_prefix native_backend_repo
+
+cargo_lock_pin_guard_python="$(type -P python3 2>/dev/null || true)"
+if [[ -z $cargo_lock_pin_guard_python ]]; then
+	rm -f "$cargo_lock_committed"
+	echo "Visual replay CI needs python3 to classify native-backend lock drift." >&2
+	exit 1
+fi
+
+cargo_lock_guard_status=0
+"$cargo_lock_pin_guard_python" -I \
+	"$PREFLIGHT_DIR/cargo-lock-pin-guard.py" \
+	--committed "$cargo_lock_committed" \
+	--resolved "$native_backend_repo/Cargo.lock" \
+	--manifest "$native_backend_repo/Cargo.toml" \
+	--label codetracer-native-backend || cargo_lock_guard_status=$?
+
+# Leave the sibling checkout exactly as it was found. The later
+# `cargo build --bin ct-native-replay` re-resolves it the same way, against the
+# cache this fetch just warmed.
+cp "$cargo_lock_committed" "$native_backend_repo/Cargo.lock"
+rm -f "$cargo_lock_committed"
+
+if [[ $cargo_lock_guard_status -ne 0 ]]; then
+	exit "$cargo_lock_guard_status"
+fi
+
+unset cargo_lock_committed cargo_lock_guard_status cargo_lock_pin_guard_python
+unset cargo_fetch_output cargo_auth_header cargo_auth_credential cargo_auth_key
+unset cargo_auth_prefix native_backend_repo
 unset LLDB_SYS_URL

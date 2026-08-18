@@ -6421,6 +6421,25 @@ mod tests {
         Ok(())
     }
 
+    /// `ct/load-locals` answers for the step the debugger is on — for
+    /// JavaScript exactly as for every other language.
+    ///
+    /// The trace below is deliberately *sparse*: each step records only
+    /// the binding its line wrote, which is the shape every JavaScript
+    /// recording had before M37 (issue #602). JavaScript used to be
+    /// special-cased in `Db::load_locals`, which compensated for that
+    /// sparseness by unioning the whole frame's history into a
+    /// last-write-wins map — so this test used to assert that step 1
+    /// reports `a`, `b` (the call's arguments) and `x` together. That
+    /// union attributed values recorded elsewhere in the frame to the
+    /// step the user was stopped on; it is gone.
+    ///
+    /// The contract now is: report what this step recorded, nothing else.
+    /// Completeness is the recorder's job — since M37 the JS recorder
+    /// emits the full in-scope local set on every step, so a real
+    /// recording still shows the parameters and every live binding here.
+    /// See `tests/javascript_locals_dap_test.rs` for the end-to-end
+    /// counterpart driven by the real recorder.
     #[test]
     fn test_js_load_locals_function_scope() -> Result<(), Box<dyn Error>> {
         let mut tracer = NonStreamingTraceWriter::new("example.js", &[]);
@@ -6452,38 +6471,40 @@ mod tests {
 
         let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
 
-        // Seek to step 1 (where y is not yet assigned)
-        handler.step_in(true)?;
-        let (tx, rx) = std::sync::mpsc::channel();
-        handler.load_locals(
-            dap::Request::default(),
-            task::CtLoadLocalsArguments::default(),
-            tx.clone(),
-        )?;
-        if let Ok(DapMessage::Response(resp)) = rx.recv() {
-            let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
-            let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
-            assert!(names.contains(&"a".to_string()));
-            assert!(names.contains(&"b".to_string()));
-            assert!(names.contains(&"x".to_string()));
-            assert!(!names.contains(&"y".to_string()));
-        } else {
-            panic!("Expected CtLoadLocalsResponseBody");
-        }
+        // Read the locals reported at the step the handler is currently on.
+        let locals_now = |handler: &mut Handler| -> Vec<String> {
+            let (tx, rx) = std::sync::mpsc::channel();
+            handler
+                .load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), tx)
+                .expect("load_locals");
+            match rx.recv() {
+                Ok(DapMessage::Response(resp)) => {
+                    let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
+                    let mut names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
+                    names.sort();
+                    names
+                }
+                other => panic!("Expected CtLoadLocalsResponseBody, got {other:?}"),
+            }
+        };
 
-        // Seek to step 2 (where both x and y are assigned)
+        // Step 1 recorded `x` and nothing else.
         handler.step_in(true)?;
-        handler.load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), tx)?;
-        if let Ok(DapMessage::Response(resp)) = rx.recv() {
-            let body: task::CtLoadLocalsResponseBody = serde_json::from_value(resp.body).unwrap();
-            let names: Vec<String> = body.locals.iter().map(|l| l.expression.clone()).collect();
-            assert!(names.contains(&"a".to_string()));
-            assert!(names.contains(&"b".to_string()));
-            assert!(names.contains(&"x".to_string()));
-            assert!(names.contains(&"y".to_string()));
-        } else {
-            panic!("Expected CtLoadLocalsResponseBody");
-        }
+        assert_eq!(
+            locals_now(&mut handler),
+            vec!["x".to_string()],
+            "step 1 must report the binding step 1 recorded — `a`/`b` here would mean the \
+             frame-history union is back"
+        );
+
+        // Step 2 recorded `y` and nothing else. In particular `x`, recorded
+        // one step earlier, must not be carried forward by the backend.
+        handler.step_in(true)?;
+        assert_eq!(
+            locals_now(&mut handler),
+            vec!["y".to_string()],
+            "step 2 must report the binding step 2 recorded, not step 1's"
+        );
 
         Ok(())
     }

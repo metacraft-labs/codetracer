@@ -978,7 +978,19 @@ proc setDeepReviewIteration(self: DeepReviewComponent; index: int) =
   self.selectedIteration = index
   self.syncLegacyDeepReviewIntoVM()
 
-proc setDeepReviewTraceContext(self: DeepReviewComponent; id: int) =
+proc setDeepReviewTraceContext*(self: DeepReviewComponent; id: int) =
+  ## Adopt ``id`` as the review's selected trace context.
+  ##
+  ## Exported because DeepReview-GUI.md §2 moved the selector into the VCS
+  ## panel header (DR-R2): the VCS panel is now the surface that offers the
+  ## choice, and it forwards the chosen id here so this panel's decorations
+  ## agree with it — the same relationship `syncDeepReviewPanelSelection`
+  ## already maintains for the selected file.
+  ##
+  ## NOTE (M42b): `updateDecorations` currently only re-applies decorations
+  ## for the data already loaded.  `--deepreview` loads no recording, so
+  ## switching context does not yet change which run's flow values are shown;
+  ## that is DR-R6's job and is blocked on the recording ever being loaded.
   self.selectedTraceContextId = id
   self.updateDecorations()
   self.syncLegacyDeepReviewIntoVM()

@@ -769,7 +769,17 @@ type
     deletions*: int
 
   VCSComponent* = ref object of Component
-    diffTarget*: cstring
+    ## The docked VCS panel: branch picker, commit history, changed files.
+    ##
+    ## It is never a diff surface.  A unified diff is its own editor-area
+    ## document (``UnifiedDiffComponent``) — VCS-Panel.md, "Unified Diff View
+    ## (Editor Integration)" — and this panel only decides what a click on a
+    ## changed file opens (``VCSVM.openActionFor``).
+    openFileMode*: bool
+      ## View-mode toggle for the docked panel (VCS-Panel.md "View mode
+      ## toggle").  ``false`` — the spec's ``defaultView: "unified-diff"`` —
+      ## means clicking a file opens a unified diff tab; ``true`` means it
+      ## opens the file itself in the editor.
     currentBranch*: cstring
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
@@ -794,24 +804,6 @@ type
       ## ID of the debounce ``windowSetTimeout``. -1 when idle.
     debounceActive*: bool
       ## True while the 1-second debounce window is open.
-    # Unified diff from git state (Task #69).
-    unifiedDiffActive*: bool
-      ## True when the "Unified Diff" toggle is active in normal git mode.
-    gitDiffData*: DeepReviewData
-      ## Populated on-demand with parsed ``git diff HEAD`` output so that
-      ## the DeepReview unified diff renderer can be reused.
-    # Hunk editor state (hunk selection + actions).
-    selectedHunks*: seq[(int, int)]
-      ## Selected (fileIndex, hunkIndex) pairs for hunk operations.
-    hunkToolbarVisible*: bool
-      ## True when at least one hunk is selected and the action toolbar
-      ## should be displayed.
-    lastHunkClickIndex*: int
-      ## Index into ``selectedHunks``-eligible list used for Shift-click
-      ## range selection. Stores the flat hunk ordinal of the last
-      ## single-clicked hunk header.
-    hunkCopyFeedback*: bool
-      ## Briefly true after a successful "Copy as patch" to show feedback.
     # Commit graph pagination state.
     commitOffset*: int
       ## Number of commits already fetched; used as the --skip argument when
@@ -819,6 +811,59 @@ type
     loadingMore*: bool
       ## True while a background git-log call is in progress to load the
       ## next commit page.  Prevents concurrent overlapping fetches.
+    allCommitsLoaded*: bool
+      ## True once a page came back short (or empty), i.e. the repository has
+      ## no commits beyond the ones already in ``commits``.
+      ##
+      ## Without this the infinite-scroll sentinel is a busy loop on every
+      ## repository whose history is shorter than the panel: the sentinel sits
+      ## permanently inside the viewport, its IntersectionObserver fires,
+      ## ``loadMoreCommits`` shells out to ``git log`` for a page that does not
+      ## exist, publishes the unchanged list anyway, the panel's render effect
+      ## tears the whole subtree down and rebuilds it — sentinel included — and
+      ## the new sentinel is intersecting the moment it is attached.  Measured
+      ## at ~60 ``git log`` processes and ~440 DOM rebuilds per second, which is
+      ## also why nothing in the panel could ever be clicked: every element was
+      ## detached again before a click could land on it.
+      ## Reset wherever ``commitOffset`` is reset.
+
+  UnifiedDiffComponent* = ref object of Component
+    ## One unified-diff editor tab: a Monaco document showing the diff for a
+    ## single target.
+    ##
+    ## VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the
+    ## standard CodeTracer Monaco editor".  Before DR-R4 this was a second
+    ## ``VCSComponent`` instance rendering nested ``tdiv`` elements, which had
+    ## no find, no cross-document selection, no minimap and no surface for the
+    ## Omniscience decorations DR-R6 adds.
+    ##
+    ## The component owns the *data* and the Monaco instance.  The selection
+    ## model and the patch builder live in ``VCSVM`` (see
+    ## ``viewmodel/viewmodels/vcs_vm.nim``), so there is one hunk-editor model
+    ## rather than one per surface.
+    diffTarget*: cstring
+      ## The layout path identifying what this tab shows —
+      ## ``diff:file:<path>``, ``diff:commit:<hash>[:<path>]`` or
+      ## ``diff:Working Tree``.  It is the tab's identity: asking for the same
+      ## target again focuses this tab instead of stacking a duplicate.
+    diffData*: DeepReviewData
+      ## Parsed hunks for the target.  Filled from the review dataset when the
+      ## session is a review and from ``git diff`` otherwise — VCS-Panel.md,
+      ## "Data Sources and Instantiation Modes".
+    reviewBacked*: bool
+      ## True when ``diffData`` came from ``deepReviewData`` rather than from
+      ## live git.  Drives *only* whether the mutating hunk operations are
+      ## offered ("Commit operations: Disabled (read-only view)"); the diff
+      ## rendering never consults it, per "Unified Diff View (Shared)".
+    initialized*: bool
+    editor*: MonacoEditor
+      ## The Monaco instance, or nil before the container exists.
+    editorInitialized*: bool
+    decorationCollection*: js
+      ## Monaco decorations collection holding the per-line diff decorations.
+    lineLabels*: seq[cstring]
+      ## Dual old/new line-number labels, one per model line, handed to
+      ## Monaco's ``lineNumbers`` callback.
 
   ViewKind* =       enum ViewTable, ViewLine, ViewPie
 
@@ -1397,6 +1442,15 @@ type
     editorUI*: EditorViewComponent
     focusedLine*: int
     flow*: FlowViewUpdate
+    ## Set when `EditorViewComponent.loadFlow` replaces this component with a
+    ## newer one for the same editor.  A superseded component still owns the
+    ## loop-control DOM the user can see and click until the replacement has
+    ## rendered, so it is not torn down — but it must stop *repainting*: its
+    ## deferred redraw/render timers were scheduled against the previous
+    ## debugger position and would otherwise rebuild the flow view zones (and
+    ## the loop counter inside them) from a stale location, on top of the ones
+    ## the live component is about to create.  See `ui/flow.nim::flowIsLive`.
+    superseded*: bool
     flowLines*: JsAssoc[int, FlowLine]
     flowViewWidth*: int
     flowLoops*: JsAssoc[int, FlowLoop]
@@ -1432,7 +1486,6 @@ type
     selectedStepCount*: int
     service*: FlowService
     shrinkedLoopColumnMinWidth*: int
-    sliderWidgets*: JsAssoc[int, js]
     status*: FlowUpdateState
     statusDom*: kdom.Node
     statusWidget*: js
@@ -1922,6 +1975,13 @@ type
       ## (file list) and the DeepReview component (diff view).  Updated
       ## by VCS clicks and read by the DeepReview component to determine
       ## which file's diff to render.
+    deepReviewSelectedTraceContextId*: int
+      ## Id of the selected entry of ``deepReviewData.traceContexts``, shared
+      ## the same way: the selector lives in the VCS panel header
+      ## (DeepReview-GUI.md §2) but the selection describes the review, not
+      ## one panel, so it is stored next to the data it indexes.  Zero means
+      ## "not chosen yet"; the VCS panel resolves that to the first declared
+      ## context, which the export contract says is the default.
 
     # Multi-replay-window architecture (M0): session management.
     # During the migration the first (and only) session mirrors the
@@ -2374,6 +2434,27 @@ when defined(ctRenderer):
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
 
+  method unregister*(self: Component) {.base.} =
+    ## Counterpart of ``register`` — detach a destroyed component from the
+    ## event bus.
+    ##
+    ## ``register`` subscribes the component's handlers on a private mediator
+    ## created by ``setupLocalViewToMiddlewareApi``; that mediator in turn
+    ## registers itself as a subscriber of ``data.viewsApi``.  Neither side
+    ## used to have a removal path, so every panel that was closed and
+    ## reopened (``closeLayoutTab``), every layout reset
+    ## (``renderer.resetLayoutState``) and every closed session left its
+    ## handlers subscribed for the lifetime of the page.  A single emit was
+    ## then delivered once per dead component as well as to the live one —
+    ## the "Add to Scratchpad adds the value N times" symptom (#612).
+    ##
+    ## ``api`` is cleared so a component object that is later re-registered
+    ## (``registerComponent`` skips components that already carry an ``api``)
+    ## gets a fresh mediator instead of the silenced one.
+    if not self.api.isNil:
+      self.api.unsubscribeAll()
+      self.api = nil
+
   # === LocalViewSubscriber:
 
   type
@@ -2414,6 +2495,10 @@ when defined(ctRenderer):
     let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
     result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
     result.asSubscriber = newLocalViewSubscriber(transport)
+    # Remember which mediator this one subscribes to, so ``Component.unregister``
+    # can take the component off ``middlewareToViewsApi.subscribers`` as well as
+    # clear its own handlers.  See ``communication.unsubscribeAll``.
+    result.parent = middlewareToViewsApi
 
   proc registerComponent*(data: Data, component: Component, content: Content) =
     if data.ui.componentMapping[content].hasKey(component.id):
@@ -2462,6 +2547,21 @@ proc duration*(call: nil Call): int64 =
 proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
+
+method independentTabPath*(self: Component): cstring {.base.} =
+  ## The layout path this component instance is *keyed by* when it is opened
+  ## as an independent editor-area tab (see `opensAsIndependentTab`).
+  ##
+  ## The empty string means "no independent identity": the component is the
+  ## singleton instance of its content kind.  Because `openLayoutTab` only ever
+  ## compares this against a non-empty requested path, singleton instances can
+  ## never be mistaken for an independent tab.
+  cstring""
+
+method independentTabPath*(self: UnifiedDiffComponent): cstring =
+  ## A diff tab is identified by the target it shows, so a second `View Diff`
+  ## on the same file focuses the tab that already shows it (#611).
+  if self.diffTarget.isNil: cstring"" else: self.diffTarget
 
 method restart*(self: Component) {.base.} =
   discard

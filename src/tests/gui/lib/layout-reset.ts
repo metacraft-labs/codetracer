@@ -75,6 +75,30 @@ export function ensureDefaultLayout(codetracerInstallDir: string): void {
 }
 
 /**
+ * Drop the saved auto-hide state so the next launch starts with nothing
+ * pinned.
+ *
+ * The auto-hide state is the second half of the saved arrangement: pinning a
+ * panel REMOVES it from the GoldenLayout tree and records it in
+ * `auto_hide_state.json` instead.  Resetting `default_layout.json` alone
+ * therefore does not give a test a clean slate — it gives it a default layout
+ * plus whichever panels an earlier test in the same worker left pinned, which
+ * is a state no single test ever set up.  (Concretely: one test pinning FILES
+ * to the bottom edge made every later test see five bottom strip tabs instead
+ * of the four `layout.nim` registers by default.)
+ *
+ * Specs that are *about* restoring a persisted pin seed the file deliberately
+ * and opt out via the `preserveAutoHideState` fixture option.
+ */
+export function resetAutoHideState(): void {
+  const { userLayoutDir } = currentLayoutPaths();
+  const statePath = path.join(userLayoutDir, "auto_hide_state.json");
+  if (fs.existsSync(statePath)) {
+    fs.unlinkSync(statePath);
+  }
+}
+
+/**
  * Restore the user's original layout from the backup.
  * Call this from `test.afterAll()`.
  */

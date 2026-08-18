@@ -15,6 +15,7 @@ import ../agent_evidence
 import ../agent_service
 import ../store/[replay_data_store, types]
 import agent_activity_vm, agent_workspace_vm, deepreview_vm, editor_vm, vcs_vm
+import review_entry
 
 type
   AgenticWorkspaceMode* = enum
@@ -389,6 +390,83 @@ proc applyDeepReviewEvidence*(vm: AgenticSessionVM;
     vm.deepReview.setUnifiedFiles(reviewUnified)
     vm.deepReview.setViewMode(drpvmUnified)
   true
+
+proc agenticReviewDataset*(vm: AgenticSessionVM): ReviewDataset =
+  ## The review an agentic session hands over, as the dataset the one
+  ## review-entry routine takes (`viewmodels/review_entry`).
+  ##
+  ## Agentic-Coding-Integration.md §4.4: when a session finishes with a diff
+  ## and one or more recorded traces, "CodeTracer creates a DeepReview session
+  ## from that output, following DeepReview GUI".  This is that output
+  ## projected into the same shape `ct --deepreview` projects an exported
+  ## dataset into, so both reach an identical review state through one routine
+  ## instead of two conventions.
+  ##
+  ## It lives on the ViewModel rather than in the launcher
+  ## (`ui/agentic_session_launcher.nim`, which is JS-only) so that the agentic
+  ## launch path is drivable — and comparable with the other two — from a
+  ## headless test.  The launcher builds its `DeepReviewData` from this same
+  ## value, so the two cannot describe different changesets.
+  ##
+  ## What an agent session genuinely does not carry is said honestly rather
+  ## than filled in: an evidence file entry (`AgentServiceEvidenceFileEntry`)
+  ## has a path, a status and line counts, but no per-line coverage and no
+  ## flow, so the coverage columns are empty rather than zeroed-as-if-measured
+  ## and `functionsTraced` is 0.  Live coverage/flow streaming during a
+  ## session is Agentic-Coding-Integration.md §5, which no producer implements
+  ## yet.
+  if vm.isNil:
+    return ReviewDataset(files: @[], traceContexts: @[])
+  let session = vm.activeSession()
+  result.title = "DeepReview: " & session.captionForSession()
+  result.files = @[]
+  for file in vm.vcs.changedFiles.val:
+    result.files.add(ReviewFile(
+      path: file.path,
+      baseName: file.baseName,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions))
+  result.traceContexts = @[]
+  # `deepReview` is optional on this VM (`createAgenticSessionVM`'s last
+  # parameter defaults to nil), so a session without one must still produce a
+  # review that names its run rather than crashing on the read.
+  if not vm.deepReview.isNil:
+    for ctx in vm.deepReview.traceContexts.val:
+      result.traceContexts.add(VCSTraceContextRow(id: ctx.id, label: ctx.label))
+  if result.traceContexts.len == 0 and result.files.len > 0:
+    # A review always has at least the run that produced it; naming it after
+    # the recorded test is what `applyDeepReviewEvidence` does, and the
+    # fallback matches it so a session whose DeepReviewVM was never populated
+    # still offers the selector rather than an empty dropdown.
+    result.traceContexts.add(VCSTraceContextRow(
+      id: 1,
+      label: if session.evidence.testName.len > 0: session.evidence.testName
+             else: "recorded test"))
+  result.functionsTraced = 0
+
+proc agenticReviewFileDiffs*(vm: AgenticSessionVM; dataset: ReviewDataset):
+    seq[ReviewFileDiff] =
+  ## The per-file diffs of the review an agentic session hands over — the
+  ## other half of `agenticReviewDataset`, and the half the review's Monaco
+  ## diff tabs are built from.
+  ##
+  ## The source is `vcs.diffFiles`: the per-file diff this VM projected from
+  ## the agent's own output (a Harbor `fileDiff` REST call, an ACP diff event,
+  ## or an evidence file entry).  It used to be `activeEditorContent` re-parsed
+  ## as a patch inside `ui/agentic_session_launcher.nim`, which meant *every*
+  ## file of a multi-file changeset received the diff of whichever file the
+  ## editor happened to be showing.  Pairing each file with its own row is what
+  ## `reviewHunksFor` enforces; being on the ViewModel is what makes it
+  ## assertable without Electron.
+  ##
+  ## The full text of the one file the editor is showing is passed along for
+  ## context expansion (DeepReview-GUI.md §4.2); the other files carry none
+  ## rather than a copy of that one's text.
+  if vm.isNil:
+    return @[]
+  reviewFileDiffs(dataset, vm.vcs.diffFiles.val,
+                  vm.activeEditorPath.val, vm.activeEditorContent.val)
 
 proc handleAgentEvidenceNotification*(vm: AgenticSessionVM;
     notification: AgentEvidenceNotification): bool =

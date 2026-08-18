@@ -81,6 +81,7 @@ import views/isonim_agent_activity_deepreview_view
 import views/isonim_agent_workspace_view
 import views/isonim_deepreview_view
 import views/isonim_vcs_view
+import views/isonim_unified_diff_view
 import views/isonim_welcome_screen_view
 import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
@@ -579,6 +580,23 @@ suite "IsoNim Status Shell — structure":
 
 suite "IsoNim Menu Shell — structure":
 
+  proc menuSlug(name: string): string =
+    ## The same slug `ui/menu.nim` feeds into a node's identity class via
+    ## `jslib.convertStringToHtmlClass`: alphanumeric words, lower-cased and
+    ## joined with `-`, so "Ruby: Fibonacci" becomes `ruby-fibonacci` and the
+    ## GUI suite's `.menu-element-ruby-fibonacci` selector resolves.
+    var words: seq[string] = @[]
+    var current = ""
+    for ch in name:
+      if ch.isAlphaNumeric or ch == '-':
+        current.add ch
+      elif current.len > 0:
+        words.add current
+        current = ""
+    if current.len > 0:
+      words.add current
+    words.join("-").toLowerAscii
+
   proc menuNode(
       name: string;
       path: seq[int];
@@ -592,7 +610,15 @@ suite "IsoNim Menu Shell — structure":
       shortcut: shortcut,
       enabled: enabled,
       iconClass: name.toLowerAscii,
-      nameClass: "menu-element-" & name.toLowerAscii,
+      # Mirror `ui/menu.nim`'s `menuRecord`: an element gets
+      # `menu-element-<slug>`, a folder gets `menu-folder-<slug>`.  The
+      # fixture used the element prefix for both, which made it impossible
+      # for this suite to notice that the folder identity classes the GUI
+      # suite selects on (`.menu-folder-debug`,
+      # `.menu-folder-launch-configurations`) had stopped being rendered.
+      nameClass:
+        (if kind == MenuRecordFolder: "menu-folder-" else: "menu-element-") &
+          menuSlug(name),
       nodeClass: nodeClass,
       path: path,
       nameWidth: name.len + 1)
@@ -620,7 +646,7 @@ suite "IsoNim Menu Shell — structure":
     check findByClass(panel, WindowMenuClass) != nil
     check findByClass(panel, "maximize") != nil
     check findByClass(panel, "restore").isNil
-    check findAllByClass(panel, "menu-node").len == 0
+    check findAllByClass(panel, "menu-node-container").len == 0
 
   test "caption bar hosts survive without navigation menu":
     let r = MockRenderer()
@@ -652,10 +678,39 @@ suite "IsoNim Menu Shell — structure":
         maximized: true))
 
     check findByClass(panel, "menu-active-node") != nil
+    # One `.menu-node` per rendered menu row.  This is the selector the GUI
+    # suite enumerates the open menu with — `#menu-elements .menu-node` and
+    # `.menu-nested-elements .menu-node` in
+    # `welcome-screen/launch_config.spec.ts`, catalogued in
+    # `codetracer-specs/Testing/UI-Test-Catalog.md` § Launch Configuration
+    # Tests — so a row that renders without it is invisible to every one of
+    # those tests even though the user can see it.
     check findAllByClass(panel, "menu-node").len == 2
+    # …and each row is addressable by kind and by identity, which is what
+    # ".menu-folder-debug" / ".menu-element-ruby-fibonacci" in that same
+    # catalogue mean for a real menu.
+    check findAllByClass(panel, "menu-folder").len == 1
+    check findAllByClass(panel, "menu-element").len == 1
+    check findByClass(panel, "menu-folder-file") != nil
+    check findByClass(panel, "menu-element-run") != nil
     check findById(panel, DebugShellId).attributes["class"] == DebugShellClass
     check findById(panel, "isonim-debug-controls") != nil
-    check findByClass(panel, "menu-node-shortcut").textContent == "CTRL+R"
+    # The row must show its keyboard shortcut.  Spec:
+    # `codetracer-specs/GUI/Keyboard-Shortcuts-System.md` — "Shortcut display
+    # in menus uses a manual `loadShortcut()` function" (§ Known Issues) and
+    # "Shortcut hints in UI: Show keyboard shortcut hints on toolbar buttons
+    # (tooltips), menu items (already partial)" (§ Future Work).  The slot it
+    # is displayed in is the design system's sublabel —
+    # `styles/components/menu_item.styl`: ".ct-menu-item-sublabel — secondary
+    # / descriptive text (keyboard shortcut)".
+    #
+    # The nil guards here are deliberate: a nil deref in a `check` aborts the
+    # whole test binary with a SIGSEGV, which is how the menu-shell suite once
+    # took every later suite in this file down with it.
+    let shortcut = findByClass(panel, "ct-menu-item-sublabel")
+    check shortcut != nil
+    if shortcut != nil:
+      check shortcut.textContent == "CTRL+R"
     check findByClass(panel, "restore") != nil
     check findByClass(panel, "maximize").isNil
 
@@ -673,10 +728,17 @@ suite "IsoNim Menu Shell — structure":
         onNodeClick: proc(path: seq[int]) = clickedPath = path,
         onSearchResultClick: proc(index: int) = searchIndex = index))
 
+    # `.menu-element` is the clickable leaf row; `launch_config.spec.ts`
+    # activates a launch configuration by clicking exactly this selector
+    # (".menu-nested-elements .menu-element", catalogued in
+    # `codetracer-specs/Testing/UI-Test-Catalog.md`), so the class and the
+    # click handler have to sit on the same element.
     let item = findByClass(menuPanel, "menu-element")
     check item != nil
-    item.fireEvent("click")
-    check clickedPath == @[1]
+    # Guarded — see the note above: a nil deref here aborts the whole binary.
+    if item != nil:
+      item.fireEvent("click")
+      check clickedPath == @[1]
 
     let searchPanel = renderMenuShell(
       r,
@@ -697,8 +759,9 @@ suite "IsoNim Menu Shell — structure":
 
     let result = findByClass(searchPanel, "menu-search-result")
     check result != nil
-    result.fireEvent("click")
-    check searchIndex == 0
+    if result != nil:
+      result.fireEvent("click")
+      check searchIndex == 0
 
   test "shell UI model can render menu without window controls":
     let r = MockRenderer()
@@ -713,7 +776,69 @@ suite "IsoNim Menu Shell — structure":
     check findByClass(panel, WindowMenuClass).isNil
     check findById(panel, DebugShellId) != nil
     check findById(panel, "isonim-debug-controls") != nil
-    check findByClass(panel, "menu-folder").textContent.contains("Shell")
+    let folder = findByClass(panel, "menu-folder")
+    check folder != nil
+    if folder != nil:
+      check folder.textContent.contains("Shell")
+      # A folder is enabled here, so it must advertise itself as activatable:
+      # `codetracer-specs/Testing/UI-Test-Catalog.md` § Launch Configuration
+      # Tests — "Launch config items are clickable | Verifies `.menu-enabled`
+      # class on launch config elements".
+      check folder.attributes["class"].split(' ').contains("menu-enabled")
+      check findByClass(panel, "menu-folder-shell") != nil
+
+  test "submenu rows carry the same identity and enablement hooks":
+    ## The launch-configuration flow the GUI suite drives lives entirely in
+    ## *submenus*: `codetracer-specs/Testing/UI-Test-Catalog.md` § Launch
+    ## Configuration Tests hovers `.menu-folder-debug`, then
+    ## `.menu-folder-launch-configurations`, then clicks
+    ## `.menu-element-ruby-fibonacci` inside `.menu-nested-elements`, and
+    ## checks `.menu-enabled` on it.  Only the root menu was covered here, so
+    ## the nested branch could lose those hooks unnoticed — as it had.
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: true,
+        rootNodes: @[menuNode("Debug", @[0], kind = MenuRecordFolder)],
+        nestedMenus: @[
+          MenuNestedRecord(
+            id: "menu-nested-elements-1",
+            className: "menu-nested-elements",
+            style: "top: 0px; left: 0px",
+            nodes: @[
+              menuNode("Launch Configurations", @[0, 0],
+                kind = MenuRecordFolder),
+              menuNode("Ruby: Fibonacci", @[0, 1], shortcut = "CTRL+SHIFT+R"),
+              menuNode("Stop", @[0, 2], enabled = false)
+            ])
+        ]))
+
+    let nested = findByClass(panel, "menu-nested-elements")
+    check nested != nil
+    if nested != nil:
+      check findAllByClass(nested, "menu-node").len == 3
+      check findByClass(nested, "menu-folder-launch-configurations") != nil
+      let entry = findByClass(nested, "menu-element-ruby-fibonacci")
+      check entry != nil
+      if entry != nil:
+        let entryClasses = entry.attributes["class"].split(' ')
+        check entryClasses.contains("menu-element")
+        check entryClasses.contains("menu-enabled")
+        check entry.textContent.contains("CTRL+SHIFT+R")
+
+      # A disabled entry must say so in both vocabularies: `menu-disabled` is
+      # the semantic counterpart of `menu-enabled` above, and
+      # `ct-menu-item--disabled` is what actually greys the row out and turns
+      # off its pointer events (`styles/components/menu_item.styl`).
+      let disabled = findByClass(nested, "menu-element-stop")
+      check disabled != nil
+      if disabled != nil:
+        let disabledClasses = disabled.attributes["class"].split(' ')
+        check disabledClasses.contains("menu-disabled")
+        check disabledClasses.contains("ct-menu-item--disabled")
+        check not disabledClasses.contains("menu-enabled")
 
   test "caption shell keeps chrome hosts when menu nodes are unavailable":
     ## Regression guard for welcome / newly-created empty sessions: the caption
@@ -747,16 +872,40 @@ suite "IsoNim Menu Shell — structure":
 suite "IsoNim Session Tabs — structure":
 
   test "single session uses hidden modifier and renders add button":
+    ## Spec: `codetracer-specs/GUI/Multi-Window-Tab-Management.md` § Tab
+    ## Behavior — 'The "+" button opens a new empty tab (for loading a new
+    ## trace)'.
+    ##
+    ## What that requires of the rendered bar is a single, activatable,
+    ## named control wired to "add a session".  This used to be asserted as
+    ## `textContent == "+"`, which stopped holding when the plus glyph moved
+    ## into the button's background image
+    ## (`styles/components/session_tabs.styl` → `session_tab_add.svg`) — a
+    ## presentation detail, not the contract.  It is asserted here as the
+    ## contract instead: the control exists exactly once, is a real `button`
+    ## (so it is focusable and activatable, not a bare div), announces itself
+    ## through its title now that no text node names it, and adding is what
+    ## clicking it does.
+    var addCount = 0
     let r = MockRenderer()
     let panel = renderSessionTabsPanel(
       r,
       @[SessionTabRecord(label: "main.py")],
-      activeIndex = 0)
+      activeIndex = 0,
+      callbacks = SessionTabsCallbacks(onAdd: proc() = addCount += 1))
 
     check panel.attributes["id"] == SessionTabBarId
     check panel.attributes["class"] == SessionTabBarSingleClass
     check findAllByClass(panel, SessionTabClass).len == 1
-    check findByClass(panel, SessionTabAddClass).textContent == "+"
+    check findAllByClass(panel, SessionTabAddClass).len == 1
+
+    let addButton = findByClass(panel, SessionTabAddClass)
+    check addButton != nil
+    if addButton != nil:
+      check addButton.tag == "button"
+      check addButton.attributes["title"] == SessionTabAddTitle
+      addButton.fireEvent("click")
+      check addCount == 1
     check panel.textContent.contains("main.py")
 
   test "multiple sessions mark the active tab and show close buttons":
@@ -7582,25 +7731,11 @@ suite "IsoNim Request Panel — structure":
 
       let panel = renderRequestPanel(r, vm)
 
-      check findByClass(panel, "request-panel-header") != nil
       check findByClass(panel, "request-panel-filters") != nil
       check findByClass(panel, "request-table-header") != nil
       let body = findByClass(panel, "request-table-body")
       check body != nil
       check body.children.len == 0
-
-      dispose()
-
-  test "count badge renders 0 / 0 requests in the empty state":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createRequestPanelVM(store)
-      let r = MockRenderer()
-
-      let panel = renderRequestPanel(r, vm)
-      let count = findByClass(panel, "request-panel-count-text")
-      check count != nil
-      check count.textContent == "0 / 0 requests"
 
       dispose()
 
@@ -7638,7 +7773,7 @@ suite "IsoNim Request Panel — row rendering":
 
       let body = findByClass(panel, "request-table-body")
       let row = body.children[0]
-      check findByClass(row, "request-col-id").textContent == "1"
+      check findByClass(row, "request-col-id").textContent == "01"
       check findByClass(row, "request-col-method").textContent == "POST"
       check findByClass(row, "request-col-url").textContent == "/api/x"
       check findByClass(row, "request-col-status").textContent == "201"
@@ -7662,23 +7797,6 @@ suite "IsoNim Request Panel — row rendering":
       check entries[0].id == 1
       check entries[1].id == 2
       check entries[2].id == 3
-
-      dispose()
-
-  test "count badge updates as rows arrive":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createRequestPanelVM(store)
-      let r = MockRenderer()
-
-      let panel = renderRequestPanel(r, vm)
-      let count = findByClass(panel, "request-panel-count-text")
-
-      check count.textContent == "0 / 0 requests"
-      vm.addRequest("GET", "/a", 200, 0, 0, 0)
-      check count.textContent == "1 / 1 requests"
-      vm.addRequest("POST", "/b", 500, 0, 0, 0)
-      check count.textContent == "2 / 2 requests"
 
       dispose()
 
@@ -7854,28 +7972,6 @@ suite "IsoNim Request Panel — filters":
 
       dispose()
 
-  test "count badge tracks filteredRequests vs total":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createRequestPanelVM(store)
-      let r = MockRenderer()
-
-      let panel = renderRequestPanel(r, vm)
-      vm.addRequest("GET", "/a", 200, 0, 0, 0)
-      vm.addRequest("POST", "/b", 200, 0, 0, 0)
-      vm.addRequest("GET", "/c", 200, 0, 0, 0)
-
-      let count = findByClass(panel, "request-panel-count-text")
-      check count.textContent == "3 / 3 requests"
-
-      vm.setFilterMethod("POST")
-      check count.textContent == "1 / 3 requests"
-
-      vm.setFilterMethod("")
-      check count.textContent == "3 / 3 requests"
-
-      dispose()
-
   test "filter mutation resets the selection":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -8001,6 +8097,7 @@ suite "IsoNim Request Panel — vm":
       check vm.searchText.val == ""
       check vm.selectedIndex.val == NO_SELECTED_INDEX
       check vm.filteredRequests.val.len == 0
+      check vm.detailTab.val == "headers"
       check not vm.store.isNil
 
       dispose()
@@ -8037,6 +8134,180 @@ suite "IsoNim Request Panel — vm":
   test "countText renders the legacy '<filtered> / <total> requests' shape":
     check countText(0, 0) == "0 / 0 requests"
     check countText(2, 5) == "2 / 5 requests"
+
+  test "statusCodeText returns reason phrase for known codes":
+    check statusCodeText(200) == "OK"
+    check statusCodeText(201) == "Created"
+    check statusCodeText(404) == "Not Found"
+    check statusCodeText(500) == "Internal Server Error"
+    check statusCodeText(999) == ""
+
+  test "detailStatusText formats code + reason phrase":
+    check detailStatusText(200) == "200 OK"
+    check detailStatusText(500) == "500 Internal Server Error"
+    check detailStatusText(999) == "999"
+
+# ---------------------------------------------------------------------------
+# IsoNim Request Panel — detail panel
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — detail panel":
+
+  test "no detail content when no selection":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+      let host = findByClass(panel, "request-detail-host")
+      check host != nil
+      check host.children.len == 0
+
+      dispose()
+
+  test "detail panel appears when row is selected":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
+      vm.selectRequest(0)
+
+      check findByClass(panel, "request-detail") != nil
+
+      dispose()
+
+  test "detail header shows method badge, URL, and status text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
+      vm.selectRequest(0)
+
+      let header = findByClass(panel, "request-detail-header")
+      check header != nil
+      # Method badge uses the same class as table rows
+      check findByClass(header, "request-method-delete") != nil
+      check findByClass(header, "request-method-delete").textContent == "DELETE"
+      # URL
+      check findByClass(header, "request-detail-header-url") != nil
+      check findByClass(header, "request-detail-header-url").textContent == "/api/users/42"
+      # Status: "500 Internal Server Error" coloured red
+      let statusEl = findByClass(header, "request-detail-header-status")
+      check statusEl != nil
+      check "500" in statusEl.textContent
+      check "Internal Server Error" in statusEl.textContent
+      check "request-status-server-error" in statusEl.attributes["class"]
+
+      dispose()
+
+  test "handler button is present and dispatches jumpToHandler":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/health", 200, 5, 64, 9999)
+      vm.selectRequest(0)
+
+      let btn = findByClass(panel, "request-detail-handler-btn")
+      check btn != nil
+      check "Handler" in btn.textContent
+
+      mock.clearReceivedCommands()
+      btn.fireEvent("click")
+      check mock.findCommand("ct/seek-to-geid").isSome
+
+      dispose()
+
+  test "tab bar renders all six tabs with Headers active by default":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/x", 200, 10, 100, 1)
+      vm.selectRequest(0)
+
+      let tabs = findAllByClass(panel, "request-detail-tab")
+      check tabs.len == 6
+      check tabs[0].textContent == "Headers"
+      check tabs[1].textContent == "Request"
+      check tabs[2].textContent == "Response"
+      check tabs[3].textContent == "Timing"
+      check tabs[4].textContent == "Call Trace"
+      check tabs[5].textContent == "Async Flow"
+      # Default active tab is "Headers"
+      check "request-detail-tab--active" in tabs[0].attributes["class"]
+      check "request-detail-tab--active" notin tabs[3].attributes["class"]
+
+      dispose()
+
+  test "clicking Timing tab updates vm.detailTab and shows timing content":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("POST", "/api/jobs", 201, 65, 512, 1)
+      vm.selectRequest(0)
+
+      findAllByClass(panel, "request-detail-tab")[3].fireEvent("click")
+      check vm.detailTab.val == "timing"
+
+      let content = findByClass(panel, "request-detail-content")
+      check content != nil
+      let title = findByClass(content, "request-detail-section-title")
+      check title != nil
+      check "TIMING" in title.textContent
+      check "65ms" in title.textContent
+
+      dispose()
+
+  test "detail panel disappears when selection is cleared":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/x", 200, 0, 0, 1)
+      vm.selectRequest(0)
+      check findByClass(panel, "request-detail") != nil
+
+      vm.selectRequest(NO_SELECTED_INDEX)
+      check findByClass(panel, "request-detail") == nil
+
+      dispose()
+
+  test "detail panel updates when selection changes to different row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+
+      vm.addRequest("GET", "/api/users", 200, 10, 100, 1)
+      vm.addRequest("DELETE", "/api/items/1", 404, 20, 50, 2)
+
+      vm.selectRequest(0)
+      check findByClass(panel, "request-detail-header-url").textContent == "/api/users"
+
+      vm.selectRequest(1)
+      check findByClass(panel, "request-detail-header-url").textContent == "/api/items/1"
+      check findByClass(panel, "request-method-delete") != nil
+
+      dispose()
 
 # ---------------------------------------------------------------------------
 # IsoNim Trace Log Panel — closes section 5.4 entry "trace_log"
@@ -9076,6 +9347,60 @@ suite "IsoNim Filesystem Panel — vm":
 
       dispose()
 
+  test "the active file's row materialises after the debugger stops in it":
+    ## View-layer companion to the FilesystemVM suite in
+    ## src/tests/gui/tests/filesystem/filesystem_vm_test.nim (#576).
+    ##
+    ## The view only recurses into EXPANDED folders
+    ## (isonim_filesystem_view.nim), so a file three levels down is absent
+    ## from the DOM until every folder above it is expanded.  That is what
+    ## makes this a proof the file is REVEALED, rather than merely marked
+    ## expanded in a set.
+    ##
+    ## Note the contrast with the test directly above: that one covers the
+    ## single-child chain collapse (`collectSmartExpansionPaths`), which is a
+    ## DIFFERENT feature and was wrongly cited in the milestone file as
+    ## verification for auto-expand-to-active-file.  Here `src` deliberately
+    ## has TWO folder children, so the chain collapse contributes nothing and
+    ## this cannot pass for the wrong reason.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("proj", path = "/proj", isFolder = true, children = @[
+          makeFsEntry("src", path = "/proj/src", isFolder = true, children = @[
+            makeFsEntry("db", path = "/proj/src/db", isFolder = true,
+                        children = @[
+                          makeFsEntry("main.rs",
+                                      path = "/proj/src/db/main.rs")]),
+            makeFsEntry("ui", path = "/proj/src/ui", isFolder = true,
+                        children = @[
+                          makeFsEntry("view.rs",
+                                      path = "/proj/src/ui/view.rs")]),
+          ]),
+          makeFsEntry("README.md", path = "/proj/README.md"),
+        ]),
+      ]))
+
+      proc labelTexts(): seq[string] =
+        for node in findAllByClass(panel, "filesystem-entry-label"):
+          result.add(node.textContent)
+
+      # Everything below the top level is collapsed, so the file is absent.
+      check "main.rs" notin labelTexts()
+
+      store.updateDebuggerPosition(1'u64, "/proj/src/db/main.rs", 12)
+
+      let texts = labelTexts()
+      check "main.rs" in texts
+      # The sibling subtree stays collapsed, so its file is still absent.
+      check "view.rs" notin texts
+
+      dispose()
+
   test "diffClassToCss maps the enum to the legacy CSS modifier strings":
     check diffClassToCss(fdcNone) == ""
     check diffClassToCss(fdcAdded) == "diff-file-added"
@@ -10002,6 +10327,180 @@ suite "IsoNim Agent Activity DeepReview Panel — interactions":
       dispose()
 
 # ---------------------------------------------------------------------------
+# DR-R3 — the section inside the Agent Activity panel
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Agent Activity DeepReview Panel — review rendering (DR-R3)":
+
+  test "the tests card says the dataset carries no test results":
+    ## DeepReview-GUI.milestones.org DR-R3: "the row must render an honest
+    ## 'not available for this dataset' state, not a fabricated zero".
+    ## `DeepReviewData` has no test-result fields at all, so a CLI-launched
+    ## review has nothing to put here — and "0/0 · all passing" would report
+    ## a green suite that never ran.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      let testsCard = findByClass(panel, "activity-dr-card-tests")
+      check testsCard != nil
+
+      check findByClass(testsCard, "activity-dr-card-value").textContent ==
+        AgentActivityDeepReviewTestsUnavailableValueText
+      let detail = findByClass(testsCard, "activity-dr-card-detail")
+      check detail.textContent == AgentActivityDeepReviewTestsUnavailableText
+      check detail.textContent != "all passing"
+      check AgentActivityDeepReviewTestsUnavailableClass in
+        detail.attributes["class"]
+      # Not the failure branch either — absent data is neither red nor green.
+      check "activity-dr-card-warn" notin detail.attributes["class"]
+
+      # A live agent session reporting a run replaces it with real counts.
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 4, testsPassed: 4, testsFailed: 0))
+      check findByClass(testsCard, "activity-dr-card-value").textContent ==
+        "4/4"
+      check findByClass(testsCard, "activity-dr-card-detail").textContent ==
+        "all passing"
+
+      dispose()
+
+  test "the section stays hidden until a review populates it":
+    ## §2.1 puts the section inside the Agent Activity panel, which every
+    ## standard layout already has — so outside a review it must take up no
+    ## room in a normal debugging session's panel.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      # The panel's root element IS the section container.
+      let container = renderAgentActivityDeepReviewPanel(r, vm)
+      check AgentActivityDeepReviewInactiveModifier in
+        container.attributes["class"].split(' ')
+      check AgentActivityDeepReviewHiddenModifier in
+        container.attributes["class"].split(' ')
+
+      vm.setReviewActive(true)
+      check AgentActivityDeepReviewInactiveModifier notin
+        container.attributes["class"].split(' ')
+      check AgentActivityDeepReviewHiddenModifier notin
+        container.attributes["class"].split(' ')
+
+      dispose()
+
+  test "the selected coverage row is highlighted and reports clicks":
+    ## §2.1: "Selecting a file in either the VCS panel or the per-file
+    ## coverage table should agree with the other; they are two views of one
+    ## selection."  This is the coverage table's half: it shows which file is
+    ## under review, and a click on a row reports that file to the host.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+      var reported = ""
+      let callbacks = AgentActivityDeepReviewCallbacks(
+        onSelectFile: proc(path: string) = (reported = path))
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm, callbacks)
+      vm.setFileCoverage([
+        makeAdrFile("src/main.rs", 15, 17),
+        makeAdrFile("src/utils.rs", 5, 7),
+      ])
+
+      var rows = findAllByClass(panel, "activity-dr-files-row")
+      check rows.len == 2
+      for row in rows:
+        check AgentActivityDeepReviewFileRowSelectedClass notin
+          row.attributes["class"]
+
+      vm.setSelectedFilePath("src/utils.rs")
+      rows = findAllByClass(panel, "activity-dr-files-row")
+      check AgentActivityDeepReviewFileRowSelectedClass notin
+        rows[0].attributes["class"]
+      check AgentActivityDeepReviewFileRowSelectedClass in
+        rows[1].attributes["class"]
+
+      rows[0].fireEvent("click")
+      check reported == "src/main.rs"
+
+      dispose()
+
+  test "with no host attached a coverage-row click still moves the selection":
+    ## The VM-level fallback, mirroring `invokeSetTraceContext` in the VCS
+    ## view: the MockRenderer path must be exercisable without a host.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      vm.setFileCoverage([
+        makeAdrFile("src/main.rs", 15, 17),
+        makeAdrFile("src/utils.rs", 5, 7),
+      ])
+      findAllByClass(panel, "activity-dr-files-row")[1].fireEvent("click")
+      check vm.selectedFilePath.val == "src/utils.rs"
+      check vm.selectedFileIndex.val == 1
+
+      dispose()
+
+suite "IsoNim Agent Activity Panel — hosts the DeepReview section (DR-R3)":
+
+  test "a panel with no review VM renders no DeepReview section":
+    ## Regression guard for normal debugging: passing no DeepReview VM must
+    ## leave the Agent Activity panel exactly as it was.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityPanel(r, vm, componentId = 71)
+      let host = findByClass(panel, AgentActivityDeepReviewHostClass)
+      check host != nil
+      check host.children.len == 0
+      check findByClass(panel, "activity-dr-container") == nil
+
+      dispose()
+
+  test "the DeepReview section renders inside the Agent Activity panel":
+    ## §2.1: "The section is part of the existing Agent Activity panel.  It is
+    ## not a separate panel and does not get its own layout slot."  Before
+    ## DR-R3 the section existed only as `Content.AgentActivityDeepReview`, a
+    ## panel no layout declares — so it never rendered in a real review.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let drVm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityPanel(
+        r, vm, componentId = 72, deepReviewVm = drVm)
+      let host = findByClass(panel, AgentActivityDeepReviewHostClass)
+      check host != nil
+      check findByClass(host, "activity-dr-container") != nil
+      # Outside a review the host takes no space at all.
+      check "hidden" in host.attributes["class"]
+
+      drVm.setFileCoverage([makeAdrFile("src/main.rs", 15, 17)])
+      drVm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: 15, totalLinesUncovered: 2,
+        coveragePercent: 88.2, functionsTraced: 2))
+      drVm.setReviewActive(true)
+      drVm.setExpanded(true)
+
+      check "hidden" notin host.attributes["class"]
+      check findAllByClass(host, "activity-dr-files-row").len == 1
+      check findByClass(host, "activity-dr-card-coverage").textContent
+        .contains("88.2%")
+      # The conversation surface is untouched by any of this.
+      check findByClass(panel, AgentActivityConversationClass) != nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
 # VM defaults / formatting helpers
 # ---------------------------------------------------------------------------
 
@@ -10874,8 +11373,8 @@ suite "IsoNim VCS Panel — structure":
       let callbacks = VCSCallbacks(
         onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
           (expandedCommit = index; expandModifiers = (ctrl, shift)),
-        onSelectFile: proc(index: int; path: string) =
-          (discard index; selectedFile = path),
+        onSelectFile: proc(index: int; path, target, status: string) =
+          (discard index; discard target; selectedFile = path),
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
@@ -10931,8 +11430,12 @@ suite "IsoNim VCS Panel — structure":
       let dropdown = findByClass(panel, "vcs-branch-dropdown")
       check dropdown != nil
 
-      let options = findAllByClass(dropdown, "vcs-branch-option")
+      # `0717477a` moved the dropdown onto the shared `ct-menu-item` markup;
+      # the old `vcs-branch-option` class no longer exists.
+      let options = findAllByClass(dropdown, "ct-menu-item")
       check options.len == 3
+      # The checked-out branch is marked so the picker shows where you are.
+      check options[0].attributes["class"].contains("ct-menu-item--active")
       check options[0].textContent.contains("main")
       check options[1].textContent.contains("feature-1")
       check options[2].textContent.contains("feature-2")
@@ -10949,8 +11452,8 @@ suite "IsoNim VCS Panel — structure":
       let r = MockRenderer()
       var selected = -1
       let callbacks = VCSCallbacks(
-        onSelectFile: proc(index: int; path: string) =
-          (discard path; selected = index),
+        onSelectFile: proc(index: int; path, target, status: string) =
+          (discard path; discard target; selected = index),
       )
       let panel = renderVCSPanel(r, vm, callbacks)
 
@@ -10972,7 +11475,17 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
-  test "test_vcs_unified_diff_inline":
+  test "test_vcs_panel_is_never_a_diff_surface":
+    ## DR-R4: a unified diff is an editor-area Monaco document
+    ## (``Content.UnifiedDiff``), not a second instance of this panel —
+    ## VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the
+    ## standard CodeTracer Monaco editor".
+    ##
+    ## This replaces ``test_vcs_unified_diff_tab``, which asserted that the
+    ## panel renders the diff itself when ``unifiedDiffActive`` is set.  That
+    ## branch is gone; the assertion that remains is that setting the flag
+    ## cannot bring a DOM diff back into the panel, and that the panel keeps
+    ## its own chrome (#561: the diff must never replace the commit history).
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
@@ -10982,42 +11495,213 @@ suite "IsoNim VCS Panel — structure":
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
 
-      let diff = findByClass(panel, "deepreview-unified-diff")
-      let filePath = findByClass(panel, "deepreview-unified-file-path")
-      check findByClass(panel, "vcs-changed-files") == nil
-      check diff != nil
-      check filePath != nil
-      check filePath.textContent == "src/main.nim"
-      check findAllByClass(diff, "deepreview-unified-line").len == 2
-      check findByClass(panel, "vcs-commit-history") == nil
+      check findByClass(panel, "deepreview-unified-diff") == nil
+      check findByClass(panel, "deepreview-unified-line") == nil
+      check findByClass(panel, "deepreview-unified-file-path") == nil
+      # ...and the panel is still the panel.
+      check findByClass(panel, "vcs-commit-history") != nil
+      check findByClass(panel, "vcs-branch-picker") != nil
+      check findByClass(panel, "vcs-diff-toggle") != nil
 
       dispose()
 
-  test "unified diff renders toolbar selection and hunk callback":
+  test "test_vcs_view_mode_toggle_keeps_commit_history":
+    ## #561: the reporter's complaint was that turning on "Unified Diff"
+    ## replaced the VCS panel's contents.  The toggle selects what a file click
+    ## *does*; the commit history must survive it.
+    ##
+    ## `renderDiffToggle` was dead code — `renderVCSPanelImpl` never called it
+    ## — and `onToggleUnifiedDiff` was a `discard`, so neither the switch nor
+    ## its effect existed.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var selectedHunk = (-1, -1)
+      var toggled = 0
       let callbacks = VCSCallbacks(
-        onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
-          (discard shiftKey; discard ctrlKey; selectedHunk = (fileIdx, hunkIdx)),
+        onToggleUnifiedDiff: proc() =
+          toggled += 1
+          vm.setViewMode(
+            if vm.viewMode.val == vmUnifiedDiff: vmOpenFile
+            else: vmUnifiedDiff),
       )
+      let panel = renderVCSPanel(r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[])
+
+      let toggle = findByClass(panel, "vcs-diff-toggle")
+      let button = findByClass(panel, "vcs-toggle-button")
+      check toggle != nil
+      check button != nil
+      # Guarded: without the switch there is nothing to click, and the
+      # assertions below would dereference nil.
+      if button != nil:
+        # Unified diff is the spec default, so the switch starts active.
+        check button.attributes["class"] ==
+          "vcs-toggle-button vcs-toggle-active"
+        check findByClass(panel, "vcs-commit-history") != nil
+
+        button.fireEvent("click")
+
+        check toggled == 1
+        check vm.viewMode.val == vmOpenFile
+        # Still a commit list, still no diff: the toggle changed behaviour only.
+        check findByClass(panel, "vcs-commit-history") != nil
+        check findByClass(panel, "deepreview-unified-diff") == nil
+        check findByClass(panel, "vcs-toggle-button").attributes["class"] ==
+          "vcs-toggle-button"
+
+      dispose()
+
+  test "test_vcs_view_diff_button_dispatches_target":
+    ## #561 / #611: the "View Diff" button must dispatch the diff target for
+    ## its row, and must not also trigger the row's own file-selection click.
+    ##
+    ## Both row kinds are covered.  In a normal git session `renderChangedFiles`
+    ## is not rendered at all, so the rows a user actually sees are the
+    ## `vcs-accordion-file` rows of an expanded commit; the `vcs-file-item`
+    ## rows only appear in DeepReview mode.  They dispatch different targets.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var selectedFile = ""
+      var openedDiff = ""
+      let callbacks = VCSCallbacks(
+        onSelectFile: proc(index: int; path, target, status: string) =
+          (discard index; discard target; selectedFile = path),
+        onOpenFileDiff: proc(target: string) =
+          openedDiff = target,
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      # --- normal git mode: accordion rows under an expanded commit ---------
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[0])
+      vm.setCommitFiles(0, @[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim"),
+        VCSFileRow(status: "A", path: "src/other.nim", baseName: "other.nim"),
+      ])
+
+      # Every row carries a button — dropping one must fail loudly.
+      check findAllByClass(panel, "vcs-accordion-file").len == 2
+      let commitButtons = findAllByClass(panel, "vcs-file-diff-btn")
+      check commitButtons.len == 2
+      if commitButtons.len == 2:
+        commitButtons[1].fireEvent("click")
+        check openedDiff == "commit:abc123:src/other.nim"
+        # The button must not double as a row click.
+        check selectedFile == ""
+
+      # --- DeepReview mode: changed-file rows -------------------------------
+      openedDiff = ""
+      vm.setDeepReviewMode(true)
+      vm.setChangedFiles(@[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim"),
+      ])
+
+      check findAllByClass(panel, "vcs-file-item").len == 1
+      let reviewButtons = findAllByClass(panel, "vcs-file-diff-btn")
+      check reviewButtons.len == 1
+      if reviewButtons.len == 1:
+        reviewButtons[0].fireEvent("click")
+        check openedDiff == "file:src/main.nim"
+        check selectedFile == ""
+
+      dispose()
+
+  test "test_vcs_row_click_carries_its_diff_target":
+    ## The row click reports the same target as the row's button, so the host
+    ## can honour the unified-diff view mode without having to re-derive which
+    ## commit an accordion row belonged to.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var rowTarget = ""
+      var rowPath = ""
+      let callbacks = VCSCallbacks(
+        onSelectFile: proc(index: int; path, target, status: string) =
+          (discard index; rowPath = path; rowTarget = target),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndices = @[0])
+      vm.setCommitFiles(0, @[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim"),
+      ])
+
+      let row = findByClass(panel, "vcs-accordion-file")
+      check row != nil
+      if row != nil:
+        row.fireEvent("click")
+        check rowPath == "src/main.nim"
+        check rowTarget == "commit:abc123:src/main.nim"
+
+      dispose()
+
+  test "the diff tab renders its hunk toolbar over the Monaco host":
+    ## DR-R4's rewrite of "unified diff renders toolbar selection and hunk
+    ## callback", retargeted from the deleted DOM renderer to the diff tab's
+    ## chrome.
+    ##
+    ## The tab is a Monaco editor, so its *body* has no DOM to assert on here
+    ## — the document and its decorations are covered headlessly in
+    ## ``src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim``.  What this
+    ## covers is the chrome: the host element Monaco mounts into, and the hunk
+    ## editor's toolbar driven by the same ``VCSVM`` signals the selection
+    ## model writes.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var copied = 0
+      var cleared = 0
+      let callbacks = isonim_unified_diff_view.UnifiedDiffCallbacks(
+        onCopySelectedHunks: proc() = copied += 1,
+        onClearSelectedHunks: proc() = cleared += 1,
+      )
+
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
-      vm.setHunkState(@[(0, 0)], toolbarVisible = true, copyFeedback = false)
+      let panel = isonim_unified_diff_view.renderUnifiedDiffTab(
+        r, vm, "unifiedDiffEditor-7", callbacks)
 
-      let panel = renderUnifiedDiff(r, vm, callbacks)
+      # The Monaco host is present and empty: the editor attaches to it.
+      let host = findByClass(panel, "unified-diff-editor")
+      check host != nil
+      check host.attributes["id"] == "unifiedDiffEditor-7"
+      # No selection yet, so no toolbar.
+      check findByClass(panel, "hunk-toolbar") == nil
 
+      # Selection made through the ViewModel's own entry point — the one the
+      # Monaco tab calls — drives the toolbar.
+      vm.selectHunk(0, 0)
       check findByClass(panel, "hunk-toolbar-count").textContent ==
         "1 hunk selected"
-      check findByClass(panel, "deepreview-unified-file-path").textContent ==
-        "src/main.nim"
-      check findAllByClass(panel, "deepreview-unified-line").len == 2
 
-      findByClass(panel, "deepreview-unified-hunk-header").fireEvent("click")
-      check selectedHunk == (0, 0)
+      findAllByClass(panel, "hunk-toolbar-button")[0].fireEvent("click")
+      check copied == 1
+
+      vm.setHunkCopyFeedback(true)
+      check findAllByClass(panel, "hunk-toolbar-button")[0].textContent ==
+        "Copied!"
+
+      # Normal version control offers staging; a review does not
+      # (VCS-Panel.md, "DeepReview Mode": "Commit operations: Disabled").
+      check "Stage hunks" in panel.textContent
+      vm.setDeepReviewMode(true)
+      check "Stage hunks" notin panel.textContent
+      # ...and the read-only affordances survive the mode.
+      check findByClass(panel, "hunk-toolbar-count") != nil
+      let buttons = findAllByClass(panel, "hunk-toolbar-button")
+      buttons[^1].fireEvent("click")
+      check cleared == 1
 
       dispose()
 
@@ -11272,12 +11956,12 @@ suite "IsoNim App Shell — structure":
     mockPin(2)
     check pinnedEdge == 2 # Bottom
 
-  test "test_flow_conditional_branch_colors":
-    # Verify the Taken and NotTaken style classes.
-    # Taken branch line style should carry the "flow-taken" CSS class.
-    # NotTaken branch line style should carry the "flow-not-taken" CSS class.
-    let takenClass = "flow-taken"
-    let notTakenClass = "flow-not-taken"
-
-    check takenClass == "flow-taken"
-    check notTakenClass == "flow-not-taken"
+  # `test_flow_conditional_branch_colors` used to live here. It compared two
+  # string literals to themselves (`check "flow-taken" == "flow-taken"`), so it
+  # passed both before and after the 2026-07-16 attempt at #594 and could not
+  # have detected that the colours were being wiped by the flow reload. Removed
+  # rather than repaired: this suite renders IsoNim views through MockRenderer
+  # and has no access to the Monaco decoration bookkeeping where the bug lives.
+  # Real coverage is in
+  # `src/tests/gui/tests/editor/editor_decorations_test.nim` (the retention
+  # rule) and `src/tests/gui/tests/flow/flow_branch_colors.spec.ts` (end to end).

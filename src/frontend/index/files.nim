@@ -283,9 +283,13 @@ proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
 
 proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
   try:
-    if data.tabs.hasKey(response.name):
-      data.tabs[response.name].ignoreNext += 1
+    # Arm the self-write window before the write (events can be raised while
+    # it is still in progress) and re-arm it after, anchored to the moment the
+    # file settled.  Without this the renderer gets a "File changed on disk"
+    # conflict dialog for CodeTracer's own save — issue #603.
+    suppressSelfWrite(response.name)
     discard await writeFileAsync(fsAsync, response.name, response.raw)
+    suppressSelfWrite(response.name)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
     errorPrint "save-file error: ", getCurrentExceptionMsg()
@@ -294,9 +298,9 @@ proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveA
 
 proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
   try:
-    if data.tabs.hasKey(response.name):
-      data.tabs[response.name].ignoreNext += 1
+    suppressSelfWrite(response.name)
     discard await writeFileAsync(fsAsync, response.name, response.raw)
+    suppressSelfWrite(response.name)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()
@@ -400,21 +404,63 @@ proc onLoadPathContent*(
     nodeId=cstring,
     nodeIndex=int,
     nodeParentIndices=seq[int])) {.async.} =
-  # this won't work if we have multiple traces in one index_js instance!
-  let traceFilesPath = nodePath.join(data.trace.outputFolder, cstring"files")
-  let content = await loadPathContentPartially(
-    response.path,
-    response.nodeIndex,
-    response.nodeParentIndices,
-    traceFilesPath,
-    selfContained=data.trace.imported)
+  ## Fill in the children of a file-tree folder that was loaded as a
+  ## "Loading..." stub (see ``editFilesystemDepthLimit``).
+  ##
+  ## The renderer replaces the stub with whatever this handler sends
+  ## back, so the ONE thing this handler must never do is fail to answer:
+  ## a rejected promise leaves the folder showing "Loading..." forever
+  ## with no way to retry.  Every exit path below therefore emits
+  ## ``update-path-content``, and a failure degrades to "this folder has
+  ## no children" rather than to a permanently stuck row.
+  var content: CodetracerFile = nil
+  try:
+    # ``data.trace`` is nil whenever the user opened a plain folder
+    # (edit mode) instead of a recording — the open-folder flow never
+    # assigns one.  Resolving the payload root through the pure helper
+    # keeps that case (and the stale-trace case) out of the handler.
+    let traceOutputFolder =
+      if data.trace.isNil or data.trace.outputFolder.isNil: ""
+      else: $data.trace.outputFolder
+    let traceImported = not data.trace.isNil and data.trace.imported
+    let workspaceFolder =
+      if data.workspaceFolder.isNil: "" else: $data.workspaceFolder
+    let contentRoot = pathContentRootFor(
+      traceOutputFolder,
+      traceImported,
+      workspaceFolder,
+      $response.path)
 
-  if not content.isNil:
-    mainWindow.webContents.send "CODETRACER::update-path-content", js{
-      content: content,
-      nodeId: response.nodeId,
-      nodeIndex: response.nodeIndex,
-      nodeParentIndices: response.nodeParentIndices}
+    content = await loadPathContentPartially(
+      response.path,
+      response.nodeIndex,
+      response.nodeParentIndices,
+      cstring(contentRoot.filesRoot),
+      selfContained = contentRoot.selfContained)
+  except:
+    errorPrint "load-path-content error for ", response.path, ": ",
+      getCurrentExceptionMsg()
+    content = nil
+
+  if content.isNil:
+    # Answer anyway with a childless node so the stub is cleared.
+    let name =
+      if response.path.isNil or response.path.len == 0: cstring""
+      else: nodePath.basename(response.path.stripLastChar(cstring"/"))
+    content = CodetracerFile(
+      text: if name.len > 0: name else: response.path,
+      children: @[],
+      state: js{opened: false},
+      index: response.nodeIndex,
+      parentIndices: response.nodeParentIndices,
+      original: CodetracerFileData(text: name, path: response.path))
+    content.toJs.path = response.path
+
+  mainWindow.webContents.send "CODETRACER::update-path-content", js{
+    content: content,
+    nodeId: response.nodeId,
+    nodeIndex: response.nodeIndex,
+    nodeParentIndices: response.nodeParentIndices}
 
 proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1): Future[void] {.async.} =
   await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line)

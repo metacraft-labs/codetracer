@@ -1,4 +1,4 @@
-import std/[json, os, osproc, strutils, unittest]
+import std/[json, os, osproc, sequtils, strutils, unittest]
 
 import ct_test
 import contracts
@@ -108,7 +108,10 @@ suite "ct-test M2 Nim unittest provider":
       "tests/test_sample.nim"
     check catalog.itemBySelector("more::second file case").file ==
       "tests/test_more.nim"
-    check catalog.items.len == 11
+    # 9 in test_sample.nim + 2 in test_more.nim + 6 in
+    # test_lexical_edge_cases.nim (1 suite + 5 cases, matching what
+    # `nim c -r` on that fixture actually reports).
+    check catalog.items.len == 17
     check catalog.validateCatalog.valid
 
   test "CLI JSON for real Nim fixture uses nim-unittest provider":
@@ -185,3 +188,175 @@ suite "ct-test M2 Nim unittest provider":
     check response.catalogProviderIds == @["nim-unittest"]
     check not allMessages(response).contains("m1-fake")
     check not allMessages(response).contains("m1-unsupported")
+
+# ---------------------------------------------------------------------------
+# Lexical regressions.
+#
+# These run the real provider over real source text written to a real temp
+# file — no mocks, no internal-proc shortcuts — because the defect they pin
+# was invisible at every level except "file in, catalog out": the scanner
+# happily reported *some* declarations while silently dropping the ones that
+# followed an apostrophe it had misread.
+# ---------------------------------------------------------------------------
+
+var lexicalCaseCounter = 0
+
+proc catalogForSource(source: string): TestCatalog =
+  ## Materialise ``source`` as a Nim test file and discover it.
+  let root = getTempDir() / ("ct-test-nim-lexical-" & $getCurrentProcessId())
+  inc lexicalCaseCounter
+  let file = root / "tests" / ("test_case" & $lexicalCaseCounter & ".nim")
+  createDir(root / "tests")
+  writeFile(file, source)
+  nimUnittestFileCatalog(root, file).value
+
+proc selectorsOf(catalog: TestCatalog): seq[string] =
+  catalog.items.mapIt(it.selector)
+
+proc messagesOf(catalog: TestCatalog): string =
+  for item in catalog.diagnostics:
+    result.add item.message & "\n"
+
+const declarationTail = """
+
+suite "round trip":
+  test "keeps the probe":
+    discard
+"""
+
+suite "ct-test Nim unittest lexical regressions":
+  test "a numeric type suffix no longer hides the declarations after it":
+    # The reported defect, reduced: the apostrophe in `10485760'i64` used to
+    # open a phantom character literal that ran to the end of the file.
+    let catalog = catalogForSource(
+      "import std/unittest\n\nconst sizeBytes = 10485760'i64\n" &
+      declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+    check "no literal suite/test declarations" notin catalog.messagesOf
+
+  test "every apostrophe-bearing literal form keeps the scan in sync":
+    const probes = [
+      "0'u8",                       # integer type suffix
+      "10485760'i64",               # the reported case
+      "1.0'f32",                    # float type suffix
+      "2.5'f64",
+      "0x1F'i64",                   # hex literal with a suffix
+      "0b1010'u8",
+      "1_000_000'u32",              # underscore separators plus a suffix
+      "12'MyMeters",                # custom numeric literal
+      "'a'",                        # character literal
+      "'\\''",                      # escaped-apostrophe character literal
+      "'\\x41'",
+      "\"it's a string\"",          # apostrophe inside a string
+      "r\"C:\\dir\\\"",             # raw string ending in a backslash
+      "gr\"a\"\"b\""]               # generalized raw string literal
+    for probe in probes:
+      let catalog = catalogForSource(
+        "import std/unittest\n\nconst probe = " & probe & "\n" &
+        declarationTail)
+      checkpoint("probe: " & probe)
+      check catalog.selectorsOf ==
+        @["round trip::", "round trip::keeps the probe"]
+
+  test "an apostrophe in a comment or a doc comment stays inert":
+    let catalog = catalogForSource(
+      "import std/unittest\n\n" &
+      "## It's a doc comment.\n" &
+      "# and it's a line comment\n" &
+      "#[ a block comment: it's fine ]#\n" &
+      declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+
+  test "declarations inside comments are not discovered":
+    # The mirror defect: over-counting.  A commented-out test is not a test.
+    let catalog = catalogForSource(
+      "import std/unittest\n\n" &
+      "# suite \"commented suite\":\n" &
+      "#   test \"commented test\":\n" &
+      "#[\nsuite \"block suite\":\n  test \"block test\":\n]#\n" &
+      declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+
+  test "declarations inside a multi-line string are not discovered":
+    let catalog = catalogForSource(
+      "import std/unittest\n\n" &
+      "const fixture = \"\"\"\n" &
+      "suite \"string suite\":\n  test \"string test\":\n    discard\n" &
+      "\"\"\"\n" &
+      declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+
+  test "declarations inside a `when false:` block are not discovered":
+    # `when false:` is the idiomatic way to disable Nim source without deleting
+    # it.  The compiler never instantiates the body, so no runner can produce
+    # those cases and discovery must not claim them — but it must say so
+    # rather than dropping them silently, and it must resume afterwards.
+    let catalog = catalogForSource(
+      "import std/unittest\n\n" &
+      "when false:\n" &
+      "  suite \"disabled suite\":\n    test \"disabled case\":\n      discard\n" &
+      declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+    check catalog.messagesOf.contains("`when false:`")
+
+  test "a `when false:` block nested inside a suite ends at the dedent":
+    let catalog = catalogForSource(
+      "import std/unittest\n\n" &
+      "suite \"outer\":\n" &
+      "  when false:\n    test \"disabled case\":\n      discard\n" &
+      "  test \"live case\":\n    discard\n")
+    check catalog.selectorsOf == @["outer::", "outer::live case"]
+
+  test "a half-typed name string does not manufacture a test case":
+    # A single-quoted string cannot cross a line, so `test "half typed` is a
+    # file mid-edit, not a declaration. Inventing a case from it would put a
+    # phantom in the catalog that no runner can ever produce — and, worse, one
+    # whose selector changes on the next keystroke.
+    let catalog = catalogForSource(
+      "import std/unittest\n\ntest \"half typed\n" & declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+
+  test "the parenthesised and glued call forms are still discovered":
+    let parenthesised = catalogForSource(
+      "import std/unittest\n\nsuite(\"paren suite\"):\n  test(\"paren case\"):\n    discard\n")
+    check parenthesised.selectorsOf ==
+      @["paren suite::", "paren suite::paren case"]
+    # `test"name"` is Nim's generalized raw string literal syntax; it still
+    # calls the `test` template, so it is still a declaration.
+    let glued = catalogForSource(
+      "import std/unittest\n\ntest\"glued case\":\n  discard\n")
+    check glued.selectorsOf == @["::glued case"]
+
+  test "an import hidden inside a here-doc is not a framework detection":
+    # `maskNimNonCode` blanks multi-line literals, so a documentation block
+    # that quotes an `import std/unittest` line no longer makes the file look
+    # like a test file with no tests.
+    check detectFrameworksInContent(
+      "const doc = \"\"\"\nimport std/unittest\n\"\"\"\n").len == 0
+    check detectFrameworksInContent("import std/unittest\n").len == 1
+    # A single-line literal is preserved: `import "module"` is legal Nim.
+    check detectFrameworksInContent("import \"std/unittest\"\n").len == 1
+
+suite "ct-test CLI surface":
+  test "the usage string documents the scoping escape hatch":
+    ## `--scope`/`--unscoped` change which files discovery is even allowed to
+    ## look at. They were absent from the usage text entirely, which made the
+    ## only way out of the default scoping something a caller had to be told
+    ## about out of band.
+    let usage = ctTestUsageMessage()
+    check usage.contains("--scope auto|vcs|walk|unscoped")
+    check usage.contains("--unscoped")
+    check usage.contains("CT_TEST_SCOPE")
+
+  test "an unknown verb prints that usage string":
+    let registry = newDefaultProviderRegistry()
+    let cache = newDiscoveryCache()
+    # `runCtTest` writes the response to stdout; assert on the message the
+    # response carries by rebuilding it the same way the CLI does.
+    check runCtTest(@["test", "nonsense"], registry, cache) == 1

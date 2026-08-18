@@ -1,0 +1,114 @@
+// Unified diff editor tab (DR-R4).
+//
+// The tab is a real Monaco editor whose model holds the assembled diff text
+// (src/frontend/viewmodel/viewmodels/diff_document.nim), so everything here
+// styles Monaco's own decoration layers rather than a DOM diff:
+//
+//   .ct-diff-line-*    -> whole-line decorations, rendered by Monaco into
+//                         `.view-overlays` as `<div class="cdr …">`
+//   .ct-diff-gutter-*  -> `linesDecorationsClassName`, rendered into
+//                         `.margin-view-overlays` as `<div class="cldr …">`;
+//                         these draw the `+` / `-` markers VCS-Panel.md
+//                         ("Unified Diff View (Editor Integration)") requires
+//
+// Colours mirror the ones the pre-DR-R4 DOM renderer used
+// (`deepreview-unified-line-*` in deepreview.styl) so the diff reads the same
+// after the port.
+
+.unified-diff-container
+  display flex
+  flex-direction column
+  width 100%
+  height 100%
+  overflow hidden
+
+.unified-diff-toolbar-host
+  flex-shrink 0
+
+.unified-diff-editor
+  flex 1 1 auto
+  min-height 0
+  width 100%
+
+  // Dual old/new line numbers are one padded label per line, so the gutter has
+  // to keep the padding that aligns the two columns.
+  .line-numbers
+    white-space pre
+    text-align right
+
+// --- Whole-line decorations ---------------------------------------------
+
+.ct-diff-line-added
+  background-color rgba(63, 185, 80, 0.10)
+
+.ct-diff-line-removed
+  background-color rgba(248, 81, 73, 0.10)
+
+.ct-diff-line-context
+  background-color transparent
+
+.ct-diff-line-hunk-header
+  background-color rgba(56, 58, 68, 0.55)
+
+.ct-diff-line-file-header
+  background-color rgba(86, 156, 214, 0.10)
+
+// A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
+// and gains a marked left edge, the way the DOM renderer's `.hunk-selected`
+// did.
+//
+// Monaco puts every line class on ONE element, so an unscoped selection
+// background here sits at the same specificity as `.ct-diff-line-added` and,
+// being declared later, wins — a selected added line would lose its green.
+// The DOM renderer did not have that problem: its `.hunk-selected` was on the
+// parent hunk container, so each child line's kind colour painted over it.
+// Restrict the wash to lines that have no kind colour of their own, and let
+// the left edge carry selection everywhere else.
+.ct-diff-hunk-selected
+  box-shadow inset 0.1875em 0 0 0 #569cd6
+
+.ct-diff-line-context.ct-diff-hunk-selected
+  background-color rgba(86, 156, 214, 0.08)
+
+// --- Context expansion (DR-R5) -------------------------------------------
+//
+// DeepReview-GUI.md §4.2 requires "Expand surrounding context above/below a
+// visible region".  The controls are LINES of the model, not DOM chrome, so
+// they are styled here as whole-line decorations like everything else; the
+// colours come from `.deepreview-expand-row` / `.deepreview-expanded-context`
+// in deepreview.styl, so the migrated controls read the way the standalone
+// panel's did.
+
+.ct-diff-line-expand
+  background-color rgba(56, 58, 68, 0.30)
+  cursor pointer
+
+  &:hover
+    background-color rgba(56, 58, 68, 0.55)
+
+// A revealed line is a NORMAL context line — §4.2: "Newly revealed lines
+// become normal code lines in the diff tab and can receive Omniscience
+// overlays" — so this only dims it slightly to show where the diff itself
+// ended.  It must not change the line's kind colouring, or a revealed line
+// would stop looking like the context line it is.
+.ct-diff-line-revealed
+  opacity 0.75
+
+// --- Gutter markers ------------------------------------------------------
+
+.ct-diff-gutter
+  text-align center
+  user-select none
+
+.ct-diff-gutter-added::before
+  content "+"
+  color #3fb950
+
+.ct-diff-gutter-removed::before
+  content "-"
+  color #f85149
+
+.ct-diff-gutter-context::before
+  // A blank marker, so context lines keep the same content indent as changed
+  // ones instead of shifting left.
+  content " "

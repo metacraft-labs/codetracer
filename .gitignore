@@ -18,9 +18,6 @@ build-*/
 # build/ (build/generated/ct_config.h, build/c/*.o).
 /build/
 
-!build-python
-build-python/src/ct/bin
-
 gem_home/
 
 # wasm binaries
@@ -349,3 +346,8 @@ src/codetracer-bench/fixtures/gui-ops/*/main.ct-build-sources.json
 /reprobuild.paths
 
 repro.paths
+
+# Playwright scratch trees. `just test-e2e` creates
+# `src/tests/gui/non-nix-build/tmp/ct-<fixture>-<random>/` per run; they are
+# per-run temporaries with randomized suffixes and must never be committed.
+/src/tests/gui/non-nix-build/

@@ -65,6 +65,13 @@ proc configureIpcMain* =
     "acp-cancel-prompt"
 
     "save-config"
+    # Auto-hide (pinned panel) state.  It is persisted separately from the
+    # GoldenLayout config because pinning a panel REMOVES it from the
+    # GoldenLayout tree — see `onSaveAutoHideState` in `index/window.nim`.
+    # `request-auto-hide-state` answers an `ipcRenderer.sendSync` from
+    # `ui/layout.nim`'s `initLayout`.
+    "save-auto-hide-state"
+    "request-auto-hide-state"
     "exit-error"
     "started"
     "open-tab"

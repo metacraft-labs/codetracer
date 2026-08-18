@@ -1,7 +1,7 @@
-//! NaN-payload demo — the WebAssembly tier (M52).
+//! NaN-payload demo — the WebAssembly tier.
 //!
-//! A module that computes with the three float values a JavaScript host
-//! could not carry before M52:
+//! A module that computes with the three float values a JavaScript
+//! `Number` cannot carry:
 //!
 //!   * an `f32` **signalling** NaN, `0x7F80_0001` — the quiet bit is
 //!     clear, so any quieting, or an `f32 -> f64 -> f32` round trip,
@@ -41,7 +41,7 @@
 #[link(wasm_import_module = "env")]
 extern "C" {
     /// Reports one `f32` to the host. The recorded argument is the
-    /// module's own bit pattern (M52), not a JavaScript `Number`.
+    /// module's own bit pattern, not a JavaScript `Number`.
     fn observe_f32(value: f32);
     /// Reports one `f64` to the host.
     fn observe_f64(value: f64);

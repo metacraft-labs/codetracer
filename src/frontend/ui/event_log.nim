@@ -463,14 +463,14 @@ var arg: js
 const
   CLICK_DELAY_TIMER = 5
   EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
-    "std streams:",
-    "read events:",
-    "write events:",
-    "network:",
-    "trace:",
-    "file:",
-    "errors:",
-    "evm events:"
+    "std streams",
+    "read events",
+    "write events",
+    "network",
+    "trace",
+    "file",
+    "errors",
+    "evm events"
   ]
 
   EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
@@ -1420,7 +1420,7 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
        self.pendingReloadRetries < eventLogMaxReloadRetries:
       self.pendingReloadRetries += 1
       let delay = 250 * self.pendingReloadRetries  # 250, 500, 750, ... ms
-      # Legitimate, hence DEBUG (M51).  The comment above says it: an empty
+      # Legitimate, hence DEBUG.  The comment above says it: an empty
       # first page means `ct/event-load` is still in flight, which is the
       # normal ordering on every trace open.  The retry below is the
       # designed response, and it is bounded, so the condition is expected

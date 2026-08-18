@@ -56,6 +56,18 @@ type
     handlers*: array[CtEventKind, seq[proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)]]
     isRemote*: bool
     singleSubscriber*: bool
+    # Optional back-reference to the mediator this one subscribes to.
+    #
+    # A child mediator (one per UI component, built by
+    # ``types.setupLocalViewToMiddlewareApi``) announces itself to the parent
+    # by emitting ``CtSubscribe``, which appends ``asSubscriber`` to the
+    # parent's ``subscribers`` list.  Nothing in the event payload identifies
+    # the child afterwards, so without this pointer a destroyed component can
+    # never be taken off the parent's fan-out list.  ``unsubscribeAll`` uses
+    # it to complete the teardown; it stays ``nil`` for root mediators and for
+    # genuinely remote transports (webview / subwindow / browser client),
+    # where clearing the local handlers is the only teardown available.
+    parent*: MediatorWithSubscribers
 
 proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
   console.log cstring"api for ", m.name, " emit: ", cstring($eventKind), value
@@ -78,6 +90,47 @@ proc subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback:
 
 proc registerSubscriber*(m: MediatorWithSubscribers, eventKind: CtEventKind, subscriber: Subscriber) =
   m.subscribers[eventKind].add(subscriber) # callbacks for the event kind are actually preserved in the mediator on the other side
+
+proc removeSubscriber*(m: MediatorWithSubscribers, subscriber: Subscriber) =
+  ## Drop every registration of ``subscriber`` from this mediator's fan-out
+  ## lists.  The counterpart of ``registerSubscriber``: without it
+  ## ``subscribers`` is append-only and a mediator keeps emitting into
+  ## components that were destroyed long ago (see ``unsubscribeAll``).
+  ##
+  ## Matching is by reference identity, which is what ``registerSubscriber``
+  ## stored — a subscriber may legitimately appear under several event kinds,
+  ## so every kind is swept.
+  if subscriber.isNil:
+    return
+  for kind in CtEventKind:
+    if m.subscribers[kind].len == 0:
+      continue
+    var kept: seq[Subscriber] = @[]
+    for existing in m.subscribers[kind]:
+      if existing != subscriber:
+        kept.add(existing)
+    m.subscribers[kind] = kept
+
+proc unsubscribeAll*(m: MediatorWithSubscribers) =
+  ## Detach this mediator from the event bus.
+  ##
+  ## Two things have to happen for a destroyed component to stop reacting to
+  ## events:
+  ##
+  ## 1. its own handlers must go — delivery terminates in ``receive``, which
+  ##    walks ``m.handlers[kind]``, so clearing that array is what actually
+  ##    silences the component.  This is the load-bearing half and it works
+  ##    for every transport, local or remote.
+  ## 2. the parent must stop fanning out to it — otherwise
+  ##    ``parent.subscribers`` grows by one entry per opened-and-closed panel
+  ##    and every emit pays for a round trip through a dead mediator.
+  ##
+  ## Safe to call more than once; the second call is a no-op.
+  for kind in CtEventKind:
+    if m.handlers[kind].len > 0:
+      m.handlers[kind] = @[]
+  if not m.parent.isNil:
+    m.parent.removeSubscriber(m.asSubscriber)
 
 proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.exportc.} =
   console.log cstring"api for ", m.name, cstring" receive: ", cstring($eventKind), rawValue, subscriber

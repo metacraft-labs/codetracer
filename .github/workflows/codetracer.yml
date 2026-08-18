@@ -12,6 +12,45 @@ permissions:
   id-token: write
 
 jobs:
+  # WHY EVERY `siblings:` ENTRY CARRIES AN EXPLICIT `=dev` REF.
+  #
+  # `metacraft-github-actions/setup-dev-env` clones cross-repo siblings via its
+  # `clone-siblings` sub-action. A bare entry (`codetracer-trace-format`) asks
+  # that action to resolve the revision from a *workspace lock* — a per-commit
+  # snapshot published to `metacraft-labs/metacraft-manifests@latest` by the
+  # workspace tooling's pre-push hook. An entry of the form `name=ref` skips
+  # that lookup and clones `ref` directly.
+  #
+  # Lock publication for this repo stopped on 2026-08-02 (last entry:
+  # `locks/dev/codetracer/784c9bda…​.xml`). `clone-siblings` probes the pushed
+  # commit and its parent only (`--no-walk`), so `dev` stayed resolvable for
+  # exactly one more commit and then broke: 8d587343 (parent 784c9bda) was the
+  # last green `Setup dev env`; 3583cd6b (run 30951549711, 2026-08-04) was the
+  # first red one, and every push since has failed the same way:
+  #
+  #   ##[error]No workspace lock for codetracer (candidates: <sha> <parent>).
+  #   Neither a repo-workspaces locks/<project>/codetracer/<sha>.xml nor a
+  #   reprobuild locks/<project>/codetracer/<sha>.toml exists in
+  #   metacraft-labs/metacraft-manifests@latest.
+  #
+  # That took out `lint-rust`, `test-non-gui`, `test-ui-tests` (both legs),
+  # `test-ui-tests-rr`, `visual-replay-regression-gate` and `ct-test-providers`
+  # in their first real step, which in turn left nine jobs declaring `needs:` on
+  # them `skipped` — the exact "the tests never ran" state `ci-verdict` exists
+  # to name.
+  #
+  # Restoring lock publication is an infrastructure task outside this repo (the
+  # workspace moved from repo-workspaces to reprobuild and the manifests repo
+  # has received nothing since). Until it is restored, siblings are pinned to
+  # the branch the lock itself recorded for every one of them (`upstream="dev"`
+  # in 784c9bda's lock), which is also what the lock-free paths in this file
+  # already do — `.github/actions/setup-isonim-siblings` and the `clone-repo`
+  # steps in `viewmodel-tests` / `test-non-gui` all clone `ref: dev`.
+  #
+  # This changes WHERE a revision comes from, not WHICH repos are provisioned
+  # or what any job asserts. When locks are published again, dropping the
+  # `=dev` suffixes restores per-commit pinning.
+  #
   # NOTE (CIP-5 Wave 4): the whole Windows platform was migrated as a single
   # unit (honoring the prior "move the whole platform or none of it" rule) from
   # the GitHub-hosted `windows-latest` onto the self-hosted `eph-win-x64`
@@ -20,9 +59,70 @@ jobs:
   # `eph-win-x64` is the DIY-Windows runner. `eph-win-arm64` is intentionally NOT
   # added here (env.ps1 ARM support is unverified in CI and that class still
   # queues); revisit once eph-win-arm64 is live.
+  #
+  # WHY EVERY eph-win-x64 JOB STARTS WITH "Ensure Git and Git Bash":
+  # the migration above moved the runner label but inherited the GitHub-hosted
+  # `windows-latest` *image contract*, and `eph-win-x64` does not honour it.
+  # The garm-provisioned image ships neither `git` nor `bash` on PATH, which
+  # took out three of the four Windows jobs in three different places:
+  #
+  #   windows-bootstrap-smoke   "Validate env.sh syntax"   -> bash: command not found
+  #   windows-named-pipe-tests  "Install Rust toolchain"   -> bash: command not found
+  #                             (dtolnay/rust-toolchain's own step is shell: bash)
+  #   windows-rust-components   "Checkout"                 -> Input 'submodules' not
+  #                             supported when falling back to the GitHub REST API
+  #
+  # All three logs also carry actions/checkout's tell: "The repository will be
+  # downloaded using the GitHub REST API / To create a local Git repository
+  # instead, add Git 2.18 or higher to the PATH." Runs 30726348404, 31180327493
+  # and 31385899773 fail identically, so this is the steady state of the lane,
+  # not a one-off.
+  #
+  # `ci/ensure-git-for-checkout.ps1` already solved exactly this — it finds or
+  # provisions a pinned, digest-verified PortableGit and puts BOTH `cmd/`
+  # (git.exe) and `bin/` (bash.exe) on GITHUB_PATH. It was wired into
+  # `origin-dap-windows` only, where its step is the one Windows step that has
+  # been passing throughout. Every eph-win-x64 job now runs it, first, before
+  # checkout: the jobs that check out submodules need git *for* the checkout,
+  # and the jobs whose first real step is `shell: bash` need bash before it.
+  # It is fetched over HTTPS at the immutable `github.sha` rather than run from
+  # the tree because at that point there is no tree — the checkout is the step
+  # it is making possible.
+  #
+  # `ci/test/windows-runner-bootstrap-test.sh` pins this: it fails if any
+  # eph-win-x64 job stops opening with the bootstrap.
   windows-bootstrap-smoke:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -231,7 +331,9 @@ jobs:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (materialized Python, Windows)
     steps:
-      - name: Ensure Git supports recursive checkout
+      # See the eph-win-x64 note at the top of this file. This is where the
+      # bootstrap started, and for a long time it was the only job that had it.
+      - name: Ensure Git and Git Bash are on PATH
         shell: powershell
         env:
           CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
@@ -261,10 +363,10 @@ jobs:
           }
 
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -272,12 +374,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -313,7 +415,7 @@ jobs:
         shell: powershell
         env:
           RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
-          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+          SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
         run: |
           $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
           ./ci/checkout-locked-python-recorder.ps1 `
@@ -386,11 +488,44 @@ jobs:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
     steps:
+      # See the eph-win-x64 note at the top of this file. This job is
+      # schedule/dispatch-gated, so it has never run on the migrated runner
+      # class; it checks out with `submodules: recursive` and would hit the
+      # same REST-API fallback the moment it is triggered.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -398,12 +533,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -436,7 +571,7 @@ jobs:
         shell: pwsh
         env:
           RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
-          SIBLING_TOKEN: ${{ steps.app-token.outputs.token }}
+          SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
         run: |
           $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
           ./ci/checkout-locked-python-recorder.ps1 `
@@ -477,6 +612,23 @@ jobs:
           "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
       - name: Prefer Git Bash over WSL bash stub
+        # The twin of the step of the same purpose in
+        # ``windows-rust-components``; keep the two bodies in step. Both
+        # remove the WSL launcher stub so ``CreateProcessW``'s System32-first
+        # lookup falls through to Git for Windows' ``bash.exe``.
+        #
+        # The ``C:\Program Files\Git\bin`` append is conditional on the
+        # directory existing. That is the GitHub-hosted ``windows-latest``
+        # layout; on ``eph-win-x64`` the directory is absent and the
+        # "Ensure Git and Git Bash are on PATH" step above provisions
+        # PortableGit under RUNNER_TEMP instead. Appending a non-existent
+        # directory succeeds silently, which is why the original mismatch
+        # surfaced several steps later as ``bash: command not found`` rather
+        # than here.
+        #
+        # And then bash must actually resolve: this job's payload step is
+        # ``shell: bash``, so a missing bash there is reported as a test
+        # failure rather than as a missing tool.
         shell: pwsh
         run: |
           $wslStub = "$env:SystemRoot\System32\bash.exe"
@@ -485,7 +637,17 @@ jobs:
             icacls $wslStub /grant "Administrators:(F)" | Out-Null
             Remove-Item -Force $wslStub
           }
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+          $gitForWindowsBin = "C:\Program Files\Git\bin"
+          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
+          }
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
+                  "should have provisioned Git Bash; the routed matrix below needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
@@ -510,6 +672,38 @@ jobs:
   windows-named-pipe-tests:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
+      # See the eph-win-x64 note at the top of this file. Without this,
+      # `dtolnay/rust-toolchain@stable` dies in its own `shell: bash` step
+      # with `bash: command not found` before rustup is ever consulted.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -524,11 +718,44 @@ jobs:
   windows-rust-components:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     steps:
+      # See the eph-win-x64 note at the top of this file. This job checks out
+      # with `submodules: recursive`, which actions/checkout can only honour
+      # through a real git; without one it falls back to the REST API and
+      # fails outright with "Input 'submodules' not supported".
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -536,11 +763,11 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env (windows-diy) clones the cross-repo siblings adjacent
-        # to this checkout at the workspace-lock-pinned revisions and sources
+        # to this checkout at their pinned `dev` refs and sources
         # env.ps1, whose ensure-* helpers provision the Windows toolchain
         # (capnp / cargo / nim / nimble), persisting the env to GITHUB_ENV /
         # GITHUB_PATH for subsequent steps. This replaces the former
@@ -550,11 +777,11 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: windows-diy
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           siblings: |
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
 
       - name: Remove WSL bash stub from System32
         # db-backend's build.rs runs ``Command::new("bash") ...
@@ -568,9 +795,22 @@ jobs:
         #
         # We don't need WSL on this runner -- removing the stub
         # lets CreateProcessW fall through to Git for Windows'
-        # ``bash.exe`` (added to PATH below), which is what the
-        # build.rs comment ("Ensure Git for Windows bash is on
-        # PATH") actually wants.
+        # ``bash.exe``, which the "Ensure Git and Git Bash are on
+        # PATH" step above has already placed on GITHUB_PATH. That is
+        # what the build.rs comment ("Ensure Git for Windows bash is
+        # on PATH") actually wants.
+        #
+        # This step used to append the literal
+        # ``C:\Program Files\Git\bin`` unconditionally. That is the
+        # GitHub-hosted ``windows-latest`` layout; on ``eph-win-x64``
+        # the directory does not exist, and the bootstrap step instead
+        # provisions PortableGit under RUNNER_TEMP. Appending a
+        # non-existent directory is silent, so the mismatch would not
+        # have shown up here -- it showed up as ``bash: command not
+        # found`` in whichever step needed bash first. The path is now
+        # added only when it is really there, so a runner that does
+        # ship Git for Windows keeps the old behaviour and one that
+        # does not relies on the bootstrap rather than on a lie.
         shell: pwsh
         run: |
           $wslStub = "$env:SystemRoot\System32\bash.exe"
@@ -579,8 +819,20 @@ jobs:
             icacls $wslStub /grant "Administrators:(F)" | Out-Null
             Remove-Item -Force $wslStub
           }
-          # Add Git Bash bin dir so ``bash`` resolves to Git for Windows.
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+          $gitForWindowsBin = "C:\Program Files\Git\bin"
+          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
+          }
+          # Whatever supplied it, `bash` must resolve now: every step below
+          # this one is `shell: bash`, and a missing bash there reads as a
+          # build failure rather than as a missing tool.
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
+                  "should have provisioned Git Bash; every step below this one needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
@@ -682,11 +934,45 @@ jobs:
     needs:
       - windows-rust-components
     steps:
+      # See the eph-win-x64 note at the top of this file. This job has been
+      # `skipped` behind windows-rust-components throughout the blackout, so it
+      # has never reported — but it checks out with `submodules: recursive` and
+      # runs `shell: bash` steps, so it would fail exactly as that job did the
+      # moment it is unblocked.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -694,7 +980,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Disable TTD validation for the Windows DIY bootstrap
         # setup-dev-env (windows-diy) sources env.ps1 inside the composite;
@@ -705,7 +991,7 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env clones the cross-repo siblings adjacent to this
-        # checkout at the workspace-lock-pinned revisions and sources
+        # checkout at their pinned `dev` refs and sources
         # env.ps1 (windows-diy flavor), persisting the resulting env to
         # GITHUB_ENV/GITHUB_PATH for subsequent steps — replacing the former
         # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps
@@ -715,12 +1001,12 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: windows-diy
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder
-            codetracer-trace-format
-            codetracer-trace-format-nim
+            codetracer-native-recorder=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Install Nim dependencies
         shell: bash
@@ -798,6 +1084,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -829,6 +1122,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -860,6 +1160,13 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -886,24 +1193,23 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones the cross-repo siblings adjacent to this checkout at the
-        # workspace-lock-pinned revisions, replacing the former
+        # pinned `dev` refs, replacing the former
         # Checkout-manifests / Resolve-lock / per-sibling clone-repo / Install
         # Nix steps. The direnv-allow + ct_emulator nimble steps below remain
         # bespoke because they operate inside the cloned native-recorder
@@ -911,13 +1217,13 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # src/db-backend/build.rs invokes ``direnv exec <recorder-root>
@@ -982,6 +1288,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1013,6 +1326,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1049,19 +1369,11 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1073,7 +1385,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run required materialized Python origin-DAP gate
         env:
@@ -1104,19 +1416,11 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1128,7 +1432,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run routed materialized origin-DAP matrix
         env:
@@ -1150,10 +1454,10 @@ jobs:
     name: cross-process value-origin (Linux)
     steps:
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -1161,17 +1465,17 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup isonim siblings
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build frontend (needed by gated Playwright stage)
         env:
@@ -1191,10 +1495,10 @@ jobs:
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -1202,19 +1506,47 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup isonim siblings
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # Nine ViewModel suites -- the eight request-panel ones plus
+        # request_span_conformance_test -- ``import codetracer_ctfs/container``
+        # to read a real CTFS container. ``config.nims`` resolves that module
+        # from ``$CODETRACER_TRACE_FORMAT_NIM_SRC`` or from the workspace
+        # sibling ``../codetracer-trace-format-nim/src``, and this job set up
+        # neither, so all nine failed to compile with
+        #
+        #   Error: cannot open file: codetracer_ctfs/container
+        #
+        # in every run (30726348404, 31180327493, 31385899773). They compile
+        # and pass in a normal workspace, which is why the gap survived: the
+        # only environment that lacked the sibling was the one nobody was
+        # reading. Cloned here with ``clone-repo``, the same way this job
+        # already gets ``codetracer-js-recorder``, rather than through
+        # ``setup-dev-env`` -- that route additionally requires a published
+        # workspace lock, which is a separate unresolved problem and
+        # would make this job depend on it for no benefit.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          # That repo's default branch is `dev` (confirmed against the API);
+          # `main` is not where its work lands.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
@@ -1226,6 +1558,15 @@ jobs:
         # `test-vm`'s glob nor `test-vm-recorder-gated`'s, so these suites
         # ran nowhere.  Pure Nim, no recorder sibling, no display.
         run: nix develop .#devShells.x86_64-linux.default --command just test-ct-trace-units
+
+      - name: Run ct upload MCR-enrichment unit tests
+        # src/ct/online_sharing/test_mcr_enrichment.nim was matched by no
+        # runner at all — 34 assertions that could not fail a build — and the
+        # member-check suite alongside it pins that `ct upload` does not
+        # replace the user's recording with a lossier export just because the
+        # exporter exited 0.  Pure Nim, no recorder sibling, no display, so it
+        # belongs in the same job as the trace-layer units above.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
 
       - name: Clone codetracer-js-recorder sibling
         # The recorder-gated ViewModel tests
@@ -1247,7 +1588,7 @@ jobs:
           # stale recorder while reporting green.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
@@ -1366,14 +1707,6 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -1383,12 +1716,12 @@ jobs:
       - name: Setup isonim siblings
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1436,263 +1769,6 @@ jobs:
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh"
 
-  build-python-packages:
-    needs:
-      - lint-bash
-      - lint-nim
-      - lint-nix
-      - lint-rust
-
-    # TODO: migrate the matrix to self-hosted runners once the apt-get install
-    # libssl-dev / libbpf-dev / libelf-dev / zlib1g-dev steps and the manual
-    # nim/openssl/zlib downloads are replaced with nix equivalents. The macos
-    # legs additionally need a self-hosted macOS Intel runner (we only have
-    # aarch64-darwin self-hosted hosts today).
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-amd64
-            runner: ubuntu-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (apt/nim-from-source) — see job TODO
-            target_os: linux
-            arch: amd64
-            plat_name: manylinux_2_17_x86_64
-          # - name: linux-arm64
-          #   runner: ubuntu-22.04-arm64
-          #   target_os: linux
-          #   arch: arm64
-          #   plat_name: manylinux_2_17_aarch64
-
-          - name: macos-amd64
-            runner: macos-15-intel  # HOLD (CIP-5 Wave 4): DIY macOS release build — see job TODO
-            target_os: macos
-            arch: amd64
-            plat_name: macosx_10_9_x86_64
-          - name: macos-arm64
-            runner: macos-14  # HOLD (CIP-5 Wave 4): DIY macOS release build — see job TODO
-            target_os: macos
-            arch: arm64
-            plat_name: macosx_11_0_arm64
-
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Mint installation token for cross-repo sibling access
-        # GitHub free plan restricts org-level secrets with visibility
-        # ALL from being readable inside private repos, so we mint
-        # per-run installation tokens from the repo-local
-        # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
-        # secrets via the CI Token Provider GitHub App.
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Check out repository
-        uses: actions/checkout@v5
-        with:
-          submodules: 'true'
-          token: ${{ steps.ci_token.outputs.token }}
-
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Install Python build backend
-        run: python -m pip install --upgrade build
-
-      - name: Install nim
-        run: |
-          set -euo pipefail
-
-          wget https://nim-lang.org/download/nim-2.2.6.tar.xz
-          tar xf nim-2.2.6.tar.xz
-          pushd nim-2.2.6
-          sh build.sh
-          bin/nim c koch
-          ./koch boot -d:release
-          export PATH="$(pwd)/bin:${PATH}"
-          popd
-
-      - name: Get sqlite
-        run: |
-          set -euo pipefail
-
-          wget https://sqlite.org/2025/sqlite-amalgamation-3500400.zip
-          unzip sqlite-amalgamation-3500400.zip
-          cp sqlite-amalgamation-3500400/sqlite3.c .
-
-      - name: Install libssl and libbpf (Linux)
-        if: ${{ matrix.target_os == 'linux' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev libbpf-dev libelf-dev
-
-      - name: Install libssl (MacOS)
-        if: ${{ matrix.target_os == 'macos' }}
-        run: |
-          git clone https://github.com/openssl/openssl
-          pushd openssl
-          git checkout openssl-3.5.4
-
-          ./Configure --prefix=$(pwd)/../openssl-res
-          make -j$(sysctl -n hw.ncpu)
-          make install_sw
-
-          popd
-
-      - name: Install zlib (Linux)
-        if: ${{ matrix.target_os == 'linux' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zlib1g-dev
-
-      - name: Install zlib (MacOS)
-        if: ${{ matrix.target_os == 'macos' }}
-        run: |
-          wget https://zlib.net/zlib-1.3.2.tar.gz
-          tar xf zlib-1.3.2.tar.gz
-          pushd zlib-1.3.2
-
-          ./configure --static --prefix=$(pwd)/../zlib-res
-          make -j$(sysctl -n hw.ncpu)
-          make install
-
-          popd
-
-      - name: Build codetracer binaries (Linux)
-        if: ${{ matrix.target_os == 'linux' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
-          mkdir -p "${TARGET_DIR}"
-
-          ./nim-2.2.6/bin/nim -d:release \
-            --d:asyncBackend=asyncdispatch \
-            --dynlibOverride:std -d:staticStd \
-            --mm:refc --hints:on --warnings:off \
-            --boundChecks:on \
-            -d:useOpenssl3 \
-            -d:ssl \
-            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-            -d:chronicles_timestamps=UnixTime \
-            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-            -d:builtWithNix \
-            -d:ctEntrypoint \
-            -d:pythonPackage \
-            -d:libcPath=libc \
-            -d:pathToNodeModules=../node_modules \
-            --nimcache:nimcache \
-            -d:staticSqlite \
-            -d:useLibzipSrc \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libz.a -Wl,-Bdynamic" \
-            --dynlibOverride:ssl --dynlibOverride:crypto \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
-            --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
-
-          ./nim-2.2.6/bin/nim \
-            -d:release -d:asyncBackend=asyncdispatch \
-            --mm:refc --hints:off --warnings:off \
-            --debugInfo --lineDir:on \
-            --boundChecks:on --stacktrace:on --linetrace:on \
-            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-            -d:chronicles_timestamps=UnixTime \
-            -d:ssl \
-            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-            -d:libcPath=libc \
-            -d:builtWithNix \
-            -d:ctEntrypoint \
-            -d:pythonPackage \
-            --nimcache:nimcache \
-            -d:staticSqlite \
-            -d:useLibzipSrc \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libz.a -Wl,-Bdynamic" \
-            --dynlibOverride:ssl --dynlibOverride:crypto \
-            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
-            --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
-
-          ./build-python/scripts/download_ct_remote.sh \
-            "${{ matrix.target_os }}" \
-            "${{ matrix.arch }}" \
-            "${TARGET_DIR}"
-
-      - name: Build codetracer binaries (MacOS)
-        if: ${{ matrix.target_os == 'macos' }}
-        run: |
-          set -euo pipefail
-
-          TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
-          mkdir -p "${TARGET_DIR}"
-
-          ./nim-2.2.6/bin/nim -d:release \
-            --d:asyncBackend=asyncdispatch \
-            --dynlibOverride:std -d:staticStd \
-            --mm:refc --hints:on --warnings:off \
-            --boundChecks:on \
-            -d:useOpenssl3 \
-            -d:ssl \
-            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-            -d:chronicles_timestamps=UnixTime \
-            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-            -d:builtWithNix \
-            -d:ctEntrypoint \
-            -d:pythonPackage \
-            -d:libcPath=libc \
-            -d:pathToNodeModules=../node_modules \
-            --nimcache:nimcache \
-            -d:staticSqlite \
-            -d:useLibzipSrc \
-            --passL:"$(pwd)/zlib-res/lib/libz.a" \
-            --dynlibOverride:ssl --dynlibOverride:crypto \
-            --passL:"$(pwd)/openssl-res/lib/libssl.a $(pwd)/openssl-res/lib/libcrypto.a" \
-            --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
-
-          ./nim-2.2.6/bin/nim \
-            -d:release -d:asyncBackend=asyncdispatch \
-            --mm:refc --hints:off --warnings:off \
-            --debugInfo --lineDir:on \
-            --boundChecks:on --stacktrace:on --linetrace:on \
-            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-            -d:chronicles_timestamps=UnixTime \
-            -d:ssl \
-            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-            -d:libcPath=libc \
-            -d:builtWithNix \
-            -d:ctEntrypoint \
-            -d:pythonPackage \
-            --nimcache:nimcache \
-            -d:staticSqlite \
-            -d:useLibzipSrc \
-            --passL:"$(pwd)/zlib-res/lib/libz.a" \
-            --dynlibOverride:ssl --dynlibOverride:crypto \
-            --passL:"$(pwd)/openssl-res/lib/libssl.a $(pwd)/openssl-res/lib/libcrypto.a" \
-            --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
-
-          ./build-python/scripts/download_ct_remote.sh \
-            "${{ matrix.target_os }}" \
-            "${{ matrix.arch }}" \
-            "${TARGET_DIR}"
-
-      - name: Build wheel
-        run: |
-          set -euo pipefail
-
-          pushd build-python
-          python -m build --wheel -C--build-option=--plat-name=${{ matrix.plat_name }}
-          popd
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@v5
-        with:
-          name: python-dist-${{ matrix.name }}
-          path: build-python/dist/*.whl
-          if-no-files-found: error
-
   appimage-build:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
@@ -1715,14 +1791,6 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -1736,7 +1804,7 @@ jobs:
         # ``path:"../isonim/src"`` directives resolve.
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1768,10 +1836,16 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
 
   dmg-build:
-    # TODO: migrate to [self-hosted, darwin, nix-darwin, aarch64-darwin] once
-    # the `brew install awscli` step + signing flow are rewired through the
-    # nix dev shell (Homebrew is not installed on the nix-darwin runners).
-    runs-on: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew) — see TODO above
+    # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
+    # `dtolnay/rust-toolchain` + `./ci/build/dmg.sh` (-> Homebrew-native
+    # `./non-nix-build/build.sh`) and `brew install awscli` steps are gone. The
+    # dmg is now produced toolchain-free by reprobuild
+    # (`repro build .#dmg --tool-provisioning=nix`, driven by
+    # `ci/reprobuild/macos-daemon-build.sh`), which lands the artifact at the
+    # same `non-nix-build/CodeTracer.dmg` path the sign + upload steps consume.
+    # `aws` comes from `nixpkgs#awscli2`, provisioned per-command via `nix
+    # shell`.
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     needs:
       - lint-bash
       - lint-nim
@@ -1798,6 +1872,13 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: "Import GPG key for signing commits"
         id: import-gpg
         uses: crazy-max/ghaction-import-gpg@v6
@@ -1808,14 +1889,12 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
-        run: ./ci/build/dmg.sh
-
-      - name: Install AWS CLI
-        run: brew install awscli
+      - name: Build DMG via reprobuild
+        # Toolchain-free reprobuild macOS build: starts runquotad, runs
+        # `repro build .#dmg --tool-provisioning=nix`, and asserts the artifact
+        # at `non-nix-build/CodeTracer.dmg` — the exact path the sign + upload
+        # steps below consume.
+        run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
 
       - name: Upload artifact
         env:
@@ -1825,36 +1904,33 @@ jobs:
           gpg --armor --detach-sign non-nix-build/CodeTracer.dmg
           # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
           #   adding `--checksum-algorithm CRC32`
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
 
   dmg-lib-check:
-    # TODO: migrate to [self-hosted, darwin, nix-darwin, aarch64-darwin] once
-    # the `brew install awscli` + `brew install sevenzip` steps are replaced
-    # with nix equivalents (Homebrew is not installed on the nix-darwin runners).
-    runs-on: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew) — see TODO above
+    # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
+    # `brew install awscli` / `brew install sevenzip` steps are gone; `aws`
+    # comes from `nixpkgs#awscli2` and 7-Zip from `nixpkgs#p7zip` (the `7z`
+    # binary), both provisioned per-command via `nix shell`. This job only
+    # downloads + extracts + smoke-runs the release dmg, so it needs no
+    # Homebrew build toolchain.
+    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     needs:
       - dmg-build
     steps:
-      - name: Install AWS CLI
-        run: brew install awscli
-
-      - name: Install 7zip
-        run: brew install sevenzip
-
       - name: Download artifact
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
 
       - name: Extract dmg
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          7zz x ./CodeTracer.dmg
+          nix shell nixpkgs#p7zip --command 7z x ./CodeTracer.dmg
 
       - name: Check if ct starts
         env:
@@ -1864,31 +1940,29 @@ jobs:
           ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
 
   appimage-lib-check:
-    # TODO: migrate to [self-hosted, nixos] once the `sudo snap install
-    # aws-cli` + `sudo apt-get install fuse libfuse2` steps are replaced with
-    # nix equivalents (snap + apt are unavailable on the NixOS runners).
-    runs-on: ubuntu-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (snap/apt) — see TODO above
+    # CIP-5 Wave 4: migrated to the self-hosted NixOS runner. The DIY
+    # `sudo snap install aws-cli` step is gone (`aws` now comes from
+    # `nixpkgs#awscli2` via `nix shell`), and the `sudo apt-get install fuse
+    # libfuse2` step is dropped entirely: the ephemeral NixOS runner has no
+    # fusermount setuid wrapper / /dev/fuse, so we smoke-run the AppImage with
+    # `APPIMAGE_EXTRACT_AND_RUN=1` (self-extract, no FUSE) — the same mode
+    # nix/shells/ci-base.nix documents for AppImages on these runners.
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     needs:
       - appimage-build
     steps:
-      - name: Install AWS CLI
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
-        run: sudo snap install aws-cli --classic
-
-      - name: Install FUSE
-        run: sudo apt-get install -y fuse libfuse2
-
       - name: Download artifact
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
 
       - name: Check if ct starts
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           chmod +x ./CodeTracer.AppImage
           ./CodeTracer.AppImage --version
@@ -1902,11 +1976,12 @@ jobs:
   # don't need FUSE in the runner.  See
   # scripts/test-appimage-cross-distro.sh.
   appimage-cross-distro:
-    # TODO: migrate to [self-hosted, nixos] once the `sudo snap install
-    # aws-cli` step is replaced with a nix equivalent (snap is unavailable
-    # on the NixOS runners). The cross-distro smoke uses Docker, which the
-    # bare-metal NixOS runners can also expose.
-    runs-on: ubuntu-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (snap/Docker) — see TODO above
+    # Self-hosted on the nested-Docker class: this job's core is a 5-distro
+    # Docker matrix (scripts/test-appimage-cross-distro.sh pulls
+    # ubuntu/debian/fedora/arch images and runs the AppImage inside each), and
+    # eph-linux-x64-nested is the Incus class that exposes an in-guest Docker
+    # daemon (security.nesting + fuse-overlayfs). aws-cli comes from nixpkgs.
+    runs-on: eph-linux-x64-nested
     needs:
       - appimage-build
     strategy:
@@ -1924,7 +1999,9 @@ jobs:
 
       - name: Install AWS CLI
         if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
-        run: sudo snap install aws-cli --classic
+        # nixpkgs' awscli2 into the runner's nix profile (on PATH for the
+        # download step) — snap/apt are unavailable on the NixOS runner.
+        run: nix profile install nixpkgs#awscli2
 
       - name: Download AppImage
         env:
@@ -1946,21 +2023,33 @@ jobs:
         include:
           - platform: nixos
             runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
-          # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
-          # once the macOS-only steps in this job (`brew install just`,
-          # `actions/setup-python`, `brew install awscli`) are replaced with nix
-          # equivalents — they assume Homebrew, which is not installed on the
-          # nix-darwin runners.
+          # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
+          # runner and drives the tests through codetracer's nix dev shell
+          # (``nix develop . --command just test``), same as the nixos leg. The
+          # former Homebrew-native ``./non-nix-build/build.sh`` toolchain (brew
+          # install just / setup-python / dtolnay rust-toolchain) is gone; nim /
+          # cargo / cargo-nextest / nimsuggest all come from the dev shell.
           - platform: macos
-            runner: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew/setup-python) — see leg TODO
+            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
-    needs:
-      - lint-bash
-      - lint-nim
-      - lint-nix
-      - lint-rust
+    # NOTE: this job deliberately does NOT declare `needs: [lint-bash,
+    # lint-nim, lint-nix, lint-rust]` any more.
+    #
+    # That dependency existed purely to fail fast and save runner time —
+    # the lint jobs produce no artifact and no output this job consumes.
+    # Its real effect was to make the entire non-GUI test suite hostage to
+    # the lint lane's toolchain: when lint-rust started dying before it
+    # linted anything (`direnv: not found`, exit 127; or `Setup dev env`
+    # failing for want of a workspace lock), GitHub reported this job as
+    # `skipped`, and the run was red from lint anyway, so the missing test
+    # coverage was invisible. On `dev`, this job last executed on
+    # 2026-06-25 and was skipped on every run after it.
+    #
+    # The lint jobs remain REQUIRED — ci/verdict/required-jobs.txt lists
+    # all four, so a lint failure still fails the run. They just no longer
+    # get to silence the tests on their way down.
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1975,32 +2064,26 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        if: matrix.platform == 'nixos'
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings (nixos)
+      - name: Setup isonim siblings
         # ``just test`` -> ``test-nimsuggest`` needs the codetracer
         # source to build, which pulls in ``../isonim/src`` siblings.
-        if: matrix.platform == 'nixos'
+        # Both legs now build inside the nix dev shell, so both need the
+        # isonim siblings adjacent to this checkout.
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
-      # --- NixOS setup ---
       - name: Install Nix
-        if: matrix.platform == 'nixos'
+        # Both legs drive the tests through ``nix develop`` now. On the
+        # self-hosted eph-linux-x64 / eph-macos-arm64 runners nix is already
+        # on PATH, so setup-nix is a fast no-op; it stays for hosted-runner
+        # portability.
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
@@ -2008,27 +2091,45 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       # --- macOS setup ---
-      - name: Install just (macOS)
+      # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
+      # no ``./non-nix-build/build.sh`` any more: the macOS leg runs the tests
+      # inside codetracer's nix dev shell (``nix develop . --command just
+      # test``), which provisions nim / cargo / cargo-nextest / nimsuggest from
+      # /nix/store exactly like the nixos leg. ``just test`` (test-rust +
+      # test-nimsuggest) builds what it needs via cargo, so no explicit
+      # pre-build of the ct tree is required here.
+      - name: Clone codetracer-trace-format (macOS)
+        # The BEAM recorder built below transitively path-depends on
+        # codetracer-trace-format / codetracer_trace_writer_nim; its build.rs
+        # resolves that crate from the workspace sibling
+        # ``$GITHUB_WORKSPACE/../codetracer-trace-format``. Clone it (and its
+        # matched FFI half, codetracer-trace-format-nim) with the same
+        # ``clone-repo`` + ``ref: dev`` pattern the nixos leg's setup-dev-env
+        # uses.
         if: matrix.platform == 'macos'
-        run: brew install just
-
-      - name: Set up Python 3.12 (macOS)
-        if: matrix.platform == 'macos'
-        uses: actions/setup-python@v5
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
-          python-version: '3.12'
+          repo: metacraft-labs/codetracer-trace-format
+          # `dev` is where this repo's work lands; its default branch is
+          # `stable`, and the last published workspace lock recorded
+          # upstream="dev" for it.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Set up Rust toolchain (macOS)
+      - name: Clone codetracer-trace-format-nim (macOS)
+        # Matched FFI half of codetracer-trace-format: the recorder's build.rs
+        # hard-errors ("Nim FFI entry point not found ...
+        # codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim")
+        # without this sibling. Same pairing the nixos leg's setup-dev-env
+        # ``siblings:`` list encodes.
         if: matrix.platform == 'macos'
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-nextest (macOS)
-        if: matrix.platform == 'macos'
-        run: curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-
-      - name: Build (non-nix)
-        if: matrix.platform == 'macos'
-        run: ./non-nix-build/build.sh
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -2061,7 +2162,7 @@ jobs:
       #
       # setup-dev-env clones the BEAM recorder + codetracer-trace-format
       # (the recorder's CTFS path-dep) adjacent to this checkout at the
-      # workspace-lock-pinned revisions, replacing the former
+      # pinned `dev` refs, replacing the former
       # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps.
       # Nix is already installed by the earlier "Install Nix" step on the
       # nixos leg; setup-dev-env's nix install is idempotent.
@@ -2070,12 +2171,26 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # MATCHED FFI PAIR. The "Build codetracer-beam-recorder (nixos)" step
+          # below already documents that this recorder "transitively
+          # path-depends on codetracer-trace-format/codetracer_trace_writer_nim"
+          # -- that crate's build.rs also needs the Nim half checked out as a
+          # SIBLING of codetracer-trace-format, and hard-errors without it:
+          #
+          #   Nim FFI entry point not found at
+          #   .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
+          #
+          # Observed via the identical path-dep from codetracer-shell-recorders
+          # (run 31719867246, job 94513828226). Pinned by the
+          # "codetracer-trace-format implies codetracer-trace-format-nim"
+          # assertion in ci/test/sibling-provisioning-test.sh.
           siblings: |
-            codetracer-beam-recorder
-            codetracer-trace-format
+            codetracer-beam-recorder=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
@@ -2151,19 +2266,33 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build codetracer-beam-recorder (macOS)
-        # macOS has cargo from ``Set up Rust toolchain (macOS)`` above.
-        # Skip the recorder's ``just build-native`` (which uses
-        # ``--locked``) for the same reason as the nixos step above --
-        # the trace-format sibling is checked out at a newer ref than
-        # the recorder's Cargo.lock expects.  Elixir / rebar3 aren't
-        # required to *produce* the binary, only to run its full test
-        # matrix.
+        # cargo now comes from codetracer's nix dev shell (``nix develop .``)
+        # rather than a DIY rust-toolchain — same source the nixos step above
+        # uses, only with the host-default aarch64-darwin shell instead of the
+        # explicit x86_64-linux selector.  Codetracer's shell ships the full
+        # nim / nimble toolchain the recorder's transitive
+        # codetracer_trace_writer_nim build.rs needs.
+        #
+        # Skip the recorder's ``just build-native`` (which uses ``--locked``)
+        # for the same reason as the nixos step -- the trace-format sibling is
+        # checked out at a newer ref than the recorder's Cargo.lock expects.
+        # ``CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1`` +
+        # ``CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS`` inject codetracer's
+        # vendored stew instead of a network ``nimble install --depsOnly``,
+        # exactly as the nixos step does.
         if: matrix.platform == 'macos'
         shell: bash
+        env:
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
-          cargo build
+          cd "${{ github.workspace }}"
+          nix develop . --command bash -c '
+            set -euo pipefail
+            cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
+            cargo build
+          '
 
       # Runs all Rust tests including flow integration tests for all languages.
       # WASM flow tests skip automatically if wazero or wasm32-wasip1 target
@@ -2181,12 +2310,15 @@ jobs:
         include:
           - platform: nixos
             runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
-          # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
-          # once the macOS-only steps (`brew install just`, `actions/setup-python`)
-          # are replaced with nix equivalents (Homebrew is not installed on the
-          # nix-darwin runners).
+          # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
+          # runner. The ct binary is built by codetracer's reprobuild recipe in
+          # the nix dev shell (``nix develop . --command just build-once`` ->
+          # ``src/build-debug-repro/bin/ct``) and the Playwright suite runs
+          # inside that same dev shell, replacing the Homebrew-native
+          # ``./non-nix-build/build.sh`` toolchain (brew install just /
+          # setup-python / dtolnay rust-toolchain).
           - platform: macos
-            runner: macos-latest  # HOLD (CIP-5 Wave 4): STEP-RISKY DIY (brew/setup-python) — see leg TODO
+            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2204,58 +2336,41 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
-        # setup-dev-env (nix) installs Nix via the shared setup-nix (which
-        # skips the install when nix is already on PATH for the self-hosted
-        # nixos runner, and otherwise installs via the Determinate installer —
-        # the workaround for the hosted-macOS ``eDSRecordAlreadyExists``
-        # failure that the older installer trips on the GitHub-hosted Apple
-        # Silicon image) and clones the cross-repo siblings adjacent to this
-        # checkout (``../<name>``) at the workspace-lock-pinned revisions. This
-        # replaces the former Checkout-manifests / Resolve-lock / per-sibling
-        # clone-repo steps (both legs), the nixos ``Install Nix`` (setup-nix),
-        # and the bespoke macOS ``Install Nix (… for ct_cli build)`` Determinate
-        # step (Nix is now provisioned here for the macOS sibling
-        # ``nix develop`` builds below).
-        #
-        # NOTE: the macOS leg keeps its open-coded ``just`` / Python / Rust
-        # toolchain steps below — its ``./non-nix-build/build.sh`` and
-        # ``./ci/test/ui-tests-db.sh`` invocations run at the top shell (the
-        # explicitly *non-nix* macOS build path) and rely on those tools being
-        # on the system PATH rather than inside codetracer's nix dev shell.
+        # setup-dev-env (nix) installs Nix via the shared setup-nix (a fast
+        # no-op on the self-hosted eph-linux-x64 / eph-macos-arm64 runners,
+        # where nix is already on PATH) and clones the cross-repo siblings
+        # adjacent to this checkout (``../<name>``) at their pinned `dev` refs.
+        # This replaces the former Checkout-manifests / Resolve-lock /
+        # per-sibling clone-repo steps (both legs) and the nixos ``Install Nix``
+        # (setup-nix). Nix is provisioned here for both the macOS sibling
+        # ``nix develop`` builds and the ct build + Playwright run, which now
+        # all go through codetracer's dev shell.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           nix-develop-args: '.?submodules=1'
           siblings: |
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            codetracer-native-recorder
-            nim-stackable-hooks
-            codetracer-visual-replay
-            codetracer-native-backend
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
+            nim-stackable-hooks=dev
+            codetracer-visual-replay=dev
+            codetracer-native-backend=dev
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
         # with the in-repo path ./libs/codetracer-trace-format; mirror the
-        # lock-pinned sibling clone (placed at ../codetracer-trace-format by
+        # sibling clone (placed at ../codetracer-trace-format by
         # setup-dev-env) there.
         shell: bash
         run: |
@@ -2266,30 +2381,48 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       # --- NixOS setup ---
+
+      - name: Stage codetracer-trace-format-nim into libs/
+        # codetracer-trace-format and codetracer-trace-format-nim are a MATCHED
+        # PAIR across an FFI boundary, and must move together or not at all.
+        # `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs` is the
+        # Rust caller; `codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim`
+        # is the Nim provider. Overriding only the first one links the newer
+        # caller against the older provider:
+        #
+        #   libcodetracer_trace_writer_nim...rcgu.o: in function
+        #     `codetracer_trace_writer_nim::NimTraceReaderHandle::event_metadata':
+        #     undefined reference to `ct_reader_event_metadata'
+        #   error: could not compile `replay-server` (bin "replay-server")
+        #
+        # `ct_reader_event_metadata` was added to the Nim side on 2026-08-07;
+        # flake.lock pins that repo at 839ed880 (2026-06-24), which does not
+        # define it.
+        #
+        # This is what the per-commit workspace lock was actually buying: not a
+        # pinned SHA, but COORDINATION across repos -- it moved both halves to
+        # one consistent revision. Pinning each sibling independently to `dev`
+        # keeps them current and loses that coordination, so the pair has to be
+        # overridden together, explicitly.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format-nim"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format-nim"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
+
       - name: Build CodeTracer (nix)
         if: matrix.platform == 'nixos'
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
       # --- macOS setup ---
-      # The macOS leg is the explicitly non-nix build path on the hosted
-      # ``macos-latest`` runner (``./non-nix-build/build.sh`` +
-      # ``./ci/test/ui-tests-db.sh`` run at the top shell). It still needs
-      # just / Python / Rust on the system PATH; the nix dev env from
-      # ``Setup dev env`` only backs the sibling ``nix develop`` builds.
-      - name: Install just (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install just
-
-      - name: Set up Python 3.12 (macOS)
-        if: matrix.platform == 'macos'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Set up Rust toolchain (macOS)
-        if: matrix.platform == 'macos'
-        uses: dtolnay/rust-toolchain@stable
-
+      # The macOS leg now builds the ct binary with codetracer's reprobuild
+      # recipe inside the nix dev shell and runs the Playwright suite in that
+      # same shell (see the "Build CodeTracer (nix dev shell)" step and
+      # ``./ci/test/ui-tests-db.sh`` below). just / nim / cargo / node /
+      # Playwright all come from ``nix develop .``; the former open-coded brew
+      # install just / setup-python / dtolnay rust-toolchain steps are gone.
       - name: Setup isonim siblings (macOS)
         if: matrix.platform == 'macos'
         # codetracer's nim.cfg ``--path:``s into ``../isonim/src`` and
@@ -2299,12 +2432,12 @@ jobs:
         # the Linux jobs already use.
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
       # codetracer-native-backend are now cloned adjacent to this checkout
-      # (``../<name>``) at workspace-lock-pinned revisions by the
+      # (``../<name>``) at their pinned `dev` refs by the
       # ``Setup dev env`` step above. The macOS cargo path deps
       # (``../../../codetracer-trace-format/...``), the trace-format-nim FFI
       # entry point, the native-recorder canonicalize, the ct_cli
@@ -2323,7 +2456,7 @@ jobs:
           repo: metacraft-labs/codetracer-snapshot-codecs
           ref: main
           path: ${{ github.workspace }}/../codetracer-snapshot-codecs
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-image-diff sibling (macOS)
@@ -2336,15 +2469,12 @@ jobs:
           repo: metacraft-labs/codetracer-image-diff
           ref: main
           path: ${{ github.workspace }}/../codetracer-image-diff
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
-      # NOTE: Nix is installed by the ``Setup dev env`` step above. On the
-      # hosted ``macos-latest`` (arm64) runner the shared setup-nix installs
-      # via DeterminateSystems/nix-installer-action — the workaround for the
-      # ``eDSRecordAlreadyExists`` failure that the older installer trips on
-      # the GitHub-hosted Apple Silicon image (leftover Nix state in the base
-      # snapshot). The former bespoke ``Install Nix (macOS, for ct_cli build)``
+      # NOTE: Nix is installed by the ``Setup dev env`` step above (a fast
+      # no-op on the self-hosted eph-macos-arm64 runner, where nix is already
+      # on PATH). The former bespoke ``Install Nix (macOS, for ct_cli build)``
       # step is therefore no longer needed; the visual-replay sibling builds
       # below still drive each sibling's own ``nix develop`` flake.
 
@@ -2360,7 +2490,7 @@ jobs:
         #
         # We bypass scripts/build-siblings.sh because that script
         # assumes direnv-allow state and a parent codetracer dev shell
-        # that supplies nim/nimble.  On macos-latest none of those
+        # that supplies nim/nimble.  On this runner none of those
         # preconditions hold yet -- ``nix develop`` invokes the recorder's
         # flake directly and supplies the same Nim/Rust/LLDB toolchain
         # the recipe expects, without the direnv allow state plumbing.
@@ -2371,8 +2501,8 @@ jobs:
           # private ``lldb-sys.rs`` dependency picks up the App-token
           # we set via ``GIT_CREDENTIALS`` below.
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
-          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
-          git config --global --add url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
           nix develop --no-write-lock-file --command just build-ct-mcr
 
       - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
@@ -2389,34 +2519,18 @@ jobs:
           cd "${{ github.workspace }}/../codetracer-visual-replay"
           nix develop --no-write-lock-file --command just build
 
-      - name: Build CodeTracer (non-nix)
+      - name: Build CodeTracer (nix dev shell)
         if: matrix.platform == 'macos'
-        # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
-        # at ``$ROOT_DIR/../codetracer-trace-format`` (the dev-machine
-        # workspace-sibling layout).  In CI we already clone it into
-        # ``libs/codetracer-trace-format``; point TRACE_FORMAT_DIR there
-        # instead of duplicating the clone.
-        #
-        # The codetracer_trace_writer_nim build.rs also defaults to
-        # running ``nimble install --depsOnly`` to pull stew + results;
-        # ``install_nim_osx.sh`` only bootstraps Nim itself (no nimble
-        # binary), so SKIP that step and provide the deps via
-        # CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS instead.  Same pair
-        # of stew paths the Nix derivation uses (``stew/`` first so
-        # ``import results`` resolves to stew's results.nim, then the
-        # parent so ``import stew/...`` also resolves).
-        # db-backend's build.rs wraps build_native_api.sh in
-        # ``direnv exec`` on POSIX so the recorder's Nim/Nimble env
-        # loads onto PATH.  macos-latest doesn't ship direnv and
-        # we already have nim on PATH from install_nim_osx.sh, so
-        # tell build.rs to skip the direnv wrapper.
-        env:
-          TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-        run: ./non-nix-build/build.sh
+        # Toolchain-free reprobuild build inside codetracer's nix dev shell,
+        # the same path ``dmg-build`` uses on this runner. On Darwin
+        # ``scripts/build-once.sh`` selects the reprobuild driver (``repro`` +
+        # ``runquotad`` are both provisioned by ``nix develop .``) and emits the
+        # ct binary at ``src/build-debug-repro/bin/ct`` — the path
+        # ``ci/test/ui-tests-db.sh`` points ``CODETRACER_E2E_CT_PATH`` at. The
+        # in-repo ``libs/codetracer-trace-format{,-nim}`` staged above feed the
+        # recipe; no ``--override-input`` is needed for the tup/reprobuild dev
+        # build. Replaces the old Homebrew ``./non-nix-build/build.sh``.
+        run: nix develop . --command just build-once
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -2459,24 +2573,16 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones codetracer-trace-format adjacent to this checkout at the
-        # workspace-lock-pinned revision, replacing the former
+        # pinned `dev` ref, replacing the former
         # Checkout-manifests / Resolve-lock / clone-repo / Install Nix steps.
         # The flake build below reads the in-repo path
         # libs/codetracer-trace-format, so the sibling clone is mirrored
@@ -2484,15 +2590,16 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-trace-format
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
-        # mirror the lock-pinned sibling clone there.
+        # mirror the sibling clone there.
         shell: bash
         run: |
           set -euo pipefail
@@ -2501,12 +2608,54 @@ jobs:
           rm -rf "$DEST"
           cp -a "$SRC" "$DEST"
 
+
+      - name: Stage codetracer-trace-format-nim into libs/
+        # codetracer-trace-format and codetracer-trace-format-nim are a MATCHED
+        # PAIR across an FFI boundary, and must move together or not at all.
+        # `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs` is the
+        # Rust caller; `codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim`
+        # is the Nim provider. Overriding only the first one links the newer
+        # caller against the older provider:
+        #
+        #   libcodetracer_trace_writer_nim...rcgu.o: in function
+        #     `codetracer_trace_writer_nim::NimTraceReaderHandle::event_metadata':
+        #     undefined reference to `ct_reader_event_metadata'
+        #   error: could not compile `replay-server` (bin "replay-server")
+        #
+        # `ct_reader_event_metadata` was added to the Nim side on 2026-08-07;
+        # flake.lock pins that repo at 839ed880 (2026-06-24), which does not
+        # define it.
+        #
+        # This is what the per-commit workspace lock was actually buying: not a
+        # pinned SHA, but COORDINATION across repos -- it moved both halves to
+        # one consistent revision. Pinning each sibling independently to `dev`
+        # keeps them current and loses that coordination, so the pair has to be
+        # overridden together, explicitly.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format-nim"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format-nim"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
+
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
       - name: Setup rr-backend
+        # `ci/setup-rr-backend.sh` resolves codetracer-native-backend's revision
+        # from `$RR_BACKEND_REF` first and otherwise from the workspace lock via
+        # `scripts/resolve-sibling-rev.sh`. That second route cannot work on a
+        # runner: the resolver locates the locks/ tree by walking up for a
+        # `.repro/manifests` or `.repo/manifests` directory, and a CI checkout
+        # has neither (nothing sets `$CT_MANIFEST_DIR` here either), so it exits
+        # 3 with "cannot locate the manifest repo locks/ tree" -- the same
+        # lock dependency the `siblings:` entries above were pinned to avoid,
+        # reached one step later. Take the documented explicit override, which
+        # keeps the script's lock path intact for workspace use.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
+          RR_BACKEND_REF: dev
         run: ./ci/setup-rr-backend.sh
 
       - name: Run TypeScript Playwright UI tests (RR-based only)
@@ -2564,11 +2713,34 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave `http.https://github.com/.extraHeader` behind in
+          # `.git/config` for the rest of a three-hour job on a persistent GPU
+          # runner. This is ordinary least-persistence hygiene — the same reason
+          # actions/checkout v6 moved the credential out of `.git/config`
+          # entirely — and NOT a boundary the private-Cargo preflight depends
+          # on: that header carries the org-wide CI App token, which by policy
+          # also authenticates the private lldb-sys dependency, so its presence
+          # is never a leak and the preflight no longer asserts anything about
+          # it. See the long note in
+          # `ci/test/visual-replay-private-cargo-preflight.sh`.
+          #
+          # Nothing downstream needs the persisted header:
+          #   * `Setup dev env` gets the same token explicitly via `gh-token`.
+          #   * `submodules: recursive` is unaffected — actions/checkout fetches
+          #     submodules under a temporary *global* auth config it installs
+          #     regardless of this setting, and only strips the credential in
+          #     its `finally` block, after submodules are checked out.
+          #   * The gate itself does no network git against this checkout. Its
+          #     one authenticated fetch (`git ls-remote` on lldb-sys, in the
+          #     preflight) uses the process-scoped `GIT_CONFIG_KEY_0`
+          #     extraHeader; every other git-touching step runs with its working
+          #     directory inside a *sibling* repo provisioned by setup-dev-env.
+          persist-credentials: false
 
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones every source dependency used by the visual gate adjacent to
-        # this checkout at workspace-lock-pinned revisions. That includes the
+        # this checkout at their pinned `dev` refs. That includes the
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
@@ -2579,21 +2751,22 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            isonim
-            nim-everywhere
-            nim-acp
-            nim-agent-harbor
-            nim-agents
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            io-mon
-            nim-shm-queue
-            nim-stackable-hooks
-            codetracer-visual-replay
-            codetracer-native-backend
-            codetracer-native-recorder
-            codetracer-native-test-programs
-            codetracer-visual-replay-fixtures
+            isonim=dev
+            nim-everywhere=dev
+            nim-acp=dev
+            nim-agent-harbor=dev
+            nim-agents=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            io-mon=dev
+            nim-shm-queue=dev
+            nim-shm-gset=dev
+            nim-stackable-hooks=dev
+            codetracer-visual-replay=dev
+            codetracer-native-backend=dev
+            codetracer-native-recorder=dev
+            codetracer-native-test-programs=dev
+            codetracer-visual-replay-fixtures=dev
 
       - name: Run visual replay regression gate
         env:
@@ -2716,31 +2889,203 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  publish-pypi:
-    needs:
-      - build-python-packages
-      - test-non-gui
-      - test-ui-tests
-      - create-release
-    if: startsWith(github.ref, 'refs/tags/')
+  # ---------------------------------------------------------------------------
+  # ct-test gates.
+  #
+  # `ci/test/m16-release-gate.sh` and `ci/test/ct-providers.sh` were real,
+  # maintained scripts that NO pipeline invoked: `.gitlab-ci.yml`'s only test
+  # jobs are `just test` (test-rust + test-nimsuggest + optional cross-repo) and
+  # `ci/test/ui-tests.sh`, and no workflow here named either script. They ran
+  # only when a human typed `just test-m16-release-gate` / `just
+  # test-ct-providers`. Every suite listed in them — not just the most recently
+  # added one — has therefore been in a gate that never gated.
+  #
+  # They are split across two jobs on purpose, because they have very different
+  # prerequisites and mixing them would let the harder one's infrastructure
+  # failures mask the easier one's test failures:
+  #
+  #   * `ct-test-release-gate` needs nothing but the codetracer dev shell. It is
+  #     the toolchain-light provider matrix plus the framework contract,
+  #     discovery, run-store and worker-pool suites.
+  #   * `ct-test-providers` drives real external toolchains AND three recorder
+  #     siblings (native/ct-mcr, JavaScript, Ruby), which have to be checked out
+  #     and built before the recording assertions can run.
+  #
+  # Neither job weakens what the scripts check: `CT_PROVIDERS_ALLOW_MISSING` and
+  # `CT_PROVIDERS_SKIP_SIBLINGS` are deliberately NOT set, so a recorder that is
+  # missing or fails to build fails the job instead of quietly turning the
+  # recording assertions into no-ops.
+  # ---------------------------------------------------------------------------
+  ct-test-release-gate:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    name: ct-test release gate (M16 provider matrix)
     steps:
-      - name: Download built distributions
-        uses: actions/download-artifact@v6
+      - name: Mint installation token for cross-repo sibling access
+        # GitHub free plan restricts org-level secrets with visibility ALL from
+        # being readable inside private repos, so we mint per-run installation
+        # tokens from the repo-local CI_TOKEN_PROVIDER_APP_ID +
+        # CI_TOKEN_PROVIDER_PRIVATE_KEY secrets via the CI Token Provider App.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          path: dist
-          merge-multiple: true
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Checkout
+        uses: actions/checkout@v5
         with:
-          packages_dir: dist
-          repository-url: https://test.pypi.org/legacy/
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+          # Do not leave the installation token in `.git/config` for the rest
+          # of the job: these runners reuse their work tree. Nothing here needs
+          # the persisted header -- `submodules:` is fetched by actions/checkout
+          # before it strips the credential, and every later step that talks to
+          # a remote is handed the token explicitly (`gh-token:`). Same reasoning
+          # as the visual-replay gate; the long form is in that job.
+          persist-credentials: false
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Setup isonim siblings
+        # The gate's last two suites are ViewModel tests under
+        # src/frontend/viewmodel/, which build against ../isonim/src et al. via
+        # codetracer's top-level nim.cfg. Same prerequisite as `viewmodel-tests`.
+        uses: ./.github/actions/setup-isonim-siblings
         with:
-          packages_dir: dist
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Run the M16 ct-test release gate
+        # The ct_test sources import runquota_process; the dev shell exports
+        # RUNQUOTA_SRC (nix/shells/ci-base.nix) and src/ct_test/config.nims
+        # turns that into the --path set, so no runquota sibling checkout is
+        # needed here.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-m16-release-gate
+
+  ct-test-providers:
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    name: ct-test cross-language provider gate
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+          skip-token-revoke: false
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        # ci/test/ct-providers.sh requires three recorder siblings checked out
+        # at ../<repo> and builds each through its own pinned dev shell
+        # (scripts/build-siblings.sh -> `direnv exec <repo> just build`). Without
+        # them the script aborts in its very first suite, which is why it could
+        # never simply be dropped into an existing job.
+        #
+        # setup-dev-env clones them adjacent to this checkout at
+        # pinned `dev` refs — the same mechanism
+        # `visual-replay-regression-gate` and `test-non-gui` already use, so
+        # this is not new infrastructure. The trace-format / io-mon /
+        # stackable-hooks / nim-shm-queue entries are the native recorder's own
+        # build dependencies, mirroring the visual gate's sibling list.
+        #
+        # codetracer-native-backend is listed for the NATIVE RECORDER's sake,
+        # not this job's: `build-siblings.sh` runs `just build-ct-mcr`, whose
+        # `build-license-ffi` recipe opens with
+        # `cd ../codetracer-native-backend && ...` to build `ct_license_ffi` out
+        # of the backend checkout. Without it:
+        #
+        #   sh: line 1: cd: ../codetracer-native-backend: No such file or directory
+        #   error: could not find `Cargo.toml` in `.../codetracer-native-recorder`
+        #   error: Recipe `build-license-ffi` failed on line 123 with exit code 101
+        #
+        # The recipe `&&`-chains only its first link and uses `;` after, so the
+        # failed `cd` does not abort it -- cargo just runs in the recorder root,
+        # which has no root Cargo.toml, and the error names the wrong repo.
+        #
+        # A gap in this list, not in the lock: the recipe is byte-identical at
+        # the last lock-pinned recorder revision (196f95c9, 2026-07-07) and at
+        # today's `dev`, and neither revision has a root Cargo.toml, so the
+        # lock-pinned build would have failed the same way. It stayed invisible
+        # because this job could not get past `Setup dev env` to reach it.
+        #
+        # codetracer-visual-replay is here for the same reason, one layer on:
+        # once the backend is present, `build-license-ffi` succeeds and the
+        # build reaches `cd ct_cli && nimble build`, which imports
+        # `gfx_stream/ctfs_visual` -- a module that lives in
+        # codetracer-visual-replay/src/gfx_stream, not in the recorder:
+        #
+        #   ct_cli/src/ct_cli/extract_gfx_cmd.nim(39, 18)
+        #     Error: cannot open file: gfx_stream/ctfs_visual
+        #   error: Recipe `build-ct-mcr` failed on line 43 with exit code 1
+        #
+        # `visual-replay-regression-gate` already lists it. Same missing-sibling
+        # class as the backend above, uncovered only because fixing the first
+        # one let the build run far enough to hit the second.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: |
+            nim-everywhere=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            io-mon=dev
+            nim-shm-queue=dev
+            nim-shm-gset=dev
+            nim-stackable-hooks=dev
+            codetracer-native-recorder=dev
+            codetracer-js-recorder=dev
+            codetracer-ruby-recorder=dev
+            codetracer-native-backend=dev
+            codetracer-visual-replay=dev
+
+      - name: Allow direnv in the cloned recorder siblings
+        # scripts/build-siblings.sh runs every sibling build as
+        # `direnv exec <repo> …` so the repo's own flake pins its toolchain. A
+        # freshly cloned .envrc is in direnv's "blocked" state, so without this
+        # the build step fails (or silently falls back to the wrong PATH) —
+        # the same hazard `test-non-gui` handles for codetracer-beam-recorder.
+        run: |
+          set -euo pipefail
+          for sibling in codetracer-native-recorder codetracer-js-recorder codetracer-ruby-recorder; do
+            nix develop .#devShells.x86_64-linux.default -c \
+              direnv allow "${{ github.workspace }}/../${sibling}"
+          done
+
+      - name: Run the cross-language ct-test provider gate
+        # No CT_PROVIDERS_ALLOW_MISSING / CT_PROVIDERS_SKIP_SIBLINGS: a missing
+        # or unbuildable recorder must fail this job, not silently degrade the
+        # recording assertions into checks of nothing.
+        env:
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+        run: nix develop '.?submodules=1' --command just test-ct-providers
+
+      - name: Upload sibling build logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ct-test-providers-sibling-logs
+          # scripts/build-siblings.sh captures each recorder build into
+          # .tools/build-siblings-logs/<repo>.log (LOG_DIR in that script);
+          # without them a sibling build failure reports only its exit code.
+          path: .tools/build-siblings-logs/
+          retention-days: 14
+          if-no-files-found: ignore
 
   push-to-attic:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
@@ -2856,13 +3201,21 @@ jobs:
           # contents:write permission below) -- the same reliable mechanism the
           # isonim/isonim-docs docs deploys use. The old origin+CODETRACER_PUSH_
           # GITHUB_TOKEN path failed auth ("Authentication failed for .../codetracer").
+          #
+          # `origin` is deliberately NOT re-pointed at a credentialed URL here.
+          # docs.sh only reads `origin` in its DEPLOY_TOKEN-absent fallback
+          # (`ci/deploy/docs.sh`, the `git push --force "$REMOTE" HEAD:gh-pages`
+          # branch), and DEPLOY_TOKEN is always set on this step -- so the
+          # rewrite could never be the credential that pushed, it could only
+          # expand a long-lived PAT into `.git/config` on a self-hosted runner
+          # that reuses its workspace. This is a category-1 push (the
+          # workflow's own public repo), and the policy credential for that is
+          # the token Actions already provides.
           DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main
-
-          git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
 
           nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
 
@@ -2918,8 +3271,39 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main
 
-          git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
-
+          # `origin` is deliberately NOT re-pointed at a credentialed URL.
+          #
+          # It used to be, at `CODETRACER_PUSH_GITHUB_TOKEN` -- a long-lived
+          # PAT, and the last rotation-bearing GitHub credential in this
+          # workflow. That userinfo could never be the credential that pushed.
+          # The `Checkout` step above runs with `persist-credentials` at its
+          # default of true, so actions/checkout leaves
+          # `http.https://github.com/.extraheader` in `.git/config` carrying
+          # the App installation token, and Git prefers a configured
+          # Authorization header over userinfo in the remote URL.
+          #
+          # That preference is total, not merely a first choice, which is what
+          # makes deleting the line safe rather than a gamble. Against a server
+          # that answers 401, `git push` retries with the SAME header and then
+          # gives up; the userinfo is never put on the wire at all, so it is not
+          # a fallback either. (Reproducible without any real credential: point
+          # a checkout at a local HTTP server with both an `extraHeader` and
+          # userinfo configured, and read the `Authorization` it receives.)
+          #
+          # So the App token was already performing this push, and removing the
+          # rewrite changes which credential authenticates not at all -- it only
+          # stops expanding a PAT into `.git/config` on a self-hosted runner
+          # that reuses its workspace. `persist-credentials` must therefore STAY
+          # enabled on the checkout above: here the persisted header is
+          # load-bearing, which is the opposite of the situation in most jobs.
+          #
+          # STILL UNVERIFIED, for whoever runs the next release. Whether the App
+          # installation has `contents: write` on this repo has never been
+          # exercised: the last tag (25.11.1) predates the switch to App tokens,
+          # and no `main` run has reached this job since. If the tag push fails
+          # with 403, that is the App's permission set, NOT this change -- the
+          # PAT was already inert and restoring it would not help. Grant the
+          # installation contents:write rather than reintroducing a PAT.
           git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
@@ -3030,3 +3414,201 @@ jobs:
             resources.tar.xz.asc
           generate_release_notes: false
           tag_name: "${{ needs.push-tag.outputs.tag }}"
+
+  ci-verdict:
+    # Final gate: assert that CI actually RAN the jobs it gates on.
+    #
+    # GitHub reports a job whose dependency failed as `skipped`, and
+    # `skipped` is not `failure`. When `lint-rust` started failing early —
+    # in `Setup dev env` for want of a repo-workspaces workspace lock on
+    # the pushed commit, or one step later at `direnv: not found` — every
+    # job declaring `needs: [lint-bash, lint-nim, lint-nix, lint-rust]`,
+    # including `test-non-gui`, the whole non-GUI suite, was silently
+    # skipped. The run went red regardless, so for six weeks "the tests
+    # are failing" and "the tests never ran" looked identical. On `dev`,
+    # `test-non-gui` last actually executed on 2026-06-25.
+    #
+    # This job exists so those two states never look alike again. It does
+    # not suppress or soften any failure: a required job that ran and
+    # failed still fails this gate (exit 1). It only ensures that a
+    # required job which never ran fails LOUDLY and differently (exit 2).
+    #
+    # It deliberately runs on a stock GitHub-hosted runner with nothing
+    # but checkout + bash + jq — no Nix, no dev shell, no setup-dev-env,
+    # no workspace lock, no cross-repo siblings. A watchdog must not share
+    # the failure mode it is watching for; if this job needed the dev env,
+    # the very outage it reports would take it down too.
+    #
+    # KNOWN LATENCY — read before trusting the absence of a verdict.
+    # Two jobs in the needs: list below, `reprobuild-macos-smoke` and
+    # `origin-dap-macos`, request `runs-on: eph-macos-arm64`, and no
+    # registered runner carries that label (the org's darwin runners
+    # expose aarch64-darwin / nix-darwin / darwin instead). Those jobs
+    # therefore never get scheduled: they sit queued until GitHub's
+    # 24-hour ceiling cancels them. Because this gate waits on them, its
+    # verdict cannot be published until ~24h after the push. It is
+    # correct when it arrives, but it is NOT prompt, and a run that is
+    # still in progress has simply not been judged yet — do not read a
+    # missing verdict as a passing one. Fixing the runner labels removes
+    # the delay; dropping those jobs from needs: would remove the delay
+    # by giving up the coverage, which is the trade this gate exists to
+    # refuse.
+    needs:
+      - lint-bash
+      - lint-nim
+      - lint-nix
+      - lint-rust
+      - dev-build
+      - nix-build
+      - appimage-build
+      - dmg-build
+      - appimage-lib-check
+      - appimage-cross-distro
+      - dmg-lib-check
+      - test-non-gui
+      - test-ui-tests
+      - test-ui-tests-rr
+      - cross-process-linux
+      - viewmodel-tests
+      - visual-replay-regression-gate
+      - ct-test-release-gate
+      - ct-test-providers
+      - windows-bootstrap-smoke
+      - windows-named-pipe-tests
+      - windows-rust-components
+      - windows-headless-test
+      - origin-dap-windows
+      - origin-dap-macos
+      - reprobuild-linux-smoke
+      - reprobuild-macos-smoke
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Self-test the verdict gate
+        # The gate is only worth trusting if its own contracts hold, so
+        # they are checked on every run, against fixtures captured from
+        # the real broken runs this gate was built for.
+        run: bash ci/verdict/required-jobs-test.sh
+
+      - name: Assert the Windows lane provisions its own git and bash
+        # The eph-win-x64 image ships neither; five of the six Windows jobs
+        # did not run the bootstrap that supplies them, and the lane failed
+        # in three places that looked unrelated. This is a static contract
+        # over this workflow file, so it can be enforced from a Linux runner
+        # -- which matters, because the Windows lane had no signal at all
+        # for the months this went unnoticed.
+        run: bash ci/test/windows-runner-bootstrap-test.sh
+
+      - name: Assert every job's sibling checkout is self-sufficient
+        # Two halves of one contract, both static checks over this workflow
+        # file, so they run here from a stock runner where they cannot be
+        # taken down by the outages they watch for.
+        #
+        # WHICH REF: a bare `siblings:` entry resolves its revision from a
+        # workspace lock in metacraft-labs/metacraft-manifests, which has
+        # published nothing for this repo since 2026-08-02. Six jobs died in
+        # their first real step for eight days because of it, and nine more
+        # were reported `skipped` in consequence -- the state the verdict step
+        # below exists to name.
+        #
+        # WHICH CREDENTIAL: one org-scoped installation token per job, minted
+        # from the per-repo secret. The org-variable form of the app id
+        # resolves only because this repo is public and evaluates to the empty
+        # string anywhere else; a job that minted two tokens made it ambiguous
+        # which one a step used; and an unresolved `steps.*.outputs.token`
+        # silently becomes an empty token rather than an error.
+        run: bash ci/test/sibling-provisioning-test.sh
+
+      - name: Self-test the private-registry credential preflight
+        # This suite is also run by `visual-replay-regression-gate`, but that
+        # job needs a GPU runner, a workspace lock and eight sibling
+        # checkouts, so it is exactly the kind of lane that can stop
+        # executing without anyone noticing -- which is what this whole
+        # verdict job exists to prevent. The suite itself needs only bash,
+        # git and coreutils (its `cargo` is a stub), so running it here as
+        # well means the boundary and credential-leak contracts around the
+        # private lldb-sys token are checked on every run, from a stock
+        # runner, regardless of the state of the heavy lanes.
+        run: bash ci/test/visual-replay-private-cargo-preflight-test.sh
+
+      - name: Assert the required jobs actually ran
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "$NEEDS_JSON" > "${RUNNER_TEMP}/needs.json"
+          bash ci/verdict/required-jobs.sh --needs-json "${RUNNER_TEMP}/needs.json"
+
+  workspace-lock-freshness:
+    # Alarm, not a gate: is the shared manifests repo still receiving workspace
+    # locks for this repo's commits?
+    #
+    # Until 2026-08-04 that question was answered as a side effect —
+    # `setup-dev-env` resolved every cross-repo sibling from the per-commit
+    # lock, so an unlocked commit could not get past `Setup dev env`. That
+    # coupling was a terrible gate (six jobs dead in their first real step, nine
+    # more `skipped`, for eight days) and the `siblings:` entries above now name
+    # their refs explicitly so it cannot recur. But it was also the only thing
+    # anyone was watching, and the condition it was accidentally reporting is
+    # not small: nothing has been committed to the manifests repo, for ANY repo,
+    # since 2026-08-02. Those locks are what make a published workspace state
+    # reproducible, so the stall means no reproducible snapshot exists for any
+    # commit in that window.
+    #
+    # Fixing the pipeline must not be the thing that hides that. Hence a job
+    # with its own name, red on every run while the stall lasts.
+    #
+    # NOTHING declares `needs:` on this job, and it is deliberately absent from
+    # `ci/verdict/required-jobs.txt`. A red check here must never be able to
+    # skip a test job — coupling lock publication to the test suite is exactly
+    # the defect being undone, and re-introducing it as a gate would trade an
+    # eight-day outage for the next one. Loud, and structurally incapable of
+    # cascading.
+    #
+    # Stock ubuntu-latest, bash + git only: like `ci-verdict`, a watchdog must
+    # not share the failure mode it watches for.
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Mint installation token for the manifests repo
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        # depth 2 so HEAD's first parent is present: that is the second
+        # candidate, and the one that kept `dev` resolvable for exactly one
+        # commit after publication stopped.
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+          fetch-depth: 2
+
+      - name: Clone the manifests repo
+        env:
+          GH_TOKEN: ${{ steps.ci_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git clone --quiet --branch latest \
+            "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/metacraft-manifests.git" \
+            "${RUNNER_TEMP}/metacraft-manifests"
+
+      - name: Assert this commit has a published workspace lock
+        run: |
+          set -uo pipefail
+          # HEAD plus its first parent — the same two candidates clone-siblings
+          # probes. `git rev-parse HEAD^` is empty for a root commit or if the
+          # fetch depth did not reach the parent; the script ignores empty and
+          # all-zero candidates.
+          PARENT="$(git rev-parse --verify --quiet HEAD^ || true)"
+          bash ci/verdict/workspace-lock-freshness.sh \
+            --manifest-dir "${RUNNER_TEMP}/metacraft-manifests" \
+            --sha "${GITHUB_SHA}" \
+            --sha "${PARENT}"

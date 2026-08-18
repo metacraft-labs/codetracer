@@ -9,11 +9,29 @@ SENTINEL="ct-private-cargo-preflight-test-$$"
 SENTINEL_BASIC="$(printf 'x-access-token:%s' "$SENTINEL" | base64 | tr -d '\r\n')"
 LLDB_SYS_URL="https://github.com/metacraft-labs/lldb-sys.rs.git"
 
+# `prepare_two_slot_environment` restores this. Cases that need the preflight's
+# isolated boundary probe to land somewhere specific override TMPDIR, and the
+# override must not leak into the next case.
+ORIGINAL_TMPDIR="${TMPDIR:-}"
+
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/workspace"
 cat >"$TEST_ROOT/bin/cargo" <<'FAKE_CARGO'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >"${CARGO_CALL_LOG:?}"
+# The preflight no longer asserts the whole lock with `--locked`; it re-resolves
+# it and classifies the diff. Modelling that needs a cargo that can actually
+# rewrite the lock, so the drift cases hand this stub the lock a real
+# re-resolution would have produced.
+if [[ -n ${FAKE_CARGO_RESOLVED_LOCK:-} ]]; then
+	manifest=""
+	prev=""
+	for arg in "$@"; do
+		[[ $prev == "--manifest-path" ]] && manifest="$arg"
+		prev="$arg"
+	done
+	[[ -n $manifest ]] && cp "$FAKE_CARGO_RESOLVED_LOCK" "$(dirname "$manifest")/Cargo.lock"
+fi
 FAKE_CARGO
 chmod +x "$TEST_ROOT/bin/cargo"
 
@@ -28,20 +46,55 @@ edition = "2021"
 
 [patch.crates-io]
 lldb-sys = { git = "https://github.com/metacraft-labs/lldb-sys.rs.git" }
+ct-dap-client = { path = "../codetracer/libs/ct-dap-client" }
+
+[dev-dependencies]
+private-cargo-preflight-fixture = { path = "." }
 CARGO_TOML
 	cat >"$workspace/Cargo.lock" <<'CARGO_LOCK'
 version = 4
 
 [[package]]
+name = "ct-dap-client"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "private-cargo-preflight-fixture"
+version = "0.1.0"
+dependencies = [
+ "lldb-sys",
+]
+
+[[package]]
+name = "libc"
+version = "0.2.180"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+
+[[package]]
 name = "lldb-sys"
 version = "0.0.31"
 source = "git+https://github.com/metacraft-labs/lldb-sys.rs.git#0123456789abcdef0123456789abcdef01234567"
+
+[[package]]
+name = "log"
+version = "0.4.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
 CARGO_LOCK
 }
 
 prepare_two_slot_environment() {
 	local cargo_home="$1"
 	mkdir -p "$cargo_home"
+	if [[ -n $ORIGINAL_TMPDIR ]]; then
+		export TMPDIR="$ORIGINAL_TMPDIR"
+	else
+		unset TMPDIR
+	fi
 	unset GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_ALLOW_PROTOCOL
 	unset GIT_CONFIG_KEY_00 GIT_CONFIG_VALUE_00
 	unset GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
@@ -103,8 +156,83 @@ run_positive_case() {
 	PATH="$TEST_ROOT/bin:$PATH" \
 		bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
 		"$workspace"
-	grep -Fxq "fetch --locked --manifest-path $workspace/Cargo.toml" \
+	grep -Fxq "fetch --manifest-path $workspace/Cargo.toml" \
 		"$CARGO_CALL_LOG"
+}
+
+# ---------------------------------------------------------------------------
+# The native-backend lock is a function of a sibling working tree.
+#
+# `codetracer-native-backend/Cargo.toml` routes `ct-dap-client` through
+# `[patch.crates-io] path = "../codetracer/libs/ct-dap-client"`, and in the
+# visual replay job that sibling is THIS pull request's checkout. A path
+# dependency records no source, checksum or revision, so Cargo copies the
+# sibling's dependency edges into the lock and the hunk moves with the tree
+# under test. `cargo fetch --locked` therefore asserted "native-backend was
+# relocked after the CodeTracer commit you are testing", which no CodeTracer
+# author can satisfy from this repository, and reported it as "cannot update
+# the lock file because --locked was passed" — the flag, not the cause.
+#
+# The four cases below pin the replacement contract. They are not mocks of the
+# classifier: each writes a real pair of lock files and runs the real preflight
+# against them, with a stub `cargo` standing in only for the network fetch.
+#
+#   sibling lag   — only path-package edges moved. MUST PASS, and must name the
+#                   package, the sibling path and the edge that moved.
+#   version drift — a package carrying a source changed version. MUST FAIL:
+#                   this is what `--locked` was protecting and the reason
+#                   dropping it outright would have been a regression.
+#   new pin       — a package carrying a source appears only after
+#                   re-resolution. MUST FAIL: a sibling pulled in a crate the
+#                   committed lock does not pin, so Cargo took whatever the
+#                   registry serves today.
+#   local drift   — the drifting package is the workspace member itself, or an
+#                   in-repo path dependency. MUST FAIL: no sibling checkout can
+#                   explain it, so the lock is simply unrefreshed. `path = "."`
+#                   is the repository, not a sibling, and lands on this side.
+# ---------------------------------------------------------------------------
+run_lock_drift_case() {
+	# $1 = case name, $2 = expected exit status, $3 = required output fragment,
+	# $4 = sed program producing the re-resolved lock from the committed one.
+	local case_name="$1" expected_status="$2" expected_text="$3" mutation="$4"
+	local workspace="$TEST_ROOT/workspace/lock-$case_name"
+	local resolved="$TEST_ROOT/resolved-$case_name.lock"
+	local output status
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-lock-$case_name"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	sed "$mutation" "$workspace/Cargo.lock" >"$resolved"
+
+	set +e
+	output="$(
+		CARGO_CALL_LOG="$TEST_ROOT/cargo-lock-$case_name.args" \
+			FAKE_CARGO_RESOLVED_LOCK="$resolved" \
+			PATH="$TEST_ROOT/bin:$PATH" \
+			bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+			"$workspace" 2>&1
+	)"
+	status=$?
+	set -e
+	if ((status != expected_status)) || [[ $output != *"$expected_text"* ]]; then
+		echo "Native-backend lock drift case failed: $case_name" >&2
+		echo "expected status $expected_status and text: $expected_text" >&2
+		printf '%s\n' "$output" >&2
+		exit 1
+	fi
+	# The preflight must hand the sibling checkout back exactly as it found it;
+	# a gate that leaves another repository's lock rewritten is a gate that
+	# changes what the build it is guarding compiles.
+	if ! diff -q "$workspace/Cargo.lock" <(write_committed_lock_to_stdout) >/dev/null; then
+		echo "Preflight left the sibling Cargo.lock rewritten: $case_name" >&2
+		exit 1
+	fi
+}
+
+write_committed_lock_to_stdout() {
+	local reference="$TEST_ROOT/workspace/lock-reference"
+	write_valid_workspace "$reference"
+	cat "$reference/Cargo.lock"
 }
 
 run_negative_case() {
@@ -118,11 +246,131 @@ run_negative_case() {
 	# shellcheck disable=SC1091
 	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
 
+	# Cases that must run from inside a particular checkout set
+	# NEGATIVE_CASE_CWD; cases that build a repository carrying a credential
+	# set NEGATIVE_CASE_CLEANUP so the end-of-run sentinel sweep keeps
+	# meaning "nothing retained the credential" rather than "no test wrote
+	# one". Both are reset here so one case cannot bleed into the next.
+	NEGATIVE_CASE_CWD="$PWD"
+	NEGATIVE_CASE_CLEANUP=""
+
+	# These assignments mutate variables that
+	# ``visual-replay-private-cargo-env.sh`` (sourced just above) has
+	# already exported, so the child ``git`` sees them; shellcheck cannot
+	# follow that across the source boundary and reads them as unused.
+	# shellcheck disable=SC2034
 	case "$case_name" in
 	prompt) GIT_TERMINAL_PROMPT=1 ;;
 	global-config) GIT_CONFIG_GLOBAL="$TEST_ROOT/hostile.gitconfig" ;;
 	count) GIT_CONFIG_COUNT=5 ;;
-	auth-key) GIT_CONFIG_KEY_0="http.https://github.com/.extraHeader" ;;
+	auth-key)
+		# Git normalises away the default port before matching, so this key
+		# is semantically identical to the correct one: it grants the header
+		# to the lldb-sys URL and to nothing else, and therefore passes the
+		# `effective-auth-header` check and both boundary readings. Only the
+		# literal key comparison can catch it. Using a *harmless* rewrite
+		# here is deliberate — it pins that check as an independent contract
+		# rather than as a shadow of the boundary probe.
+		GIT_CONFIG_KEY_0="http.https://github.com:443/metacraft-labs/lldb-sys.rs.git.extraHeader"
+		;;
+	auth-key-wide)
+		# A genuinely widened key: `https://github.com/metacraft-labs/` is a
+		# prefix of the first probe URL, so Git hands the lldb-sys header to
+		# a URL that is not lldb-sys. This is reading (1) of the boundary
+		# check — the isolated probe over the gate's own inline config —
+		# and it is the case that reddens if that reading is deleted.
+		GIT_CONFIG_KEY_0="http.https://github.com/metacraft-labs/.extraHeader"
+		;;
+	auth-key-hostless)
+		# The widening that matters most now the credential is known to be
+		# org-wide: a key with no URL section at all. Git applies
+		# `http.extraHeader` to *every* URL it fetches, github.com or not,
+		# so this would hand an organisation-scoped token to whatever host a
+		# dependency happens to name. Reading (1) catches it — via the
+		# same-host probes as well as the off-host ones, since a host-less
+		# key matches everything. That redundancy is the point: the
+		# `auth-key-wide` case above only widens within github.com, so
+		# without this case nothing would distinguish "keyed to one URL"
+		# from "keyed to one host".
+		#
+		# RUN IT FROM A CHECKOUT THAT CARRIES THE AMBIENT HEADER, not from
+		# whatever directory the suite happens to start in. A host-less key
+		# is the least specific key there is, so against the github.com-wide
+		# `extraHeader` that `actions/checkout` persists it LOSES Git's
+		# specificity contest: the lldb-sys URL resolves to the ambient
+		# header, and `effective-auth-header` fires before reading (1) is
+		# reached. That is environment-dependent — green on a laptop with no
+		# ambient header, red on the runner — and it is what made this case
+		# pass locally and fail in CI. The fixture pins the runner's
+		# environment so the ordering in the preflight cannot regress
+		# unnoticed; the expected invariant stays `auth-header-url-boundary`
+		# because reading (1) is isolated and must answer first.
+		GIT_CONFIG_KEY_0="http.extraHeader"
+		local hostless_repo="$TEST_ROOT/auth-key-hostless-checkout"
+		make_checkout_like_repo "$hostless_repo" \
+			"AUTHORIZATION: basic ${AMBIENT_BASIC}"
+		NEGATIVE_CASE_CWD="$hostless_repo"
+		NEGATIVE_CASE_CLEANUP="$hostless_repo"
+		;;
+	auth-key-narrow)
+		# The other side of `auth-key-wide`, and the case that pins
+		# `effective-auth-header` now that it runs after reading (1).
+		#
+		# This key is a strict extension of the lldb-sys URL, so it is too
+		# narrow rather than too wide: Git hands the header to
+		# `<lldb-sys>/subpath` and NOT to the lldb-sys URL the lockfile
+		# actually names. Nothing leaks — reading (1) sees a key that matches
+		# none of its probes and passes, and reading (2) has nothing to find
+		# — but the fetch this gate exists to authenticate would go out
+		# unauthenticated. Only asking Git's matcher "does the URL we fetch
+		# actually receive this gate's header" catches that.
+		#
+		# The literal key check (`auth-header-url-scope`) would catch this
+		# too, but it runs later, so this case pins the semantic check rather
+		# than the syntactic one: delete the `effective-auth-header` block and
+		# this case reports `auth-header-url-scope` instead and fails.
+		GIT_CONFIG_KEY_0="http.${LLDB_SYS_URL}/subpath.extraHeader"
+		;;
+	probe-isolation)
+		# The boundary probe's reading (1) is only meaningful while its
+		# working directory is outside every work tree. `mktemp -d` honours
+		# TMPDIR, so a runner whose temp directory sits inside a checkout
+		# would silently give the probe that checkout's repository config
+		# back and make the reading vacuous. Reproduce exactly that: a real
+		# repository, carrying the real `actions/checkout` credential, with
+		# TMPDIR pointing inside it.
+		local isolation_repo="$TEST_ROOT/probe-isolation-checkout"
+		make_checkout_like_repo "$isolation_repo" \
+			"AUTHORIZATION: basic ${AMBIENT_BASIC}"
+		mkdir -p "$isolation_repo/runner-temp"
+		export TMPDIR="$isolation_repo/runner-temp"
+		NEGATIVE_CASE_CLEANUP="$isolation_repo"
+		;;
+	leak-lowercase-field | leak-uppercase-scheme | leak-trailing-space | \
+		leak-doubled-space)
+		# One leaked credential, four wire-valid spellings, all pointed at a
+		# host that is not github.com. RFC 9110 §5.1 makes the field name
+		# case-insensitive, RFC 7617 §2 makes the `basic` scheme token
+		# case-insensitive, and RFC 9110 §5.5 allows optional whitespace
+		# around the field value — so every one of these hands the *same*
+		# organisation-scoped token to `https://example.invalid/`, and a `==`
+		# comparison against `AUTHORIZATION: basic <token>` waves three of the
+		# four through. Git preserves the spelling verbatim (values with edge
+		# whitespace are written quoted), so what `--get-urlmatch` returns
+		# here is what the wire would carry.
+		local leak_repo="$TEST_ROOT/leak-checkout-$case_name"
+		local leaked_header
+		case "$case_name" in
+		leak-lowercase-field) leaked_header="authorization: basic ${SENTINEL_BASIC}" ;;
+		leak-uppercase-scheme) leaked_header="AUTHORIZATION: Basic ${SENTINEL_BASIC}" ;;
+		leak-trailing-space) leaked_header="AUTHORIZATION: basic ${SENTINEL_BASIC}   " ;;
+		leak-doubled-space) leaked_header="AUTHORIZATION:  basic  ${SENTINEL_BASIC}" ;;
+		esac
+		make_checkout_like_repo "$leak_repo" "$leaked_header" \
+			"https://example.invalid/"
+		NEGATIVE_CASE_CWD="$leak_repo"
+		NEGATIVE_CASE_CLEANUP="$leak_repo"
+		;;
 	header-shape) GIT_CONFIG_VALUE_0="AUTHORIZATION: basic bad value" ;;
 	helper) GIT_CONFIG_VALUE_1="hostile-helper" ;;
 	redirect) GIT_CONFIG_VALUE_2=true ;;
@@ -158,25 +406,191 @@ SECOND_GIT_SOURCE
 	esac
 	set +e
 	output="$(
-		CARGO_CALL_LOG="$TEST_ROOT/cargo-negative-$case_name.args" \
-			PATH="$TEST_ROOT/bin:$PATH" \
-			bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
-			"$workspace" 2>&1
+		cd "$NEGATIVE_CASE_CWD" &&
+			CARGO_CALL_LOG="$TEST_ROOT/cargo-negative-$case_name.args" \
+				PATH="$TEST_ROOT/bin:$PATH" \
+				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+				"$workspace" 2>&1
 	)"
 	status=$?
 	set -e
+	if [[ -n $NEGATIVE_CASE_CLEANUP ]]; then
+		rm -rf "$NEGATIVE_CASE_CLEANUP"
+	fi
 	if ((status == 0)) || [[ $output != *"$expected_invariant"* ]]; then
 		echo "Private Cargo preflight negative case failed: $case_name" >&2
 		printf '%s\n' "$output" >&2
 		exit 1
 	fi
+	# No diagnostic may echo the credential it is complaining about.
+	if [[ $output == *"$SENTINEL_BASIC"* || $output == *"$SENTINEL"* ]]; then
+		echo "Private Cargo preflight echoed the credential while reporting" >&2
+		echo "negative case: $case_name" >&2
+		exit 1
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# The ambient checkout credential.
+#
+# `actions/checkout` defaults to `persist-credentials: true` and writes
+#
+#     [http "https://github.com/"]
+#         extraheader = AUTHORIZATION: basic <the token the job supplied>
+#
+# into the checkout's `.git/config`, and `git config --get-urlmatch` consults
+# the repository config. A persistent self-hosted runner can carry equivalent
+# configuration from other sources too, so the preflight has to stay correct
+# in the presence of a github.com-wide header regardless of what any one
+# `actions/checkout` step is configured to do.
+#
+# Two of the cases below are the crux of the boundary contract, and they differ
+# only in the *host* the ambient header applies to:
+#
+#   * github.com-wide, carrying the very same token the gate installs for
+#     lldb-sys — MUST PASS. `metacraft-labs/lldb-sys.rs` is a private repo in
+#     this organisation, reached with the org-wide CI Token Provider App
+#     installation token; the same token authenticates this checkout and every
+#     private sibling the gate clones. One credential covering all of them is
+#     the policy, not a leak. See the long note in
+#     `visual-replay-private-cargo-preflight.sh` and
+#     `metacraft-dev-guidelines/policies/ci-workflow-standards.md`.
+#   * off-github.com, carrying that same token — MUST FAIL. An
+#     organisation-scoped credential handed to a third-party host is a leak
+#     under any policy, and is the only sense in which "this credential
+#     widened" is still a meaningful accusation.
+#
+# None of these is a mock: each builds a real git repository and writes the
+# real configuration actions/checkout writes, then runs the preflight as a
+# subprocess with that repository as its working directory — exactly how CI
+# invokes it.
+# ---------------------------------------------------------------------------
+AMBIENT_BASIC="$(printf 'x-access-token:%s' "ambient-checkout-token-$$" | base64 | tr -d '\r\n')"
+
+make_checkout_like_repo() {
+	# $1 = directory, $2 = the extraHeader value actions/checkout persisted,
+	# $3 = the URL the header is scoped to (default: all of github.com, which
+	# is what actions/checkout writes).
+	local dir="$1" header="$2" url="${3:-https://github.com/}"
+	mkdir -p "$dir"
+	git -C "$dir" init -q .
+	git -C "$dir" config "http.${url}.extraheader" "$header"
+}
+
+run_preflight_in_repo() {
+	# $1 = repo to run from, $2 = cargo workspace, $3 = call-log tag.
+	# Prints combined output; returns the preflight's exit status.
+	local repo="$1" workspace="$2" tag="$3"
+	(
+		cd "$repo" &&
+			CARGO_CALL_LOG="$TEST_ROOT/cargo-$tag.args" \
+				PATH="$TEST_ROOT/bin:$PATH" \
+				bash "$REPO_ROOT/ci/test/visual-replay-private-cargo-preflight.sh" \
+				"$workspace" 2>&1
+	)
+}
+
+run_ambient_credential_positive_case() {
+	# An unrelated, legitimate credential scoped to https://github.com/ must
+	# not fail the gate.
+	local workspace="$TEST_ROOT/workspace/ambient-ok"
+	local repo="$TEST_ROOT/ambient-ok-checkout"
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-ambient-ok"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	make_checkout_like_repo "$repo" "AUTHORIZATION: basic ${AMBIENT_BASIC}"
+
+	run_preflight_in_repo "$repo" "$workspace" "ambient-ok" || {
+		echo "Private Cargo preflight rejected a checkout carrying its own" >&2
+		echo "actions/checkout credential; that is not a leak and must not" >&2
+		echo "fail the gate." >&2
+		exit 1
+	}
+}
+
+run_same_credential_org_wide_positive_case() {
+	# The regression this whole rework exists for. The gate installs an
+	# lldb-sys-scoped header carrying the org-wide App installation token; the
+	# checkout carries the SAME token github.com-wide because that is how
+	# every private sibling gets cloned. Failing here would mean the gate
+	# passes only when someone provisions a second, narrower token — the
+	# arrangement the policy exists to avoid, because per-repo tokens are the
+	# ones that need rotating.
+	local workspace="$TEST_ROOT/workspace/same-token"
+	local repo="$TEST_ROOT/same-token-checkout"
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-same-token"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	make_checkout_like_repo "$repo" "$GIT_CONFIG_VALUE_0"
+
+	run_preflight_in_repo "$repo" "$workspace" "same-token" || {
+		echo "Private Cargo preflight failed a correctly provisioned job: the" >&2
+		echo "org-wide CI App token legitimately authenticates both this" >&2
+		echo "checkout and the private lldb-sys sibling. Do not 'fix' this by" >&2
+		echo "minting a second token; fix the assertion." >&2
+		exit 1
+	}
+	# The fixture wrote the sentinel header into a git config, so remove it
+	# before the end-of-run sweep below.
+	rm -rf "$repo"
+}
+
+run_offsite_credential_leak_case() {
+	# The leak that is still real: the run's credential, applied by ambient
+	# repository config to a host that is not github.com.
+	local workspace="$TEST_ROOT/workspace/offsite-leak"
+	local repo="$TEST_ROOT/offsite-leak-checkout"
+	local output status
+	write_valid_workspace "$workspace"
+	prepare_two_slot_environment "$TEST_ROOT/cargo-offsite-leak"
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/ci/test/visual-replay-private-cargo-env.sh" >/dev/null
+	make_checkout_like_repo "$repo" "$GIT_CONFIG_VALUE_0" \
+		"https://example.invalid/"
+
+	set +e
+	output="$(run_preflight_in_repo "$repo" "$workspace" "offsite-leak")"
+	status=$?
+	set -e
+	if ((status == 0)) || [[ $output != *"auth-header-offsite-leak"* ]]; then
+		echo "Private Cargo preflight did not catch the run's credential being" >&2
+		echo "applied to a non-github.com host by the repository config." >&2
+		printf '%s\n' "$output" >&2
+		exit 1
+	fi
+	# The failure must not print the credential it is complaining about.
+	if [[ $output == *"$SENTINEL_BASIC"* || $output == *"$SENTINEL"* ]]; then
+		echo "Private Cargo preflight echoed the credential in its diagnostic." >&2
+		exit 1
+	fi
+	# This fixture had to write the sentinel header into a git config on
+	# purpose — that IS the leak being reproduced. Remove it here so the
+	# end-of-run sweep below keeps its meaning: "nothing the preflight
+	# touched retained the credential", rather than "no test ever wrote it".
+	rm -rf "$repo"
 }
 
 run_positive_case
+run_ambient_credential_positive_case
+run_same_credential_org_wide_positive_case
+run_offsite_credential_leak_case
 run_negative_case prompt "interactive-credential-blocking"
 run_negative_case global-config "config-file-isolation"
 run_negative_case count "inline-config-count"
 run_negative_case auth-key "auth-header-url-scope"
+run_negative_case auth-key-wide "auth-header-url-boundary"
+run_negative_case auth-key-hostless "auth-header-url-boundary"
+run_negative_case auth-key-narrow "effective-auth-header"
+run_negative_case probe-isolation "auth-boundary-probe-isolation"
+# The same leaked credential, spelled four wire-valid ways, applied to a host
+# that is not github.com. Each of these passed the gate while the boundary check
+# compared whole header strings with `==`.
+run_negative_case leak-lowercase-field "auth-header-offsite-leak"
+run_negative_case leak-uppercase-scheme "auth-header-offsite-leak"
+run_negative_case leak-trailing-space "auth-header-offsite-leak"
+run_negative_case leak-doubled-space "auth-header-offsite-leak"
 run_negative_case header-shape "auth-header-shape"
 run_negative_case helper "credential-helper-blocking"
 run_negative_case redirect "redirect-blocking"
@@ -188,6 +602,33 @@ run_negative_case extra-padded "unexpected-inline-config-slot"
 run_negative_case extra-huge "unexpected-inline-config-slot"
 run_negative_case raw-token "Raw visual replay CI token"
 run_negative_case lock-boundary "locked-git-source-boundary"
+
+# The exact shape of the failure this replaced: native-backend's committed lock
+# lacked `ct-dap-client -> libc`, which `libs/ct-dap-client` has declared since
+# codetracer 26f0bdba2. Nothing pinned moves — `libc` is already in the lock —
+# so the gate continues and says why.
+run_lock_drift_case sibling-lag 0 \
+	"lags the sibling revisions under test" \
+	's|^ "log",$| "libc",\n "log",|'
+run_lock_drift_case sibling-lag-names-cause 0 \
+	"ct-dap-client (../codetracer/libs/ct-dap-client" \
+	's|^ "log",$| "libc",\n "log",|'
+# Version drift: the protection `--locked` was actually buying. Dropping the
+# flag without this check is the regression a previous attempt correctly refused.
+run_lock_drift_case version-drift 1 \
+	"does not pin the graph it resolves to" \
+	's|^version = "0.2.180"$|version = "0.2.181"|'
+# A crate that is not in the committed lock at all: resolved from the registry
+# at whatever version it serves today, so the gate must refuse it.
+# The hole a "path packages may lag" rule would otherwise open: the drifting
+# package is the workspace member itself, so no sibling checkout can explain it
+# and the lock is simply unrefreshed.
+run_lock_drift_case local-member-drift 1 \
+	"is out of date with codetracer-native-backend's own" \
+	's|^ "lldb-sys",$| "libc",\n "lldb-sys",|'
+run_lock_drift_case new-pin 1 \
+	"does not match the sibling revision under" \
+	's|^checksum = "2222222222222222222222222222222222222222222222222222222222222222"$|checksum = "2222222222222222222222222222222222222222222222222222222222222222"\n\n[[package]]\nname = "unpinned-newcomer"\nversion = "9.9.9"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "3333333333333333333333333333333333333333333333333333333333333333"|'
 
 if grep -R -aFq -- "$SENTINEL" "$TEST_ROOT" ||
 	grep -R -aFq -- "$SENTINEL_BASIC" "$TEST_ROOT"; then

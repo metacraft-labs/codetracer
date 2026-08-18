@@ -940,17 +940,9 @@ proc applyVCS(vm: VCSVM) =
                status: "added", baseName: "CodeTracerSurfaces.stories.js",
                additions: 180, deletions: 0, coverageText: "story"),
   ])
-  vm.setUnifiedDiff(true, [
-    VCSDiffFileRow(path: "src/frontend/storybook_components.nim",
-                   status: "modified", fileIndex: 0, additions: 240,
-                   deletions: 20, hunks: @[
-      VCSHunkRow(oldStart: 1, oldCount: 3, newStart: 1, newCount: 4,
-                 selected: true, lines: @[
-        VCSDiffLineRow(lineType: "added", oldLine: 0, newLine: 1,
-                       content: "mount every IsoNim panel"),
-      ]),
-    ]),
-  ])
+  # No diff is staged into this story: the VCS panel is not a diff surface.
+  # A unified diff is an editor-area Monaco document of its own
+  # (`ui/unified_diff.nim`), which a storybook mount cannot host.
 
 proc applySearch(vm: SearchVM) =
   vm.setMode(smFindInFiles)
