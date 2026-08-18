@@ -53,9 +53,9 @@
 ## =====================  ==========================================================
 ## Recordings             Route
 ## =====================  ==========================================================
-## all native (rr)        `ct-native-replay review-data collect`, as before
-## all materialized       the db-backend collector — **absent until RV-4**, so this
-##                        fails with a message naming the kind
+## all native (rr)        `ct-native-replay review-data collect`
+## all materialized       `replay-server review-collect` — the db-backend collector
+##                        (RV-4), over the same trace database the debugger reads
 ## mixed kinds            refused; see the milestone's judgement calls for why the
 ##                        alternative (collect per kind and merge) was not taken
 ## none                   refused, distinguishing an empty directory from one that
@@ -85,6 +85,11 @@
 ## chunks *and* `<DIR>/review.json`, and `ct review <DIR>` accepts the
 ## directory (resolving the JSON inside it) as well as the JSON file itself.
 ## One command in, one command out, no undocumented intermediate step.
+##
+## The materialized collector has no binary intermediate at all: it writes
+## `<DIR>/review.json` directly, so its route is one subprocess rather than
+## two.  Both routes therefore leave the same file in the same place, which is
+## what lets `ct review <DIR>` stay indifferent to which one ran.
 
 import std/strutils
 
@@ -104,6 +109,12 @@ const
     ## collector.  Hidden, not removed: RV-1 retires the *user-facing*
     ## `deepreview` group while keeping the implementation reachable as a
     ## subprocess, exactly as the milestone's deliverable requires.
+
+  ReplayServerReviewCollectVerb* = "review-collect"
+    ## The db-backend (`replay-server`) subcommand carrying the materialized
+    ## collector (RV-4).  Not hidden the way the native group is: the
+    ## db-backend binary is internal to CodeTracer and has no published CLI to
+    ## retire a command from.
 
 type
   ReviewPlanKind* = enum
@@ -131,6 +142,17 @@ type
         ## `collectorArgs` because RV-3's dispatch inspects it *before* any
         ## collector is chosen, and re-parsing the collector's argv to find it
         ## again would be a second source of truth for the same value.
+      repoDir*, diffSpec*, diffFile*, preset*: string
+      progress*: bool
+        ## The collect options as the *user* typed them, kept beside the
+        ## native collector's already-translated argv.
+        ##
+        ## RV-4 adds a second collector whose argv differs (a different verb,
+        ## and `--repo`/`--diff` that it can honour without an optional Cargo
+        ## feature), so a single pre-translated `collectorArgs` is no longer
+        ## enough.  Holding the parsed values means each collector's argv is
+        ## derived from the same one parse — `planCollect` — rather than one
+        ## being re-parsed out of the other's command line.
     of rpkInspect:
       inspectPath*: string
       inspectFormat*: string   ## "text" (default) or "json"
@@ -296,7 +318,8 @@ func planCollect(rest: openArray[string]): ReviewPlan =
   if progress:
     argv.add("--progress")
   ReviewPlan(kind: rpkCollect, collectorArgs: argv, outputDir: output,
-    recordingsDir: recordings)
+    recordingsDir: recordings, repoDir: repo, diffSpec: diff,
+    diffFile: diffFile, preset: preset, progress: progress)
 
 func planInspect(rest: openArray[string]): ReviewPlan =
   ## Translate `ct review inspect <PATH> [--format …]`.
@@ -419,8 +442,8 @@ type
       ## `ct-native-replay review-data collect`, reached as a subprocess
       ## through its hidden `review-data` group (RV-1)
     rcvMaterialized
-      ## the db-backend collector.  Not implemented until RV-4, so a route
-      ## that names it still carries a `message` and still fails.
+      ## `replay-server review-collect` — the db-backend collector (RV-4),
+      ## reading the same trace database the debugger reads.
 
   CollectRoute* = object
     ## The outcome of inspecting a recordings directory.
@@ -491,11 +514,13 @@ func routeReviewCollect*(recordingsDir: string,
   ## Four outcomes, each deliberate; see the milestone's judgement calls:
   ##
   ## * one kind, native — the existing collector, unchanged.
-  ## * one kind, materialized — RV-4's collector, named and refused.
+  ## * one kind, materialized — the db-backend collector (RV-4); named, with
+  ##   no message, because it exists and can run.
   ## * more than one kind — refused rather than collected per kind and
-  ##   merged.  With one collector implemented, "merge" could only mean
-  ##   "collect the native ones and drop the rest", which is the silent
-  ##   partial dataset this milestone exists to prevent.
+  ##   merged.  The two collectors write two datasets and there is no
+  ##   dataset-level merge, so "merge" could only mean "collect one kind and
+  ##   drop the rest", which is the silent partial dataset this milestone
+  ##   exists to prevent.
   ## * nothing to collect — refused, and an empty directory is distinguished
   ##   from one holding no recordings, because those are different mistakes.
   var recordings: seq[RecordingSurveyEntry] = @[]
@@ -546,28 +571,89 @@ func routeReviewCollect*(recordingsDir: string,
     result.collector = rcvNative
     return
 
+  # RV-4: materialized recordings are collected by the db-backend, so this arm
+  # names a collector that exists and carries no message.  Until RV-4 it named
+  # the kind and refused; the refusal machinery is deliberately left in place
+  # for the kinds that still have no collector (`rcvNone` above), so a future
+  # kind cannot be added and silently produce an empty dataset.
   result.collector = rcvMaterialized
-  let names = namesOfKind(recordings, ctkMaterialized)
-  result.message =
-    "error: `ct review collect` does not support this trace kind yet: " &
-    traceKindLabel(ctkMaterialized) & ".\n" &
-    "  '" & recordingsDir & "' holds " & $names.len & " " &
-    traceKindLabel(ctkMaterialized) & " recording" &
-    (if names.len == 1: "" else: "s") & " (" & briefList(names) & ") and no " &
-    traceKindLabel(ctkNative) & " recording.\n" &
-    "  Materialized traces — Python, Ruby, JavaScript and every other " &
-    "language that records one —\n  are collected by the db-backend " &
-    "collector, which is not implemented yet.  " &
-    traceKindLabel(ctkNative) & " recordings\n  can be collected today.  " &
-    "See codetracer-specs/DeepReview/CLI-Reference.md."
+
+func materializedCollectorArgs*(plan: ReviewPlan): seq[string] =
+  ## argv for the db-backend collector, in ITS spelling, starting at the
+  ## `review-collect` verb.
+  ##
+  ## The sibling of `plan.collectorArgs`, which is the native collector's argv.
+  ## Both are derived from the one parse `planCollect` performed, so the two
+  ## collectors cannot disagree about what the user asked for, and both are
+  ## pure functions of the plan so the translation is assertable on either Nim
+  ## backend with no collector installed.
+  ##
+  ## The two argv differ in exactly two places, both deliberate:
+  ##
+  ## * the verb — `collect` under the native binary's hidden `review-data`
+  ##   group, `review-collect` on the db-backend;
+  ## * `--repo` + `--diff` are passed through as typed.  The native collector
+  ##   can only read a repository when it was built with its optional
+  ##   `git2-support` Cargo feature (RV-1 judgement call 4), which is why the
+  ##   CI templates use `--diff-file`; the db-backend collector shells out to
+  ##   `git`, so the flags work on a stock build.
+  doAssert plan.kind == rpkCollect
+  result = @[ReplayServerReviewCollectVerb]
+  if plan.diffFile.len > 0:
+    result.add(@["--diff-file", plan.diffFile])
+    # `--diff-file` names no commits, but a repository still resolves the
+    # patch's relative paths, so it is forwarded when the user gave one.
+    if plan.repoDir.len > 0:
+      result.add(@["--repo", plan.repoDir])
+  else:
+    result.add(@["--repo", plan.repoDir, "--diff", plan.diffSpec])
+  result.add(@["--recordings", plan.recordingsDir, "--output", plan.outputDir])
+  if plan.preset.len > 0:
+    result.add(@["--preset", plan.preset])
+  if plan.progress:
+    result.add("--progress")
 
 when not defined(js):
   import std/[os, osproc]
+  import ../common/paths
 
   const
     NativeReplayExeEnvVar* = "CODETRACER_NATIVE_REPLAY_PATH"
       ## Explicit override for the native replay binary, used by tests and by
       ## installations that keep it outside `PATH`.
+
+    ReplayServerExeEnvVar* = "CODETRACER_REPLAY_SERVER_PATH"
+      ## Explicit override for the db-backend binary, the sibling of
+      ## `NativeReplayExeEnvVar`.  Used by tests and by installations that keep
+      ## the backend outside the CodeTracer prefix.
+
+  proc replayServerExe*(): string =
+    ## Locate the binary that carries the materialized DeepReview collector.
+    ##
+    ## Unlike the native backend, the db-backend ships *with* CodeTracer, so
+    ## the install-prefix path (`paths.dbBackendExe`, which the replay launch
+    ## already uses) is the normal answer and `PATH` is only the fallback for a
+    ## development tree.  Returns "" when it is not installed; callers must
+    ## diagnose that rather than spawning an empty path.
+    result = getEnv(ReplayServerExeEnvVar, "")
+    if result.len > 0:
+      return
+    if dbBackendExe.len > 0 and fileExists(dbBackendExe):
+      return dbBackendExe
+    result = findExe("replay-server")
+
+  func missingReplayServerMessage*(): string =
+    ## Diagnostic for a materialized collection with no db-backend installed.
+    ##
+    ## Names the binary CodeTracer ships rather than the rr backend: a user
+    ## reviewing a Python recording who is told `ct-native-replay` is missing
+    ## has been told DeepReview is an rr-only feature, which is the coupling
+    ## DeepReview-GUI.md §1.1 says must not become architectural.
+    "error: `ct review collect` needs the CodeTracer replay backend to " &
+      "collect from materialized (CTFS) recordings, and no `replay-server` " &
+      "binary was found.\n" &
+      "  It ships with CodeTracer; add it to PATH, or point " &
+      ReplayServerExeEnvVar & " at it."
 
   proc nativeReplayExe*(): string =
     ## Locate the binary that carries the native DeepReview collector.
@@ -629,6 +715,35 @@ when not defined(js):
     result = waitForExit(process)
     close(process)
 
+  proc runMaterializedReviewCollect*(plan: ReviewPlan): int =
+    ## Collect from materialized (CTFS) recordings, through the db-backend.
+    ##
+    ## One subprocess, not two: the db-backend writes `review.json` itself, so
+    ## there is no binary intermediate to export from.  The success line still
+    ## names the same file `ct review <DIR>` opens, so the two routes are
+    ## indistinguishable from the outside.
+    doAssert plan.kind == rpkCollect
+    let exe = replayServerExe()
+    if exe.len == 0:
+      stderr.writeLine(missingReplayServerMessage())
+      return 1
+    let process = startProcess(exe, args = materializedCollectorArgs(plan),
+      options = {poParentStreams})
+    result = waitForExit(process)
+    close(process)
+    if result != 0:
+      return result
+    let jsonPath = plan.outputDir / ReviewDatasetJsonName
+    if not fileExists(jsonPath):
+      # The collector reported success but wrote nothing the GUI can open.
+      # Diagnosed here rather than left for `ct review <DIR>` to trip over,
+      # because this is the moment the user can still act on it.
+      stderr.writeLine("error: the collection reported success but no " &
+        ReviewDatasetJsonName & " was written to '" & plan.outputDir &
+        "', so `ct review " & plan.outputDir & "` cannot open it.")
+      return 1
+    echo "Open it with: ct review ", plan.outputDir
+
   proc runReviewCollect*(plan: ReviewPlan): int =
     ## Collect a dataset, then export the JSON the GUI reads.
     ##
@@ -645,8 +760,10 @@ when not defined(js):
     if not canCollect(route):
       stderr.writeLine(route.message)
       return 1
+    if route.collector == rcvMaterialized:
+      return runMaterializedReviewCollect(plan)
     doAssert route.collector == rcvNative,
-      "the only collector RV-3 can run is the native one"
+      "the survey names one of two collectors, and the other was handled above"
     if nativeReplayExe().len == 0:
       stderr.writeLine(missingNativeReplayMessage("collect"))
       return 1

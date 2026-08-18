@@ -45,6 +45,7 @@ import viewmodels/[agent_activity_deepreview_vm, agent_activity_vm,
   agent_workspace_vm, agentic_session_vm, deepreview_vm, editor_vm,
   review_entry, vcs_vm]
 import ../../../../common/types as ct_types
+import lib/review_dataset_json
 
 # ---------------------------------------------------------------------------
 # The fixture — one changeset, three launch paths
@@ -61,77 +62,18 @@ proc fixtureDirPath(): string {.compileTime.} =
 const SampleReviewJson = staticRead(fixtureDirPath() & "sample-review.json")
 
 proc fixtureReviewData(fixture: string): ct_types.DeepReviewData =
-  ## Decode an exported review dataset the way `--deepreview` does.
+  ## Decode an exported review dataset the way `ct review` does.
   ##
   ## The renderer's decode is `cast[DeepReviewData](JSON.parse(...))`
-  ## (`frontend/index/args.nim`), which no native test can perform; this is the
-  ## same field-for-field mapping written out.  Everything downstream of it —
-  ## `reviewDatasetFrom`, `enterReview` — is production code.
-  let node = parseJson(fixture)
-  result = ct_types.DeepReviewData(
-    commitSha: node{"commitSha"}.getStr(""),
-    baseCommitSha: node{"baseCommitSha"}.getStr(""),
-    collectionTimeMs: node{"collectionTimeMs"}.getInt(0),
-    recordingCount: node{"recordingCount"}.getInt(0),
-    sessionTitle: node{"sessionTitle"}.getStr(""),
-    traceContexts: @[],
-    files: @[],
-    callTrace: ct_types.DeepReviewCallTrace(nodes: @[]))
-  if node.hasKey("traceContexts"):
-    for ctx in node["traceContexts"].items:
-      result.traceContexts.add(ct_types.DeepReviewTraceContext(
-        id: ctx{"id"}.getInt(0),
-        label: ctx{"label"}.getStr(""),
-        recordingId: ctx{"recordingId"}.getStr("")))
-  if not node.hasKey("files"):
-    return
-  for file in node["files"].items:
-    var coverage: seq[ct_types.DeepReviewLineCoverage] = @[]
-    if file.hasKey("coverage"):
-      for cov in file["coverage"].items:
-        coverage.add(ct_types.DeepReviewLineCoverage(
-          line: cov{"line"}.getInt(0),
-          executionCount: cov{"executionCount"}.getInt(0),
-          executed: cov{"executed"}.getBool(false)))
-    var flow: seq[ct_types.DeepReviewFunctionFlow] = @[]
-    if file.hasKey("flow"):
-      for entry in file["flow"].items:
-        flow.add(ct_types.DeepReviewFunctionFlow(
-          functionKey: entry{"functionKey"}.getStr(""),
-          executionIndex: entry{"executionIndex"}.getInt(0),
-          steps: @[]))
-    var hunks: seq[ct_types.DeepReviewHunk] = @[]
-    let diff = file{"diff"}
-    if diff != nil and diff.hasKey("hunks"):
-      for hunk in diff["hunks"].items:
-        var lines: seq[ct_types.DeepReviewHunkLine] = @[]
-        for line in hunk["lines"].items:
-          lines.add(ct_types.DeepReviewHunkLine(
-            `type`: line{"type"}.getStr(""),
-            content: line{"content"}.getStr(""),
-            oldLine: line{"oldLine"}.getInt(0),
-            newLine: line{"newLine"}.getInt(0)))
-        hunks.add(ct_types.DeepReviewHunk(
-          oldStart: hunk{"oldStart"}.getInt(0),
-          oldCount: hunk{"oldCount"}.getInt(0),
-          newStart: hunk{"newStart"}.getInt(0),
-          newCount: hunk{"newCount"}.getInt(0),
-          lines: lines))
-    result.files.add(ct_types.DeepReviewFileData(
-      path: file{"path"}.getStr(""),
-      contentHash: file{"contentHash"}.getStr(""),
-      sourceContent: file{"sourceContent"}.getStr(""),
-      symbols: @[],
-      coverage: coverage,
-      functions: @[],
-      loops: @[],
-      flow: flow,
-      flags: ct_types.DeepReviewFileFlags(),
-      diff: ct_types.DeepReviewFileDiff(
-        status: if diff == nil: "M" else: diff{"status"}.getStr("M"),
-        linesAdded: if diff == nil: 0 else: diff{"linesAdded"}.getInt(0),
-        linesRemoved: if diff == nil: 0 else: diff{"linesRemoved"}.getInt(0),
-        hunks: hunks)))
+  ## (`frontend/index/args.nim`), which no native test can perform; the shared
+  ## `decodeReviewDatasetJson` is that same field-for-field mapping written
+  ## out.  It moved to `lib/review_dataset_json.nim` in RV-4 so that this suite
+  ## and `materialized_review_dataset_test.nim` feed the two collectors'
+  ## datasets through *one* reader — which is what makes "the GUI reader
+  ## accepts both" a claim rather than an assertion about two decoders.
+  ## Everything downstream of it — `reviewDatasetFrom`, `enterReview` — is
+  ## production code.
+  decodeReviewDatasetJson(fixture)
 
 proc fixtureTraceDiff(fixture: string): ct_types.Diff =
   ## The same changeset as the structured diff a trace carries.

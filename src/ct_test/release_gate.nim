@@ -384,6 +384,25 @@ const
     # Python recordings used to print "Review dataset ready" and exit 0 over
     # a dataset with nothing in it.
     "src/tests/gui/tests/deepreview/ct_review_cli_test.nim",
+    # RV-4 — the materialized-trace collector, at the end the GUI reads.
+    # DeepReview-GUI.md §1.1: "DeepReview is not an rr-only feature. Every
+    # language that produces a materialized trace ... must be reviewable."
+    # RV-3 named the second collector and refused; RV-4 implements it in the
+    # db-backend, and this suite is the claim that its output is a dataset the
+    # GUI reader accepts: both collectors' datasets go through ONE decode
+    # (`deepreview/lib/review_dataset_json.nim`, the renderer's
+    # `cast[DeepReviewData](JSON.parse(...))` written out) and ONE production
+    # projection (`review_entry`), and both must arrive at a usable review.
+    # The fixture is real collector output over a real Noir recording
+    # (`fixtures/regenerate-materialized-review.sh`), so the coverage and flow
+    # numbers it asserts are the recording's, not a shape someone invented.
+    #
+    # Registered here because this array IS the gate and nothing else reaches
+    # it: the Rust side asserts the collector's own numbers
+    # (`src/db-backend/tests/deepreview_materialized_collector_test.rs`) but
+    # cannot see the reader, and the Playwright suites launch a review without
+    # asserting what is in the dataset.
+    "src/tests/gui/tests/deepreview/materialized_review_dataset_test.nim",
   ]
 
   CliRecordGateTests* = [

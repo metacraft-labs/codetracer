@@ -46,6 +46,9 @@ pub mod dap_handler;
 pub mod dap_server;
 pub mod dap_types;
 pub mod db;
+// RV-4 — the materialized-trace DeepReview collector, the second of the two
+// collectors `DeepReview-GUI.md` §1.1 names.  See `deepreview/mod.rs`.
+pub mod deepreview;
 pub mod diff;
 pub mod distinct_vec;
 // M-DWARF-1: DWARF parsing infrastructure. Compiles on both native and
@@ -80,6 +83,10 @@ pub mod flow_preloader;
 pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;
+// RV-4 — the one place that answers "open this materialized recording
+// directory", shared by the DeepReview collector and (for its legacy-stream
+// repair) `dap_server`.
+pub mod materialized_source;
 pub mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. The Nim shim
 // at `codetracer-native-recorder/ct_emulator/src/ct_emulator/omniscient_db_ffi.nim`

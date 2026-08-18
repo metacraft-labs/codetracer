@@ -37,23 +37,43 @@
 ## `version`, a CTFS `.ct` container, a `trace_metadata.json`), because the
 ## survey's whole job is to read a filesystem.
 ##
-## Mocking justification (workspace policy on mock objects): one stand-in,
-## used by exactly one case.  `collect_over_native_recordings_reaches_the_native_collector`
-## points the documented `CODETRACER_NATIVE_REPLAY_PATH` override at a script
-## that records its argv and exits 0.
+## RV-4 fills in the arm RV-3 refused: materialized recordings now reach the
+## db-backend collector (`replay-server review-collect`) instead of a "not yet
+## supported" message.  The cases that asserted the refusal assert the route
+## instead — the behaviour genuinely changed, and this milestone is where it
+## changed — but the property the refusal was protecting is kept and asserted
+## on its own: a machine with no CodeTracer replay backend must be told THAT,
+## and never that `ct-native-replay` is missing, because a Python user told
+## the rr backend is missing has been told DeepReview is an rr-only feature.
 ##
-## It is justified because the alternative does not assert the thing: the real
-## `ct-native-replay review-data collect` starts an rr replay, so running it
-## for real turns a routing assertion into a test of whether this machine can
-## replay (it cannot — `perf_event_paranoid` is 2 here), and every other way
-## of observing the route is negative ("it did not say the other thing").
-## What is being asserted is precisely the subprocess contract — which binary
-## `ct` invokes, with which argv — and a stand-in is the only way to see it.
-## Nothing about the collector's behaviour is simulated: the case makes no
-## claim about what comes back.  The other cases use no double at all: `ct` is
-## the real binary, invoked by absolute path, and the "native backend absent"
-## cases are produced by scrubbing PATH and the same override variable, which
-## is a real environment rather than a substitute for one.
+## Mocking justification (workspace policy on mock objects): two stand-ins, one
+## per collector, each used by the routing cases only.
+## `collect_over_native_recordings_reaches_the_native_collector` points the
+## documented `CODETRACER_NATIVE_REPLAY_PATH` override at a script that records
+## its argv and exits 0;
+## `collect_over_materialized_recordings_reaches_the_db_backend_collector`
+## does the same through `CODETRACER_REPLAY_SERVER_PATH`.
+##
+## They are justified because the alternative does not assert the thing: the
+## real `ct-native-replay review-data collect` starts an rr replay, so running
+## it for real turns a routing assertion into a test of whether this machine
+## can replay (it cannot — `perf_event_paranoid` is 2 here), and the real
+## `replay-server review-collect` needs a real recording of a real program,
+## which is a recorder-toolchain dependency this lane does not have.  Every
+## other way of observing the route is negative ("it did not say the other
+## thing").  What is being asserted here is precisely the subprocess contract —
+## which binary `ct` invokes, with which argv — and a stand-in is the only way
+## to see it.  Nothing about either collector's behaviour is simulated: the
+## cases make no claim about what comes back beyond `ct`'s own post-run check
+## that a `review.json` was left behind.  The collectors' *behaviour* is
+## asserted for real elsewhere: the materialized one by
+## `src/db-backend/tests/deepreview_materialized_collector_test.rs`, over a
+## recording made by the real Noir recorder, and its output by
+## `src/tests/gui/tests/deepreview/materialized_review_dataset_test.nim`.
+## The other cases use no double at all: `ct` is the real binary, invoked by
+## absolute path, and the "backend absent" cases are produced by scrubbing PATH
+## and the override variables, which is a real environment rather than a
+## substitute for one.
 ##
 ## Compile and run:
 ##   nim c -r src/tests/cli/review_cli_test.nim
@@ -323,35 +343,92 @@ suite "ct review collect — the collector is chosen by inspecting the recording
     # The user never named a backend anywhere in this.
     check not run.output.contains("--backend")
 
-  test "collect_over_materialized_recordings_names_the_kind_it_cannot_handle":
-    # The milestone's third verification entry.  Note the native backend is
-    # deliberately NOT scrubbed: the refusal must come from what the
-    # recordings are, not from what happens to be installed.
+  test "collect_over_materialized_recordings_reaches_the_db_backend_collector":
+    # RV-4.  Until it landed this command refused with "does not support this
+    # trace kind yet"; now it must reach the db-backend collector with the
+    # db-backend's own argv.  The native backend is deliberately NOT scrubbed:
+    # the route must come from what the recordings are, not from what happens
+    # to be installed — and nothing in the run may invoke the rr binary.
+    let log = workspace / "db-backend-argv.log"
+    let nativeLog = workspace / "native-collector-argv.log"
+    let stub = workspace / "stub-replay-server"
+    let outDir = workspace / "out-materialized"
+    # The stand-in writes the dataset the real collector writes, so `ct`'s
+    # post-run check (a collection that reports success must leave a
+    # `review.json`) is exercised rather than bypassed.  See the file header
+    # for why the collector itself is stood in for here.
+    writeFile(stub, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " & log & "\n" &
+      "mkdir -p " & outDir & "\n" &
+      "printf '{\"files\":[]}' > " & outDir / "review.json" & "\n")
+    setFilePermissions(stub, {fpUserRead, fpUserWrite, fpUserExec})
+    let nativeStub = workspace / "stub-ct-native-replay-unused"
+    writeFile(nativeStub,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " & nativeLog & "\n")
+    setFilePermissions(nativeStub, {fpUserRead, fpUserWrite, fpUserExec})
+
     let recordings = recordingsDir("materialized")
     materializedTrace(recordings, "py-0")
     materializedTrace(recordings, "py-1")
-    let run = collect(recordings)
+    let run = collect(recordings, extraEnv = {
+      "CODETRACER_REPLAY_SERVER_PATH": stub,
+      "CODETRACER_NATIVE_REPLAY_PATH": nativeStub})
     checkpoint(run.output)
-    check run.exitCode != 0
-    check run.output.contains("materialized (CTFS)")
-    check run.output.contains("py-0")
-    # It must not claim a dataset was produced...
-    check not run.output.contains("Review dataset ready")
-    check not fileExists(workspace / "out-materialized" / "review.json")
-    # ...nor blame the native backend for a recording that was never its job.
-    check not run.output.contains("ct-native-replay")
+    check run.exitCode == 0
+    check fileExists(log)
+    let invocations = readFile(log).strip.splitLines()
+    # One, not two: the db-backend writes `review.json` itself, so there is no
+    # binary intermediate to export from.
+    check invocations.len == 1
+    checkpoint(invocations[0])
+    check invocations[0].startsWith("review-collect ")
+    check invocations[0].contains("--recordings " & recordings)
+    check invocations[0].contains("--output " & outDir)
+    check fileExists(outDir / "review.json")
+    check run.output.contains("ct review " & outDir)
+    # The rr backend was available and was never asked: a materialized
+    # recording is not its job (DeepReview-GUI.md §1.1).
+    check not fileExists(nativeLog)
+    # The user never named a backend anywhere in this.
+    check not run.output.contains("--backend")
 
-  test "the_materialized_refusal_does_not_depend_on_a_backend_being_installed":
+  test "a_materialized_collection_names_the_db_backend_when_it_is_missing":
     # A Python user has no `ct-native-replay`.  The whole point of §1.1's
-    # "DeepReview is not an rr-only feature" is that such a user gets the
-    # right diagnostic, so the survey has to run before any backend lookup.
+    # "DeepReview is not an rr-only feature" is that such a user is never told
+    # the rr backend is what is missing.  With PATH scrubbed and both
+    # overrides cleared, the diagnostic must name the CodeTracer replay
+    # backend and nothing else.
     let recordings = recordingsDir("materialized-no-backend")
     materializedTrace(recordings, "py-0")
-    let run = collect(recordings, scrubNativeBackend = true)
+    let run = collect(recordings, scrubNativeBackend = true,
+      extraEnv = {"CODETRACER_REPLAY_SERVER_PATH": "",
+                  "CODETRACER_PREFIX": workspace / "nowhere"})
     checkpoint(run.output)
     check run.exitCode != 0
-    check run.output.contains("materialized (CTFS)")
+    check run.output.contains("replay-server")
+    check run.output.contains("CODETRACER_REPLAY_SERVER_PATH")
+    check not run.output.contains("ct-native-replay")
     check not run.output.contains("CODETRACER_NATIVE_REPLAY_PATH")
+    # It must not claim a dataset was produced.
+    check not run.output.contains("Review dataset ready")
+    check not fileExists(
+      workspace / "out-materialized-no-backend" / "review.json")
+
+  test "a_materialized_collection_that_writes_no_dataset_is_not_reported_as_ready":
+    # The failure mode RV-3 removed from the native path, kept closed on the
+    # new one: a collector that exits 0 without writing `review.json` leaves
+    # the user with a directory `ct review` cannot open, so `ct` checks rather
+    # than trusting the exit code.
+    let stub = workspace / "stub-replay-server-silent"
+    writeFile(stub, "#!/bin/sh\nexit 0\n")
+    setFilePermissions(stub, {fpUserRead, fpUserWrite, fpUserExec})
+    let recordings = recordingsDir("materialized-silent")
+    materializedTrace(recordings, "py-0")
+    let run = collect(recordings,
+      extraEnv = {"CODETRACER_REPLAY_SERVER_PATH": stub})
+    checkpoint(run.output)
+    check run.exitCode != 0
+    check run.output.contains("review.json")
+    check not run.output.contains("Open it with")
 
   test "collect_over_a_mixed_recordings_directory_is_refused":
     # RV-3's recorded decision: refuse, rather than collect per kind and

@@ -198,6 +198,44 @@ enum Commands {
         /// identical to the one the frontend would see.
         manifest_path: std::path::PathBuf,
     },
+    /// RV-4 — collect a DeepReview dataset from materialized (CTFS)
+    /// recordings.
+    ///
+    /// `DeepReview-GUI.md` §1.1 names two collectors, one per trace kind, and
+    /// says the user never picks between them: `ct review collect` inspects
+    /// the recordings and invokes whichever can read them
+    /// (`src/ct/review_cli.nim`).  This is the materialized arm; the rr arm is
+    /// `ct-native-replay review-data collect`.
+    ///
+    /// The flag names are the ones `ct review collect` documents, so ct's
+    /// translation is a rename of the verb and nothing else.
+    ReviewCollect {
+        /// Git repository the diff is read from.
+        #[arg(long)]
+        repo: Option<std::path::PathBuf>,
+        /// Diff specification, e.g. `main..HEAD`.
+        #[arg(long)]
+        diff: Option<String>,
+        /// A unified diff file, instead of `--repo` + `--diff`.
+        #[arg(long = "diff-file")]
+        diff_file: Option<std::path::PathBuf>,
+        /// Directory holding the recordings, one subdirectory each.
+        #[arg(long)]
+        recordings: std::path::PathBuf,
+        /// Directory the dataset is written to; `review.json` lands in it.
+        #[arg(long, short = 'o')]
+        output: std::path::PathBuf,
+        /// `default` | `minimal` | `comprehensive`.
+        #[arg(long)]
+        preset: Option<String>,
+        /// Emit JSON Lines progress events on stderr.
+        #[arg(long)]
+        progress: bool,
+        /// Title shown in the review header.  Absent means the dataset
+        /// carries no title, and the GUI falls back to naming the commit.
+        #[arg(long = "session-title")]
+        session_title: Option<String>,
+    },
 }
 
 /// `ct trace` subcommand surface — `probe` reports the capability
@@ -405,6 +443,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Commands::Session { manifest_path } => {
             run_session_subcommand(&manifest_path)?;
+        }
+        Commands::ReviewCollect {
+            repo,
+            diff,
+            diff_file,
+            recordings,
+            output,
+            preset,
+            progress,
+            session_title,
+        } => {
+            let args = db_backend::deepreview::cli::ReviewCollectArgs {
+                repo,
+                diff_spec: diff,
+                diff_file,
+                recordings,
+                output,
+                preset,
+                progress,
+                session_title,
+            };
+            db_backend::deepreview::cli::run(&args)?;
         }
     }
 

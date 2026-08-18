@@ -39,6 +39,14 @@ const fixturesDir = path.join(__dirname, "fixtures");
 const sampleReviewPath = path.join(fixturesDir, "sample-review.json");
 const emptyReviewPath = path.join(fixturesDir, "empty-review.json");
 const noCalltracePath = path.join(fixturesDir, "no-calltrace-review.json");
+// RV-4 — real output of the MATERIALIZED collector (`replay-server
+// review-collect`) over a real Noir recording, produced by
+// `fixtures/regenerate-materialized-review.sh`.  Every other fixture in this
+// directory is hand-written and shaped like the NATIVE collector's export;
+// this one is the second collector's actual bytes, which is what makes the
+// suite below an end-to-end review over a materialized recording rather than
+// another test of the same document.
+const materializedReviewPath = path.join(fixturesDir, "materialized-review.json");
 
 // ---------------------------------------------------------------------------
 // Skip guard: the fixtures must exist for the tests to be meaningful.
@@ -47,7 +55,8 @@ const noCalltracePath = path.join(fixturesDir, "no-calltrace-review.json");
 const fixturesExist =
   fs.existsSync(sampleReviewPath) &&
   fs.existsSync(emptyReviewPath) &&
-  fs.existsSync(noCalltracePath);
+  fs.existsSync(noCalltracePath) &&
+  fs.existsSync(materializedReviewPath);
 
 // Note: expected values in assertions below are derived from the fixture
 // data in sample-review.json. If the fixture changes, update the assertions.
@@ -1557,6 +1566,90 @@ test.describe("DeepReview comprehensive workflow", () => {
       const titles = await dr.layoutTabTitles();
       expect(titles).not.toContain("CALLTRACE");
       expect(titles).toContain("VCS");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // RV-4: a review over a MATERIALIZED (CTFS) recording
+  // -----------------------------------------------------------------------
+
+  test.describe("a materialized-trace review", () => {
+    test.use({ launchMode: "deepreview", deepreviewJsonPath: materializedReviewPath });
+
+    // The milestone's third verification entry, end to end: `ct review` over a
+    // dataset the db-backend collector produced from a real materialized
+    // recording. DeepReview-GUI.md §1.1: "DeepReview is not an rr-only
+    // feature. Every language that produces a materialized trace — Python,
+    // Ruby, JavaScript, Noir, and the rest — must be reviewable."
+    //
+    // Before RV-4 this dataset could not exist: `ct review collect` over
+    // materialized recordings refused with "does not support this trace kind
+    // yet".
+    test("RV-4: a dataset collected from a materialized recording opens a review", async ({
+      ctPage,
+    }) => {
+      const dr = new DeepReviewPage(ctPage);
+      await dr.waitForReady();
+
+      await expect(dr.vcsPanel()).toBeVisible();
+      await expect(dr.vcsPanel().locator(".vcs-error")).toHaveCount(0);
+      await expect(ctPage.locator(".deepreview-error")).toHaveCount(0);
+
+      // The one file of the collected changeset, named the way the patch
+      // names it.
+      const items = await dr.fileItems();
+      expect(items.length).toBe(1);
+      expect(await items[0].name()).toBe("main.nr");
+      expect(await items[0].diffStatus()).toBe("M");
+
+      // Coverage came from the recording, not from a placeholder: the badge
+      // reports covered-of-total for the file — ten lines, every one of them
+      // executed, because the collector writes a record only for a line it
+      // observed.
+      const coverage = await items[0].coverageBadge();
+      expect(coverage).toBeTruthy();
+      expect(coverage).toContain("10/10");
+
+      // …and the review is on the editor layout RV-2 established, so no panel
+      // a dataset cannot populate is shown.
+      const titles = await dr.layoutTabTitles();
+      expect(titles).toContain("VCS");
+      expect(titles).not.toContain("CALLTRACE");
+      expect(titles).not.toContain("EVENT LOG");
+    });
+
+    // The trace-context selector is the VCS panel's "which run am I looking
+    // at" control (DeepReview-GUI.md §3). It is only offered when there is a
+    // choice (`vcs_vm.hasTraceContextChoice`), which is why the fixture holds
+    // TWO recordings. The native exporter emits no contexts at all, so no
+    // other fixture in this directory can exercise this control from a
+    // collector's real output.
+    test("RV-4: the review names the recording it was collected from", async ({ ctPage }) => {
+      const dr = new DeepReviewPage(ctPage);
+      await dr.waitForReady();
+
+      await expect(dr.vcsTraceContextSelector()).toBeVisible();
+      const options = await dr.vcsTraceContextSelect().locator("option").allTextContents();
+      expect(options.map((o) => o.trim())).toEqual(["run-1", "run-2"]);
+    });
+
+    // RV-4 deliverable 4, at the surface a user sees: the dataset carries no
+    // test results, and the pane must say so rather than show a zeroed
+    // roll-up that reads as "all tests passed" (DR-R3).
+    test("RV-4: a materialized review reports test results as unavailable", async ({ ctPage }) => {
+      const dr = new DeepReviewPage(ctPage);
+      await dr.waitForReady();
+
+      await expect(dr.reviewActivitySection()).toBeVisible();
+      await expect(dr.reviewActivityCoverageCard()).toBeVisible();
+      // Asserted the way the native-dataset suite asserts it
+      // (`agent-activity-deepreview.spec.ts:e2e_review_test_results_row_says_the_dataset_carries_none`):
+      // the pane must SAY the dataset carries none, not merely avoid printing
+      // a zero — an empty or errored card would pass a negative check alone.
+      const tests = await dr.reviewActivityTestsCard().textContent();
+      expect(tests).toContain("not available for this dataset");
+      expect(tests).not.toContain("all passing");
+      expect(tests ?? "").not.toMatch(/\b0 passed\b/);
     });
   });
 });

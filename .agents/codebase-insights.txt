@@ -1286,3 +1286,51 @@ inside the directory.
   form only — and never named `collect` or `inspect`. `reviewNeedsRawDispatch`
   still keys on the exact token, so `ct review ./help` launches a dataset in a
   directory called `help`.
+
+- 2026-08-18 (RV-4): `FlowMode::Diff` in the db-backend is NOT implemented.
+  `flow_preloader::CallFlowPreloader::next_diff_flow_step` is a bare `todo!()`,
+  so `FlowPreloader::load_diff_flow` panics ("not yet implemented") on its
+  first call, and `diff::index_diff` — its only production caller, reached by
+  `replay-server index-diff` — panics for the same reason. Anything that needs
+  per-diff-line flow must drive `FlowMode::Call` per call instead, which is
+  what `deepreview::collector` does (find the calls whose steps land on the
+  diff's lines, ask for each of those calls' flow).
+
+  Two things bit while doing that, both worth knowing before driving
+  `FlowPreloader::load` from new code:
+    * The anchor `Location` must have a NON-ZERO `rrTicks`. With
+      `rrTicks == 0 && event == 0 && line > 0`,
+      `should_seek_materialized_call_body_from_line_only_location` treats the
+      request as line-only, sets a breakpoint on the line and continues to it —
+      and if the line's only occurrence IS step 0, the breakpoint is never hit
+      and the flow comes back with zero steps and no error.
+    * `load_flow` widens any exact step to the ENCLOSING CALL ENTRY, so any
+      step inside the call gives the same window. Picking the last matching
+      step is therefore free and dodges the trap above.
+
+- 2026-08-18 (RV-4): three on-disk layouts count as a materialized recording,
+  and they are not interchangeable between loaders. `dap_server::setup` reads
+  all three (a `*.ct` CTFS container, a legacy `runtime_tracing` `trace.json`,
+  a legacy `trace.bin`); `diff::load_and_postprocess_trace` reads ONLY the
+  container and rejects the other two outright. `nargo trace` writes a legacy
+  `trace.json`, and the committed `codetracer-example-recordings/python/` are
+  legacy `trace.bin`, so a helper built on `load_and_postprocess_trace`
+  silently excludes them. `materialized_source::open_materialized_trace` is
+  the shared opener for all three; use it rather than growing a fourth rule.
+
+  Which layout a recorder writes is a per-recorder DEFAULT, not a property of
+  the language: the Rust-backed `codetracer_python_recorder` writes a `*.ct`
+  container unless `CODETRACER_TRACE_FORMAT` says `json`/`binary`
+  (`codetracer-python-recorder/src/runtime/output_paths.rs`). So "Python
+  recordings are legacy" is only true of the old committed fixtures — anything
+  reading recordings has to handle all three.
+
+- 2026-08-18: `codetracer_python_recorder` IS importable in this dev shell,
+  but only from `python3.12`; the shell's default `python3` is 3.13 and has
+  no such module. `ct record prog.py` therefore answers "Python module
+  `codetracer_python_recorder` is not installed for interpreter …/python3" on
+  a machine where recording Python works perfectly well — the db-backend test
+  harness records with it routinely (`test_harness::find_suitable_python`
+  probes `python3.12` FIRST for exactly this reason). Before concluding "the
+  Python recorder is unavailable here", run
+  `python3.12 -c "import codetracer_python_recorder"`.

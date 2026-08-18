@@ -269,23 +269,60 @@ suite "ct review collect — the collector is chosen by inspecting the recording
     check route.message == ""
     check route.kinds == {ctkNative}
 
-  test "materialized_recordings_are_refused_and_the_failure_names_the_kind":
-    # The milestone's third verification entry, and the one that must never
-    # become a silent empty dataset: until RV-4 there is no collector that
-    # can read these.
+  test "materialized_recordings_route_to_the_db_backend_collector":
+    # RV-3 named this collector and refused, because it did not exist.  RV-4
+    # implements it, so the route is takeable and carries no message — the
+    # change §1.1 asks for: "DeepReview is not an rr-only feature."
     let route = routeReviewCollect("/tmp/rec",
       survey({"py-0": ctkMaterialized, "py-1": ctkMaterialized}))
     check route.collector == rcvMaterialized
-    check not canCollect(route)
+    check canCollect(route)
+    check route.message == ""
     check route.kinds == {ctkMaterialized}
-    check route.message.contains(traceKindLabel(ctkMaterialized))
-    check route.message.contains("does not support this trace kind yet")
-    # It names the recordings it refused, and where they were.
-    check route.message.contains("py-0")
-    check route.message.contains("/tmp/rec")
-    # ...and says which kind *can* be collected, so the message is actionable
-    # rather than merely negative.
-    check route.message.contains(traceKindLabel(ctkNative))
+
+  test "the_materialized_route_translates_to_the_db_backends_own_argv":
+    # The seam decides *whether* a collector runs; this is *how* it is called.
+    # Held as a pure function of the plan so it is assertable on either Nim
+    # backend with no collector installed, exactly as the native translation
+    # is.
+    let plan = planReviewCli(@["review", "collect",
+      "--repo", "/src", "--diff", "main..HEAD",
+      "--recordings", "/tmp/rec", "-o", "/tmp/out",
+      "--preset", "comprehensive", "--progress"])
+    check plan.kind == rpkCollect
+    check materializedCollectorArgs(plan) == @[
+      "review-collect", "--repo", "/src", "--diff", "main..HEAD",
+      "--recordings", "/tmp/rec", "--output", "/tmp/out",
+      "--preset", "comprehensive", "--progress"]
+    # The verb is the db-backend's, not the native binary's hidden group.
+    check materializedCollectorArgs(plan)[0] == ReplayServerReviewCollectVerb
+    check not materializedCollectorArgs(plan).contains(
+      NativeReplayReviewDataGroup)
+
+  test "a_materialized_collection_from_a_patch_file_forwards_the_patch":
+    # `--diff-file` names no commits, so the dataset carries none; the
+    # repository is still forwarded when the user gave one, because the
+    # patch's paths are relative to it.
+    let withRepo = planReviewCli(@["review", "collect",
+      "--diff-file", "/tmp/p.patch", "--recordings", "/rec", "-o", "/out"])
+    check materializedCollectorArgs(withRepo) == @[
+      "review-collect", "--diff-file", "/tmp/p.patch",
+      "--recordings", "/rec", "--output", "/out"]
+    check not materializedCollectorArgs(withRepo).contains("--diff")
+
+  test "the_two_collectors_are_handed_the_same_options_under_their_own_names":
+    # One parse, two translations: a user who types `--recordings X --output Y`
+    # must reach either collector with X and Y, or the seam would change what
+    # the command means depending on what was recorded.
+    let plan = planReviewCli(@["review", "collect",
+      "--diff-file", "/tmp/p.patch", "--recordings", "/rec", "-o", "/out"])
+    for argv in [plan.collectorArgs, materializedCollectorArgs(plan)]:
+      check argv.contains("/rec")
+      check argv.contains("/tmp/p.patch")
+      check argv.contains("/out")
+    # They differ only in the verb and in the flag naming the output.
+    check plan.collectorArgs[0] == "collect"
+    check materializedCollectorArgs(plan)[0] == "review-collect"
 
   test "a_mixed_recordings_directory_is_refused_and_names_both_kinds":
     # The decision recorded in RV-3's judgement calls: refuse, rather than
@@ -339,7 +376,11 @@ suite "ct review collect — the collector is chosen by inspecting the recording
     # `canCollect` is the single question the executor asks, so a collector
     # that is named but not implemented cannot be run by accident.
     check canCollect(CollectRoute(collector: rcvNative))
+    check canCollect(CollectRoute(collector: rcvMaterialized))
     check not canCollect(CollectRoute(collector: rcvNone, message: "x"))
+    # The "named but not runnable" state still exists and is still refused —
+    # RV-4 filled the materialized arm, it did not remove the mechanism a
+    # future trace kind would be refused by.
     check not canCollect(
       CollectRoute(collector: rcvMaterialized, message: "not yet"))
 
@@ -563,7 +604,10 @@ when not defined(js):
       check entries[0].kind == ctkNative
       check routeReviewCollect(dir, entries).collector == rcvNative
 
-    test "a_materialized_recording_on_disk_is_refused_by_name":
+    test "a_materialized_recording_on_disk_routes_to_the_db_backend":
+      # Both materialized layouts the debugger reads — the pre-CTFS
+      # `trace_metadata.json` + `trace.bin` pair a Python recording has, and a
+      # `.ct` container — reach the collector RV-4 added.
       let dir = makeRecordings("ct-review-survey-materialized")
       defer: removeDir(dir)
       discard materializedTrace(dir, "py-0")
@@ -575,8 +619,19 @@ when not defined(js):
         check entry.kind == ctkMaterialized
       let route = routeReviewCollect(dir, entries)
       check route.collector == rcvMaterialized
-      check not canCollect(route)
-      check route.message.contains(traceKindLabel(ctkMaterialized))
+      check canCollect(route)
+      check route.message == ""
+
+    test "a_materialized_collection_names_the_db_backend_when_it_is_missing":
+      # The property RV-3's refusal was protecting, kept now that the refusal
+      # is gone: a user reviewing a Python recording is never told the *rr*
+      # backend is missing, because that would say DeepReview is an rr-only
+      # feature (DeepReview-GUI.md §1.1).
+      let message = missingReplayServerMessage()
+      check message.contains("replay-server")
+      check message.contains(ReplayServerExeEnvVar)
+      check not message.contains("ct-native-replay")
+      check not message.contains(NativeReplayExeEnvVar)
 
     test "an_mcr_recording_on_disk_stays_native_despite_its_ct_container":
       let dir = makeRecordings("ct-review-survey-mcr")

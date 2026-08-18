@@ -694,7 +694,13 @@ fn setup(
     }
 }
 
-fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
+/// Repair a legacy `runtime_tracing` `trace.json` in place.
+///
+/// `pub` because `materialized_source` opens the same streams for the
+/// DeepReview collector and must apply the same repair; two copies of it would
+/// diverge and give a review a different trace from the one the debugger
+/// shows.
+pub fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Array(items) => {
             for item in items {
