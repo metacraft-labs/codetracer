@@ -387,6 +387,92 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 1d. NO SECOND SIBLING-CLONING IMPLEMENTATION.
+#
+# Everything above reads `siblings:` blocks, so everything above is blind to a
+# composite action that clones siblings some OTHER way. That is not a
+# hypothetical either: `.github/actions/setup-isonim-siblings` spent months
+# cloning nine repos with nine `clone-repo@main` steps at a hard-coded
+# `ref: dev`, used by seven jobs in codetracer.yml plus
+# request-panel-sidecar-retirement.yml. Every assertion in this file passed the
+# whole time, because there was no `siblings:` block to inspect. The nine repos
+# were pinned to a branch TIP -- whatever it pointed at the minute the job ran
+# -- while every document said this repo's CI builds pinned revisions.
+#
+# The shared action states the rule directly (metacraft-github-actions/
+# clone-siblings/action.yml, "NO SECOND SIBLING-CLONING ACTION"): there is
+# exactly one mechanism for "what revision of sibling repo X does this commit
+# use?", and a per-project action must delegate to it rather than reimplement
+# it. `clone-repo` is the primitive that mechanism is built out of; a composite
+# action reaching for it directly is that action taking over revision selection.
+#
+# Scope is composite actions only. A workflow step may still clone one specific
+# repo for one specific purpose -- that is a checkout, not a sibling set -- and
+# narrowing those is a separate question from this one.
+#
+# The anti-vacuity half matters more than usual here: "no file matched
+# clone-repo" is also what a renamed action directory, a moved primitive or a
+# broken glob looks like. So the same scan must find the approved delegation it
+# expects to see.
+# ---------------------------------------------------------------------------
+echo "no composite action clones cross-repo siblings itself"
+
+declare -a COMPOSITE_ACTIONS=()
+for _act in "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml; do
+	[ -f "$_act" ] && COMPOSITE_ACTIONS+=("$_act")
+done
+unset _act
+
+bespoke_cloners=()
+delegating_actions=0
+for act in "${COMPOSITE_ACTIONS[@]}"; do
+	act_name="${act%/*}"
+	act_name="${act_name##*/}"
+	clone_repo_uses=0
+	delegates=0
+	line_no=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		stripped="${line#"${line%%[![:space:]]*}"}"
+		case "$stripped" in
+		'#'*) continue ;;
+		esac
+		case "$stripped" in
+		*'clone-repo@'*)
+			clone_repo_uses=$((clone_repo_uses + 1))
+			bespoke_cloners+=("$act_name/action.yml:$line_no: $stripped")
+			;;
+		*'clone-siblings@'* | *'setup-dev-env@'*)
+			delegates=$((delegates + 1))
+			;;
+		esac
+	done <"$act"
+	[ "$delegates" -gt 0 ] && delegating_actions=$((delegating_actions + 1))
+	unset clone_repo_uses
+done
+
+if [ "${#bespoke_cloners[@]}" -eq 0 ]; then
+	ok "none of the ${#COMPOSITE_ACTIONS[@]} composite actions uses clone-repo directly"
+else
+	fail "no composite action clones cross-repo siblings itself" \
+		"each line below selects a sibling revision outside the one approved" \
+		"mechanism, so no workspace lock, no ::warning:: and no audit can see it;" \
+		"delegate to clone-siblings (or setup-dev-env) with a 'siblings:' list" \
+		"instead -- see .github/actions/setup-db-backend-siblings" \
+		"${bespoke_cloners[@]}"
+fi
+
+if [ "$delegating_actions" -ge 2 ]; then
+	ok "$delegating_actions composite actions provision siblings through the shared action"
+else
+	fail "composite actions provision siblings through the shared action" \
+		"only $delegating_actions of ${#COMPOSITE_ACTIONS[@]} composite actions name" \
+		"clone-siblings or setup-dev-env -- either sibling provisioning moved" \
+		"somewhere this scanner cannot see, or the actions directory was" \
+		"restructured and the assertion above is now vacuous"
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Every `./non-nix-build/build.sh` invocation has codetracer-trace-format
 #    provisioned earlier in its own job.
 #
@@ -944,7 +1030,7 @@ fi
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=16
+readonly EXPECTED_ASSERTIONS=18
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
