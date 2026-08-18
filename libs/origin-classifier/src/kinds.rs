@@ -48,6 +48,17 @@ pub enum Lang {
     /// children positionally rather than via `left`/`right`
     /// fields.
     Circom,
+    /// GDScript / Godot — the materialized-trace recorder language
+    /// (GDScript-Recorder.md, milestone G5).  GDScript's surface
+    /// syntax is derived from Python, so it reuses the tree-sitter
+    /// **Python** grammar and the Python splitter/assignment-kinds.
+    /// The two GDScript-specific declaration forms that are not valid
+    /// Python — the `var`/`const` declaration keywords and the `:=`
+    /// inferred-type assignment operator — are normalised away before
+    /// parsing (see `ast::normalize_gdscript_line`), so no separate
+    /// grammar dependency is needed (mirroring how Stylus/Solana/Noir
+    /// reuse the Rust grammar).
+    GDScript,
 }
 
 impl Lang {
@@ -68,6 +79,9 @@ impl Lang {
             Lang::Aiken => tree_sitter_aiken::LANGUAGE.into(),
             Lang::Leo => tree_sitter_leo::LANGUAGE.into(),
             Lang::Circom => tree_sitter_circom::LANGUAGE.into(),
+            // GDScript reuses the Python grammar (Python-derived syntax);
+            // GDScript-only forms are normalised away before parsing.
+            Lang::GDScript => tree_sitter_python::LANGUAGE.into(),
         }
     }
 
@@ -88,6 +102,7 @@ impl Lang {
             Lang::Aiken => "aiken",
             Lang::Leo => "leo",
             Lang::Circom => "circom",
+            Lang::GDScript => "gdscript",
         }
     }
 
@@ -118,6 +133,7 @@ impl Lang {
             "aiken" | "cardano" => Lang::Aiken,
             "leo" | "aleo" => Lang::Leo,
             "circom" => Lang::Circom,
+            "gdscript" | "gd" | "godot" => Lang::GDScript,
             // Smart-contract languages whose source surface IS Rust
             // (Stylus, Solana, Noir) — reuse the Rust splitter so
             // built-in patterns keyed on `language = "rust"` still

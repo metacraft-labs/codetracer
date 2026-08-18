@@ -607,6 +607,8 @@ impl ExprLoader {
                 Lang::Elixir
             } else if extension == "erl" || extension == "hrl" {
                 Lang::Erlang
+            } else if extension == "gd" {
+                Lang::GDScript
             } else {
                 Lang::Unknown
             }
@@ -2325,9 +2327,33 @@ pub enum SourceOrigin {
 }
 
 fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
+    // Godot records GDScript source under its virtual-filesystem scheme
+    // (`res://script.gd`, `user://...`). That is neither a real
+    // filesystem path nor portable (a `res:` path component is invalid
+    // on Windows), so strip a leading `<scheme>://` before mapping the
+    // path under the bundled-sources root. `res://gf_values.gd` then
+    // resolves to `<root>/gf_values.gd`.
+    let source_str = source_path.to_string_lossy();
+    let source_path: &Path = if let Some(rel) = strip_godot_scheme(&source_str) {
+        Path::new(rel)
+    } else {
+        source_path
+    };
     // Strip the leading "/" so absolute paths can sit under root/.
     let rel = source_path.strip_prefix("/").unwrap_or(source_path);
     root.join(rel)
+}
+
+/// Strip a leading Godot virtual-filesystem scheme (`res://`, `user://`)
+/// from a source path, returning the project-relative remainder. Returns
+/// `None` when the path carries no such scheme.
+fn strip_godot_scheme(path: &str) -> Option<&str> {
+    for scheme in ["res://", "user://"] {
+        if let Some(rest) = path.strip_prefix(scheme) {
+            return Some(rest);
+        }
+    }
+    None
 }
 
 fn nth_line(text: &str, row: usize) -> String {

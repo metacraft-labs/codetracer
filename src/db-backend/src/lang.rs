@@ -80,6 +80,10 @@ pub enum Lang {
     Erlang,
     /// PHP materialized traces
     Php,
+    /// GDScript/Godot materialized traces (ordinal 40, internal only —
+    /// not in the Nim frontend enum). Recorded by the patched Godot
+    /// engine; see GDScript-Recorder.md milestone G5.
+    GDScript,
 }
 
 pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
@@ -122,6 +126,7 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "ex" | "exs" => Lang::Elixir,
         "erl" | "hrl" => Lang::Erlang,
         "php" => Lang::Php,
+        "gd" => Lang::GDScript,
         _ => Lang::Unknown,
     }
 }

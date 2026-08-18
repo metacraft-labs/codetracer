@@ -4210,6 +4210,10 @@ fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
         "go" => Some(ClassifierLang::Go),
         "nim" | "nims" | "nimble" => Some(ClassifierLang::Nim),
         "nr" => Some(ClassifierLang::Rust),
+        // GDScript materialized traces (GDScript-Recorder.md G5). The
+        // classifier reuses the Python grammar for GDScript's
+        // Python-derived syntax.
+        "gd" => Some(ClassifierLang::GDScript),
         _ => None,
     }
 }

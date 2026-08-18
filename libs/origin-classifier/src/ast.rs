@@ -218,6 +218,16 @@ fn walk_for_exact<'a>(
 /// (e.g. `receive(value)` → `["value"]`). Returns `None` when no
 /// call is found at all.
 pub fn parse_call_arguments(line: &str, lang: Lang) -> Option<Vec<String>> {
+    // GDScript parses under the Python grammar; normalise its
+    // declaration keywords / `:=` first (byte-length-preserving, so the
+    // returned argument slices still address the caller's bytes).
+    let line_owned;
+    let line: &str = if lang == Lang::GDScript {
+        line_owned = normalize_gdscript_line(line);
+        &line_owned
+    } else {
+        line
+    };
     let mut parser = Parser::new();
     parser.set_language(&lang.tree_sitter_language()).ok()?;
     let tree = parser.parse(line, None)?;
@@ -317,6 +327,20 @@ fn parse_assignment_inner(line: &str, lang: Lang, with_preamble: bool) -> Option
     // the original line untouched and stash the preamble prefix
     // length so `NodeLocator`s can be normalised back into the
     // original `line` byte ranges.
+    // GDScript is parsed with the Python grammar; normalise the two
+    // GDScript-only forms (`var`/`const` declaration keywords and the
+    // `:=` inferred-type operator) into plain Python assignments first.
+    // The normalisation is byte-length-preserving, so every
+    // `NodeLocator` still addresses the exact same byte range in the
+    // caller's original `line`.
+    let line_owned;
+    let line: &str = if lang == Lang::GDScript {
+        line_owned = normalize_gdscript_line(line);
+        &line_owned
+    } else {
+        line
+    };
+
     let (parse_text, prefix_len, suffix_len) = if with_preamble {
         let (pre, suf) = preamble_for(lang)?;
         let combined = format!("{pre}{line}{suf}");
@@ -385,6 +409,93 @@ fn parse_assignment_inner(line: &str, lang: Lang, with_preamble: bool) -> Option
 /// altering the line text itself.
 fn lang_needs_preamble(lang: Lang) -> bool {
     matches!(lang, Lang::Cairo | Lang::Aiken | Lang::Leo | Lang::Circom)
+}
+
+/// Normalise a single GDScript source line into a byte-length-preserving
+/// Python-parseable form.
+///
+/// GDScript's surface syntax is Python-derived, so the tree-sitter
+/// Python grammar parses most GDScript assignments directly. Two
+/// GDScript-only forms are not valid Python and are rewritten here:
+///
+/// - Leading declaration keywords `var` / `const` (e.g. `var x = 1`,
+///   `const K = 2`) are blanked to spaces so the remainder parses as a
+///   plain Python assignment (`    x = 1`).
+/// - The `:=` inferred-type assignment operator (e.g. `var i := 10`) is
+///   rewritten to ` =` (colon → space) so the statement parses as a
+///   normal assignment rather than a bare (parenthesis-less, hence
+///   invalid at statement level) Python walrus expression.
+///
+/// Every replacement preserves byte length, so `NodeLocator` byte
+/// ranges computed against the normalised text still address the same
+/// bytes in the caller's original line. The db-backend renders each
+/// hop's `source_text` from the original line while the classifier
+/// slices the identically-indexed normalised `AssignmentAst::source`.
+pub(crate) fn normalize_gdscript_line(line: &str) -> String {
+    let mut bytes = line.as_bytes().to_vec();
+
+    // 1. Blank a leading `var`/`const` declaration keyword. Leading
+    //    whitespace (GDScript indents with tabs) is ASCII, so `indent`
+    //    is a valid byte boundary.
+    let indent = line.len() - line.trim_start().len();
+    let rest = &line[indent..];
+    for kw in ["var", "const"] {
+        if rest.starts_with(kw) {
+            // Only a real keyword when followed by whitespace, so we do
+            // not clobber identifiers like `variable` / `constant`.
+            let after = rest.as_bytes().get(kw.len()).copied();
+            if matches!(after, Some(b' ') | Some(b'\t')) {
+                for b in &mut bytes[indent..indent + kw.len()] {
+                    *b = b' ';
+                }
+                break;
+            }
+        }
+    }
+
+    // 2. Rewrite the first `:=` (inferred-type assignment) to ` =`.
+    if let Some(pos) = bytes.windows(2).position(|w| w == b":=") {
+        bytes[pos] = b' ';
+    }
+
+    // 3. Map GDScript's lowercase `null`/`true`/`false` literals onto
+    //    Python's `None`/`True`/`False` so the classifier terminates on
+    //    a Literal instead of treating them as (dead-end) identifiers.
+    //    Each pair is byte-length-identical, so locators are preserved.
+    replace_word(&mut bytes, b"null", b"None");
+    replace_word(&mut bytes, b"true", b"True");
+    replace_word(&mut bytes, b"false", b"False");
+
+    // Only ASCII bytes are replaced with ASCII, so the result stays
+    // valid UTF-8; fall back to the original on the impossible error.
+    String::from_utf8(bytes).unwrap_or_else(|_| line.to_string())
+}
+
+/// Replace every whole-word occurrence of `needle` with the equal-length
+/// `replacement` in `bytes`. A match is a "whole word" only when the
+/// bytes on either side are not identifier characters, so `nullable`
+/// and `is_true` are left untouched. `needle` and `replacement` must be
+/// the same length (asserted) so byte offsets are preserved.
+fn replace_word(bytes: &mut [u8], needle: &[u8], replacement: &[u8]) {
+    debug_assert_eq!(needle.len(), replacement.len());
+    let n = needle.len();
+    if n == 0 || bytes.len() < n {
+        return;
+    }
+    let is_ident = |b: u8| b == b'_' || b.is_ascii_alphanumeric();
+    let mut i = 0usize;
+    while i + n <= bytes.len() {
+        if &bytes[i..i + n] == needle {
+            let left_ok = i == 0 || !is_ident(bytes[i - 1]);
+            let right_ok = i + n == bytes.len() || !is_ident(bytes[i + n]);
+            if left_ok && right_ok {
+                bytes[i..i + n].copy_from_slice(replacement);
+                i += n;
+                continue;
+            }
+        }
+        i += 1;
+    }
 }
 
 /// Return the `(prefix, suffix)` strings to splice around a bare
@@ -493,7 +604,10 @@ fn walk_assignment<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, lang: Lang) -> 
 /// on byte-level pattern matching.
 fn is_assignment_kind(kind: &str, lang: Lang) -> bool {
     match lang {
-        Lang::Python => matches!(
+        // GDScript reuses the Python grammar (after
+        // `normalize_gdscript_line`), so its assignment node kinds are
+        // exactly Python's.
+        Lang::Python | Lang::GDScript => matches!(
             kind,
             "assignment" | "augmented_assignment" | "named_expression"
         ),
@@ -555,7 +669,9 @@ fn is_assignment_kind(kind: &str, lang: Lang) -> bool {
 /// child ordering changes.
 fn split_assignment(node: Node<'_>, lang: Lang) -> Option<(Node<'_>, Node<'_>, bool)> {
     match lang {
-        Lang::Python => split_python(node),
+        // GDScript is normalised to Python-shaped assignments, so the
+        // Python splitter applies unchanged.
+        Lang::Python | Lang::GDScript => split_python(node),
         Lang::Ruby => split_ruby(node),
         Lang::JavaScript => split_javascript(node),
         Lang::C | Lang::Cpp => split_c_like(node),

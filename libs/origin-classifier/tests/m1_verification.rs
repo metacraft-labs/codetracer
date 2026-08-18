@@ -698,3 +698,60 @@ fn test_classifier_rust_syntax_smart_contract_languages() {
     let c = classify_full("let a: u64 = 10;", "a", Lang::Rust, &patterns);
     assert_eq!(c.kind, OriginKind::Literal);
 }
+
+// ===========================================================================
+// GDScript (GDScript-Recorder.md milestone G5)
+//
+// GDScript reuses the Python grammar after `ast::normalize_gdscript_line`
+// blanks the `var`/`const` declaration keywords and rewrites the `:=`
+// inferred-type operator. These assertions pin the four assignment forms
+// the G5 spec calls out (`var name = expr`, `var name := expr`,
+// `const NAME = expr`, `name = expr`) plus the reassignment / function-call
+// shapes the materialized value-origin test asserts on.
+// ===========================================================================
+#[test]
+fn test_classifier_gdscript_assignment_forms() {
+    let patterns = PatternSet::built_in();
+
+    // `var name := literal` (inferred type) — Literal terminator.
+    let c = classify_full("\tvar i := 10", "i", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal, "var i := 10");
+
+    // `var name = literal` — Literal.
+    let c = classify_full("\tvar n = null", "n", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal, "var n = null");
+
+    // `const NAME = literal` — Literal.
+    let c = classify_full("\tconst K = 100", "K", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal, "const K = 100");
+
+    // Bare `name = name` (reassignment/copy) — TrivialCopy, continuation
+    // is the source identifier.
+    let c = classify_full("\tvar b = a", "b", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy, "var b = a");
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    // Reassignment `i = i + 5` — Computational, operand `i` (the prior
+    // value the chain reaches back to).
+    let c = classify_full("\ti = i + 5", "i", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::Computational, "i = i + 5");
+    let operands: Vec<&str> = c.operand_snapshots.iter().map(|s| s.as_str()).collect();
+    assert!(operands.contains(&"i"), "i = i + 5 operands = {operands:?}");
+
+    // Function-call RHS `var r = scale(i)` — FunctionCall (subtype of
+    // Computational; a plain call assignment, no `await`).
+    let c = classify_full("\tvar r = scale(i)", "r", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::FunctionCall, "var r = scale(i)");
+
+    // Typed declaration `var x: int = 7` — Literal (the `: int`
+    // annotation must not defeat the parse).
+    let c = classify_full("\tvar x: int = 7", "x", Lang::GDScript, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal, "var x: int = 7");
+}
+
+#[test]
+fn test_gdscript_canonical_name_roundtrip() {
+    assert_eq!(Lang::from_canonical_name("gdscript"), Some(Lang::GDScript));
+    assert_eq!(Lang::from_canonical_name("gd"), Some(Lang::GDScript));
+    assert_eq!(Lang::GDScript.canonical_name(), "gdscript");
+}
