@@ -1382,10 +1382,25 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
       if row.base64Encoded:
         mutData.data[i].content = cstring(decode($mutData.data[i].content))
 
+    # Capture before loadEvents because loadEvents sets receivedUpdates = true
+    # when data arrives; we use this to fire resizeEventLogHandler only once.
+    let isFirstDataLoad = not self.receivedUpdates
+
     self.loadEvents(mutData)
 
     self.tableCallback(mutData.toJs)
     self.redraw()
+
+    # Re-sync scroll-area dimensions after the first batch of real data lands.
+    # On startup the virtual scroll area is 0-height (no rows yet), so mouse-
+    # wheel scroll is locked until the Scroller learns the real recordsTotal.
+    # The Scroller's own draw.dt→measure(false) may also reset the scroll body
+    # height to a stale value; re-applying after a setTimeout(0) lets it finish
+    # first, then we restore the panel height and re-measure.
+    # We only do this once (isFirstDataLoad) — calling it on every update would
+    # trigger scroller.measure() mid-scroll and snap the table back to the top.
+    if isFirstDataLoad and mutData.recordsTotal > 0:
+      discard setTimeout(proc = resizeEventLogHandler(self), 0)
 
     # The IsoNim event-log shell renders the footer once with a static
     # class string (`data-tables-footer 0to0`) and child counters fixed
@@ -1581,6 +1596,39 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
 
   self.denseTable.footerDom =
     cast[Element](componentTab.findNodeInElement(".data-tables-footer"))
+
+  # Attach scroll → footer-row-range sync listeners.
+  # These were previously in the dead else-branch of events() which was never
+  # reached because events() is only called once (with self.init = false).
+  let denseScrollBody = cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
+  if not denseScrollBody.isNil:
+    denseScrollBody.addEventListener(
+      cstring"scroll",
+      proc () =
+        self.denseTable.updateTableRows(redraw = false)
+        if not self.denseTable.footerDom.isNil:
+          self.denseTable.updateTableFooter()
+    )
+  let detailedScrollBody = cast[Node](jq(detailedWrapper)).findNodeInElement(".dt-scroll-body")
+  if not detailedScrollBody.isNil:
+    detailedScrollBody.addEventListener(
+      cstring"scroll",
+      proc () =
+        self.detailedTable.updateTableRows(redraw = false)
+        if not self.detailedTable.footerDom.isNil:
+          self.detailedTable.updateTableFooter()
+    )
+
+  # Set up ResizeObserver so the DataTable is re-fitted whenever the event log
+  # panel changes size. Previously in the dead else-branch of events() where it
+  # was never reached; moved here so it fires correctly after mount.
+  if self.resizeObserver.isNil:
+    let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
+      for entry in entries:
+        discard setTimeout(proc =
+          resizeEventLogHandler(self), 100))
+    resizeObserver.observe(componentTab)
+    self.resizeObserver = resizeObserver
 
   if not self.inExtension:
     if not self.isDetailed:
