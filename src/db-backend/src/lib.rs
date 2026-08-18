@@ -15,6 +15,8 @@ use wasm_bindgen::JsValue;
 #[cfg(feature = "browser-transport")]
 use crate::dap::setup_onmessage_callback;
 
+pub mod async_continuation;
+
 #[cfg(feature = "browser-transport")]
 pub mod c_compat;
 

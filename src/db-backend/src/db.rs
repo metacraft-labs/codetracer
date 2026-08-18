@@ -2847,6 +2847,19 @@ enum BackwardScanOutcome {
 }
 
 impl MaterializedReplaySession {
+    /// GF10 — the async continuation links recorded in this trace.
+    ///
+    /// Scans the container's events stream for the recorder's suspend/resume
+    /// markers and pairs them, by async `context_id`, into
+    /// [`ContinuationLink`](crate::async_continuation::ContinuationLink)s
+    /// (HTTP-Request-Panel.md §3.2). The GDScript recorder writes a
+    /// `gdscript-coroutine` marker pair per `await`; the built-in
+    /// [`ContinuationPatternSet`](crate::async_continuation::ContinuationPatternSet)
+    /// recognises it. Returns the links in registration order.
+    pub fn continuation_links(&self) -> Vec<crate::async_continuation::ContinuationLink> {
+        crate::async_continuation::ContinuationPatternSet::built_in().discover_links(self.reader.events())
+    }
+
     /// Spec §6.1 Path B — value-origin chain on a materialized trace.
     ///
     /// The caller owns the `ExprLoader` (typically `Handler::expr_loader`)

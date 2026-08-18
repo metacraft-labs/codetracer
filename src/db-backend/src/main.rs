@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::{error::Error, panic};
 
+mod async_continuation;
 mod calltrace;
 mod core;
 // M25 — Correlation markers. Both modules belong to the bin's tree
