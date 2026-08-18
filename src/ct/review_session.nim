@@ -209,7 +209,12 @@ proc reviewSessionRefFromJson*(node: JsonNode): ReviewSessionRefSpec =
     taskId: node{"taskId"}.getStr(""),
     agentCommand: node{"agentCommand"}.getStr(""),
     endpoint: node{"endpoint"}.getStr(""))
-  for arg in node{"agentArgs"}.items:
+  # `getElems`, not `items`: `items` dereferences its argument, and a session
+  # reference written by anything other than `toJson` (a hand-edited dataset,
+  # an older writer, another tool) need not carry `agentArgs` at all.  The
+  # doc comment above promises that a session this cannot read yields an empty
+  # spec rather than a failure, and a nil dereference is not that.
+  for arg in node{"agentArgs"}.getElems:
     result.agentArgs.add arg.getStr("")
 
 proc withSessionRef*(dataset: JsonNode;

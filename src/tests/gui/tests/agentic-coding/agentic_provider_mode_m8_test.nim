@@ -236,7 +236,13 @@ proc evidencePayload(f: M8Fixture): string =
     rawMetadata: %*{"providerMode": f.harbor.scenario.expectedMode})
   $(%notification)
 
-proc assertProviderContract(f: M8Fixture) =
+template assertProviderContract(f: M8Fixture) =
+  ## A **template**, not a proc.  `unittest`'s `check` only marks the
+  ## enclosing `test` as failed when it expands *inside* it (`fail` is
+  ## guarded by `when declared(testStatusIMPL)`); from a plain proc all 29
+  ## assertions below printed their failures and set the process exit code
+  ## while the one case still reported `[OK]` — and this suite has exactly
+  ## one case, so the whole file was green over a red contract.
   let started = f.service.startAgentSession(f.harbor.launchConfig())
   check started.id == f.harbor.sessionId()
   check started.taskId == f.harbor.taskId()
@@ -244,8 +250,11 @@ proc assertProviderContract(f: M8Fixture) =
   let taskBody = parseJson(f.harbor.requests[0].body)
   check taskBody["working_copy_mode"].getStr() ==
     f.harbor.scenario.expectedMode
+  # RV-7: the prompt carries the two-command handoff, not the retired
+  # single-command form, which now fails for want of a dataset path.
+  check taskBody["prompt"].getStr().contains("ct review collect")
   check taskBody["prompt"].getStr().contains(
-    "ct agent evidence --session " & f.harbor.tabId())
+    "ct agent evidence review.json --session " & f.harbor.tabId())
 
   let state = f.store.agentSessions.val
   check state.sessions.len == 1

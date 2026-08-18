@@ -463,6 +463,27 @@ const
     # `callCount` and no flow, and the control must say so rather than offer an
     # invocation it cannot render.
     "src/tests/gui/tests/deepreview/review_flow_overlay_test.nim",
+    # RV-7 — the agent handoff is two ordinary commands.
+    # Agentic-Coding-Integration.md §4.4: "`ct agent evidence` takes the
+    # dataset path and nothing else in the common case.  The session it
+    # belongs to, the task, and the workspace are read from the environment
+    # variables the agent already runs under."
+    #
+    # Three of the milestone's four verification entries have their pure half
+    # here — the environment is resolved, explicit flags override it, and a
+    # missing environment produces an error rather than an invented id — plus
+    # the flag shrink itself: every one of the nine retired flags is refused
+    # with a diagnostic naming its replacement, and every field they used to
+    # assert is shown being read out of a real collector's dataset instead.
+    #
+    # It belongs in this array rather than in a CLI lane because all of it is
+    # a *decision* — what an environment means, what a dataset says, what a
+    # hook would run — and the failure it prevents is silent by construction:
+    # an id invented here attaches a review to the wrong conversation and
+    # nothing downstream can tell.  The shipped binary's half, and the fourth
+    # entry (the hook really produces a loadable dataset), are
+    # `src/tests/cli/agent_cli_test.nim`.
+    "src/tests/gui/tests/deepreview/agent_evidence_vm_test.nim",
   ]
 
   CliRecordGateTests* = [
@@ -521,6 +542,25 @@ const
     # the seventh pins the native route, which must survive the seam
     # unchanged.
     "src/tests/cli/review_cli_test.nim",
+  ]
+
+  CliAgentGateTests* = [
+    # RV-7: the `ct agent` CLI lane.  Same contract and the same runner as
+    # `CliReviewGateTests` above — `just test-cli-record` globs the whole of
+    # `src/tests/cli` — kept in its own array because its subject is the
+    # agent handoff rather than the review command group.
+    #
+    # Two things live here that no ViewModel test can reach.  The first is the
+    # wiring: `ct agent …` is intercepted before confutils parses argv, and
+    # against the pre-RV-7 binary `ct agent --help` was answered by the
+    # evidence command with a notification rather than a usage screen.  The
+    # second is the milestone's fourth verification entry, which is not an
+    # assertion about argv at all: the end-of-turn hook is run for real, over
+    # a real git repository and a real Noir recording, through the real
+    # `replay-server` collector, and the `review.json` it produces is then
+    # OPENED and read.  A hook that reports success over a file nothing can
+    # load is precisely the failure that entry exists to catch.
+    "src/tests/cli/agent_cli_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

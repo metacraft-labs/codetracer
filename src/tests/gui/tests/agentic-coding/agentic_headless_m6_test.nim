@@ -12,12 +12,13 @@ import nim_agent_harbor
 import nim_agents
 import nim_everywhere
 
-import agent_evidence
+import ../../../../ct/agent_cli
 import agent_service
 import backend/mock_backend
 import store/[replay_data_store, types]
 import viewmodels/[agent_activity_vm, agent_workspace_vm, agentic_session_vm,
   deepreview_vm, editor_vm, vcs_vm]
+import ../deepreview/lib/review_dataset_fixture
 
 type
   HarborScenarioFixture = ref object
@@ -155,37 +156,42 @@ proc harborTransport(fixture: HarborScenarioFixture): HttpTransport =
     HttpResponse(status: 404, body: "not found: " & req.url)
 
 proc buildAgentEvidenceCliWrapper(): string =
+  ## Compile the checked-in `ct agent …` entry point.  See
+  ## `agent_cli_wrapper.nim` for why it is a repository file rather than a
+  ## generated one.
   let root = getCurrentDir()
-  let wrapperDir = getTempDir() / ("codetracer-agent-evidence-m6-cli-" &
+  let outDir = getTempDir() / ("codetracer-agent-cli-m6-" &
     $getCurrentProcessId() & "-" & $epochTime().int)
-  createDir(wrapperDir)
-  let wrapperPath = wrapperDir / "agent_evidence_cli_wrapper.nim"
-  result = wrapperDir / "agent_evidence_cli_wrapper"
-  writeFile(wrapperPath, """
-import std/os
-import agent_evidence
-
-quit(runAgentEvidenceCli(commandLineParams()))
-""")
+  createDir(outDir)
+  result = outDir / "agent_cli_wrapper"
   let command = [
     "nim", "c", "--hints:off", "--warnings:off",
-    "--path:" & shellQuote(root / "src" / "frontend" / "viewmodel"),
     "-o:" & shellQuote(result),
-    shellQuote(wrapperPath)
+    shellQuote(root / "src" / "tests" / "gui" / "tests" / "agentic-coding" /
+      "agent_cli_wrapper.nim")
   ].join(" ")
   sh(root, command)
 
+proc m6Dataset(f: M6Fixture): string =
+  ## The review dataset the agent hands over.  RV-7: `ct agent evidence` takes
+  ## the dataset `ct review collect` produced, so the changeset and the
+  ## recording it names are read out of the file instead of asserted with
+  ## `--trace-id` / `--test-name` / `--exit-code`, all of which are retired.
+  writeReviewDataset(f.worktree / ".ct" / "review" / "review.json",
+    @[
+      fixtureFile("src/feature.nim", @[
+        hunkLine("removed", "-proc answer(): int = 1"),
+        hunkLine("added", "+proc answer(): int = 42")]),
+      fixtureFile("feature-note.txt", @[
+        hunkLine("added", "+M6 scenario evidence")], status = "A")
+    ],
+    @[fixtureRecording("trace-m6-001",
+      "e2e_codetracer_headless_agent_harbor_worktree_deepreview")],
+    sessionTitle = "M6 headless worktree task")
+
 proc evidenceArgs(f: M6Fixture): seq[string] =
-  @[
-    "--session", "agent:harbor:m6",
-    "--tab", "agent:harbor:m6",
-    "--workspace", f.worktree,
-    "--trace-id", "trace-m6-001",
-    "--trace-path", f.worktree / ".codetracer" / "trace-m6-001",
-    "--test-name", "e2e_codetracer_headless_agent_harbor_worktree_deepreview",
-    "--test-command", "nim c -r src/tests/gui/tests/agentic-coding/agentic_headless_m6_test.nim",
-    "--exit-code", "0"
-  ]
+  @[f.m6Dataset(), "--session", "agent:harbor:m6",
+    "--workspace", f.worktree]
 
 proc runAgentEvidenceCli(f: M6Fixture; rpcPath: string):
     tuple[output: string; exitCode: int] =
@@ -262,8 +268,11 @@ suite "CodeTracer agentic M6 headless integration gate":
       let taskBody = parseJson(f.harbor.requests[0].body)
       check taskBody["workspace_path"].getStr() == f.worktree
       check taskBody["working_copy_mode"].getStr() == "git_worktree"
+      # RV-7: both commands of the handoff reach the agent, and the second
+      # one names the dataset the first one writes.
+      check taskBody["prompt"].getStr().contains("ct review collect")
       check taskBody["prompt"].getStr().contains(
-        "ct agent evidence --session agent:harbor:m6")
+        "ct agent evidence review.json --session agent:harbor:m6")
       check ($taskBody["agents"][0]["acpStdioLaunchCommand"]).contains(
         "codetracer_contract_worktree_file_edges.yaml")
 

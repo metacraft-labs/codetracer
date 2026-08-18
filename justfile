@@ -1133,7 +1133,7 @@ test-cli-record: vm-test-prereqs
     output=$(nim c -r --hints:off \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
@@ -1143,6 +1143,13 @@ test-cli-record: vm-test-prereqs
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"
       echo "$output" | grep -A 12 '\[FAILED\]' | head -60 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$rc" -ne 0 ]; then
+      # Every case said [OK] and the process still failed.  See the note on
+      # `test-vm-native` for the two ways that happens; both are silent
+      # unless the exit code is read, and this lane used to discard it.
+      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
+      echo "$output" | tail -30 | sed 's/^/    /'
       failed=$((failed + 1))
     else
       echo "OK ($oks tests)"
@@ -2288,7 +2295,7 @@ test-vm-native: vm-test-prereqs
     fi
     ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
     output=$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-      "$cache/$name" 2>&1) || true
+      "$cache/$name" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
@@ -2302,6 +2309,24 @@ test-vm-native: vm-test-prereqs
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"
       echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$rc" -ne 0 ]; then
+      # Every case reported [OK] and the process still exited non-zero.
+      # There are two ways that happens and both are silent otherwise:
+      #
+      #  1. `unittest`'s `check` only marks the enclosing `test` FAILED when
+      #     it expands INSIDE it (`fail` is `when declared(testStatusIMPL)`).
+      #     A `check` in a plain `proc` called from a test prints its failure
+      #     and sets the exit code while the case still prints [OK].  Assert
+      #     from a `template`, or read this line.
+      #  2. The binary died after its last case — a crash in teardown, or at
+      #     exit — which no [OK]/[FAILED] tally can show.
+      #
+      # `test-vm-js` has always read the exit code; the native lane discarded
+      # it, so a whole suite of assertions could be green over a red process.
+      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
+      echo "$output" | grep -E 'Check failed|Error|Exception|SIGSEGV' \
+        | head -20 | sed 's/^/    /'
       failed=$((failed + 1))
     else
       echo "OK ($oks tests)"
@@ -2480,7 +2505,7 @@ test-ct-trace-units:
     output=$(nim c -r --hints:off \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     total_oks=$((total_oks + oks))
@@ -2491,6 +2516,13 @@ test-ct-trace-units:
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"
       echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$rc" -ne 0 ]; then
+      # Green cases over a red process.  See the note on `test-vm-native`:
+      # a `check` inside a plain `proc` sets the exit code without ever
+      # printing [FAILED], and so does a crash after the last case.
+      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
+      echo "$output" | tail -30 | sed 's/^/    /'
       failed=$((failed + 1))
     else
       echo "OK ($oks tests)"
@@ -2538,7 +2570,7 @@ test-mcr-enrichment-units:
     output=$(nim c -r --hints:off \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     total_oks=$((total_oks + oks))
@@ -2549,6 +2581,13 @@ test-mcr-enrichment-units:
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"
       echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$rc" -ne 0 ]; then
+      # Green cases over a red process.  See the note on `test-vm-native`:
+      # a `check` inside a plain `proc` sets the exit code without ever
+      # printing [FAILED], and so does a crash after the last case.
+      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
+      echo "$output" | tail -30 | sed 's/^/    /'
       failed=$((failed + 1))
     else
       echo "OK ($oks case(s))"
@@ -2617,7 +2656,7 @@ test-vm-recorder-gated: vm-test-prereqs
       --path:src/frontend/viewmodel \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     skips=$(echo "$output" | grep -c 'MISSING-RECORDER SKIP:' || true)
@@ -2629,6 +2668,14 @@ test-vm-recorder-gated: vm-test-prereqs
       echo "SKIPPED (missing recorder)"
       echo "$output" | grep 'MISSING-RECORDER SKIP:' | head -1 | sed 's/^/    /'
       skipped=$((skipped + 1))
+    elif [ "$rc" -ne 0 ] && [ "$oks" -gt 0 ]; then
+      # Green cases over a red process.  See the note on `test-vm-native`:
+      # a `check` inside a plain `proc` sets the exit code without ever
+      # printing [FAILED], and so does a crash after the last case.
+      # Ordered after the skip branch so a recorder-gated skip is unaffected.
+      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
+      echo "$output" | tail -30 | sed 's/^/    /'
+      failed=$((failed + 1))
     elif [ "$oks" -eq 0 ]; then
       echo "COMPILE ERROR / no tests ran"
       echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'

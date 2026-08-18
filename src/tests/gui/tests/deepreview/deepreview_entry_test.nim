@@ -300,10 +300,16 @@ proc diffLines(diff: ReviewFileDiff): seq[string] =
       if line.content.len > 0:
         result.add(line.kind & " " & line.content)
 
-proc checkEnteredState(entered: EnteredReview; launchPath: string) =
+template checkEnteredState(entered: EnteredReview; launchPath: string) =
   ## The review state every launch path must reach — everything except the
   ## coverage numbers, which are a property of the dataset rather than of the
   ## entry (see the test body).
+  ##
+  ## A **template**, not a proc.  `unittest`'s `check` only marks the
+  ## enclosing `test` as failed when it expands *inside* it (`fail` is
+  ## guarded by `when declared(testStatusIMPL)`); from a plain proc these
+  ## eighteen assertions — the contract every launch path must meet — set
+  ## the exit code without the case ever printing `[FAILED]`.
   checkpoint("launch path: " & launchPath)
   # §7 step 1 — the VCS panel populates with the changeset, and the first row
   # is the selected one.

@@ -1,4 +1,12 @@
 ## Headless integration tests for M5 agent evidence command and DeepReview handoff.
+##
+## RV-7 changed what the command is given, not what CodeTracer does with the
+## result: `ct agent evidence` now takes the **review dataset**
+## (`ct review collect`'s output) and reads the session from the environment,
+## instead of taking a dozen flags that asserted the same facts.  So the
+## fixture below produces a dataset where it used to assemble a flag vector,
+## and every assertion downstream of the notification is unchanged — which is
+## the point: the handoff into DeepReview is the same handoff.
 
 import std/[json, os, osproc, sequtils, strutils, times, unittest]
 
@@ -6,13 +14,14 @@ import isonim/core/[computation, owner, signals]
 import nim_acp
 import nim_agents
 
-import agent_evidence
+import ../../../../ct/agent_cli
 import agent_service
 import backend/mock_backend
 import store/[replay_data_store, types]
 import viewmodels/[agent_activity_deepreview_vm, agent_activity_vm,
   agent_workspace_vm, agentic_session_vm, deepreview_vm, editor_vm,
   review_entry, vcs_vm]
+import ../deepreview/lib/review_dataset_fixture
 
 type
   M5Fixture = object
@@ -93,17 +102,22 @@ proc makeFixture(): M5Fixture =
   discard result.service.startAgentSession(launchConfig(result.worktree))
   result.vm.activateAgentTab("agent:acp:m5")
 
-proc evidenceArgs(f: M5Fixture; extra: seq[string] = @[]): seq[string] =
-  @[
-    "--session", "agent:acp:m5",
-    "--tab", "agent:acp:m5",
-    "--workspace", f.worktree,
-    "--trace-id", "trace-m5-001",
-    "--trace-path", f.worktree / ".codetracer" / "trace-m5-001",
-    "--test-name", "m5 integration test",
-    "--test-command", "nim test",
-    "--exit-code", "0"
-  ] & extra
+proc m5Dataset(f: M5Fixture; recordings: seq[FixtureRecording] = @[
+    fixtureRecording("trace-m5-001", "m5 integration test")];
+    files: seq[FixtureFile] = @[
+      fixtureFile("src/feature.nim", @[
+        hunkLine("removed", "-proc answer(): int = 1"),
+        hunkLine("added", "+proc answer(): int = 42")])]): string =
+  ## The review dataset the agent hands over — `ct review collect`'s output,
+  ## which after RV-7 is the whole argument of `ct agent evidence`.
+  writeReviewDataset(f.worktree / ".ct" / "review" / "review.json",
+    files, recordings, sessionTitle = "M5 feature")
+
+proc evidenceArgs(f: M5Fixture; dataset: string): seq[string] =
+  ## The three flags RV-7 leaves.  They are passed rather than exported
+  ## because this process is not itself an agent session — which is the case
+  ## §4.4 keeps them for: "use outside a managed session and in tests".
+  @[dataset, "--session", "agent:acp:m5", "--workspace", f.worktree]
 
 proc captureSender(target: EvidenceCapture):
     AgentEvidenceRpcSender =
@@ -111,32 +125,44 @@ proc captureSender(target: EvidenceCapture):
     target.notifications.add notification
 
 proc buildAgentEvidenceCliWrapper(): string =
+  ## Compile the checked-in `ct agent …` entry point
+  ## (`agent_cli_wrapper.nim`).  It lives in the tree rather than being
+  ## generated into a temp directory because `src/ct/agent_cli.nim` reaches
+  ## `nim-agents` through `config.nims`, which Nim reads from the compiled
+  ## file's own project directory.
   let root = getCurrentDir()
-  let wrapperDir = getTempDir() / ("codetracer-agent-evidence-cli-" &
+  let outDir = getTempDir() / ("codetracer-agent-cli-" &
     $getCurrentProcessId() & "-" & $epochTime().int)
-  createDir(wrapperDir)
-  let wrapperPath = wrapperDir / "agent_evidence_cli_wrapper.nim"
-  result = wrapperDir / "agent_evidence_cli_wrapper"
-  writeFile(wrapperPath, """
-import std/os
-import agent_evidence
-
-quit(runAgentEvidenceCli(commandLineParams()))
-""")
+  createDir(outDir)
+  result = outDir / "agent_cli_wrapper"
   let command = [
     "nim", "c", "--hints:off", "--warnings:off",
-    "--path:" & shellQuote(root / "src" / "frontend" / "viewmodel"),
     "-o:" & shellQuote(result),
-    shellQuote(wrapperPath)
+    shellQuote(root / "src" / "tests" / "gui" / "tests" / "agentic-coding" /
+      "agent_cli_wrapper.nim")
   ].join(" ")
   sh(root, command)
+
+proc emptyEnv(name: string): string = ""
+  ## The suites drive the identity through flags, so the ambient environment
+  ## must not reach the resolution — a developer running the suite inside an
+  ## agent session would otherwise get that session's id instead of `m5`'s.
+
+proc runEvidence(f: M5Fixture; dataset: string): AgentEvidenceNotification =
+  ## `ct agent evidence <dataset>`, in process, returning what it sent.
+  let outcome = runAgentEvidence(dataset,
+    AgentIdentityFlags(session: "agent:acp:m5", workspace: f.worktree),
+    cwd = f.worktree, sendRpc = captureSender(f.captured),
+    lookup = emptyEnv)
+  doAssert outcome.output.len > 0, outcome.errorOutput
+  evidenceNotificationFromJson(parseJson(outcome.output))
 
 proc runAgentEvidenceCli(f: M5Fixture; rpcPath: string): tuple[output: string;
     exitCode: int] =
   let cli = buildAgentEvidenceCliWrapper()
   putEnv("CODETRACER_AGENT_EVIDENCE_RPC_PATH", rpcPath)
   let command = cli.shellQuote() & " agent evidence " &
-    f.evidenceArgs().mapIt(it.shellQuote()).join(" ")
+    f.evidenceArgs(f.m5Dataset()).mapIt(it.shellQuote()).join(" ")
   execCmdEx(command, workingDir = f.worktree)
 
 proc cleanup(f: M5Fixture) =
@@ -152,8 +178,8 @@ suite "agentic coding M5 evidence handoff":
         f.cleanup()
         dispose()
 
-      let notification = executeAgentEvidenceCommand(
-        f.evidenceArgs(), cwd = f.worktree, sendRpc = captureSender(f.captured))
+      let dataset = f.m5Dataset()
+      let notification = f.runEvidence(dataset)
       f.service.registerAgentEvidence(notification)
 
       let state = f.store.agentSessions.val
@@ -164,6 +190,10 @@ suite "agentic coding M5 evidence handoff":
       check session.evidence.traceId == "trace-m5-001"
       check session.evidence.workspacePath == f.worktree
       check session.evidence.testName == "m5 integration test"
+      # RV-7: the session now also remembers the dataset it was handed, so a
+      # review can be re-opened on the collector's own output rather than on
+      # the summary projected out of it.
+      check session.evidence.datasetPath == dataset
       check session.evidence.files.len == 1
       check session.evidence.files[0].path == "src/feature.nim"
       check session.evidence.files[0].diff.contains(
@@ -324,35 +354,42 @@ suite "agentic coding M5 evidence handoff":
         f.cleanup()
         dispose()
 
-      let missingRecording = executeAgentEvidenceCommand(
-        f.evidenceArgs(@["--trace-id", "", "--trace-path", ""]),
-        cwd = f.worktree,
-        sendRpc = captureSender(f.captured))
+      # RV-7 moved the triggers of these four states from flags the agent
+      # asserted onto the dataset itself, which is the milestone's point: the
+      # states are unchanged, and each is now a property of the file the
+      # reviewer will open rather than of a claim on a command line.
+
+      # No recordings collected — nothing to review WITH.
+      let missingRecording = f.runEvidence(f.m5Dataset(recordings = @[]))
       check not f.vm.handleAgentEvidenceNotification(missingRecording)
       check not f.vcs.deepReviewMode.val
       check not f.deepReview.hasData.val
       check f.store.agentSessions.val.sessions[0].evidence.state ==
         asesNoRecording
 
-      let failedTest = executeAgentEvidenceCommand(
-        f.evidenceArgs(@["--exit-code", "7"]), cwd = f.worktree,
-        sendRpc = captureSender(f.captured))
+      # A failing test run.  `--exit-code` is retired — an agent handing over
+      # evidence for a red suite is told to say what failed instead
+      # (`docs/agent-prompt/deepreview-evidence.md`) — but the state itself
+      # stays on the RPC wire for producers other than this CLI, and the
+      # ViewModel's handling of it is what this case guards.
+      var failedTest = f.runEvidence(f.m5Dataset())
+      failedTest.status = aesFailedTests
+      failedTest.statusMessage = "recorded test command failed"
       check not f.vm.handleAgentEvidenceNotification(failedTest)
       check f.store.agentSessions.val.sessions[0].evidence.state ==
         asesFailedTests
 
-      let metadataPath = f.worktree / "broken-evidence.json"
-      writeFile(metadataPath, "{not-json")
-      let malformed = executeAgentEvidenceCommand(
-        f.evidenceArgs(@["--metadata", metadataPath]), cwd = f.worktree,
-        sendRpc = captureSender(f.captured))
+      # A dataset that is not one.
+      let brokenDataset = f.worktree / ".ct" / "broken" / "review.json"
+      createDir(brokenDataset.parentDir)
+      writeFile(brokenDataset, "{not-json")
+      let malformed = f.runEvidence(brokenDataset)
       check not f.vm.handleAgentEvidenceNotification(malformed)
       check f.store.agentSessions.val.sessions[0].evidence.state ==
         asesMalformedMetadata
 
-      sh(f.worktree, "git checkout -- src/feature.nim")
-      let mismatch = executeAgentEvidenceCommand(
-        f.evidenceArgs(), cwd = f.worktree, sendRpc = captureSender(f.captured))
+      # Recordings, but nothing changed alongside them — nothing to review.
+      let mismatch = f.runEvidence(f.m5Dataset(files = @[]))
       check not f.vm.handleAgentEvidenceNotification(mismatch)
       check f.store.agentSessions.val.sessions[0].evidence.state ==
         asesDiffTraceMismatch

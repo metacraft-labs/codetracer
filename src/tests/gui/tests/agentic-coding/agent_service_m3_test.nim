@@ -187,8 +187,15 @@ suite "CodeTracer agent service M3":
       let session = store.agentSessions.val.sessions[0]
       check body["workspace_path"].getStr() == "/repo"
       check body["working_copy_mode"].getStr() == "git_worktree"
+      # RV-7: the instruction CodeTracer sends is the two ordinary commands.
+      # `ct agent evidence` takes the dataset `ct review collect` produced, so
+      # an instruction naming only `--session` is one the agent cannot carry
+      # out.  Asserted in full, because the whole value of this string is that
+      # it can be pasted into a shell.
       check session.evidenceCommand ==
-        "ct agent evidence --session agent:harbor:prompt-key"
+        "ct review collect --diff main..HEAD --recordings .ct/runs " &
+        "-o review.json && ct agent evidence review.json " &
+        "--session agent:harbor:prompt-key"
       check outgoingPrompt.contains(session.evidenceCommand)
       check outgoingPrompt.contains("Before finishing, run one or more tests")
       check outgoingPrompt.contains("DeepReview")

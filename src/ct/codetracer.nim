@@ -2,7 +2,7 @@
 
 import
   launch/[launch, help_delegate],
-  ../frontend/viewmodel/agent_evidence,
+  agent_cli,
   cli/e2e_tests,
   ../ct_test/incremental_cli,
   ../ct_test/ct_test,
@@ -114,9 +114,18 @@ try:
         if reviewNeedsRawDispatch(args):
           quit(runReviewCli(args))
       of "agent":
+        # RV-7: the whole `ct agent` group is intercepted here, for the same
+        # confutils limitation `review` is intercepted for — every verb of it
+        # carries options ct itself does not declare, and confutils rejects
+        # any dash-prefixed token it does not recognise.  `runAgentCli` puts
+        # the notification on stdout and diagnostics on stderr, because a hook
+        # pipes the former into `jq`.
         let dispatch = dispatchAgentEvidenceCli(args)
         if dispatch.handled:
-          echo dispatch.output
+          if dispatch.errorOutput.len > 0:
+            stderr.writeLine(dispatch.errorOutput)
+          if dispatch.output.len > 0:
+            echo dispatch.output
           quit(dispatch.exitCode)
       of "ct-complete":
         runCtComplete(args[1 .. ^1])

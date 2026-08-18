@@ -218,7 +218,8 @@ proc expectedTabId(backend: MatrixBackend): string =
   of mbAcp: "agent:acp:m4-acp"
   of mbHarbor: "agent:harbor:m4-harbor"
 
-proc assertProgressTabsActivity(fixture: VmFixture) =
+template assertProgressTabsActivity(fixture: VmFixture) =
+  ## A template, not a proc — see `assertLifecycle` below.
   discard fixture.start()
   fixture.vm.refreshActiveProjection()
 
@@ -242,7 +243,8 @@ proc assertProgressTabsActivity(fixture: VmFixture) =
     it.content.contains("M4 progress"))
   check not fixture.activity.isLoading.val
 
-proc assertWorkspaceSwitch(fixture: VmFixture) =
+template assertWorkspaceSwitch(fixture: VmFixture) =
+  ## A template, not a proc — see `assertLifecycle` below.
   discard fixture.start()
   let tabId = fixture.backend.expectedTabId()
   fixture.vm.setUserEditorState("/repo/src/user.nim", "user workspace content",
@@ -271,8 +273,14 @@ proc assertWorkspaceSwitch(fixture: VmFixture) =
     check fixture.harbor.requests.anyIt(it.url.contains(
       "/api/v1/sessions/session-harbor-m4/diff/src/app.nim"))
 
-proc assertLifecycle(backend: MatrixBackend; status: string;
+template assertLifecycle(backend: MatrixBackend; status: string;
     expected: AgentServiceLifecycle) =
+  ## A **template**, not a proc.  `unittest`'s `check` only marks the
+  ## enclosing `test` as failed when it expands *inside* it (`fail` is guarded
+  ## by `when declared(testStatusIMPL)`); from a plain proc it prints the
+  ## failure and sets the process exit code while the case still reports
+  ## `[OK]`.  Every assertion helper in this file is a template for that
+  ## reason.
   let fixture = makeFixture(backend, status)
   discard fixture.start()
   check fixture.store.agentSessions.val.sessions[0].lifecycle == expected

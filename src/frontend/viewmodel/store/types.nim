@@ -1160,6 +1160,10 @@ type
     testName*: string
     testCommand*: string
     workspacePath*: string
+    datasetPath*: string
+      ## RV-7 — the `review.json` this evidence handed over, as resolved by
+      ## `ct agent evidence <PATH>`.  Kept so a session can be re-opened on
+      ## the dataset itself rather than on the summary projected out of it.
     state*: AgentServiceEvidenceState
     statusMessage*: string
     files*: seq[AgentServiceEvidenceFileEntry]

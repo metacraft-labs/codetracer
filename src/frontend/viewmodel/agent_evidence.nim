@@ -1,13 +1,37 @@
-## CodeTracer-owned agent evidence command/RPC helpers.
+## The agent-evidence **notification** — the payload `ct agent evidence` hands
+## CodeTracer, and the only thing the ViewModels know about that command.
 ##
-## Agent Harbor only sees ``ct agent evidence`` as a normal shell command.  The
-## command records session-local metadata and notifies CodeTracer through this
-## small JSON RPC payload so GUI and headless ViewModels can enter DeepReview.
+## Agent Harbor and ACP agents only see ``ct agent evidence`` as a normal shell
+## command.  The command notifies CodeTracer through this small JSON RPC
+## payload so GUI and headless ViewModels can enter DeepReview.
+##
+## ## What lives here and what does not (RV-7)
+##
+## This module is the **wire type plus its codec**, and nothing else.  The
+## command that produces it is `src/ct/agent_cli.nim`, beside `review_cli.nim`,
+## because after RV-7 the two are one workflow —
+##
+## ```sh
+## ct review collect --diff main..HEAD --recordings .ct/runs -o review.json
+## ct agent evidence review.json
+## ```
+##
+## — and `ct agent evidence` resolves the dataset with the same routine
+## `ct review <PATH>` resolves it with, and the agent session with the same
+## routine `ct review collect` stamps it with (`ct/review_session.nim`).  Both
+## of those live under `src/ct`, and a CLI in `src/frontend/viewmodel` could
+## reach neither without dragging the whole ct-side dependency set into every
+## ViewModel test compile.
+##
+## The split is also what keeps this file importable from the JavaScript
+## backend: the renderer decodes an RPC payload
+## (`AgenticSessionVM.handleAgentEvidenceRpcPayload`), and a renderer must not
+## need `std/osproc` to do it.
 
-import std/[json, strutils]
+import std/json
 
 when not defined(js):
-  import std/[os, osproc, sequtils, times]
+  import std/[os]
 
 type
   AgentEvidenceStatus* = enum
@@ -29,6 +53,14 @@ type
     taskId*: string
     tabId*: string
     workspacePath*: string
+    datasetPath*: string
+      ## RV-7 — the review dataset this evidence *is*.
+      ##
+      ## The argument of `ct agent evidence <PATH>`, resolved to the
+      ## `review.json` the GUI opens.  Every other descriptive field below is
+      ## read out of that file, so this is the one field from which the rest
+      ## can be re-derived, and the one a consumer should prefer when it wants
+      ## the whole review rather than the summary.
     traceId*: string
     tracePath*: string
     testName*: string
@@ -42,12 +74,14 @@ type
 
   AgentEvidenceRpcSender* = proc(notification: AgentEvidenceNotification) {.gcsafe.}
 
-  AgentEvidenceCliResult* = object
-    handled*: bool
-    exitCode*: int
-    output*: string
-
 proc statusString*(status: AgentEvidenceStatus): string =
+  ## The wire spellings, which are part of the RPC contract and therefore
+  ## unchanged by RV-7 even where the *trigger* moved.  `malformed_metadata`
+  ## used to mean "the `--metadata` JSON file would not parse"; that flag is
+  ## retired and the status now means "the review dataset would not parse",
+  ## which is the same failure about the same kind of document.  Renaming it
+  ## would break every consumer that already matches on the string, for a
+  ## cosmetic gain.
   case status
   of aesReady: "ready"
   of aesNoRecording: "no_recording"
@@ -82,6 +116,7 @@ proc `%`*(notification: AgentEvidenceNotification): JsonNode =
     "taskId": notification.taskId,
     "tabId": notification.tabId,
     "workspacePath": notification.workspacePath,
+    "datasetPath": notification.datasetPath,
     "traceId": notification.traceId,
     "tracePath": notification.tracePath,
     "testName": notification.testName,
@@ -104,13 +139,18 @@ proc evidenceFileFromJson*(node: JsonNode): AgentEvidenceFile =
 
 proc evidenceNotificationFromJson*(node: JsonNode): AgentEvidenceNotification =
   var files: seq[AgentEvidenceFile] = @[]
-  for item in node{"files"}.items:
+  # `getElems` rather than `items`, which dereferences its argument: this
+  # decodes a payload that arrived over RPC, and a notification carrying no
+  # changed files at all is a legitimate one (`no_recording` sends exactly
+  # that).  Crashing the renderer on it would be the worst possible reading.
+  for item in node{"files"}.getElems:
     files.add item.evidenceFileFromJson()
   AgentEvidenceNotification(
     sessionId: node{"sessionId"}.getStr(),
     taskId: node{"taskId"}.getStr(),
     tabId: node{"tabId"}.getStr(),
     workspacePath: node{"workspacePath"}.getStr(),
+    datasetPath: node{"datasetPath"}.getStr(),
     traceId: node{"traceId"}.getStr(),
     tracePath: node{"tracePath"}.getStr(),
     testName: node{"testName"}.getStr(),
@@ -123,126 +163,21 @@ proc evidenceNotificationFromJson*(node: JsonNode): AgentEvidenceNotification =
     rawMetadata: node{"metadata"})
 
 when not defined(js):
-  proc parseArgs(args: openArray[string]): JsonNode =
-    result = newJObject()
-    var i = 0
-    while i < args.len:
-      let arg = args[i]
-      if arg.startsWith("--") and i + 1 < args.len:
-        result[arg[2 .. ^1]] = %args[i + 1]
-        i += 2
-      else:
-        i += 1
-
-  proc runGit(workspacePath: string; args: openArray[string]): string =
-    let (output, code) = execCmdEx("git " & args.join(" "),
-      workingDir = workspacePath)
-    if code != 0:
-      return ""
-    output
-
-  proc fileDiff(workspacePath, path: string): string =
-    let quotedPath = "'" & path.replace("'", "'\\''") & "'"
-    result = runGit(workspacePath, @["diff", "--", quotedPath])
-    if result.len == 0:
-      result = runGit(workspacePath, @["diff", "--cached", "--", quotedPath])
-
-  proc collectChangedFiles*(workspacePath: string): seq[AgentEvidenceFile] =
-    let statusOutput = runGit(workspacePath, @["status", "--porcelain"])
-    let numstatOutput = runGit(workspacePath, @["diff", "--numstat"])
-    var counts = newJObject()
-    for line in numstatOutput.splitLines():
-      let parts = line.splitWhitespace()
-      if parts.len >= 3:
-        let added = if parts[0] == "-": 0 else: parseInt(parts[0])
-        let removed = if parts[1] == "-": 0 else: parseInt(parts[1])
-        counts[parts[^1]] = %*{"added": added, "removed": removed}
-
-    for line in statusOutput.splitLines():
-      if line.len < 4:
-        continue
-      let status = line[0 .. 1].strip()
-      var path = line[3 .. ^1]
-      if " -> " in path:
-        path = path.split(" -> ")[^1]
-      let stat = counts{path}
-      result.add AgentEvidenceFile(
-        path: path,
-        status: if status.len == 0: "modified" else: status,
-        linesAdded: stat{"added"}.getInt(0),
-        linesRemoved: stat{"removed"}.getInt(0),
-        diff: fileDiff(workspacePath, path))
-
-  proc validateNotification(notification: var AgentEvidenceNotification) =
-    if notification.status != aesReady:
-      return
-    if notification.traceId.len == 0 and notification.tracePath.len == 0:
-      notification.status = aesNoRecording
-      notification.statusMessage = "no recorded trace was supplied"
-    elif notification.exitCode != 0:
-      notification.status = aesFailedTests
-      notification.statusMessage = "recorded test command failed with exit code " &
-        $notification.exitCode
-    elif notification.files.len == 0 or notification.files.allIt(it.diff.len == 0):
-      notification.status = aesDiffTraceMismatch
-      notification.statusMessage = "recording has no matching workspace diff"
+  const AgentEvidenceRpcPathEnvVar* = "CODETRACER_AGENT_EVIDENCE_RPC_PATH"
+    ## Where `ct agent evidence` drops the notification for a running
+    ## CodeTracer to pick up.  Unset in the ordinary case: the command still
+    ## prints the notification on stdout, which is what a hook or a CI job
+    ## reads, and the RPC file is only written when a GUI asked for one.
 
   proc defaultRpcSender*(notification: AgentEvidenceNotification) {.gcsafe.} =
-    let path = getEnv("CODETRACER_AGENT_EVIDENCE_RPC_PATH", "")
+    ## Hand the notification to a running CodeTracer, if one asked to be told.
+    ##
+    ## Deliberately silent when the variable is unset: an agent running
+    ## `ct agent evidence` outside a CodeTracer session has still produced
+    ## valid evidence, and failing because nobody was listening would make the
+    ## command useless in exactly the batch/CI case it is most wanted in.
+    let path = getEnv(AgentEvidenceRpcPathEnvVar, "")
     if path.len == 0:
       return
     createDir(path.parentDir)
     writeFile(path, $(%notification))
-
-  proc executeAgentEvidenceCommand*(args: openArray[string]; cwd = getCurrentDir(
-      ); sendRpc: AgentEvidenceRpcSender = defaultRpcSender):
-      AgentEvidenceNotification =
-    let parsed = parseArgs(args)
-    var metadata = newJObject()
-    let metadataPath = parsed{"metadata"}.getStr()
-    if metadataPath.len > 0:
-      try:
-        metadata = parseFile(metadataPath)
-      except CatchableError:
-        metadata = %*{"error": "malformed metadata", "path": metadataPath}
-
-    result = AgentEvidenceNotification(
-      sessionId: parsed{"session"}.getStr(),
-      taskId: parsed{"task"}.getStr(),
-      tabId: parsed{"tab"}.getStr(parsed{"session"}.getStr()),
-      workspacePath: parsed{"workspace"}.getStr(cwd),
-      traceId: parsed{"trace-id"}.getStr(metadata{"traceId"}.getStr()),
-      tracePath: parsed{"trace-path"}.getStr(metadata{"tracePath"}.getStr()),
-      testName: parsed{"test-name"}.getStr(metadata{"testName"}.getStr()),
-      testCommand: parsed{"test-command"}.getStr(metadata{"testCommand"}.getStr()),
-      exitCode: parseInt(parsed{"exit-code"}.getStr("0")),
-      status: parseEvidenceStatus(parsed{"status"}.getStr("ready")),
-      statusMessage: parsed{"message"}.getStr(),
-      createdAt: $now().utc(),
-      rawMetadata: metadata)
-    if result.status == aesReady and metadata.hasKey("error"):
-      result.status = aesMalformedMetadata
-      result.statusMessage = metadata{"error"}.getStr()
-    if result.workspacePath.len > 0 and dirExists(result.workspacePath):
-      result.files = collectChangedFiles(result.workspacePath)
-    result.validateNotification()
-    sendRpc(result)
-
-  proc dispatchAgentEvidenceCli*(args: openArray[string]; cwd = getCurrentDir();
-      sendRpc: AgentEvidenceRpcSender = defaultRpcSender): AgentEvidenceCliResult =
-    if args.len >= 2 and args[0] == "agent" and args[1] == "evidence":
-      let notification = executeAgentEvidenceCommand(args[2 .. ^1],
-        cwd = cwd, sendRpc = sendRpc)
-      result = AgentEvidenceCliResult(
-        handled: true,
-        exitCode: if notification.status ==
-        aesReady: QuitSuccess else: QuitFailure,
-        output: $(%notification))
-
-  proc runAgentEvidenceCli*(args: openArray[string]; cwd = getCurrentDir();
-      sendRpc: AgentEvidenceRpcSender = defaultRpcSender): int =
-    let dispatch = dispatchAgentEvidenceCli(args, cwd = cwd, sendRpc = sendRpc)
-    if not dispatch.handled:
-      return QuitFailure
-    echo dispatch.output
-    dispatch.exitCode

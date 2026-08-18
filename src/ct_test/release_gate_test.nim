@@ -136,6 +136,18 @@ suite "ct-test M16 release gate":
     check reviewRunner.contains("test-cli-record:")
     check reviewRunner.contains("find src/tests/cli -name '*_test.nim'")
 
+  test "cli_agent_gate_tests_exist_and_are_registered":
+    # RV-7: the `ct agent` CLI lane, on the same runner as the two above.
+    for cliPath in CliAgentGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    check fileExists("justfile")
+    let agentRunner = readExisting("justfile")
+    check agentRunner.contains("test-cli-record:")
+    check agentRunner.contains("find src/tests/cli -name '*_test.nim'")
+
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:
       checkpoint(entry.action)
