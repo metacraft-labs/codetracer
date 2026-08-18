@@ -172,3 +172,27 @@
   width: 100%
   font-size: 0
   overflow: hidden
+
+// -- Inline value history rows --
+.ct-history-inline-container
+  background-color: colors-ui-surface-primary-default
+  font-family: "SpaceMono"
+  padding: 0.25em 0
+  max-height: 5em
+  overflow-y: auto
+
+.ct-history-inline-row
+  display: flex
+  align-items: baseline
+  line-height: 1.5em
+  justify-content: flex-start
+  gap: 1em
+
+  .history-location
+    color: colors-ui-text-primary-body
+    min-width: 4em
+    text-align: right
+
+  .history-value
+    color: #FDBA74
+    text-align: left
