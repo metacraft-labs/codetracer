@@ -809,7 +809,7 @@ proc startReviewNavigation*(self: VCSComponent) =
   ##
   ## This proc supplies what the ViewModel layer cannot: the review dataset
   ## behind ``data.deepReviewData`` and the GoldenLayout side effects.  All
-  ## three launch paths (``ct --deepreview``, a trace with an associated diff,
+  ## three launch paths (``ct review``, a trace with an associated diff,
   ## the agentic handoff) arrive here through ``startDeepReviewNavigation``.
   if self.isNil or not self.isDeepReviewMode():
     return
@@ -876,7 +876,7 @@ proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
   ## can tell which launch path it was.
   ##
   ## A review that is already active is left alone: a trace opened *into* a
-  ## running review (`ct --deepreview` loads no trace today, but a session can
+  ## running review (`ct review` loads no trace today, but a session can
   ## gain one) must not have its exported dataset replaced by the bare diff.
   if data.isNil or diff.isNil or diff.files.len == 0:
     return

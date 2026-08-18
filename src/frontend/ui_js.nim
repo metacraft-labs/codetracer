@@ -2295,7 +2295,7 @@ proc onTraceLoaded(
   # forwarded it — `ct run` as `--diff <path>`, `index/args.nim` into
   # `StartOptions.diff`, `index/traces.nim` into this very message — but the
   # renderer used to drop it, so the launch method existed on paper only.
-  # It enters the review through the same routine `ct --deepreview` and the
+  # It enters the review through the same routine `ct review` and the
   # agentic handoff use.
   if response.withDiff and not response.diff.isNil and
       response.diff.files.len > 0:

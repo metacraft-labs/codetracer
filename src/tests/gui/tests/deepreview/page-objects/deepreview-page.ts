@@ -1,6 +1,5 @@
 /**
- * Page object for a DeepReview session, activated via the
- * ``--deepreview <path>`` CLI argument.
+ * Page object for a DeepReview session, activated with ``ct review <path>``.
  *
  * DeepReview has NO panel of its own. It is a combination of features of
  * three surfaces that exist independently of it

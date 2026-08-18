@@ -9,6 +9,7 @@ import
   ../trace/[ replay, record, run, metadata, host, import_command, trace_forward ],
   ../ci/[ ci_commands ],
   ../codetracerconf,
+  ../review_cli,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
   ../doctor,
@@ -254,7 +255,9 @@ proc runInitial*(conf: CodetracerConf) =
       )
     of StartupCommand.noCommand:
       # When ct is launched with no subcommand, show the welcome screen.
-      # If --deepreview is provided, open the deepreview view instead.
+      # (RV-1: the review launch moved out of here into
+      # `StartupCommand.review` below — DeepReview is reached with
+      # `ct review <PATH>`, never with a global option.)
       # Playwright launches the ct binary directly and passes the trace to
       # the Electron index process via CODETRACER_RECORDING_ID. In that case we
       # must not force --welcome-screen, or the renderer never enters replay
@@ -268,10 +271,7 @@ proc runInitial*(conf: CodetracerConf) =
       # ``launch_env_var_test`` share a single source of truth.
       refuseLegacyRecordingIdEnv(proc (msg: string) = errorMessage(msg))
       var frontendArgs: seq[string] = @[]
-      if conf.deepreview.len > 0:
-        frontendArgs.add("--deepreview")
-        frontendArgs.add(conf.deepreview)
-      elif getEnv("CODETRACER_RECORDING_ID", "").len == 0:
+      if getEnv("CODETRACER_RECORDING_ID", "").len == 0:
         frontendArgs.add("--welcome-screen")
       launchElectron(
         args = frontendArgs,
@@ -469,6 +469,39 @@ proc runInitial*(conf: CodetracerConf) =
         inspect = conf.inspect,
         remoteDebuggingPort = conf.remoteDebuggingPort,
         remoteDebuggingPipe = conf.remoteDebuggingPipe)
+    of StartupCommand.review:
+      # RV-1: `ct review <PATH>` replaces the retired `ct --deepreview <PATH>`.
+      #
+      # The decision of what the command line means is `planReviewCli`'s, so
+      # this arm and the pre-confutils dispatcher in `codetracer.nim` cannot
+      # disagree about it; only the *effect* differs, because launching
+      # Electron is the one thing the raw dispatcher deliberately does not do.
+      let plan = planReviewCli(@["review", conf.reviewPath])
+      case plan.kind
+      of rpkLaunch:
+        let resolved = resolveReviewDatasetJson(plan.datasetPath)
+        if resolved.error.len > 0:
+          errorMessage resolved.error
+          quit(1)
+        # `--deepreview` here is the internal ct -> Electron argument parsed
+        # by `src/frontend/index/args.nim`, not the retired user-facing
+        # option: the frontend wire is unchanged, only its entry point is.
+        launchElectron(
+          args = @["--deepreview", absolutePath(resolved.jsonPath)],
+          inspect = conf.inspect,
+          remoteDebuggingPort = conf.remoteDebuggingPort,
+          remoteDebuggingPipe = conf.remoteDebuggingPipe)
+      of rpkUsage:
+        echo ReviewUsage
+      of rpkError:
+        errorMessage plan.message
+        quit(1)
+      of rpkCollect, rpkInspect:
+        # Unreachable: `reviewNeedsRawDispatch` routes those verbs to the
+        # dispatcher in `codetracer.nim` before confutils ever runs.
+        errorMessage "internal: `ct review " & conf.reviewPath &
+          "` should have been dispatched before argument parsing"
+        quit(1)
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,

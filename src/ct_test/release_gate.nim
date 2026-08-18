@@ -186,7 +186,7 @@ const
     # this defect stayed invisible.
     "src/tests/gui/tests/layout/layout_config_roundtrip_test.nim",
     # #610 (M42a) and DR-R8 — what starting a review does to the layout.
-    # Launching `ct --deepreview` pasted a hard-coded three-panel preset over
+    # Launching `ct review` pasted a hard-coded three-panel preset over
     # `data.ui.resolvedConfig`, so FILES, STATE, SCRATCHPAD, AGENT ACTIVITY,
     # EVENT LOG, TIMELINE and TERMINAL OUTPUT were gone for the session and
     # the user's own layout was ignored.  M42a made placement additive; DR-R8
@@ -275,7 +275,7 @@ const
     # id and modules are the ones that went.
     "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim",
     # DR-R7 — one review-entry routine for all three launch paths.  The three
-    # ways into a review (`ct --deepreview`, a trace with an associated diff,
+    # ways into a review (`ct review`, a trace with an associated diff,
     # the agentic handoff) used to configure review state their own way, and
     # the agentic one additionally reached into the standalone DeepReview
     # panel.  This file drives each path's *production* projection over the
@@ -329,6 +329,19 @@ const
     # delivery contract exhaustively over every startup path, so a new path
     # cannot be added without deciding how it gets its lists.
     "src/tests/gui/tests/welcome-screen/recent_items_startup_vm_test.nim",
+    # RV-1 (Review-Command.milestones.org) — `ct review` is DeepReview's whole
+    # command-line surface, and the two older spellings are retired outright.
+    # Registered here because this array IS the gate: the dispatch it asserts
+    # is pure argv handling in `src/ct/review_cli.nim`, which no Playwright
+    # suite can reach (they exercise the *launch*, and only its success path),
+    # and an unregistered ViewModel test runs nowhere.  It carries a
+    # native-only source-contract suite for the same reason
+    # `deepreview_layout_test.nim` and `deepreview_entry_test.nim` do: the
+    # wiring lives in confutils declarations and a pre-parser interception
+    # that only exist in a linked `ct`, so reading the sources is the only
+    # headless way to assert the retired option is really gone rather than
+    # merely unused.
+    "src/tests/gui/tests/deepreview/ct_review_cli_test.nim",
   ]
 
   CliRecordGateTests* = [
@@ -360,6 +373,24 @@ const
     "src/tests/cli/record_dispatch_test.nim",
     "src/tests/cli/record_missing_recorder_test.nim",
     "src/tests/cli/record_dispatch_e2e_test.nim",
+  ]
+
+  CliReviewGateTests* = [
+    # RV-1: the `ct review` CLI lane.  Same contract and the same runner as
+    # `CliRecordGateTests` above — `just test-cli-record` globs the whole of
+    # `src/tests/cli`, so this file is compiled and run by it — but a
+    # different subject, kept in its own array so the record lane's rationale
+    # is not diluted.
+    #
+    # It exists because the two halves of RV-1 fail in different places.  The
+    # dispatch is pure and is gated in `CoreViewModelGateTests`; whether the
+    # SHIPPED binary is wired to it is not, and cannot be: the wiring is a
+    # confutils declaration plus an interception that runs before confutils,
+    # neither of which exists outside a linked `ct`.  Against the pre-RV-1
+    # binary every case in this file fails — `ct review …` answered "ct has
+    # no such subcommand" and the retired global option was still accepted —
+    # which is exactly the gap it now guards.
+    "src/tests/cli/review_cli_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

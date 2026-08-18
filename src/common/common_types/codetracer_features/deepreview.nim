@@ -18,7 +18,7 @@ type
     ## carries no test-name, pass/fail or duration field anywhere, and neither
     ## does the exporter that produces it
     ## (``codetracer-native-backend/src/deepreview/json_export.rs``,
-    ## ``DeepReviewData``).  A review launched from ``ct --deepreview`` over an
+    ## ``DeepReviewData``).  A review launched from ``ct review`` over an
     ## exported dataset therefore has nothing to fill that row with, and the
     ## Agent Activity pane renders an explicit "not available for this
     ## dataset" state rather than a zeroed roll-up that would read as "all

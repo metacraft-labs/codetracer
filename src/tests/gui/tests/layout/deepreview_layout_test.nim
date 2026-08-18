@@ -1,7 +1,7 @@
 ## Headless regression tests for what starting a DeepReview session does to
 ## the GoldenLayout — issue #610 (milestone M42a) and DR-R8.
 ##
-## The reported symptom: launching ``ct --deepreview <export.json>`` replaced
+## The reported symptom: launching ``ct review <export.json>`` replaced
 ## the whole workspace with three panels (VCS, the DeepReview diff, CALLTRACE).
 ## FILES, STATE, SCRATCHPAD, AGENT ACTIVITY, EVENT LOG, TIMELINE and TERMINAL
 ## OUTPUT were gone for the entire session, and the user's own layout was

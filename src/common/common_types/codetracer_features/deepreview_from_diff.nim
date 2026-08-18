@@ -12,7 +12,7 @@
 ## Every stage of that pipeline already existed; the renderer used to drop the
 ## diff on the floor, so the launch method existed on paper only.  This module
 ## is the missing conversion: a structured `Diff` becomes the same
-## `DeepReviewData` that `ct --deepreview` loads from disk and that the
+## `DeepReviewData` that `ct review` loads from disk and that the
 ## agentic handoff assembles from its session, so from the renderer's point of
 ## view the three launch paths differ only in where the dataset came from
 ## (§7: "All three entry points converge on the same routine").

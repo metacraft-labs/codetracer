@@ -96,6 +96,15 @@ type
     `index-diff`,
     edit,
 
+    # RV-1 (`codetracer-specs/DeepReview/Review-Command.milestones.org`):
+    # DeepReview's entire command-line surface.  `ct review <PATH>` is
+    # declared here — as an ordinary command with one argument — so it keeps
+    # ct's global options and appears in `ct --help` and shell completion.
+    # `ct review collect …` and `ct review inspect …` never reach confutils:
+    # they carry flags that are not ct's own, so `codetracer.nim` intercepts
+    # them ahead of the parser (`review_cli.reviewNeedsRawDispatch`).
+    review,
+
     # `g++`,
     # gcc,
     # rustc,
@@ -216,16 +225,17 @@ type
       defaultValue: false
     .} : bool
 
-    # Frontend flag forwarded to Electron as an
-    # app argument. Parsed by the frontend's
-    # src/frontend/index/args.nim.
-    deepreview* {.
-      name: "deepreview"
-      desc: "Path to a DeepReview JSON " &
-        "export file (forwarded to " &
-        "Electron frontend)"
-      defaultValue: ""
-    .} : string
+    # RV-1: the global `--deepreview <PATH>` option that used to live here is
+    # RETIRED, not renamed.  DeepReview's whole command-line surface is the
+    # `ct review` command group (`StartupCommand.review` below), per
+    # `codetracer-specs/DeepReview/DeepReview-GUI.md` §1.1.  The retired
+    # spelling is diagnosed deliberately in `codetracer.nim` — see
+    # `review_cli.retiredDeepReviewMessage` — because confutils' default
+    # "Unrecognized option" names no replacement.
+    #
+    # The frontend-side `--deepreview <PATH>` argument is a DIFFERENT thing
+    # and stays: it is the internal ct -> Electron wire that
+    # `src/frontend/index/args.nim` parses, not a user-facing option.
 
     # Tab-vs-window policy overrides.
     # These apply to replay, run, and any command that opens a trace.
@@ -1156,6 +1166,16 @@ type
         argument
         desc: "Path to a directory or " &
           "file to open for editing"
+      .}: string
+
+    of review:
+      reviewPath* {.
+        argument
+        defaultValue: ""
+        desc: "Path to a review dataset: " &
+          "a review.json file, or a " &
+          "directory produced by " &
+          "`ct review collect`"
       .}: string
 
     # of `import`:

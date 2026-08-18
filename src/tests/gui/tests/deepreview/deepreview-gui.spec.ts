@@ -1,8 +1,11 @@
 /**
  * E2E tests for the DeepReview GUI (M3: Local .dr file loading).
  *
- * These tests verify that the ``--deepreview <path>`` CLI argument correctly
- * loads a DeepReview JSON export file and renders it in the CodeTracer GUI.
+ * These tests verify that ``ct review <path>`` correctly loads a DeepReview
+ * JSON export file and renders it in the CodeTracer GUI.  (That command
+ * replaced the retired ``ct --deepreview <path>`` option; the fixture in
+ * ``lib/fixtures.ts`` launches the shipping spelling, so this suite is the
+ * end-to-end coverage of it.)
  *
  * Headless counterparts live in
  * ``src/tests/gui/tests/deepreview/``, ``src/tests/gui/tests/vcs/``,

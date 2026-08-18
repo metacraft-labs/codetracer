@@ -255,7 +255,7 @@ proc toDeepReviewHunks(hunks: seq[ReviewHunk]): seq[DeepReviewHunk] =
 
 proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
   ## The agentic session's evidence as a review dataset — the same
-  ## ``DeepReviewData`` shape ``ct --deepreview`` loads from disk, so the two
+  ## ``DeepReviewData`` shape ``ct review`` loads from disk, so the two
   ## paths differ in where the dataset came from and in nothing else.
   ##
   ## Everything is projected on the ViewModel: the changeset, the title and the
@@ -444,7 +444,7 @@ proc syncDeepReview(launcher: AgenticSessionLauncher) =
   ## What replaces it is the entry routine every other launch path uses.  The
   ## agent's route into DeepReview is the CLI (§1.1), and `ct agent evidence`
   ## reaches this handoff through `AgenticSessionVM.handleAgentEvidenceRpc*`;
-  ## from here on it is indistinguishable from `ct --deepreview`.
+  ## from here on it is indistinguishable from `ct review`.
   data.deepReviewActive = true
   data.deepReviewData = launcher.deepReviewData()
   data.startOptions.deepReview = data.deepReviewData

@@ -131,6 +131,15 @@ func augmentSelfCommand(cmd: var RuntimeCommand) =
   of "edit":
     if cmd.description.len == 0:
       cmd.description = "Open a file or folder in CodeTracer"
+  # RV-1: DeepReview's whole command-line surface.  Without a description
+  # here the launcher's help screen would show a bare `review` next to the
+  # commands that do carry one.
+  of "review":
+    if cmd.description.len == 0:
+      cmd.description =
+        "Review a diff with its recorded executions (collect, inspect, open)"
+    if cmd.fileTypes.len == 0:
+      cmd.fileTypes = @[".json"]
   of "import":
     if cmd.description.len == 0:
       cmd.description = "Import a previously exported trace archive"

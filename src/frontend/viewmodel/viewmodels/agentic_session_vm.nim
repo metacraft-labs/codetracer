@@ -398,7 +398,7 @@ proc agenticReviewDataset*(vm: AgenticSessionVM): ReviewDataset =
   ## Agentic-Coding-Integration.md §4.4: when a session finishes with a diff
   ## and one or more recorded traces, "CodeTracer creates a DeepReview session
   ## from that output, following DeepReview GUI".  This is that output
-  ## projected into the same shape `ct --deepreview` projects an exported
+  ## projected into the same shape `ct review` projects an exported
   ## dataset into, so both reach an identical review state through one routine
   ## instead of two conventions.
   ##

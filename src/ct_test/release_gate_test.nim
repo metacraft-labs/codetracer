@@ -121,6 +121,21 @@ suite "ct-test M16 release gate":
     check justfile.contains("test-cli-record:")
     check justfile.contains("find src/tests/cli -name '*_test.nim'")
 
+  test "cli_review_gate_tests_exist_and_are_registered":
+    # RV-1: the `ct review` CLI lane.  Same contract as the record lane, and
+    # deliberately the same runner — `test-cli-record`'s glob covers the whole
+    # of `src/tests/cli` — so the "registered in only one place runs nowhere"
+    # failure cannot recur here either.
+    for cliPath in CliReviewGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    check fileExists("justfile")
+    let reviewRunner = readExisting("justfile")
+    check reviewRunner.contains("test-cli-record:")
+    check reviewRunner.contains("find src/tests/cli -name '*_test.nim'")
+
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:
       checkpoint(entry.action)

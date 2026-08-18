@@ -1,13 +1,13 @@
 ## One review-entry routine for all three launch paths (DR-R7).
 ##
 ## `codetracer-specs/DeepReview/DeepReview-GUI.md` §1 lists three ways into a
-## review — `ct --deepreview <PATH>`, opening a trace that is associated with a
+## review — `ct review <PATH>`, opening a trace that is associated with a
 ## diff, and finishing an agentic coding session — and §7 requires them to
 ## converge: "All three entry points converge on the same routine: load the
 ## dataset, populate the three panels, focus the VCS panel, open the first
 ## file."
 ##
-## Before DR-R7 they did not.  `ct --deepreview` went through
+## Before DR-R7 they did not.  `ct review` went through
 ## `ui_js.onStartDeepReview`, the agentic handoff through
 ## `ui/agentic_session_launcher.syncDeepReview` (which additionally reached
 ## into a standalone `DeepReviewComponent` to set its view mode, selected file,
@@ -218,7 +218,7 @@ proc fixtureEvidenceFiles(fixture: string): seq[AgentServiceEvidenceFileEntry] =
 # ---------------------------------------------------------------------------
 
 proc cliLaunchDataset(): ReviewDataset =
-  ## `ct --deepreview <PATH>`: the exported dataset, projected by the same
+  ## `ct review <PATH>`: the exported dataset, projected by the same
   ## generic routine the renderer instantiates over its own `DeepReviewData`.
   reviewDatasetFrom(fixtureReviewData(SampleReviewJson))
 
@@ -461,7 +461,7 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
       let b = enterFrom(traceDiff)
       let c = enterFrom(agentic)
 
-      checkEnteredState(a, "ct --deepreview")
+      checkEnteredState(a, "ct review")
       checkEnteredState(b, "trace with an associated diff")
       checkEnteredState(c, "agentic handoff")
 
@@ -868,7 +868,7 @@ when not defined(js):
       check not whole.contains("proc deepReviewHunks(")
 
     test "the CLI launch path enters the review through the same routine":
-      ## `ct --deepreview` cannot open a tab from `onStartDeepReview` itself
+      ## `ct review` cannot open a tab from `onStartDeepReview` itself
       ## (the message can arrive before GoldenLayout exists), so entry runs
       ## from `tryInitLayout` — but through the same host routine.
       let body = source(UiJsPath)

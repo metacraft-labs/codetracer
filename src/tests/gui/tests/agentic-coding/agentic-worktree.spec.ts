@@ -459,7 +459,7 @@ test.describe("Agentic worktree GUI E2E", () => {
     assertSameAgentSession(startSnapshot, deepReviewSnapshot);
     assertDeepReview(deepReviewSnapshot);
     // DR-R7: the agentic handoff no longer opens a standalone DeepReview
-    // panel — it enters the review through the same routine `ct --deepreview`
+    // panel — it enters the review through the same routine `ct review`
     // uses, so the review is the VCS panel plus an editor diff tab plus the
     // Agent Activity panel's DeepReview section (DeepReview-GUI.md §7, "There
     // is no separate 'DeepReview mode' that replaces the UI").  These two

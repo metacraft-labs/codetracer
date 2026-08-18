@@ -401,7 +401,7 @@ proc ensureAgentActivityDeepReviewVM*(): AgentActivityDeepReviewVM =
   ##
   ## Needed because the DeepReview section is rendered inside the Agent
   ## Activity panel (DeepReview-GUI.md §2.1) and that panel mounts long
-  ## before — and, on the ``ct --deepreview`` path, entirely without —
+  ## before — and, on the ``ct review`` path, entirely without —
   ## ``configureMiddleware``.  Before DR-R3 the VM was only ever constructed
   ## by an ``AgentActivityDeepReviewComponent``, and no layout declares one,
   ## which is one of the reasons the third pillar was never populated.

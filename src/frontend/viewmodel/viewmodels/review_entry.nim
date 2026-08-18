@@ -17,7 +17,7 @@
 ## routine: load the dataset, populate the three panels, focus the VCS panel,
 ## open the first file").  Since DR-R7 all three do:
 ##
-##   * `ct --deepreview <PATH>`  → `ui_js.onStartDeepReview` sets
+##   * `ct review <PATH>`  → `ui_js.onStartDeepReview` sets
 ##     `data.deepReviewData`; `tryInitLayout` calls
 ##     `vcs.startDeepReviewNavigation`;
 ##   * a trace with an associated diff → `ui_js.onTraceLoaded` assembles a
@@ -85,7 +85,7 @@ type
 
   ReviewDataset* = object
     ## Everything the review-entry routine needs, whichever launch path
-    ## produced it: `ct --deepreview <PATH>`, opening a trace that carries an
+    ## produced it: `ct review <PATH>`, opening a trace that carries an
     ## associated diff, or the agentic handoff (DeepReview-GUI.md §1).
     title*: string
     commit*: string

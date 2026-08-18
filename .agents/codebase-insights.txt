@@ -1164,7 +1164,7 @@ must not do is drag `frontend/types` in as well.
 
 ## Review entry has exactly one routine — do not add a second
 
-All three DeepReview launch paths (`ct --deepreview`, a trace with an
+All three DeepReview launch paths (`ct review`, a trace with an
 associated diff, the agentic handoff) publish `data.deepReviewData` and then
 call `vcs.startDeepReviewNavigation(data)` → `review_entry.enterReview`, which
 populates the VCS panel, the Agent Activity DeepReview section and the editor.
@@ -1174,3 +1174,45 @@ the first file — is gated by `VCSVM.reviewEntered` and the selection is
 carried across a refresh *by path*. `src/tests/gui/tests/deepreview/
 deepreview_entry_test.nim` holds both a behavioural suite and a source
 contract asserting the hosts still call it.
+
+## `ct review` is DeepReview's whole CLI, and it is dispatched in two places
+
+`src/ct/review_cli.nim` holds a *pure* planner, `planReviewCli(argv)`, that
+resolves a `ct review …` line into a `ReviewPlan` with no filesystem and no
+subprocess. That is what makes the dispatch assertable on both Nim backends
+(`src/tests/gui/tests/deepreview/ct_review_cli_test.nim` runs under `nim c`
+*and* `nim js`). Everything effectful — resolving the dataset on disk, shelling
+out to the native collector — is in the file's `when not defined(js)` half.
+
+The two callers are deliberate and asymmetric:
+
+* `src/ct/codetracer.nim` intercepts `ct review collect|inspect` **before**
+  confutils parses argv, because those verbs carry flags that are not ct's
+  (`--repo`, `--diff-file`, `--preset`) and confutils rejects any unknown
+  dash-prefixed token. Same technique as `ct-complete` and `ct record --`.
+* `src/ct/launch/launch.nim` handles `ct review <PATH>` as an ordinary
+  `StartupCommand.review`, so it keeps ct's global options (`--inspect`,
+  `--remote-debugging-port`) that Playwright injects.
+
+Both call the planner, so they cannot disagree about what a line means.
+
+`reviewNeedsRawDispatch` must key on the VERB alone — `collect`, `inspect`,
+`export` — and never on argument count. Claiming the line as soon as a second
+token followed the path made `ct review DIR --remote-debugging-port=0` fail
+with "exactly one dataset path", i.e. it took back the one property the split
+exists to preserve. Extra positionals are confutils' job: it answers them with
+"The subcommand 'review' does not accept additional arguments", the same way it
+does for `ct edit`.
+
+Retired, and they fail rather than alias: `ct --deepreview <PATH>` (diagnosed
+deliberately in `codetracer.nim` — confutils' default names no replacement) and
+`ct-native-replay deepreview {collect,export,inspect}` (the group was renamed to
+a hidden `review-data` that `ct review` invokes; a hidden `deepreview` arm
+survives only to print the pointer). The *frontend* `--deepreview <PATH>`
+argument in `src/frontend/index/args.nim` is a different thing and is NOT
+retired: it is the internal ct → Electron wire.
+
+`ct review collect --output DIR` writes `DIR/review.json` as well as the binary
+`.dr` chunks, because the GUI reads JSON and the `export` step that used to
+bridge them is one of the retired commands. `ct review DIR` resolves the JSON
+inside the directory.

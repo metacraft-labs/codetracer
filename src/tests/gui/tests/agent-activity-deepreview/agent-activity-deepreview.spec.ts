@@ -11,7 +11,7 @@
  *    review launched from the CLI over an exported dataset must populate it
  *    too."
  *
- * These tests launch `ct --deepreview` over `sample-review.json` — no agent
+ * These tests launch `ct review` over `sample-review.json` — no agent
  * process, no ACP session, no live notification stream — and assert that the
  * pane is nevertheless populated from the dataset.
  *

@@ -354,7 +354,7 @@ proc findById(node: MockNode; id: string): MockNode =
 # DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
 # modified file opens in the editor with unified diff view."  The step is a
 # named, reusable routine (`viewmodels/review_entry`) because DR-R7 makes all
-# three launch paths — `ct --deepreview`, opening a diff-associated trace, and
+# three launch paths — `ct review`, opening a diff-associated trace, and
 # the agentic handoff — converge on it.
 #
 # The changeset is read from the same `sample-review.json` fixture the

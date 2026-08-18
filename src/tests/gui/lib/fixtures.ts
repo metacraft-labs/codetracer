@@ -1669,10 +1669,15 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   clearElectronSingletonLocks();
   console.log(`# launching deepreview mode for ${jsonPath}`);
 
+  // RV-1: the user-facing spelling is `ct review <PATH>`; the retired
+  // `ct --deepreview <PATH>` option now fails with a pointer to it.  The
+  // Windows branch launches ELECTRON directly rather than `ct`, so it passes
+  // the internal ct -> Electron argument that `src/frontend/index/args.nim`
+  // parses, which is unchanged and is not the retired option.
   const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
   const drArgs = (isWindows && electronExePath)
     ? [codetracerPrefix, "--deepreview", jsonPath]
-    : [`--deepreview=${jsonPath}`];
+    : ["review", jsonPath];
 
   const app = await _electron.launch({
     executablePath: drExe,

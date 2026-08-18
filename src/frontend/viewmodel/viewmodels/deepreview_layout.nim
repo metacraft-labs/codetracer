@@ -1,6 +1,6 @@
 ## GoldenLayout focus preset for a DeepReview session.
 ##
-## DeepReview (``ct --deepreview <export.json>``) used to *replace* the
+## DeepReview (``ct review <export.json>``) used to *replace* the
 ## user's GoldenLayout with a hand-rolled three-panel preset (VCS +
 ## DeepReview + CALLTRACE).  Everything else — FILES, STATE, SCRATCHPAD,
 ## AGENT ACTIVITY, EVENT LOG, TIMELINE, TERMINAL OUTPUT — simply vanished
