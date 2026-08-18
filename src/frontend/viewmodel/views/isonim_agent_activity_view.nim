@@ -36,6 +36,15 @@ const AgentActivityDiffEditorPrefix* = "diff-editor"
 const AgentActivityTerminalShellPrefix* = "shellComponent-"
 const AgentActivityPlaceholderText* = "Ask anything"
 
+const AgentActivitySessionNoticeClass* = "agent-session-notice"
+  ## RV-6 — the panel's explicit statement about a review's agent session.
+  ##
+  ## It paints only when `AgentActivityVM.sessionNotice` is non-empty, which
+  ## is every case except "here is the conversation" and "this review has no
+  ## session".  DeepReview-GUI.md §2.1: when the backend cannot resolve the
+  ## referenced session, "the panel says so explicitly.  It must not silently
+  ## render an empty session, which reads as 'the agent did nothing'."
+
 const AgentActivityDeepReviewHostClass* = "agent-ha-deepreview-host"
   ## Wrapper the DeepReview section is rendered into.  It carries `hidden`
   ## outside a review so the host contributes neither height nor the
@@ -259,6 +268,16 @@ proc renderModelButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
         text "GPT 5"
       tdiv(class = "agent-model-img")
 
+proc renderSessionNotice[R](r: R; notice: string): auto =
+  ## One line explaining the state of the review's agent session.
+  ##
+  ## Deliberately a plain block rather than a message row: it is CodeTracer
+  ## speaking, not the agent, and styling it as a conversation turn would
+  ## attribute the sentence to the agent.
+  ui(r):
+    tdiv(class = AgentActivitySessionNoticeClass):
+      text notice
+
 proc renderSubmitButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-primary agent-submit-button agent-start-button",
@@ -284,8 +303,13 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   let panel = ui(r):
     tdiv(class = AgentActivityContainerClass):
-      tdiv(ref = deepReviewHost, class = AgentActivityDeepReviewHostClass)
+      # RV-6, amended §2.1: **the session is primary, the roll-up is
+      # secondary.**  The conversation therefore comes first in the panel and
+      # the DeepReview roll-up sits beneath it — previously the order was the
+      # other way round, which put a static coverage summary above the thing
+      # the reviewer opened the review to read.
       tdiv(ref = conversation, class = AgentActivityConversationClass)
+      tdiv(ref = deepReviewHost, class = AgentActivityDeepReviewHostClass)
       tdiv(class = AgentActivityInteractionClass):
         textarea(ref = input,
                  `type` = "text",
@@ -321,6 +345,13 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   createRenderEffect proc() =
     r.clearChildren(conversation)
+    # First, and outside the message list: why this conversation looks the way
+    # it does.  A loaded-but-empty session, a pruned one and an agent that
+    # cannot replay sessions all render an identical empty list, so the
+    # sentence is the only thing that tells them apart (§2.1).
+    if vm.sessionNotice.val.len > 0:
+      r.appendRenderedChild(
+        conversation, renderSessionNotice(r, vm.sessionNotice.val))
     for message in vm.messages.val:
       r.appendRenderedChild(conversation, renderMessage(r, componentId, message))
     for terminal in vm.terminals.val:

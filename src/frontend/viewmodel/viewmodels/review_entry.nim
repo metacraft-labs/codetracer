@@ -48,6 +48,8 @@ import isonim/core/signals
 
 import ../store/types
 import agent_activity_deepreview_vm
+import agent_activity_vm
+import review_session
 import vcs_vm
 
 type
@@ -450,7 +452,8 @@ proc reviewCoverageSummary*(files: openArray[AgentDeepReviewFileCoverage];
 
 proc populateReviewActivity*(activity: AgentActivityDeepReviewVM;
                              files: openArray[AgentDeepReviewFileCoverage];
-                             functionsTraced: int) =
+                             functionsTraced: int;
+                             sessionPresent = false) =
   ## §7 step 4: "The Agent Activity panel's DeepReview section populates with
   ## coverage and test results."
   ##
@@ -473,11 +476,17 @@ proc populateReviewActivity*(activity: AgentActivityDeepReviewVM;
     activity.setTestResultsUnavailable()
   activity.setReviewActive(true)
   # The section is collapsible, and collapsed by default so it stays out of
-  # the way of an agent conversation.  A review is the case where it is the
-  # point of the panel — §2.1: the review answers "what was run, what did it
-  # cover, and what passed" here — so entering one opens it.  The reviewer can
-  # still fold it away; nothing re-opens it afterwards.
-  activity.setExpanded(true)
+  # the way of an agent conversation.
+  #
+  # RV-6 reconciles the two halves of the panel per the amended §2.1: **the
+  # session is primary, the roll-up is secondary.**  So a review that carries
+  # a session leaves the roll-up folded — the conversation is what the
+  # reviewer came for, and the coverage numbers are a summary they can open —
+  # while a review with no session opens it, because then it *is* the point
+  # of the panel ("what was run, what did it cover, and what passed").
+  # Either way the reviewer can fold or unfold it; nothing overrides them
+  # afterwards, which is what makes `setExpanded` idempotent.
+  activity.setExpanded(not sessionPresent)
 
 # ---------------------------------------------------------------------------
 # §2.1 — "two views of one selection"
@@ -612,7 +621,9 @@ proc enterReview*(vcs: VCSVM;
                   dataset: ReviewDataset;
                   open: ReviewOpenProc;
                   focus: ReviewFocusProc = nil;
-                  wantedTraceContextId = KeepCurrentTraceContext):
+                  wantedTraceContextId = KeepCurrentTraceContext;
+                  conversation: AgentActivityVM = nil;
+                  session = ReviewSession(state: rssAbsent)):
     VCSOpenAction {.discardable.} =
   ## **The** review-entry routine.  Every launch path calls this one
   ## (DeepReview-GUI.md §7: "All three entry points converge on the same
@@ -647,8 +658,18 @@ proc enterReview*(vcs: VCSVM;
   if vcs.isNil:
     return VCSOpenAction(kind: voaNone, index: -1)
   let selected = vcs.applyReviewDataset(dataset, wantedTraceContextId)
+  # RV-6, §2.1 step 4a: the agent session that produced the review, loaded
+  # into the same panel.  It happens *before* the roll-up so the roll-up can
+  # see whether a session is present and demote itself accordingly, and it
+  # happens here — in the one entry routine — so a CLI-launched review and an
+  # agentic handoff show the session identically.
+  #
+  # An absent session is a no-op, which is what keeps a dataset with no
+  # reference reviewing exactly as it did before RV-6.
+  applyReviewSession(conversation, session)
   populateReviewActivity(activity, dataset.coverageRows(),
-                         dataset.functionsTraced)
+                         dataset.functionsTraced,
+                         sessionPresent = session.hasSession())
   if not vcs.reviewEntered.val and selected >= 0:
     vcs.reviewEntered.val = true
     if focus != nil:

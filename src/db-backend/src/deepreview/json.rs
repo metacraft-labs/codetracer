@@ -69,6 +69,55 @@ pub struct DeepReviewData {
     pub files: Vec<FileData>,
     /// Call trace tree (absent when no call tree was collected).
     pub call_trace: Option<CallTraceData>,
+    /// RV-6 — the agent session this dataset came from, when the collecting
+    /// environment identified one.
+    ///
+    /// `#[serde(default)]` because absence is the normal case, not an error:
+    /// a dataset collected by a human names no session, and the native
+    /// exporter in `codetracer-native-backend` does not write the field at
+    /// all.  `skip_serializing_if` keeps it out of those datasets entirely
+    /// rather than writing `"session": null`, so a reader cannot mistake an
+    /// explicit null for a reference it failed to parse.
+    ///
+    /// The field is a **reference**: an id plus what is needed to resolve it,
+    /// never a copy of the conversation.  `ct review collect` is what stamps
+    /// it (it is the one process that sees the agent's environment, and it is
+    /// the single path both collectors go through), so nothing in this crate
+    /// populates it today — but the type carries it so a dataset that already
+    /// has one survives a round-trip through here instead of being silently
+    /// dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionRefData>,
+}
+
+/// A pointer at the agent session that produced a dataset.
+///
+/// Mirrors `DeepReviewSessionRef` in
+/// `src/common/common_types/codetracer_features/deepreview.nim` field for
+/// field; see that type for why a review references a session rather than
+/// embedding its transcript.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRefData {
+    /// The backend's own id for the session.
+    pub session_id: String,
+    /// `"acp"` or `"harbor"`.
+    pub backend: String,
+    /// The directory the session ran in.
+    #[serde(default)]
+    pub workspace_path: String,
+    /// Agent Harbor's task id, when the session belongs to one.
+    #[serde(default)]
+    pub task_id: String,
+    /// For `"acp"`: the stdio ACP binary that can replay the session.
+    #[serde(default)]
+    pub agent_command: String,
+    /// Arguments for `agent_command`.
+    #[serde(default)]
+    pub agent_args: Vec<String>,
+    /// For `"harbor"`: base URL of the instance holding the session.
+    #[serde(default)]
+    pub endpoint: String,
 }
 
 /// A selectable trace context — one recording of the reviewed change.

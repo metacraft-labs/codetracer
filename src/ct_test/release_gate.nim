@@ -384,6 +384,23 @@ const
     # Python recordings used to print "Review dataset ready" and exit 0 over
     # a dataset with nothing in it.
     "src/tests/gui/tests/deepreview/ct_review_cli_test.nim",
+    # RV-6 — a review loads the agent session that produced it.
+    # DeepReview-GUI.md §2.1: "The primary thing the panel shows in a review
+    # is the agent session that produced it."  Three of the milestone's five
+    # verification entries live here (the other two are `nim-acp`'s
+    # `session/load` and `nim-agents`' `loadSession`, in those repositories'
+    # own suites): a dataset with no reference reviews normally, an
+    # unresolvable reference renders an explicit state, and a resolvable one
+    # renders the session's messages.
+    #
+    # It belongs in this array rather than in the Playwright lane because the
+    # decision it guards is a *projection* — three different empty message
+    # lists that must not read alike — and the failure it prevents is silent:
+    # a pruned session rendering as a blank panel says "the agent did
+    # nothing", which §2.1 names a defect.  The collect-side half (what the
+    # agent's environment means, and what stamping a reference does) is pure
+    # for the same reason `ct review`'s dispatch is, and is asserted here too.
+    "src/tests/gui/tests/deepreview/review_session_vm_test.nim",
     # RV-4 — the materialized-trace collector, at the end the GUI reads.
     # DeepReview-GUI.md §1.1: "DeepReview is not an rr-only feature. Every
     # language that produces a materialized trace ... must be reviewable."

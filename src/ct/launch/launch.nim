@@ -10,6 +10,7 @@ import
   ../ci/[ ci_commands ],
   ../codetracerconf,
   ../review_cli,
+  ../review_session,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
   ../doctor,
@@ -483,11 +484,48 @@ proc runInitial*(conf: CodetracerConf) =
         if resolved.error.len > 0:
           errorMessage resolved.error
           quit(1)
-        # `--deepreview` here is the internal ct -> Electron argument parsed
-        # by `src/frontend/index/args.nim`, not the retired user-facing
-        # option: the frontend wire is unchanged, only its entry point is.
+        # RV-6 — resolve the agent session the dataset names, if it names
+        # one, *before* Electron starts.
+        #
+        # It happens here rather than in the renderer because reaching an
+        # agent means spawning a stdio ACP child or speaking HTTP to Agent
+        # Harbor, and `nim-acp`'s stdio transport does not exist on the
+        # JavaScript backend the Electron main process is compiled to.  `ct`
+        # is native, holds `nim-agents`, and is already the process that
+        # decided which dataset to open.
+        #
+        # The dataset still carries only a *reference*: the transcript this
+        # produces is a temporary file for this one window, never written
+        # back into `review.json` (DeepReview-GUI.md §2.1, "by reference,
+        # never by copy").  A dataset that names no session produces no file
+        # and no argument, which is the ordinary case.
+        var electronArgs = @["--deepreview", absolutePath(resolved.jsonPath)]
+        let sessionRef = reviewSessionRefOfDataset(resolved.jsonPath)
+        if hasSessionRef(sessionRef):
+          # `resolveReviewSession` never raises and never answers with
+          # silence: an unreachable agent, a pruned session or a missing
+          # agent command all come back as an explicit state the panel
+          # renders as such.  So a failure here must not stop the review
+          # opening — the review is complete without its session.
+          let sessionPath = writeResolvedReviewSession(
+            resolveReviewSession(sessionRef))
+          if sessionPath.len > 0:
+            electronArgs.add "--review-session"
+            electronArgs.add sessionPath
+          else:
+            # The one remaining way this whole path could go quiet: the
+            # resolution succeeded (or failed explicitly) but the handoff file
+            # could not be written, so the renderer gets no document and shows
+            # the panel a dataset with *no* reference shows.  That would be the
+            # "reads as the agent did nothing" state §2.1 forbids, arrived at
+            # from the other side, so it is said out loud here rather than
+            # swallowed.  It stays non-fatal: the review is complete without
+            # its session.
+            errorMessage "could not hand the agent session '" &
+              sessionRef.sessionId & "' to the review window; the review " &
+              "opens without it"
         launchElectron(
-          args = @["--deepreview", absolutePath(resolved.jsonPath)],
+          args = electronArgs,
           inspect = conf.inspect,
           remoteDebuggingPort = conf.remoteDebuggingPort,
           remoteDebuggingPipe = conf.remoteDebuggingPipe)

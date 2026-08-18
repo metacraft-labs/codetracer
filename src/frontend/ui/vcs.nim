@@ -30,8 +30,11 @@ import git_cli
 # shared selection travels back through its `onActivityReviewFileSelected`
 # hook, installed by `startReviewNavigation` below.
 import agent_activity_deepreview
+import agent_activity
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/review_entry
+from ../viewmodel/viewmodels/review_session import
+  ReviewSession, reviewSessionFrom
 from ../viewmodel/store/types as vm_store_types import
   AgentDeepReviewFileCoverage
 
@@ -820,6 +823,19 @@ proc startReviewNavigation*(self: VCSComponent) =
   agent_activity_deepreview.onActivityReviewFileSelected =
     proc(path: string) = self.handleActivityFileSelection(path)
   let dataset = self.reviewDataset()
+  # RV-6 — the agent session the dataset named, already resolved by `ct`
+  # (`src/ct/review_session.nim`) and forwarded through `StartOptions`.
+  #
+  # Nil is the ordinary case and projects to the "absent" state, which
+  # `enterReview` treats as "this review has no session" and leaves the
+  # conversation alone.  A reference that would *not* resolve is not nil: it
+  # arrives with an explicit state and the backend's message, so the panel
+  # can say why (DeepReview-GUI.md §2.1).
+  let session = reviewSessionFrom(self.data.startOptions.reviewSession)
+  # Latched before entry so an Agent Activity panel that finishes mounting
+  # after this call — the mount retries asynchronously — lands in the same
+  # state, and so the legacy conversation sync cannot wipe it.
+  rememberReviewSessionForAgentActivity(session)
   discard enterReview(
     vm,
     ensureAgentActivityDeepReviewVM(),
@@ -828,7 +844,9 @@ proc startReviewNavigation*(self: VCSComponent) =
     proc() =
       focusDockedPanel(self.data, Content.VCS)
       focusDockedPanel(self.data, Content.AgentActivity),
-    self.data.deepReviewSelectedTraceContextId)
+    self.data.deepReviewSelectedTraceContextId,
+    conversation = agentActivityConversationVM(),
+    session = session)
   # The legacy carriers follow the ViewModel (see `syncLegacyVCSIntoVM`).
   self.data.deepReviewSelectedFileIndex =
     max(vm.reviewRowIndexForPath(selectedReviewPath(vm)), 0)

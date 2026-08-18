@@ -16,6 +16,8 @@ from ../viewmodel/viewmodels/agent_activity_vm import
 # separate panel and does not get its own layout slot"), so the mount passes
 # the section's VM and its click callback down to the IsoNim view.
 import agent_activity_deepreview
+from ../viewmodel/viewmodels/review_session import
+  ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_agent_activity_view import
@@ -172,6 +174,51 @@ proc safeStr(s: cstring): string =
   else:
     $s
 
+var reviewSessionForPanels = ReviewSession(state: rssAbsent)
+  ## RV-6 — the agent session the current review is bound to, latched at the
+  ## host level.
+  ##
+  ## The *decision* of what a review's session is, and what it means, belongs
+  ## entirely to `review_entry.enterReview` / `viewmodels/review_session.nim`;
+  ## this is only bookkeeping so a panel that mounts **after** the review was
+  ## entered ends up in the state that routine already computed.  Two things
+  ## make it necessary:
+  ##
+  ##   * `tryMountIsoNimAgentActivityPanel` retries asynchronously, so the
+  ##     panel's VM can be created after `startDeepReviewNavigation` has run;
+  ##   * `syncLegacyAgentActivityIntoVM` republishes the *legacy* conversation
+  ##     over the VM on every sync, which would otherwise wipe a loaded
+  ##     session moments after it was shown.
+  ##
+  ## Absent (the default) means no review, or a review whose dataset names no
+  ## session — in which case nothing here touches the panel at all.
+
+proc rememberReviewSessionForAgentActivity*(session: ReviewSession) =
+  ## Record the review's session so late-mounting panels and legacy syncs
+  ## converge on it.  Does not itself paint: `enterReview` does that for the
+  ## panels that already exist.
+  if session.state == rssAbsent:
+    return
+  reviewSessionForPanels = session
+
+proc agentActivityConversationVM*(): AgentActivityVM =
+  ## The conversation VM of whichever Agent Activity panel this window has,
+  ## or nil when none has mounted yet.
+  ##
+  ## A layout declares at most one Agent Activity panel in practice (the
+  ## review layout asserts exactly one), so "whichever" is "the".  Nil is a
+  ## legitimate answer and callers must treat it as one: a host whose layout
+  ## has no Agent Activity panel still gets a navigable review.
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      return vm
+  nil
+
+proc replayReviewSessionInto(vm: AgentActivityVM) =
+  ## Re-apply the latched review session over `vm`.  A no-op when there is
+  ## none, which is every non-review session.
+  applyReviewSession(vm, reviewSessionForPanels)
+
 proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   if self.isNil:
     return nil
@@ -196,6 +243,9 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
 
   result = createAgentActivityVM(agentActivityVMStore)
   agentActivityVMInstances[self.id] = result
+  # A panel that mounts into a review already in progress shows that review's
+  # session, not an empty conversation.
+  replayReviewSessionInto(result)
 
 proc initAgentActivityVMWithStore*(store: ReplayDataStore) =
   ## Install the shared ViewModel store used by production panels.
@@ -290,6 +340,15 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   vm.setLoading(self.isLoading)
   vm.setReRecordInProgress(self.reRecordInProgress)
   vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
+  # RV-6 — last, so a review's loaded session survives this sync.
+  #
+  # The legacy carrier's conversation is the *live* ACP one, which on the
+  # `ct review` path is empty (no agent was started, and CodeTracer must not
+  # start one).  Publishing it over a review's session would replace the
+  # thing the reviewer opened the review to read with nothing at all — and an
+  # empty conversation reads as "the agent did nothing" (DeepReview-GUI.md
+  # §2.1).  A non-review session leaves this a no-op.
+  replayReviewSessionInto(vm)
 
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent) =
   ## Refresh the Agent Activity IsoNim mount after legacy component state

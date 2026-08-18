@@ -625,6 +625,12 @@ pub fn collect(options: &CollectOptions) -> Result<(DeepReviewData, CollectRepor
         } else {
             Some(CallTraceData { nodes: call_nodes })
         },
+        // RV-6: the collector knows nothing about agent sessions, and should
+        // not.  The reference is a fact about the *environment the collection
+        // ran in*, which only `ct review collect` sees; it stamps the field
+        // onto the written `review.json` (`src/ct/review_session.nim`), for
+        // both collector routes at once.
+        session: None,
     };
     Ok((data, report))
 }

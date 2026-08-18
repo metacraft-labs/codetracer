@@ -129,6 +129,25 @@ proc decodeReviewDatasetJson*(fixture: string): ct_types.DeepReviewData =
     callTrace: ct_types.DeepReviewCallTrace(
       nodes: decodeCallNodes(node{"callTrace"}{"nodes"})))
 
+  # RV-6 — the optional reference to the agent session that produced the
+  # dataset.  Absent is the ordinary case and decodes to nil, which is what
+  # the renderer's cast produces for a missing key; a *present* reference must
+  # survive the reader intact, because the whole point is that the dataset
+  # carries the id rather than the conversation.
+  if node.hasKey("session") and node["session"].kind == JObject:
+    let session = node["session"]
+    var agentArgs: seq[string] = @[]
+    for arg in session{"agentArgs"}.items:
+      agentArgs.add arg.getStr("")
+    result.session = ct_types.DeepReviewSessionRef(
+      sessionId: session{"sessionId"}.getStr(""),
+      backend: session{"backend"}.getStr(""),
+      workspacePath: session{"workspacePath"}.getStr(""),
+      taskId: session{"taskId"}.getStr(""),
+      agentCommand: session{"agentCommand"}.getStr(""),
+      agentArgs: agentArgs,
+      endpoint: session{"endpoint"}.getStr(""))
+
   if node.hasKey("traceContexts"):
     for ctx in node["traceContexts"].items:
       result.traceContexts.add(ct_types.DeepReviewTraceContext(
@@ -206,3 +225,28 @@ proc datasetDeclaresKey*(fixture: string; key: string): bool =
   ## renderer does; a test that wants to assert a producer *omitted* a field
   ## (rather than wrote an empty one) needs to see the raw document.
   parseJson(fixture).hasKey(key)
+
+proc decodeReviewSessionTranscript*(fixture: string):
+    ct_types.DeepReviewSessionTranscript =
+  ## Decode the resolved-session document `ct` hands the renderer
+  ## (`--review-session`), the way `frontend/index/args.nim`'s cast does.
+  ##
+  ## It lives beside the dataset decode, and is deliberately *separate* from
+  ## it: the dataset carries the reference, this carries the conversation, and
+  ## the two are different files precisely so a shared dataset never carries
+  ## the conversation (DeepReview-GUI.md §2.1).
+  let node = parseJson(fixture)
+  result = ct_types.DeepReviewSessionTranscript(
+    state: node{"state"}.getStr(""),
+    sessionId: node{"sessionId"}.getStr(""),
+    backend: node{"backend"}.getStr(""),
+    message: node{"message"}.getStr(""),
+    events: @[])
+  for event in node{"events"}.items:
+    result.events.add ct_types.DeepReviewSessionEvent(
+      kind: event{"kind"}.getStr(""),
+      text: event{"text"}.getStr(""),
+      status: event{"status"}.getStr(""),
+      toolName: event{"toolName"}.getStr(""),
+      toolCallId: event{"toolCallId"}.getStr(""),
+      filePath: event{"filePath"}.getStr(""))

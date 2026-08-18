@@ -5,6 +5,13 @@ import
   ../lib/[ jslib, electron_lib ],
   ../../common/ct_logging
 
+proc reviewSessionUnlink*(path: cstring)
+    {.importjs: "try { require('fs').unlinkSync(#); } catch (_) {}".}
+  ## Remove the resolved-session handoff file `ct` wrote for this window,
+  ## after it has been read into memory (RV-6).  Swallowing the error is the
+  ## point: the file is a courtesy copy with no remaining reader, and a
+  ## read-only temp directory must not turn into a failed review.
+
 # <traceId>
 # --port <port>
 # --frontend-socket-port <frontend-socket-port>
@@ -104,6 +111,34 @@ proc parseArgs* =
           continue
         else:
           errorPrint "expected --deepreview <deepreviewJson>"
+          break
+      elif arg == cstring"--review-session":
+        # RV-6: the agent session the review's dataset referenced, already
+        # resolved by `ct` (see `src/ct/review_session.nim` for why the
+        # resolution happens there and not here — reaching an ACP agent needs
+        # a stdio child process, which `nim-acp` cannot spawn on this, the
+        # JavaScript, backend).
+        #
+        # The document always carries an explicit `state`, so a failed
+        # resolution arrives as a failure rather than as an empty
+        # conversation.  Like `--deepreview`, this is an internal ct ->
+        # Electron argument, not a user-facing flag.
+        if i + 1 < args.len:
+          data.startOptions.reviewSession = cast[DeepReviewSessionTranscript](
+            JSON.parse(fs.readFileSync(args[i + 1], cstring"utf8")))
+          # Read once, then unlinked.  This file is the *only* place a
+          # review's conversation content is ever written to disk, and the
+          # whole point of storing a reference rather than a transcript
+          # (DeepReview-GUI.md §2.1) is that conversation content does not
+          # accumulate in files that outlive the thing showing them.  It is
+          # already in memory by this line, so the copy on disk has no
+          # remaining reader.  Best-effort: failing to remove it must not stop
+          # the review opening.
+          reviewSessionUnlink(args[i + 1])
+          i += 2
+          continue
+        else:
+          errorPrint "expected --review-session <resolvedSessionJson>"
           break
       elif arg == cstring"--no-record":
         data.startOptions.record = false

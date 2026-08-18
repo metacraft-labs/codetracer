@@ -198,6 +198,31 @@
   background: colors-ui-surface-input-default
   margin-bottom: 0.5em
 
+// RV-6 — the panel's explanation of a review's agent session: it is empty,
+// it could not be fetched, or the agent cannot replay sessions at all
+// (DeepReview-GUI.md §2.1).
+//
+// Deliberately NOT styled as a message row.  It is CodeTracer speaking, not
+// the agent, and giving it the conversation turn's avatar-and-border chrome
+// would attribute the sentence to the agent — which is the same class of
+// mistake as rendering an unresolvable session as an empty conversation.
+// The left rule and the muted colour say "system note" without competing
+// with a conversation when one is also present.
+.agent-session-notice
+  // The rule uses the design system's *information* border rather than a
+  // surface colour: a surface token resolves to within a few percent of the
+  // notice's own background, so the accent was invisible in the running
+  // product and the block read as a plain box.  A notice a reviewer can
+  // overlook is most of the way back to the empty panel this exists to
+  // prevent.
+  border-left: 0.1875em solid colors-ui-border-information
+  border-radius: 0.125em
+  background: colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
+  padding: 0.5em 0.75em
+  margin-bottom: 0.5em
+  line-height: 1.4
+
 .user-wrapper
   background: transparent !important
 

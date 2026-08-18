@@ -25,10 +25,23 @@ type
     wantsPassword*: Signal[bool]
     wantsPermission*: Signal[bool]
     sessionKey*: Signal[string]
+    sessionNotice*: Signal[string]
+      ## RV-6 — an explicit statement about *why* this panel is showing the
+      ## conversation it is showing, or "" when the conversation speaks for
+      ## itself.
+      ##
+      ## It exists because the panel previously had no state between "here
+      ## are the messages" and nothing at all: a review whose session had
+      ## been pruned, or whose agent cannot replay sessions, rendered an
+      ## empty `.agent-com` that reads as "the agent did nothing".
+      ## DeepReview-GUI.md §2.1 names that a defect — "it must not silently
+      ## render an empty session".  A loaded session that genuinely carries
+      ## nothing also sets it, for the same reason.
 
     messageCount*: Memo[int]
     terminalCount*: Memo[int]
     hasMessages*: Memo[bool]
+    hasSessionNotice*: Memo[bool]
 
 proc setMessages*(vm: AgentActivityVM;
                   messages: openArray[AgentActivityMessageEntry]) =
@@ -54,6 +67,13 @@ proc setPromptFlags*(vm: AgentActivityVM; wantsPassword, wantsPermission: bool) 
 proc setSessionKey*(vm: AgentActivityVM; sessionKey: string) =
   vm.sessionKey.val = sessionKey
 
+proc setSessionNotice*(vm: AgentActivityVM; notice: string) =
+  ## Publish (or, with "", withdraw) the panel's explanatory notice.
+  ## Idempotent so subscribers do not refire on a re-entered review.
+  if vm.sessionNotice.val == notice:
+    return
+  vm.sessionNotice.val = notice
+
 proc clearConversation*(vm: AgentActivityVM) =
   vm.messages.val = @[]
   vm.terminals.val = @[]
@@ -62,6 +82,7 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.reRecordInProgress.val = false
   vm.wantsPassword.val = false
   vm.wantsPermission.val = false
+  vm.sessionNotice.val = ""
 
 proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
   withViewModel proc(dispose: proc()): AgentActivityVM =
@@ -73,6 +94,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let wantsPassword = createSignal(false)
     let wantsPermission = createSignal(false)
     let sessionKey = createSignal("")
+    let sessionNotice = createSignal("")
 
     let messageCount = createMemo[int] proc(): int =
       messages.val.len
@@ -80,6 +102,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       terminals.val.len
     let hasMessages = createMemo[bool] proc(): bool =
       messages.val.len > 0
+    let hasSessionNotice = createMemo[bool] proc(): bool =
+      sessionNotice.val.len > 0
 
     AgentActivityVM(
       store: store,
@@ -91,8 +115,10 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       wantsPassword: wantsPassword,
       wantsPermission: wantsPermission,
       sessionKey: sessionKey,
+      sessionNotice: sessionNotice,
       messageCount: messageCount,
       terminalCount: terminalCount,
       hasMessages: hasMessages,
+      hasSessionNotice: hasSessionNotice,
       disposeProc: dispose,
     )

@@ -254,6 +254,19 @@ type
     rawDiffIndex*: langstring
     deepReview*: DeepReviewData
     withDeepReview*: bool
+    reviewSession*: DeepReviewSessionTranscript
+      ## RV-6 — the agent session the review's dataset named, already
+      ## resolved by `ct` (`src/ct/review_session.nim`), or nil.
+      ##
+      ## Nil covers *two* cases and the panel must tell them apart, which is
+      ## why the failures are not nil: a dataset with no reference has none
+      ## of this (a complete review, no session shown), while a reference
+      ## that would not resolve arrives here with a non-`"loaded"` `state`
+      ## and the backend's own message, so the panel can say why rather than
+      ## rendering an empty conversation (DeepReview-GUI.md §2.1).
+      ##
+      ## It is *not* part of the dataset and is never written back into one:
+      ## `review.json` carries the reference only.
 
   # The contents of a window in the frontend
   Content* {.pure.} = enum

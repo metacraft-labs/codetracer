@@ -616,6 +616,7 @@ func materializedCollectorArgs*(plan: ReviewPlan): seq[string] =
 when not defined(js):
   import std/[os, osproc]
   import ../common/paths
+  import review_session
 
   const
     NativeReplayExeEnvVar* = "CODETRACER_NATIVE_REPLAY_PATH"
@@ -715,6 +716,35 @@ when not defined(js):
     result = waitForExit(process)
     close(process)
 
+  proc associateCollectedSession(jsonPath: string): int =
+    ## RV-6 — record the agent session that produced this dataset, when the
+    ## environment names one.
+    ##
+    ## Called by *both* collector routes, at the point where each has just
+    ## written the `review.json` the GUI opens.  The reference is a fact about
+    ## the environment the collection ran in, not about the recordings, so it
+    ## belongs to `ct` — the one process that sees that environment, and the
+    ## one path both collectors go through.  Doing it here rather than in each
+    ## collector is what stops the two disagreeing (and keeps the rr collector,
+    ## which lives in another repository, from needing to know about agent
+    ## sessions at all).
+    ##
+    ## **Absence is normal.**  A human running `ct review collect` by hand has
+    ## none of the variables set; the dataset simply carries no reference and
+    ## the review is complete without one (DeepReview-GUI.md §2.1).
+    let spec = detectReviewSessionRef(getCurrentDir())
+    let failure = stampReviewSessionRef(jsonPath, spec)
+    if failure.len > 0:
+      # The dataset itself is fine — only the association failed — so this is
+      # reported and the collection still counts as a failure, because a user
+      # who set the variables asked for the association and did not get it.
+      stderr.writeLine("error: " & failure)
+      return 1
+    if hasSessionRef(spec):
+      echo "Associated with agent session: ", spec.sessionId,
+        " (", normalizeBackend(spec.backend), ")"
+    0
+
   proc runMaterializedReviewCollect*(plan: ReviewPlan): int =
     ## Collect from materialized (CTFS) recordings, through the db-backend.
     ##
@@ -742,6 +772,9 @@ when not defined(js):
         ReviewDatasetJsonName & " was written to '" & plan.outputDir &
         "', so `ct review " & plan.outputDir & "` cannot open it.")
       return 1
+    let associated = associateCollectedSession(jsonPath)
+    if associated != 0:
+      return associated
     echo "Open it with: ct review ", plan.outputDir
 
   proc runReviewCollect*(plan: ReviewPlan): int =
@@ -778,6 +811,9 @@ when not defined(js):
         plan.outputDir & "' but could not be written as " &
         ReviewDatasetJsonName & ", so `ct review " & plan.outputDir &
         "` cannot open it.")
+      return result
+    result = associateCollectedSession(jsonPath)
+    if result != 0:
       return result
     echo "Review dataset ready: ", jsonPath
     echo "Open it with: ct review ", plan.outputDir

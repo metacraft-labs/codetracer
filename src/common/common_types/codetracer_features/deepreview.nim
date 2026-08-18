@@ -54,6 +54,97 @@ type
       ## is selected by default.
     files*: seq[DeepReviewFileData]
     callTrace*: DeepReviewCallTrace
+    session*: DeepReviewSessionRef
+      ## RV-6 — the agent session that produced this dataset, or nil.
+      ##
+      ## **Optional.**  A dataset collected by a human, or by an agent
+      ## whose backend cannot replay sessions, is a complete review; nil
+      ## here is normal and is not an error (DeepReview-GUI.md §2.1).
+      ##
+      ## **A reference, never a transcript.**  See
+      ## `DeepReviewSessionRef`'s own documentation for why.
+
+  DeepReviewSessionRef* = ref object
+    ## A pointer at the agent session a review dataset came from.
+    ##
+    ## DeepReview-GUI.md §2.1: "Loading is **by reference, never by
+    ## copy**.  The dataset stores an identifier and enough context to
+    ## resolve it; it does not embed a transcript."  Two consequences the
+    ## shape of this type exists to guarantee:
+    ##
+    ##   * a dataset cannot go **stale** against the session it names — a
+    ##     session that gained ten more turns after the dataset was
+    ##     written reads back with all of them;
+    ##   * no **conversation content** is duplicated into a file that may
+    ##     be attached to a ticket, mailed around or committed, while the
+    ##     session itself is behind whatever access control the agent
+    ##     backend applies.
+    ##
+    ## Resolution happens through `nim-agents`
+    ## (`AgentClient.loadSession`), which is why the fields below are
+    ## exactly what that call needs and nothing more: the backend to
+    ## speak, the id to ask for, and the workspace context an agent
+    ## resolves a session against.  CodeTracer stores no session history
+    ## of its own and must not start.
+    sessionId*: langstring
+      ## The backend's own id for the session.  Empty means "no
+      ## reference", the same as a nil `DeepReviewSessionRef`.
+    backend*: langstring
+      ## `"acp"` or `"harbor"`.  Anything else is treated as `"acp"`,
+      ## which is the backend that needs the most context and therefore
+      ## fails loudest rather than silently reading the wrong thing.
+    workspacePath*: langstring
+      ## The directory the session ran in.  ACP agents resolve a session
+      ## against a working directory, so this is what stops a session
+      ## being replayed against a different tree — the "workspace is
+      ## elsewhere" case §2.1 asks to be reported explicitly.
+    taskId*: langstring
+      ## Agent Harbor's task id, when the session belongs to one.  Empty
+      ## for ACP.
+    agentCommand*: langstring
+      ## For `"acp"`: the stdio ACP binary to re-spawn in order to ask
+      ## the agent for the session.  Empty means "the environment must
+      ## supply it", and an unresolvable reference is reported rather
+      ## than guessed at.
+    agentArgs*: seq[langstring]
+      ## Arguments for `agentCommand`.
+    endpoint*: langstring
+      ## For `"harbor"`: the base URL of the Agent Harbor instance that
+      ## holds the session.
+
+  DeepReviewSessionEvent* = ref object
+    ## One entry of a **resolved** session's conversation.
+    ##
+    ## This type does *not* live in a review dataset — it is the shape
+    ## `ct` hands the renderer after it has fetched the session from the
+    ## backend, and it is a strict subset of `nim-agents`'
+    ## `AgentEvent.toJson` so the two cannot drift.  It exists separately
+    ## from `DeepReviewSessionRef` precisely to keep the "reference in
+    ## the file, transcript only in memory" split visible in the types.
+    kind*: langstring
+    text*: langstring
+    status*: langstring
+    toolName*: langstring
+    toolCallId*: langstring
+    filePath*: langstring
+
+  DeepReviewSessionTranscript* = ref object
+    ## The outcome of resolving a `DeepReviewSessionRef`, as handed from
+    ## `ct` to the renderer.
+    ##
+    ## `state` is the load result from `nim-agents`
+    ## (`AgentSessionLoadState`): `"loaded"`, `"unsupported"` (the agent
+    ## cannot replay sessions at all) or `"unavailable"` (this session
+    ## could not be fetched — pruned, unknown, workspace elsewhere).  It
+    ## travels *with* the events on purpose: without it, an empty
+    ## `events` cannot be told from a failed fetch, and the panel would
+    ## render "the agent did nothing" for both — the defect §2.1 names.
+    state*: langstring
+    sessionId*: langstring
+    backend*: langstring
+    message*: langstring
+      ## The backend's own diagnostic for a non-`"loaded"` state.
+    events*: seq[DeepReviewSessionEvent]
 
   DeepReviewFileData* = ref object
     ## Per-file data including symbols, coverage, flow, loops, and diff info.

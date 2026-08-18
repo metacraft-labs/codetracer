@@ -2401,6 +2401,11 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   # but since the renderer runs in a separate Electron process, the
   # startOptions are forwarded via the IPC message.
   data.startOptions.deepReview = response.startOptions.deepReview
+  # RV-6: and, when the dataset named an agent session, the resolution `ct`
+  # performed for it.  Nil when the dataset named none — which is normal, and
+  # is *not* the same as a reference that failed to resolve (that arrives with
+  # an explicit non-"loaded" state; DeepReview-GUI.md §2.1).
+  data.startOptions.reviewSession = response.startOptions.reviewSession
 
   # Store DeepReview data at the Data level so all panels can access it.
   data.deepReviewActive = true
