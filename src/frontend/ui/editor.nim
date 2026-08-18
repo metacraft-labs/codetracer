@@ -6,7 +6,7 @@ import
   editor_decoration_layers, trace_redraw_policy,
   flow_line_styles, review_flow_adapter, review_flow_selection,
   ../[ renderer, communication, event_helpers, lsp_router ],
-  ../../common/ct_event
+  ../../common/[ ct_event, review_source_paths ]
 
 from welcome_screen import resetView
 from event_log import findTRNode
@@ -684,6 +684,31 @@ proc flowStyleLines(self: EditorViewComponent, conditionFlowLines: seq[MonacoLin
 
   lines
 
+proc reviewFileForTab(self: EditorViewComponent): DeepReviewFileData =
+  ## The review dataset's entry for the file THIS editor tab shows, or nil.
+  ##
+  ## The single place either full-file overlay decides "is this my file?", so
+  ## §5.1's diff highlights and §5.3's flow overlay cannot disagree about it —
+  ## and they did: both used to spell the question `file.path == self.path`,
+  ## with the dataset's repo-relative `src/main.nr` on the left and the tab's
+  ## path on the right.  When the two differed at all the answer was always
+  ## "no", so Full Files mode drew zero decorations of either kind; measured
+  ## over the book's own worked example it was 0 added, 0 modified, and the
+  ## diff tab's 8 flow lines and 36 value chips unchanged by opening the file.
+  ##
+  ## The rule itself lives in `common/review_source_paths` because the index
+  ## process asks the same question when it serves the tab's text, and a
+  ## second implementation of it would be a second chance to get it wrong.
+  result = nil
+  if not self.data.deepReviewActive or self.data.deepReviewData.isNil:
+    return
+  var paths: seq[string] = @[]
+  for file in self.data.deepReviewData.files:
+    paths.add($file.path)
+  let index = reviewFileIndexForPath(paths, $self.path)
+  if index >= 0:
+    result = self.data.deepReviewData.files[index]
+
 proc reviewFlowStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   ## The review's Omniscience overlay on a full-file editor tab
   ## (DeepReview-GUI.md §5.3: "The same Omniscience data from the associated
@@ -707,13 +732,10 @@ proc reviewFlowStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   ## own text with the debugger's own flow chip classes. Never a text comment —
   ## `afterContent` carries the value, and `afterClass` the standard classes.
   result = @[]
-  if not self.data.deepReviewActive or self.data.deepReviewData.isNil:
-    return
   if self.editorView != ViewSource:
     return
-  for file in self.data.deepReviewData.files:
-    if file.path != self.path:
-      continue
+  let file = self.reviewFileForTab()
+  if not file.isNil:
     let path = $file.path
     let functions = reviewFunctionInvocations(file)
     for fn in functions:
@@ -761,7 +783,6 @@ proc reviewFlowStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
             line: position,
             afterContent: cstring(chip.text),
             afterClass: cstring(ReviewValueBoxClass)))
-    break
 
 proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int): seq[MonacoLineStyle] =
   var lines: seq[MonacoLineStyle] = @[]
@@ -847,39 +868,34 @@ proc deepReviewDiffStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   ##   - Added lines in mixed hunks (modification): yellow border (``line-diff-modified``)
   ## Removed lines are not decorated since they have no position in the new file.
   var lines: seq[MonacoLineStyle] = @[]
-  if not self.data.deepReviewActive or self.data.deepReviewData.isNil:
+  let file = self.reviewFileForTab()
+  if file.isNil or file.diff.isNil:
     return lines
 
-  for file in self.data.deepReviewData.files:
-    if file.path == self.path:
-      if file.diff.isNil:
-        break
-      for hunk in file.diff.hunks:
-        # Determine if hunk has both removals and additions (= modification).
-        var hasRemoved = false
-        var hasAdded = false
-        for line in hunk.lines:
-          let lt = $line.`type`
-          if lt == "removed":
-            hasRemoved = true
-          elif lt == "added":
-            hasAdded = true
+  for hunk in file.diff.hunks:
+    # Determine if hunk has both removals and additions (= modification).
+    var hasRemoved = false
+    var hasAdded = false
+    for line in hunk.lines:
+      let lt = $line.`type`
+      if lt == "removed":
+        hasRemoved = true
+      elif lt == "added":
+        hasAdded = true
 
-        let isModification = hasRemoved and hasAdded
+    let isModification = hasRemoved and hasAdded
 
-        for line in hunk.lines:
-          let lt = $line.`type`
-          if lt != "added":
-            continue
-          if line.newLine < 1:
-            continue
-          let className = if isModification:
-            cstring"line-diff-modified"
-          else:
-            cstring"line-diff-added"
-          lines.add(MonacoLineStyle(line: line.newLine, class: className))
-      # Found the matching file, no need to continue.
-      break
+    for line in hunk.lines:
+      let lt = $line.`type`
+      if lt != "added":
+        continue
+      if line.newLine < 1:
+        continue
+      let className = if isModification:
+        cstring"line-diff-modified"
+      else:
+        cstring"line-diff-added"
+      lines.add(MonacoLineStyle(line: line.newLine, class: className))
   lines
 
 proc originHopStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
@@ -2409,11 +2425,17 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     return
 
   let path = tabInfo.name
-  var readOnly: bool
-  if self.data.ui.readOnly:
-    readOnly = true
-  else:
-    readOnly = false
+  # DeepReview-GUI.md §5.1: "Keep the review representation read-only by
+  # default."  A review opened from a dataset serves every tab out of
+  # `DeepReviewFileData.sourceContent` — the file as of the REVIEWED COMMIT —
+  # and names the tab by the dataset's repo-relative path, because that is the
+  # only name a portable dataset has.  An editable tab therefore has a save
+  # target that resolves against the index process's working directory, i.e.
+  # wherever `ct review` happened to be typed, and saving would overwrite an
+  # unrelated file that merely sits at the same relative path.  There is also
+  # nothing to save into: a review has no working tree, only a commit that has
+  # already happened.
+  let readOnly = self.data.ui.readOnly or self.data.isReviewDatasetSession()
 
   const whiteThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
   const darkThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")

@@ -1087,14 +1087,20 @@ test.describe("DeepReview GUI - main features", () => {
   // assigns the overlays to "The Editor, on the full file"); it simply never
   // fired, because before DR-R1 no editor tab was ever opened in review mode.
   //
-  // Still `test.skip`, for the reason they were skipped before and not for a
-  // new one: the overlays are drawn over the file's real source text, and
-  // `--deepreview` mode loads no recording to supply it (M42b).  Restore them
-  // with the trace plumbing.  They are kept rather than deleted precisely
-  // because the capability survived the deletion — deleting them would drop
-  // the only end-to-end coverage §5.1 will ever have.
+  // Un-skipped in RV-11.  The reason they carried — "the overlays are drawn
+  // over the file's real source text, and `--deepreview` mode loads no
+  // recording to supply it" — turned out to name the wrong supplier.  A review
+  // never needed a recording for the text: the dataset carries it, in
+  // `DeepReviewFileData.sourceContent`, which is also the ONLY text whose line
+  // numbering the hunks' `newLine` values actually index.  The index process
+  // now serves a review tab from that field (`index/config.open`), so these
+  // three run over the fixture's own bytes and need nothing on disk.
+  //
+  // The second half of the fix is `common/review_source_paths`: both overlays
+  // used to compare the dataset's repo-relative `src/main.rs` against the
+  // tab's path with `==`, which no dataset can ever satisfy.
 
-  test.skip("Test 19: diff decorations appear in Full Files Mode for modified file", async ({ ctPage }) => {
+  test("Test 19: diff decorations appear in Full Files Mode for modified file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await dr.switchToFullFiles();
@@ -1108,7 +1114,7 @@ test.describe("DeepReview GUI - main features", () => {
     expect(modifiedCount).toBeGreaterThan(0);
   });
 
-  test.skip("Test 20: added lines have green decoration class for purely added file", async ({ ctPage }) => {
+  test("Test 20: added lines have green decoration class for purely added file", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await dr.switchToFullFiles();
@@ -1130,7 +1136,7 @@ test.describe("DeepReview GUI - main features", () => {
     expect(classes).toContain("line-diff-added");
   });
 
-  test.skip("Test 21: diff decorations are removed when switching to a file without diff data", async ({ ctPage }) => {
+  test("Test 21: diff decorations are removed when switching to a file without diff data", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await dr.switchToFullFiles();
@@ -1155,17 +1161,115 @@ test.describe("DeepReview GUI - main features", () => {
     const modifiedCount = await dr.editorDiffModifiedLines().count();
     expect(modifiedCount).toBe(0);
 
-    // Switch to the third file (src/config.rs, deleted) — all lines are
-    // removed, so there should be no diff decorations at all (removed
-    // lines have no position in the new file).
+    // Switch to the third file (src/config.rs, DELETED).  A deleted file has
+    // no content in the new tree, so `vcs_vm.openActionFor` resolves it to the
+    // diff tab that shows the removal even in Full Files mode — DR-R1 decided
+    // that deliberately, and it is the one row whose click does not open a
+    // source tab.
+    //
+    // So the invariant here is not "the page-wide decoration count drops to
+    // zero" (it cannot: the utils.rs source tab is still the visible one, and
+    // its own decorations are still correct).  It is the stronger statement
+    // that the deleted file contributes NO full-file decorations of its own:
+    // it opens a diff tab, adds no source tab, and leaves the editor's
+    // decorations exactly as utils.rs left them.
+    const sourceTabsBefore = await dr.sourceTabs().count();
     const thirdItem = dr.fileItemByIndex(2);
     await thirdItem.click();
+    await expect(dr.diffTabFor("src/config.rs")).toBeVisible({ timeout: 20_000 });
+
+    expect(await dr.sourceTabs().count()).toBe(sourceTabsBefore);
+    expect(await dr.editorDiffAddedLines().count()).toBe(addedCount);
+    expect(await dr.editorDiffModifiedLines().count()).toBe(0);
+  });
+
+  // -----------------------------------------------------------------------
+  // Test 21b: §5.3's Omniscience overlay on the full file
+  // -----------------------------------------------------------------------
+  //
+  // DeepReview-GUI.md §5.3: "The same Omniscience data from the associated
+  // traces is overlaid on the file in its normal form ... Use the standard
+  // Omniscience appearance ... Show overlays wherever DeepReview data exists
+  // for the loaded file."
+  //
+  // Tests 19-21 cover §5.1's diff highlights.  This is §5.3, the *other* half,
+  // and it had no end-to-end coverage at all — `reviewFlowStyleLines` was
+  // asserted only through the shared headless suites and through RV-5's
+  // reasoning that "the input is the same plan the diff tab renders".  It was
+  // not: the proc returned an empty seq for every tab, and no test noticed.
+  //
+  // The overlay is asserted as a DIFFERENCE across opening the file rather
+  // than as an absolute count, because the diff tab contributes its own
+  // decorations to the same page and an absolute number could be satisfied
+  // entirely by that tab.  A difference can only come from the new tab.
+  test("Test 21b: the full file carries the flow overlay and its value chips", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+
+    const flowLines = ctPage.locator("[class*='line-flow']");
+    const valueChips = ctPage.locator(".review-flow-value");
+    const flowBefore = await flowLines.count();
+    const chipsBefore = await valueChips.count();
+
+    await dr.switchToFullFiles();
+    await dr.fileItemByIndex(0).click();
+    await expect(dr.sourceTabs()).toHaveCount(1, { timeout: 20_000 });
+    await wait(2000);
+
+    // src/main.rs carries three recorded invocations (two of `main`, one of
+    // `compute`) and 21 captured values, so opening it must add both kinds of
+    // decoration — the shading §5.3 calls the standard Omniscience appearance,
+    // and the inline value chips that come with it.
+    expect(await flowLines.count()).toBeGreaterThan(flowBefore);
+    expect(await valueChips.count()).toBeGreaterThan(chipsBefore);
+
+    // The classes must be the debugger's own, not a review-specific style
+    // (§5.3: "Do not create a separate DeepReview-specific inline style").
+    const flowClasses = await flowLines.first().getAttribute("class");
+    expect(flowClasses).toMatch(/line-flow-(hit|skip|unknown)/);
+  });
+
+  // -----------------------------------------------------------------------
+  // Test 21d: the full file is read-only
+  // -----------------------------------------------------------------------
+  //
+  // DeepReview-GUI.md §5.1: "Keep the review representation read-only by
+  // default."
+  //
+  // This is not cosmetic, and it is the reason the requirement is asserted
+  // through a real keystroke rather than by reading an option.  A review's
+  // tab is served from the dataset's `sourceContent` and is NAMED BY THE
+  // DATASET'S REPO-RELATIVE PATH, which is the only name a portable dataset
+  // has.  An editable tab is therefore a dirty buffer whose save target
+  // (`index/files.onSaveFile`) resolves against the index process's working
+  // directory — wherever `ct review` was typed.  Measured before this was
+  // fixed: editing the review's `src/main.nr` and pressing Ctrl+S overwrote
+  // an unrelated `src/main.nr` sitting under the launch directory, with no
+  // prompt and no error.
+  test("Test 21d: the review's full file cannot be edited", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await dr.switchToFullFiles();
+    await dr.fileItemByIndex(0).click();
+    await expect(dr.sourceTabs()).toHaveCount(1, { timeout: 20_000 });
+    await wait(1500);
+
+    const lines = dr.sourceTabs().first().locator(".monaco-editor .view-lines");
+    const before = (await lines.innerText()).trim();
+    expect(before.length).toBeGreaterThan(0);
+
+    // Type as a user would: click into the document, then send keys.
+    await lines.click();
+    await ctPage.keyboard.type("EDITED_BY_TEST");
     await wait(1000);
 
-    const deletedAdded = await dr.editorDiffAddedLines().count();
-    const deletedModified = await dr.editorDiffModifiedLines().count();
-    expect(deletedAdded).toBe(0);
-    expect(deletedModified).toBe(0);
+    expect((await lines.innerText()).trim()).toBe(before);
+    // ...and nothing became dirty, so no save can ever be dispatched for it.
+    const dirty = await ctPage.evaluate(() => {
+      const open = (globalThis as any).data?.services?.editor?.open ?? {};
+      return Object.keys(open).filter((k) => open[k] && open[k].changed);
+    });
+    expect(dirty).toEqual([]);
   });
 
   // -----------------------------------------------------------------------
@@ -1675,6 +1779,33 @@ test.describe("DeepReview GUI - empty data handling", () => {
 
   test.describe("missing call trace", () => {
     test.use({ launchMode: "deepreview", deepreviewJsonPath: noCalltracePath });
+
+    // -----------------------------------------------------------------------
+    // Test 21c: a review that cannot supply a file's text says why
+    // -----------------------------------------------------------------------
+    //
+    // The failure this replaces was silent: `index/config.open` logged
+    // `error reading file directly ... ENOENT` and returned WITHOUT sending
+    // `tab-load-received`, so no tab opened, nothing appeared, and the renderer
+    // waited on a future that would never resolve.
+    //
+    // `no-calltrace-review.json`'s `src/lib.rs` carries an empty `sourceContent`
+    // — the one case a dataset genuinely cannot serve — so it is the fixture
+    // that reaches the branch.  The notice is a toast and auto-dismisses, so it
+    // is sampled promptly after the click rather than after a long settle.
+    test("Test 21c: a file the dataset carries no text for is reported, not swallowed", async ({ ctPage }) => {
+      const dr = new DeepReviewPage(ctPage);
+      await dr.waitForReady();
+      await dr.switchToFullFiles();
+      await dr.fileItemByIndex(0).click();
+
+      await expect(ctPage.locator("body")).toContainText("no source text", {
+        timeout: 15_000,
+      });
+      await expect(ctPage.locator("body")).toContainText("src/lib.rs", {
+        timeout: 15_000,
+      });
+    });
 
     // "Test 9b: renders without crash when callTrace is null" was deleted in
     // DR-R8 with the panel: it asserted `.deepreview-calltrace-empty`, the

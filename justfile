@@ -60,6 +60,17 @@ capture-book-assets:
   CODETRACER_BOOK_SCREENSHOT_DIR="$(pwd)/docs/book-isonim/static/img/visual_recordings" \
     bash scripts/docs/capture-visual-recording-screenshots.sh
 
+# Regenerate the DeepReview screenshots the book serves from
+# `/assets/img/deep_review/`. Same discipline as `capture-book-assets`: it
+# records a real Noir program, collects a real review dataset and photographs
+# the real `ct review` window, and fails with a named remedy rather than
+# leaving stale images in place. Needs nargo, Xvfb, xdotool and ImageMagick.
+capture-deep-review-assets:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  CODETRACER_BOOK_SCREENSHOT_DIR="$(pwd)/docs/book-isonim/static/img/deep_review" \
+    bash scripts/docs/capture-deep-review-screenshots.sh
+
 capture-docs-visual-page:
   #!/usr/bin/env bash
   set -euo pipefail

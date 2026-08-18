@@ -463,6 +463,25 @@ const
     # `callCount` and no flow, and the control must say so rather than offer an
     # invocation it cannot render.
     "src/tests/gui/tests/deepreview/review_flow_overlay_test.nim",
+    # RV-11 — Full Files mode, which had never drawn a decoration.
+    #
+    # Both §5 overlays asked "is this editor tab the dataset's file?" as
+    # `file.path == self.path`, with the dataset's repo-relative `src/main.nr`
+    # on the left and the tab's path on the right.  Measured over the book's
+    # own worked example, opening the full file contributed exactly zero: 0
+    # `line-diff-added`, 0 `line-diff-modified`, and the diff tab's 8 flow
+    # lines and 36 value chips unchanged.
+    #
+    # The rule now lives in `common/review_source_paths` because THREE places
+    # ask it — §5.1's diff highlights, §5.3's flow overlay, and the index
+    # process that serves the tab's text — and three spellings of it would be
+    # three chances to disagree.  It is registered here rather than left to
+    # the Playwright suite because the interesting cases are the ones a
+    # browser cannot reach: the component-boundary rule that stops `main.nr`
+    # claiming `/repo/src/domain.nr` (a wrong answer that renders as a
+    # perfectly plausible right one), the longest-match rule that keeps the
+    # answer independent of dataset ordering, and the Windows path forms.
+    "src/tests/gui/tests/deepreview/review_source_paths_test.nim",
     # RV-7 — the agent handoff is two ordinary commands.
     # Agentic-Coding-Integration.md §4.4: "`ct agent evidence` takes the
     # dataset path and nothing else in the common case.  The session it

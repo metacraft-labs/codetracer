@@ -5,7 +5,7 @@ import
   ../lib/[ jslib, electron_lib, misc_lib ],
   ./bootstrap_cache,
   ./layout_config_repair,
-  ../../common/[ paths, ct_logging, trace_source_paths ]
+  ../../common/[ paths, ct_logging, trace_source_paths, review_source_paths ]
 
 type
   ServerData* = object
@@ -143,6 +143,99 @@ proc readFirstAvailable(pathCandidates: seq[cstring]):
       return (source, err, path)
     result = (source, err, path)
 
+type
+  ReviewSourceLookup = object
+    ## What the review dataset can say about one requested path.
+    ## Module-private: `open` below is the only caller.
+    claimed: bool
+      ## The dataset has an entry for this path, so the review — not the
+      ## working tree — is the authority on the file's text.
+    text: cstring
+      ## That entry's `sourceContent`.  Empty when the collector could not
+      ## read the file at collect time (`collector.rs`'s `read_source`
+      ## returns an empty string rather than failing the collection), which
+      ## is the one case a review cannot serve and must report.
+
+proc reviewSourceLookup(data: ServerData, filename: cstring): ReviewSourceLookup =
+  ## The dataset's text for `filename`, when a review is what is open.
+  ##
+  ## DeepReview-GUI.md §5.1 wants the full file "fully loaded ... with diff
+  ## highlights on the modified lines".  The text those highlights are drawn
+  ## over cannot be whatever the working tree holds right now: the hunks'
+  ## `newLine` values index the file **as of the reviewed commit**, so any
+  ## other text puts the decorations on the wrong lines.  The dataset carries
+  ## exactly that revision, in `DeepReviewFileData.sourceContent`, and the
+  ## index process is already handed the whole dataset at startup
+  ## (`index/args.nim`'s `--deepreview` branch) — it simply never read it.
+  ##
+  ## Serving from the dataset is also what makes a review portable.  Before
+  ## this, opening a file resolved the dataset's repo-relative path against
+  ## whatever repository the *terminal* happened to be in, so a review of
+  ## somebody else's dataset — the normal case for a dataset attached to a
+  ## ticket — read a path that did not exist and gave up silently.
+  result = ReviewSourceLookup(claimed: false, text: cstring"")
+  if not data.startOptions.withDeepReview or data.startOptions.deepReview.isNil:
+    return
+  var paths: seq[string] = @[]
+  for file in data.startOptions.deepReview.files:
+    paths.add($file.path)
+  let index = reviewFileIndexForPath(paths, $filename)
+  if index < 0:
+    return
+  let file = data.startOptions.deepReview.files[index]
+  result.claimed = true
+  if not file.sourceContent.isNil:
+    result.text = cstring($file.sourceContent)
+
+proc sendTabInfo(main: js, location: types.Location, filename, source: cstring,
+                 editorView: EditorView, messagePath: string, lang: Lang) =
+  ## Hand one loaded document back to the renderer.
+  ##
+  ## Factored out of `open` so the disk-backed path and the review path answer
+  ## `tab-load` with the *same* message — the renderer resolves its pending
+  ## `tab-load` future by `argId`, and a second spelling of this send would be
+  ## a second chance for a tab to hang on "Loading…" forever.
+  var sourceText = source
+  var sourceLines = sourceText.split(jsNl)
+
+  var name = cstring""
+  var argId = cstring""
+
+  if location.isExpanded:
+    sourceLines = sourceLines.slice(location.expansionFirstLine - 1, location.expansionLastLine)
+    sourceText = sourceLines.join(jsNl) & jsNl
+    name = location.functionName
+    argId = name
+  else:
+    name = basename(filename)
+    # TODO maybe remove if we don't hit that for some time
+    if name == cstring"expanded.nim":
+      errorPrint "expanded.nim with isExpanded == false ", filename
+      return
+    argId = filename
+
+  if editorView == ViewCalltrace:
+    name = location.path & cstring":" & location.functionName & cstring"-" & location.key
+    argId = name
+    sourceLines = sourceLines.slice(location.functionFirst - 1, location.functionLast)
+    sourceText = sourceLines.join(jsNl) & jsNl
+
+  main.webContents.send "CODETRACER::" & messagePath, js{
+    "argId": argId,
+    "value": TabInfo(
+      overlayExpanded: -1,
+      highlightLine: -1,
+      location: location,
+      source: sourceText,
+      sourceLines: sourceLines,
+      received: true,
+
+      name: name,
+      path: filename,
+      lang: lang
+    )
+  }
+
 proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int): Future[void] {.async.} =
   var source = cstring""
   # var tokens: seq[seq[Token]] = @[]
@@ -150,6 +243,33 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   if location.highLevelPath == cstring"unknown":
     return
   let filename = location.highLevelPath
+
+  # DeepReview §5.1/§5.3: a review's full-file tab is served from the dataset,
+  # never from the working tree, and no file watcher is registered for it — the
+  # text is a snapshot of a commit, so there is nothing to watch for changes.
+  let review = data.reviewSourceLookup(filename)
+  if review.claimed:
+    if review.text.len > 0:
+      sendTabInfo(main, location, filename, review.text, editorView, messagePath, lang)
+      return
+    # The dataset names this file but carries no text for it.  Say so instead
+    # of falling through to a disk read that resolves against the wrong
+    # repository and then returns in silence — the failure mode this branch
+    # exists to replace.  The remedy differs by cause, so both are named.
+    let message =
+      "Review: no source text for '" & $filename & "'.\n" &
+      "The review dataset carries none for this file, so the full file " &
+      "cannot be shown. Re-collect it from inside the reviewed repository " &
+      "(`ct review collect --repo <repository> …`); the diff tab still works."
+    errorPrint message
+    # Sent to `main` — the window that asked for this tab — rather than to the
+    # module-level `mainWindow`, which is the same window in the normal case
+    # but is not the one this request came from and is not guaranteed to be
+    # assigned yet.  Addressing the requester is also what makes the notice
+    # arrive in the window the user is looking at.
+    main.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationKind.NotificationError, message)
+    return
   # TODO path for low level?
   # if data.tabs.hasKey(filename):
   #   return
@@ -273,45 +393,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
           data.tabs[filename].fileWatched = false
 
   echo "index_config open: file read succesfully"
-  var sourceLines = source.split(jsNl)
-
-  var name = cstring""
-  var argId = cstring""
-
-  if location.isExpanded:
-    sourceLines = sourceLines.slice(location.expansionFirstLine - 1, location.expansionLastLine)
-    source = sourceLines.join(jsNl) & jsNl
-    name = location.functionName
-    argId = name
-  else:
-    name = basename(filename)
-    # TODO maybe remove if we don't hit that for some time
-    if name == cstring"expanded.nim":
-      errorPrint "expanded.nim with isExpanded == false ", filename
-      return
-    argId = filename
-
-  if editorView == ViewCalltrace:
-    name = location.path & cstring":" & location.functionName & cstring"-" & location.key
-    argId = name
-    sourceLines = sourceLines.slice(location.functionFirst - 1, location.functionLast)
-    source = sourceLines.join(jsNl) & jsNl
-
-  main.webContents.send "CODETRACER::" & messagePath, js{
-    "argId": argId,
-    "value": TabInfo(
-      overlayExpanded: -1,
-      highlightLine: -1,
-      location: location,
-      source: source,
-      sourceLines: sourceLines,
-      received: true,
-
-      name: name,
-      path: filename,
-      lang: lang
-    )
-  }
+  sendTabInfo(main, location, filename, source, editorView, messagePath, lang)
 
 
 proc findConfig(folder: cstring, configPath: cstring): cstring =

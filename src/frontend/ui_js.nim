@@ -985,14 +985,25 @@ proc update*(self: Data, build: bool = false) =
 
 proc setEditorsEditable*(data: Data, editable: bool) =
   ## Update Monaco editors to match requested editability.
+  ##
+  ## A review opened from a dataset is the one state that never becomes
+  ## editable, whichever way the read-only flag is driven (`toggleReadOnly`,
+  ## the edit/debug mode switch).  DeepReview-GUI.md §5.1 requires the review
+  ## representation to stay read-only, and such a tab has no writable target to
+  ## begin with: its text is the dataset's snapshot of the reviewed commit
+  ## (`index/config.reviewSourceLookup`) and its name is the dataset's
+  ## repo-relative path, so a save would land under whatever directory
+  ## `ct review` was launched from — silently overwriting an unrelated file
+  ## that happens to sit at the same relative path.
+  let reallyEditable = editable and not data.isReviewDatasetSession()
   for label, editor in data.ui.editors:
     if editor.monacoEditor.isNil:
       continue
     let minimapEnabled =
-      if editable: data.config.showMinimap
+      if reallyEditable: data.config.showMinimap
       else: false
     let options = MonacoEditorOptions(
-      readOnly: not editable,
+      readOnly: not reallyEditable,
       minimap: js{ enabled: minimapEnabled }
     )
     editor.monacoEditor.updateOptions(options)

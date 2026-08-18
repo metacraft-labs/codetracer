@@ -200,7 +200,11 @@ func retiredDeepReviewMessage*(): string =
     "    ct review <PATH>            open a review over an exported dataset\n" &
     "    ct review collect …         produce a dataset from recordings\n" &
     "    ct review inspect <PATH>    summarise a dataset\n" &
-    "  See codetracer-specs/DeepReview/CLI-Reference.md."
+    # Point at something the person reading this actually has.  This line used
+    # to name `codetracer-specs/DeepReview/CLI-Reference.md`, a file that lives
+    # in a private specification repository: for every user of the shipped
+    # binary it is a dead end, and it advertises internal layout besides.
+    "  Run `ct review --help` for the full flag set."
 
 func retiredDeepReviewArgIndex*(args: openArray[string]): int =
   ## Index of a retired `--deepreview` **global option** in argv, or -1.

@@ -226,7 +226,12 @@ func retiredEvidenceFlagMessage*(flag, replacement: string): string =
     "    ct review collect --diff main..HEAD --recordings .ct/runs -o " &
     "review.json\n" &
     "    ct agent evidence review.json\n" &
-    "  See codetracer-specs/DeepReview/Agentic-Coding-Integration.md §4.4."
+    # Point at something the person reading this actually has.  This line used
+    # to name `codetracer-specs/DeepReview/Agentic-Coding-Integration.md`, a
+    # file that lives in a private specification repository: for every user of
+    # the shipped binary it is a dead end, and it advertises internal layout
+    # besides.
+    "  Run `ct agent evidence --help` for the full flag set."
 
 func missingSessionMessage*(datasetPath: string): string =
   ## RV-7's third verification entry: a missing environment must produce this

@@ -146,6 +146,21 @@ proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, edi
   discard panel.addChild(contentItem)
 
 
+func isReviewDatasetSession*(data: Data): bool =
+  ## Is this window a review opened from an exported dataset?
+  ##
+  ## True for `ct review <PATH>` and for the agent handoff — the launches that
+  ## carry `StartOptions.withDeepReview`, where the index process was handed
+  ## the dataset and serves every review file's text out of
+  ## `DeepReviewFileData.sourceContent` (`index/config.reviewSourceLookup`).
+  ##
+  ## Deliberately NARROWER than `deepReviewActive`, which is also set by
+  ## `ui/vcs.startReviewForTraceDiff` — DeepReview-GUI.md §1's launch method 2,
+  ## where a *recorded trace* carries its diff.  That window has the real
+  ## working tree in front of it and its tabs are read from disk as usual, so
+  ## nothing about it should change.
+  not data.isNil and data.startOptions.withDeepReview
+
 proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # kout layoutConfig.toJs
   # A review runs on a layout that is not the debugging one: since RV-2 the

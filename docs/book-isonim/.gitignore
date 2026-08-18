@@ -10,6 +10,12 @@ public/
 tests/test_nav_order_matches_summary
 tests/test_legacy_url_redirects
 tests/test_publish_output_shape
+# `just test` runs test_dev, and the whole suite is run by hand; all four of
+# these left an untracked binary behind before they were listed here.
+tests/test_dev
+tests/test_chrome
+tests/test_home_landing
+tests/test_support_pages
 tests/test_site_builds
 tests/test_completeness
 tests/test_content_loader
@@ -21,6 +27,14 @@ tests/test_proofsite_examples_compile
 tests/test_theme_contract
 src/ssr
 src/build
+
+# The sibling `--path`s, as absolute paths. `ci/deploy/docs.sh` generates this
+# before a build and deletes it after, and README.md tells a developer to write
+# the same file once by hand -- so it exists in most working trees and its
+# contents are machine-specific. Ignoring it is what keeps somebody's
+# `/home/<name>/...` out of a commit; it must stay untracked, because a
+# committed copy would collide with the one CI writes.
+nim.cfg
 
 # `nim js` writes its output next to the compiled .nim file unless -o: is given.
 src/**/*.js

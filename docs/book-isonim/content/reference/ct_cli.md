@@ -26,6 +26,19 @@ ct <command> [options] [<program>] [<args>]
 | `ct trace export --portable -o <out> <trace>` | Export a portable trace (embeds binaries and debug symbols)          |
 | `ct gfx-replay --gfx-stream <dir>`            | Replay an extracted graphics stream (used by the visual replay GUI)  |
 
+#### DeepReview
+
+| Command                      | Description                                                          |
+| ---------------------------- | -------------------------------------------------------------------- |
+| `ct review <PATH>`           | Open a review over an exported review dataset                        |
+| `ct review collect [options]`| Produce a review dataset from recordings + a diff                    |
+| `ct review inspect <PATH>`   | Summarise a dataset without opening a GUI                            |
+| `ct agent evidence <PATH>`   | Hand a review dataset to CodeTracer from inside an agent session     |
+| `ct agent end-of-turn`       | Run `ct review collect` then `ct agent evidence`, for a project hook |
+| `ct agent prompt`            | Print the prompt text that teaches an agent the pair                 |
+
+See [DeepReview](../usage_guide/deep_review.md) for the workflow.
+
 #### Stylus / EVM
 
 | Command           | Description                                       |
@@ -141,6 +154,168 @@ ct run [options] <program> [-- <program-args>]
 ```
 
 Accepts the same options as `ct record`.
+
+### ct review
+
+Opens a review over an exported review dataset — the diff, its recorded
+executions, coverage and flow. See [DeepReview](../usage_guide/deep_review.md).
+
+```
+ct review <PATH>
+```
+
+| Argument | Description                                                                            |
+| -------- | --------------------------------------------------------------------------------------- |
+| `<PATH>` | A `review.json` file, or the directory `ct review collect` wrote it into. Required.     |
+
+`ct review` is an ordinary `ct` command, so `ct`'s global options (`--cwd`,
+`--inspect`, `--remote-debugging-port`, the `--env-file` family) work with it.
+A path that does not exist is diagnosed by `ct` rather than by the renderer.
+
+`ct review` on its own — and `ct review --help` — prints the whole group's
+usage, not just the launch form.
+
+:::note
+`ct --deepreview <PATH>` and the `ct-native-replay deepreview
+{collect,export,inspect}` subcommands are retired. They fail with a message
+naming the `ct review` replacement rather than being kept as aliases.
+:::
+
+### ct review collect
+
+Produces a review dataset from a set of recordings and a diff. The collector is
+chosen by **inspecting the recordings** — native/rr recordings go to the native
+replay backend, materialized traces (Python, Ruby, JavaScript, Noir, …) go to
+the db-backend collector. There is no `--backend` flag.
+
+```
+ct review collect (--repo <DIR> --diff <BASE..HEAD> | --diff-file <PATH>) \
+                  --recordings <DIR> --output <DIR> \
+                  [--preset <NAME>] [--progress]
+```
+
+**Options:**
+
+| Flag                   | Required                       | Default   | Description                                                                      |
+| ---------------------- | ------------------------------ | --------- | ---------------------------------------------------------------------------------- |
+| `--repo <DIR>`         | Yes (unless `--diff-file`)     | —         | Git repository the diff is read from                                             |
+| `--diff <BASE..HEAD>`  | Yes (unless `--diff-file`)     | —         | Diff specification, e.g. `main..HEAD`. Must contain `..`                         |
+| `--diff-file <PATH>`   | Yes (unless `--repo`+`--diff`) | —         | A unified diff file instead of `--repo`/`--diff`. Cannot be combined with either |
+| `--recordings <DIR>`   | Yes                            | —         | Directory holding the recordings, one subdirectory per run                       |
+| `--output <DIR>`, `-o` | Yes                            | —         | Directory the dataset is written to                                              |
+| `--preset <NAME>`      | No                             | `default` | Collection preset: `default`, `minimal` or `comprehensive`                       |
+| `--progress`           | No                             | off       | Emit JSON Lines progress events on stderr                                        |
+
+Both `--output DIR` and `--output=DIR` are accepted. `collect` takes no
+positional arguments.
+
+`collect` writes `review.json` into `--output` beside the collector's own
+chunks, so `ct review <the same DIR>` opens exactly what it produced. If the
+export half fails, the command says so and exits non-zero rather than reporting
+a partial success.
+
+**Presets** differ in sampling intensity only: `minimal` keeps one sample per
+line and one execution per function (fastest, smallest); `default` keeps 3 and
+10; `comprehensive` keeps 10 and 50 with a deeper value limit.
+
+**Progress events** (`--progress`) are one JSON object per line on stderr:
+
+```
+{"fileCount":1,"recordingCount":2,"type":"collection_started"}
+{"percentage":0.0,"recordingIndex":0,"recordingTotal":2,"type":"recording_progress"}
+{"percentage":50.0,"recordingIndex":1,"recordingTotal":2,"type":"recording_progress"}
+{"coverageLines":8,"flowSteps":42,"path":"src/main.nr","symbols":1,"type":"file_collected"}
+{"elapsedMs":68,"fileCount":1,"totalFlowSteps":42,"type":"collection_completed"}
+```
+
+One `recording_progress` is emitted per recording, before that recording is
+collected, so the stream is as long as `--recordings` is deep.
+
+**Diagnostics.** A recordings directory that mixes native and materialized
+recordings is refused with a message naming both kinds. An empty directory, a
+directory holding no recordings, and a `--recordings` path that does not exist
+each get their own message and a non-zero status — never a silently empty
+dataset.
+
+### ct review inspect
+
+Reads a dataset and prints summary statistics without opening a GUI.
+
+```
+ct review inspect <PATH> [--format text|json]
+```
+
+| Flag                | Default | Description                            |
+| ------------------- | ------- | -------------------------------------- |
+| `<PATH>`            | —       | The dataset directory. Required.       |
+| `--format <FORMAT>` | `text`  | `text` (human-readable) or `json`      |
+
+:::note
+`inspect` reads the **native** collector's dataset layout (the directory
+containing `manifest.dr`) and delegates to the native replay backend. A dataset
+produced from a materialized trace is a single `review.json` with no chunks, so
+`inspect` reports the missing `manifest.dr`; open it with `ct review`, or read
+the JSON directly.
+:::
+
+### ct agent evidence
+
+Hands a review dataset to CodeTracer from inside an agent session.
+
+```
+ct agent evidence <PATH> [--session <ID>] [--task <ID>] [--workspace <DIR>]
+```
+
+| Flag                | Description                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `<PATH>`            | The dataset: a directory from `ct review collect`, or the `review.json` in it. Required. |
+| `--session <ID>`    | The agent session this evidence belongs to                                          |
+| `--task <ID>`       | The task the session is working on                                                  |
+| `--workspace <DIR>` | The workspace the session is working in                                             |
+
+All three are read from `CODETRACER_AGENT_SESSION_ID`,
+`CODETRACER_AGENT_TASK_ID` and `CODETRACER_AGENT_WORKSPACE` — the variables the
+agent harness already exports — and the flags override them. The session falls
+back to the reference `ct review collect` stamped into the dataset. If none of
+the three names a session, the command exits non-zero and says which to supply;
+it never invents an id.
+
+The changeset, the recordings and the status the notification carries are read
+from the dataset, not restated by the agent.
+
+### ct agent end-of-turn
+
+Runs the two ordinary commands, in order, printing each as it runs it — for use
+as a project's end-of-turn hook.
+
+```
+ct agent end-of-turn [collect options] [--session <ID>] [--task <ID>] [--workspace <DIR>]
+```
+
+It accepts all of `ct review collect`'s options (`--repo`, `--diff`,
+`--diff-file`, `--recordings`, `--output`/`-o`, `--preset`, `--progress`) plus
+the three above, and fills unset ones from the environment so a hook line can be
+bare:
+
+| Variable                       | Fills in       | Default        |
+| ------------------------------ | -------------- | -------------- |
+| `CODETRACER_REVIEW_REPO`       | `--repo`       | the workspace  |
+| `CODETRACER_REVIEW_DIFF`       | `--diff`       | —              |
+| `CODETRACER_REVIEW_DIFF_FILE`  | `--diff-file`  | —              |
+| `CODETRACER_REVIEW_RECORDINGS` | `--recordings` | `.ct/runs`     |
+| `CODETRACER_REVIEW_OUTPUT`     | `--output`     | `.ct/review`   |
+
+### ct agent prompt
+
+Prints the prompt text that teaches an agent the collect-then-hand-over pair.
+Install it into a project's agent instructions with:
+
+```bash
+ct agent prompt >> AGENTS.md
+```
+
+The text describes only commands that ship. In particular it does not mention
+test certificates, which `ct test` does not yet issue.
 
 ### ct trace origin
 
@@ -289,6 +464,15 @@ for the full surface.
 | `CODETRACER_CT_MCR_CMD`         | Override the internal MCR binary that `ct trace extract-gfx` invokes     |
 | `CODETRACER_CT_GFX_PLAYER_CMD`  | Override the internal player binary that `ct gfx-replay` launches        |
 | `CODETRACER_CT_GFX_PLAYER_BACKEND` | Default backend for `ct gfx-replay` (equivalent to `--backend`), for example `software` |
+| `CODETRACER_NATIVE_REPLAY_PATH` | Path to the `ct-native-replay` binary used by native `ct review collect` / `ct review inspect` |
+| `CODETRACER_AGENT_SESSION_ID`   | Agent session `ct agent evidence` and `ct review collect` attribute a review to |
+| `CODETRACER_AGENT_TASK_ID`      | Task the agent session is working on                                    |
+| `CODETRACER_AGENT_WORKSPACE`    | Workspace the agent session is working in                               |
+| `CODETRACER_REVIEW_REPO`        | `ct agent end-of-turn` default for `--repo`                             |
+| `CODETRACER_REVIEW_DIFF`        | `ct agent end-of-turn` default for `--diff`                             |
+| `CODETRACER_REVIEW_DIFF_FILE`   | `ct agent end-of-turn` default for `--diff-file`                        |
+| `CODETRACER_REVIEW_RECORDINGS`  | `ct agent end-of-turn` default for `--recordings` (falls back to `.ct/runs`) |
+| `CODETRACER_REVIEW_OUTPUT`      | `ct agent end-of-turn` default for `--output` (falls back to `.ct/review`) |
 
 ### Output Format
 

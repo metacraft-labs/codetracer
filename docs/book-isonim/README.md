@@ -63,6 +63,34 @@ just serve-docs    # one-shot SSR preview (no live reload)
 just test          # nav-order + dev-server tests
 ```
 
+### If the build says `cannot open file: build_site`
+
+Nim has no `--path` to the sibling framework. The book's `config.nims` — which
+used to supply them, resolved from `currentSourcePath()` — is matched by the
+repo-wide `*.nims` line in `codetracer/.gitignore`, so it is not in the
+checkout. `ci/deploy/docs.sh` works around this by generating an absolute
+`nim.cfg` before the build and deleting it after; do the same locally, once:
+
+```bash
+S="$(cd ../../.. && pwd)"      # the workspace root holding the sibling repos
+cat > nim.cfg <<CFG
+--path:"$S/isonim-docs/src"
+--path:"$S/isonim/src"
+--path:"$S/nim-everywhere/src"
+--path:"$S/nim-faststreams"
+--path:"$S/nim-stew"
+--path:"$S/isonim/vendor/chronicles"
+--path:"$S/isonim/vendor/serialization"
+--path:"$S/isonim/vendor/json_serialization"
+CFG
+```
+
+`nim.cfg` is git-ignored (RV-11 added the entry, after a run of this recipe left
+an untracked file full of one machine's absolute paths sitting in the tree), and
+CI writes and deletes its own copy regardless, so leaving it in place is
+local-only and safe. It must stay untracked: a committed copy would collide with
+the one `ci/deploy/docs.sh` generates.
+
 ## Where things live
 
 | Path | What |

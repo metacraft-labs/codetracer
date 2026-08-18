@@ -77,11 +77,12 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
     # The redirect stubs are ADDITIONAL to the real pages (46 M1 pages + the M5
     # `getting_started/introduction` split + the three WebFlow utility pages
     # faq/support/sign-in = 50, + the nine live-request-tracking pages + the
-    # `sign-up` page = 60); the framework output must still be intact.
+    # `sign-up` page = 60, + `usage_guide/deep_review` = 61); the framework
+    # output must still be intact.
     check dirExists(publicDir())
     check fileExists(publicDir() / "index.html")
     let entries = loadContentEntries(contentDir())
-    check entries.len == 60
+    check entries.len == 61
 
   test "no legacy URL is left without a redirect":
     # Build the set of clean routes the real site actually serves, so we can

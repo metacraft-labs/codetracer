@@ -699,11 +699,34 @@ proc dispatchOpenAction(self: VCSComponent; action: VCSOpenAction) =
   of voaDiffTab:
     self.openUnifiedDiffTab(action.target)
   of voaSourceFile:
-    # VCS-005: open the file itself.  git (and the DeepReview export) hand us
-    # a repository-relative path; the editor needs an absolute one, otherwise
-    # the tab load is issued for a path that does not exist unless some
-    # already-open tab happens to end with it.
-    self.data.openTab(self.absoluteRepoPath(action.path), ViewSource)
+    # VCS-005: open the file itself.  git hands us a repository-relative path
+    # and the editor needs an absolute one, otherwise the tab load is issued
+    # for a path that does not exist unless some already-open tab happens to
+    # end with it.
+    #
+    # A REVIEW OPENED FROM A DATASET is the exception, and deliberately so.
+    # Its files are addressed by their path in the *reviewed* repository, which
+    # is the only name the dataset knows and the only one that means anything
+    # on a machine that is not the one the dataset was collected on.  Resolving
+    # it here would join it onto `git rev-parse --show-toplevel` of whatever
+    # repository the terminal happened to be in — for a dataset from a ticket,
+    # an unrelated tree — and produce a path that exists nowhere.  The index
+    # serves such a tab from the dataset's own `sourceContent`
+    # (`index/config.reviewSourceLookup`), so no absolute path is needed and
+    # fabricating one would only mislabel the tab.
+    #
+    # The test is `isReviewDatasetSession`, not "is a review active".  A review
+    # started over a *live trace diff* (DeepReview-GUI.md §1, launch method 2:
+    # a trace recorded with `--with-diff`) has the real working tree in front
+    # of it and its index process was never handed a dataset, so its tabs are
+    # still read from disk and still need the absolute path — the repository is
+    # right there, and `ct` may well have been run from a subdirectory of it.
+    # Those tabs are matched to their dataset entry by the component-suffix
+    # rule in `common/review_source_paths`, which exists for exactly this case.
+    if self.data.isReviewDatasetSession():
+      self.data.openTab(cstring(action.path), ViewSource)
+    else:
+      self.data.openTab(self.absoluteRepoPath(action.path), ViewSource)
 
 proc handleVCSFileSelection(self: VCSComponent; index: int;
                             path, target, status: string) =
