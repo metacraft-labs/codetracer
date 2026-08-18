@@ -1604,6 +1604,23 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Assert the JS ViewModel lane can observe its own failures (full suite)
+        # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
+        # dev shell, where `nim` and `node` exist. That difference is the whole
+        # point of this step.
+        #
+        # `ci-verdict` sits on stock ubuntu-latest, so its copy takes the skip
+        # branch for the three dynamic contracts -- the ones that compile a
+        # deliberately-failing suite with and without `-d:nodejs` and compare
+        # node's exit code. Those three are the only thing standing between
+        # "the recipe contains the string -d:nodejs" and "-d:nodejs actually
+        # makes a failing suite fail", and for a day they ran nowhere at all.
+        #
+        # It runs BEFORE `test-vm` below on purpose: if the lane has lost the
+        # ability to report failures, that is worth knowing before reading the
+        # lane's report.
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/vm-js-lane-test.sh
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
@@ -3700,9 +3717,16 @@ jobs:
         # The shape half of this suite is a static check over the justfile, so
         # it belongs here on a stock runner: the lane it guards runs inside the
         # dev shell on a self-hosted runner, and is therefore exactly the kind
-        # of lane that can stop reporting without anyone noticing. The suite's
-        # toolchain-dependent half skips cleanly where nim and node are absent
-        # and is exercised in full by `viewmodel-tests`.
+        # of lane that can stop reporting without anyone noticing.
+        #
+        # This runner has no `nim`, so the three toolchain-dependent contracts
+        # skip here and the suite says so with a denominator ("5 of 8 ran, 3
+        # skipped") rather than printing an unqualified pass. They are run in
+        # full by the `viewmodel-tests` job, which invokes this same script
+        # inside the dev shell -- see the step there. That statement was an
+        # aspiration when this step first landed, not a fact; the step in
+        # `viewmodel-tests` is what makes it true, and if it is ever removed
+        # this comment is wrong again.
         run: bash ci/test/vm-js-lane-test.sh
 
       - name: Assert the required jobs actually ran

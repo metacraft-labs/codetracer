@@ -35,12 +35,44 @@
 # `node`; when they are absent it says so and is counted as skipped rather than
 # quietly passing.
 #
+# WHERE THIS RUNS, AND WHY BOTH CALL SITES MATTER
+# -----------------------------------------------
+# Two call sites, deliberately:
+#
+#   * `ci-verdict` (stock ubuntu-latest, no nim) -- gets the five static
+#     contracts. This is the one that runs on every push and PR.
+#   * `viewmodel-tests` (inside the dev shell, nim + node present) -- gets all
+#     eight, including the three that actually PROVE `-d:nodejs` is
+#     load-bearing rather than grepping for it.
+#
+# For its first day on `dev` there was only the first, so the three dynamic
+# contracts skipped on every run while the header claimed they were "exercised
+# in full by viewmodel-tests" -- a promise nothing kept. A contract suite whose
+# decisive half never executes is the exact defect this suite exists to catch,
+# so it is worth being blunt: if the `viewmodel-tests` call site is ever
+# dropped, the dynamic contracts stop running and only the summary's skip count
+# will say so.
+#
+# THE SUMMARY REPORTS A DENOMINATOR
+# ---------------------------------
+# `ran + skipped` is checked against TOTAL_CONTRACTS below and disagreement is
+# a hard failure. That is not ceremony: this suite shipped with a skip branch
+# that emitted two skips for three dynamic contracts, so on a stock runner it
+# printed a total of seven where the real number is eight, and the missing
+# contract was invisible. A count without a denominator cannot tell you what it
+# failed to mention.
+#
 # Run directly:  bash ci/test/vm-js-lane-test.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 JUSTFILE="${REPO_ROOT}/justfile"
+
+# Every contract below, counted once, whether or not this environment can run
+# it. Bump deliberately when adding one -- the reconciliation at the end fails
+# loudly if this disagrees with what actually ran.
+TOTAL_CONTRACTS=8
 
 pass_count=0
 skip_count=0
@@ -162,8 +194,11 @@ fi
 # the second contract fails and contract 1 is revealed as cargo cult.
 
 if ! command -v nim >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+	# One skip per contract in the `else` arm below. There are THREE, and this
+	# branch used to emit two -- which is why the totals did not add up.
 	skip "nim and/or node not on PATH; cannot verify the -d:nodejs claim here"
 	skip "nim and/or node not on PATH; cannot verify the no-define counterpart"
+	skip "nim and/or node not on PATH; cannot verify the absence of the warning"
 else
 	tmp_dir="$(mktemp -d)"
 	trap 'rm -rf "${tmp_dir}"' EXIT
@@ -217,5 +252,32 @@ EOF
 fi
 
 echo
-echo "assertions: ${pass_count}  skipped: ${skip_count}  fail: 0"
-echo "test-vm-js lane: all contracts hold."
+
+# Reconcile against the declared total before reporting anything. If these
+# disagree, some contract neither ran nor announced itself as skipped, and the
+# summary below would be quietly understating what this run actually checked.
+accounted=$((pass_count + skip_count))
+if [ "${accounted}" -ne "${TOTAL_CONTRACTS}" ]; then
+	fail "every contract is accounted for as run or skipped" \
+		"declared TOTAL_CONTRACTS=${TOTAL_CONTRACTS} but ${pass_count} ran and" \
+		"${skip_count} were skipped, which accounts for ${accounted}." \
+		"A contract that neither ran nor reported itself skipped is invisible," \
+		"so this suite refuses to print a total it cannot justify. Either a" \
+		"contract was added without bumping TOTAL_CONTRACTS, or a skip branch" \
+		"emits fewer skips than the arm it stands in for."
+fi
+
+if [ "${skip_count}" -eq 0 ]; then
+	echo "contracts: ${pass_count} of ${TOTAL_CONTRACTS} ran, 0 skipped"
+	echo "test-vm-js lane: all contracts hold."
+else
+	echo "contracts: ${pass_count} of ${TOTAL_CONTRACTS} ran, ${skip_count} skipped" \
+		"(no nim and/or node in this environment)"
+	echo "test-vm-js lane: the ${pass_count} contracts this environment can check hold."
+	echo "  NOTE: the ${skip_count} skipped contract(s) are the ones that PROVE -d:nodejs is"
+	# Deliberately no backticks in this string. With them, shfmt -s rewrites
+	# the line to single quotes and SC2016 then fires on the backticks; plain
+	# words satisfy both tools. (And this comment avoids opening with the
+	# linter's name, which would be read as a directive and fail the parse.)
+	echo "  load-bearing. They run in the viewmodel-tests job, inside the dev shell."
+fi
