@@ -87,6 +87,16 @@ type
     # matching what the Karax search results view shows.
     backendSearchResults*: Signal[seq[tuple[name: string, rrTicks: int, key: string]]]
 
+    # -- Measured layout --
+    # Actual rendered row height in CSS pixels, measured from the DOM after
+    # the first batch of rows renders and updated on every zoom/resize.
+    # Defaults to 24.0 (the legacy CALL_HEIGHT_PX constant) until measured.
+    # Used by the view to compute the virtual-scroll container height
+    # (totalCallsCount * rowHeightPx) and the translateY offset
+    # (startLineIndex * rowHeightPx) so the loaded window is positioned
+    # correctly regardless of font-size / em scaling.
+    rowHeightPx*: Signal[float]
+
     # -- Derived state --
     visibleLines*: Memo[seq[CallLine]]
     hasMoreAbove*: Memo[bool]
@@ -262,6 +272,14 @@ proc setRawIgnorePatterns*(vm: CalltraceVM; patterns: string) =
   ## Triggers the auto-load effect if the value changes.
   vm.rawIgnorePatterns.val = patterns
 
+proc setRowHeightPx*(vm: CalltraceVM; h: float) =
+  ## Update the measured row height in CSS pixels.  Called from the view after
+  ## the first batch of rows renders and whenever a zoom or resize is detected.
+  ## Only updates the signal when the value meaningfully changes (> 0.5 px
+  ## delta) to avoid oscillating reactive cycles from sub-pixel rounding.
+  if h > 0.0 and abs(h - vm.rowHeightPx.val) > 0.5:
+    vm.rowHeightPx.val = h
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -378,6 +396,11 @@ proc createCalltraceVM*(store: ReplayDataStore;
 
     let backendSearchResults = createSignal(newSeq[tuple[name: string, rrTicks: int, key: string]]())
 
+    # Default 24.0 matches the legacy CALL_HEIGHT_PX constant; updated by the
+    # view once rows have rendered so the virtual-scroll math uses the actual
+    # em/rem-derived pixel height rather than the compile-time approximation.
+    let rowHeightPx = createSignal(24.0)
+
     let vm = CalltraceVM(
       store: store,
       collabCore: collabCore,
@@ -390,6 +413,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       searchQuery: searchQuery,
       rawIgnorePatterns: rawIgnorePatterns,
       backendSearchResults: backendSearchResults,
+      rowHeightPx: rowHeightPx,
       visibleLines: visibleLines,
       hasMoreAbove: hasMoreAbove,
       hasMoreBelow: hasMoreBelow,
