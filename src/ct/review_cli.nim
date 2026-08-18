@@ -41,6 +41,40 @@
 ##   options (`--inspect`, `--remote-debugging-port`, …) that Playwright and
 ##   the Electron tooling inject.
 ##
+## ## How `collect` chooses a collector (RV-3)
+##
+## DeepReview-GUI.md §1.1: "A collector is chosen by inspecting the recording,
+## never by the user naming a backend."  So `collect` surveys `--recordings`
+## before it runs anything (:proc:`surveyRecordings`, in
+## `trace/trace_kind.nim` — the same rules `ct replay` uses to decide which
+## backend opens a trace) and routes on what it finds
+## (:proc:`routeReviewCollect`):
+##
+## =====================  ==========================================================
+## Recordings             Route
+## =====================  ==========================================================
+## all native (rr)        `ct-native-replay review-data collect`, as before
+## all materialized       the db-backend collector — **absent until RV-4**, so this
+##                        fails with a message naming the kind
+## mixed kinds            refused; see the milestone's judgement calls for why the
+##                        alternative (collect per kind and merge) was not taken
+## none                   refused, distinguishing an empty directory from one that
+##                        holds no recordings
+## =====================  ==========================================================
+##
+## The survey runs *before* the native backend is looked up, which is not an
+## accident of ordering: a Python user has no `ct-native-replay` installed, and
+## answering "the native replay backend is missing" for a Python recording
+## would name the wrong problem and imply DeepReview is an rr-only feature —
+## the exact coupling §1.1 says must not become architectural.  For the same
+## reason the survey is implemented in `ct` rather than delegated to the native
+## backend's own trace-kind detection: the machine that most needs the
+## diagnostic is the one where that binary is not installed.
+##
+## Every one of these routes is decided by a *pure* function of the survey, so
+## the whole dispatch table is assertable on both Nim backends without a
+## recording, a collector or a filesystem.
+##
 ## ## Why `collect` writes JSON as well as `.dr`
 ##
 ## The native collector writes a binary `.dr` dataset; the GUI reads JSON.
@@ -53,6 +87,9 @@
 ## One command in, one command out, no undocumented intermediate step.
 
 import std/strutils
+
+import trace/trace_kind
+export trace_kind
 
 const
   ReviewDatasetJsonName* = "review.json"
@@ -89,6 +126,11 @@ type
         ## without a native backend installed.
       outputDir*: string
         ## where the dataset lands; also where `review.json` is written.
+      recordingsDir*: string
+        ## the directory `--recordings` named.  Held separately from
+        ## `collectorArgs` because RV-3's dispatch inspects it *before* any
+        ## collector is chosen, and re-parsing the collector's argv to find it
+        ## again would be a second source of truth for the same value.
     of rpkInspect:
       inspectPath*: string
       inspectFormat*: string   ## "text" (default) or "json"
@@ -253,7 +295,8 @@ func planCollect(rest: openArray[string]): ReviewPlan =
     argv.add(@["--preset", preset])
   if progress:
     argv.add("--progress")
-  ReviewPlan(kind: rpkCollect, collectorArgs: argv, outputDir: output)
+  ReviewPlan(kind: rpkCollect, collectorArgs: argv, outputDir: output,
+    recordingsDir: recordings)
 
 func planInspect(rest: openArray[string]): ReviewPlan =
   ## Translate `ct review inspect <PATH> [--format …]`.
@@ -366,6 +409,158 @@ func reviewNeedsRawDispatch*(args: openArray[string]): bool =
     return false
   args[1] in ["collect", "inspect", "export"] or isHelpToken(args[1])
 
+type
+  ReviewCollector* = enum
+    ## Which collector can read a given set of recordings.  RV-3 builds the
+    ## seam; RV-4 fills in the second arm.
+    rcvNone
+      ## no collector can be chosen — the route's `message` says why
+    rcvNative
+      ## `ct-native-replay review-data collect`, reached as a subprocess
+      ## through its hidden `review-data` group (RV-1)
+    rcvMaterialized
+      ## the db-backend collector.  Not implemented until RV-4, so a route
+      ## that names it still carries a `message` and still fails.
+
+  CollectRoute* = object
+    ## The outcome of inspecting a recordings directory.
+    collector*: ReviewCollector
+    message*: string
+      ## Empty **iff** the route can be taken today.  A non-empty message on
+      ## a named collector means "this is whose job it is, and it cannot do
+      ## it yet" — which is what keeps the refusal specific instead of
+      ## degenerating into "unsupported".
+    kinds*: set[CtTraceKind]
+      ## Every kind found among the recordings (excluding `ctkUnknown`
+      ## entries, which are not recordings).  Exposed so a caller can report
+      ## what was seen without re-deriving it.
+
+func canCollect*(route: CollectRoute): bool =
+  ## Whether this route names a collector that exists and can run now.
+  route.collector != rcvNone and route.message.len == 0
+
+func namesOfKind(entries: openArray[RecordingSurveyEntry],
+                 kind: CtTraceKind): seq[string] =
+  result = @[]
+  for entry in entries:
+    if entry.kind == kind:
+      result.add entry.name
+
+func briefList(names: openArray[string]): string =
+  ## Name at most three things, then say how many more there were.  A
+  ## diagnostic that pastes two hundred directory names is unreadable, and
+  ## one that names none makes the user go looking.
+  const shown = 3
+  if names.len == 0:
+    return "none"
+  var parts: seq[string] = @[]
+  for i in 0 ..< min(shown, names.len):
+    parts.add names[i]
+  result = parts.join(", ")
+  if names.len > shown:
+    result &= " and " & $(names.len - shown) & " more"
+
+const
+  RecordingShapeHelp* =
+    "  A recording is an rr trace directory (one holding a `version` " &
+    "file), or a\n" &
+    "  materialized trace directory (one holding a `.ct` container or a " &
+    "trace_metadata.json)."
+    ## What `ct review collect` is looking for, in the terms a user can
+    ## check with `ls`.  Repeated in every "nothing here" diagnostic,
+    ## because the most likely cause of one is a mistyped path.
+
+func missingRecordingsDirMessage*(recordingsDir: string): string =
+  ## `--recordings` names a directory that is not there.
+  ##
+  ## Diagnosed by `ct` rather than left to the collector, which answered with
+  ## a Rust `Debug` rendering of its error type
+  ## (`Error: Custom { kind: Other, error: "invalid data: recordings ...`).
+  "error: `ct review collect` found no recordings directory at '" &
+    recordingsDir & "'.\n" &
+    "  --recordings names the directory that HOLDS the recordings, one " &
+    "subdirectory each."
+
+func routeReviewCollect*(recordingsDir: string,
+                         entries: openArray[RecordingSurveyEntry]):
+                        CollectRoute =
+  ## Choose the collector for a surveyed recordings directory — the seam
+  ## DeepReview-GUI.md §1.1 describes, as a pure function so the whole
+  ## dispatch table is assertable without a recording on disk.
+  ##
+  ## Four outcomes, each deliberate; see the milestone's judgement calls:
+  ##
+  ## * one kind, native — the existing collector, unchanged.
+  ## * one kind, materialized — RV-4's collector, named and refused.
+  ## * more than one kind — refused rather than collected per kind and
+  ##   merged.  With one collector implemented, "merge" could only mean
+  ##   "collect the native ones and drop the rest", which is the silent
+  ##   partial dataset this milestone exists to prevent.
+  ## * nothing to collect — refused, and an empty directory is distinguished
+  ##   from one holding no recordings, because those are different mistakes.
+  var recordings: seq[RecordingSurveyEntry] = @[]
+  for entry in entries:
+    if entry.kind != ctkUnknown:
+      recordings.add entry
+      result.kinds.incl entry.kind
+
+  if recordings.len == 0:
+    result.collector = rcvNone
+    if entries.len == 0:
+      result.message =
+        "error: `ct review collect` found no recordings in '" &
+        recordingsDir & "': the directory is empty.\n" &
+        "  Record the runs you want reviewed first (`ct record …`), then " &
+        "point --recordings at\n  the directory holding them."
+    else:
+      var names: seq[string] = @[]
+      for entry in entries:
+        names.add entry.name
+      result.message =
+        "error: `ct review collect` found no recordings in '" &
+        recordingsDir & "'.\n" &
+        "  It holds " & $entries.len & " entr" &
+        (if entries.len == 1: "y" else: "ies") &
+        ", none of which is a recording: " & briefList(names) & ".\n" &
+        RecordingShapeHelp
+    return
+
+  if result.kinds.card > 1:
+    result.collector = rcvNone
+    var kindLines = ""
+    for kind in [ctkNative, ctkMaterialized]:
+      if kind in result.kinds:
+        let names = namesOfKind(recordings, kind)
+        kindLines &= "\n    " & traceKindLabel(kind) & ": " & $names.len &
+          " (" & briefList(names) & ")"
+    result.message =
+      "error: `ct review collect` refuses a mixed recordings directory: '" &
+      recordingsDir & "' holds recordings of more than one kind." &
+      kindLines & "\n" &
+      "  One collector is chosen per run by inspecting the recordings, and " &
+      "datasets produced by\n  two different collectors are not merged.  " &
+      "Point --recordings at recordings of one kind."
+    return
+
+  if ctkNative in result.kinds:
+    result.collector = rcvNative
+    return
+
+  result.collector = rcvMaterialized
+  let names = namesOfKind(recordings, ctkMaterialized)
+  result.message =
+    "error: `ct review collect` does not support this trace kind yet: " &
+    traceKindLabel(ctkMaterialized) & ".\n" &
+    "  '" & recordingsDir & "' holds " & $names.len & " " &
+    traceKindLabel(ctkMaterialized) & " recording" &
+    (if names.len == 1: "" else: "s") & " (" & briefList(names) & ") and no " &
+    traceKindLabel(ctkNative) & " recording.\n" &
+    "  Materialized traces — Python, Ruby, JavaScript and every other " &
+    "language that records one —\n  are collected by the db-backend " &
+    "collector, which is not implemented yet.  " &
+    traceKindLabel(ctkNative) & " recordings\n  can be collected today.  " &
+    "See codetracer-specs/DeepReview/CLI-Reference.md."
+
 when not defined(js):
   import std/[os, osproc]
 
@@ -440,6 +635,18 @@ when not defined(js):
     ## Two subprocess calls, one user-visible command: see the module header
     ## for why `collect` is not allowed to stop at the binary chunks.
     doAssert plan.kind == rpkCollect
+    # RV-3: inspect the recordings and choose the collector BEFORE looking
+    # for any backend.  See the module header for why the order matters.
+    if not dirExists(plan.recordingsDir):
+      stderr.writeLine(missingRecordingsDirMessage(plan.recordingsDir))
+      return 1
+    let route = routeReviewCollect(
+      plan.recordingsDir, surveyRecordings(plan.recordingsDir))
+    if not canCollect(route):
+      stderr.writeLine(route.message)
+      return 1
+    doAssert route.collector == rcvNative,
+      "the only collector RV-3 can run is the native one"
     if nativeReplayExe().len == 0:
       stderr.writeLine(missingNativeReplayMessage("collect"))
       return 1

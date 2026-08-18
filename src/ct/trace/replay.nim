@@ -3,6 +3,7 @@ import std / [options, os, osproc, strutils, strformat ],
   ../cli/[ interactive_replay ],
   ../trace / storage_and_import,
   ../trace / session_import,
+  ../trace / trace_kind,
   ../../common/[ types, common_trace_index, lang, paths, config,
                   recording_id ],
   ../codetracerconf,
@@ -170,24 +171,17 @@ proc replay*(
 
     if trace.isNil and traceFolderArg.isSome:
       let traceFolder = traceFolderArg.get()
-      var hasCtSibling = false
-      if dirExists(traceFolder):
-        for entry in walkDir(traceFolder):
-          if entry.kind == pcFile and entry.path.endsWith(".ct"):
-            hasCtSibling = true
-            break
-      let traceKind =
-        if traceFolder.endsWith(".ct") or fileExists(traceFolder / "mcr"):
-          # MCR + materialized CTFS share the `.ct` container; native MCR
-          # replays go through the worker (ct-native-replay), materialized
-          # `.ct` containers are loaded by db-backend directly.
-          "rr"
-        elif hasCtSibling:
-          # Folder containing a materialized CTFS bundle.
-          "db"
-        else:
-          # replay traces (RR/TTD) — metadata comes from meta.dat
-          "rr"
+      # MCR + materialized CTFS share the `.ct` container; native MCR replays
+      # go through the worker (ct-native-replay), materialized `.ct`
+      # containers are loaded by db-backend directly, and the `mcr` marker is
+      # what tells them apart.  These rules used to be written out here; they
+      # now live in `trace/trace_kind.nim` because `ct review collect` has to
+      # apply the same ones to decide which DeepReview collector can read a
+      # recording (RV-3), and two copies of "what is this folder?" is how the
+      # copies in this file and in `import_command.nim` came to disagree.
+      # `traceKindString` keeps this call site's long-standing default for a
+      # folder it cannot identify: "rr", whose metadata comes from meta.dat.
+      let traceKind = traceKindString(detectTraceKind(traceFolder))
       trace = importTrace(
         traceFolder,
         NO_RECORDING_ID,

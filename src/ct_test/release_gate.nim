@@ -373,6 +373,16 @@ const
     # that only exist in a linked `ct`, so reading the sources is the only
     # headless way to assert the retired option is really gone rather than
     # merely unused.
+    #
+    # RV-3 added the routing layer to the same file: `collect` inspects the
+    # recordings it was given and chooses the collector that can read them
+    # (DeepReview-GUI.md §1.1, "a collector is chosen by inspecting the
+    # recording, never by the user naming a backend").  It belongs here for
+    # the same reason the dispatch does — the rules and the route are pure
+    # functions no Playwright suite can reach — and it guards a failure that
+    # was silent rather than loud: `ct review collect` over a directory of
+    # Python recordings used to print "Review dataset ready" and exit 0 over
+    # a dataset with nothing in it.
     "src/tests/gui/tests/deepreview/ct_review_cli_test.nim",
   ]
 
@@ -422,6 +432,15 @@ const
     # binary every case in this file fails — `ct review …` answered "ct has
     # no such subcommand" and the retired global option was still accepted —
     # which is exactly the gap it now guards.
+    #
+    # RV-3 added the routing cases, which are here rather than only in the
+    # ViewModel lane because the property they assert is an ORDER inside the
+    # linked executor — the recordings are surveyed before any backend is
+    # looked up — and because the recordings they route on are real
+    # directories with real marker files.  Six of the seven failed against
+    # the pre-RV-3 binary by producing "Review dataset ready" and exit 0;
+    # the seventh pins the native route, which must survive the seam
+    # unchanged.
     "src/tests/cli/review_cli_test.nim",
   ]
 

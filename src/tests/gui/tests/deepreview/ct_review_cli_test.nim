@@ -14,13 +14,23 @@
 ## whose only observable effect was spawning a GUI, which is why the launch
 ## path had no headless coverage at all.
 ##
-## Three layers, matching the milestone's three verification entries:
+## Four layers, matching the milestones' verification entries:
 ##
 ##   * **Dispatch** — `review` resolves to launch, collect or inspect, and the
 ##     collect verb translates into the native collector's own argv.  The argv
 ##     is asserted as data rather than by running the collector: the
 ##     translation is the part that can silently rot, and it must be checkable
 ##     on a machine that has no `ct-native-replay`.
+##   * **Routing** (RV-3) — `collect` inspects the recordings it was given and
+##     chooses the collector that can read them, and the user never names a
+##     backend.  Asserted at two levels for two different failure modes: the
+##     rules that say what a recording *is*
+##     (`src/ct/trace/trace_kind.nim`), and the route those rules produce
+##     (`routeReviewCollect`).  Both are pure, so the whole dispatch table is
+##     checkable with no recording, no collector and — on the `nim js`
+##     backend — no filesystem at all.  What made this worth its own layer:
+##     before RV-3, `ct review collect --recordings <a Python recording>`
+##     printed "Review dataset ready" and exited 0 over an empty dataset.
 ##   * **Retirement** — the old spellings fail, and the failure names
 ##     `ct review`.  A retirement whose diagnostic says only "unrecognized
 ##     option" is the failure mode `Retired-Names.md` exists to prevent.
@@ -31,7 +41,10 @@
 ##     launches the new spelling.  Those files need confutils, Electron and a
 ##     browser, so reading them is the only way to assert the wiring
 ##     headlessly — the same technique `deepreview_layout_test.nim` and
-##     `deepreview_entry_test.nim` already use.
+##     `deepreview_entry_test.nim` already use.  RV-3 adds one more source
+##     contract: `ct replay` must keep using the *shared* trace-kind rules
+##     rather than growing a private copy back, which is the only way a
+##     "one rule, one place" claim stays true after the commit that made it.
 ##
 ## Mocking justification (workspace policy): there is no mock in this file.
 ## The planner is production code called directly; the filesystem suite uses a
@@ -158,6 +171,196 @@ suite "ct review — dispatch":
     # answer `ct edit` gives, rather than by a second opinion here.
     check not reviewNeedsRawDispatch(@["review", "/tmp/a.json", "/tmp/b.json"])
 
+suite "trace kinds — one rule for what a recording is":
+  # RV-3 requires `collect` to reuse the existing trace-kind machinery rather
+  # than invent a second notion of what a recording is.  These cases assert
+  # the rules themselves, as evidence rather than as paths, so they hold on
+  # both Nim backends and describe exactly which fact decides which answer.
+
+  proc evidence(isDirectory = true, pathIsCtContainer = false,
+                hasMcrMarker = false, hasRrVersionFile = false,
+                holdsCtContainer = false,
+                holdsMaterializedIndex = false): TraceEvidence =
+    TraceEvidence(name: "rec", isDirectory: isDirectory,
+      pathIsCtContainer: pathIsCtContainer, hasMcrMarker: hasMcrMarker,
+      hasRrVersionFile: hasRrVersionFile, holdsCtContainer: holdsCtContainer,
+      holdsMaterializedIndex: holdsMaterializedIndex)
+
+  test "an_rr_trace_directory_is_native":
+    # rr writes `version` in every trace it records, and it is the same rule
+    # the native collector already discovers recordings by, so ct's dispatch
+    # and the collector's own discovery cannot disagree about what it will
+    # find.
+    check traceKindFromEvidence(evidence(hasRrVersionFile = true)) == ctkNative
+
+  test "a_ct_container_is_native_when_the_path_itself_is_one":
+    check traceKindFromEvidence(
+      evidence(isDirectory = false, pathIsCtContainer = true)) == ctkNative
+
+  test "the_mcr_marker_decides_the_ambiguous_ct_container":
+    # Native MCR recordings and materialized traces share the CTFS container,
+    # so the container alone cannot answer.  The marker is what `ct replay`
+    # has always used to tell them apart, and RV-3 reuses that rather than
+    # ruling on it a second time.
+    check traceKindFromEvidence(
+      evidence(holdsCtContainer = true, hasMcrMarker = true)) == ctkNative
+    check traceKindFromEvidence(
+      evidence(holdsCtContainer = true)) == ctkMaterialized
+
+  test "the_pre_ctfs_three_file_layout_is_materialized":
+    # `trace_metadata.json` + `trace.bin`, which is what the recordings in
+    # codetracer-example-recordings/python still are.
+    check traceKindFromEvidence(
+      evidence(holdsMaterializedIndex = true)) == ctkMaterialized
+
+  test "a_folder_with_no_evidence_is_not_a_recording":
+    # The value that did not exist before RV-3, and the reason
+    # `--recordings ~/src` used to produce an empty dataset and exit 0: with
+    # only "rr" and "db" to choose from, every directory was a recording.
+    check traceKindFromEvidence(evidence()) == ctkUnknown
+    check traceKindFromEvidence(evidence(isDirectory = false)) == ctkUnknown
+
+  test "the_replay_side_default_is_unchanged":
+    # `ct replay` asks a different question — "which backend opens this trace
+    # I was told is a trace" — and its long-standing answer for a folder it
+    # cannot identify is "rr", whose metadata comes from meta.dat.  Moving
+    # the rules into a shared module must not change that.
+    check traceKindString(ctkNative) == TraceKindNative
+    check traceKindString(ctkMaterialized) == TraceKindMaterialized
+    check traceKindString(ctkUnknown) == TraceKindNative
+
+  test "every_kind_can_be_named_to_a_user":
+    # A refusal has to name the kind it could not handle, so every value must
+    # have a label and no two may share one.
+    var labels: seq[string] = @[]
+    for kind in CtTraceKind:
+      let label = traceKindLabel(kind)
+      check label.len > 0
+      check label notin labels
+      labels.add label
+    check traceKindLabel(ctkMaterialized).contains("materialized")
+    check traceKindLabel(ctkNative).contains("rr")
+
+suite "ct review collect — the collector is chosen by inspecting the recordings":
+  # RV-3.  DeepReview-GUI.md §1.1: "A collector is chosen by inspecting the
+  # recording, never by the user naming a backend."
+
+  proc survey(pairs: openArray[(string, CtTraceKind)]):
+             seq[RecordingSurveyEntry] =
+    result = @[]
+    for (name, kind) in pairs:
+      result.add RecordingSurveyEntry(name: name, kind: kind)
+
+  test "collect_carries_the_recordings_directory_into_the_dispatch":
+    # The dispatch inspects `--recordings` before any collector is chosen, so
+    # the plan has to carry it rather than leave the executor to find it
+    # again by re-reading the collector's argv.
+    let plan = planReviewCli(@["review", "collect",
+      "--repo", "/src", "--diff", "a..b",
+      "--recordings", "/tmp/recordings", "-o", "/tmp/out"])
+    check plan.kind == rpkCollect
+    check plan.recordingsDir == "/tmp/recordings"
+
+  test "native_recordings_route_to_the_native_collector":
+    let route = routeReviewCollect("/tmp/rec",
+      survey({"app-0": ctkNative, "app-1": ctkNative}))
+    check route.collector == rcvNative
+    check canCollect(route)
+    check route.message == ""
+    check route.kinds == {ctkNative}
+
+  test "materialized_recordings_are_refused_and_the_failure_names_the_kind":
+    # The milestone's third verification entry, and the one that must never
+    # become a silent empty dataset: until RV-4 there is no collector that
+    # can read these.
+    let route = routeReviewCollect("/tmp/rec",
+      survey({"py-0": ctkMaterialized, "py-1": ctkMaterialized}))
+    check route.collector == rcvMaterialized
+    check not canCollect(route)
+    check route.kinds == {ctkMaterialized}
+    check route.message.contains(traceKindLabel(ctkMaterialized))
+    check route.message.contains("does not support this trace kind yet")
+    # It names the recordings it refused, and where they were.
+    check route.message.contains("py-0")
+    check route.message.contains("/tmp/rec")
+    # ...and says which kind *can* be collected, so the message is actionable
+    # rather than merely negative.
+    check route.message.contains(traceKindLabel(ctkNative))
+
+  test "a_mixed_recordings_directory_is_refused_and_names_both_kinds":
+    # The decision recorded in RV-3's judgement calls: refuse, rather than
+    # collect per kind and merge.  With one collector implemented, "merge"
+    # could only mean "collect the native ones and drop the rest".
+    let route = routeReviewCollect("/tmp/rec",
+      survey({"app-0": ctkNative, "py-0": ctkMaterialized}))
+    check route.collector == rcvNone
+    check not canCollect(route)
+    check route.kinds == {ctkNative, ctkMaterialized}
+    check route.message.contains("mixed")
+    check route.message.contains(traceKindLabel(ctkNative))
+    check route.message.contains(traceKindLabel(ctkMaterialized))
+    check route.message.contains("app-0")
+    check route.message.contains("py-0")
+
+  test "an_empty_recordings_directory_is_refused_and_says_it_is_empty":
+    # Before RV-3 this printed "Review dataset ready" and exited 0.
+    let route = routeReviewCollect("/tmp/rec", newSeq[RecordingSurveyEntry]())
+    check route.collector == rcvNone
+    check not canCollect(route)
+    check route.message.contains("no recordings")
+    check route.message.contains("empty")
+    check route.message.contains("/tmp/rec")
+
+  test "a_directory_holding_no_recordings_says_what_it_does_hold":
+    # A different mistake from an empty directory — almost always a path
+    # typed one level too high — and so a different message.
+    let route = routeReviewCollect("/home/me/src",
+      survey({"README.md": ctkUnknown, "src": ctkUnknown,
+              "Cargo.toml": ctkUnknown}))
+    check route.collector == rcvNone
+    check route.message.contains("no recordings")
+    check not route.message.contains("empty")
+    check route.message.contains("3 entries")
+    check route.message.contains("README.md")
+    # and it says what it was looking for, in terms the user can check.
+    check route.message.contains("version")
+    check route.message.contains(".ct")
+
+  test "entries_that_are_not_recordings_do_not_stop_a_collection":
+    # A recordings directory routinely carries a `.gitignore`, a log or a
+    # README beside the recordings; failing over those would be hostile.
+    let route = routeReviewCollect("/tmp/rec",
+      survey({"README.md": ctkUnknown, "app-0": ctkNative,
+              "collect.log": ctkUnknown}))
+    check route.collector == rcvNative
+    check canCollect(route)
+
+  test "a_route_is_takeable_only_when_its_collector_exists":
+    # `canCollect` is the single question the executor asks, so a collector
+    # that is named but not implemented cannot be run by accident.
+    check canCollect(CollectRoute(collector: rcvNative))
+    check not canCollect(CollectRoute(collector: rcvNone, message: "x"))
+    check not canCollect(
+      CollectRoute(collector: rcvMaterialized, message: "not yet"))
+
+  test "a_missing_recordings_directory_names_the_path_and_what_it_should_be":
+    # Diagnosed by ct rather than left to the collector, which answered with
+    # a Rust Debug rendering of its own error type:
+    #   Error: Custom { kind: Other, error: "invalid data: recordings ...
+    let message = missingRecordingsDirMessage("/tmp/nope")
+    check message.contains("/tmp/nope")
+    check message.contains("--recordings")
+
+  test "the_user_still_never_names_a_backend":
+    # RV-3 is what makes §1.1's prohibition affordable: now that the
+    # recording decides, there is no reason for a flag, and there is still
+    # none in the surface.
+    check not ReviewUsage.contains("--backend")
+    let plan = planReviewCli(@["review", "collect", "--backend", "db",
+      "--repo", "/src", "--diff", "a..b", "--recordings", "/rec", "-o", "/o"])
+    check plan.kind == rpkError
+    check plan.message.contains("--backend")
+
 suite "ct review — the retired spellings":
   test "the_deepreview_option_is_detected_only_where_it_could_ever_have_worked":
     # `--deepreview` was a *global* option of ct, and confutils honours global
@@ -258,7 +461,7 @@ suite "ct review — argument errors are specific":
     check plan.message.contains("ct review collect")
 
 when not defined(js):
-  import std/[os, strutils as nativeStrutils]
+  import std/[os, sequtils, strutils as nativeStrutils]
 
   proc repoRoot(): string =
     ## ``<repo>/src/tests/gui/tests/deepreview`` -> ``<repo>``
@@ -319,6 +522,224 @@ when not defined(js):
       check message.contains("ct-native-replay")
       check message.contains(NativeReplayExeEnvVar)
 
+  suite "ct review collect — surveying real recordings on disk":
+    # The suite above asserts the *rules*; this one asserts that the rules are
+    # applied to what is actually on a filesystem — real directories, real
+    # marker files, no doubles.  The two halves fail in different ways: a
+    # wrong rule, versus a rule that is never reached because the evidence was
+    # gathered from the wrong place.
+
+    proc makeRecordings(name: string): string =
+      result = getTempDir() / name
+      removeDir(result)
+      createDir(result)
+
+    proc rrTrace(parent, name: string): string =
+      result = parent / name
+      createDir(result)
+      # rr writes `version` into every trace directory it records.
+      writeFile(result / "version", "7\n")
+
+    proc materializedTrace(parent, name: string): string =
+      result = parent / name
+      createDir(result)
+      # The pre-CTFS layout the example Python recordings still use.
+      writeFile(result / "trace_metadata.json", "{}")
+      writeFile(result / "trace.bin", "")
+
+    proc ctfsTrace(parent, name: string): string =
+      result = parent / name
+      createDir(result)
+      writeFile(result / "trace.ct", "")
+
+    test "an_rr_trace_directory_on_disk_routes_to_the_native_collector":
+      let dir = makeRecordings("ct-review-survey-native")
+      defer: removeDir(dir)
+      discard rrTrace(dir, "app-0")
+      discard rrTrace(dir, "app-1")
+      let entries = surveyRecordings(dir)
+      check entries.len == 2
+      check entries[0].name == "app-0"
+      check entries[0].kind == ctkNative
+      check routeReviewCollect(dir, entries).collector == rcvNative
+
+    test "a_materialized_recording_on_disk_is_refused_by_name":
+      let dir = makeRecordings("ct-review-survey-materialized")
+      defer: removeDir(dir)
+      discard materializedTrace(dir, "py-0")
+      discard ctfsTrace(dir, "py-1")
+      let entries = surveyRecordings(dir)
+      check entries.len == 2
+      for entry in entries:
+        checkpoint(entry.name)
+        check entry.kind == ctkMaterialized
+      let route = routeReviewCollect(dir, entries)
+      check route.collector == rcvMaterialized
+      check not canCollect(route)
+      check route.message.contains(traceKindLabel(ctkMaterialized))
+
+    test "an_mcr_recording_on_disk_stays_native_despite_its_ct_container":
+      let dir = makeRecordings("ct-review-survey-mcr")
+      defer: removeDir(dir)
+      let trace = ctfsTrace(dir, "mcr-0")
+      writeFile(trace / "mcr", "")
+      check detectTraceKind(trace) == ctkNative
+      check routeReviewCollect(dir, surveyRecordings(dir)).collector ==
+        rcvNative
+
+    test "a_mixed_directory_on_disk_is_refused":
+      let dir = makeRecordings("ct-review-survey-mixed")
+      defer: removeDir(dir)
+      discard rrTrace(dir, "app-0")
+      discard materializedTrace(dir, "py-0")
+      let route = routeReviewCollect(dir, surveyRecordings(dir))
+      check route.collector == rcvNone
+      check route.message.contains("mixed")
+
+    test "a_directory_of_ordinary_files_holds_no_recordings":
+      # `--recordings` pointed at a source tree: the survey must say so
+      # rather than hand a source tree to a collector.
+      let dir = makeRecordings("ct-review-survey-source-tree")
+      defer: removeDir(dir)
+      writeFile(dir / "README.md", "hi")
+      createDir(dir / "src")
+      writeFile(dir / "src" / "lib.rs", "")
+      let entries = surveyRecordings(dir)
+      check entries.len == 2
+      for entry in entries:
+        checkpoint(entry.name)
+        check entry.kind == ctkUnknown
+      let route = routeReviewCollect(dir, entries)
+      check route.collector == rcvNone
+      check route.message.contains("none of which is a recording")
+
+    test "an_empty_directory_on_disk_is_surveyed_as_empty":
+      let dir = makeRecordings("ct-review-survey-empty")
+      defer: removeDir(dir)
+      check surveyRecordings(dir).len == 0
+      check routeReviewCollect(dir, surveyRecordings(dir)).message
+        .contains("empty")
+
+    test "the_survey_is_sorted_so_a_diagnostic_names_the_same_entries_twice":
+      # `walkDir` order is filesystem-dependent; a message that names "the
+      # first three" must not name a different three on another machine.
+      let dir = makeRecordings("ct-review-survey-order")
+      defer: removeDir(dir)
+      for name in ["zeta", "alpha", "middle"]:
+        discard rrTrace(dir, name)
+      let names = surveyRecordings(dir).mapIt(it.name)
+      check names == @["alpha", "middle", "zeta"]
+
+    test "the_shared_rules_change_ct_replays_answer_in_exactly_two_places":
+      # RV-3 moved `ct replay`'s open-coded trace-kind rules into the shared
+      # module.  Whether that is a refactor or a behaviour change is not a
+      # matter of opinion, so the rules as they stood are re-implemented here
+      # and the two are compared EXHAUSTIVELY rather than over a hand-picked
+      # list of shapes: a hand-picked list can only confirm the differences
+      # its author already suspected, and the point of this case is to find
+      # the ones nobody suspected.
+      #
+      # The two rules together read five independent facts about a path — the
+      # `mcr` marker, rr's `version` file, a `*.ct` file inside, one of the
+      # pre-CTFS index files, and whether the path's own name ends in `.ct` —
+      # so every shape either rule can tell apart is one of 2^5 combinations,
+      # and all of them are built and compared below.  Three of the 32 differ,
+      # and they are two distinct rule changes: one combination for the first
+      # and two for the second, which is only visible once every combination
+      # is enumerated rather than sampled.
+      #
+      # It pins the migration, not the rule: a deliberate change to what a
+      # trace kind means is expected to update this case and say why.  What
+      # it forbids is a THIRD, unnoticed difference appearing later.
+      proc theRuleReplayNimUsedToHave(traceFolder: string): string =
+        var hasCtSibling = false
+        if dirExists(traceFolder):
+          for entry in walkDir(traceFolder):
+            if entry.kind == pcFile and entry.path.endsWith(".ct"):
+              hasCtSibling = true
+              break
+        if traceFolder.endsWith(".ct") or fileExists(traceFolder / "mcr"):
+          "rr"
+        elif hasCtSibling:
+          "db"
+        else:
+          "rr"
+
+      let root = makeRecordings("ct-review-trace-kind-equivalence")
+      defer: removeDir(root)
+
+      # Every combination of the five facts, as a real directory on disk.
+      var differing: seq[string] = @[]
+      for bits in 0 ..< 32:
+        let
+          hasMcrMarker = (bits and 1) != 0
+          hasRrVersion = (bits and 2) != 0
+          holdsContainer = (bits and 4) != 0
+          holdsIndexFile = (bits and 8) != 0
+          nameEndsInCt = (bits and 16) != 0
+        let shape = root / ("shape-" & $bits & (if nameEndsInCt: ".ct" else: ""))
+        createDir(shape)
+        if hasMcrMarker: writeFile(shape / "mcr", "")
+        if hasRrVersion: writeFile(shape / "version", "7\n")
+        if holdsContainer: writeFile(shape / "trace.ct", "")
+        if holdsIndexFile: writeFile(shape / "trace_metadata.json", "{}")
+        checkpoint(shape)
+        let was = theRuleReplayNimUsedToHave(shape)
+        let now = traceKindString(detectTraceKind(shape))
+        if was != now:
+          differing.add shape.lastPathPart & ": mcr=" & $hasMcrMarker &
+            " version=" & $hasRrVersion & " container=" & $holdsContainer &
+            " index=" & $holdsIndexFile & " nameEndsInCt=" & $nameEndsInCt &
+            " was=" & was & " now=" & now
+
+      # Paths that are not directories are outside the loop above, and the two
+      # rules must still agree about them: a bare container file, and paths
+      # that are not there at all (`ct replay --trace-folder <typo>`).
+      let bareContainer = root / "loose.ct"
+      writeFile(bareContainer, "")
+      for shape in [bareContainer, root / "not-there", root / "not-there.ct"]:
+        checkpoint(shape)
+        check traceKindString(detectTraceKind(shape)) ==
+          theRuleReplayNimUsedToHave(shape)
+
+      checkpoint(differing.join("\n"))
+      check differing.len == 3  # difference 1 once, difference 2 twice
+
+      # DIFFERENCE 1 — a pre-CTFS materialized folder (`trace_metadata.json` +
+      # `trace.bin`, the shape `ct record-web` writes and the shape the
+      # example Python recordings still have) has no `.ct` container, so the
+      # old rule fell through to its `else` and called it "rr" — a
+      # materialized recording registered as one the native replay worker
+      # opens, which decides both the language mapping (`detectTraceLang`) and
+      # which arm of `trace_index.recordTrace` runs.  The shared rules
+      # recognise the layout and say "db".  The old rule never considered it
+      # because by the time that branch was written every recording carried a
+      # container.
+      let legacyMaterialized = materializedTrace(root, "a-materialized-trace")
+      check theRuleReplayNimUsedToHave(legacyMaterialized) == TraceKindNative
+      check traceKindString(detectTraceKind(legacyMaterialized)) ==
+        TraceKindMaterialized
+
+      # DIFFERENCE 2 — an rr trace directory that also happens to hold a `.ct`
+      # file.  The old rule tested for a container before it tested for
+      # anything native at all (it had no test for rr's `version` file), so it
+      # answered "db" and handed an rr trace to the db-backend.  The shared
+      # rules read the positive evidence first and answer "rr".  Both
+      # differences are the same correction: the old rule decided by
+      # fall-through, the new one decides by what is actually on disk.
+      let rrWithAContainer = rrTrace(root, "an-rr-trace-holding-a-container")
+      writeFile(rrWithAContainer / "extra.ct", "")
+      check theRuleReplayNimUsedToHave(rrWithAContainer) ==
+        TraceKindMaterialized
+      check traceKindString(detectTraceKind(rrWithAContainer)) ==
+        TraceKindNative
+
+    test "a_missing_recordings_directory_surveys_as_nothing":
+      # The executor diagnoses this before routing; the survey must not
+      # pretend an absent directory is an empty one by raising instead.
+      check surveyRecordings(
+        getTempDir() / "ct-review-survey-absent").len == 0
+
   suite "ct review — production wiring (source contract)":
     test "the_deepreview_option_is_gone_from_the_conf_and_review_declared":
       let conf = readSource("src/ct/codetracerconf.nim")
@@ -340,6 +761,30 @@ when not defined(js):
       check main.contains("runReviewCli")
       check main.contains("retiredDeepReviewArgIndex")
       check main.contains("retiredDeepReviewMessage")
+
+    test "collect_routes_before_it_looks_for_a_backend":
+      # Order is the whole point, not an accident of control flow: a Python
+      # user has no `ct-native-replay`, and answering "the native replay
+      # backend is missing" for a Python recording names the wrong problem
+      # and implies DeepReview is an rr-only feature — the coupling
+      # DeepReview-GUI.md §1.1 says must not become architectural.
+      let source = readSource("src/ct/review_cli.nim")
+      let routeAt = source.find("routeReviewCollect(")
+      let backendAt = source.find("if nativeReplayExe().len == 0")
+      check routeAt > 0
+      check backendAt > 0
+      check routeAt < backendAt
+
+    test "ct_replay_keeps_using_the_shared_trace_kind_rules":
+      # RV-3's claim is that there is ONE rule for what a recording is, not
+      # that there was one on the day it was written.  `ct replay` used to
+      # open-code the rules; if a later change puts a private copy back, the
+      # dispatch and the replay path can drift apart again without anything
+      # failing — so the absence of the old copy is asserted, not assumed.
+      let replay = readSource("src/ct/trace/replay.nim")
+      check replay.contains("detectTraceKind(traceFolder)")
+      check replay.contains("traceKindString(")
+      check not replay.contains("hasCtSibling")
 
     test "the_playwright_fixture_launches_the_new_spelling":
       # The GUI suites are the end-to-end coverage of the launch path.  If the
