@@ -3614,6 +3614,31 @@ jobs:
     # failure mode it watches for. If this needed a self-hosted runner, a run
     # starved of self-hosted runners would starve the watchdog too, and it
     # would fall silent at exactly the moment it is meant to speak.
+    #
+    # PULL REQUESTS ONLY, and this is a deliberate narrowing rather than
+    # timidity about the alarm.
+    #
+    # The fleet is capped hard enough that `RUNNING == 0 && QUEUED > 0` holds
+    # for long stretches on `dev` right now -- five of five sampled in-flight
+    # `dev` runs satisfied it, the oldest for ~22 hours. Left ungated, this job
+    # would go red on every mainline push, 5-6 times a day, reporting the same
+    # true fact with no way to acknowledge it and no way to clear it. A red row
+    # that is always red stops being read, and then the next genuinely new red
+    # row is not read either. That is the failure mode this whole campaign is
+    # about, so an alarm must not become an instance of it.
+    #
+    # On a pull request the same signal is actionable: someone is waiting on
+    # the result and can act on "no runner is servicing this". So the alarm
+    # keeps its teeth exactly where a human is listening.
+    #
+    # This does NOT mute it on starved PR runs -- it will still fire there, by
+    # design, because that is a report worth making. What it drops is the
+    # standing mainline red for a fleet condition that is already known and
+    # separately tracked.
+    #
+    # When fleet capacity is restored, removing this line is the whole of the
+    # work needed to put the alarm back on `dev`.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
