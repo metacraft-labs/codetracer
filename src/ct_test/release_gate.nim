@@ -403,6 +403,49 @@ const
     # cannot see the reader, and the Playwright suites launch a review without
     # asserting what is in the dataset.
     "src/tests/gui/tests/deepreview/materialized_review_dataset_test.nim",
+    # RV-5 — the flow overlay, from the dataset (superseding DR-R6).  Two
+    # subjects, one milestone:
+    #
+    #   1. `flowStyleLines` indexed `branchesTaken[0][0]` with no bounds or nil
+    #      check, so an empty seq was an `IndexDefect` that aborted
+    #      `applyEventualStylesLines` before a single decoration was applied —
+    #      a latent crash with nothing to do with DeepReview, which is why it
+    #      is tested on its own terms in `editor/flow_line_styles_test.nim`
+    #      over hand-built `FlowViewUpdate` values rather than through a
+    #      review.
+    #   2. The adapter that turns a review dataset's per-invocation flow into
+    #      the per-view `FlowUpdate` the editor's `ct/updated-flow`
+    #      subscription already consumes.  DeepReview-GUI.md §7: "the adapter,
+    #      not the replay backend, is the thing standing between a dataset and
+    #      a flow overlay".
+    #
+    # Registered here because the adapter is where every judgement is made —
+    # the synthesised `Location`, the well-formed empty `branchesTaken`, the
+    # derived step counts, the loop mapping and the value synthesis — and none
+    # of it is observable from Playwright, which can see only the classes that
+    # came out the far end.
+    "src/tests/gui/tests/editor/flow_line_styles_test.nim",
+    "src/tests/gui/tests/deepreview/deepreview_flow_adapter_test.nim",
+    # RV-5's other half: the mapping of a source line onto the diff tab's
+    # synthetic document (§4.4's "restrict rendering to lines currently loaded
+    # into the diff tab", which is a property of that mapping), the **inline
+    # values** §4.4 requires alongside it, and the two in-editor controls that
+    # decide which execution those values describe — the invocation selector
+    # (§7's "Monaco view zone anchored immediately above the relevant lines",
+    # whose anchor is arithmetic and so assertable headlessly) and the loop
+    # iteration control.
+    #
+    # The value cases assert the fixture's own values **by content**, which is
+    # what the Playwright suite can also do but the ViewModel layer must:
+    # a strip of the wrong invocation's — or the wrong loop pass's — values has
+    # exactly the same count as the right one's, so a count-only assertion
+    # cannot tell them apart.  RV-5's first version rendered no values at all
+    # and its e2e coverage did not notice.
+    #
+    # It also carries RV-4's gap 8: a function the changeset only *calls* has a
+    # `callCount` and no flow, and the control must say so rather than offer an
+    # invocation it cannot render.
+    "src/tests/gui/tests/deepreview/review_flow_overlay_test.nim",
   ]
 
   CliRecordGateTests* = [

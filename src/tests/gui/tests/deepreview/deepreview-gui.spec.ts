@@ -589,6 +589,342 @@ test.describe("DeepReview GUI - main features", () => {
     }
   });
 
+  // -----------------------------------------------------------------------
+  // RV-5: the flow overlay, from the dataset.
+  //
+  // Tests 26 and 29-31 replace Tests 17 and 18 ("omniscience inline values
+  // appear on unified diff lines" / "... match the flow data"), which DR-R8
+  // deleted along with the standalone panel that hosted them.
+  //
+  // Those two tests were RIGHT about what to assert: they read the standard
+  // `.deepreview-flow-values` chips — `flow-parallel-value-name` plus
+  // `flow-parallel-value-box` — **by content** against the fixture (`<x>`,
+  // `10`, `<y>`, `20`, `<result>`, `55`, `<trimmed>`).  They were never the
+  // text-comment rendering §4.4 forbids; that was `deepreview-inline-value`, a
+  // separate `after:`-content decoration built by
+  // `ui/deepreview.buildInlineValueDecorations` as `"  // x = 10, y = 20"`,
+  // which DR-R8 deleted and nothing has restored.
+  //
+  // So the content-level assertions are restored here rather than replaced by
+  // counts: a count cannot distinguish the selected invocation's values from
+  // another call's, which is the whole point of the selector.  The chips now
+  // reach the line as Monaco injected text carrying the debugger's own classes
+  // (§7, "Monaco decorations with the flow annotation classes"), driven by the
+  // dataset rather than by a loaded recording.
+  //
+  // Tests 27, 28 and 31 are new coverage 17/18 never had: which *call*, and
+  // which *pass through a loop*, the values describe.
+  //
+  // Headless counterparts:
+  //   deepreview/deepreview_flow_adapter_test.nim  — the FlowUpdate
+  //   deepreview/review_flow_overlay_test.nim      — the mapping, the values
+  //                                                  and the two controls
+  //   editor/flow_line_styles_test.nim             — the classes and the guard
+  // -----------------------------------------------------------------------
+
+  test("Test 26: a review's diff lines carry the standard Omniscience flow classes", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    const lines = tab.locator(".monaco-editor .view-lines");
+
+    // `main`'s first invocation runs on lines 1-4 and 10; the hunk shows 2-11,
+    // so four of those five lines are on screen and get `line-flow-hit`.  The
+    // rest of the function's visible lines get `line-flow-skip`, because a
+    // dataset is a finished window.
+    await expect
+      .poll(async () => await lines.locator(".line-flow-hit").count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    expect(await lines.locator(".line-flow-skip").count()).toBeGreaterThan(0);
+
+    // §4.4: "Inline variable values MUST NOT be rendered as text comments."
+    // The deleted panel drew `  // x = 10, y = 20` as an after-content
+    // decoration with this class; neither may come back.
+    expect(await tab.locator(".deepreview-inline-value").count()).toBe(0);
+    const text = (await lines.innerText()) ?? "";
+    expect(text).not.toContain("// x = ");
+
+    // ...and §4.4's other half — "Preserve existing interaction patterns such
+    // as loop sliders and inline values" — is not satisfied by an empty
+    // overlay.  The values must actually be on the page, in the standard
+    // classes.  Tests 29-31 assert *which* values; this asserts that the
+    // rendering exists at all, which is what a review with zero chips failed.
+    await expect
+      .poll(
+        async () => await DeepReviewPage.flowValueChips(tab).count(),
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    expect(await DeepReviewPage.flowValueNames(tab).count()).toBeGreaterThan(0);
+    expect(await DeepReviewPage.flowValueBoxes(tab).count()).toBe(
+      await DeepReviewPage.flowValueNames(tab).count(),
+    );
+    // The chips carry the debugger's own classes, so a normal-debugging
+    // consumer looking for a flow value box finds a review's too (§7,
+    // "the flow annotations in DeepReview look identical to flow annotations
+    // during normal debugging").
+    expect(
+      await tab.locator(".view-lines .flow-parallel-value-box").count(),
+    ).toBeGreaterThan(0);
+    expect(
+      await tab.locator(".view-lines .ct-omni-name").count(),
+    ).toBeGreaterThan(0);
+  });
+
+  test("Test 29: the inline values are the ones the fixture recorded", async ({ ctPage }) => {
+    // The content-level assertion the deleted Test 18 made, restored.  From
+    // `sample-review.json`, `main` execution 0:
+    //   line 2  x = 10
+    //   line 3  x = 10, y = 20
+    //   line 4  result = 55
+    //   line 10 result = 55
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(
+        async () => await DeepReviewPage.flowValueChips(tab).count(),
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+
+    const combined = await DeepReviewPage.flowValueText(tab);
+    expect(combined).toContain("<x>");
+    expect(combined).toContain("10");
+    expect(combined).toContain("<y>");
+    expect(combined).toContain("20");
+    expect(combined).toContain("<result>");
+    expect(combined).toContain("55");
+
+    // And `src/utils.rs`'s own values, which live in a second tab now that a
+    // review is the editor rather than one panel listing every file.
+    const utils = await openReviewDiffTab(dr, 1, "src/utils.rs");
+    await expect
+      .poll(
+        async () => await DeepReviewPage.flowValueChips(utils).count(),
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    const utilsText = await DeepReviewPage.flowValueText(utils);
+    expect(utilsText).toContain("<trimmed>");
+    expect(utilsText).toContain("hello world");
+    // The collector truncated `input`, and the marker it cut with survives to
+    // the screen rather than being silently dropped.
+    expect(utilsText).toContain("<input>");
+    expect(utilsText).toContain("...");
+  });
+
+  test("Test 30: stepping the selector switches the values, not just the classes", async ({ ctPage }) => {
+    // Call 1 of `main` computes 55 from x = 10; call 2 computes 903 from
+    // x = 42.  Asserting the values — rather than only the hit count, as
+    // Test 28 does — is what proves the overlay follows the selector all the
+    // way down to what was recorded.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    const selector = DeepReviewPage.invocationSelectors(tab).first();
+    await expect(selector).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueText(tab), {
+        timeout: 20_000,
+      })
+      .toContain("<x>");
+
+    expect(await DeepReviewPage.flowValueText(tab)).toContain("10");
+    expect(await DeepReviewPage.flowValueText(tab)).toContain("55");
+    expect(await DeepReviewPage.flowValueText(tab)).not.toContain("42");
+
+    await selector.locator(".review-invocation-next").click();
+    await expect(selector.locator(".review-invocation-label")).toHaveText(
+      "main: call 2 / 2",
+      { timeout: 10_000 },
+    );
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueText(tab), {
+        timeout: 20_000,
+      })
+      .toContain("42");
+    const secondCall = await DeepReviewPage.flowValueText(tab);
+    expect(secondCall).toContain("84");
+    expect(secondCall).toContain("903");
+    // Call 2 never reached line 10, so its `result = 55` strip is gone rather
+    // than left behind from the previous invocation.
+    expect(secondCall).not.toContain("55");
+
+    await selector.locator(".review-invocation-prev").click();
+    await expect(selector.locator(".review-invocation-label")).toHaveText(
+      "main: call 1 / 2",
+      { timeout: 10_000 },
+    );
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueText(tab), {
+        timeout: 20_000,
+      })
+      .toContain("55");
+  });
+
+  test("Test 31: the loop control picks which pass through the loop is shown", async ({ ctPage }) => {
+    // §4.4: "Preserve existing interaction patterns such as loop sliders and
+    // inline values."  `compute` is the fixture's only looping function, on
+    // lines 14-20, so it reaches the tab after one "expand below" click.  It
+    // recorded three passes over the header line 16:
+    //   pass 1  i = 0, acc = 0
+    //   pass 2  i = 1, acc = 1
+    //   pass 3  i = 2, acc = 3
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(1, {
+      timeout: 20_000,
+    });
+    await DeepReviewPage.expandBelowLine(tab).click();
+
+    const loop = DeepReviewPage.loopSelectors(tab).first();
+    await expect(loop).toBeVisible({ timeout: 20_000 });
+    await expect(loop.locator(".review-loop-label")).toHaveText(
+      "iteration 1 / 3",
+    );
+    // It is an in-editor control, like the invocation selector above it and
+    // like the loop slider it is modelled on — not a panel affordance.
+    expect(await ctPage.locator(".review-loop-selector").count()).toBe(
+      await DeepReviewPage.loopSelectors(tab).count(),
+    );
+
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueText(tab), {
+        timeout: 20_000,
+      })
+      .toContain("<i>");
+    expect(await DeepReviewPage.flowValueText(tab)).toContain("<acc>");
+    const firstPassText = await DeepReviewPage.flowValueText(tab);
+    const firstPassChips = await DeepReviewPage.flowValueChips(tab).count();
+
+    await loop.locator(".review-loop-next").click();
+    await expect(loop.locator(".review-loop-label")).toHaveText(
+      "iteration 2 / 3",
+      { timeout: 10_000 },
+    );
+    await loop.locator(".review-loop-next").click();
+    await expect(loop.locator(".review-loop-label")).toHaveText(
+      "iteration 3 / 3",
+      { timeout: 10_000 },
+    );
+    // Pass 3 recorded `acc = 3` on the header, a value no other pass carries.
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueText(tab), {
+        timeout: 20_000,
+      })
+      .toContain("3");
+    const thirdPassText = await DeepReviewPage.flowValueText(tab);
+    expect(thirdPassText).not.toEqual(firstPassText);
+
+    // The body line `acc += i;` ran on passes 1 and 2 only, so pass 3 leaves it
+    // BARE rather than repeating pass 2's values under a "iteration 3 / 3"
+    // label.  That is the property that makes one strip per line honest, and it
+    // is visible as strictly fewer chips than pass 1 drew — the loop's header
+    // still carries its pair, so this cannot pass by the whole overlay
+    // vanishing.
+    expect(await DeepReviewPage.flowValueChips(tab).count()).toBeLessThan(
+      firstPassChips,
+    );
+    expect(thirdPassText).toContain("<i>");
+    expect(thirdPassText).toContain("<acc>");
+
+    // Clamped at the far end, exactly as the invocation selector is.
+    await expect(loop.locator(".review-loop-next")).toBeDisabled();
+    await loop.locator(".review-loop-prev").click();
+    await expect(loop.locator(".review-loop-label")).toHaveText(
+      "iteration 2 / 3",
+      { timeout: 10_000 },
+    );
+  });
+
+  test("Test 27: the invocation selector is an in-editor control above the function", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+
+    // §7: "an in-editor control, modelled on the loop iteration selector — the
+    // inline slider CodeTracer already renders immediately above the relevant
+    // lines for a loop", NOT "a dropdown in a panel header".  So it must be
+    // inside the editor tab, and there must be no such control in the VCS
+    // panel.
+    const selector = tab.locator(".review-invocation-selector");
+    await expect(selector.first()).toBeVisible({ timeout: 20_000 });
+    // Every control on the page is inside this editor tab: there is no copy of
+    // it in a panel header, which is what §7 rules out.
+    expect(await ctPage.locator(".review-invocation-selector").count()).toBe(
+      await selector.count(),
+    );
+    await expect(
+      selector.first().locator("xpath=ancestor::*[contains(@class,'monaco-editor')]").first(),
+    ).toBeVisible();
+
+    // `main` is recorded twice in the fixture, so the control counts two.
+    // `compute` is not on screen in this hunk and gets no control at all.
+    await expect(selector.first().locator(".review-invocation-label")).toHaveText(
+      "main: call 1 / 2",
+    );
+    expect(await selector.count()).toBe(1);
+  });
+
+  test("Test 28: stepping the selector switches the rendered invocation", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    const selector = tab.locator(".review-invocation-selector").first();
+    await expect(selector).toBeVisible({ timeout: 20_000 });
+
+    const lines = tab.locator(".monaco-editor .view-lines");
+    await expect
+      .poll(async () => await lines.locator(".line-flow-hit").count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    const firstCallHits = await lines.locator(".line-flow-hit").count();
+
+    // The first call reaches line 10; the second stops at line 4.  So moving to
+    // the second invocation must draw strictly fewer hits — the visible proof
+    // that the control changes which execution is on screen rather than merely
+    // relabelling itself.
+    await selector.locator(".review-invocation-next").click();
+    await expect(selector.locator(".review-invocation-label")).toHaveText(
+      "main: call 2 / 2",
+      { timeout: 10_000 },
+    );
+    await expect
+      .poll(async () => await lines.locator(".line-flow-hit").count(), {
+        timeout: 20_000,
+      })
+      .toBeLessThan(firstCallHits);
+
+    // And back: clamped at both ends, like the loop iteration slider.
+    await selector.locator(".review-invocation-prev").click();
+    await expect(selector.locator(".review-invocation-label")).toHaveText(
+      "main: call 1 / 2",
+      { timeout: 10_000 },
+    );
+    await expect
+      .poll(async () => await lines.locator(".line-flow-hit").count(), {
+        timeout: 20_000,
+      })
+      .toBe(firstCallHits);
+  });
+
   test("Test 12: opening a second file yields a second tab, and both stay open", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();

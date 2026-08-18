@@ -37,9 +37,13 @@ import
 import std/strformat
 import isonim/core/signals
 import git_cli
+import flow_line_styles
+import review_flow_adapter
+import review_flow_selection
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/diff_document
 import ../viewmodel/viewmodels/context_expansion
+import ../viewmodel/viewmodels/review_flow_overlay
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -101,6 +105,23 @@ proc udMouseCtrl(e: js): bool
   {.importjs: """(function(e) {
     return !!(e && e.event && (e.event.ctrlKey || e.event.metaKey));
   })(#)""".}
+
+proc udAddViewZone(editor: MonacoEditor, zone: js): int {.importjs: """
+  (function(editor, zone) {
+    var id = null;
+    editor.changeViewZones(function(accessor) { id = accessor.addZone(zone); });
+    return id;
+  })(#, #)""".}
+  ## Monaco's view zones can only be mutated inside a `changeViewZones`
+  ## transaction, which is why this is a wrapper rather than a direct call.
+  ## Identical in shape to `ui/flow.nim`'s `addMonacoViewZone`, which is what
+  ## renders the loop iteration slider — §7 asks for the same mechanism, so it
+  ## is the same call.
+
+proc udRemoveViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
+  (function(editor, id) {
+    editor.changeViewZones(function(accessor) { accessor.removeZone(id); });
+  })(#, #)""".}
 
 proc udLineNumberFn(labels: seq[cstring]): js
   {.importjs: """(function(labels) {
@@ -392,6 +413,374 @@ proc applyDecorations(self: UnifiedDiffComponent) =
   else:
     self.decorationCollection.udCollectionSet(decorations.toJs)
 
+# ---------------------------------------------------------------------------
+# The review's Omniscience overlay (RV-5)
+# ---------------------------------------------------------------------------
+#
+#   "Flow data from the associated trace is rendered using the same
+#    visualization system as normal debugging (`flowStyleLines`,
+#    `applyEventualStylesLines`). […] The overlay is driven by the dataset, not
+#    by a live recording."  — DeepReview-GUI.md §7
+#
+# The dataset is adapted into a real `FlowUpdate` (`ui/review_flow_adapter.nim`)
+# and the per-line classes come from `ui/flow_line_styles.flowStyledLines` — the
+# same proc `ui/editor.nim`'s `flowStyleLines` calls, so a review's annotations
+# and a debugging session's are one implementation. Only the *mapping* onto this
+# tab's synthetic document is review-specific, and that lives in the pure
+# `viewmodel/viewmodels/review_flow_overlay.nim`.
+
+proc reviewFlowFile(self: UnifiedDiffComponent):
+    tuple[file: DeepReviewFileData, fileIndex: int] =
+  ## The reviewed file this tab shows, and its index in `diffData.files` —
+  ## which is the `fileIndex` the diff document's lines carry.
+  ##
+  ## A git-backed tab has no reviewed file: its `diffData` was parsed from
+  ## `git diff` and carries no flow, no functions and no loops.
+  result = (nil, -1)
+  if not self.reviewBacked or self.diffData.isNil:
+    return
+  for index, file in self.diffData.files:
+    if not file.diff.isNil and file.diff.hunks.len > 0:
+      return (file, index)
+
+proc reviewInvocationZonesFor(self: UnifiedDiffComponent; doc: DiffDocument):
+    seq[ReviewInvocationZone] =
+  let (file, fileIndex) = self.reviewFlowFile()
+  if file.isNil:
+    return @[]
+  let path = safeStr(file.path)
+  var ordinals: seq[(string, int)] = @[]
+  let functions = reviewFunctionInvocations(file)
+  for fn in functions:
+    ordinals.add((fn.functionKey, reviewInvocationOrdinal(path, fn.functionKey)))
+  reviewInvocationZones(doc, fileIndex, functions, ordinals)
+
+proc reviewLoopIterationsFor(self: UnifiedDiffComponent;
+                             plan: ReviewFlowPlan): seq[(int, int)] =
+  ## The reader's chosen pass through every loop of `plan`, as
+  ## `review_flow_overlay` wants it.
+  ##
+  ## Read for every loop the plan carries rather than only the ones with a
+  ## control, so a loop that ran once (no control) still resolves to iteration
+  ## 0 by the same path as one that ran six times.
+  result = @[]
+  for loopIndex in 1 ..< plan.loops.len:
+    result.add((loopIndex,
+                reviewLoopIteration(plan.path, plan.functionKey, loopIndex)))
+
+proc reviewDisplayedPlans(self: UnifiedDiffComponent; doc: DiffDocument):
+    seq[ReviewFlowPlan] =
+  ## The invocation each on-screen function is currently showing.
+  ##
+  ## One invocation *per function*, chosen by the invocation zones, so the
+  ## annotations a reader sees always describe the calls the controls above them
+  ## name.
+  result = @[]
+  let (file, _) = self.reviewFlowFile()
+  if file.isNil:
+    return
+  for zone in self.reviewInvocationZonesFor(doc):
+    if zone.invocationIndex == NoInvocation:
+      continue
+    let plan = reviewFlowPlan(file, zone.invocationIndex)
+    if plan.found:
+      result.add(plan)
+
+proc reviewFlowDecorationsFor(self: UnifiedDiffComponent; doc: DiffDocument):
+    seq[ReviewFlowDecoration] =
+  ## Every displayed invocation's per-line flow, mapped onto this document.
+  result = @[]
+  let (_, fileIndex) = self.reviewFlowFile()
+  if fileIndex < 0:
+    return
+  for plan in self.reviewDisplayedPlans(doc):
+    var update = FlowUpdate()
+    fillFlowUpdate(plan, update, ViewSource)
+    result.add(reviewFlowDecorations(
+      doc, fileIndex,
+      flowStyledLines(update.viewUpdates[ViewSource], update.finished)))
+
+proc reviewValueAnnotationsFor(self: UnifiedDiffComponent; doc: DiffDocument):
+    seq[ReviewValueAnnotation] =
+  ## Every displayed invocation's inline values (§4.4), mapped onto this
+  ## document — the values the *selected* call recorded, on the *selected* pass
+  ## through any loop containing the line.
+  result = @[]
+  let (_, fileIndex) = self.reviewFlowFile()
+  if fileIndex < 0:
+    return
+  for plan in self.reviewDisplayedPlans(doc):
+    result.add(reviewValueAnnotations(
+      doc, fileIndex, plan, self.reviewLoopIterationsFor(plan)))
+
+proc reviewLoopZonesFor(self: UnifiedDiffComponent; doc: DiffDocument):
+    seq[ReviewLoopZone] =
+  result = @[]
+  let (_, fileIndex) = self.reviewFlowFile()
+  if fileIndex < 0:
+    return
+  for plan in self.reviewDisplayedPlans(doc):
+    result.add(reviewLoopZones(
+      doc, fileIndex, plan, self.reviewLoopIterationsFor(plan)))
+
+proc monacoFlowDecorations(decorations: seq[ReviewFlowDecoration]):
+    seq[JsObject] =
+  ## The standard Omniscience appearance: an *inline* class over the line's
+  ## text, exactly as `editor.nim`'s `toDeltaDecorations` applies
+  ## `MonacoLineStyle.inlineClass`.
+  result = @[]
+  for decoration in decorations:
+    result.add(js{
+      range: js{
+        startLineNumber: decoration.modelLine,
+        startColumn: 1,
+        endLineNumber: decoration.modelLine,
+        endColumn: 100000
+      },
+      options: js{
+        isWholeLine: false,
+        inlineClassName: cstring(decoration.inlineClassName)
+      }
+    })
+
+proc monacoValueDecorations(doc: DiffDocument;
+                            annotations: seq[ReviewValueAnnotation]):
+    seq[JsObject] =
+  ## The inline values §4.4 requires, as Monaco decorations carrying the flow
+  ## annotation classes — which is the form §7 names:
+  ##
+  ##   "The inline variable values MUST NOT be rendered as text comments (e.g.
+  ##    `// x = 10`) — they must use the standard CodeTracer Omniscience visual
+  ##    style (Monaco decorations with the flow annotation classes)."
+  ##
+  ## Each chip is one decoration with *injected text* (`options.after`), which
+  ## Monaco renders as a real inline span inside the line's own DOM carrying
+  ## `inlineClassName`. That is what makes this the standard appearance rather
+  ## than a look-alike: the classes are the debugger's own (see
+  ## `ReviewValueNameClass` / `ReviewValueBoxClass`) and the span is a sibling of
+  ## the code's tokens, exactly as the flow panel's chip is a sibling of its
+  ## column's.
+  ##
+  ## A name chip and a value chip per variable, in that order, rather than one
+  ## span of joined text: the name and the value are styled differently in the
+  ## debugger and a single span could only be one of them.
+  ##
+  ## The range is *collapsed at the end of the line's text* — not the
+  ## `endColumn: 100000` the class decorations above use — because injected text
+  ## is placed at the range's end position, and a column past the end of the
+  ## line is clamped by Monaco to the same place for every decoration on it. The
+  ## document's own text is the length source, so no model read is needed.
+  result = @[]
+  for annotation in annotations:
+    if annotation.modelLine <= 0 or annotation.modelLine > doc.lines.len:
+      continue
+    let endColumn = doc.lines[annotation.modelLine - 1].text.len + 1
+    proc chip(content: string; className: string): JsObject =
+      js{
+        range: js{
+          startLineNumber: annotation.modelLine,
+          startColumn: endColumn,
+          endLineNumber: annotation.modelLine,
+          endColumn: endColumn
+        },
+        options: js{
+          # `showIfCollapsed` keeps the decoration alive on an *empty* line,
+          # whose only column is 1 and whose range is therefore degenerate.
+          showIfCollapsed: true,
+          after: js{
+            content: cstring(content),
+            inlineClassName: cstring(className),
+            # Without this Monaco lays the injected span out as if it were
+            # plain monospace text and the chips' padding overlaps the code.
+            inlineClassNameAffectsLetterSpacing: true
+          }
+        }
+      }
+    for value in annotation.values:
+      result.add(chip(" " & reviewValueChipName(value), ReviewValueNameClass))
+      result.add(chip(value.text, ReviewValueBoxClass))
+
+proc applyFlowDecorations(self: UnifiedDiffComponent; doc: DiffDocument) =
+  ## Repaint the whole overlay: the per-line classes and the inline values.
+  ##
+  ## One collection for both, replaced wholesale, because they answer the same
+  ## question — "what did the selected invocation do here?" — and so always
+  ## change together. Splitting them would let a stale value strip outlive the
+  ## classes that say which lines ran.
+  if not self.editorInitialized or self.editor.isNil:
+    return
+  var decorations = monacoFlowDecorations(self.reviewFlowDecorationsFor(doc))
+  decorations.add(
+    monacoValueDecorations(doc, self.reviewValueAnnotationsFor(doc)))
+  if self.flowDecorationCollection.isNil:
+    self.flowDecorationCollection =
+      self.editor.udCreateDecorationsCollection(decorations.toJs)
+  else:
+    self.flowDecorationCollection.udCollectionSet(decorations.toJs)
+
+proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument)
+
+proc stepInvocation(self: UnifiedDiffComponent; functionKey: string;
+                    delta: int) =
+  ## Move one invocation forward or back, and repaint.
+  ##
+  ## Clamped by `nextOrdinal`, so the ends of the range are stable — the
+  ## behaviour the loop iteration slider has.
+  let vm = self.ensureUnifiedDiffVM()
+  if vm.isNil:
+    return
+  let doc = diffDocumentFor(vm)
+  let (file, _) = self.reviewFlowFile()
+  if file.isNil:
+    return
+  for zone in self.reviewInvocationZonesFor(doc):
+    if zone.functionKey != functionKey:
+      continue
+    setReviewInvocationOrdinal(
+      safeStr(file.path), functionKey, zone.nextOrdinal(delta))
+    self.rebuildInvocationZones(doc)
+    self.applyFlowDecorations(doc)
+    return
+
+proc stepLoopIteration(self: UnifiedDiffComponent; functionKey: string;
+                       loopIndex, delta: int) =
+  ## Move one loop iteration forward or back, and repaint.
+  ##
+  ## The values are what change: the classes say which lines the *call* ran, and
+  ## a different pass through a loop runs the same lines with different values.
+  let vm = self.ensureUnifiedDiffVM()
+  if vm.isNil:
+    return
+  let doc = diffDocumentFor(vm)
+  let (file, _) = self.reviewFlowFile()
+  if file.isNil:
+    return
+  for zone in self.reviewLoopZonesFor(doc):
+    if zone.functionKey != functionKey or zone.loopIndex != loopIndex:
+      continue
+    setReviewLoopIteration(
+      safeStr(file.path), functionKey, loopIndex, zone.nextIteration(delta))
+    self.rebuildInvocationZones(doc)
+    self.applyFlowDecorations(doc)
+    return
+
+proc reviewStepButton(label: cstring; klass: string; enabled: bool;
+                      onStep: proc()): Node =
+  ## One step button of a review's in-editor controls.
+  ##
+  ## `mousedown` rather than `click`: Monaco's own mouse handling on the editor
+  ## can swallow a click that starts inside a view zone, and `mousedown` is what
+  ## `ui/flow.nim`'s value spans listen for as well.
+  result = document.createElement(cstring"button")
+  result.setAttribute(cstring"class", cstring("review-flow-step " & klass))
+  result.appendChild(document.createTextNode(label))
+  if not enabled:
+    result.setAttribute(cstring"disabled", cstring"disabled")
+  else:
+    result.addEventListener(cstring"mousedown", proc(e: Event) =
+      e.stopPropagation()
+      onStep())
+
+proc invocationZoneDom(self: UnifiedDiffComponent;
+                       zone: ReviewInvocationZone): Node =
+  ## The control itself: a previous/next pair around a counter, in the register
+  ## of the loop iteration slider (`.flow-loop-slider` / the flow panel's
+  ## `.flow-iteration-slider`), rendered into a Monaco view zone above the
+  ## function it governs.
+  result = document.createElement(cstring"div")
+  result.setAttribute(
+    cstring"class",
+    cstring"flow-view-zone review-flow-selector review-invocation-selector")
+  result.setAttribute(
+    cstring"id",
+    cstring(fmt"review-invocation-selector-{self.id}-{zone.functionKey}"))
+  result.setAttribute(cstring"data-function", cstring(zone.functionKey))
+  result.setAttribute(cstring"data-ordinal", cstring($zone.ordinal))
+  result.setAttribute(cstring"data-total", cstring($zone.total))
+
+  let component = self
+  let functionKey = zone.functionKey
+
+  result.appendChild(reviewStepButton(
+    cstring"‹", "review-invocation-prev", zone.canStepBack(),
+    proc() = component.stepInvocation(functionKey, -1)))
+  let label = document.createElement(cstring"span")
+  label.setAttribute(cstring"class",
+                     cstring"review-flow-label review-invocation-label")
+  label.appendChild(document.createTextNode(
+    cstring(invocationSelectorLabel(zone))))
+  result.appendChild(label)
+  result.appendChild(reviewStepButton(
+    cstring"›", "review-invocation-next", zone.canStepForward(),
+    proc() = component.stepInvocation(functionKey, 1)))
+
+proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
+  ## The loop iteration control — §4.4's "loop sliders", in the same stepper
+  ## register as the invocation selector directly above it.
+  ##
+  ## It is a stepper rather than the debugger's dragged `noUiSlider`: that
+  ## widget is sized from `FlowComponent`'s measured layout — `ensureLoopSlider`
+  ## refuses to build it until `loopControlWidth` reads a non-zero
+  ## `flowLoops[position].flowDom.clientWidth` (the #562 fix) — state a review
+  ## has no `FlowComponent` to hold. The counter, the two
+  ## directions, the clamping at both ends and the effect on the values are the
+  ## same; the drag affordance is what is missing, and RV-10 owns it.
+  result = document.createElement(cstring"div")
+  result.setAttribute(
+    cstring"class",
+    cstring"flow-view-zone review-flow-selector review-loop-selector")
+  result.setAttribute(
+    cstring"id",
+    cstring(fmt"review-loop-selector-{self.id}-{zone.functionKey}-{zone.loopIndex}"))
+  result.setAttribute(cstring"data-function", cstring(zone.functionKey))
+  result.setAttribute(cstring"data-loop", cstring($zone.loopIndex))
+  result.setAttribute(cstring"data-iteration", cstring($zone.iteration))
+  result.setAttribute(cstring"data-total", cstring($zone.total))
+
+  let component = self
+  let functionKey = zone.functionKey
+  let loopIndex = zone.loopIndex
+
+  result.appendChild(reviewStepButton(
+    cstring"‹", "review-loop-prev", zone.canStepBack(),
+    proc() = component.stepLoopIteration(functionKey, loopIndex, -1)))
+  let label = document.createElement(cstring"span")
+  label.setAttribute(cstring"class",
+                     cstring"review-flow-label review-loop-label")
+  label.appendChild(document.createTextNode(cstring(loopSelectorLabel(zone))))
+  result.appendChild(label)
+  result.appendChild(reviewStepButton(
+    cstring"›", "review-loop-next", zone.canStepForward(),
+    proc() = component.stepLoopIteration(functionKey, loopIndex, 1)))
+
+proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument) =
+  ## Replace the whole set of in-editor controls — invocation selectors and loop
+  ## iteration controls alike.
+  ##
+  ## Wholesale, and previous ids removed first: leaving them behind is how the
+  ## loop slider ended up with a stack of dead controls (#562), and the anchors
+  ## move whenever context expansion changes the document's numbering.
+  if not self.editorInitialized or self.editor.isNil:
+    return
+  for zoneId in self.flowViewZoneIds:
+    self.editor.udRemoveViewZone(zoneId)
+  self.flowViewZoneIds = @[]
+  let lineHeight = self.data.ui.fontSize + 10
+  for zone in self.reviewInvocationZonesFor(doc):
+    let dom = self.invocationZoneDom(zone)
+    self.flowViewZoneIds.add(self.editor.udAddViewZone(js{
+      afterLineNumber: zone.afterLineNumber,
+      heightInPx: lineHeight,
+      domNode: dom
+    }))
+  for zone in self.reviewLoopZonesFor(doc):
+    let dom = self.loopZoneDom(zone)
+    self.flowViewZoneIds.add(self.editor.udAddViewZone(js{
+      afterLineNumber: zone.afterLineNumber,
+      heightInPx: lineHeight,
+      domNode: dom
+    }))
+
 proc syncIntoVM*(self: UnifiedDiffComponent) =
   ## Push the tab's parsed diff into its ViewModel.  The hunk selection is left
   ## alone: it is the VM's own state and survives a re-sync.
@@ -465,6 +854,12 @@ proc refreshModel(self: UnifiedDiffComponent) =
   })
   self.editor.udSetScrollTop(scrollTop)
   self.applyDecorations()
+  # The overlay is keyed on model lines, which every re-publish renumbers —
+  # context expansion inserts lines above the ones it revealed — so the flow
+  # decorations and the invocation selectors move with the document rather than
+  # being left pointing at whatever now occupies their old positions.
+  self.applyFlowDecorations(doc)
+  self.rebuildInvocationZones(doc)
 
 proc handleExpandClick(self: UnifiedDiffComponent; modelLine: int): bool =
   ## DeepReview-GUI.md §4.2: "Expand surrounding context above a visible
@@ -575,6 +970,10 @@ proc initEditor(self: UnifiedDiffComponent) =
     component.handleHunkClick(line, udMouseShift(e), udMouseCtrl(e)))
 
   self.applyDecorations()
+  # §7 step 3, "Omniscience/flow data from the trace overlays onto diff lines",
+  # for a review; a no-op for a git-backed tab, which carries no flow.
+  self.applyFlowDecorations(doc)
+  self.rebuildInvocationZones(doc)
 
 proc tryMountUnifiedDiffTab*(componentId: int) =
   when defined(js):
@@ -602,6 +1001,12 @@ proc tryMountUnifiedDiffTab*(componentId: int) =
       component.editorInitialized = false
       component.editor = nil
       component.decorationCollection = nil
+      # The review overlay's two handles belong to the destroyed Monaco
+      # instance as much as `decorationCollection` does: a stale collection
+      # would be written to an editor that no longer exists, and a stale zone
+      # id would make the next `rebuildInvocationZones` remove a zone from it.
+      component.flowDecorationCollection = nil
+      component.flowViewZoneIds = @[]
 
     if not (isoNimUnifiedDiffMountedIds.hasKey(componentId) and
             isoNimUnifiedDiffMountedIds[componentId]):

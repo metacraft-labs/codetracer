@@ -1334,3 +1334,35 @@ inside the directory.
   probes `python3.12` FIRST for exactly this reason). Before concluding "the
   Python recorder is unavailable here", run
   `python3.12 -c "import codetracer_python_recorder"`.
+
+- 2026-08-18 (RV-5 values): a Monaco DECORATION can carry DOM-ish annotations
+  without a view zone or a content widget — `options.after` (injected text)
+  renders `content` as a real inline span inside the line's own DOM, styled by
+  `after.inlineClassName`. That is how a review draws its Omniscience value
+  chips (`ui/unified_diff.monacoValueDecorations`, and `MonacoLineStyle`'s
+  `afterContent`/`afterClass` for the full-file editor) with the debugger's own
+  `ct-omni-name` / `flow-parallel-value-box` classes and no `FlowComponent`
+  behind it. Three gotchas:
+    * The range must be COLLAPSED at the end of the line's text. Injected text
+      is placed at the range's end position, and a non-empty range would also
+      apply the chip's class to the line's own characters. Set
+      `showIfCollapsed: true` or the decoration vanishes on an empty line.
+    * Set `inlineClassNameAffectsLetterSpacing: true`, or Monaco lays the span
+      out as if it were plain monospace text and the chip's padding overlaps
+      the code.
+    * Monaco splits a LONG injected string across several rendering chunks, so
+      one chip can yield more than one element — a Playwright
+      `allTextContents()` over the chip class must rejoin them (see
+      `DeepReviewPage.flowValueText`).
+  Corollary, recorded because RV-5 got it wrong first: `after`-content is not
+  itself the "text comment" DeepReview-GUI.md §4.4 forbids. The forbidden thing
+  was the CONTENT (`  // x = 10, y = 20`, the deleted
+  `ui/deepreview.buildInlineValueDecorations`), not the mechanism.
+
+- 2026-08-18: `.flow-parallel-value-box` and `.flow-parallel-value-before-only`
+  are COMMENTED OUT in `styles/components/flow.styl`. The debugger's value
+  chips get their box appearance from `.ct-omni-value`, the flex *container*
+  `ui/flow.flowSimpleValue` wraps them in — so anything that renders a chip
+  without that container (an injected span, for instance) gets the classes but
+  none of the paint, and has to restate the container's declarations on the
+  element that is actually rendered.

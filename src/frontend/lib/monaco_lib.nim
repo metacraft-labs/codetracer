@@ -180,6 +180,20 @@ type
     line*: int
     class*: cstring
     inlineClass*: cstring
+    afterContent*: cstring
+      ## Text to inject after the line's own text, as a real inline span inside
+      ## the line's DOM (Monaco's `IModelDecorationOptions.after`).  Nil for the
+      ## ordinary case, which is a decoration that only *styles* existing text.
+      ##
+      ## This is how the Omniscience value chips reach a line that has no
+      ## `FlowComponent` behind it — a review's, whose values come from the
+      ## exported dataset rather than from a loaded recording.  It is NOT a
+      ## channel for comment-shaped annotations: `afterClass` carries the
+      ## standard flow chip classes and the content is the value, never
+      ## `// name = value`.
+    afterClass*: cstring
+      ## `inlineClassName` of the injected span.  Meaningless without
+      ## `afterContent`.
 
 const
   # monaco option const

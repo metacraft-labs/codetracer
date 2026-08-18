@@ -4,6 +4,7 @@ import
   trace_macro, trace_static,
   column_click_resolver,
   editor_decoration_layers, trace_redraw_policy,
+  flow_line_styles, review_flow_adapter, review_flow_selection,
   ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/ct_event
 
@@ -384,6 +385,22 @@ proc toDeltaDecorations(
     let lineContent = textModel.getLineContent(line.line)
     let endIndex = lineContent.len() + 1
     let startIndex = textModel.getLineFirstNonWhitespaceColumn(line.line)
+    if not line.afterContent.isNil:
+      # An *injected text* decoration: Monaco renders `after.content` as a real
+      # inline span at the range's end position, carrying `inlineClassName`.
+      # The range is collapsed there because injected text is placed at the end
+      # position and a non-empty range would additionally style the line's own
+      # text with the chip's class.  `showIfCollapsed` keeps it alive on an
+      # empty line, whose only column is 1.
+      result.add(DeltaDecoration(
+        `range`: newMonacoRange(line.line, endIndex, line.line, endIndex),
+        options: js{
+          showIfCollapsed: true,
+          after: js{
+            content: line.afterContent,
+            inlineClassName: line.afterClass,
+            inlineClassNameAffectsLetterSpacing: true}}))
+      continue
     result.add(DeltaDecoration(
       `range`: newMonacoRange(line.line, startIndex, line.line, endIndex),
       options: js{
@@ -654,22 +671,97 @@ proc flowStyleLines(self: EditorViewComponent, conditionFlowLines: seq[MonacoLin
   var flow = self.flow
 
   if not flow.isNil and not flow.flow.isNil and not self.flowUpdate.isNil:
-    let finished = self.flowUpdate.finished
-    for position in flow.flow.location.functionFirst + 1 .. flow.flow.location.functionLast:
-      if not flow.flow.branchesTaken[0][0].table.hasKey(position):
-        let lineFlowKind = toLineFlowKind(flow.flow, position, finished)
-        if isLineStyleSet(conditionFlowLines, position) and position notin flow.flow.commentLines:
-          case lineFlowKind:
-          of LineFlowHit:
-              lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))
-
-          of LineFlowSkip:
-            lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
-
-          of LineFlowUnknown:
-            lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-unknown"))
+    # The per-line decision lives in `ui/flow_line_styles.nim` so it can be
+    # unit-tested headlessly, and so the guard it carries is shared with every
+    # other reader of `branchesTaken`. Before RV-5 this loop indexed
+    # `branchesTaken[0][0]` with no bounds check — a latent `IndexDefect` that
+    # aborted the whole of `applyEventualStylesLines`.
+    for styled in flowStyledLines(flow.flow, self.flowUpdate.finished):
+      if isLineStyleSet(conditionFlowLines, styled.position):
+        lines.add(MonacoLineStyle(
+          line: styled.position,
+          inlineClass: cstring(flowLineStyleClass(styled.kind))))
 
   lines
+
+proc reviewFlowStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
+  ## The review's Omniscience overlay on a full-file editor tab
+  ## (DeepReview-GUI.md §5.3: "The same Omniscience data from the associated
+  ## traces is overlaid on the file in its normal form […] Use the standard
+  ## Omniscience appearance").
+  ##
+  ## A review launched over an exported dataset loads no recording, so no
+  ## `FlowComponent` is ever created for this tab and `flowStyleLines` above has
+  ## nothing to work from. The overlay's input is the dataset (§7), so the
+  ## dataset is adapted into a `FlowUpdate` here and handed to the *same*
+  ## `flowStyledLines` — the classes, the guard and the hit/skip/unknown
+  ## decision are one implementation, not two.
+  ##
+  ## Which invocation is displayed is the reviewer's choice, made with the
+  ## in-editor selector the diff tab renders (`ui/unified_diff.nim`); this tab
+  ## follows the same per-file, per-function ordinals so both surfaces of one
+  ## review agree about which call they are showing.
+  ##
+  ## The **inline values** §4.4 names come with the classes: each captured
+  ## variable becomes one name chip and one value box, injected after the line's
+  ## own text with the debugger's own flow chip classes. Never a text comment —
+  ## `afterContent` carries the value, and `afterClass` the standard classes.
+  result = @[]
+  if not self.data.deepReviewActive or self.data.deepReviewData.isNil:
+    return
+  if self.editorView != ViewSource:
+    return
+  for file in self.data.deepReviewData.files:
+    if file.path != self.path:
+      continue
+    let path = $file.path
+    let functions = reviewFunctionInvocations(file)
+    for fn in functions:
+      let ordinal = reviewInvocationOrdinal(path, fn.functionKey)
+      let invocation =
+        reviewInvocationIndex(functions, fn.functionKey, ordinal)
+      # A function the changeset only *calls* has a `callCount` and no flow
+      # (RV-4 gap 8): it is skipped rather than annotated with somebody else's
+      # execution.
+      if invocation == NoInvocation:
+        continue
+      let plan = reviewFlowPlan(file, invocation)
+      if not plan.found:
+        continue
+      var update = FlowUpdate()
+      fillFlowUpdate(plan, update, ViewSource)
+      let view = update.viewUpdates[ViewSource]
+      # The loop iteration the reader picked with the diff tab's loop control,
+      # for every loop this invocation entered — so a line inside a loop shows
+      # the pass the reader asked for on both surfaces of the review.
+      var iterations: seq[(int, int)] = @[]
+      for loopIndex in 1 ..< plan.loops.len:
+        iterations.add(
+          (loopIndex, reviewLoopIteration(path, fn.functionKey, loopIndex)))
+      for styled in flowStyledLines(view, update.finished):
+        result.add(MonacoLineStyle(
+          line: styled.position,
+          inlineClass: cstring(flowLineStyleClass(styled.kind))))
+      # §4.4's inline values. Walked over the function's own span rather than
+      # over `flowStyledLines`, which starts at `functionFirst + 1` because the
+      # declaration line cannot be *skipped* — it can still have captured a
+      # parameter, and `format_output`'s `input` is exactly that case. The model
+      # line IS the source line here (this tab shows the whole file), so no
+      # mapping is needed, unlike the diff tab's synthetic document.
+      for position in plan.functionFirst .. plan.functionLast:
+        let stepIndex = plan.stepAtLine(position, iterations)
+        if stepIndex < 0:
+          continue
+        for chip in reviewValueChips(plan.steps[stepIndex]):
+          result.add(MonacoLineStyle(
+            line: position,
+            afterContent: cstring(" " & reviewValueChipName(chip)),
+            afterClass: cstring(ReviewValueNameClass)))
+          result.add(MonacoLineStyle(
+            line: position,
+            afterContent: cstring(chip.text),
+            afterClass: cstring(ReviewValueBoxClass)))
+    break
 
 proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int): seq[MonacoLineStyle] =
   var lines: seq[MonacoLineStyle] = @[]
@@ -833,9 +925,16 @@ proc applyEventualStylesLines*(self: EditorViewComponent) =
   # Layer split, see `styleLines` / `ui/editor_decoration_layers.nim`:
   # everything derived from `self.flow.flow` goes into the flow layer, which is
   # retained rather than wiped while a flow reload is in flight.
+  # §5.3 — a review's flow comes from the dataset, so it is available whenever
+  # the review is, with no `FlowComponent` and no recording behind it. It joins
+  # the flow layer because it *is* flow: the layer-retention rule of #594 must
+  # apply to it identically.
+  let reviewFlowLines = self.reviewFlowStyleLines()
   let baseLines = concat(colorLineList, concat(deepReviewDiffLines, originHopLines))
-  let flowLines = concat(flowLineList, conditionFlowLines)
-  let flowDataAvailable = not self.flow.isNil and not self.flow.flow.isNil
+  let flowLines = concat(concat(flowLineList, reviewFlowLines), conditionFlowLines)
+  let flowDataAvailable =
+    (not self.flow.isNil and not self.flow.flow.isNil) or
+    reviewFlowLines.len > 0
 
   self.styleLines(self.monacoEditor, baseLines, flowLines, flowDataAvailable)
 

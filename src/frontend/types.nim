@@ -864,6 +864,25 @@ type
     lineLabels*: seq[cstring]
       ## Dual old/new line-number labels, one per model line, handed to
       ## Monaco's ``lineNumbers`` callback.
+    flowDecorationCollection*: js
+      ## Monaco decorations collection holding the review's Omniscience flow
+      ## decorations (RV-5).  A *second* collection rather than more entries in
+      ## ``decorationCollection`` because the two have different lifetimes: the
+      ## diff decorations change when a hunk is selected or context is
+      ## expanded, the flow ones when the reader picks another invocation, and
+      ## a single collection would make each rebuild throw the other away.
+    flowViewZoneIds*: seq[int]
+      ## Monaco view-zone ids of the review's in-editor controls — the
+      ## invocation selectors (DeepReview-GUI.md §7) and the loop iteration
+      ## controls (§4.4) alike — so a rebuild can remove the previous ones
+      ## instead of stacking a second control above every function — the defect
+      ## #562 recorded for the loop slider.
+      ##
+      ## One seq for both kinds because they are rebuilt together, by the same
+      ## proc, from the same document: the anchors of both move whenever
+      ## context expansion renumbers the model, so a rebuild that dropped one
+      ## kind and kept the other would leave that one pointing at somebody
+      ## else's lines.
 
   ViewKind* =       enum ViewTable, ViewLine, ViewPie
 

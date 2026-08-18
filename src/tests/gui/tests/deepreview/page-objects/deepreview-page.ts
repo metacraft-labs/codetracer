@@ -32,10 +32,19 @@
  * | ``.deepreview-calltrace``         | the standard CALLTRACE panel        |
  * | its coverage / inline decorations | the Agent Activity section (§2.1)   |
  *
- * Still outstanding: in ``--deepreview`` mode the index process never loads a
- * recording (M42b), so the replay-backed panels are present but empty and the
- * Monaco inline-value decorations have no data to show. That is why the
- * Omniscience assertions remain out of this suite; DR-R6 owns them.
+ * The Omniscience overlay is no longer outstanding. DR-R6 recorded it as
+ * blocked on a review loading its recording (M42b); RV-5 established that the
+ * premise was wrong — a review dataset carries per-invocation flow per file,
+ * and an adapter turns it into the ``FlowUpdate`` the editor already consumes
+ * (DeepReview-GUI.md §7, "The overlay is driven by the dataset, not by a live
+ * recording"). Tests 26-28 in ``deepreview-gui.spec.ts`` assert it on the diff
+ * tab: the standard ``line-flow-hit`` / ``line-flow-skip`` classes, and the
+ * in-editor invocation selector (``.review-invocation-selector``) that chooses
+ * which call of a function is drawn.
+ *
+ * Still outstanding: in review mode the index process never loads a recording
+ * (M42b), so the replay-backed panels — CALLTRACE, STATE, EVENT LOG — are
+ * present but empty. Nothing in this file depends on them.
  */
 
 import type { Locator, Page } from "@playwright/test";
@@ -280,6 +289,58 @@ export class DeepReviewPage {
     // Monaco preserves the label's padding with U+00A0, which no `\s` class
     // matches, so it is normalised to an ordinary space first.
     return raw.map((t) => t.replace(/ /g, " ").trim().replace(/\s+/g, " "));
+  }
+
+  // -- The Omniscience overlay in the diff tab (RV-5) ----------------------
+  //
+  // DeepReview-GUI.md §4.4 requires the standard Omniscience appearance, and
+  // §7 requires it as "Monaco decorations with the flow annotation classes".
+  // The values are therefore *injected text* decorations rendered inside the
+  // line's own DOM, carrying the debugger's own chip classes plus the two
+  // `review-flow-value-*` markers that locate them here.
+
+  /** Every inline value chip — name chips and value boxes alike. */
+  static flowValueChips(tab: Locator): Locator {
+    return tab.locator(".monaco-editor .view-lines .review-flow-value");
+  }
+
+  /** The name half of each inline value chip, e.g. ``<x>``. */
+  static flowValueNames(tab: Locator): Locator {
+    return tab.locator(".monaco-editor .view-lines .review-flow-value-name");
+  }
+
+  /** The value half of each inline value chip, e.g. ``10``. */
+  static flowValueBoxes(tab: Locator): Locator {
+    return tab.locator(".monaco-editor .view-lines .review-flow-value-box");
+  }
+
+  /**
+   * Every chip of ``tab`` as one string, in document order.
+   *
+   * Chips are read as text rather than counted because a count cannot tell the
+   * right invocation's values from the wrong one's — the axis the deleted
+   * Tests 17/18 asserted on and the reason they are worth restoring.
+   *
+   * Two normalisations, both forced by how Monaco renders injected text:
+   * spaces inside a rendered span arrive as U+00A0, and a long span is split
+   * across several rendering chunks — so a single chip can yield more than one
+   * element and its text must be rejoined without a separator inside a chip.
+   * Chips are therefore separated by a single space here, and callers assert on
+   * short values.
+   */
+  static async flowValueText(tab: Locator): Promise<string> {
+    const chips = await DeepReviewPage.flowValueChips(tab).allTextContents();
+    return chips.map((t) => t.replace(/[\s\u00a0]+/g, " ")).join(" ");
+  }
+
+  /** The in-editor invocation selectors of ``tab`` (§7). */
+  static invocationSelectors(tab: Locator): Locator {
+    return tab.locator(".review-invocation-selector");
+  }
+
+  /** The in-editor loop iteration controls of ``tab`` (§4.4). */
+  static loopSelectors(tab: Locator): Locator {
+    return tab.locator(".review-loop-selector");
   }
 
   // -- The docked VCS panel ------------------------------------------------

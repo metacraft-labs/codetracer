@@ -631,6 +631,82 @@
   font-weight: normal
   opacity: 0.5
 
+// The review's two in-editor controls (RV-5, DeepReview-GUI.md §7 and §4.4):
+// `.review-invocation-selector`, which picks which *call* is drawn, and
+// `.review-loop-selector`, which picks which *pass through a loop* is drawn.
+//
+// Neither is a new kind of control: each is a Monaco view zone anchored
+// immediately above the lines it governs, carrying a counter between two step
+// buttons — the shape of the loop iteration slider they are modelled on. They
+// borrow the flow panel's iteration slider palette so a reader fluent in one
+// recognises the others.
+.review-flow-selector
+  display: flex
+  align-items: center
+  gap: 6px
+  padding: 0 8px
+  font-size: 0.85em
+  color: colors-ui-text-primary-body
+  opacity: 0.85
+  // Monaco paints `.view-lines` over the `.view-zones` container, so a zone's
+  // own controls are unreachable without being lifted out of that stack — the
+  // buttons are visible but every click lands on the text layer.
+  position: relative
+  z-index: 12
+  pointer-events: auto
+
+  .review-flow-label
+    white-space: nowrap
+
+  .review-flow-step
+    background: transparent
+    border: 1px solid colors-ui-border-secondary
+    border-radius: 3px
+    color: inherit
+    cursor: pointer
+    font: inherit
+    line-height: 1
+    padding: 0 5px
+
+    &:hover
+      background: colors-ui-surface-input-default
+
+    &[disabled]
+      cursor: default
+      opacity: 0.35
+
+// The loop iteration control sits directly under the invocation selector for
+// the same function, so it is dimmed slightly to read as the narrower choice.
+.review-loop-selector
+  opacity: 0.7
+
+// The review's inline Omniscience values (RV-5, §4.4 / §7).
+//
+// The chips are Monaco *injected text* — a real inline span inside the code
+// line's own DOM — and they carry the debugger's own classes: `ct-omni-name`
+// and `flow-parallel-value-name` on the name, `flow-parallel-value-box` and
+// `flow-parallel-value-before-only` on the value.  §5.3 forbids "a separate
+// DeepReview-specific inline style", so nothing here restyles a chip: the two
+// rules below supply only what an injected span needs and a flex child of the
+// flow panel's value column does not — an inline box model, and the gap that
+// the column's own border provides in the debugger.
+//
+// `.flow-parallel-value-before-only`'s own colours are commented out in this
+// file (see above) because the flow panel's chips take them from
+// `.ct-omni-value`, the flex *container* that an injected span cannot have.
+// The value box therefore restates that container's appearance — the same
+// declarations, on the element that is actually rendered.
+.review-flow-value
+  white-space: pre
+  border-radius: 0.25em
+  padding: 0 0.4em
+
+.review-flow-value-box
+  font-family: "SpaceMono"
+  background: colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
+  margin-right: 0.5em
+
 .flow-taken
   width: 100px
   background: FLOW_CONDITION_TAKEN
