@@ -1,0 +1,354 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Variable Rename List - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="variable-rename-list"><a class="header" href="#variable-rename-list">Variable Rename List</a></h1>
+<p>Minified JavaScript bundles strip identifier names — <code>function add(left, right)</code> becomes <code>function a(b,c)</code>, and your debugger watch pane shows <code>a = [1,2,3,4,5]</code> instead of <code>array = [1,2,3,4,5]</code>.</p>
+<p>When the bundle ships a <a href="https://sourcemaps.info/spec.html">source map V3</a> with a populated <code>names</code> field, CodeTracer's <a href="#sourcemap-translation-pipeline">server-side sourcemap translation</a> recovers the original names for free.</p>
+<p>When the bundle does <strong>not</strong> ship a sourcemap, or its <code>names</code> table is missing the binding you care about, you can supply a <strong>rename list</strong> — a small TOML file that maps minified names back to readable ones.  The replay-server loads the list at trace open and applies it whenever it surfaces a variable name to the UI.</p>
+<p>This document covers:</p>
+<ul>
+<li><a href="#toml-schema">TOML schema</a></li>
+<li><a href="#where-the-file-lives">Where the file lives</a></li>
+<li><a href="#composition-rules">Composition rules</a></li>
+<li><a href="#environment-variables">Environment variables</a></li>
+<li><a href="#caveats">Caveats</a></li>
+</ul>
+<h2 id="toml-schema"><a class="header" href="#toml-schema">TOML schema</a></h2>
+<pre><code class="language-toml"># Optional metadata.  Reserved for future schema bumps; the current
+# parser accepts and surfaces these fields without enforcing them.
+[meta]
+version = "1"
+comment = "lodash 4.17.21 minified bundle"
+
+# Per-file [[rename]] entries.  Each maps a minified variable name to
+# a human-readable one.  `scope` defaults to "global" — set to
+# "function:&lt;funcname&gt;" or "block:L&lt;line&gt;" to constrain.
+
+[[rename]]
+file = "lodash.min.js"     # required — recorded path (relative or absolute)
+scope = "global"           # optional — defaults to "global"
+from = "e"                 # required — minified binding name
+to = "array"               # required — readable name shown by the UI
+
+[[rename]]
+file = "lodash.min.js"
+scope = "function:chunk"
+from = "t"
+to = "result"
+
+[[rename]]
+file = "lodash.min.js"
+scope = "block:L42"
+from = "f"
+to = "iteration_index"
+</code></pre>
+<h3 id="required-fields"><a class="header" href="#required-fields">Required fields</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>file</code></td><td>string</td><td>Path the recording observed.  Either the basename (<code>lodash.min.js</code>) or an absolute path; the loader matches both.</td></tr>
+<tr><td><code>from</code></td><td>string</td><td>The minified binding name as it appears in the recorded trace.</td></tr>
+<tr><td><code>to</code></td><td>string</td><td>The readable name the UI should show in its place.</td></tr>
+</tbody></table>
+</div>
+<h3 id="optional-fields"><a class="header" href="#optional-fields">Optional fields</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>scope</code></td><td>string</td><td><code>"global"</code></td><td>Lookup scope.  Recognised values: <code>"global"</code>, <code>"function:&lt;funcname&gt;"</code>, <code>"block:L&lt;line&gt;"</code>, or <code>"block:&lt;n&gt;"</code>.</td></tr>
+</tbody></table>
+</div>
+<h3 id="parser-tolerance"><a class="header" href="#parser-tolerance">Parser tolerance</a></h3>
+<ul>
+<li>Unknown top-level tables (other than <code>[meta]</code>) and unknown keys inside <code>[[rename]]</code> are <strong>logged at warn level and skipped</strong> — a typo on one key (e.g. <code>flie = "x"</code> next to a correct <code>file = "lodash.min.js"</code>) does not drop the rename.</li>
+<li>Missing required fields (<code>file</code>, <code>from</code>, <code>to</code>) produce a typed <code>MissingField</code> error and refuse to load the list.</li>
+<li>Duplicate <code>(file, scope, from)</code> triples produce a typed <code>DuplicateEntry</code> error.</li>
+</ul>
+<h2 id="where-the-file-lives"><a class="header" href="#where-the-file-lives">Where the file lives</a></h2>
+<p>The replay-server looks for the rename list in this order:</p>
+<ol>
+<li>The path passed via the CLI flag <code>--rename-list &lt;path&gt;</code> on <code>replay-server dap-server</code>.</li>
+<li>The path passed via the DAP <code>launch</code> argument <code>renameList</code>.</li>
+<li>The conventional sibling location <code>&lt;recording-dir&gt;/renames.toml</code>.</li>
+</ol>
+<p>When none of those resolve to an existing file, no rename list is installed and only the sourcemap <code>names[]</code> data is consulted (see <a href="#composition-rules">composition rules</a> below).</p>
+<h3 id="cli-flag"><a class="header" href="#cli-flag">CLI flag</a></h3>
+<pre><code class="language-sh">replay-server dap-server --rename-list ~/recordings/my-trace/renames.toml --stdio
+</code></pre>
+<p>The CLI flag applies to <strong>every</strong> trace the server opens during its lifetime.  Per-launch DAP <code>renameList</code> arguments override the CLI default on a per-trace basis.</p>
+<h3 id="sibling-lookup"><a class="header" href="#sibling-lookup">Sibling lookup</a></h3>
+<pre><code class="language-text">my-recording/
+├── trace.ct
+├── meta_dat/
+├── renames.toml       &lt;-- picked up automatically at trace open
+└── ...
+</code></pre>
+<p>No flag needed — the loader probes for <code>renames.toml</code> next to the trace folder at trace open.</p>
+<h2 id="composition-rules"><a class="header" href="#composition-rules">Composition rules</a></h2>
+<p>When the UI requests the name for a recorded binding, the resolver consults three sources in order:</p>
+<ol>
+<li><strong>User rename list</strong> (this file).  Lookup is scope-aware:
+<ul>
+<li>A <code>Scope::Function(name)</code> hint matches a <code>function:&lt;name&gt;</code>-scoped entry first, then falls back to a <code>global</code> entry.</li>
+<li>A <code>Scope::Block(line)</code> hint matches a <code>block:L&lt;line&gt;</code>-scoped entry first, then falls back to a <code>global</code> entry.</li>
+<li>A <code>None</code> / unknown scope hint matches <code>global</code> entries only — function- and block-scoped entries are intentionally narrower.</li>
+</ul>
+</li>
+<li><strong>Sourcemap V3 <code>names[]</code> array</strong> (from <a href="#sourcemap-translation-pipeline">§P3</a> translation).  When the sourcemap declares an entry for the minified name, the resolver echoes the recorded name back as confirmation that the bundle preserved a known original.</li>
+<li><strong><code>None</code></strong> — the recorded name flows through unchanged.</li>
+</ol>
+<p><strong>Precedence on conflict</strong>: the user rename list always wins.  If you map <code>e -&gt; userId</code> in <code>renames.toml</code> and the bundle's sourcemap names <code>e</code> as <code>e</code> (or anything else), the UI shows <code>userId</code>.</p>
+<h2 id="environment-variables"><a class="header" href="#environment-variables">Environment variables</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Effect when set to one of <code>0</code>/<code>off</code>/<code>false</code>/<code>no</code></th></tr></thead><tbody>
+<tr><td><code>CT_RENAME_LIST</code></td><td>on</td><td>Disables the rename-list loader entirely — even an explicit <code>--rename-list</code> path is ignored.</td></tr>
+<tr><td><code>CT_SOURCEMAP_TRANSLATION</code></td><td>on</td><td>Disables <a href="#sourcemap-translation-pipeline">§P3</a> sourcemap translation (separate kill switch).</td></tr>
+<tr><td><code>CT_AUTOFORMAT</code></td><td>on</td><td>Disables the <a href="#sourcemap-translation-pipeline">§P4</a> auto-format fallback for sourcemap-less minified sources, <strong>and</strong> the <a href="#sourcemap-translation-pipeline">§P6.2</a> recorder-side pre-format hook.</td></tr>
+<tr><td><code>CT_AUTOFORMAT_THRESHOLD</code></td><td>500</td><td>Override the average-line-length heuristic used by both the recorder pre-format and the replay-server fallback to decide whether a source looks minified.  Integer ≥ 1.</td></tr>
+</tbody></table>
+</div>
+<p>The four kill switches are independent.  Turning off <code>CT_RENAME_LIST</code> does not affect sourcemap translation or auto-format.</p>
+<h2 id="auto-format-pipeline-where-formatting-happens"><a class="header" href="#auto-format-pipeline-where-formatting-happens">Auto-format pipeline (where formatting happens)</a></h2>
+<p>There are <strong>two</strong> places minified-source formatting can run, depending on which recorder produced the trace:</p>
+<ul>
+<li><strong>Recorder-side (P6.2, recommended).</strong>  Recorders from version 0.2.0 onward (e.g. <code>codetracer-js-recorder</code>) detect minified sources at record start, shell out to <code>prettier</code> (JavaScript) / <code>black</code> (Python) once, and bake the formatted view + a Source Map V3 sourcemap (formatted → original) into the trace under <code>&lt;trace&gt;/files/&lt;file&gt;.fmt.js{,.map}</code>.  The replay-server's existing <a href="#sourcemap-translation-pipeline">§P3</a> sourcemap path discovers the <code>.map</code> sibling and translates positions with no replay-time subprocess.</li>
+<li><strong>Replay-server-side (P4, fallback).</strong>  For traces produced by older recorders, the replay-server lazily formats minified sources at trace open, caching the result under the trace's cache directory.  The behaviour is identical from the UI's perspective; the only difference is <em>when</em> the formatter runs (record time vs. view time) and how it's cached.</li>
+</ul>
+<p>The same <code>CT_AUTOFORMAT</code> env var disables both — useful when you want to inspect the raw minified source.  Disabling autoformat on a trace that already carries a <code>.fmt.js</code> sibling is a no-op (the formatted view is already on disk; the env var only gates the lookup pipeline).</p>
+<p>The JS recorder exposes a CLI flag <code>--no-autoformat</code> that disables the recorder-side hook for a single invocation, falling back to the P4 lazy path at view time.</p>
+<h2 id="caveats"><a class="header" href="#caveats">Caveats</a></h2>
+<ul>
+<li><strong>Render-time only.</strong>  The rename list is applied when the value-stream renderer surfaces a binding to the UI.  The recorded trace itself is <strong>not</strong> rewritten — every recorded variable name stays in its original (minified) form on disk.  Re-opening the same trace with a different rename list yields different rendered names.</li>
+<li><strong>No schema/format change.</strong>  Adding a rename list does not bump the trace format or require the recorder to be aware of it.  Any trace produced by any recorder version works with any rename list.</li>
+<li><strong>Origin tracking unchanged.</strong>  Variable-origin chains (the §3 of the spec) continue to look up by the recorded variable id, not by the rendered name.  Renaming a binding does not break the origin index.</li>
+<li><strong>Scope hints are best-effort.</strong>  The resolver computes a scope hint from the surrounding call's function name and the current step's line.  When neither is available (e.g. the step has no associated path), only the global-scope user entries and the sourcemap <code>names[]</code> table are consulted.</li>
+</ul>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li><a href="https://sourcemaps.info/spec.html">Source Map V3 spec</a> — the format the §P3 translation consumes.</li>
+<li><a href="./value-origin-tracking.html">Value-Origin Tracking</a> — the parallel pipeline that recovers value provenance independently of binding names.</li>
+</ul>
+<p><a id="sourcemap-translation-pipeline"></a>
+<em>§P3 (sourcemap translation), §P4 (replay-side auto-format fallback), §P5 (this document), and §P6.2 (recorder-side auto-format hook) are milestones of the <strong>Column-Aware Tracing &amp; Source Deminification</strong> campaign; the milestones spec lives at <code>codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org</code>.</em></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../usage_guide/cross-tracer-demo.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../usage_guide/codetracer_shell.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../usage_guide/cross-tracer-demo.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../usage_guide/codetracer_shell.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

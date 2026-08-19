@@ -1,0 +1,360 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Cross-Tracer Demo - codetracer docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">codetracer docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="cross-tracer-demo-account-balance-with-wasm"><a class="header" href="#cross-tracer-demo-account-balance-with-wasm">Cross-Tracer Demo (<code>account-balance-with-wasm</code>)</a></h1>
+<p>The <strong>cross-tracer demo</strong> is a one-command launcher that opens the
+canonical M29 three-trace fixture in the CodeTracer GUI for manual
+inspection. The fixture records the same web request through three
+independent recorders simultaneously, producing three <code>.ct</code> containers
+glued together by a <code>session.toml</code> manifest. The GUI then lets you
+right-click a value in any recording and follow its origin chain
+across recording boundaries.</p>
+<p>This demo is the user-facing counterpart of the automated
+<code>test-cross-process</code> envelope: same fixture, same <code>session.toml</code>, but
+launched interactively so you can chain-walk and switch recordings
+yourself instead of asserting against a Playwright script.</p>
+<h2 id="what-the-demo-records"><a class="header" href="#what-the-demo-records">What the demo records</a></h2>
+<p>The fixture is a three-tier balance-update flow:</p>
+<ol>
+<li><strong>Frontend (JavaScript).</strong> A Vite-built single-page app posts
+<code>{ balance: N }</code> to the backend and renders the response. Recorded
+by the codetracer-js-recorder host
+(<code>browser_stream_receiver</code>).</li>
+<li><strong>Frontend (WASM).</strong> A <code>wasm-pack</code>-built Rust module that the
+frontend calls into to format the balance. Recorded by the
+codetracer-wasm-instrumenter shim under the same browser host. The
+<code>frontend-wasm.ct</code> and <code>frontend.ct</code> files share a realm boundary,
+not an OS-process boundary.</li>
+<li><strong>Backend (Python aiohttp).</strong> A small aiohttp server that handles
+<code>POST /balance</code> and returns the updated balance. Recorded by the
+codetracer Python recorder.</li>
+</ol>
+<p>A single <code>POST /balance</code> request flows from the JS frontend, through
+the WASM module, across an HTTP boundary into the Python backend, and
+back. The <code>session.toml</code> manifest binds the three recordings together
+with their <code>frontend-js</code> / <code>frontend-wasm</code> / <code>backend</code> role labels and
+an eager-mode <code>[correlation]</code> section, so the cross-process composer
+can index every send/recv marker upfront when the session opens.</p>
+<p>The full scenario contract — including the exact <code>balance</code> value the
+chain should resolve to — lives in the fixture's <code>ANSWERS.md</code>.</p>
+<h2 id="how-to-run-it"><a class="header" href="#how-to-run-it">How to run it</a></h2>
+<p>From the repository root:</p>
+<pre><code class="language-bash">just demo-cross-tracer
+</code></pre>
+<p>The recipe records the demo before it launches:</p>
+<ul>
+<li>The three <code>.ct</code> containers and <code>session.toml</code> are <strong>not committed</strong>.
+They are produced by <code>scripts/materialize-recording.sh</code>, which runs
+<code>src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/regenerate.sh</code>
+and caches the result under the gitignored <code>target/test-recordings/</code>.
+So what the GUI opens is always a recording of the tree you are
+standing in — not a copy made by whichever recorder happened to be
+current when someone last committed one.</li>
+<li>The cache is keyed on the demo's sources <strong>and on the content of every
+recorder binary involved</strong> (<code>ct-instrument</code>, the <code>record-web</code> binary,
+the instrumenter's <code>recorder-runtime/</code>, the JS recorder's built
+packages), so a second run is instant and a rebuilt recorder re-records.</li>
+<li>The pipeline is honestly gated on its prerequisites (see below) and
+fails with an actionable, consolidated diagnostic when any are missing.
+There is no outcome that quietly launches on nothing.</li>
+</ul>
+<p>The launch is <code>ct replay -t &lt;fixture-dir&gt;/session.toml</code>, which hands
+the manifest to the same DAP session loader the M24 process-tree flow
+uses (<code>src/db-backend/src/session_manifest.rs</code> +
+<code>session_handler.rs</code>).</p>
+<h3 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h3>
+<p>The recorder pipeline requires every component below. The recipe
+exits with a single consolidated report when any are missing, so the
+operator can fill the gaps one by one and re-run:</p>
+<ul>
+<li><code>rustup target add wasm32-unknown-unknown</code></li>
+<li><code>ct-instrument</code>, built in the <code>codetracer-wasm-instrumenter</code> sibling</li>
+<li>The <code>record-web</code> daemon — i.e. a built <code>session-manager</code>
+(<code>cargo build</code> in <code>src/backend-manager</code>, or <code>just build-once</code>)</li>
+<li>The <code>codetracer-js-recorder</code> sibling, built (<code>just build</code> there)</li>
+<li>Playwright in the fixture's <code>frontend/</code> directory
+(<code>npm install playwright</code>)</li>
+<li>A built <code>ct</code> binary (<code>just build-once</code>)</li>
+</ul>
+<p>These are the same prerequisites the Playwright spec
+<code>cross-tracer-three-recording.spec.ts</code> depends on: it calls
+<code>src/tests/gui/lib/value-origin-fixtures.ts::threeTraceRecordingRoot()</code>,
+which runs the same materialiser and <strong>throws</strong> rather than skipping when
+it cannot record. Only the missing <code>ct</code> binary is treated as an
+environment gap the spec may skip on, because that one genuinely means
+the machine cannot run a GUI test at all.</p>
+<h2 id="what-to-expect-in-the-gui"><a class="header" href="#what-to-expect-in-the-gui">What to expect in the GUI</a></h2>
+<p>Once the Electron window opens:</p>
+<ol>
+<li><strong>Process tree.</strong> The left-hand process tree mounts three entries
+labelled by their <code>role</code> (<code>frontend-js</code>, <code>frontend-wasm</code>,
+<code>backend</code>) and prefixed with the manifest's
+<code>default_thread_prefix</code> (<code>fe</code>, <code>wasm</code>, <code>be</code>). Each entry is
+expandable to its threads.</li>
+<li><strong>Switch recordings.</strong> Click any process-tree entry to make that
+recording active. The source pane, calltrace, and state pane all
+switch to that recording's timeline; the other two stay paused at
+their last-inspected step.</li>
+<li><strong>Right-click chain walk.</strong> In the backend recording, right-click
+the <code>balance</code> variable at the response site and pick <strong>Show value
+origin</strong>. The chain panel renders <code>CrossProcessSpan</code> breadcrumb
+chips at every cross-recording hop — one for the HTTP boundary
+between the backend and the JS frontend, one for the realm
+boundary between the JS frontend and the WASM module — terminating
+at the frontend expression that produced the input. Each chip's
+click target seeks the <em>receiving</em> recording to the matched
+message-arrival step.</li>
+<li><strong>Seek across hops.</strong> Clicking a <code>CrossProcessSpan</code> chip flips the
+active recording to the chip's target process and seeks to the
+matched step. The chain panel survives the switch — the breadcrumb
+chips stay in place so you can hop forward and backward through
+the chain without re-querying.</li>
+</ol>
+<p>The full step-by-step contract (steps 1-9, including the exact chip
+counts and the expected <code>frontend.js</code> expression at the terminator)
+lives in
+<code>codetracer-specs/Planned-Features/Cross-Tracer-Origin-Test.audit.md</code>
+§ TCT-M5, which the Playwright spec
+<code>src/tests/gui/tests/value-origin/cross-tracer-three-recording.spec.ts</code>
+encodes as a single end-to-end pass/fail. The demo recipe is the
+human-driven version of that same scenario.</p>
+<h2 id="further-reading"><a class="header" href="#further-reading">Further reading</a></h2>
+<ul>
+<li><a href="./value-origin-tracking.html">Value Origin Tracking</a> — single-trace
+and cross-trace chain-walking surfaces (M29 milestone).</li>
+<li><code>codetracer-specs/Planned-Features/Cross-Tracer-Origin-Test.audit.md</code>
+— TCT-M5 acceptance criteria the demo mirrors.</li>
+<li><code>codetracer-specs/GUI/Test-Scenarios/Cross-Process-Origin-E2E-Test-Design.md</code>
+— design notes for the cross-process chain panel surface.</li>
+<li>The fixture sources at
+<code>src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/</code>
+— <code>frontend/</code>, <code>backend/</code>, <code>wasm-src/</code>, and the canonical
+<code>ANSWERS.md</code> describing the expected origin chain.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../usage_guide/value-origin-tracking.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../usage_guide/variable-rename-list.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../usage_guide/value-origin-tracking.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../usage_guide/variable-rename-list.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>
