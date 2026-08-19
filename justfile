@@ -721,6 +721,22 @@ test-desktop-component:
 test-desktop-capabilities:
   bash ci/test/desktop-capabilities-dispatch.sh
 
+# End-to-end launcher <-> recorder compatibility gate: `ct record sample.py`
+# driven through the REAL `ct` launcher binary, which routes from the
+# codetracer-desktop capability file into the real desktop core, which
+# dispatches the real recorder, whose CTFS trace is decoded and asserted with
+# `ct-print` from codetracer-trace-format-nim.  This is the only gate that
+# covers hop 1 (the launcher's router); `just test-ct-providers` drives the
+# core directly and never sees it.  Scenarios, samples and expected trace
+# shape all come from the recorder repo's own contract fixture
+# (<recorder>/cross-repo/launcher-compat.yml), so a recorder that changes its
+# CLI or handled extensions has to update that file in the same change.
+# Needs the codetracer-launcher and recorder siblings, a built core
+# (`just build-once`) and `ct-print`; every missing prerequisite fails loudly
+# rather than skipping.  See ci/test/launcher-recorder-e2e.sh.
+test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
+  bash ci/test/launcher-recorder-e2e.sh {{recorder}} {{lang}}
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!

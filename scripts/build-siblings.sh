@@ -266,6 +266,19 @@ build_sibling \
 	libcodetracer_trace_writer.so \
 	"$trace_format_nim_cmd"
 
+# `ct-print` — the canonical CTFS decoder, and the trace-validation oracle for
+# ci/test/launcher-recorder-e2e.sh (Launcher-Recorder-Compatibility-Tests.md
+# §5.4).  Same repo as the shared lib above but a separate artifact and a
+# separate recipe, so it gets its own logical key (the cadence-trace-helper
+# precedent below).  The repo builds it at its own root on purpose:
+# "downstream recorder tests resolve it at the fixed sibling path
+# ../codetracer-trace-format-nim/ct-print" (that repo's Justfile).
+build_sibling \
+	codetracer-trace-format-nim \
+	ct-print \
+	"nimble buildCtPrint" \
+	codetracer-trace-format-nim/ct-print
+
 # Native backend (ct-native-replay). Its own direnv/flake can reject freshly
 # initialized submodules in repo-managed checkouts, so build it the same way
 # the local justfile does: borrow codetracer's dev shell and compile in-place.
@@ -305,6 +318,26 @@ build_sibling \
 	codetracer-js-recorder \
 	packages/cli/dist/index.js \
 	"npm install && just build"
+
+# Python recorder (PyO3 extension + `codetracer-python-recorder` console
+# script).  Unlike the other recorders this one is a Python package rather than
+# a standalone binary: the desktop core resolves it with
+# `findTool("codetracer-python-recorder")` (src/common/paths.nim), i.e. a plain
+# PATH search for the console script.  `just dev` is the recorder repo's own
+# canonical dev build (`uv run ... maturin develop`), and it drops that console
+# script into the repo's `.venv/bin`, which is the artifact
+# ci/test/launcher-recorder-e2e.sh puts on PATH via the recorder's
+# cross-repo/launcher-compat.yml `discovery.path-prepend`.
+#
+# NOTE: `.venv/bin` is deliberately NOT added to PATH by
+# scripts/detect-siblings.sh.  It carries a `python` of its own, and prepending
+# it globally would shadow the dev shell's interpreter for every other tool in
+# the workspace; only the launcher/recorder E2E needs it, and only for the
+# duration of that run.
+build_sibling \
+	codetracer-python-recorder \
+	.venv/bin/codetracer-python-recorder \
+	"just dev"
 
 # Ruby native extension.  The build target installs into the gem dir; the
 # detect-siblings check is for the wrapper binary at
