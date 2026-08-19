@@ -456,6 +456,12 @@ fn setup(
                 // entry for the same path (the recorder explicitly
                 // baked this view).
                 handler.load_source_views(trace_folder);
+                // §5.2 — extract any BUNDLED sources (a self-contained GDScript
+                // `.ct` bundles its `res://` `.gd` text so the value-origin
+                // classifier and Editor Pane resolve it without the original
+                // project). Additive to the srcviews path above; only raw
+                // (kind 0) views are materialised.
+                handler.load_bundled_sources(trace_folder);
                 // §P5 — user-provided variable rename list.
                 handler.load_rename_list(trace_folder, rename_list_path);
                 if for_launch {

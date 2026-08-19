@@ -299,6 +299,20 @@ pub struct Handler {
     /// is meaningless against a different container. Everything else the tail
     /// invalidates itself; see [`crate::request_spans::RequestSpanTail`].
     pub request_span_tail: Option<crate::request_spans::RequestSpanTail>,
+
+    /// §5.2 — filesystem root of the `.gd` (and any other) sources the `.ct`
+    /// container BUNDLED, once extracted at trace open by
+    /// [`Handler::load_bundled_sources`]. Populated only when the container
+    /// ships raw source views (Godot GDScript traces bundle `res://` sources
+    /// so they resolve without the original project checkout —
+    /// Mixed-Native-GDScript-Debugging §3.2 / §5.2).
+    ///
+    /// When set, [`Handler::meta_dat_sources_root`] returns this directory so
+    /// the value-origin classifier's bundled-source probe (spec §6.1) reads the
+    /// self-contained copy. `None` for traces that carry no bundled sources, in
+    /// which case the resolver falls back to the recorded-workdir probe /
+    /// on-disk source files exactly as before.
+    pub bundled_sources_root: Option<std::path::PathBuf>,
 }
 
 /// M25b — Event-Log marker row returned by `ct/event-load`. The
@@ -533,6 +547,7 @@ impl Handler {
             active_source_view_path: None,
             trace_folder: None,
             request_span_tail: None,
+            bundled_sources_root: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -3164,8 +3179,108 @@ impl Handler {
     /// recorded without bundled sources (the classifier falls back to
     /// filesystem reads — spec §6.1 "Source-file resolution").
     fn meta_dat_sources_root(&self) -> Option<std::path::PathBuf> {
+        // §5.2 — a container that BUNDLED its sources (a self-contained
+        // GDScript `.ct`, whose `res://` paths never exist on disk) wins: the
+        // bundle was extracted to `bundled_sources_root` at trace open and is
+        // authoritative for the classifier's source probe (spec §6.1).
+        if let Some(root) = &self.bundled_sources_root {
+            return Some(root.clone());
+        }
+        // Fall back to the recorded workdir's `meta_dat/sources/` for traces
+        // that ship on-disk-relative bundled sources (and legacy layouts).
         let candidate = self.reader.workdir().join("meta_dat").join("sources");
         if candidate.is_dir() { Some(candidate) } else { None }
+    }
+
+    /// §5.2 — extract the raw source views the `.ct` container bundled to a
+    /// stable per-trace directory and remember it as
+    /// [`Handler::bundled_sources_root`].
+    ///
+    /// Godot GDScript traces record `res://` virtual paths that never exist on
+    /// the replay host, so the recorder bundles each `.gd`'s source TEXT into
+    /// the container's `srcviews.dat` stream (view_kind 0 = raw). We materialise
+    /// those raw views onto disk under the file path
+    /// [`crate::expr_loader::bundled_source_path`] derives — i.e. the same
+    /// `res://`-scheme-stripped layout the value-origin classifier probes (spec
+    /// §6.1) — so `ExprLoader::load_file`/`get_source_line_v2` resolve the
+    /// self-contained copy WITHOUT the original project checkout or an explicit
+    /// sources-root hook.
+    ///
+    /// Only view_kind 0 (raw original source) is extracted; formatted
+    /// deminification views (kind 1/2, which carry a sourcemap and are consumed
+    /// by [`Self::load_source_views`]) are left alone. A trace that bundled no
+    /// raw sources leaves `bundled_sources_root` `None`, preserving the prior
+    /// filesystem-read behaviour exactly.
+    pub fn load_bundled_sources(&mut self, trace_dir: &Path) {
+        let Some(ct_path) = find_ct_container(trace_dir) else {
+            return;
+        };
+        let views = match crate::source_views::SourceViews::load(&ct_path) {
+            Ok(v) => v,
+            // Pre-extension trace (no srcviews) — the common case; silent.
+            Err(crate::source_views::SourceViewsError::Absent) => return,
+            Err(e) => {
+                debug!("bundled-sources: failed to read srcviews from {}: {e}", ct_path.display());
+                return;
+            }
+        };
+        if views.is_empty() {
+            return;
+        }
+
+        // Map the srcviews `path_id` back to the recorded path string (e.g.
+        // `res://gf_values.gd`) the classifier probes with.
+        let path_strings: HashMap<u64, String> = self
+            .reader
+            .path_entries_iter()
+            .map(|(p, id)| (id.0 as u64, p.to_string()))
+            .collect();
+
+        // Extract into a deterministic per-container directory so repeated
+        // opens reuse the same files and concurrent traces do not collide. The
+        // container path is unique per recording, so its hash keys the dir.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&ct_path, &mut hasher);
+        let key = std::hash::Hasher::finish(&hasher);
+        let root = std::env::temp_dir()
+            .join("codetracer-bundled-sources")
+            .join(format!("{key:016x}"));
+
+        let mut extracted = 0usize;
+        for sv in views.entries() {
+            // Only raw (kind 0) views are the source itself; skip formatted
+            // deminification views.
+            if sv.view_kind != 0 {
+                continue;
+            }
+            let Some(recorded_path) = path_strings.get(&sv.path_id) else {
+                warn!("bundled-sources: srcview references unknown path_id {}", sv.path_id);
+                continue;
+            };
+            // Write to exactly the path the read side derives, so the write and
+            // read layouts can never drift.
+            let dest = crate::expr_loader::bundled_source_path(&root, Path::new(recorded_path));
+            if let Some(parent) = dest.parent()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                warn!("bundled-sources: cannot create {}: {e}", parent.display());
+                continue;
+            }
+            if let Err(e) = std::fs::write(&dest, &sv.content) {
+                warn!("bundled-sources: cannot write {}: {e}", dest.display());
+                continue;
+            }
+            extracted += 1;
+        }
+
+        if extracted > 0 {
+            info!(
+                "bundled-sources: extracted {extracted} bundled source(s) from {} to {}",
+                ct_path.display(),
+                root.display()
+            );
+            self.bundled_sources_root = Some(root);
+        }
     }
 
     /// Load the layered origin-pattern set per spec §7.4.

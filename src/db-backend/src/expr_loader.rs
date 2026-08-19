@@ -2326,7 +2326,7 @@ pub enum SourceOrigin {
     Unavailable,
 }
 
-fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
+pub(crate) fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
     // Godot records GDScript source under its virtual-filesystem scheme
     // (`res://script.gd`, `user://...`). That is neither a real
     // filesystem path nor portable (a `res:` path component is invalid
@@ -2347,7 +2347,7 @@ fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
 /// Strip a leading Godot virtual-filesystem scheme (`res://`, `user://`)
 /// from a source path, returning the project-relative remainder. Returns
 /// `None` when the path carries no such scheme.
-fn strip_godot_scheme(path: &str) -> Option<&str> {
+pub(crate) fn strip_godot_scheme(path: &str) -> Option<&str> {
     for scheme in ["res://", "user://"] {
         if let Some(rest) = path.strip_prefix(scheme) {
             return Some(rest);
