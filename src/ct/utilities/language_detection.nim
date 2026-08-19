@@ -62,7 +62,13 @@ proc detectFolderLang(folder: string): Lang =
     LangUnknown
 
 
-const LANGS = {
+# The extension -> language table `ct record` / `ct run` detect with, via
+# `detectLangFromPath` below.  Exported so that the capability-file
+# conformance check (ci/test/desktop_capabilities_dispatch_check.nim) can
+# recompute the set of extensions codetracer-desktop is allowed to declare
+# in `resources/codetracer-desktop-capabilities` from THIS table, rather
+# than from a second, drift-prone copy of it.
+const LANGS* = {
   "c": LangC,
   "cpp": LangCpp,
   "rs": LangRust,

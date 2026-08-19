@@ -706,6 +706,21 @@ test-ct-providers:
 test-desktop-component:
   bash ci/test/desktop-component-bundle.sh
 
+# Verify that `resources/codetracer-desktop-capabilities` declares exactly the
+# file extensions the core can actually record.  The expected set is recomputed
+# from the production tables themselves
+# (`src/ct/utilities/language_detection.nim`'s LANGS +
+# `src/ct/trace/recorder_dispatch.nim`) by a checker compiled against them, so
+# it cannot drift; both directions are enforced (nothing declared that the core
+# cannot record, nothing recordable left undeclared — the `.js` routing bug).
+# Five mutation scenarios prove the check has teeth, and the built core's
+# `ct-describe-commands` file-types are compared against the same lists.  Needs
+# `nim` on PATH and a built core (`just build-once`); a missing -- or stale --
+# prerequisite fails loudly with a named remedy rather than skipping.
+# See ci/test/desktop-capabilities-dispatch.sh.
+test-desktop-capabilities:
+  bash ci/test/desktop-capabilities-dispatch.sh
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!
