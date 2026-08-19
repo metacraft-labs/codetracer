@@ -8,6 +8,7 @@ public/
 
 # `nim c -r` writes an extensionless native binary next to the source.
 tests/test_nav_order_matches_summary
+tests/test_nightly_channel
 tests/test_legacy_url_redirects
 tests/test_publish_output_shape
 # `just test` runs test_dev, and the whole suite is run by hand; all four of

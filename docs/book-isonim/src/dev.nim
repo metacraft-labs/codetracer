@@ -6,8 +6,10 @@
 ## `content/` so any edit hot-reloads every open tab via the framework's
 ## `dev_server` WebSocket live-reload channel.
 ##
-## The book is root-hosted (docs.codetracer.com, no basePath), so dev URLs match
-## production directly. Driven by `just dev-docs` (server) + `just open-docs` (browser);
+## The dev server always serves the book root-hosted (no basePath), so dev URLs
+## match the released channel (docs.codetracer.com/) directly; the `/nightly`
+## channel is a publish-time prefix (`CT_DOCS_BASE_PATH`, see `build.nim`) and
+## needs no separate dev mode. Driven by `just dev-docs` (server) + `just open-docs` (browser);
 ## optional first arg is the port (default 8000).
 
 import std/[os, strutils, asyncdispatch]

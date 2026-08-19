@@ -8,6 +8,7 @@
 
 test:
     nim c -r tests/test_nav_order_matches_summary.nim
+    nim c -r tests/test_nightly_channel.nim
     nim c -r tests/test_dev.nim
 
 build:

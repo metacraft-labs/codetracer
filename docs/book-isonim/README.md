@@ -127,5 +127,42 @@ layout/overrides live in `assets/style.css`. (The editor itself lives in
 ## Deployment
 
 CI (`.github/workflows/codetracer.yml` → `ci/deploy/docs.sh`) builds this book
-and publishes it to GitHub Pages on every push to `main`, `dev`, or `stable`,
-decoupled from the app build/test matrix.
+and publishes it to GitHub Pages, decoupled from the app build/test matrix.
+There are **two channels**, chosen by the branch that was pushed:
+
+| Branch | URL | Built with |
+|---|---|---|
+| `stable` | <https://docs.codetracer.com/> (plus the archived mdBook at `/old`) | `CT_DOCS_BASE_PATH` unset |
+| `dev` | <https://docs.codetracer.com/nightly> | `CT_DOCS_BASE_PATH=/nightly` |
+
+A push to `main` publishes nothing. Both channels commit to the same `gh-pages`
+branch and each run replaces **only its own subtree**, so the other channel
+survives untouched; the deploy is a fast-forward push, never a force-push.
+
+Search engines are asked to skip the nightly channel: every released-channel
+deploy appends `Disallow: /nightly/` to the **root** `robots.txt` (the only
+`robots.txt` crawlers read), so the nightly pages do not compete with the
+released ones for the same queries. To publish the nightly channel to search
+engines instead, drop that one `printf` from `swap_owned_subtree` in
+`ci/deploy/docs.sh`; the next released deploy regenerates `robots.txt` from the
+build, so the line disappears on its own.
+
+`CT_DOCS_BASE_PATH` is the URL prefix the build is hosted under: `src/build.nim`
+passes it to `bookDocsConfig()`, and the framework then rewrites every
+root-relative link, asset, stylesheet `url(...)`, search-index route and legacy
+redirect stub to carry it. Build the nightly variant locally with:
+
+```bash
+CT_DOCS_BASE_PATH=/nightly just build
+```
+
+To rehearse a deploy without pushing anything, from the repo root:
+
+```bash
+DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_BRANCH=dev ./ci/deploy/docs.sh   # or =stable
+```
+
+It prints the staged tree, including how many files it preserved from the
+channel it does not own. If the book build fails the deploy **fails**: it never
+substitutes older content under the published URLs, and because nothing is
+pushed the previously published site keeps serving.

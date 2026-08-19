@@ -23,6 +23,7 @@
 ## and is deliberately NOT overwritten with a stub (the one collision).
 
 import std/[os, strutils]
+import core/base_path
 
 type
   LegacyRedirect* = object
@@ -132,18 +133,26 @@ proc metaRefreshTarget*(stubHtml: string): string =
   if close < 0: return ""
   stubHtml[start ..< close].strip()
 
-proc generateRedirects*(publicDir, summaryPath: string): int =
+proc generateRedirects*(publicDir, summaryPath: string; basePath = ""): int =
   ## Write a meta-refresh stub at every legacy `*.html` path under
   ## `publicDir` and a `_redirects` manifest at `publicDir/_redirects`.
   ## Returns the number of stub files written. A stub is skipped when its
   ## target path already exists as a real generated page (the root
   ## `/index.html`), so the real home page is never overwritten.
+  ##
+  ## `basePath` is the channel prefix this build is hosted under (`""` for the
+  ## released book at `docs.codetracer.com/`, `"/nightly"` for the nightly
+  ## channel). These stubs are hand-emitted HTML the framework's base-path pass
+  ## never sees, so BOTH the URL a stub redirects to and the manifest's old/new
+  ## URL pair are prefixed here -- an unprefixed `/getting_started/python` in a
+  ## `/nightly` stub would bounce the reader out of the nightly site.
+  let base = normalizeBasePath(basePath)
   let redirects = legacyRedirects(summaryPath)
   var lines: seq[string] = @[]
   var written = 0
   for r in redirects:
     if r.needsStub:
-      lines.add r.oldUrl & " " & r.newRoute & " 301"
+      lines.add base & r.oldUrl & " " & base & r.newRoute & " 301"
       let outPath = publicDir / r.oldRelPath
       # Never overwrite a real generated page. Clean pages are always
       # emitted as `<route>/index.html`, so a stub whose basename is
@@ -154,7 +163,7 @@ proc generateRedirects*(publicDir, summaryPath: string): int =
       if outPath.extractFilename == "index.html":
         continue
       createDir(outPath.parentDir())
-      writeFile(outPath, metaRefreshStub(r.newRoute))
+      writeFile(outPath, metaRefreshStub(base & r.newRoute))
       inc written
   writeFile(publicDir / "_redirects", lines.join("\n") & "\n")
   written

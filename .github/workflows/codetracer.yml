@@ -3298,10 +3298,28 @@ jobs:
     # be chained behind push-to-attic (which needs the full build/test matrix:
     # test-non-gui, test-ui-tests, appimage/dmg-lib-check) — otherwise any
     # unrelated app-CI failure silently blocks the docs deploy. Decoupled so the
-    # docs publish on every main push regardless of build/test status. The attic
-    # substituter set up in "Install Nix" is a read-through cache that works
-    # whether or not this run's push-to-attic populated it.
-    if: ${{ github.ref == 'refs/heads/main' && !github.event['codetracer-ci'] }}
+    # docs publish on every push to a documentation branch regardless of
+    # build/test status. The attic substituter set up in "Install Nix" is a
+    # read-through cache that works whether or not this run's push-to-attic
+    # populated it.
+    #
+    # TWO PUBLISH CHANNELS, one job, chosen by the branch (`ci/deploy/docs.sh`
+    # derives the channel from GITHUB_REF_NAME):
+    #
+    #   stable -> docs.codetracer.com/          (the released book, plus /old)
+    #   dev    -> docs.codetracer.com/nightly   (the integration book)
+    #
+    # `main` deliberately publishes nothing: the released docs now track
+    # `stable`, so a `main` push must not overwrite them.
+    if: ${{ (github.ref == 'refs/heads/stable' || github.ref == 'refs/heads/dev') && !github.event['codetracer-ci'] }}
+    # Both channels commit to the SAME `gh-pages` branch, each replacing only
+    # its own subtree on top of the current tip. docs.sh already fetches,
+    # re-applies and retries if it loses a race, but serializing the job across
+    # branches means the race normally never happens. Never cancel: a cancelled
+    # deploy would leave that channel a release behind.
+    concurrency:
+      group: docs-gh-pages
+      cancel-in-progress: false
     permissions:
       contents: "write"
     steps:
@@ -3359,15 +3377,18 @@ jobs:
           done
 
       - env:
-          # docs.sh pushes gh-pages with this (the job's GITHUB_TOKEN + the
-          # contents:write permission below) -- the same reliable mechanism the
-          # isonim/isonim-docs docs deploys use. The old origin+CODETRACER_PUSH_
+          # docs.sh reads AND pushes gh-pages with this (the job's GITHUB_TOKEN +
+          # the contents:write permission above) -- the same reliable mechanism
+          # the isonim/isonim-docs docs deploys use. It is now used for both
+          # directions: the script fetches the current gh-pages so it can leave
+          # the OTHER channel's subtree in place, then pushes its own subtree on
+          # top (fast-forward, never `--force`). The old origin+CODETRACER_PUSH_
           # GITHUB_TOKEN path failed auth ("Authentication failed for .../codetracer").
           #
           # `origin` is deliberately NOT re-pointed at a credentialed URL here.
           # docs.sh only reads `origin` in its DEPLOY_TOKEN-absent fallback
-          # (`ci/deploy/docs.sh`, the `git push --force "$REMOTE" HEAD:gh-pages`
-          # branch), and DEPLOY_TOKEN is always set on this step -- so the
+          # (`ci/deploy/docs.sh`, the `REMOTE` resolution before the publish
+          # step), and DEPLOY_TOKEN is always set on this step -- so the
           # rewrite could never be the credential that pushed, it could only
           # expand a long-lived PAT into `.git/config` on a self-hosted runner
           # that reuses its workspace. This is a category-1 push (the
