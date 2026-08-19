@@ -150,7 +150,7 @@ const
   TRACE_COLLAPSED_RESULTS_EXTRA_PX = 15
   TRACE_MIN_RESULTS_HEIGHT_PX = 36
   TRACE_MENU_MIN_HEIGHT_PX = 36
-  TRACE_FOOTER_MIN_HEIGHT_PX = 18
+  TRACE_FOOTER_MIN_HEIGHT_PX = 31
   TRACE_RESULTS_VISIBLE_ROWS = 10
 
 proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
