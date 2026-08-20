@@ -4200,13 +4200,16 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     if not self.inExtension:
       self.editorUI.flowUpdate = update
 
-    if update.location.key != self.key:
-      # The location key changed: the flow structure (loops, lines, function)
-      # is different from what is currently on screen. Tear down the old DOM
-      # and build a new one from the incoming data.
+    if update.location.key != self.key or self.flow.isNil:
+      # Full rebuild required when:
+      #   * the location key changed (different file/function/loop structure), OR
+      #   * this component has never received flow data yet (self.flow is nil).
       #
-      # This path also covers the very first update for this component (when
-      # `self.key` is empty), because `"" != update.location.key`.
+      # The `self.flow.isNil` guard is critical for components freshly created
+      # by `loadFlow()`: they start with key="" and flow=nil. If the server
+      # also sends key="" the string comparison alone would be false, landing
+      # in the in-place branch where no DOM is built and handoffFlow is never
+      # cleared — causing old zones to accumulate with each navigation.
       self.resetFlow()
       self.key = update.location.key
       if self.flow.isNil:
@@ -4228,10 +4231,15 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       self.scheduleFlowRedraw(100)
       self.scheduleActiveLoopIterationValueRender()
     else:
-      # Same location key: the flow structure (loops, lines) is unchanged.
-      # Only the step data (values, active iteration) has changed — update
-      # the existing DOM nodes in-place without any teardown or rebuild.
+      # Same location key and component already has DOM: the flow structure
+      # (loops, lines) is unchanged. Only step data and active iteration
+      # changed — update existing DOM nodes in-place without teardown.
       # This is the hot path during noUiSlider drags and arrow-button clicks.
+      # handoffFlow should be nil here (new components always hit the branch
+      # above due to self.flow.isNil), but clear it defensively.
+      if not self.handoffFlow.isNil:
+        self.handoffFlow.resetFlow()
+        self.handoffFlow = nil
       self.flow = update.view_updates[editorView]
       self.updateFlowOnMove(self.location.rrTicks, self.location.line)
       self.scheduleActiveLoopIterationValueRender()
