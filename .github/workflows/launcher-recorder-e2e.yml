@@ -1,0 +1,559 @@
+# =============================================================================
+# Launcher <-> recorder end-to-end compatibility gate -- REUSABLE WORKFLOW.
+#
+# WHAT THIS IS
+#   The single CI implementation of the bidirectional three-repo gate designed
+#   in codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md
+#   (milestone LRC-3, design section 6 "CI wiring: three trigger edges, one
+#   reusable workflow").  It builds the real launcher, the real desktop core
+#   and the real recorder, then runs
+#
+#       ci/test/launcher-recorder-e2e.sh <recorder-repo> <lang>
+#
+#   which routes `ct record <sample>` through the LAUNCHER binary and validates
+#   the produced CTFS trace with `ct-print` from codetracer-trace-format-nim.
+#
+# WHY IT LIVES HERE
+#   The design's Open Questions record the provisional decision "driver in
+#   `codetracer`, reusable workflow calling it".  This repo owns the driver
+#   (ci/test/launcher-recorder-e2e.sh), the desktop-core build, the LRC-0
+#   component-bundle producer and the scripts/{build,detect}-siblings.sh
+#   tooling the driver reuses, so a workflow that only orchestrates them
+#   belongs beside them.  `codetracer` is a PUBLIC repository, which is what
+#   makes this workflow callable from the private `codetracer-launcher` as well
+#   as from the public `codetracer-python-recorder`.
+#
+# THE THREE EDGES (design section 6 table).  Each caller is a thin
+# `workflow_call` that decides WHICH repo is pinned to the commit under test:
+#
+#   | Trigger repo                | Pinned to github.sha | Others          |
+#   |-----------------------------|----------------------|-----------------|
+#   | codetracer-launcher         | launcher-ref         | mainline branch |
+#   | codetracer-<lang>-recorder  | recorder-ref         | mainline branch |
+#   | codetracer (desktop)        | codetracer-ref       | mainline branch |
+#
+#   Callers:
+#     codetracer-launcher/.github/workflows/launcher-recorder-e2e.yml
+#     codetracer-python-recorder/.github/workflows/launcher-recorder-e2e.yml
+#     codetracer/.github/workflows/launcher-recorder-e2e-desktop-edge.yml
+#
+# WORKSPACE LAYOUT -- WHY THE TRIGGERING REPO IS THE PRIMARY CHECKOUT
+#   The runner's working directory is `.../_work/<triggering-repo>/<triggering-
+#   repo>` and `clone-siblings` places every sibling at
+#   `$GITHUB_WORKSPACE/../<name>`.  Those two facts together mean
+#   `$GITHUB_WORKSPACE/../<triggering-repo>` IS `$GITHUB_WORKSPACE`: a repo
+#   cannot be cloned as a sibling of its own checkout.  `authenticated-clone.sh`
+#   starts with `rm -rf "$DEST"`, so listing the triggering repo among the
+#   siblings deletes the primary checkout mid-run.
+#
+#   So the layout is the one every other cross-repo workflow in this org uses
+#   and documents (codetracer-{cairo,beam,evm,flow,fuel}-recorder's
+#   cross-repo-tests.yml all carry the same "Workspace layout" header):
+#
+#     $GITHUB_WORKSPACE/../
+#       <triggering repo>/            <-- actions/checkout, at its *-ref input
+#       codetracer/                   <-- this repo: driver + desktop core
+#       codetracer-launcher/          <-- hop 1
+#       codetracer-<lang>-recorder/   <-- hop 3 + the contract fixture
+#       codetracer-trace-format-nim/  <-- ct-print, the trace oracle
+#
+#   The "Plan the workspace layout" step below derives, from
+#   `github.repository`, which of the four the trigger is, drops it from the
+#   `siblings:` list, and publishes `ct-dir` -- the path of the codetracer
+#   checkout, which is `$GITHUB_WORKSPACE` on the desktop edge and
+#   `$GITHUB_WORKSPACE/../codetracer` on the other two.  Every subsequent step
+#   runs with that as its working directory, so the driver and
+#   scripts/{build,detect}-siblings.sh resolve `../<name>` exactly as they do
+#   in a developer's workspace.
+#
+#   On the two edges where codetracer is a sibling it is cloned by
+#   `clone-siblings` (shallow, `--submodules-optional`, on the scoped App
+#   credential).  That is the same materialisation
+#   codetracer-{cairo,beam,evm}-recorder's cross-repo-tests.yml already build
+#   `nix build ".?submodules=1#codetracer"` from today, private
+#   `libs/tree-sitter-nim` submodule included.
+#
+# SIBLING PINNING -- a deliberate, recorded choice
+#   Every sibling is passed to `setup-dev-env` with an EXPLICIT `name=ref`, so
+#   the workspace lock is not consulted at all (clone-siblings only clones the
+#   manifest repo when at least one entry has no ref).  That is design section
+#   6's "branch-ref pattern", the provisional v1 decision: the repo under test
+#   is pinned to `github.sha` and the rest to their mainline branch.
+#   `clone-siblings` emits a `::warning::` for each non-SHA override saying the
+#   run is not reproducible -- that warning is CORRECT and expected here; the
+#   design's open question "lock-SHA vs branch-ref pinning" is milestone LRC-6's
+#   to close, and switching to the lock is a one-line change (drop the `=ref`).
+#
+# THE TWO PREREQUISITE BLOCKS THE DRIVER DELIBERATELY DOES NOT PROVIDE
+#   (inherited from LRC-2's step-2 deviation; see the milestones file)
+#
+#   1. THE DESKTOP CORE.  The driver RESOLVES an already-built core and exits 1
+#      with "Build it with: just build-once" when there is none -- a tens-of-
+#      minutes build inside the gate would make a core-build break read as a
+#      launcher/recorder incompatibility.  So this workflow builds it, in its
+#      own visible step, before invoking the driver.  That step checks the
+#      ARTIFACT rather than the exit code: `just build-once` currently exits 1
+#      on a later tree-sitter-nim cargo job AFTER emitting a working
+#      src/build-debug/bin/ct (recorded under LRC-1).  The tolerance is scoped
+#      to that one command and is immediately followed by a hard artifact gate;
+#      it is NOT a `continue-on-error` on the job.
+#
+#   2. RUNNER PREREQUISITES, each a hard failure in the driver rather than a
+#      skip, so a missing one is a red gate and never a silent green:
+#        * a musl toolchain or `zig` for codetracer-launcher/build.sh (without
+#          either it falls back to `cc` and fails the link on -ldl/-lc).
+#          Provisioned explicitly below instead of being left to the driver's
+#          on-demand `nixpkgs#zig` fetch, so the cost is visible in the log and
+#          attributable to its own step.
+#        * `ct-print` from codetracer-trace-format-nim -- the design section 5.4
+#          trace-validation oracle -- built through
+#          scripts/build-siblings.sh --only codetracer-trace-format-nim/ct-print.
+#        * the recorder sibling's own build, which the driver drives through
+#          scripts/build-siblings.sh --only <key>.  That needs `direnv` on PATH
+#          (declared in nix/shells/ci-base.nix) AND each freshly cloned sibling
+#          `.envrc` whitelisted -- a fresh clone's .envrc is in direnv's
+#          "blocked" state and `direnv exec` refuses to run it.  Both are done
+#          below.
+#
+# LANDING ORDER -- a real precondition, not a formality
+#   Two of the three edges reference this file by ref
+#   (`...launcher-recorder-e2e.yml@dev`) and check `codetracer` out at its
+#   mainline branch, so nothing can go green until the LRC-0/1/2 work this gate
+#   consumes is ON that branch:
+#     * codetracer@dev must carry ci/test/launcher-recorder-e2e.sh, the
+#       `just test-launcher-recorder-e2e` recipe, scripts/build-desktop-component.sh,
+#       the reconciled resources/codetracer-desktop-capabilities, and the two new
+#       scripts/build-siblings.sh entries;
+#     * codetracer-python-recorder@dev must carry cross-repo/launcher-compat.yml
+#       and its samples -- the driver hard-fails without the fixture rather than
+#       skipping;
+#     * this file itself must be on codetracer@dev for `@dev` to resolve.
+#   Until then the two remote callers fail at workflow resolution, and the local
+#   desktop-edge caller fails inside the driver with "contract fixture not
+#   found".  Both are loud failures, which is the intended behaviour.  `dev` is
+#   the mainline branch for product repos per
+#   metacraft-dev-guidelines/policies/branching-policy.md; if that ever changes,
+#   the `*-ref` input defaults below and the `@dev` in the two remote callers
+#   move together.
+#
+# RELATIONSHIP TO THE SHALLOW SMOKE WORKFLOWS
+#   codetracer-launcher/.github/workflows/cross-repo-recorder-packaging.yml and
+#   each recorder's launcher-integration.yml are RETAINED as a fast pre-check.
+#   They assert only `ct --version` and never run `ct record`, so they are
+#   explicitly NON-AUTHORITATIVE for the record contract; this workflow is the
+#   authority.  See the header comments in those two files.
+# =============================================================================
+
+name: launcher-recorder-e2e (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      edge:
+        description: >
+          Human-readable label for the trigger edge under test, e.g.
+          "codetracer-launcher@github.sha -> python".  Used for the job name
+          and echoed into the log so a run is self-describing.
+        required: true
+        type: string
+      recorder-repo:
+        description: >
+          The recorder sibling repo directory name, e.g.
+          codetracer-python-recorder.  Must match `recorder.repo` in that
+          repo's cross-repo/launcher-compat.yml -- the driver refuses to run
+          when they disagree.
+        required: true
+        type: string
+      recorder-lang:
+        description: >
+          The `ct` language key, e.g. `python`.  Must match `recorder.lang` in
+          the contract fixture.
+        required: true
+        type: string
+      codetracer-ref:
+        description: >
+          Revision of metacraft-labs/codetracer (the desktop core + this
+          driver).  The desktop edge passes github.sha; the other two edges
+          leave it at the mainline branch.
+        required: false
+        default: dev
+        type: string
+      launcher-ref:
+        description: >
+          Revision of metacraft-labs/codetracer-launcher (hop 1).  The launcher
+          edge passes github.sha.
+        required: false
+        default: dev
+        type: string
+      recorder-ref:
+        description: >
+          Revision of the recorder repo (hop 3).  The recorder edge passes
+          github.sha.
+        required: false
+        default: dev
+        type: string
+      trace-format-nim-ref:
+        description: >
+          Revision of metacraft-labs/codetracer-trace-format-nim, which
+          provides the `ct-print` trace-validation oracle (design section 5.4).
+          Never the repo under test for this gate; always mainline.
+        required: false
+        default: dev
+        type: string
+    secrets:
+      CI_TOKEN_PROVIDER_APP_ID:
+        # Optional because some repos carry the App ID as a repository/org
+        # VARIABLE rather than a secret (see
+        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md, "CI
+        # Authentication Setup"); the step below falls back to
+        # vars.CI_TOKEN_PROVIDER_APP_ID, which resolves against the CALLING
+        # repository.  Callers pass `secrets: inherit`.
+        required: false
+      CI_TOKEN_PROVIDER_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  launcher-recorder-e2e:
+    # Self-hosted per org policy, and the same label every other nix job in
+    # these repos uses (codetracer/.github/workflows/cross-repo-tests.yml,
+    # codetracer-launcher/.github/workflows/cross-repo-recorder-packaging.yml,
+    # codetracer-python-recorder/.github/workflows/launcher-integration.yml).
+    runs-on: eph-linux-x64 # CIP-5: nix job (setup-dev-env) -> eph-linux-x64
+    name: ${{ inputs.edge }}
+    timeout-minutes: 180
+
+    steps:
+      - name: Plan the workspace layout
+        # See "WORKSPACE LAYOUT" in this file's header.  The triggering repo is
+        # the primary checkout, because `clone-siblings` cannot clone a repo
+        # into a directory that already is `$GITHUB_WORKSPACE`.  This step
+        # decides, from `github.repository` (which in a reusable workflow is
+        # always the CALLER), which of the four repos that is, and emits:
+        #
+        #   self       -- the triggering repo's directory name
+        #   self-ref   -- the revision the primary checkout is pinned to,
+        #                 read from that repo's own *-ref input, so the caller
+        #                 keeps a single, uniform way to say "test this commit"
+        #   siblings   -- the remaining three, as clone-siblings `name=ref`
+        #                 entries; the triggering repo is DROPPED
+        #   ct-dir     -- the codetracer checkout every later step runs in
+        #
+        # A repo that is none of the four is refused here, loudly, rather than
+        # silently producing a workspace with no codetracer in it.
+        #
+        # Inputs reach every `run:` step in this workflow through `env:`, never
+        # by direct `${{ }}` interpolation into the script body: an interpolated
+        # value is spliced in as shell TEXT, so a quote or a `;` in it would be
+        # parsed as syntax.  These inputs come from workflow files under org
+        # control, but the safe spelling costs nothing and keeps the steps
+        # copy-pasteable.
+        id: plan
+        shell: bash
+        env:
+          EDGE: ${{ inputs.edge }}
+          CODETRACER_REF: ${{ inputs.codetracer-ref }}
+          LAUNCHER_REF: ${{ inputs.launcher-ref }}
+          RECORDER_REPO: ${{ inputs.recorder-repo }}
+          RECORDER_REF: ${{ inputs.recorder-ref }}
+          RECORDER_LANG: ${{ inputs.recorder-lang }}
+          TRACE_FORMAT_NIM_REF: ${{ inputs.trace-format-nim-ref }}
+        run: |
+          set -euo pipefail
+          SELF="${GITHUB_REPOSITORY##*/}"
+          case "${SELF}" in
+            codetracer)           SELF_REF="${CODETRACER_REF}" ;;
+            codetracer-launcher)  SELF_REF="${LAUNCHER_REF}" ;;
+            "${RECORDER_REPO}")   SELF_REF="${RECORDER_REF}" ;;
+            *)
+              echo "::error::launcher-recorder-e2e was called from '${GITHUB_REPOSITORY}', which is neither codetracer, codetracer-launcher nor the recorder under test (${RECORDER_REPO}). This gate's workspace layout puts the TRIGGERING repo at \$GITHUB_WORKSPACE and clones the other three beside it, so a fourth caller has no defined place in it. Add the edge deliberately rather than by calling this workflow."
+              exit 1
+              ;;
+          esac
+
+          PARENT="$(cd "${GITHUB_WORKSPACE}/.." && pwd)"
+          if [ "${SELF}" = "codetracer" ]; then
+            CT_DIR="${GITHUB_WORKSPACE}"
+          else
+            CT_DIR="${PARENT}/codetracer"
+          fi
+
+          # The four repos this gate spans, minus whichever one is the primary
+          # checkout, as clone-siblings `name=ref` entries.
+          SIB_NAMES=(codetracer codetracer-launcher "${RECORDER_REPO}" codetracer-trace-format-nim)
+          SIB_REFS=("${CODETRACER_REF}" "${LAUNCHER_REF}" "${RECORDER_REF}" "${TRACE_FORMAT_NIM_REF}")
+          SIB_ENTRIES=()
+          for i in "${!SIB_NAMES[@]}"; do
+            if [ "${SIB_NAMES[$i]}" != "${SELF}" ]; then
+              SIB_ENTRIES+=("${SIB_NAMES[$i]}=${SIB_REFS[$i]}")
+            fi
+          done
+          if [ "${#SIB_ENTRIES[@]}" -ne 3 ]; then
+            echo "::error::expected exactly 3 siblings beside '${SELF}', got ${#SIB_ENTRIES[@]}. recorder-repo='${RECORDER_REPO}' probably collides with one of the fixed names."
+            exit 1
+          fi
+
+          # An EMPTY ref is never harmless here and must not be tolerated.
+          # Empty for the primary checkout means actions/checkout silently takes
+          # the repo's DEFAULT branch -- which for codetracer is `stable`, not
+          # the commit under test -- and the gate would then report on the wrong
+          # code while looking green. Empty for a sibling means clone-siblings
+          # switches that entry to the workspace LOCK (NEED_LOCK=1), clones the
+          # manifest repo, and resolves a revision this workflow never chose.
+          if [ -z "${SELF_REF}" ]; then
+            echo "::error::the ref for the triggering repo '${SELF}' is empty. The caller must pass its own *-ref input (normally \${{ github.sha }}); an empty value would check out that repo's DEFAULT branch instead of the commit under test."
+            exit 1
+          fi
+          for e in "${SIB_ENTRIES[@]}"; do
+            if [ -z "${e#*=}" ]; then
+              echo "::error::sibling entry '${e}' has an empty ref. clone-siblings treats a trailing '=' as 'resolve from the workspace lock', which is LRC-6's decision to make, not an accident of an unset input."
+              exit 1
+            fi
+          done
+
+          echo "edge:                         ${EDGE}"
+          echo "triggering repo (primary):    ${SELF} @ ${SELF_REF}"
+          echo "recorder:                     ${RECORDER_REPO} (lang: ${RECORDER_LANG})"
+          echo "codetracer checkout will be:  ${CT_DIR}"
+          echo "siblings to clone beside it:"
+          for e in "${SIB_ENTRIES[@]}"; do echo "  ${e}"; done
+
+          {
+            echo "self=${SELF}"
+            echo "self-ref=${SELF_REF}"
+            echo "ct-dir=${CT_DIR}"
+            echo "siblings<<LRC3_SIBLINGS_EOF"
+            for e in "${SIB_ENTRIES[@]}"; do echo "${e}"; done
+            echo "LRC3_SIBLINGS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Mint installation token for cross-repo sibling access
+        # GitHub's free plan restricts org-level secrets with visibility ALL
+        # from being readable inside private repos, so every workflow in this
+        # org mints a per-run installation token from the CI Token Provider
+        # GitHub App.  `secrets.*` arrives via the callers' `secrets: inherit`;
+        # `vars.*` is the fallback for repos that hold the App ID as a variable
+        # (both spellings exist across this org today).
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout the triggering repository (the workspace root)
+        # The PRIMARY checkout is the repo that triggered the run -- see
+        # "WORKSPACE LAYOUT" in this file's header for why it cannot be
+        # anything else.  It is pinned to that repo's own `*-ref` input, which
+        # every caller sets to `github.sha`.
+        #
+        # `submodules: recursive` matters on the desktop edge: the core build
+        # needs libs/tree-sitter-nim, a PRIVATE submodule of this public repo,
+        # which is why this step needs the App token.  On the other two edges
+        # it is a no-op for repos that have no submodules.
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.plan.outputs.self-ref }}
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env + clone the remaining siblings
+        # setup-dev-env installs Nix (with the Attic substituter + keys) and
+        # delegates sibling cloning to `clone-siblings`, which places each one
+        # adjacent to this checkout (../<name>) -- exactly the layout
+        # scripts/detect-siblings.sh and the driver expect, and it `rm -rf`s
+        # each destination first, which is what the NixOS "self-hosted runners
+        # reuse workspaces" gotcha requires.  The triggering repo is NOT in the
+        # list: that `rm -rf` would land on $GITHUB_WORKSPACE itself.
+        #
+        # Every entry carries an EXPLICIT `=ref`, so no entry resolves from the
+        # workspace lock and the manifest repo is never cloned.  See the
+        # "SIBLING PINNING" note in this file's header for why (design section
+        # 6, provisional v1 decision; LRC-6 revisits it).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: ${{ steps.plan.outputs.siblings }}
+
+      - name: Check the workspace has the shape the driver expects
+        # Cheap, and it turns the one class of failure a local rehearsal cannot
+        # reproduce -- a sibling that did not land where the driver looks for
+        # it -- into a named error at the top of the log instead of a confusing
+        # one thirty minutes in.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          RECORDER_REPO: ${{ inputs.recorder-repo }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for d in "${CT_DIR}" "${CT_DIR}/../codetracer-launcher" \
+                   "${CT_DIR}/../${RECORDER_REPO}" \
+                   "${CT_DIR}/../codetracer-trace-format-nim"; do
+            if [ -d "${d}" ]; then
+              echo "  OK   ${d}"
+            else
+              echo "  MISSING ${d}"
+              missing="${missing} ${d}"
+            fi
+          done
+          if [ ! -f "${CT_DIR}/ci/test/launcher-recorder-e2e.sh" ]; then
+            missing="${missing} ${CT_DIR}/ci/test/launcher-recorder-e2e.sh"
+            echo "  MISSING ${CT_DIR}/ci/test/launcher-recorder-e2e.sh"
+          fi
+          if [ -n "${missing}" ]; then
+            echo "::error::the workspace is not laid out the way the gate needs:${missing}. Every repo this gate spans must sit beside the codetracer checkout (\$GITHUB_WORKSPACE/../<name>). If ci/test/launcher-recorder-e2e.sh is what is missing, the codetracer revision this run resolved does not carry the driver yet."
+            exit 1
+          fi
+
+      - name: Provision the musl/zig toolchain for the launcher link
+        # INHERITED LRC-3 DELIVERABLE (runner prerequisites).
+        #
+        # codetracer-launcher/build.sh links a FULLY STATIC musl binary.  It
+        # probes musl-gcc -> a /nix/store musl wrapper -> zig, and a dev shell
+        # with none of them makes it fall back to `cc`, which then fails the
+        # link on -ldl/-lc.  Neither codetracer's `ci` nor its `default` dev
+        # shell declares zig or a musl toolchain, so one has to be provided.
+        #
+        # The driver can materialise `nixpkgs#zig` on demand, but doing it here
+        # is better on an ephemeral runner: the nix-cache fetch becomes its own
+        # timed, named step instead of being hidden inside the gate, and a
+        # cache/network outage fails with a diagnostic about zig rather than
+        # about the launcher's linker.  The fetch itself is already routine on
+        # this runner class -- both retained smoke workflows shell out to
+        # `nix shell nixpkgs#zig` / `nix-shell -p zig` on eph-linux-x64 today.
+        #
+        # A musl toolchain in the dev shell would remove the fetch entirely,
+        # but that means editing codetracer's flake, which is a separate,
+        # announced change (it widens the closure for every CI job in the repo).
+        # No working directory of its own: `nixpkgs#zig` is a registry flake
+        # reference, not a path, so this step is independent of the checkout.
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIG_OUT="$(nix build --no-link --print-out-paths nixpkgs#zig)"
+          if [ -z "${ZIG_OUT}" ] || [ ! -x "${ZIG_OUT}/bin/zig" ]; then
+            echo "::error::could not materialise nixpkgs#zig; codetracer-launcher/build.sh would fall back to 'cc' and fail the static musl link on -ldl/-lc."
+            exit 1
+          fi
+          "${ZIG_OUT}/bin/zig" version
+          echo "${ZIG_OUT}/bin" >> "${GITHUB_PATH}"
+          echo "zig provisioned at ${ZIG_OUT}/bin"
+
+      - name: Allow direnv in the freshly cloned siblings
+        # INHERITED LRC-3 DELIVERABLE (runner prerequisites).
+        #
+        # scripts/build-siblings.sh runs every sibling build as
+        # `direnv exec <repo> <cmd>` so each repo's own flake pins its
+        # toolchain.  A FRESH clone's .envrc is in direnv's "blocked" state and
+        # direnv refuses to run it -- the same failure
+        # cross-repo-tests.yml already works around for
+        # codetracer-native-recorder.  Whitelist each sibling that has one.
+        #
+        # `direnv` itself is declared in nix/shells/ci-base.nix, so it is on
+        # PATH inside the shell used here; the check below turns a future
+        # removal into a named failure instead of a bare "direnv: not found"
+        # exit 127 deep inside the driver.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          RECORDER_REPO: ${{ inputs.recorder-repo }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          nix develop '.?submodules=1#ci' --command bash -c 'command -v direnv' \
+            || { echo "::error::direnv is not on PATH in the codetracer ci dev shell; scripts/build-siblings.sh cannot build any sibling without it."; exit 1; }
+          for sib in "codetracer-launcher" "${RECORDER_REPO}" "codetracer-trace-format-nim"; do
+            dir="$(cd .. && pwd)/${sib}"
+            if [ -f "${dir}/.envrc" ]; then
+              nix develop '.?submodules=1#ci' --command direnv allow "${dir}"
+              echo "direnv allow: ${dir}"
+            else
+              echo "no .envrc in ${dir} (nothing to allow)"
+            fi
+          done
+
+      - name: Build the codetracer-desktop core
+        # INHERITED LRC-3 DELIVERABLE #1.  See this file's header.
+        #
+        # THE EXIT CODE OF `just build-once` IS DELIBERATELY NOT THE GATE.  It
+        # currently exits 1 on a later tree-sitter-nim cargo job AFTER emitting
+        # a working src/build-debug/bin/ct (recorded under LRC-1 in
+        # codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.milestones.org).
+        # The tolerance is scoped to this one command -- the job has no
+        # continue-on-error -- and is immediately followed by a hard artifact
+        # check: the binary must exist, be executable, and answer --version.
+        # If build-once ever emits nothing, that check fails the job.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -uo pipefail
+          cd "${CT_DIR}" || exit 1
+          build_rc=0
+          nix develop '.?submodules=1#ci' --command just build-once || build_rc=$?
+          echo "just build-once exit code: ${build_rc}"
+          if [ "${build_rc}" -ne 0 ]; then
+            echo "::warning::'just build-once' exited ${build_rc}. That is known to happen on a later tree-sitter-nim cargo job AFTER a working core has been emitted, so the artifact check below decides -- not this exit code."
+          fi
+          set -euo pipefail
+          CT_BIN="src/build-debug/bin/ct"
+          if [ ! -x "${CT_BIN}" ]; then
+            echo "::error::the desktop core was not built: no executable at ${CT_BIN}. The launcher<->recorder gate cannot run without hop 2; this is deliberately a hard failure and never a skip."
+            exit 1
+          fi
+          ls -l "${CT_BIN}"
+          nix develop '.?submodules=1#ci' --command "./${CT_BIN}" --version
+          echo "desktop core artifact check: OK"
+
+      - name: Build ct-print (the trace-validation oracle)
+        # INHERITED LRC-3 DELIVERABLE (runner prerequisites).
+        #
+        # design section 5.4: every assertion about a produced trace goes
+        # through codetracer-trace-format-nim's `ct-print`.  The driver treats a
+        # missing ct-print as a hard failure (never a skip), so build it here.
+        # `codetracer-trace-format-nim/ct-print` is the second logical key
+        # LRC-2 added to scripts/build-siblings.sh; the repo builds it at its
+        # own root because downstream tests resolve it at the fixed sibling
+        # path ../codetracer-trace-format-nim/ct-print.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          nix develop '.?submodules=1#ci' --command \
+            bash scripts/build-siblings.sh --only codetracer-trace-format-nim/ct-print
+          CT_PRINT="$(cd .. && pwd)/codetracer-trace-format-nim/ct-print"
+          if [ ! -x "${CT_PRINT}" ]; then
+            echo "::error::codetracer-trace-format-nim/ct-print was not produced. It is the gate's only trace decoder (design section 5.4); without it the test could assert no more than 'some bytes appeared'."
+            exit 1
+          fi
+          ls -l "${CT_PRINT}"
+
+      - name: Run the launcher <-> recorder end-to-end gate
+        # The recorder sibling itself is built by the driver's step 3
+        # (scripts/build-siblings.sh --only <key>, with the key read from the
+        # recorder's own cross-repo/launcher-compat.yml), which is why the
+        # direnv step above exists.
+        #
+        # LAUNCHER_RECORDER_E2E_ALLOW_MISSING is deliberately NOT set: design
+        # section 5.5 makes a missing sibling a hard failure, and that escape
+        # hatch is documented as local-iteration only, never for a required
+        # gate.  The driver's own zero-test guard fails the run if fewer
+        # scenarios execute than the fixture declares.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          RECORDER_REPO: ${{ inputs.recorder-repo }}
+          RECORDER_LANG: ${{ inputs.recorder-lang }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          nix develop '.?submodules=1#ci' --command \
+            just test-launcher-recorder-e2e "${RECORDER_REPO}" "${RECORDER_LANG}"

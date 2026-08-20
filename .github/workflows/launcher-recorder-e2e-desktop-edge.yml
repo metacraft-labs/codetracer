@@ -1,0 +1,64 @@
+# =============================================================================
+# Desktop -> launcher/recorder end-to-end compatibility gate (THE DESKTOP EDGE).
+#
+# THIN CALLER.  All of the work lives in the reusable workflow beside this one,
+# `./.github/workflows/launcher-recorder-e2e.yml`, which the launcher and the
+# recorder repos call too -- one implementation, three trigger directions, so
+# the assertions cannot drift.
+#
+# Design: codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md
+#         section 6 "CI wiring: three trigger edges, one reusable workflow".
+# Milestone: LRC-3.
+#
+# WHAT THIS EDGE PINS.  This repository -- the codetracer-desktop core -- is the
+# one under test, so it is pinned to `github.sha`; the launcher and the recorder
+# are taken at their mainline branch.  The call uses the LOCAL path form
+# (`./.github/workflows/...`), which GitHub resolves inside the calling
+# commit, so the desktop edge always runs the version of the reusable workflow
+# that ships with the commit under test.  The other two edges necessarily
+# reference it by ref (`@dev`).
+#
+# WHY THIS EDGE EXISTS ALONGSIDE `ct-test-providers`.  The existing
+# `ci/test/ct-providers.sh` gate drives the core `ct` binary DIRECTLY against
+# each recorder; it proves hops 2 and 3 and never exercises the launcher's
+# router.  This edge is the launcher-fronted superset: it additionally covers
+# hop 1 -- capability-file routing, the execv hand-off and the
+# CODETRACER_COMPONENT_DIR export that the decoded trace is asserted to contain.
+#
+# NO PATH FILTERS, deliberately.  A capability-file edit, a
+# language_detection.nim change and a recorder_dispatch.nim change can each
+# break routing, and LRC-3's verification is precisely that a trivial commit
+# triggers the edge.
+#
+# FAN-OUT.  One row today (python, the LRC-2 pilot); LRC-4 appends
+# ruby / js / native / beam once each recorder carries its own
+# `cross-repo/launcher-compat.yml`.
+# =============================================================================
+
+name: launcher-recorder-e2e (desktop edge)
+
+on:
+  push:
+    branches: [main, dev, stable]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - recorder: codetracer-python-recorder
+            lang: python
+    name: ${{ matrix.lang }}
+    uses: ./.github/workflows/launcher-recorder-e2e.yml
+    with:
+      edge: codetracer-desktop@${{ github.sha }} -> ${{ matrix.lang }}
+      codetracer-ref: ${{ github.sha }}
+      recorder-repo: ${{ matrix.recorder }}
+      recorder-lang: ${{ matrix.lang }}
+    secrets: inherit
