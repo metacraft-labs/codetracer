@@ -52,7 +52,10 @@ type
     LangSolana,   # 36
     LangElixir,   # 37
     LangErlang,   # 38
-    LangPhp       # 39
+    LangPhp,      # 39
+    LangGdScript  # 40 — GDScript (Godot); materialized trace from the patched
+                  # engine recorder. MUST stay ordinal 40 to match the db-backend
+                  # Rust `Lang::GDScript` (codetracer/src/db-backend/src/lang.rs).
 
 var CURRENT_LANG*: Lang = LangUnknown ## The current lang in the codetraces session
 
@@ -65,8 +68,8 @@ var USES_MATERIALIZED_TRACES*: array[Lang, bool] = [
   false, false, false, false, false, false, false, false, false, false, false, false,
   #Py    Ruby   RubyDb JS     Lua    Asm    Noir   RsWasm CppWsm PyDb   Unknwn
   false, false, false, false, false, false, false, false, false, false, false,
-  #Bash  Zsh    Sol    Masm   Sway   Move   Polka  Cairo  Circom Leo    Tolk   Aiken  Cadnce Solana Elixir Erlang Php
-  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
+  #Bash  Zsh    Sol    Masm   Sway   Move   Polka  Cairo  Circom Leo    Tolk   Aiken  Cadnce Solana Elixir Erlang Php    GdScr
+  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
 ]
 
 USES_MATERIALIZED_TRACES[LangRubyDb] = true
@@ -98,6 +101,10 @@ USES_MATERIALIZED_TRACES[LangJavascript] = true
 USES_MATERIALIZED_TRACES[LangElixir] = true
 USES_MATERIALIZED_TRACES[LangErlang] = true
 USES_MATERIALIZED_TRACES[LangPhp] = true
+# LangGdScript: the patched Godot engine recorder links the CTFS writer and emits
+# a self-contained materialized .ct (GDScript-Recorder.md); it is not an rr/gdb
+# replay trace.
+USES_MATERIALIZED_TRACES[LangGdScript] = true
 
 proc usesMaterializedTraces*(lang: Lang): bool =
   ## Return true if ``lang`` produces materialized (self-contained) traces
@@ -113,7 +120,7 @@ proc toCLang*(lang: Lang): string =
     "rust", "c++", "python", "unknown",
     "bash", "zsh", "solidity", "masm", "sway", "move",
     "polkavm", "cairo", "circom", "leo", "tolk", "aiken", "cadence",
-    "solana", "elixir", "erlang", "php"
+    "solana", "elixir", "erlang", "php", "gdscript"
   ]
   result = langs[lang]
 
@@ -127,7 +134,7 @@ proc toName*(lang: Lang): string =
        "Python(db)", "unknown",
        "Bash", "Zsh", "Solidity", "MASM/Miden", "Sway", "Move",
        "PolkaVM", "Cairo", "Circom", "Leo", "Tolk", "Aiken", "Cadence",
-       "Solana", "Elixir", "Erlang", "PHP"
+       "Solana", "Elixir", "Erlang", "PHP", "GDScript"
   ]
   result = langs[lang]
 

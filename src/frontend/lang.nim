@@ -92,7 +92,8 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"solana",
     cstring"elixir",
     cstring"erlang",
-    cstring"php"
+    cstring"php",
+    cstring"gdscript"
   ]
   result = langs[lang]
 
@@ -156,7 +157,8 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[]),  # LangSolana
   toSet(@[]),  # LangElixir
   toSet(@[]),  # LangErlang
-  toSet(@[])   # LangPhp
+  toSet(@[]),  # LangPhp
+  toSet(@[])   # LangGdScript
 ]
 
 proc getExtension*(lang: Lang): cstring =
@@ -200,7 +202,8 @@ proc getExtension*(lang: Lang): cstring =
     "",       # LangSolana (folder-based)
     "ex",     # LangElixir
     "erl",    # LangErlang
-    "php"     # LangPhp
+    "php",    # LangPhp
+    "gd"      # LangGdScript
   ]
   result = cstring(extensions[lang])
 
