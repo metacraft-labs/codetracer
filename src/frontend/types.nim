@@ -1425,6 +1425,12 @@ type
     ## the loop counter inside them) from a stale location, on top of the ones
     ## the live component is about to create.  See `ui/flow.nim::flowIsLive`.
     superseded*: bool
+    handoffFlow*: FlowComponent
+      ## Previous `FlowComponent` whose Monaco view zones are still alive in
+      ## the editor and must be removed after the replacement has rendered.
+      ## `loadFlow` stores the outgoing component here so `onUpdatedFlow` can
+      ## call `resetFlow` on it only after the new DOM is fully constructed —
+      ## giving zero blank time compared with clearing eagerly before the load.
     flowLines*: JsAssoc[int, FlowLine]
     flowViewWidth*: int
     flowLoops*: JsAssoc[int, FlowLoop]
