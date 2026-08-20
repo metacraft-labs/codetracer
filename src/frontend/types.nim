@@ -1438,6 +1438,11 @@ type
     inlineValueWidth*: int
     key*: cstring
     lastSliderUpdateTimeInMs*: int64
+    pendingRenderTimerId*: int
+      ## Timer ID of the debounced loop-iteration render scheduled by
+      ## ``scheduleActiveLoopIterationValueRender``. -1 when no timer is
+      ## pending. Stored so each new schedule can cancel the previous one and
+      ## prevent cascading re-renders during fast slider drags.
     lineGroups*: JsAssoc[int, Group]
     lineWidgets*: JsAssoc[int, js]
     loopColumnMinWidth*: int

@@ -1540,7 +1540,9 @@ proc selectLoopIteration(
       self.flowLoops[registeredLine].loopStep = loopStep
     self.activeStep = loopStep
     self.renderActiveLoopIterationValues()
-    self.scheduleActiveLoopIterationValueRender()
+    # Do not call scheduleActiveLoopIterationValueRender here: the slider's
+    # onUpdate handler already calls it after this returns, and a second
+    # schedule would queue redundant timers on every slider tick.
 
   # Jump to the FIRST STATEMENT of the selected iteration, not to the `for` /
   # `while` header line.
@@ -3966,12 +3968,25 @@ proc doRenderActiveLoopIterationValues(data: LoopIterationRenderData) {.cdecl.} 
     data.self.resizeFlowSlider()
 
 proc scheduleActiveLoopIterationValueRender*(self: FlowComponent) =
+  # Cancel any render that was queued by an earlier call so that rapid slider
+  # moves don't pile up cascading re-renders.  We keep exactly two renders:
+  #   • an immediate deferred render (next event-loop tick, 0 ms) for
+  #     responsiveness,
+  #   • a 300 ms fallback that catches Monaco view-zone settle after the fast
+  #     sequence of slider events ends.
+  if self.pendingRenderTimerId != -1:
+    windowClearTimeout(self.pendingRenderTimerId)
+    self.pendingRenderTimerId = -1
   let renderData = LoopIterationRenderData(self: self)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 0, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 100, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 500, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 1000, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 2000, renderData)
+  # Immediate deferred render.
+  self.pendingRenderTimerId = windowSetTimeout(proc() =
+    doRenderActiveLoopIterationValues(renderData)
+    # Single fallback render after Monaco has finished adjusting view zones.
+    renderData.self.pendingRenderTimerId = windowSetTimeout(proc() =
+      doRenderActiveLoopIterationValues(renderData)
+      renderData.self.pendingRenderTimerId = -1
+    , 300)
+  , 0)
 
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
@@ -5045,7 +5060,6 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
             it.iteration == activeIteration)
           if steps.len > 0:
             let step = steps[0]
-            node.innerHTML = ""
             let valueNode = flowSimpleValue(
               self,
               expression,
@@ -5054,7 +5068,12 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
               step.stepCount,
               false,
               style())
-            node.appendChild(valueNode)
+            # Replace the existing child in a single DOM mutation to avoid the
+            # two-repaint flash that innerHTML="" + appendChild produces.
+            if node.firstChild.isNil:
+              node.appendChild(valueNode)
+            else:
+              replaceChild(node, valueNode, node.firstChild)
 
     else:
       discard

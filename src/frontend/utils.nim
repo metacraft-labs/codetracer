@@ -689,7 +689,8 @@ proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): F
     maxWidth: 0,
     modalValueComponent: JsAssoc[cstring, ValueComponent]{},
     valueMode: BeforeValueMode,
-    position: position
+    position: position,
+    pendingRenderTimerId: -1
   )
 
 proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: cstring = "", line: int = 0, inExtension: bool = false, traceId: int = 0): TraceComponent = # editorUI: EditorViewComponent, name: cstring,
