@@ -1,46 +1,43 @@
-# codetracer-desktop capabilities file (CodeTracer Launcher spec §2.3).
+# codetracer-desktop capabilities file.  The line format and the routing
+# rules for every keyword below are specified in CodeTracer-Launcher.md
+# §2.3; installers copy this file to
+# <components-root>/codetracer-desktop@<version>/capabilities
+# (codetracer-launcher/src/install.nim).  Human-readable help TEXT is not
+# here -- it comes from `ct ct-describe-commands` at runtime.
 #
-# This file is the source of truth for the launcher's component
-# discovery: when ct is installed as a launcher component, this file
-# is copied to
-#   <components-root>/codetracer-desktop@<version>/capabilities
-# (see codetracer-launcher/src/install.nim and §2.3 of the spec).
+# SIZE BUDGET -- READ THIS BEFORE ADDING ANYTHING.  The launcher parses
+# this file into a fixed 4096-byte CapBuffer
+# (codetracer-launcher/src/caps.nim) and `just test-desktop-component`
+# FAILS the build when the file exceeds it.  A declaration costs its own
+# length; a paragraph of prose costs hundreds of bytes.  Explanations
+# longer than a couple of lines belong in
+# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md §5.1,
+# not here.
 #
-# Key declarations:
-#   * ``bin`` -- launcher uses this to find the binary inside the
-#     component directory's ``bin/`` subdir.
-#   * ``help-delegate`` -- marks codetracer-desktop as the launcher's
-#     mandatory help delegate. ``ct --help`` / ``ct`` / ``ct completion``
-#     all route to this binary's ct-help / ct-describe-commands /
-#     ct-complete / ct-completions subcommands.
-#   * ``<command> .ext1 .ext2 ...`` -- declares which file extensions
-#     each command can handle (used by the launcher router to pick
-#     the right component for ``ct record foo.py``).
+# THE EXTENSION LISTS ARE DERIVED, NOT FREE-FORM.  Every extension below
+# has a real dispatch path in this repo, and every extension the core can
+# dispatch is listed.  `just test-desktop-capabilities` recomputes both
+# sets from src/ct/utilities/language_detection.nim's LANGS table plus
+# src/ct/trace/recorder_dispatch.nim and fails on any difference, so do
+# not edit an extension here without changing those tables.
 #
-# The dynamic, human-readable help content for these commands comes
-# from running ``ct ct-describe-commands`` at runtime -- this static
-# file is intentionally minimal.
+# EVERY COMMAND `ct-describe-commands` ADVERTISES MUST BE DECLARED HERE.
+# One that is not is listed on `ct --help` and then refused by the router
+# -- which is how `ct review` shipped broken.  The bare lines carry no
+# extension list on purpose: `caps.matches` yields mkNone for a dot-less
+# argument, so `ct review collect`, `ct doctor` and `ct trace export` need
+# an unqualified declaration.
 #
-# THE EXTENSION LISTS ARE DERIVED, NOT FREE-FORM.  Every extension
-# below has a real dispatch path in this repo, and every extension the
-# core can dispatch is listed.  `just test-desktop-capabilities`
-# (ci/test/desktop-capabilities-dispatch.sh) recomputes both sets from
-# src/ct/utilities/language_detection.nim's LANGS table plus
-# src/ct/trace/recorder_dispatch.nim, and fails on any difference.  Do
-# not add or remove an extension here without changing those tables.
+# NO `project` MARKERS ARE DECLARED, DELIBERATELY.  The launcher DROPS an
+# unqualified command match when a component declares markers and none of
+# them match the cwd (codetracer-launcher/src/launcher.nim,
+# `projectMarkerOutcome` == 1 -> `continue`), so markers here would stop
+# `ct replay <id>`, `ct list`, `ct login`, ... routing outside a marked
+# directory; and the core has no cwd-driven project record path to justify
+# them anyway.  Full reasoning: design §5.1 D2 (milestone LRC-1).
 #
-# NO ``project`` MARKERS ARE DECLARED, DELIBERATELY.  See
-# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md
-# §5.1 D2 (milestone LRC-1).  Two reasons: (a) the core has no
-# "record whatever project is in the current directory" entry point --
-# `ct record` requires a program argument (src/ct/codetracerconf.nim's
-# recordProgram), and folder recording is driven by an explicit folder
-# ARGUMENT (detectFolderLang), not by walking up from the cwd; (b) the
-# launcher DROPS an unqualified command match when the component
-# declares project markers and none of them match the cwd
-# (codetracer-launcher/src/launcher.nim, `projectMarkerOutcome` == 1 ->
-# `continue`), so declaring markers here would stop `ct replay <id>`,
-# `ct list`, `ct login`, ... from routing outside a marked directory.
+# All three rules above are enforced by
+# ci/test/desktop-capabilities-dispatch.sh, in both directions.
 
 name codetracer-desktop
 bin codetracer
@@ -65,11 +62,6 @@ upload
 download
 login
 edit
-# `review` is declared WITHOUT an extension list on purpose.  `ct review`
-# accepts a `review.json` file OR a directory produced by `ct review
-# collect`, and `collect` / `inspect` carry no extension at all; an
-# extension-qualified line would route only the `.json` form, because the
-# launcher's `caps.matches` yields `mkNone` for a dot-less argument.
 review
 import
 ci
@@ -77,3 +69,12 @@ help
 remote
 activate
 check-license
+build
+console
+arb
+index-diff
+set-default-org
+get-default-org
+trace
+gfx-replay
+doctor

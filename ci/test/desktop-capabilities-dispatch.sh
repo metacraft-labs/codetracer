@@ -32,6 +32,20 @@
 #        older than the sources that decide that output, the scenario fails
 #        with an explicit "CORE IS STALE / rebuild" diagnostic instead of
 #        four assertion failures that look like a capability-file bug.
+#     8. The COMMAND sets agree, in both directions and for EVERY command --
+#        not just the record-ish three scenario 7 compares file-types for.
+#        A command the core advertises but the file does not declare is
+#        listed on `ct --help` and then refused by the router ("ct: no
+#        component handles '<cmd>'"); that is exactly how `ct review`
+#        shipped broken.  A command the file declares but the core does not
+#        advertise is the converse: the launcher execs a binary that has no
+#        such subcommand.  Any deliberate exception must be an explicit,
+#        commented entry in CAPS_UNDECLARED_ALLOWLIST below (empty today) --
+#        never a silent omission, and a stale entry fails too.
+#     9..10. Mutation scenarios for 8, wired in rather than run by hand: a
+#        capability file with `review` deleted, and one that declares a
+#        command the core does not advertise, must each be rejected with the
+#        offending command named.
 #
 # DESIGN DOC
 #   codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md §5.1
@@ -341,6 +355,200 @@ if grep -q '\.styl' "$DESCRIBE_OUT"; then
 else
 	ok "ct-describe-commands no longer advertises the unsupported '.styl'"
 fi
+
+# ---------------------------------------------------------------------------
+# Scenario 8 — the COMMAND sets agree, in both directions, for every command.
+#
+# Scenario 7 above compares `file-types` for `record` / `run` / `record-test`
+# only.  That is not enough, and the gap was live: `dev` added `review` to
+# help_delegate.nim's file-type lists but never declared it in the capability
+# file, so `ct review` was advertised on the launcher's help screen and then
+# refused by the router with "ct: no component handles 'review'".  Nothing
+# noticed, because `review` is not one of the three record-ish commands.
+#
+# So compare the whole command SET, both ways:
+#
+#   * advertised by the core, not declared in the capability file
+#       -> `ct --help` lists it and `ct <cmd>` exits 1 at the launcher.
+#   * declared in the capability file, not advertised by the core
+#       -> the launcher execs codetracer-desktop for a subcommand it does
+#          not implement.
+#
+# Both are failures.  There is no third "probably fine" bucket: a deliberate
+# exception has to be written down in CAPS_UNDECLARED_ALLOWLIST.
+# ---------------------------------------------------------------------------
+
+# Commands the core may advertise WITHOUT a capability-file declaration.
+#
+# DELIBERATELY EMPTY.  A command on `ct --help` that the launcher then
+# refuses is a user-visible defect, and there are exactly two honest fixes:
+# declare it here in resources/codetracer-desktop-capabilities, or stop
+# advertising it by adding it to `describeIgnoredCommands` in
+# src/ct/launch/help_delegate.nim.  If an entry is ever added it MUST carry a
+# comment on the line above saying why that command is exempt; an entry the
+# core no longer advertises is itself a failure below, so the list cannot rot.
+CAPS_UNDECLARED_ALLOWLIST=()
+
+# Command names declared by a capability file: the first token of every
+# non-blank, non-comment line whose keyword is not capability-file metadata.
+# The reserved-keyword list mirrors `reservedCapabilityKeywords` in
+# src/ct/launch/help_delegate.nim; the launcher's own parser
+# (codetracer-launcher/src/caps.nim `matches`) treats every other first token
+# as a routable command name, which is precisely what makes an undeclared
+# command unroutable.
+caps_commands() {
+	awk '
+		{ sub(/\r$/, "") }
+		/^[ \t]*#/ { next }
+		NF == 0 { next }
+		$1 == "name" || $1 == "version" || $1 == "bin" ||
+			$1 == "description" || $1 == "help-delegate" ||
+			$1 == "licensed" || $1 == "project" { next }
+		{ print $1 }
+	' "$1" | LC_ALL=C sort -u
+}
+
+# Command names the built core advertises through the help-delegate protocol.
+describe_commands() {
+	awk '$1 == "command" { print $2 }' "$DESCRIBE_OUT" | LC_ALL=C sort -u
+}
+
+# Drop allowlisted names from stdin.
+filter_undeclared_allowlist() {
+	local line entry keep
+	while IFS= read -r line; do
+		if [[ -z $line ]]; then
+			continue
+		fi
+		keep=1
+		for entry in ${CAPS_UNDECLARED_ALLOWLIST[@]+"${CAPS_UNDECLARED_ALLOWLIST[@]}"}; do
+			if [[ $line == "$entry" ]]; then
+				keep=0
+				break
+			fi
+		done
+		if [[ $keep -eq 1 ]]; then
+			printf '%s\n' "$line"
+		fi
+	done
+}
+
+# Advertised by the core, not declared by <capability-file>, not allowlisted.
+undeclared_commands() {
+	comm -23 <(describe_commands) <(caps_commands "$1") |
+		filter_undeclared_allowlist
+}
+
+# Declared by <capability-file>, not advertised by the core.
+unadvertised_commands() {
+	comm -13 <(describe_commands) <(caps_commands "$1")
+}
+
+# `check_command_sets <label> <capability-file>` -> 0 when the sets agree.
+# Echoes one diagnostic per offending command, always naming the command.
+check_command_sets() {
+	local label="$1" caps_file="$2" cmd rc=0
+	while IFS= read -r cmd; do
+		[[ -n $cmd ]] || continue
+		rc=1
+		echo "    $label: the core advertises '$cmd' but the capability file does not declare it" \
+			"— the launcher lists it on 'ct --help' and then refuses it with \"no component handles '$cmd'\""
+	done < <(undeclared_commands "$caps_file")
+	while IFS= read -r cmd; do
+		[[ -n $cmd ]] || continue
+		rc=1
+		echo "    $label: the capability file declares '$cmd' but ct-describe-commands does not advertise it" \
+			"— the launcher would exec codetracer-desktop for a subcommand it does not implement"
+	done < <(unadvertised_commands "$caps_file")
+	return $rc
+}
+
+SCENARIOS=$((SCENARIOS + 1))
+echo
+echo "scenario $SCENARIOS: EVERY advertised command is declared, and every declared command is advertised"
+
+CAPS_CMD_FILE="$WORK_DIR/caps-commands.txt"
+DESCRIBE_CMD_FILE="$WORK_DIR/describe-commands.txt"
+caps_commands "$CAPS_SRC" >"$CAPS_CMD_FILE"
+describe_commands >"$DESCRIBE_CMD_FILE"
+CAPS_CMD_COUNT="$(wc -l <"$CAPS_CMD_FILE" | tr -d ' ')"
+DESCRIBE_CMD_COUNT="$(wc -l <"$DESCRIBE_CMD_FILE" | tr -d ' ')"
+echo "    capability file declares : $(tr '\n' ' ' <"$CAPS_CMD_FILE")"
+echo "    ct-describe-commands says: $(tr '\n' ' ' <"$DESCRIBE_CMD_FILE")"
+
+# Guard against a vacuous pass: if either extractor silently produced nothing
+# (a renamed keyword, a changed describe format), the set comparison below
+# would be trivially satisfiable in one direction.
+assert_true "the capability file yields a non-empty command set" \
+	test "$CAPS_CMD_COUNT" -gt 5
+assert_true "ct-describe-commands yields a non-empty command set" \
+	test "$DESCRIBE_CMD_COUNT" -gt 5
+assert_true "the declared command set contains the anchor command 'record'" \
+	grep -qx record "$CAPS_CMD_FILE"
+assert_true "the advertised command set contains the anchor command 'record'" \
+	grep -qx record "$DESCRIBE_CMD_FILE"
+
+if check_command_sets "capability file" "$CAPS_SRC"; then
+	ok "the declared command set equals the advertised command set ($CAPS_CMD_COUNT commands, both directions)"
+else
+	bad "the capability file and ct-describe-commands disagree about which commands codetracer-desktop handles (see the lines above)"
+fi
+
+# A stale allowlist entry is a failure, so the exemption list cannot outlive
+# the reason it was added.
+for entry in ${CAPS_UNDECLARED_ALLOWLIST[@]+"${CAPS_UNDECLARED_ALLOWLIST[@]}"}; do
+	if describe_commands | grep -qx -- "$entry"; then
+		ok "allowlisted command '$entry' is still advertised by the core"
+	else
+		bad "CAPS_UNDECLARED_ALLOWLIST names '$entry', which the core no longer advertises — remove the entry"
+	fi
+done
+
+# ---------------------------------------------------------------------------
+# Scenarios 9-10 — mutation tests for scenario 8, wired in rather than run
+# once by hand. Each mutates a byte-copy of the real capability file and must
+# be rejected with the offending command named.
+# ---------------------------------------------------------------------------
+
+# mutate_commands_and_expect_failure <name> <sed-expr> <expected-command>
+mutate_commands_and_expect_failure() {
+	local name="$1" sed_expr="$2" needle="$3"
+	SCENARIOS=$((SCENARIOS + 1))
+	echo
+	echo "scenario $SCENARIOS: $name"
+	local mutant="$WORK_DIR/caps-cmd-$SCENARIOS"
+	sed "$sed_expr" "$CAPS_SRC" >"$mutant"
+	if cmp -s "$CAPS_SRC" "$mutant"; then
+		bad "$name: the mutation did not change the file (the sed expression is stale)"
+		return
+	fi
+	local out
+	set +e
+	out="$(check_command_sets "mutant" "$mutant" 2>&1)"
+	local rc=$?
+	set -e
+	if [[ $rc -eq 0 ]]; then
+		bad "$name: the command-set check PASSED a capability file it must reject"
+	else
+		ok "$name: the command-set check rejects it"
+	fi
+	if grep -qF "'$needle'" <<<"$out"; then
+		ok "$name: the failure names '$needle'"
+	else
+		echo "$out"
+		bad "$name: the failure does not name '$needle'"
+	fi
+}
+
+mutate_commands_and_expect_failure \
+	"deleting 'review' is rejected (the defect that shipped on dev)" \
+	'/^review$/d' \
+	'review'
+
+mutate_commands_and_expect_failure \
+	"declaring a command the core does not advertise is rejected" \
+	's/^help$/help\nnot-a-real-command/' \
+	'not-a-real-command'
 
 # ---------------------------------------------------------------------------
 # Zero-assertion guard + summary.
