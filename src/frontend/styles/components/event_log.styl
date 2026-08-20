@@ -299,14 +299,6 @@
   display: flex
   flex-direction: column
 
-  // The .lm_active GL tab bleeds a downward box-shadow (~0.48em) into the
-  // content area, and .lm_header carries z-index: 3.  Give the search-bar
-  // row a higher stacking level so it paints on top of the tab's bottom
-  // decoration, matching the intended overlapping visual design.
-  > .ct-flex
-    position: relative
-    z-index: 4
-
   > .data-tables-footer
     flex: 0 0 auto
     min-height: 2.75em
