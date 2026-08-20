@@ -4246,7 +4246,13 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       if not self.handoffFlow.isNil:
         self.handoffFlow.resetFlow()
         self.handoffFlow = nil
-      self.flow = update.view_updates[editorView]
+      # NOTE: do NOT replace self.flow here. flowLines.loopStepCounts still holds
+      # indices into the existing self.flow.steps array. Replacing self.flow with
+      # new step data that may have a different step count would invalidate those
+      # indices and cause an IndexDefect in updateFlowOnMove. The canReuseFlow
+      # path in EditorViewComponent.onCompleteMove no longer emits CtLoadFlow for
+      # same-function navigation, so in-place updates are driven entirely by
+      # FlowComponent.onCompleteMove (which does NOT replace self.flow).
       self.updateFlowOnMove(self.location.rrTicks, self.location.line)
       self.scheduleActiveLoopIterationValueRender()
   except:
