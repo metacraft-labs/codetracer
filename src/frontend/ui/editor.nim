@@ -1802,10 +1802,12 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
   # and clicks, and its `loopStates` carry the optimistic iteration
   # `selectLoopIteration` just wrote, which is exactly what a rapid second
   # click must read.
+  let prevFlow = self.flow
   if not self.flow.isNil:
     self.flow.superseded = true
 
   self.flow = FlowComponent(
+    handoffFlow: prevFlow,
     api: self.api,
     id: self.id,
     flow: nil,
@@ -1853,7 +1855,8 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     inlineValueWidth: 80,
     bufferMaxOffsetInPx: 300,
     maxWidth: 0,
-    modalValueComponent: JsAssoc[cstring, ValueComponent]{}
+    modalValueComponent: JsAssoc[cstring, ValueComponent]{},
+    pendingRenderTimerId: -1
   )
   self.flow.valueMode = BeforeValueMode
 
@@ -3231,8 +3234,10 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
         self.flow.location.rrTicks != response.location.rrTicks
       )
     if needsFlowReload:
-      if not self.flow.isNil:
-        self.flow.clear()
+      # Do NOT call self.flow.clear() here. The old component's DOM stays
+      # visible while the backend loads new flow data, preventing the blank-
+      # panel flash. loadFlow() stores the old component in handoffFlow so
+      # onUpdatedFlow can remove its zones after the new DOM is built.
       cdebug "flow: create flow again"
       if response.location.line <= 0:
         self.shouldLoadFlow = false
