@@ -21,6 +21,21 @@ test-build-alignment:
 build-siblings *args:
   bash scripts/build-siblings.sh {{args}}
 
+# Assemble the `codetracer-desktop` component bundle the `ct` launcher fronts:
+#   <out-root>/codetracer-desktop@<ver>/{capabilities, bin/codetracer}
+# `capabilities` is copied byte-for-byte from
+# `resources/codetracer-desktop-capabilities`, and both the directory name and
+# the binary filename are derived from that file's `name` / `bin` lines so they
+# can never drift apart.  Requires an already-built core (`just build-once`);
+# a missing core is a loud failure, not a no-op.  Output defaults to the
+# gitignored `build-desktop-component/`, which is exactly the path to hand the
+# launcher as CODETRACER_COMPONENTS_ROOT.  Pass `--out-root DIR`, `--copy`
+# (real file instead of a symlink to the build tree) or `--help`.
+# See scripts/build-desktop-component.sh and
+# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md §5.1.
+build-desktop-component *args:
+  bash scripts/build-desktop-component.sh {{args}}
+
 # Smoke-test the built AppImage on multiple Linux distros via Docker.
 # Catches glibc/libgcc/libstdc++ symbol-version regressions and missing
 # runtime libs that the on-NixOS build can't surface.  Pass the AppImage
@@ -704,6 +719,50 @@ test-m16-release-gate:
 # via setup-dev-env first.
 test-ct-providers:
   bash ci/test/ct-providers.sh
+
+# Verify the `codetracer-desktop` component-bundle producer
+# (`just build-desktop-component`) against the launcher's real contract:
+# the bundle layout the launcher discovers, a byte-identical `capabilities`
+# copy, agreement between the capability file's `bin` line and the produced
+# filename, an executable core whose reported version matches the bundle's
+# `@<ver>`, and a parse of the capability file through the launcher's OWN
+# parser (`codetracer-launcher/src/caps.nim`, compiled from the sibling
+# checkout).  Needs a built core (`just build-once`), the codetracer-launcher
+# sibling, and `nim` on PATH — each missing prerequisite fails loudly rather
+# than skipping.  See ci/test/desktop-component-bundle.sh.
+test-desktop-component:
+  bash ci/test/desktop-component-bundle.sh
+
+# Verify that `resources/codetracer-desktop-capabilities` declares exactly the
+# file extensions the core can actually record.  The expected set is recomputed
+# from the production tables themselves
+# (`src/ct/utilities/language_detection.nim`'s LANGS +
+# `src/ct/trace/recorder_dispatch.nim`) by a checker compiled against them, so
+# it cannot drift; both directions are enforced (nothing declared that the core
+# cannot record, nothing recordable left undeclared — the `.js` routing bug).
+# Five mutation scenarios prove the check has teeth, and the built core's
+# `ct-describe-commands` file-types are compared against the same lists.  Needs
+# `nim` on PATH and a built core (`just build-once`); a missing -- or stale --
+# prerequisite fails loudly with a named remedy rather than skipping.
+# See ci/test/desktop-capabilities-dispatch.sh.
+test-desktop-capabilities:
+  bash ci/test/desktop-capabilities-dispatch.sh
+
+# End-to-end launcher <-> recorder compatibility gate: `ct record sample.py`
+# driven through the REAL `ct` launcher binary, which routes from the
+# codetracer-desktop capability file into the real desktop core, which
+# dispatches the real recorder, whose CTFS trace is decoded and asserted with
+# `ct-print` from codetracer-trace-format-nim.  This is the only gate that
+# covers hop 1 (the launcher's router); `just test-ct-providers` drives the
+# core directly and never sees it.  Scenarios, samples and expected trace
+# shape all come from the recorder repo's own contract fixture
+# (<recorder>/cross-repo/launcher-compat.yml), so a recorder that changes its
+# CLI or handled extensions has to update that file in the same change.
+# Needs the codetracer-launcher and recorder siblings, a built core
+# (`just build-once`) and `ct-print`; every missing prerequisite fails loudly
+# rather than skipping.  See ci/test/launcher-recorder-e2e.sh.
+test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
+  bash ci/test/launcher-recorder-e2e.sh {{recorder}} {{lang}}
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`

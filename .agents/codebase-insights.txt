@@ -1366,3 +1366,30 @@ inside the directory.
   without that container (an injected span, for instance) gets the classes but
   none of the paint, and has to restate the container's declarations on the
   element that is actually rendered.
+
+- 2026-08-19 (`resources/codetracer-desktop-capabilities` finally has a producer,
+  and the `ct --version` shape is NOT what you think): that file is the launcher's
+  entire routing contract for this repo, but until LRC-0 nothing copied it into a
+  `codetracer-desktop@<ver>/` bundle — it was a checked-in resource with zero
+  consumers (`git grep` found it only in `.git/index`). `just
+  build-desktop-component` (`scripts/build-desktop-component.sh`) now assembles
+  `<out-root>/codetracer-desktop@<ver>/{capabilities, bin/codetracer}`. Two things
+  worth knowing before you touch it. (1) The bundle directory name and the binary
+  filename are *read out of the capability file itself* (`name` / `bin` lines)
+  rather than hardcoded, so the `bin` declaration and the file on disk cannot
+  drift; `<ver>` is re-derived from `src/ct/version.nim`'s `CodeTracerYear/Month/
+  Build` with the same `align(2, '0')` month padding, giving `25.11.1`. (2) The
+  capability file is copied with a plain `cp` and `ci/test/desktop-component-bundle.sh`
+  asserts byte-identity — do not "fix it up" at bundle time, or every downstream
+  routing test starts testing a file the product does not ship.
+  The trap: `ct --version` on the desktop core prints confutils' banner,
+  `CodeTracer version: 25.11.1(debug)` — NOT `ct 25.11.1`. The
+  `^ct [0-9]+\.[0-9]+` regex in the cross-repo packaging smoke workflows is a
+  property of the *launcher* binary, which answers `--version` itself from a
+  built-in string (`codetracer-launcher/src/launcher.nim`, `isBuiltin` case 1 →
+  `okOut(sCtVersion)`) and never execs the component. Asserting that prefix on the
+  desktop core would be asserting something the product does not do.
+  `ci/test/desktop_component_caps_check.nim` validates the capability file by
+  compiling against the sibling `codetracer-launcher/src/caps.nim` — the launcher's
+  real parser, not a local copy of the grammar — so a missing launcher checkout is
+  a hard failure, not a skip.
