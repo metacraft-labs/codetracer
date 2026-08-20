@@ -4,6 +4,7 @@
 ## owns the shared ``#menu`` host structure so the global menu chrome no longer
 ## needs a Karax ``setRenderer`` registration.
 
+import std/strutils
 import isonim/dsl/ui
 from isonim/core/computation import createRenderEffect
 import isonim/testing/mock_dom
@@ -67,6 +68,12 @@ type
 
 const
   MenuShellRootClass* = "menu-shell"
+  ## Set on the caption-bar host (`#menu`) while the platform paints its own
+  ## window controls over the bar and space must be reserved for them.
+  MenuShellReservedControlsClass* = "menu-shell--reserved-window-controls"
+  ## Set on the same host while the window is in native fullscreen, where those
+  ## controls are hidden and the bar reclaims the space.
+  MenuShellFullscreenClass* = "menu-shell--native-fullscreen"
   NavigationMenuId* = "navigation-menu"
   MenuShellSessionTabBarId* = "session-tab-bar"
   MenuRootId* = "menu-root"
@@ -74,6 +81,36 @@ const
   MenuElementsId* = "menu-elements"
   MenuSearchResultsId* = "menu-search-results"
   WindowMenuClass* = "window-menu"
+
+proc captionBarHostClasses*(
+    existing: string;
+    reserveWindowControls: bool;
+    fullscreen: bool): string =
+  ## Pure decision logic for the classes on the caption-bar host (`#menu` in
+  ## index.html) — kept free of any DOM call so it can be exercised headlessly,
+  ## in the spirit of `ui/menu_render_gate.nim`.
+  ##
+  ## Three states, only distinguishable at runtime:
+  ##
+  ## * platform draws its own frame (Windows/Linux) — neither class;
+  ## * macOS windowed — `MenuShellReservedControlsClass`, so the bar starts
+  ##   clear of the traffic-light buttons the OS paints over it;
+  ## * macOS fullscreen — `MenuShellFullscreenClass`; the buttons are gone, so
+  ##   the bar reclaims the space and left-aligns instead.
+  ##
+  ## Classes it does not own (`menu`, and anything added elsewhere) are
+  ## preserved in their original order.
+  var kept: seq[string] = @[]
+  for cls in existing.split({' ', '\t', '\n'}):
+    if cls.len > 0 and
+       cls != MenuShellReservedControlsClass and
+       cls != MenuShellFullscreenClass:
+      kept.add(cls)
+  if reserveWindowControls:
+    kept.add(
+      if fullscreen: MenuShellFullscreenClass
+      else: MenuShellReservedControlsClass)
+  kept.join(" ")
 
 proc invokeToggle(callbacks: MenuShellCallbacks) =
   if not callbacks.onToggleMenu.isNil:
@@ -346,5 +383,9 @@ when defined(js):
     let shell = renderMenuShell(r, model, callbacks)
     let shellNode = isonim_dom.Node(shell)
     let containerNode = isonim_dom.Node(container)
+    # NB: only the shell's *children* are moved into the caller's host; this
+    # wrapper is discarded.  A class set on it never reaches the document, so
+    # the caption-bar host classes are owned by `ui/menu.nim` instead — it also
+    # has to track fullscreen, which no render pass knows about.
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)

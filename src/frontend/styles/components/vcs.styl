@@ -1,3 +1,23 @@
+// ---------------------------------------------------------------------------
+// TEMPORARY: Version Control panel opts out of the monospace panel default.
+//
+// `.component-container` in shared_widgets.styl forces `font-family: "SpaceMono"
+// !important` on every panel body, so nothing but `!important` can override it —
+// hence the shouting here.  This panel is interface text (branch names, commit
+// subjects, relative timestamps, buttons), not code, so it reads better in the
+// UI face.
+//
+// Requested as a one-panel exception on 2026-08-20; the intended end state is a
+// proper chrome-vs-code split inside `.component-container` rather than a list of
+// per-panel overrides.  Delete this block when that lands.
+//
+// Monaco is excluded: no diff editor mounts inside this panel today, but if one
+// ever does, its source must stay monospace.
+// ---------------------------------------------------------------------------
+[id^="vCSComponent"],
+[id^="vCSComponent"] *:not(.monaco-editor):not(.monaco-editor *)
+  font-family: "SpaceGrotesk" !important
+
 // VCS (Version Control System) panel styles.
 // Matches the CodeTracer dark theme and is designed for a narrow (~200px)
 // left-sidebar panel.

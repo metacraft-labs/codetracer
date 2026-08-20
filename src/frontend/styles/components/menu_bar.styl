@@ -1,3 +1,20 @@
+// Space reserved for window controls the operating system paints on top of our
+// web contents.  On macOS `titleBarStyle: hidden` keeps the native traffic-light
+// buttons and `trafficLightPosition` (src/frontend/index/window.nim) puts them at
+// x: 10; the three 12px buttons sit 20px apart, so the cluster ends at 62px.
+//
+// That trailing edge is deliberately px: the buttons are drawn by the OS at a
+// fixed size and do not scale with our font size, so an em/rem value there would
+// drift out of alignment whenever the UI scale changes.  The gap after them is
+// ours, so it follows the UI scale.
+NATIVE_WINDOW_CONTROLS_EDGE = 62px
+NATIVE_WINDOW_CONTROLS_GAP = 1rem
+NATIVE_WINDOW_CONTROLS_INSET = "calc(%s + %s)" % (NATIVE_WINDOW_CONTROLS_EDGE NATIVE_WINDOW_CONTROLS_GAP)
+
+// Left alignment for the caption bar when no OS window controls are present
+// (macOS native fullscreen).
+FULLSCREEN_EDGE_GAP = 8px
+
 // The top bar
 #menu
   display: flex
@@ -9,16 +26,27 @@
   -webkit-app-region: drag
   user-select: none
   gap: 0.5em
-  height: 2.1em
-  max-height: 2.1em
+  // Must equal `#root-container`'s `top` (shared_widgets.styl) — the content
+  // below starts there, so any shortfall leaves an unpainted strip between the
+  // two.  Because the strip shows the body background, which is the same colour
+  // as this bar, it reads as part of the bar and pushes its contents visually
+  // off-centre.  The auto-hide overlays assume the same value.
+  height: 2.27em
+  max-height: 2.27em
   min-width: 0
 
   #debug
     -webkit-app-region: no-drag
-    flex: 0 0 min(20em, 20vw)
-    width: min(20em, 20vw)
+    // Centred on the bar, and deliberately still a flex child: the row is one
+    // flow on purpose (see `.session-tab-bar` in session_tabs.styl — "so the
+    // new-tab button cannot drift over the omnibox"), so taking this out of
+    // flow would let the tabs run underneath it.  Centring comes from the two
+    // neighbours sharing the free space equally instead — see the `flex: 1 1 0`
+    // on the toolbar below and on the tab bar.
+    flex: 0 0 min(24em, 24vw)
+    width: min(24em, 24vw)
     min-width: 0
-    max-width: 20em
+    max-width: 24em
     gap: 0.5em
     align-items: center
     justify-content: center
@@ -30,6 +58,48 @@
 
   .debug-finished-background
     background-color: colors-ui-surface-base-panel
+
+// Keep the bar's own controls clear of the OS-drawn window buttons.  The class is
+// set by the menu view when the platform paints its own controls over the bar
+// (macOS today) — see `reserveWindowControls` in isonim_menu_shell_view.nim.  The
+// inset stays draggable, so the empty strip beside the buttons still moves the
+// window.
+#menu.menu-shell--reserved-window-controls
+  padding-left: NATIVE_WINDOW_CONTROLS_INSET
+  // Match the right edge to the left so the centred command prompt is centred
+  // on the *window*, not merely between two unequal paddings.  The 6em default
+  // reserves room for our own minimise/maximise/close buttons, which macOS
+  // never renders (`showWindowMenu` is false there), so the reserve is dead
+  // space and its asymmetry pulled the prompt off-centre.
+  padding-right: NATIVE_WINDOW_CONTROLS_INSET
+
+  // The session tab bar pulls itself back by the bar's default 0.25em padding
+  // so its first tab sits flush with the window edge.  Inside the reserved
+  // strip that would claw back part of the space the OS buttons need, so drop
+  // the pull-back and let every child start at the inset.
+  #session-tab-bar
+    margin-left: 0
+
+// Native fullscreen: the OS hides its window buttons, so there is nothing left
+// to reserve space for or to divide the bar from.  Left-align the contents at
+// FULLSCREEN_EDGE_GAP and drop the leading divider — see `setCaptionBarFullscreen`
+// in ui/menu.nim, driven by the window's enter/leave-full-screen events.
+#menu.menu-shell--native-fullscreen
+  padding-left: FULLSCREEN_EDGE_GAP
+  padding-right: FULLSCREEN_EDGE_GAP
+
+  #session-tab-bar
+    margin-left: 0
+
+// The debug toolbar opens with a divider, which separates whatever precedes it
+// in the caption bar from the toolbar's own controls.  On macOS nothing does:
+// the navigation menu is hidden in favour of the system menu bar, so the
+// toolbar is the first thing in the bar and the divider reads as a stray line
+// at the leading edge.  (Windows and Linux keep it — the navigation menu sits
+// before it there, so it still divides something.)
+#menu.menu-shell--reserved-window-controls .isonim-debug-controls > .separate-bar:first-child,
+#menu.menu-shell--native-fullscreen .isonim-debug-controls > .separate-bar:first-child
+  display: none
 
 .window-menu
   display: flex
@@ -102,7 +172,11 @@
 
   #isonim-debug-controls
     order: 2
-    flex: 0 0 auto
+    // Equal share of the leftover space with the session tab bar, which is what
+    // centres the command prompt between them.  `min-width: max-content` keeps
+    // the buttons from ever being squeezed, so on a narrow window the prompt
+    // drifts right of centre rather than the toolbar clipping.
+    flex: 1 1 0
     min-width: max-content
 
   #debug

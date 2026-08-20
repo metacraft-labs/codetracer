@@ -222,6 +222,26 @@ async function expectCaptionChrome(page: Page): Promise<void> {
   await expect(omnibox).toBeEnabled({ timeout: 10_000 });
   await expect.soft(omnibox).toHaveAttribute("placeholder", ReferenceCommandPlaceholder);
 
+  // The caption bar must end exactly where the content below it begins.
+  // `#menu`'s height and `#root-container`'s `top` are separate declarations
+  // (menu_bar.styl / shared_widgets.styl) and drifted apart once: the bar was
+  // 2.1em while the content started at 2.27em.  The 2.7px shortfall was not
+  // visible as a gap — it exposed the body background, which is the same colour
+  // as the bar — so the bar simply looked 2.7px taller than it was and its
+  // contents looked vertically off-centre.  Pin the two together.
+  await retryAction(async () => {
+    const menuBox = await menu.boundingBox();
+    const rootBox = await page.locator("#root-container").boundingBox();
+    expect(menuBox, "caption bar should have layout").not.toBeNull();
+    expect(rootBox, "root container should have layout").not.toBeNull();
+    const seam = Math.abs(rootBox!.y - (menuBox!.y + menuBox!.height));
+    expect(
+      seam,
+      `caption bar bottom (${menuBox!.y + menuBox!.height}) should meet the content top ` +
+        `(${rootBox!.y}); a shortfall shows the body background and reads as extra bar height`,
+    ).toBeLessThanOrEqual(1);
+  });
+
   const toolbarHost = page.locator("#isonim-debug-controls");
   await expect(toolbarHost).toBeVisible({ timeout: 10_000 });
   const toolbar = toolbarHost.locator(".isonim-debug-controls");
