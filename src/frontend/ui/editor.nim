@@ -3256,17 +3256,56 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       else:
         if isShield:
           clog cstring("[NSS-1.64] EditorVC.onCompleteMove: calling loadFlow now (monaco-ready)")
-        # If an existing rendered FlowComponent already covers this editor,
-        # reuse it instead of creating a new one. Just emit CtLoadFlow so the
-        # backend sends fresh step data; onUpdatedFlow will apply it via the
-        # in-place update path (same key). This keeps the slider DOM alive
-        # during rapid slider drags (no focus loss) and avoids accumulating
-        # handoffFlow chains that cause view-zone duplication.
-        let canReuseFlow =
-          not self.flow.isNil and
-          not self.flow.flow.isNil  # component has received step data before
+        # If the new debugger position is within the same flow window (same
+        # function body + same call invocation), reuse the existing FlowComponent
+        # instead of creating a new one. FlowComponent.onCompleteMove (called
+        # below) handles the in-place update — no CtLoadFlow needed. This keeps
+        # the slider DOM alive during rapid slider drags (no focus loss) and
+        # avoids accumulating handoffFlow chains that cause view-zone duplication.
+        #
+        # "Same function" detection:
+        #   Primary: compare functionFirst+functionLast+path from the move
+        #     response. The backend (dap_handler.rs) enriches every ct/complete-move
+        #     Location with the enclosing function's first/last source lines.
+        #     When they match the stored values from the last onCompleteMove call,
+        #     we're still inside the same function body.
+        #   Fallback (functionFirst==0, i.e. backend didn't enrich): use the
+        #     rrTicks range of the current flow window's steps (rr traces) or
+        #     the source-line range (DB traces with all rrTicks==0).
+        let canReuseFlow = block:
+          if self.flow.isNil or self.flow.flow.isNil:
+            false
+          else:
+            let prevFunctionFirst = self.flow.location.functionFirst
+            let newFunctionFirst = response.location.functionFirst
+            if prevFunctionFirst > 0 and newFunctionFirst > 0:
+              # Backend enriched both locations: direct function-bounds comparison.
+              self.flow.location.path == response.location.path and
+              prevFunctionFirst == newFunctionFirst and
+              self.flow.location.functionLast == response.location.functionLast
+            elif self.flow.flow.steps.len == 0:
+              false
+            else:
+              # Fallback: infer from execution range
+              let newTicks = response.location.rrTicks
+              if newTicks != 0:
+                # rr trace: same function call = rrTicks within step range
+                var minTicks = self.flow.flow.steps[0].rrTicks
+                var maxTicks = minTicks
+                for step in self.flow.flow.steps:
+                  if step.rrTicks < minTicks: minTicks = step.rrTicks
+                  if step.rrTicks > maxTicks: maxTicks = step.rrTicks
+                newTicks >= minTicks and newTicks <= maxTicks
+              else:
+                # DB trace (rrTicks=0): use source-line range
+                var minPos = self.flow.flow.steps[0].position
+                var maxPos = minPos
+                for step in self.flow.flow.steps:
+                  if step.position < minPos: minPos = step.position
+                  if step.position > maxPos: maxPos = step.position
+                response.location.line >= minPos and response.location.line <= maxPos
         if canReuseFlow:
-          self.api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: FlowMode.Call, location: response.location))
+          discard  # FlowComponent.onCompleteMove (below) handles in-place update
         else:
           self.loadFlow(FlowMode.Call, response.location)
         self.shouldLoadFlow = false
