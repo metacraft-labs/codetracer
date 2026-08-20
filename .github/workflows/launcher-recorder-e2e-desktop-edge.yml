@@ -30,9 +30,29 @@
 # break routing, and LRC-3's verification is precisely that a trivial commit
 # triggers the edge.
 #
-# FAN-OUT.  One row today (python, the LRC-2 pilot); LRC-4 appends
-# ruby / js / native / beam once each recorder carries its own
-# `cross-repo/launcher-compat.yml`.
+# FAN-OUT.  Three rows: python (the LRC-2 pilot) plus ruby and js, added by
+# LRC-4.  Each recorder carries its own `cross-repo/launcher-compat.yml`
+# contract fixture, without which the driver hard-fails rather than skipping,
+# and `fail-fast: false` keeps one broken recorder from hiding the state of the
+# others.
+#
+# TWO EDGES ARE DELIBERATELY ABSENT, each on a blocker recorded against
+# milestone LRC-4 in
+# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.milestones.org:
+#
+#   native.  `ct record <native-binary>` carries no extension, so the launcher
+#     returns `mkNone` against a `record` line that declares only extensions and
+#     exits 1.  The routing rule has to be decided first.
+#
+#   beam.  Routing and dispatch both work, but this repo's
+#     `recorder_dispatch.nim` invokes codetracer-beam-recorder as
+#     `… -- elixir <program>` / `… -- escript <program>` and that recorder's
+#     `is_beam_target()` accepts only `mix` / `erl` / `rebar3`, so
+#     `ct record foo.ex` EXITS 0 having recorded a 2-event, 0-function trace.
+#     The contract fixture is checked in at
+#     codetracer-beam-recorder/cross-repo/launcher-compat.yml with the full
+#     diagnosis in its header.  Note this one is OURS as much as the recorder's:
+#     the invocation comes from this repo.
 # =============================================================================
 
 name: launcher-recorder-e2e (desktop edge)
@@ -54,6 +74,13 @@ jobs:
         include:
           - recorder: codetracer-python-recorder
             lang: python
+            ref: dev
+          - recorder: codetracer-ruby-recorder
+            lang: ruby
+            ref: dev
+          - recorder: codetracer-js-recorder
+            lang: js
+            ref: dev
     name: ${{ matrix.lang }}
     uses: ./.github/workflows/launcher-recorder-e2e.yml
     with:
@@ -61,4 +88,5 @@ jobs:
       codetracer-ref: ${{ github.sha }}
       recorder-repo: ${{ matrix.recorder }}
       recorder-lang: ${{ matrix.lang }}
+      recorder-ref: ${{ matrix.ref }}
     secrets: inherit

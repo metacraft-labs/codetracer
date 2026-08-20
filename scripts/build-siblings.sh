@@ -314,10 +314,22 @@ build_sibling \
 # codetracer-js-recorder` matched nothing, so CI never built the JS recorder
 # and all JS-gated ViewModel / node:test recording assertions silently
 # skipped.
+#
+# The TRAILING `npm install` is not redundant, and dropping it breaks recorder
+# DISCOVERY on a clean checkout.  npm links a workspace package's `bin` entries
+# into node_modules/.bin only when the target file exists at install time; here
+# the target is packages/cli/dist/index.js, which `just build` produces AFTER
+# `just install` has already run.  So on a fresh clone the first install links
+# nothing, `node_modules/.bin/codetracer-js-recorder` never appears, and
+# scripts/detect-siblings.sh -- which looks for exactly that shim -- reports
+# "codetracer-js-recorder CLI not on PATH" even though the build succeeded.
+# Re-running install once the dist exists creates the link (verified: the shim
+# appears only after the second install).  `npm install` is idempotent, so the
+# cost of the extra call is a no-op resolve.
 build_sibling \
 	codetracer-js-recorder \
 	packages/cli/dist/index.js \
-	"npm install && just build"
+	"npm install && just build && npm install"
 
 # Python recorder (PyO3 extension + `codetracer-python-recorder` console
 # script).  Unlike the other recorders this one is a Python package rather than
@@ -339,13 +351,43 @@ build_sibling \
 	.venv/bin/codetracer-python-recorder \
 	"just dev"
 
-# Ruby native extension.  The build target installs into the gem dir; the
-# detect-siblings check is for the wrapper binary at
-# gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder.
+# Ruby native extension.
+#
+# The artifact below is the COMPILED EXTENSION, not the CLI wrapper.  The
+# wrapper (gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder, which is
+# what scripts/detect-siblings.sh puts on PATH) is CHECKED IN, so naming it here
+# made this entry's "already built" short-circuit fire on a clean checkout and
+# skip the build entirely — the recorder would then be on PATH but die at run
+# time in `load_extension!` (`require`: cannot load such file …
+# codetracer_ruby_recorder.so).  The `.so` is what `just build-extension`
+# actually produces, and it is absent from a fresh clone.
+#
+# `.so` is the Linux DLEXT; `just build-extension` normalises the cdylib name to
+# `codetracer_ruby_recorder.<RbConfig DLEXT>` (`.bundle` on macOS).  This gate
+# and ci/test/launcher-recorder-e2e.sh are Linux-x86_64 for v1, so the entry
+# names the Linux spelling rather than pretending to be portable.
 build_sibling \
 	codetracer-ruby-recorder \
-	gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder \
+	gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.so \
 	"just build-extension"
+
+# BEAM recorder (Erlang + Elixir) — one Rust CLI (`codetracer-beam-recorder`)
+# that wraps the command which starts the BEAM program.  Added for the LRC-4
+# beam edge of ci/test/launcher-recorder-e2e.sh: this script had no entry at
+# all, so `build-siblings.sh --only codetracer-beam-recorder` matched nothing
+# and the driver's "the recorder build produced no <artifact>" hard failure was
+# the only thing that could happen.
+#
+# `just build` in that repo re-enters `nix develop` when cargo is absent, which
+# would nest a second dev shell inside the `direnv exec` one; `build-native` is
+# the same recipe without that fallback (`cargo build --locked` plus the
+# rebar3 provider compile), and `direnv exec` has already supplied the
+# toolchain.  The binary lands in target/debug — the profile
+# scripts/detect-siblings.sh probes first.
+build_sibling \
+	codetracer-beam-recorder \
+	target/debug/codetracer-beam-recorder \
+	"just build-native"
 
 # wazero (Go binary; lives at the repo root, not target/release).
 build_sibling \
