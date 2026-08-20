@@ -1,3 +1,17 @@
+// The diff tab's empty state.  It sits as a sibling of the Monaco host inside
+// `.unified-diff-container`, and only one of the two is visible at a time, so it
+// has to fill the tab rather than sit above the editor.  The text treatment
+// itself comes from `components/empty_states.styl` via `.empty-overlay`.
+.unified-diff-empty
+  flex: 1
+  min-height: 0
+
+// Code surface: keep a monospace face.  This used to be inherited from the
+// app-wide `body` rule, which is now Space Grotesk (the interface face), so
+// it has to be stated here — diff bodies are source lines.
+.unified-diff
+  font-family: "SpaceMono", monospace
+
 // Unified diff editor tab (DR-R4, UD-1).
 //
 // Since UD-1 the tab is Monaco's own DIFF editor in the inline layout, over

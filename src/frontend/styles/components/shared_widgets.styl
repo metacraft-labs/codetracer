@@ -67,6 +67,53 @@ input::-moz-placeholder
 
 TRACE_LOG_EDITOR_Z_INDEX = 50
 
+// Dropdown surface — the panel a menu opens into.
+//
+// Defined once because two menus have to be indistinguishable: the layout menu
+// beside the panel tabs and the command prompt's results list.  Both fill it
+// with `ct-menu-item` rows, so only the container chrome lives here.
+dropdown-surface()
+  // rem, not em: the two menus sit in containers with different font sizes (the
+  // layout menu inherits 16px, the command prompt 12px), and an em-based border
+  // and radius would resolve differently in each — a 1px/8px frame in one and a
+  // 0.5px/6px frame in the other.  The surface must not depend on where it opens.
+  background-color: transparent
+  border: 0.0625rem solid colors-ui-border-tertiary
+  border-radius: 0.5rem
+  box-shadow: none
+  overflow: hidden
+
+// One row inside that surface.  The row's colour, height and hover come from
+// the `ct-menu-item` component; this is only the hairline between rows and the
+// corner rounding that lets the ends sit inside the container's radius.
+dropdown-surface-row()
+  font-size: 0.875rem
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+  padding-left: 0.5em
+  padding-right: 0.5em
+
+  // Rows differ in how they carry their text: the layout menu puts it straight
+  // in the row, the command prompt wraps it in `ct-menu-item-label`.  That
+  // label is sized `0.875em` for the application menu, which here multiplies
+  // against the row's own 0.875rem and lands two steps down — the same list
+  // rendered visibly smaller than its neighbour.  In a dropdown the row owns
+  // the size; the label just carries the text.
+  .ct-menu-item-label,
+  .ct-menu-item-sublabel
+    font-size: inherit
+
+  &:first-child
+    border-top: none
+    border-radius: 0.5rem 0.5rem 0 0
+
+  &:last-child
+    border-bottom: none
+    border-radius: 0 0 0.5rem 0.5rem
+
+
+// Minimum breathing room between an empty panel's message and the panel sides.
+EMPTY_OVERLAY_SIDE_GAP = 2.5rem
+
 .hidden
   display: none !important
 
@@ -114,7 +161,11 @@ html, body
     overflow: hidden
 
 body
-  font-family: "SpaceMono", monospace !important
+  // Space Grotesk is the interface face: menus, tab titles, labels, panel
+  // chrome — everything that is not code.  Surfaces that render code (the
+  // editor, terminal, values, diffs) set a monospace face explicitly; see the
+  // note at the top of each of those component stylesheets.
+  font-family: "SpaceGrotesk", sans-serif !important
   -webkit-font-smoothing: antialiased
   -moz-osx-font-smoothing: grayscale
   background-color: colors-ui-surface-primary-default !important
@@ -494,28 +545,15 @@ input:checked ~ .checkmark:after
     border: 0.0625em solid colors-ui-surface-action-primary !important
 
   .layout-dropdown
+    dropdown-surface()
     width: fit-content;
     z-index: 100
     position: absolute;
     top: 100%
     right: 0 !important
-    border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.5em
-    overflow: hidden
 
     .layout-dropdown-node
-      font-size: 0.875em
-      border-top: 0.0625em solid colors-ui-border-tertiary
-      padding-left: 0.5em
-      padding-right: 0.5em
-
-      &:first-child
-        border-top: none
-        border-radius: 0.5em 0.5em 0 0
-
-      &:last-child
-        border-bottom: none
-        border-radius: 0 0 0.5em 0.5em
+      dropdown-surface-row()
 
       &:hover
         background-color: colors-ui-surface-primary-default-hover
@@ -549,11 +587,26 @@ input:checked ~ .checkmark:after
   justify-content: center
   align-items: center
   font-family: "SpaceGrotesk"
-  // font-size: 14px
-  // padding-left: 12px
-  // padding-right: 12px
+  // An empty panel's message is guidance, not content: one step down from the
+  // body size and dimmed, so it sits behind the panels that do have something
+  // to show rather than competing with them.
+  font-size: 0.875rem
+  opacity: 0.6
+  // Slightly tighter leading than the panel default.  `.component-container`
+  // sets `line-height: 1.5em`, which resolves against the panel's 16px and is
+  // inherited here as a fixed 24px regardless of this smaller font size — so it
+  // has to be restated rather than nudged.  1.25rem is that 24px less 0.25rem.
+  line-height: 1.25rem
+  // Keep the message clear of the panel edges.  `border-box` is required: the
+  // overlay inherits the panel's width, so without it the padding would push
+  // the box wider than the panel instead of insetting the text.
+  box-sizing: border-box
+  padding-left: EMPTY_OVERLAY_SIDE_GAP
+  padding-right: EMPTY_OVERLAY_SIDE_GAP
   text-align: center
-  // white-space: break-spaces
+  // Let the message wrap inside the inset rather than overflow it once the
+  // panel is narrow enough for the gaps to matter.
+  overflow-wrap: break-word
 
 .jstree-default-contextmenu
   display: none !important
@@ -612,7 +665,7 @@ input:checked ~ .checkmark:after
   display: flex
   align-items: center
   flex-shrink: 0
-  opacity: 0.7
+  opacity: 0.6
 
 .ct-picker-label
   flex: 1

@@ -9,7 +9,9 @@
   // one row, so the new-tab button cannot drift over the omnibox.
   order 4
   position relative
-  flex 1 1 auto
+  // Basis 0 so this and the debug toolbar split the caption bar's free space
+  // evenly, which is what leaves the command prompt centred between them.
+  flex 1 1 0
   min-width 3.5em
   max-width 100%
   height 100%

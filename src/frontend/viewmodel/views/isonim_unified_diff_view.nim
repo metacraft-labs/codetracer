@@ -31,6 +31,13 @@ import ../viewmodels/diff_document
 const
   UnifiedDiffContainerClass* = "component-container unified-diff-container"
   UnifiedDiffEditorClass* = "unified-diff-editor"
+  UnifiedDiffEmptyClass* = "empty-overlay unified-diff-empty"
+    ## Shown instead of the editor when the diff has no files.  The message used
+    ## to be the Monaco model's own text, which meant it rendered as a line of
+    ## code — mono, left aligned, with a line number beside it.  As a DOM node it
+    ## picks up the shared empty-state treatment (`components/empty_states.styl`)
+    ## like every other panel's "nothing here" message.
+  UnifiedDiffEmptyText* = "No changes to show."
   UnifiedDiffToolbarHostClass* = "unified-diff-toolbar-host"
   UnifiedDiffFileHeaderHostClass* = "unified-diff-file-header-host"
   UnifiedDiffFileHeaderClass* = "unified-diff-file-header"
@@ -119,12 +126,15 @@ proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
   var toolbarHost: typeof(r.createElement("div"))
   var fileHeaderHost: typeof(r.createElement("div"))
   var editorHost: typeof(r.createElement("div"))
+  var emptyHost: typeof(r.createElement("div"))
 
   let panel = ui(r):
     tdiv(class = UnifiedDiffContainerClass):
       tdiv(ref = fileHeaderHost, class = UnifiedDiffFileHeaderHostClass)
       tdiv(ref = toolbarHost, class = UnifiedDiffToolbarHostClass)
       tdiv(ref = editorHost, id = editorHostId, class = UnifiedDiffEditorClass)
+      tdiv(ref = emptyHost, class = UnifiedDiffEmptyClass):
+        text UnifiedDiffEmptyText
 
   createRenderEffect proc() =
     r.clearChildren(fileHeaderHost)
@@ -138,6 +148,18 @@ proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
     r.clearChildren(toolbarHost)
     if vm.hunkToolbarVisible.val and vm.selectedHunkCount.val > 0:
       r.appendRenderedChild(toolbarHost, renderHunkToolbar(r, vm, callbacks))
+
+  # Swap the editor for the empty-state message when there is nothing to diff.
+  # Toggled by class rather than by inserting/removing the node, because the
+  # editor host next to it must survive untouched — Monaco is attached to it.
+  createRenderEffect proc() =
+    let isEmpty = vm.diffFiles.val.len == 0
+    r.setAttribute(emptyHost, "class",
+      if isEmpty: UnifiedDiffEmptyClass
+      else: UnifiedDiffEmptyClass & " hidden")
+    r.setAttribute(editorHost, "class",
+      if isEmpty: UnifiedDiffEditorClass & " hidden"
+      else: UnifiedDiffEditorClass)
 
   panel
 
