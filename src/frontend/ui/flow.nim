@@ -4215,13 +4215,19 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       if self.flow.isNil:
         self.flow = update.view_updates[editorView]
       self.redrawFlow()
-      # Now that the new DOM is built, remove the previous component's Monaco
-      # view zones. This is the moment where the user sees the transition —
-      # new zones are already painted, old ones are torn down immediately
-      # after, giving zero blank-panel time.
-      if not self.handoffFlow.isNil:
-        self.handoffFlow.resetFlow()
-        self.handoffFlow = nil
+      # Now that the new DOM is built, remove the entire chain of superseded
+      # components' Monaco view zones. Walking the chain (not just one level)
+      # is necessary for rapid navigations where multiple loadFlow() calls
+      # queued before any CtUpdatedFlow arrived: each intermediate component
+      # carries its own handoffFlow pointer, and without the loop their zones
+      # would accumulate as view-zone duplicates.
+      var prev = self.handoffFlow
+      while not prev.isNil:
+        let next = prev.handoffFlow
+        prev.resetFlow()
+        prev.handoffFlow = nil
+        prev = next
+      self.handoffFlow = nil
       self.updateFlowOnMove(self.location.rrTicks, self.location.line)
       self.recalculate = true
       # NOTE: a no-op in the app (`FlowComponent` overrides only

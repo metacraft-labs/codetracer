@@ -3256,7 +3256,19 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       else:
         if isShield:
           clog cstring("[NSS-1.64] EditorVC.onCompleteMove: calling loadFlow now (monaco-ready)")
-        self.loadFlow(FlowMode.Call, response.location)
+        # If an existing rendered FlowComponent already covers this editor,
+        # reuse it instead of creating a new one. Just emit CtLoadFlow so the
+        # backend sends fresh step data; onUpdatedFlow will apply it via the
+        # in-place update path (same key). This keeps the slider DOM alive
+        # during rapid slider drags (no focus loss) and avoids accumulating
+        # handoffFlow chains that cause view-zone duplication.
+        let canReuseFlow =
+          not self.flow.isNil and
+          not self.flow.flow.isNil  # component has received step data before
+        if canReuseFlow:
+          self.api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: FlowMode.Call, location: response.location))
+        else:
+          self.loadFlow(FlowMode.Call, response.location)
         self.shouldLoadFlow = false
         self.hasPendingFlowLocation = false
 
