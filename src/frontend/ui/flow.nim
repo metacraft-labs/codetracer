@@ -303,9 +303,9 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
     self.redraw()
   )
   api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
+    # `onUpdatedFlow` decides internally whether a full `redrawFlow()` is
+    # needed (key changed) or only an in-place value update (key unchanged).
     discard self.onUpdatedFlow(response)
-    self.redrawFlow()
-    self.redraw()
   )
 
 # FlowComponent.render() removed: IsoNim is the primary renderer.
@@ -4197,40 +4197,37 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       cerror "flow: editorView index out of bounds: " & $ord(editorView) & " updates len: " & $update.view_updates.len
       return
 
+    if not self.inExtension:
+      self.editorUI.flowUpdate = update
+
     if update.location.key != self.key:
+      # The location key changed: the flow structure (loops, lines, function)
+      # is different from what is currently on screen. Tear down the old DOM
+      # and build a new one from the incoming data.
+      #
+      # This path also covers the very first update for this component (when
+      # `self.key` is empty), because `"" != update.location.key`.
       self.resetFlow()
       self.key = update.location.key
       if self.flow.isNil:
         self.flow = update.view_updates[editorView]
+      self.redrawFlow()
+      self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+      self.recalculate = true
+      # NOTE: a no-op in the app (`FlowComponent` overrides only
+      # `redrawForExtension`); kept because it rebinds the extension host.
+      self.redraw()
+      # One deferred rebuild to capture offsets Monaco has not yet laid out.
+      self.scheduleFlowRedraw(100)
+      self.scheduleActiveLoopIterationValueRender()
     else:
+      # Same location key: the flow structure (loops, lines) is unchanged.
+      # Only the step data (values, active iteration) has changed — update
+      # the existing DOM nodes in-place without any teardown or rebuild.
+      # This is the hot path during noUiSlider drags and arrow-button clicks.
       self.flow = update.view_updates[editorView]
-
-    if not self.inExtension:
-      self.editorUI.flowUpdate = update
-
-    # One teardown/rebuild here, one deferred.
-    #
-    # This used to be `recalculateAndRedrawFlow()` + `redrawFlow()` +
-    # `scheduleFlowRedraw(0)` + `scheduleFlowRedraw(100)`. Since `redrawFlow` is
-    # itself `clear()` + `recalculateAndRedrawFlow()`, and each
-    # `scheduleFlowRedraw` runs another full `redrawFlow` plus five more
-    # `renderActiveLoopIterationValues` passes, a single move tore down and
-    # rebuilt every Monaco view zone four times — the "blinking" in #562, and
-    # the reason a stale loop control could still be live and clickable when the
-    # user pressed an arrow (#595).
-    #
-    # The deferred pass is kept because widths and offsets measured during this
-    # tick are wrong for view zones Monaco has not laid out yet; the immediately
-    # scheduled one is redundant with the synchronous rebuild above.
-    self.redrawFlow()
-    self.updateFlowOnMove(self.location.rrTicks, self.location.line)
-
-    self.recalculate = true
-    # NOTE: a no-op in the app (`FlowComponent` overrides only
-    # `redrawForExtension`); kept because it rebinds the extension host.
-    self.redraw()
-    self.scheduleFlowRedraw(100)
-    self.scheduleActiveLoopIterationValueRender()
+      self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+      self.scheduleActiveLoopIterationValueRender()
   except:
     cerror "flow: " & getCurrentExceptionMsg()
 
