@@ -128,41 +128,71 @@ layout/overrides live in `assets/style.css`. (The editor itself lives in
 
 CI (`.github/workflows/codetracer.yml` → `ci/deploy/docs.sh`) builds this book
 and publishes it to GitHub Pages, decoupled from the app build/test matrix.
-There are **two channels**, chosen by the branch that was pushed:
+There are **three channels**, chosen by the event and the branch:
 
-| Branch | URL | Built with |
+| Trigger | URL | Built with |
 |---|---|---|
-| `stable` | <https://docs.codetracer.com/> (plus the archived mdBook at `/old`) | `CT_DOCS_BASE_PATH` unset |
-| `dev` | <https://docs.codetracer.com/nightly> | `CT_DOCS_BASE_PATH=/nightly` |
+| push to `stable` | <https://docs.codetracer.com/> (plus the archived mdBook at `/old`) | `CT_DOCS_BASE_PATH` unset |
+| push to `dev` | <https://docs.codetracer.com/nightly> | `CT_DOCS_BASE_PATH=/nightly` |
+| pull request `N` | `https://docs.codetracer.com/pr/N/` | `CT_DOCS_BASE_PATH=/pr/N` |
 
-A push to `main` publishes nothing. Both channels commit to the same `gh-pages`
-branch and each run replaces **only its own subtree**, so the other channel
-survives untouched; the deploy is a fast-forward push, never a force-push.
+A push to `main` publishes nothing. All channels commit to the same `gh-pages`
+branch and each run replaces **only its own subtree**, so the other channels
+survive untouched; the deploy is a fast-forward push, never a force-push.
 
-Search engines are asked to skip the nightly channel: every released-channel
-deploy appends `Disallow: /nightly/` to the **root** `robots.txt` (the only
-`robots.txt` crawlers read), so the nightly pages do not compete with the
-released ones for the same queries. To publish the nightly channel to search
-engines instead, drop that one `printf` from `swap_owned_subtree` in
-`ci/deploy/docs.sh`; the next released deploy regenerates `robots.txt` from the
-build, so the line disappears on its own.
+### Pull-request previews
+
+A pull request that changes anything under `docs/` gets its book published at
+`/pr/<N>/`, and a single comment on the pull request links to it — edited in
+place on every later push, never re-posted, and naming the commit it was built
+from. When the pull request closes, `.github/workflows/docs-preview-cleanup.yml`
+removes `/pr/<N>/` again and corrects that comment. A pull request that touches
+no docs publishes nothing and says nothing.
+
+Previews are **same-repository pull requests only**. A pull request from a fork
+runs with a read-only token and no secrets, by design, because it builds code
+written by whoever opened it; publishing from such a run would mean executing
+untrusted build code with a token that can write to `gh-pages`. A fork pull
+request therefore gets no preview (and no comment — with a read-only token the
+job could not post one either).
+
+### robots.txt
+
+Search engines are asked to skip everything that is not the released book: the
+**root** `robots.txt` (the only one crawlers read) carries `Disallow: /nightly/`
+and `Disallow: /pr/`. Every released deploy regenerates that file from the build
+and re-adds both lines; a preview deploy adds the `/pr/` line if it is missing,
+so a preview is excluded from the moment it is first published rather than from
+the next release. To publish a channel to search engines instead, drop its
+`ensure_root_robots_disallow` call in `ci/deploy/docs.sh`.
+
+### Base path
 
 `CT_DOCS_BASE_PATH` is the URL prefix the build is hosted under: `src/build.nim`
 passes it to `bookDocsConfig()`, and the framework then rewrites every
 root-relative link, asset, stylesheet `url(...)`, search-index route and legacy
-redirect stub to carry it. Build the nightly variant locally with:
+redirect stub to carry it. Build a prefixed variant locally with:
 
 ```bash
-CT_DOCS_BASE_PATH=/nightly just build
+CT_DOCS_BASE_PATH=/nightly just build     # or /pr/123
 ```
 
-To rehearse a deploy without pushing anything, from the repo root:
+### Rehearsing a deploy
+
+To rehearse one without pushing anything, from the repo root:
 
 ```bash
 DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_BRANCH=dev ./ci/deploy/docs.sh   # or =stable
+DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_CHANNEL=preview DOCS_DEPLOY_PR=123 ./ci/deploy/docs.sh
 ```
 
 It prints the staged tree, including how many files it preserved from the
-channel it does not own. If the book build fails the deploy **fails**: it never
+channels it does not own. If the book build fails the deploy **fails**: it never
 substitutes older content under the published URLs, and because nothing is
 pushed the previously published site keeps serving.
+
+The whole channel model — every channel, both preservation directions, the
+robots.txt rules, the refusals, and real pushes/races/rejections against a local
+bare repository — is covered by `ci/test/docs-deploy-channels-test.sh`; the
+preview comment is covered by `ci/test/docs-preview-comment-test.sh`. Both run
+standalone with no network access.

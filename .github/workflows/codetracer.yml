@@ -3290,7 +3290,71 @@ jobs:
           ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
           ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
 
+  docs-scope:
+    # Does this run have any documentation to publish?
+    #
+    # WHY A JOB AND NOT A `paths:` FILTER. `paths:` only exists on the workflow
+    # TRIGGER, and this workflow's `pull_request:` trigger drives the entire CI
+    # matrix -- Linux, macOS and Windows builds and tests. Narrowing it to
+    # `docs/**` would stop all of that from running on every non-docs pull
+    # request. GitHub has no per-job `paths:`, so the filter has to be
+    # evaluated inside the workflow.
+    #
+    # WHY A SEPARATE JOB AND NOT A FIRST STEP. A job-level `if:` is evaluated
+    # before a runner is allocated; a step-level one is not. Deciding this in a
+    # step would have every pull request occupy one of the six self-hosted
+    # `eph-linux-x64` slots just to conclude it had nothing to do -- the same
+    # waste `cla.yml` documents having had to fix. This job needs no Nix and no
+    # checkout, so it runs on the free hosted class.
+    runs-on: ubuntu-latest
+    if: ${{ !github.event['codetracer-ci'] }}
+    permissions:
+      # Read-only: this job only asks which files a pull request touches.
+      contents: read
+      pull-requests: read
+    outputs:
+      publish: ${{ steps.scope.outputs.publish }}
+    steps:
+      - name: Decide whether the docs channel has anything to publish
+        id: scope
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // A branch deploy republishes its channel unconditionally: the
+            // published site must match the branch even when the change that
+            // moved it was, say, a theme token in a sibling repo.
+            if (context.eventName !== 'pull_request') {
+              core.info(`event '${context.eventName}': a branch deploy always publishes its channel`);
+              core.setOutput('publish', 'true');
+              return;
+            }
+            // The docs preview is built from `docs/` by `ci/deploy/docs.sh`.
+            // A change to the deploy script itself counts: it is the thing
+            // that decides what the published tree looks like.
+            const isDocs = (name) =>
+              name.startsWith('docs/') || /^ci\/deploy\/docs[-.a-z]*\.sh$/.test(name);
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const touched = files.map((f) => f.filename).filter(isDocs);
+            core.info(`${files.length} changed file(s), ${touched.length} of them documentation`);
+            for (const name of touched.slice(0, 20)) core.info(`  ${name}`);
+            // `listFiles` is capped at 3000 files per pull request, so beyond
+            // that the answer is "we do not know". Fail toward publishing: a
+            // preview nobody needed costs a build, a missing one costs a
+            // reviewer their only look at the rendered change.
+            if (files.length >= 3000 && touched.length === 0) {
+              core.warning('the changed-file list is truncated at the API cap; publishing anyway');
+              core.setOutput('publish', 'true');
+              return;
+            }
+            core.setOutput('publish', touched.length > 0 ? 'true' : 'false');
+
   build-and-deploy-docs:
+    needs: [ docs-scope ]
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     # The docs site is INDEPENDENT content: it is built by its own isonim-docs
     # SSG consumer (docs/book-isonim via ci/deploy/docs.sh) and consumes NO
@@ -3303,25 +3367,89 @@ jobs:
     # read-through cache that works whether or not this run's push-to-attic
     # populated it.
     #
-    # TWO PUBLISH CHANNELS, one job, chosen by the branch (`ci/deploy/docs.sh`
-    # derives the channel from GITHUB_REF_NAME):
+    # THREE PUBLISH CHANNELS, one job, chosen by the event and the branch
+    # (`ci/deploy/docs.sh` derives the channel; see its header):
     #
-    #   stable -> docs.codetracer.com/          (the released book, plus /old)
-    #   dev    -> docs.codetracer.com/nightly   (the integration book)
+    #   stable       -> docs.codetracer.com/          (the released book, plus /old)
+    #   dev          -> docs.codetracer.com/nightly   (the integration book)
+    #   pull request -> docs.codetracer.com/pr/<N>    (that PR's docs preview)
     #
     # `main` deliberately publishes nothing: the released docs now track
     # `stable`, so a `main` push must not overwrite them.
-    if: ${{ (github.ref == 'refs/heads/stable' || github.ref == 'refs/heads/dev') && !github.event['codetracer-ci'] }}
-    # Both channels commit to the SAME `gh-pages` branch, each replacing only
-    # its own subtree on top of the current tip. docs.sh already fetches,
-    # re-applies and retries if it loses a race, but serializing the job across
-    # branches means the race normally never happens. Never cancel: a cancelled
-    # deploy would leave that channel a release behind.
+    #
+    # WHY PREVIEWS ARE SAME-REPO ONLY.
+    #
+    # A `pull_request` run from a FORK gets a read-only `GITHUB_TOKEN` and no
+    # secrets, by design, because the code it builds is written by whoever
+    # opened the pull request. Publishing a preview from such a run would mean
+    # executing attacker-controlled build code with a token that can write to
+    # `gh-pages` -- the classic supply-chain hole. `pull_request_target` is NOT
+    # the answer: it would hand that write token to exactly the same untrusted
+    # code. (`cla.yml` uses `pull_request_target` safely because it never
+    # checks out or runs the pull request's code; this job does both.)
+    #
+    # So fork pull requests get NO preview and NO explanatory comment. The
+    # comment is not withheld out of preference -- with a read-only token this
+    # job cannot post one either, and the whole job is gated off before a
+    # runner is even allocated. Reviewers of a fork PR read the diff, as they
+    # did before previews existed.
+    #
+    # `head.repo.full_name` is the fork test: on a same-repo pull request it
+    # equals the repository, and it is the value GitHub itself uses to decide
+    # whether to issue a write token.
+    #
+    # `needs.docs-scope.outputs.publish` is the "only when the docs actually
+    # change" gate: on a pull request it is false unless the diff touches
+    # `docs/` or the deploy script, so such a run publishes nothing AND
+    # comments nothing. On a branch push it is always true.
+    if: >-
+      ${{ !github.event['codetracer-ci'] &&
+          needs.docs-scope.outputs.publish == 'true' && (
+            github.ref == 'refs/heads/stable' ||
+            github.ref == 'refs/heads/dev' ||
+            (github.event_name == 'pull_request' &&
+             github.event.pull_request.head.repo.full_name == github.repository)
+          ) }}
+    # PER-CHANNEL concurrency groups, not one shared group.
+    #
+    # All channels commit to the same `gh-pages` branch, so a single shared
+    # group looks safer at first glance -- no channel could ever race another.
+    # It is not, once pull-request previews exist. GitHub keeps at most ONE
+    # pending run per concurrency group and CANCELS any older pending one, so
+    # with a shared group a `stable` deploy waiting behind a running preview
+    # would be silently cancelled the moment a second preview queued behind it.
+    # Busy pull-request days would quietly stop publishing the released docs.
+    #
+    # Per-channel groups keep the guarantee that actually matters -- a channel
+    # never races ITSELF, so its own subtree is never written twice at once --
+    # and hand the cross-channel case to the mechanism built for it: docs.sh
+    # pushes fast-forward only, and re-fetches and re-applies its subtree when
+    # it loses. That path is exercised by ci/test/docs-deploy-channels-test.sh.
+    #
+    # The preview group is keyed by PR NUMBER so the cleanup job in
+    # docs-preview-cleanup.yml can join it: a cleanup must not overlap the same
+    # PR's last preview publish, or the publish would resurrect the directory
+    # the cleanup just removed.
+    #
+    # Never cancel in progress: a cancelled deploy leaves that channel a
+    # release behind.
     concurrency:
-      group: docs-gh-pages
+      group: >-
+        docs-gh-pages-${{
+          github.event_name == 'pull_request'
+            && format('pr-{0}', github.event.pull_request.number)
+            || github.ref_name
+        }}
       cancel-in-progress: false
     permissions:
+      # `contents: write` publishes gh-pages. `pull-requests: write` posts the
+      # single preview comment, and is the narrowest grant that can: GitHub has
+      # no finer scope for "edit one comment". It is deliberately NOT a
+      # separate job -- splitting one out would duplicate the whole nix +
+      # sibling-checkout preamble, and this job already holds `contents:
+      # write`, which is strictly the more powerful of the two.
       contents: "write"
+      pull-requests: "write"
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -3395,12 +3523,41 @@ jobs:
           # workflow's own public repo), and the policy credential for that is
           # the token Actions already provides.
           DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # docs.sh derives the channel from the event and the branch; on a
+          # pull request it needs the number that names the `/pr/<N>` subtree.
+          # Passed explicitly rather than parsed out of GITHUB_REF so the
+          # published path comes from the event payload GitHub itself
+          # populated.
+          DOCS_DEPLOY_PR: ${{ github.event.pull_request.number }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config init.defaultBranch main
 
           nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
+
+      - name: Link the preview from the pull request
+        # Only on a pull request, and only after the publish above succeeded --
+        # a link posted for a preview that was never published is worse than no
+        # link, because it looks authoritative and 404s.
+        #
+        # The comment is edited in place on every subsequent push (see
+        # ci/deploy/docs-preview-comment.sh), so a long pull request ends with
+        # exactly one preview comment rather than one per push. It names the
+        # head commit so a reviewer can tell whether what they are looking at
+        # includes the push they just made.
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # The pull request's own head, NOT `github.sha`: on a `pull_request`
+          # event `github.sha` is the ephemeral merge commit, which exists
+          # nowhere the reviewer can see it.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command \
+            ./ci/deploy/docs-preview-comment.sh published \
+            "$PR_NUMBER" "https://docs.codetracer.com/pr/${PR_NUMBER}/" "$HEAD_SHA"
 
   push-tag:
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
@@ -3818,6 +3975,30 @@ jobs:
         # private lldb-sys token are checked on every run, from a stock
         # runner, regardless of the state of the heavy lanes.
         run: bash ci/test/visual-replay-private-cargo-preflight-test.sh
+
+      - name: Self-test the docs publish channels
+        # `build-and-deploy-docs` writes three channels -- the released site,
+        # the nightly book and one preview per open pull request -- into ONE
+        # `gh-pages` branch, each run replacing only its own subtree. Nothing
+        # in a green CI run would notice if that stopped being true: the
+        # damage shows up as somebody else's pages quietly disappearing from
+        # docs.codetracer.com, days later.
+        #
+        # This suite asserts preservation in every direction with `diff -rq`
+        # on real trees, and exercises real pushes, a lost race and a
+        # permanently rejecting remote against a local bare repository. It
+        # needs only bash, git and coreutils -- no Nix, no dev shell, no
+        # network -- so it belongs on this stock runner for the same reason
+        # the credential preflight above does.
+        run: bash ci/test/docs-deploy-channels-test.sh
+
+      - name: Self-test the docs preview comment
+        # The preview comment must be posted once and EDITED thereafter. A
+        # regression here is invisible in CI -- it looks like a working
+        # preview, with one more bot comment per push burying the review
+        # conversation. Driven against a fake GitHub API served on localhost
+        # (python3 + curl + jq, all stock here).
+        run: bash ci/test/docs-preview-comment-test.sh
 
       - name: Assert the JS ViewModel lane can observe its own failures
         # `test-vm-js` believed it was checking node's exit code. It was not:
