@@ -91,6 +91,16 @@
 #   launcher -> core -> recorder.  Asserting only "a trace appeared" could not
 #   distinguish that from the core having been run directly.
 #
+# THE RECORDER IS ONLY HALF A TOOLCHAIN
+#   `recorder_dispatch.nim` describes each language's recording toolchain as up
+#   to two artifacts: the recorder, and the language RUNTIME `ct` spawns.  The
+#   python and js recorders are self-contained executables; ruby runs
+#   `ruby <recorder-script> …` and the BEAM edges run
+#   `codetracer-beam-recorder … -- elixir <program>`.  A fixture declares the
+#   runtimes its edge needs in `discovery.runtime`, and the driver takes each
+#   one from the RECORDER REPO'S OWN pinned dev shell -- see resolve_runtimes()
+#   for why that is the correct source and not merely a convenient one.
+#
 # MOCKING POLICY
 #   (metacraft-dev-guidelines/policies/documentation-conventions.md,
 #    "Mocking Policy in Integration Tests"; design §5.7)
@@ -655,7 +665,104 @@ step_stage_component() {
 #     that directory to be prepended.  The assertion afterwards is what matters:
 #     the resolved binary must live INSIDE the recorder checkout, so the gate
 #     cannot silently pass against a packaged recorder from the dev shell.
+#   * `discovery.runtime` covers the OTHER half of a recorder's toolchain: the
+#     language runtime the desktop core spawns.  See resolve_runtimes() below.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Language runtimes (design §5.2, Recorder-CLI-Conventions.md §3).
+#
+# `recorder_dispatch.nim` splits a language's recording toolchain in two:
+# `raRecorder` (the recorder itself, which `discovery.method` above makes
+# visible) and `raRuntime` -- the language runtime `ct` executes.  Three of the
+# five v1 edges have one: ruby runs `ruby <recorder-script> …`, and the BEAM
+# edges run `codetracer-beam-recorder … -- elixir <program>` / `… -- escript
+# <program>`.  `scripts/detect-siblings.sh` does not provide those runtimes and
+# neither codetracer dev shell declares elixir/erlang at all, so without this
+# block the ruby and beam edges would fail inside `ct` with
+# "the Ruby runtime `ruby` was not found".
+#
+# WHERE THE RUNTIME COMES FROM, and why that is the right answer rather than a
+# convenience: the RECORDER REPO'S OWN pinned dev shell.  That is the version
+# its recorder was built and tested against -- decisively so for ruby, whose
+# native extension is a cdylib bound to one interpreter's ABI, so any other
+# `ruby` on PATH would either fail to load it or load a mismatched one.  It is
+# also the remedy the product itself prints: `missingRecorderMessage` in
+# src/ct/trace/recorder_dispatch.nim tells the user
+# "the `<sibling>` repo's dev shell provides a working <lang> toolchain:
+#  direnv exec ../<sibling> <command>".  This does exactly that, through the
+# same `direnv exec` mechanism scripts/build-siblings.sh already uses to build
+# the recorder, so the gate needs no toolchain the workflow does not already
+# provision (the reusable workflow `direnv allow`s every sibling with an
+# `.envrc` for precisely this reason).
+#
+# The resolved directory is PREPENDED, not appended: an unrelated `elixir` or
+# `ruby` earlier on PATH must not win over the recorder's own pinned one.  Each
+# name is then re-resolved and asserted to be exactly the binary we prepended,
+# so a failed prepend is a named failure rather than a silently different
+# interpreter.  A runtime that cannot be resolved is a HARD failure, never a
+# skip (design §5.5).
+#
+# `direnv exec` AUGMENTS the ambient PATH, it does not replace it, so "resolved
+# inside the recorder's dev shell" is NOT by itself the same statement as
+# "provided by the recorder's dev shell".  Found in review, on a real host: a
+# fixture that declared a runtime its recorder's flake does not ship at all
+# (`elixir` added to the ruby fixture) resolved to a WINDOWS `elixir` under
+# /mnt/c/…  — whereupon the driver prepended that directory to PATH and
+# reported `ok  the 'elixir' runtime on PATH is …'s own pinned one`.  So the
+# resolved binary must also be PROVABLY PINNED: produced by a flake (it lives
+# in /nix/store) or built inside the recorder checkout.  Anything else is a
+# hard failure that names the path it found, because silently recording with
+# whatever interpreter the host happens to carry is precisely the class of
+# "green but meaningless" this gate exists to prevent — and for ruby, whose
+# cdylib is bound to one interpreter's ABI, the two are not interchangeable.
+# ---------------------------------------------------------------------------
+resolve_runtimes() {
+	local rt rt_path rt_dir resolved
+	while IFS= read -r rt; do
+		[[ -n $rt ]] || continue
+		command -v direnv >/dev/null 2>&1 ||
+			die "the fixture declares discovery.runtime '$rt', which is resolved from
+  $RECORDER_REPO's own dev shell, but 'direnv' is not on PATH.
+  It is the same mechanism scripts/build-siblings.sh uses to build the recorder."
+		# shellcheck disable=SC2016
+		# Single quotes are the point: `$1` must be expanded by the bash that
+		# `direnv exec` spawns INSIDE the recorder's dev shell, not by this one.
+		# The name is passed as an argument rather than interpolated so a tool
+		# name from the fixture can never be read as shell syntax.
+		rt_path="$(direnv exec "$RECORDER_DIR" bash -c 'command -v -- "$1"' _ "$rt" 2>/dev/null | head -n1)"
+		[[ -n $rt_path && -x $rt_path ]] ||
+			die "the desktop core needs the '$rt' runtime for the $LANG_KEY edge
+  (src/ct/trace/recorder_dispatch.nim, artifact kind raRuntime), and it is not
+  provided by '$RECORDER_REPO's dev shell either.
+      direnv exec $RECORDER_DIR command -v $rt
+  found nothing.  Deliberately NOT a skip: without the runtime the recording
+  cannot happen and the gate would be testing nothing."
+		# See the header: `direnv exec` falls through to the ambient PATH, so
+		# "it resolved" does not yet mean "the recorder's flake provides it".
+		case "$rt_path" in
+		/nix/store/* | "$RECORDER_DIR"/*) ;;
+		*)
+			die "the '$rt' runtime the $LANG_KEY edge needs resolved to
+      $rt_path
+  which is neither pinned by $RECORDER_REPO's flake (/nix/store) nor built
+  inside its checkout.  'direnv exec' augments the ambient PATH rather than
+  replacing it, so that is what this HOST happens to carry, not what the
+  recorder was built against -- and for an ABI-bound recorder the two are not
+  interchangeable.  Declare '$rt' in $RECORDER_REPO's dev shell.
+  Deliberately NOT a skip and NOT a silent fallback (design §5.5)."
+			;;
+		esac
+		rt_dir="$(cd "$(dirname "$rt_path")" && pwd)"
+		export PATH="$rt_dir:$PATH"
+		hash -r 2>/dev/null || true
+		resolved="$(command -v "$rt" 2>/dev/null || true)"
+		echo "  runtime $rt: $rt_path"
+		assert_eq "the '$rt' runtime on PATH is the flake-pinned one from $RECORDER_REPO's dev shell" \
+			"$rt_path" "$resolved"
+	done < <(fx_list discovery.runtime)
+}
+
 step_export_discovery() {
 	echo "step 5: exporting discovery environment"
 	export CODETRACER_COMPONENTS_ROOT="$COMPONENTS_ROOT"
@@ -679,6 +786,11 @@ step_export_discovery() {
 		die "unknown discovery.method '$FX_DISCOVERY' in $FIXTURE"
 		;;
 	esac
+
+	# Before the recorder is resolved: a recorder can BE a script run by its
+	# runtime (the ruby recorder is `#!/usr/bin/env ruby`), so `--version`
+	# below would not even start without it.
+	resolve_runtimes
 
 	RESOLVED_RECORDER="$(command -v "$FX_BINARY" 2>/dev/null || true)"
 	if [[ -z $RESOLVED_RECORDER ]]; then
@@ -786,6 +898,9 @@ scenario_record() {
 	cmd="$(fx_get "$s.command")"
 	rel_sample="${SAMPLE_OVERRIDE:-$(fx_get "$s.sample")}"
 	sample="$RECORDER_DIR/$rel_sample"
+	# Published for check_recorder_flag()'s --source-dir arm: the core derives
+	# the recorder's --source-dir from this file's parent directory.
+	SOURCE_DIR_SAMPLE="$sample"
 	[[ -f $sample ]] || {
 		bad "$id: sample program not found: $sample"
 		return
@@ -970,8 +1085,59 @@ check_recorder_flag() {
 		else
 			bad "$id: '$flag' was not honoured — trace at '${TRACE_FILE:-<none>}', expected under $trace_dir"
 		fi
-		assert_true "$id: '$flag' was passed — the recorder's default location './$FX_DEFAULT_OUT_DIR' stayed empty" \
-			test ! -e "$RUN_CWD/$FX_DEFAULT_OUT_DIR"
+		if [[ $FX_DEFAULT_OUT_DIR == "." ]]; then
+			# Some recorders default to the INHERITED CWD ITSELF rather than
+			# to a subdirectory of it -- codetracer-ruby-recorder's
+			# `parse_argv_and_trace_ruby_file` falls back to `Dir.pwd`.  For
+			# those, "./." obviously always exists, so the equivalent (and
+			# strictly stronger) statement of the same property is that the
+			# scratch cwd we ran from is still completely empty: had the flag
+			# not been passed, the `.ct` bundle and its `meta_dat/` would be
+			# sitting in it.
+			assert_true "$id: '$flag' was passed — the recorder's default location (the inherited cwd) stayed empty" \
+				test -z "$(find "$RUN_CWD" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)"
+		else
+			assert_true "$id: '$flag' was passed — the recorder's default location './$FX_DEFAULT_OUT_DIR' stayed empty" \
+				test ! -e "$RUN_CWD/$FX_DEFAULT_OUT_DIR"
+		fi
+		;;
+	--source-dir)
+		# codetracer-beam-recorder only.  A BEAM program is started by its
+		# build tool, so the recorder cannot infer the program's sources from
+		# the argv it wraps; `--source-dir` is how the core names them
+		# (src/ct/trace/recorder_dispatch.nim passes `program.parentDir`).
+		# Its observable effect is that the recorder INSTRUMENTS and BUNDLES
+		# those sources: `copy_sources` writes each one into
+		# `<out-dir>/files/<relative>` (and the compatibility copy under
+		# `<out-dir>/source_map/<relative>`).  Without the flag the recorder
+		# falls back to discovering sources under its own cwd -- which this
+		# driver deliberately makes an EMPTY scratch directory -- so nothing
+		# would be bundled at all.  The check is therefore "the sample's own
+		# source file came back out of the trace directory", which is exactly
+		# what the flag exists to make happen and is not implied by any other
+		# assertion here.
+		#
+		# The match is on the basename as a SUFFIX, not on the whole filename:
+		# `bundle_relative_path` only keeps the path relative when the source
+		# lies under the recorder's own working directory, and otherwise
+		# rewrites it to `external/<flattened absolute path>` -- so the bundled
+		# copy of `sample.ex` is named `_home_…_samples_sample.ex` whenever the
+		# recording is driven (as it is here) from a scratch cwd elsewhere.
+		local bundled
+		if [[ -z ${SOURCE_DIR_SAMPLE:-} ]]; then
+			# Belt and braces: an empty name would degenerate to `-name "*"`,
+			# which matches the first file under the trace directory and would
+			# turn this into the free green assertion the closed table exists
+			# to prevent.
+			bad "$id: '$flag' cannot be checked — no sample program was recorded for this scenario"
+			return
+		fi
+		bundled="$(find "$trace_dir" -type f -name "*$(basename "$SOURCE_DIR_SAMPLE")" -print -quit 2>/dev/null)"
+		if [[ -n $bundled ]]; then
+			ok "$id: '$flag' honoured — the recorder bundled ${bundled#"$trace_dir"/} from the source directory it was given"
+		else
+			bad "$id: '$flag' was not honoured — no copy of '$(basename "$SOURCE_DIR_SAMPLE")' was bundled under $trace_dir, so the recorder never saw the program's sources"
+		fi
 		;;
 	*)
 		bad "$id: no observable check is defined for recorder flag '$flag' — add one to check_recorder_flag() rather than asserting nothing"

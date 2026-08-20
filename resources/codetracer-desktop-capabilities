@@ -47,6 +47,12 @@ bin codetracer
 description CodeTracer desktop application -- launcher help delegate
 help-delegate
 
+# KNOWN GAP: `.ex` `.exs` `.erl` `.hrl` ROUTE but do not RECORD.
+#   `ct record foo.ex` exits 0 with a recordingId and a 2-event, 0-function
+#   trace: recorder_dispatch.nim sends `-- elixir <prog>`, which
+#   codetracer-beam-recorder's is_beam_target() rejects. Full diagnosis in
+#   codetracer-beam-recorder/cross-repo/launcher-compat.yml. Revisit these
+#   four extensions when it is fixed.
 record .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc
 record-test .py
 run .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc
