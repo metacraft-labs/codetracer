@@ -59,6 +59,12 @@ upload
 download
 login
 edit
+# `review` is declared WITHOUT an extension list on purpose.  `ct review`
+# accepts a `review.json` file OR a directory produced by `ct review
+# collect`, and `collect` / `inspect` carry no extension at all; an
+# extension-qualified line would route only the `.json` form, because the
+# launcher's `caps.matches` yields `mkNone` for a dot-less argument.
+review
 import
 ci
 help
