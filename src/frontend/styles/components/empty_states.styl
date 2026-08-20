@@ -1,0 +1,109 @@
+// Empty-state text — one treatment for every panel's "nothing here yet" message.
+//
+// Imported LAST from codetracer.styl on purpose: most of these messages already
+// carry padding (and a few carry a font size) in their own component
+// stylesheet, and those files are imported after shared_widgets.  Declaring the
+// shared treatment here is what lets it win without editing a dozen files.
+//
+// Scope is deliberately panel-level messages, including the ones the event log
+// renders through DataTables (`.dt-empty` / `.dataTables_empty`), whose cell
+// spans the whole table.  Inline "no rows yet" lines that sit *within* a list
+// alongside real rows (`.activity-dr-files-empty`, `.menu-no-search-results`)
+// are left alone: the side inset would indent them out of line with the rows
+// around them.
+//
+// `.empty-overlay` keeps its layout (flex centring, filling the panel) in
+// shared_widgets.styl; only the text treatment is shared from here.
+//
+// The command palette's own "no matching result" line is also excluded: it is a
+// dropdown rather than a panel, and the side inset would cramp it.
+
+.empty-overlay,
+.filesystem-empty-overlay,
+.filesystem-loading-overlay,
+.problems-empty,
+.search-results-empty,
+.unified-diff-empty,
+.dt-empty,
+.dataTables_empty,
+.event-log-marker-empty,
+.trace-log-empty,
+.point-list-empty,
+.flow-steps-empty,
+.frame-viewer-empty,
+.frame-viewer-draw-calls-empty,
+.pixel-history-empty,
+.shader-debug-empty,
+.shader-debug-values-empty,
+.video-player-empty,
+.agent-workspace-empty
+  font-family: "SpaceGrotesk"
+  font-size: 0.875rem
+  opacity: 0.6
+  line-height: 1.25rem
+  text-align: center
+  // Required: these boxes take their width from the panel, so without it the
+  // side inset would widen the box instead of insetting the text.
+  box-sizing: border-box
+  padding-left: EMPTY_OVERLAY_SIDE_GAP
+  padding-right: EMPTY_OVERLAY_SIDE_GAP
+  overflow-wrap: break-word
+
+  // These messages read as one continuous sentence.  Where the line falls is
+  // the panel's decision, not the author's: a hard break chosen for one panel
+  // width lands in the wrong place at every other width, and these panels are
+  // resizable.  Neutralising the element here enforces the rule even when a
+  // message string smuggles one in — several arrive as raw HTML from
+  // third-party table plugins, where it cannot be caught at the call site.
+  br
+    display: none
+
+// Centre every message in its panel, not just across it.  Most of these were
+// plain blocks sitting at the top of an otherwise empty panel; this gives them
+// the same centring `.empty-overlay` has always had.
+//
+// `.dt-empty` is deliberately absent: it is a table cell, and `display: flex`
+// would take it out of the table layout.  It is handled below.
+.filesystem-empty-overlay,
+.filesystem-loading-overlay,
+.problems-empty,
+.search-results-empty,
+.event-log-marker-empty,
+.trace-log-empty,
+.point-list-empty,
+.flow-steps-empty,
+.frame-viewer-empty,
+.frame-viewer-draw-calls-empty,
+.pixel-history-empty,
+.shader-debug-empty,
+.shader-debug-values-empty,
+.video-player-empty,
+.agent-workspace-empty
+  display: flex
+  width: 100%
+  height: 100%
+  justify-content: center
+  align-items: center
+
+// The event log renders its empty message as a DataTables cell.  `data_tables.styl`
+// restyles the whole table — `table`/`tbody` become blocks, `tr` a flex row and
+// `td` a grid — so this centres the grid way, not the table-cell way, and the
+// row above it has to stretch before "centred in the panel" means anything.
+//
+// Scoped with `:has()` to tables that are actually showing the empty message, so
+// tables with rows in them keep their natural row heights.
+table:has(> tbody > tr > .dt-empty),
+table:has(> tbody > tr > .dataTables_empty)
+  height: 100%
+
+  tbody
+    height: 100%
+
+  tr
+    height: 100%
+
+.dt-empty,
+.dataTables_empty
+  place-items: center
+  width: 100%
+  height: 100%

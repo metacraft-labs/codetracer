@@ -13,9 +13,41 @@ when defined(js):
   from ../viewmodel/views/isonim_menu_shell_view import
     MenuNestedRecord, MenuNodeRecord, MenuNodeRecordKind, MenuRecordElement,
     MenuRecordFolder, MenuSearchResultRecord, MenuShellCallbacks,
-    MenuShellModel, NavigationMenuId, renderMenuShellInto
+    MenuShellModel, NavigationMenuId, captionBarHostClasses, renderMenuShellInto
   from menu_render_gate import
     MenuRenderGate, invalidate, menuRenderSignature, noteRendered, shouldRender
+
+  var captionBarFullscreen = false
+    ## Whether the window is in native fullscreen.  Owned here because no render
+    ## pass knows about it: it changes from OS window events, not from state.
+
+  proc applyCaptionBarWindowMode*() =
+    ## Reconcile the caption-bar host (`#menu`) with the current window mode.
+    ##
+    ## Applied here rather than during a menu render because the wrapper the
+    ## shell view builds is discarded by `renderMenuShellInto` — only its
+    ## children survive — and because `ui/session_tabs.nim` renders the session
+    ## tab bar into the same host independently of the shell.  On the welcome
+    ## screen that tab bar is the only occupant, so a render-time hook would
+    ## leave it sitting under the window buttons.
+    let host = ui_imports.kdom.document.getElementById(cstring"menu")
+    if host.isNil:
+      return
+    let existing = $host.getAttribute(cstring"class")
+    host.setAttribute(
+      cstring"class",
+      cstring(captionBarHostClasses(
+        existing,
+        reserveWindowControls = defined(ctmacos),
+        fullscreen = captionBarFullscreen)))
+
+  proc setCaptionBarFullscreen*(fullscreen: bool) =
+    ## Called from the `window-fullscreen-changed` IPC message that
+    ## `index/window.nim` sends on the OS enter/leave-fullscreen events.
+    if captionBarFullscreen == fullscreen:
+      return
+    captionBarFullscreen = fullscreen
+    applyCaptionBarWindowMode()
 
   # Issue #555 — "Redraw issue on new file open".
   #
