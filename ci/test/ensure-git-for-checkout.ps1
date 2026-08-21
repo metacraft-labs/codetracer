@@ -96,6 +96,7 @@ $savedGitConfigParameters = $env:GIT_CONFIG_PARAMETERS
 $savedGitConfigCount = $env:GIT_CONFIG_COUNT
 $savedGitConfigKey0 = $env:GIT_CONFIG_KEY_0
 $savedGitConfigValue0 = $env:GIT_CONFIG_VALUE_0
+$savedGitConfigSystem = $env:GIT_CONFIG_SYSTEM
 $hostGit = (Get-Command git -ErrorAction Stop).Source
 
 try {
@@ -128,19 +129,33 @@ try {
     [IO.File]::WriteAllText($githubPath, "")
     [IO.File]::WriteAllText($githubEnv, "")
     $env:PATH = "original-path"
-    $state = [PSCustomObject]@{ Provisioned = $false }
+    # The candidate git.exe here is a text fixture, so the system-scope write is
+    # recorded rather than executed. What the recorder asserts is the WIRING --
+    # that the entry point performs the opt-in exactly once, against the git it
+    # selected. `Enable-CodeTracerGitSystemLongPaths` itself is exercised
+    # against the real binary further below.
+    $state = [PSCustomObject]@{ Provisioned = $false; LongPathCalls = 0; LongPathGit = "" }
     $result = Ensure-CodeTracerGitForCheckout `
       -Destination (Join-Path $caseRoot "must-not-install") `
       -GitHubPathFile $githubPath `
       -GitHubEnvFile $githubEnv `
       -CandidateProvider { @($git) } `
       -VersionReader { param($path) [Version]"2.51.2" } `
+      -EnableSystemLongPaths {
+        param($gitPath)
+        $state.LongPathCalls += 1
+        $state.LongPathGit = $gitPath
+      } `
       -ProvisionGit {
         param($destination, $versionReader)
         $state.Provisioned = $true
         throw "provisioning must not run"
       }
     Assert-True (-not $state.Provisioned) "A supported existing Git triggered provisioning."
+    Assert-True ($state.LongPathCalls -eq 1) `
+      "The bootstrap did not enable system long-path support exactly once."
+    Assert-True ($state.LongPathGit -ceq (Resolve-Path $git).Path) `
+      "System long-path support was not enabled through the selected Git."
     Assert-True ($result.Path -ceq (Resolve-Path $git).Path) `
       "The supported Git candidate was not selected."
     Assert-True ($result.Version -eq [Version]"2.51.2") `
@@ -186,7 +201,12 @@ try {
     [IO.File]::WriteAllText($githubEnv, "")
     $assetBytes = [Text.Encoding]::UTF8.GetBytes("reviewed portable git fixture")
     $assetSha = Get-BytesSha256 $assetBytes
-    $state = [PSCustomObject]@{ Downloads = 0; Extractions = 0 }
+    $state = [PSCustomObject]@{
+      Downloads = 0
+      Extractions = 0
+      LongPathCalls = 0
+      LongPathGit = ""
+    }
     $env:PATH = "runner-path-without-git-or-choco"
 
     $result = Ensure-CodeTracerGitForCheckout `
@@ -195,6 +215,11 @@ try {
       -GitHubEnvFile $githubEnv `
       -CandidateProvider { @() } `
       -VersionReader { param($path) [Version]"2.55.0" } `
+      -EnableSystemLongPaths {
+        param($gitPath)
+        $state.LongPathCalls += 1
+        $state.LongPathGit = $gitPath
+      } `
       -ProvisionGit {
         param($installDestination, $versionReader)
         Install-CodeTracerPortableGit `
@@ -225,6 +250,10 @@ try {
       "PortableGit did not propagate both cmd and bin."
     Assert-True (@(Get-ChildItem -LiteralPath $caseRoot -Filter '*.exe').Count -eq 0) `
       "The verified self-extracting archive was not cleaned up."
+    Assert-True ($state.LongPathCalls -eq 1) `
+      "The bootstrap did not enable system long-path support exactly once."
+    Assert-True ($state.LongPathGit -ceq $result.Path) `
+      "System long-path support was not enabled through the provisioned Git."
   }
 
   Invoke-Test "rejects an artifact whose SHA256 does not match" {
@@ -507,6 +536,77 @@ try {
       Remove-Item -LiteralPath Env:GIT_CONFIG_VALUE_1 -ErrorAction SilentlyContinue
     }
   }
+
+  # The system-scoped opt-in, exercised against the real git binary rather than
+  # a stub. `git config --system` honours $GIT_CONFIG_SYSTEM, so the scope can
+  # be redirected at a temporary file and the write, the read-back and the
+  # resulting file are all genuine.
+  # https://git-scm.com/docs/git-config#Documentation/git-config.txt-GITCONFIGSYSTEM
+  Invoke-Test "enables Windows long paths in the system Git configuration" {
+    $caseRoot = New-TestDirectory "system-longpaths"
+    $systemConfig = Join-Path $caseRoot "gitconfig-system"
+    $env:GIT_CONFIG_SYSTEM = $systemConfig
+    try {
+      Assert-True (-not (Test-Path -LiteralPath $systemConfig)) `
+        "The system configuration fixture existed before the opt-in ran."
+      $value = Enable-CodeTracerGitSystemLongPaths -GitPath $hostGit
+      Assert-True ($value -ceq "true") `
+        "The opt-in did not report the value it read back."
+      Assert-True (Test-Path -LiteralPath $systemConfig -PathType Leaf) `
+        "The opt-in did not write git's system configuration file."
+      $observed = (& $hostGit config --system --get core.longpaths)
+      Assert-True ($LASTEXITCODE -eq 0 -and $observed -ceq "true") `
+        "git does not resolve core.longpaths to true in the system scope."
+    }
+    finally {
+      $env:GIT_CONFIG_SYSTEM = $savedGitConfigSystem
+    }
+  }
+
+  # The failure the read-back exists for: `git config` reporting success while
+  # persisting nothing, which is what an unreachable or unwritable system scope
+  # looks like from the caller's side.
+  #
+  # MOCK JUSTIFIED. This is the one branch a real binary cannot be driven into:
+  # git either writes the value and reports success, or reports failure. An
+  # injected runner is the only way to observe that the read-back -- rather than
+  # the exit status -- is what gates the step. It also records the exact
+  # argument vectors, so a fix that quietly changed scope (`--global`, which
+  # does not reach submodule clones) is caught here too. Every other assertion
+  # about this function above and below runs the real git.
+  Invoke-Test "fails closed when the system configuration does not take" {
+    $recorded = New-Object Collections.ArrayList
+    Assert-Throws -ExpectedMessage "reads back as" -Action {
+      Enable-CodeTracerGitSystemLongPaths `
+        -GitPath "git" `
+        -GitRunner {
+          param($gitPath, $arguments)
+          [void]$recorded.Add(($arguments -join " "))
+          [PSCustomObject]@{ ExitCode = 0; Output = "" }
+        } | Out-Null
+    }
+    Assert-True ($recorded.Count -eq 2) `
+      "The opt-in did not both write and read the setting back."
+    Assert-True ($recorded[0] -ceq "config --system --replace-all core.longpaths true") `
+      "The opt-in did not enable core.longpaths in git's system scope."
+    Assert-True ($recorded[1] -ceq "config --system --get core.longpaths") `
+      "The opt-in did not read the system value back."
+  }
+
+  Invoke-Test "propagates a failed system configuration write" {
+    $caseRoot = New-TestDirectory "system-longpaths-unwritable"
+    $directoryInsteadOfFile = Join-Path $caseRoot "gitconfig-system-directory"
+    New-Item -ItemType Directory -Path $directoryInsteadOfFile | Out-Null
+    $env:GIT_CONFIG_SYSTEM = $directoryInsteadOfFile
+    try {
+      Assert-Throws -ExpectedMessage "system Git configuration failed" -Action {
+        Enable-CodeTracerGitSystemLongPaths -GitPath $hostGit | Out-Null
+      }
+    }
+    finally {
+      $env:GIT_CONFIG_SYSTEM = $savedGitConfigSystem
+    }
+  }
 }
 finally {
   $env:PATH = $savedPath
@@ -514,10 +614,11 @@ finally {
   $env:GIT_CONFIG_COUNT = $savedGitConfigCount
   $env:GIT_CONFIG_KEY_0 = $savedGitConfigKey0
   $env:GIT_CONFIG_VALUE_0 = $savedGitConfigValue0
+  $env:GIT_CONFIG_SYSTEM = $savedGitConfigSystem
   Remove-Item -LiteralPath $script:TestRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($script:Passed -ne 16) {
-  throw "Expected 16 Git bootstrap tests, but $($script:Passed) passed."
+if ($script:Passed -ne 19) {
+  throw "Expected 19 Git bootstrap tests, but $($script:Passed) passed."
 }
-Write-Host "Git bootstrap contract tests passed: 16/16"
+Write-Host "Git bootstrap contract tests passed: 19/19"
