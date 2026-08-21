@@ -1,15 +1,23 @@
 ## codetracer/docs/book-isonim -- nav-structure test (C-target).
 ##
 ## The new book DELIBERATELY diverges from the old mdBook SUMMARY.md to match
-## the WebFlow docs organization: THREE top-level sections in a fixed order
+## the WebFlow docs organization: three top-level sections in a fixed order
 ## (Getting Started, Usage Guide, Reference), with `building_and_packaging` +
 ## `misc` folded into `reference` and the root `installation` page moved under
-## `getting_started`. This test proves that reorganization:
+## `getting_started`. DS-1 added a FOURTH, `deep_review`, between Usage Guide
+## and Reference. This test proves that organization:
 ##   1. every page is still present (nothing dropped in the fold);
-##   2. the content collapses to exactly the three WebFlow sections;
+##   2. the content collapses to exactly those four sections -- no strays, and
+##      none of the pre-fold sections back;
 ##   3. the WebFlow-listed pages lead each section in WebFlow order; and
-##   4. the sidebar renders the three sections in the WebFlow order (via
-##      `DocsConfig.sectionOrder`, not the framework's default alphabetical).
+##   4. the sidebar renders the sections in the configured order (via
+##      `DocsConfig.sectionOrder`, not the framework's default alphabetical --
+##      which would put `deep_review` first, ahead of Getting Started).
+##
+## The DeepReview section's own contract (routing, sidebar placement, the
+## `/usage_guide/deep_review` redirect, and what the pages may claim) is
+## `test_deep_review_section.nim`; what stays here is the book-wide structure
+## every section shares.
 
 import std/[unittest, os, tables, sequtils, sets, strutils]
 import core/[content, routes, navigation_vm]
@@ -55,7 +63,7 @@ proc unqualifiedCertificateClaim(page: string; allowed: seq[string];
   where & ": unqualified certificate claim near: ..." &
     remaining[start .. finish] & "..."
 
-suite "book nav matches the WebFlow 3-section organization":
+suite "book nav matches the book's four-section organization":
   let dir = contentDir()
   let entries = loadContentEntries(dir)
 
@@ -76,15 +84,19 @@ suite "book nav matches the WebFlow 3-section organization":
     # `getting_started/php` and `getting_started/elixir` basics pages, which
     # were the only supported languages with no getting-started page at all.
     #
-    # +1 = `usage_guide/deep_review`, the DeepReview workflow page (RV-8).
-    check entries.len == 61
+    # +5 = the `deep_review` section (DS-1), which is the single RV-8
+    # `usage_guide/deep_review` article split into an Introduction that argues
+    # why the feature exists plus four articles: collecting, reading, the agent
+    # workflow, and the deferrals.
+    check entries.len == 65
 
-  test "content collapses to exactly the three WebFlow sections":
+  test "content collapses to exactly the four sections":
     var sections: seq[string] = @[]
     for e in entries:
       if e.section.len > 0 and e.section notin sections:
         sections.add e.section
-    check sections.toHashSet == ["getting_started", "usage_guide", "reference"].toHashSet
+    check sections.toHashSet ==
+      ["getting_started", "usage_guide", "deep_review", "reference"].toHashSet
     # the old sections are gone
     check "misc" notin sections
     check "building_and_packaging" notin sections
@@ -110,15 +122,18 @@ suite "book nav matches the WebFlow 3-section organization":
     leads("reference", @["/reference/build_systems", "/reference/contributing",
       "/reference/troubleshooting", "/reference/environment_variables",
       "/reference/building_docs"])
+    # DS-1: the section opens with the Introduction, before any command page.
+    leads("deep_review", @["/deep_review", "/deep_review/collecting",
+      "/deep_review/reading"])
 
-  test "the sidebar renders the three sections in WebFlow order":
+  test "the sidebar renders the four sections in the configured order":
     let manifest = buildManifestFromContent(dir)
     let navPages = buildNavPages(manifest,
       proc(p: string): ContentEntry = loadContentEntry(dir, p))
     let sidebar = buildSidebar(navPages, "", bookDocsConfig().sectionOrder)
     # top-level section keys, in the order the sidebar lays them out
     let keys = sidebar.sections.mapIt(it.key).filterIt(it.len > 0)
-    check keys == @["getting_started", "usage_guide", "reference"]
+    check keys == @["getting_started", "usage_guide", "deep_review", "reference"]
 
   test "every internal link resolves to a page that exists":
     ## Dangling cross-references are the failure mode a hand-maintained book
@@ -186,16 +201,28 @@ suite "book nav matches the WebFlow 3-section organization":
     ## explicitly marked as not yet available."
     ##
     ## The parts of that rule a test can hold are the ones stated as text: the
-    ## page exists and is reachable, the CLI reference carries both command
+    ## content exists and is reachable, the CLI reference carries both command
     ## groups, and the two claims it would be easiest to make wrongly -- that
     ## `ct test` issues certificates, and that `ct review inspect` reads a
-    ## materialized dataset -- are absent or qualified.  The page is where a
-    ## user forms their expectations, so a false sentence here costs more than
-    ## a false one anywhere else in the book.
+    ## materialized dataset -- are absent or qualified.  These are where a user
+    ## forms their expectations, so a false sentence here costs more than a
+    ## false one anywhere else in the book.
+    ##
+    ## DS-1 split the single page into a section, so the assertions read the
+    ## section's pages joined rather than one file.  Reading them JOINED is
+    ## deliberate: the rule is about what the documentation as a whole says, and
+    ## pinning each sentence to the page it currently lives on would fail the
+    ## next time an article is rebalanced without anything untrue being written.
+    ## `test_deep_review_section.nim` pins the per-page structure.
     let routes = entries.mapIt(it.routePath).toHashSet
-    check "/usage_guide/deep_review" in routes
+    check "/deep_review" in routes
 
-    let page = readFile(dir / "usage_guide" / "deep_review.md")
+    var page = ""
+    for path in walkDirRec(dir / "deep_review"):
+      if path.endsWith(".md"):
+        page.add readFile(path) & "\n"
+    check page.len > 0
+
     # The three commands the workflow is made of.
     check page.contains("ct review collect")
     check page.contains("ct review <PATH>")
@@ -224,11 +251,12 @@ suite "book nav matches the WebFlow 3-section organization":
     # line-based check would miss.
     check unqualifiedCertificateClaim(page,
       allowed = @["issues **no test certificates**"],
-      where = "usage_guide/deep_review.md") == ""
+      where = "deep_review/*.md") == ""
 
-    # The usage-guide index routes a reader to it, and the CLI reference
-    # carries the flag tables the page defers to.
-    check readFile(dir / "usage_guide" / "index.md").contains("deep_review.md")
+    # The usage-guide index still routes a reader to the feature, which now
+    # lives one section over -- the guide is where somebody learning to record
+    # and replay is standing when they first need it.
+    check readFile(dir / "usage_guide" / "index.md").contains("(/deep_review)")
     let cli = readFile(dir / "reference" / "ct_cli.md")
     check cli.contains("### ct review collect")
     check cli.contains("### ct review inspect")

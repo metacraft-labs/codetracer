@@ -40,11 +40,18 @@ proc bookDocsConfig*(basePath = ""): DocsConfig =
     # `basePath` only rewrites the root-relative URLs (see `core/base_path`).
     baseUrl: docsSiteOrigin & base,
     basePath: base,
-    # Match the WebFlow docs organization: the sidebar's three top-level
-    # sections in this order (the framework otherwise sorts sections
-    # alphabetically). Content was folded to these three -- building_and_packaging
-    # + misc into reference, installation into getting_started.
-    sectionOrder: @["getting_started", "usage_guide", "reference"],
+    # The sidebar's top-level sections, in this order (the framework otherwise
+    # sorts sections ALPHABETICALLY -- which would file `deep_review` ahead of
+    # Getting Started). The first three are the WebFlow docs organization;
+    # content was folded to them in M1 -- building_and_packaging + misc into
+    # reference, installation into getting_started.
+    #
+    # DS-1 added the fourth. DeepReview outgrew being one page inside the usage
+    # guide -- it has a CLI, three panels and a browser extension -- and it sits
+    # AFTER `usage_guide` because it is a feature a reader reaches for once they
+    # know how to record and replay, and BEFORE `reference` because it is still
+    # prose to read rather than tables to look things up in.
+    sectionOrder: @["getting_started", "usage_guide", "deep_review", "reference"],
     # The CodeTracer look is delivered by the token layer + `assets/style.css`
     # (prepended via `buildSite(docsTokensCss = ...)`), not by pointing
     # `stylesheetHref` elsewhere, so the SSG hash/purge/non-dangling

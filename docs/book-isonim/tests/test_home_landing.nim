@@ -10,8 +10,9 @@
 ## that the old plain-prose "Introduction" home is gone while its content is
 ## still reachable at its own `/getting_started/introduction` route.
 
-import std/[unittest, os, strutils]
+import std/[unittest, strutils]
 import ../src/ssr
+import ../src/dev   # newDocsDevServer + handleRoute: the served stylesheet
 
 suite "book home renders the WebFlow-parity landing (hero + cards)":
   test "the home is the landing: hero + Start-here + Popular-articles grids":
@@ -138,8 +139,16 @@ suite "book home renders the WebFlow-parity landing (hero + cards)":
     # supersedes the M6 widening (which the operator rejected): a constrained
     # ~800px central content column and a 2-UP card grid, verified at the CSS
     # rule level (the SSR HTML alone can't express column width / grid tracks).
-    const styleCssPath = currentSourcePath().parentDir().parentDir() / "assets" / "style.css"
-    let css = readFile(styleCssPath)
+    # The stylesheet is read from the DEV SERVER, not from a path on disk. The
+    # book stopped shipping its own `assets/style.css` when it moved to the
+    # framework's single canonical stylesheet + the shared token layer, so a
+    # `readFile` here has been raising `cannot open: assets/style.css` ever
+    # since. Asking the server for `/assets/style.css` gets the CSS the book
+    # actually serves -- framework rules with this book's tokens prepended,
+    # assembled exactly as `just build` assembles it -- which is the thing the
+    # assertions below are about, and it needs no prior build.
+    let (cssStatus, _, css) = handleRoute(newDocsDevServer(), "/assets/style.css")
+    check cssStatus == 200
     # The card grid is 2-up (WebFlow), never the reverted 3-up.
     check css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))")
     check not css.contains("repeat(3, minmax(0, 1fr))")
