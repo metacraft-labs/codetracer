@@ -1,3 +1,4 @@
 User-agent: *
 Allow: /
 Sitemap: https://docs.codetracer.com/sitemap.xml
+Disallow: /pr/
