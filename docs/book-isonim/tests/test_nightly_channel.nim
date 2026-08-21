@@ -80,13 +80,23 @@ suite "the nightly channel is built under its URL prefix":
     defer: removeDir(outDir)
 
     let written = generateRedirects(outDir, summaryPath(), "/nightly")
-    check written > 0
+    check written.legacy > 0
+    # DS-1 added a second redirect family -- clean routes the book itself has
+    # moved. It is prefixed by the same code path, and asserted here because a
+    # family that silently emitted nothing under a channel prefix would leave
+    # the nightly site 404ing on URLs the released site still serves.
+    check written.moved > 0
 
     let stub = outDir / "getting_started" / "python.html"
     check fileExists(stub)
     # A stub that redirected to `/getting_started/python` would bounce the
     # reader out of the nightly site and onto the released one.
     check metaRefreshTarget(readFile(stub)) == "/nightly/getting_started/python"
+
+    for moved in movedRoutes:
+      let movedStub = outDir / moved.oldRoute[1 .. ^1] / "index.html"
+      check fileExists(movedStub)
+      check metaRefreshTarget(readFile(movedStub)) == "/nightly" & moved.newRoute
 
     let manifest = readFile(outDir / "_redirects")
     check manifest.contains(

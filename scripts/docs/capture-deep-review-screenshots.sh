@@ -170,7 +170,37 @@ magick "${WORK}/window.png" -resize 1500x "${OUTPUT_DIR}/review-window.png"
 # The close-up: the diff tab, where the steppers and the value chips are.
 magick "${WORK}/window.png" -crop 600x400+270+60 +repage -resize 1200x \
 	"${OUTPUT_DIR}/diff-tab.png"
+# The second close-up: the VCS panel, the review's whole navigation surface.
+# `deep_review/reading.md` walks it control by control — the `Review: <commit>`
+# header, the trace-context selector, the Unified Diff toggle and the
+# changed-file row with its coverage badge — and all four are unreadably small
+# in the whole-window shot.
+#
+# The crop is derived from the captured window, not written as four fixed
+# numbers, so a different CODETRACER_BOOK_SCREENSHOT_SCREEN (or a different
+# trim) still frames the panel. The two axes are derived DIFFERENTLY, because
+# the panel behaves differently on each:
+#
+#   * WIDTH is a fraction. The panel is a flex column of the layout, so it keeps
+#     its share of a wider or narrower window.
+#   * HEIGHT is in pixels. Its contents are fixed-height chrome — a header, a
+#     dropdown, a totals line, a toggle and one row per changed file — so the
+#     panel occupies the SAME number of pixels in a short window as in a tall
+#     one, and a larger FRACTION of the short one. Taking 20% of the height
+#     framed it at 2560x1200 and cut the changed-file row off at 1600x900,
+#     which is the one control the article's coverage-badge paragraph needs.
+#
+# A here-string, not a process substitution: `identify -format` emits no
+# trailing newline, so `read` would hit EOF, return non-zero and take the whole
+# script down under `set -e` — after eight minutes of recording.
+read -r WIN_W WIN_H <<<"$(magick identify -format '%w %h' "${WORK}/window.png")"
+VCS_TOP=30 # skips the window's own title/toolbar strip, above the tab row
+VCS_HEIGHT=280
+magick "${WORK}/window.png" \
+	-crop "$((WIN_W * 15 / 100))x${VCS_HEIGHT}+0+${VCS_TOP}" \
+	+repage -resize 900x "${OUTPUT_DIR}/vcs-panel.png"
 
-echo "capture-deep-review-screenshots: wrote"
+echo "capture-deep-review-screenshots: captured window ${WIN_W}x${WIN_H}; wrote"
 echo "  ${OUTPUT_DIR}/review-window.png"
 echo "  ${OUTPUT_DIR}/diff-tab.png"
+echo "  ${OUTPUT_DIR}/vcs-panel.png"

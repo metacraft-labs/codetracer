@@ -31,7 +31,7 @@ proc consumerDir(): string =
 
 proc summaryPath(): string = consumerDir() / "../book/src/SUMMARY.md"
 
-proc redirectsInto(dir, basePath: string): int =
+proc redirectsInto(dir, basePath: string): RedirectCounts =
   ## Generate this channel's redirect artifacts into a fresh `dir`.
   removeDir(dir)
   createDir(dir)
@@ -74,7 +74,16 @@ suite "a pull request's docs preview is built under its own URL prefix":
     let outDir = getTempDir() / "ct-book-preview-redirects"
     let written = redirectsInto(outDir, "/pr/4242")
     defer: removeDir(outDir)
-    check written > 0
+    check written.legacy > 0
+    # DS-1's second family: clean routes the book has moved. Their stubs live at
+    # `<old route>/index.html`, so a preview that emitted them unprefixed would
+    # put a redirect to the RELEASED site at the exact path the preview's own
+    # reader lands on.
+    check written.moved > 0
+    for moved in movedRoutes:
+      let movedStub = outDir / moved.oldRoute[1 .. ^1] / "index.html"
+      check fileExists(movedStub)
+      check metaRefreshTarget(readFile(movedStub)) == "/pr/4242" & moved.newRoute
 
     let stub = outDir / "getting_started" / "python.html"
     check fileExists(stub)

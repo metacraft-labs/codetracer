@@ -47,13 +47,17 @@ when isMainModule:
   let n = buildDocsSite(bookDocsConfig(channelBase),
                         docsTokensCss = metacraftDocsTokensCss(),
                         clientEntry = "src/main.nim")
-  # Post-build: emit legacy-URL redirect artifacts (meta-refresh *.html
-  # stubs + a _redirects manifest) so every old mdBook deep link still
-  # resolves. Runs AFTER buildSite (which wipes+rebuilds public/) so the
-  # stubs survive, and after the static copy so the collision guard sees
-  # every real page already in place. The stubs are plain HTML the framework
-  # never sees, so they carry the channel prefix explicitly.
+  # Post-build: emit the redirect artifacts (meta-refresh stubs + a _redirects
+  # manifest) so no published URL breaks -- the legacy mdBook `*.html` deep
+  # links, and the clean routes this book has since moved between sections.
+  # Runs AFTER buildSite (which wipes+rebuilds public/) so the stubs survive,
+  # and after the static copy so the overwrite guard sees every real page
+  # already in place -- which is what lets a moved route's stub live at
+  # `<route>/index.html` without any risk of replacing a real page. The stubs
+  # are plain HTML the framework never sees, so they carry the channel prefix
+  # explicitly.
   let stubs = generateRedirects("public", legacySummaryPath, channelBase)
   echo "SSG: rendered ", n, " static pages into ./public/",
     (if channelBase.len > 0: " (hosted under " & channelBase & ")" else: "")
-  echo "SSG: emitted ", stubs, " legacy-URL redirect stubs + _redirects into ./public/"
+  echo "SSG: emitted ", stubs.legacy, " legacy-URL + ", stubs.moved,
+    " moved-route redirect stubs + _redirects into ./public/"

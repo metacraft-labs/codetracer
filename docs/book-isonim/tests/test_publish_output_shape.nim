@@ -5,15 +5,16 @@
 ## docs.codetracer.com -- has the shape GitHub Pages must serve:
 ##
 ##   * the real home page `index.html` (a rendered page, NOT a redirect stub),
-##   * all 49 rendered section/utility pages (one `<route>/index.html` per
+##   * all 65 rendered section/utility pages (one `<route>/index.html` per
 ##     content page), incl. a representative spread across every top-level
 ##     section and the WebFlow-parity faq/support/sign-in utility pages,
 ##   * the hashed, cache-busted theme stylesheet under `assets/` plus the
 ##     `assets/{fonts,img}` the CSS and content reference,
 ##   * the hashed `search-index.*.json` client search payload,
 ##   * `sitemap.xml` and `robots.txt`,
-##   * the M2 legacy-URL redirect artifacts: the meta-refresh `*.html` stubs
-##     AND the `_redirects` manifest.
+##   * the redirect artifacts: the M2 legacy-URL meta-refresh `*.html` stubs,
+##     DS-1's moved-clean-route stubs at `<old route>/index.html`, AND the
+##     `_redirects` manifest that lists both.
 ##
 ## No skips: if `public/` is missing (build not run), every assertion fails
 ## loudly. Run `just build` (or `nix develop ../../../isonim -c just build`)
@@ -21,6 +22,7 @@
 
 import std/[unittest, os, strutils]
 import core/content
+import ../src/redirects
 
 proc consumerDir(): string =
   currentSourcePath().parentDir().parentDir()
@@ -35,7 +37,9 @@ proc globOne(dir, pattern: string): seq[string] =
     result.add path
 
 proc isMetaRefresh(html: string): bool =
-  html.contains("http-equiv=\"refresh\"")
+  ## The redirect module's own predicate, so this test and the generator agree
+  ## on what a stub is by construction rather than by two copies of one string.
+  isRedirectStub(html)
 
 suite "the gh-pages publish output has the expected shape":
   let pub = publicDir()
@@ -52,21 +56,33 @@ suite "the gh-pages publish output has the expected shape":
     check html.contains("<html")
     check html.toLowerAscii.contains("codetracer")
 
-  test "all 61 rendered pages are present as clean-route index.html files":
+  test "all 65 rendered pages are present as clean-route index.html files":
     # The SSG emits every content page at `<route>/index.html`; the count must
     # match the ported content set exactly (46 M1 pages + the M5
     # `getting_started/introduction` article split out of the old root
     # `index.md` when it became the WebFlow-parity landing + the three
     # WebFlow-parity utility pages faq/support/sign-in = 50, + the nine
-    # live-request-tracking pages + the `sign-up` page = 60, + the
-    # `usage_guide/deep_review` DeepReview workflow page = 61).
+    # live-request-tracking pages + the `sign-up` page = 60, + the five
+    # `deep_review` section pages DS-1 split the single DeepReview article
+    # into = 65).
+    #
+    # `index.html` is no longer a sufficient test for "a rendered page". DS-1's
+    # moved-route redirects are stubs at `<old route>/index.html` -- that is the
+    # only path GitHub Pages serves for the trailing-slash URL a reader has --
+    # so a stub counted as a page would let the real page count drop by one for
+    # every route moved, silently, while this assertion stayed green.
     var pageCount = 0
+    var stubsAtPagePaths = 0
     for path in walkDirRec(pub, yieldFilter = {pcFile}):
       if path.lastPathPart == "index.html":
-        inc pageCount
-    check pageCount == 61
+        if isRedirectStub(readFile(path)): inc stubsAtPagePaths
+        else: inc pageCount
+    check pageCount == 65
     # Cross-check against the content source of truth.
-    check loadContentEntries(contentDir()).len == 61
+    check loadContentEntries(contentDir()).len == 65
+    # ...and the moved-route stubs are all accounted for, none of them shadowing
+    # a route the site still serves.
+    check stubsAtPagePaths == movedRoutes.len
 
   test "a representative page from every top-level section is present":
     let pages = [
