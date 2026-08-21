@@ -394,8 +394,25 @@ jobs:
           token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
+        # This job needs exactly one thing from this action: the three
+        # db-backend sibling checkouts. It provisions its own toolchain right
+        # below (`ensure-origin-dap-windows-toolchain.ps1` downloads pinned
+        # capnp/nim/just; Rust and Python come from their own actions) and it
+        # never calls `dev-exec`.
+        #
+        # The flavor is `windows-diy` because `nix` is not merely unnecessary
+        # here, it is impossible: it installs Nix through
+        # DeterminateSystems/nix-installer-action, which has no Windows
+        # platform mapping, and the step aborts with "ArchOs (X64-Windows)
+        # doesn't map to a supported Nix platform" before this job reaches any
+        # step of its own. `windows-diy` sources env.ps1 instead -- the same
+        # flavor windows-rust-components and windows-headless-test already use
+        # on this runner class, and the reason `npm` resolves in "Generate
+        # tree-sitter-nim parser" below, since nothing else in this job
+        # provides Node.
         uses: ./.github/actions/setup-db-backend-siblings
         with:
+          env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Rust toolchain
@@ -553,8 +570,13 @@ jobs:
           token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup db-backend siblings
+        # `windows-diy`, for the reason spelled out in the per-PR job above:
+        # the `nix` flavor cannot install Nix on a Windows runner, and this
+        # job wants the sibling checkouts, not a Nix shell. Keep the two in
+        # step.
         uses: ./.github/actions/setup-db-backend-siblings
         with:
+          env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Rust toolchain
@@ -1417,6 +1439,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
+          env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run required materialized Python origin-DAP gate
@@ -1471,6 +1494,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
+          env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run routed materialized origin-DAP matrix
@@ -1509,6 +1533,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
+          env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup isonim siblings
@@ -1823,6 +1848,7 @@ jobs:
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
+          env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
