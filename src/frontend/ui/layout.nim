@@ -245,6 +245,179 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   """.}
 
 
+proc setupSelectedPanelOutline() =
+  ## Draw the selected panel's outline as ONE stroked SVG path.
+  ##
+  ## The tab's concave connectors are painted by box-shadows, and a shadow is a
+  ## fill with no edge — nothing to put a border on.  Every CSS attempt to
+  ## outline the shape therefore stroked some *other* rectangle and cut across
+  ## the curve.  A single path sidesteps that entirely: tab, both connectors and
+  ## the panel are one continuous outline, so the joins are exact by
+  ## construction rather than by alignment.
+  ##
+  ## The path is rebuilt from measured geometry, so it follows any tab width,
+  ## any radius and any panel size.  Stroke colour and width come from the
+  ## stylesheet (`.ct-selected-outline`), keeping them on design tokens.
+  {.emit: """
+    (function () {
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var OUTLINE_CLASS = 'ct-selected-outline';
+
+      // Each corner carries its own radius: they are not interchangeable.  The
+      // top-left is squared when the tab is flush against it, and reading one
+      // corner for all four drew a square outline over a rounded panel.
+      function buildPath(w, h, tabX0, tabX1, tabTop, panelTop, panelBottom,
+                         tabTL, tabTR, panelTL, panelTR, panelBR, panelBL,
+                         connR, inset, tabIsFirst) {
+        // Inset by half the stroke so the line sits INSIDE the shape: SVG
+        // centres a stroke on its path.
+        var l = inset, r = w - inset, b = panelBottom - inset, t = tabTop + inset;
+        var x0 = tabX0 + inset, x1 = tabX1 - inset, pt = panelTop + inset;
+
+        // Clockwise from the tab's top-left. Convex corners sweep 1, the two
+        // concave connectors sweep 0 — that flag is the whole difference
+        // between a rounded corner and the curve that flows into the panel.
+        var d = [];
+        d.push('M', x0 + tabTL, t);
+        d.push('L', x1 - tabTR, t);
+        d.push('A', tabTR, tabTR, 0, 0, 1, x1, t + tabTR);
+        d.push('L', x1, pt - connR);
+        d.push('A', connR, connR, 0, 0, 0, x1 + connR, pt);
+        d.push('L', r - panelTR, pt);
+        d.push('A', panelTR, panelTR, 0, 0, 1, r, pt + panelTR);
+        d.push('L', r, b - panelBR);
+        d.push('A', panelBR, panelBR, 0, 0, 1, r - panelBR, b);
+        d.push('L', l + panelBL, b);
+        d.push('A', panelBL, panelBL, 0, 0, 1, l, b - panelBL);
+        if (tabIsFirst) {
+          // The tab is flush with the panel's left edge: one straight run from
+          // the panel's bottom-left up the shared edge into the tab.  No corner
+          // to round, and no connector — there is nothing to its left.
+          d.push('L', l, t + tabTL);
+        } else {
+          d.push('L', l, pt + panelTL);
+          d.push('A', panelTL, panelTL, 0, 0, 1, l + panelTL, pt);
+          d.push('L', x0 - connR, pt);
+          d.push('A', connR, connR, 0, 0, 0, x0, pt - connR);
+          d.push('L', x0, t + tabTL);
+        }
+        d.push('A', tabTL, tabTL, 0, 0, 1, x0 + tabTL, t);
+        d.push('Z');
+        return d.join(' ');
+      }
+
+      function radiusOf(el, pseudo, prop) {
+        var v = parseFloat(window.getComputedStyle(el, pseudo || null)[prop]);
+        return isFinite(v) ? v : 0;
+      }
+
+      function clearOutlines(except) {
+        var existing = document.querySelectorAll('.' + OUTLINE_CLASS);
+        for (var i = 0; i < existing.length; i++) {
+          if (existing[i] !== except) { existing[i].remove(); }
+        }
+      }
+
+      function update() {
+        var stack = document.querySelector('.lm_stack:has(> .lm_header.lm_focused)');
+        if (stack === null) { clearOutlines(null); return; }
+
+        var tab = stack.querySelector(':scope > .lm_header .lm_tab.lm_active');
+        var items = stack.querySelector(':scope > .lm_items');
+        if (tab === null || items === null) { clearOutlines(null); return; }
+
+        var sr = stack.getBoundingClientRect();
+        var tr = tab.getBoundingClientRect();
+        var ir = items.getBoundingClientRect();
+        if (sr.width < 1 || ir.height < 1) { clearOutlines(null); return; }
+
+        var svg = stack.querySelector(':scope > .' + OUTLINE_CLASS);
+        if (svg === null) {
+          svg = document.createElementNS(SVG_NS, 'svg');
+          svg.setAttribute('class', OUTLINE_CLASS);
+          svg.appendChild(document.createElementNS(SVG_NS, 'path'));
+          stack.appendChild(svg);
+        }
+        clearOutlines(svg);
+
+        var path = svg.firstChild;
+        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
+
+        svg.setAttribute('viewBox', '0 0 ' + sr.width + ' ' + sr.height);
+        svg.setAttribute('width', sr.width);
+        svg.setAttribute('height', sr.height);
+
+        path.setAttribute('d', buildPath(
+          sr.width, sr.height,
+          tr.left - sr.left, tr.right - sr.left, tr.top - sr.top,
+          ir.top - sr.top, ir.bottom - sr.top,
+          radiusOf(tab, null, 'borderTopLeftRadius'),
+          radiusOf(tab, null, 'borderTopRightRadius'),
+          radiusOf(items, null, 'borderTopLeftRadius'),
+          radiusOf(items, null, 'borderTopRightRadius'),
+          radiusOf(items, null, 'borderBottomRightRadius'),
+          radiusOf(items, null, 'borderBottomLeftRadius'),
+          radiusOf(tab, '::before', 'borderBottomRightRadius') || 10,
+          strokeWidth / 2,
+          tab.parentElement !== null && tab.parentElement.firstElementChild === tab));
+      }
+
+      var pending = false;
+      function schedule() {
+        if (pending) { return; }
+        pending = true;
+        window.requestAnimationFrame(function () { pending = false; update(); });
+      }
+
+      // Focus moves by a class change, wherever it came from — a tab click, the
+      // click-to-focus listener, or GoldenLayout itself — so watch the class
+      // rather than any one entry point.  Resizes and tab drags change the
+      // geometry without touching focus, hence the resize hook too.
+      var observer = new MutationObserver(schedule);
+      observer.observe(document.body, {
+        attributes: true, attributeFilter: ['class'], subtree: true, childList: true
+      });
+      window.addEventListener('resize', schedule);
+      schedule();
+    })();
+  """.}
+
+proc setupClickToFocusListeners() =
+  ## Focus the panel the user clicks *into*, not only the one whose tab they hit.
+  ##
+  ## GoldenLayout only focuses a stack from its tab, so clicking straight into a
+  ## panel's body left the selected-panel surface behind on whichever tab was
+  ## touched last — the highlight pointed at a panel the user was not working in.
+  ##
+  ## The click is forwarded to the stack's already-active tab rather than the
+  ## focus class being set directly, so GoldenLayout's own focus bookkeeping runs
+  ## (it blurs the previously focused item and emits its focus event); setting the
+  ## class here would leave the two disagreeing.
+  ##
+  ## Listens in the capture phase and never calls `preventDefault`, so the click
+  ## still reaches whatever was clicked — this only runs alongside it.
+  {.emit: """
+    document.addEventListener('mousedown', function (ev) {
+      var target = ev.target;
+      if (!target || !target.closest) return;
+
+      var stack = target.closest('.lm_stack');
+      if (stack === null) return;
+
+      // Header clicks are GoldenLayout's own business: tabs, the close and pin
+      // buttons and the stack menu all live there and already focus correctly.
+      if (target.closest('.lm_header') !== null) return;
+
+      // Already the selected panel — nothing to do.
+      if (stack.querySelector(':scope > .lm_header.lm_focused') !== null) return;
+
+      var activeTab = stack.querySelector(':scope > .lm_header .lm_tab.lm_active');
+      if (activeTab !== null) {
+        activeTab.click();
+      }
+    }, true);
+  """.}
+
 proc setupDragToPinListeners(layout: GoldenLayout) =
   ## Wire drag-to-pin listener.
   ## Coordinates mousemove/mouseup events when a tab is dragged to check
@@ -1258,6 +1431,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       restoreAutoHideState(savedAutoHideState)
 
   setupDragToPinListeners(layout)
+  setupClickToFocusListeners()
+  setupSelectedPanelOutline()
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
     let isEditor = panel.config.componentState.isEditor.to(bool)
     let edge = panel.edge
