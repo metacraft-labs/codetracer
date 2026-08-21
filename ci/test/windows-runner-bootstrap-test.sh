@@ -68,6 +68,9 @@
 #      action `setup-db-backend-siblings`, which hard-coded `env-flavor: nix`
 #      for all six of its callers -- four of them Linux/macOS. Section 4 has
 #      its own header with the details.
+#   8. The bootstrap turns Windows long-path support on in git's SYSTEM
+#      configuration, and verifies it by reading the value back. Section 5 has
+#      its own header with the details.
 #
 # # No mocks
 #
@@ -129,6 +132,41 @@ readonly BOOTSTRAP_URL_PREFIX="https://raw.githubusercontent.com/metacraft-labs/
 # this is the exact text the workflow must contain.
 # shellcheck disable=SC2016
 readonly BOOTSTRAP_REVISION_BINDING='CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}'
+
+# --- Section 5's needles ----------------------------------------------------
+# The function that owns the system-scoped opt-in, and the two `git config`
+# argument vectors it must run, quoted as PowerShell source. Asserting the
+# DECLARATION FORM rather than the bare word `longpaths` is deliberate: the
+# word already appears in this script's own comments and in the job-scoped
+# environment channel, so a bare grep is green before the fix exists.
+readonly LONGPATHS_FUNCTION="Enable-CodeTracerGitSystemLongPaths"
+readonly LONGPATHS_SET_FORM='@("config", "--system", "--replace-all", "core.longpaths", "true")'
+readonly LONGPATHS_GET_FORM='@("config", "--system", "--get", "core.longpaths")'
+# The comparison that turns the read-back into a gate. `-cne` is PowerShell's
+# case-sensitive inequality; git writes the canonical lowercase `true`.
+readonly LONGPATHS_READBACK_GUARD='-cne "true"'
+# The entry point the opt-in must run from, the CALL it must make there, and
+# the statement that call must precede: whatever else changes, the
+# configuration has to be in force before the step returns, because the next
+# step is the checkout it exists to unblock.
+#
+# The call is matched, not the function's NAME. The name also appears in the
+# entry point's parameter block, as the default of the injection seam, and it
+# appears there ABOVE the return -- so a name match is satisfied by an entry
+# point that declares the seam and never uses it, and by one that invokes it
+# after returning. Both of those mutations survived exactly that reading.
+readonly BOOTSTRAP_ENTRY_FUNCTION="Ensure-CodeTracerGitForCheckout"
+# `$EnableSystemLongPaths` and `$git` are PowerShell variables quoted verbatim.
+# shellcheck disable=SC2016
+readonly BOOTSTRAP_ENTRY_INVOCATION='& $EnableSystemLongPaths $git.Path'
+readonly BOOTSTRAP_ENTRY_SEAM_DEFAULT="Enable-CodeTracerGitSystemLongPaths -GitPath"
+readonly BOOTSTRAP_ENTRY_RETURN='return [PSCustomObject]@{'
+# Floors for the two scans section 5 performs. Both exist so that a stripper or
+# an extractor that stopped matching FAILS here instead of reporting "no
+# violations" over an empty input. The script is ~400 lines; 200 is a floor,
+# not a measurement, so ordinary edits never touch it.
+readonly MIN_BOOTSTRAP_CODE_LINES=200
+readonly MIN_LONGPATHS_FUNCTION_LINES=8
 
 assertions=0
 failures=0
@@ -771,16 +809,238 @@ for site in "${dev_env_sites[@]+"${dev_env_sites[@]}"}"; do
 done
 
 # ---------------------------------------------------------------------------
+# 5. The SYSTEM-scoped Windows long-path opt-in inside the bootstrap.
+#
+# Git for Windows refuses any path longer than MAX_PATH (260 characters) with
+#
+#     error: unable to create file <path>: Filename too long
+#
+# unless `core.longpaths` is true. That opt-in is GIT'S OWN and is not the
+# machine-wide `LongPathsEnabled` registry policy: Git for Windows gates its
+# `\\?\` path expansion on this configuration key and fails in exactly the way
+# above even on a host where the OS policy is already on. The registry policy
+# is for every OTHER tool; this key is for git.
+#
+# codetracer's `.gitmodules` nests submodules that themselves recurse, under a
+# workspace that already starts at `C:\actions-runner\_work\codetracer\
+# codetracer\`, so the depth is not marginal -- `submodules: recursive` lands
+# past 260 characters, and the eph-win-x64 jobs failed with
+#
+#     submodule update failed ... Filename too long
+#
+# The bootstrap already exports the same setting through the numbered
+# `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` environment
+# channel (`Add-CodeTracerGitLongPathEnvironment`), and that is NOT what this
+# section is about. The two channels cover different processes and neither is
+# redundant:
+#
+#   * the environment channel is process state. It reaches git processes that
+#     are launched with it intact, which is every git a `run:` step of this job
+#     spawns.
+#   * the system configuration is a FILE. Every git process on the machine
+#     reads it, whatever environment it was handed and whoever its parent is.
+#
+# `actions/checkout` is a node action with its own git invocation, not a child
+# of the bootstrap, and the submodule processes underneath it are two more
+# levels removed again. The system scope is the channel that does not depend on
+# any of that plumbing surviving.
+#
+# What is asserted, against the committed script rather than against a mock:
+#
+#   a. The two `git config` argument vectors are present in CODE (comments
+#      stripped), in the `--system` scope, with the value `true`.
+#   b. The value is READ BACK and the script fails when it is not `true`. A
+#      `git config` that exits 0 without persisting -- an unwritable system
+#      config, a scope the runner's account cannot reach -- would otherwise
+#      leave the job to fail minutes later, in the checkout, with the original
+#      "Filename too long".
+#   c. Neither the write nor the read-back is swallowed: no `SilentlyContinue`
+#      anywhere in that function.
+#   d. The opt-in runs from the bootstrap's entry point, before it returns --
+#      i.e. inside the step that precedes `actions/checkout` (section 2 pins
+#      that the bootstrap step is the job's first). Ordering is the whole
+#      point: configuration installed after the checkout configures nothing
+#      that the checkout needed.
+#   e. Every eph-win-x64 job actually runs this script, counted rather than
+#      assumed.
+#
+# NOT PROVEN HERE: that git accepts the write on a real eph-win-x64 runner.
+# `--system` writes into the git installation's own config, and whether the
+# runner account may do so is a property of that host. The read-back is the
+# part of that question this repository can answer, and it answers it at the
+# earliest step of the job rather than in the middle of a checkout.
+# ---------------------------------------------------------------------------
+echo
+echo "system-scoped long-path opt-in"
+
+# Full-line comments are prose, not configuration -- the same rule section 4
+# already applies to `uses:`. The floor asserted immediately below is what
+# makes a stripper that matched everything (or nothing) a FAILURE rather than a
+# vacuous pass.
+bootstrap_code="$(grep -vE '^[[:space:]]*(#.*)?$' "$BOOTSTRAP_SCRIPT" 2>/dev/null || true)"
+bootstrap_code_lines="$(printf '%s\n' "$bootstrap_code" | grep -c . || true)"
+if [ "$bootstrap_code_lines" -ge "$MIN_BOOTSTRAP_CODE_LINES" ]; then
+	ok "the bootstrap exposes $bootstrap_code_lines lines of code to scan (>= $MIN_BOOTSTRAP_CODE_LINES)"
+else
+	fail "the bootstrap exposes at least $MIN_BOOTSTRAP_CODE_LINES lines of code to scan" \
+		"found $bootstrap_code_lines. Either the script was gutted, or the" \
+		"comment stripper above stopped matching -- and every assertion in this" \
+		"section reads from that same stripped text, so a short scan reports" \
+		"'not found' for reasons that have nothing to do with the contract."
+fi
+
+# How many lines of CODE mention the system scope at all. Two are required (the
+# write and the read-back); asserting the count before asserting the forms
+# means a fix that collapsed to a single unverified write is visible as such.
+system_scope_lines="$(printf '%s\n' "$bootstrap_code" | grep -cF -- '"--system"' || true)"
+if [ "$system_scope_lines" -ge 2 ]; then
+	ok "the bootstrap configures git's --system scope on $system_scope_lines lines of code"
+else
+	fail "the bootstrap configures git's --system scope on at least 2 lines of code" \
+		"found $system_scope_lines. The opt-in has to be written AND read back," \
+		"and both halves name the scope. Anything less is either missing or" \
+		"unverified. Note that a --local or --global opt-in does not help: the" \
+		"deep paths are inside submodules, and a submodule is its own repository" \
+		"with its own config, cloned by a process that never reads the" \
+		"superproject's."
+fi
+
+if printf '%s\n' "$bootstrap_code" | grep -qF -- "$LONGPATHS_SET_FORM"; then
+	ok "the bootstrap enables core.longpaths in the system scope"
+else
+	fail "the bootstrap enables core.longpaths in the system scope" \
+		"expected the literal argument vector" \
+		"  $LONGPATHS_SET_FORM" \
+		"in code (not in a comment). Without core.longpaths, git refuses paths" \
+		"over 260 characters with 'Filename too long' regardless of the" \
+		"LongPathsEnabled OS policy, and actions/checkout's recursive submodule" \
+		"update is where codetracer crosses that line."
+fi
+
+if printf '%s\n' "$bootstrap_code" | grep -qF -- "$LONGPATHS_GET_FORM"; then
+	ok "the bootstrap reads the system core.longpaths value back"
+else
+	fail "the bootstrap reads the system core.longpaths value back" \
+		"expected the literal argument vector" \
+		"  $LONGPATHS_GET_FORM" \
+		"in code (not in a comment). A write that is not read back can report" \
+		"success and persist nothing; the job then dies minutes later inside the" \
+		"checkout, with the original error and no hint of the cause."
+fi
+
+# The function that owns both halves, extracted so the remaining assertions are
+# scoped to it rather than to the file. `^}` closes it: this script indents
+# every nested block.
+ps_function_body() { # <file> <function-name>
+	awk -v name="$2" '
+		$0 ~ "^function " name " \\{" { inside = 1; next }
+		inside && /^\}/ { inside = 0; next }
+		inside { print }
+	' "$1"
+}
+
+longpaths_body="$(ps_function_body "$BOOTSTRAP_SCRIPT" "$LONGPATHS_FUNCTION")"
+longpaths_body_lines="$(printf '%s\n' "$longpaths_body" | grep -c . || true)"
+if [ "$longpaths_body_lines" -ge "$MIN_LONGPATHS_FUNCTION_LINES" ]; then
+	ok "$LONGPATHS_FUNCTION has a $longpaths_body_lines-line body to inspect (>= $MIN_LONGPATHS_FUNCTION_LINES)"
+else
+	fail "$LONGPATHS_FUNCTION has at least $MIN_LONGPATHS_FUNCTION_LINES lines of body to inspect" \
+		"found $longpaths_body_lines. Either the function is gone or renamed --" \
+		"in which case this contract must be retargeted, not deleted -- or the" \
+		"extractor above no longer matches. The two assertions below read from" \
+		"this body, so an empty one would report a missing guard that is in fact" \
+		"present, or (worse, after a needle edit) find nothing to complain about."
+fi
+
+if printf '%s\n' "$longpaths_body" | grep -qF -- "$LONGPATHS_READBACK_GUARD" &&
+	printf '%s\n' "$longpaths_body" | grep -q 'throw'; then
+	ok "$LONGPATHS_FUNCTION fails the step when the read-back is not 'true'"
+else
+	fail "$LONGPATHS_FUNCTION fails the step when the read-back is not 'true'" \
+		"expected the read-back to be compared with '$LONGPATHS_READBACK_GUARD' and" \
+		"a 'throw' to follow. Reading the value and then ignoring it is the same" \
+		"as not reading it: the step goes green and the checkout still fails."
+fi
+
+if printf '%s\n' "$longpaths_body" | grep -q 'SilentlyContinue'; then
+	fail "$LONGPATHS_FUNCTION does not swallow a failed configuration write" \
+		"it contains 'SilentlyContinue'. This step exists to fail loudly at the" \
+		"top of the job instead of quietly at the checkout; suppressing the error" \
+		"restores exactly the failure mode it was added to remove."
+else
+	ok "$LONGPATHS_FUNCTION does not swallow a failed configuration write"
+fi
+
+# Ordering. The opt-in has to be installed by the entry point, before it hands
+# control back -- the very next step is the checkout.
+entry_body="$(ps_function_body "$BOOTSTRAP_SCRIPT" "$BOOTSTRAP_ENTRY_FUNCTION")"
+line_of() { # <text> <fixed-needle> -> 1-based line, or 0
+	local found
+	found="$(printf '%s\n' "$1" | grep -nF -- "$2" | head -1 | cut -d: -f1)"
+	printf '%s' "${found:-0}"
+}
+entry_enable_line="$(line_of "$entry_body" "$BOOTSTRAP_ENTRY_INVOCATION")"
+entry_return_line="$(line_of "$entry_body" "$BOOTSTRAP_ENTRY_RETURN")"
+if [ "$entry_enable_line" -gt 0 ] &&
+	[ "$entry_return_line" -gt 0 ] &&
+	[ "$entry_enable_line" -lt "$entry_return_line" ]; then
+	ok "$BOOTSTRAP_ENTRY_FUNCTION runs the opt-in before it returns"
+else
+	fail "$BOOTSTRAP_ENTRY_FUNCTION runs the opt-in before it returns" \
+		"'$BOOTSTRAP_ENTRY_INVOCATION' is at line ${entry_enable_line} of the entry" \
+		"point's body and its 'return' is at line ${entry_return_line} (0 means not" \
+		"found). A seam that is declared but never invoked configures nothing, and" \
+		"one invoked after the return runs never. Either way actions/checkout -- the" \
+		"very next step -- gets the git it would have got without this script."
+fi
+
+# ...and that seam has to lead to the real function. Its default is what runs
+# when nothing is injected, which is every case except the tests.
+if printf '%s\n' "$entry_body" | grep -qF -- "$BOOTSTRAP_ENTRY_SEAM_DEFAULT"; then
+	ok "$BOOTSTRAP_ENTRY_FUNCTION's opt-in seam defaults to $LONGPATHS_FUNCTION"
+else
+	fail "$BOOTSTRAP_ENTRY_FUNCTION's opt-in seam defaults to $LONGPATHS_FUNCTION" \
+		"expected '$BOOTSTRAP_ENTRY_SEAM_DEFAULT' in the entry point's parameter" \
+		"block. The injection seam exists so the tests can observe the call; if its" \
+		"default no longer reaches the function, the tests keep passing on an" \
+		"injected stub while the real runner configures nothing."
+fi
+
+# ...and the jobs that need it must actually be running this script. Counted,
+# not assumed: section 2's per-job assertions are generated from the same set,
+# so if that set were ever empty they would all vanish silently.
+bootstrap_running_jobs=0
+for job in "${windows_jobs[@]+"${windows_jobs[@]}"}"; do
+	case "${job_bootstrap_body[$job]:-}" in
+	*"ci/ensure-git-for-checkout.ps1"*) bootstrap_running_jobs=$((bootstrap_running_jobs + 1)) ;;
+	esac
+done
+if [ "$bootstrap_running_jobs" -gt 0 ] &&
+	[ "$bootstrap_running_jobs" -eq "${#windows_jobs[@]}" ]; then
+	ok "all ${#windows_jobs[@]} ${WINDOWS_RUNNER_LABEL} jobs run the bootstrap that installs the opt-in"
+else
+	fail "all ${WINDOWS_RUNNER_LABEL} jobs run the bootstrap that installs the opt-in" \
+		"$bootstrap_running_jobs of ${#windows_jobs[@]} do." \
+		"A job that skips the bootstrap gets neither git, nor bash, nor the" \
+		"long-path opt-in -- and a zero here would mean this whole section is" \
+		"asserting things about a script nothing runs."
+fi
+
+# ---------------------------------------------------------------------------
 # Self-accounting: a contract that is deleted or short-circuited must not leave
 # this script reporting success on fewer checks than it claims. Four fixed
 # assertions (script exists, script provisions bash, job set non-empty, WSL
 # stub-step set non-empty), six per Windows job, two per WSL stub step, four
 # fixed dev-env-flavor assertions (site count, no matrix-hidden Windows leg,
-# one direct, one via composite) and two per dev-env site.
+# one direct, one via composite), two per dev-env site, and ten fixed
+# long-path assertions (code-line floor, system-scope line count, the write
+# form, the read-back form, the function-body floor, the read-back guard, no
+# suppression, ordering inside the entry point, the seam's default, and the
+# jobs that run the bootstrap).
 # ---------------------------------------------------------------------------
 echo
 expected_assertions=$((4 + 6 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
-	4 + 2 * ${#dev_env_sites[@]}))
+	4 + 2 * ${#dev_env_sites[@]} + 10))
 if [ "$assertions" -ne "$expected_assertions" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$expected_assertions"
 	failures=$((failures + 1))

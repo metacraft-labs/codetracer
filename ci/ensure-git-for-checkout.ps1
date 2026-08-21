@@ -345,6 +345,78 @@ function Add-CodeTracerGitLongPathEnvironment {
   $env:GIT_CONFIG_VALUE_0 = "true"
 }
 
+function Invoke-CodeTracerGitCommand {
+  param(
+    [Parameter(Mandatory)][string]$GitPath,
+    [Parameter(Mandatory)][string[]]$Arguments
+  )
+
+  $output = (& $GitPath @Arguments 2>&1 | Out-String)
+  $status = $LASTEXITCODE
+  if ($null -eq $status) {
+    $status = if ($?) { 0 } else { 1 }
+  }
+  return [PSCustomObject]@{
+    ExitCode = $status
+    Output = $output.Trim()
+  }
+}
+
+function Enable-CodeTracerGitSystemLongPaths {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][string]$GitPath,
+    [scriptblock]$GitRunner = {
+      param($gitPath, $arguments)
+      Invoke-CodeTracerGitCommand -GitPath $gitPath -Arguments $arguments
+    }
+  )
+
+  # Windows refuses paths longer than MAX_PATH (260 characters), and Git for
+  # Windows gates its `\\?\` long-path expansion on `core.longpaths`. The gate
+  # is git's own: without this key git fails with "Filename too long" even on a
+  # host where the machine-wide LongPathsEnabled policy is already set, so the
+  # registry policy (which every OTHER tool needs) is not a substitute for it.
+  # codetracer's recursively nested submodules cross 260 characters under the
+  # runner's `C:\actions-runner\_work\...` workspace, which is where the
+  # eph-win-x64 jobs were dying.
+  #
+  # This is the SYSTEM scope, and it is not a duplicate of the job-scoped
+  # numbered environment installed below. That environment reaches the git
+  # processes this job's own steps launch; `actions/checkout` is a separate
+  # action that runs its own git -- and, for `submodules: recursive`, a tree of
+  # further git processes below that -- so the setting has to live somewhere
+  # that does not depend on the environment being handed down intact. A
+  # configuration FILE is read by every git process on the machine whatever
+  # environment it was given. `--local` and `--global` would not do: the deep
+  # paths are inside the submodules, and each submodule is its own repository,
+  # cloned by a process that never reads the superproject's config.
+  # https://git-scm.com/docs/git-config#Documentation/git-config.txt-corelongpaths
+  $set = & $GitRunner $GitPath `
+    @("config", "--system", "--replace-all", "core.longpaths", "true")
+  if ($null -eq $set -or $set.ExitCode -ne 0) {
+    $detail = if ($null -eq $set) { "no result" } else { "git exit $($set.ExitCode): $($set.Output)" }
+    throw "Enabling core.longpaths in the system Git configuration failed ($detail)."
+  }
+
+  # Read it back rather than trusting the exit status. `git config --system`
+  # writes into the Git installation's own configuration file, which the runner
+  # account may not own; a write that is reported as successful but lands
+  # nowhere would otherwise surface minutes later, in the middle of
+  # actions/checkout, as the original "Filename too long" -- with nothing
+  # pointing at the cause. Failing here fails the job's FIRST step instead.
+  $read = & $GitRunner $GitPath @("config", "--system", "--get", "core.longpaths")
+  if ($null -eq $read) {
+    throw "Reading back the system core.longpaths setting produced no result."
+  }
+  $value = ([string]$read.Output).Trim()
+  if ($read.ExitCode -ne 0 -or $value -cne "true") {
+    throw ("Windows long-path support is not enabled: system core.longpaths " +
+      "reads back as '$value' (git exit $($read.ExitCode)).")
+  }
+  return $value
+}
+
 function Ensure-CodeTracerGitForCheckout {
   [CmdletBinding()]
   param(
@@ -359,6 +431,10 @@ function Ensure-CodeTracerGitForCheckout {
       Install-CodeTracerPortableGit `
         -Destination $destination `
         -VersionReader $versionReader
+    },
+    [scriptblock]$EnableSystemLongPaths = {
+      param($gitPath)
+      Enable-CodeTracerGitSystemLongPaths -GitPath $gitPath
     }
   )
 
@@ -381,6 +457,12 @@ function Ensure-CodeTracerGitForCheckout {
   $entries = @(Add-CodeTracerGitToPath `
     -GitPath $git.Path `
     -GitHubPathFile $GitHubPathFile)
+  # Both long-path channels are installed here, before this function returns,
+  # because the step that returns from it is immediately followed by
+  # actions/checkout. The selected git is named by absolute path so the system
+  # write goes to the installation that checkout will actually use, not to
+  # whichever git happens to be first on PATH.
+  & $EnableSystemLongPaths $git.Path | Out-Null
   Add-CodeTracerGitLongPathEnvironment -GitHubEnvFile $GitHubEnvFile
   Write-Host "Using git version $verifiedVersion from $($git.Path) for checkout."
   return [PSCustomObject]@{
