@@ -466,6 +466,23 @@
         "type": "github"
       }
     },
+    "codetracer-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786483483,
+        "narHash": "sha256-VwszCAMM/MnfCcutisBiZsg6oz3SATUhTBBpsrK+CI4=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer",
+        "rev": "602e7bb728311c230c9a42fa7fd8aab546b6467a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "codetracer",
+        "type": "github"
+      }
+    },
     "codetracer-toolchains": {
       "inputs": {
         "fenix": "fenix_4",
@@ -673,17 +690,17 @@
     "ct-trace-format-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1783787749,
-        "narHash": "sha256-Y+OV7VXQx9Nam643t1P102VSMaXDtdZWDC4dKsLq3Lg=",
+        "lastModified": 1786674317,
+        "narHash": "sha256-feW0vlgU6JTVkCLnZ1iyS2FwjXQuRCXHr3V+27oyDAw=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "c2f3dfc3bcb423a939ff4d6eab42f848957f7048",
+        "rev": "bc7c5d256d0a4b1246f9a9bbb51a83071d3d8e26",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "c2f3dfc3bcb423a939ff4d6eab42f848957f7048",
+        "rev": "bc7c5d256d0a4b1246f9a9bbb51a83071d3d8e26",
         "type": "github"
       }
     },
@@ -2655,17 +2672,17 @@
     "io-mon-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1785501410,
-        "narHash": "sha256-h05yL9TZXuEHqSQlff+GUtOIQG7e0TivPIAAP1eAYV8=",
+        "lastModified": 1787244587,
+        "narHash": "sha256-SrxBD9mnvs+A2OjXLjGN3bRAE+pKEyH5oV/7y9Il6OY=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "8b6d0b9b91ee8fb907b5cb99ce8f535b7cacb9d8",
+        "rev": "3a7c15cd037dabc4c5dd7f3fe327334ffdaca4b9",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "8b6d0b9b91ee8fb907b5cb99ce8f535b7cacb9d8",
+        "rev": "3a7c15cd037dabc4c5dd7f3fe327334ffdaca4b9",
         "type": "github"
       }
     },
@@ -2902,17 +2919,17 @@
     "nim-fork-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1781780360,
-        "narHash": "sha256-WXlO46eSRdcDyins9yKxGsmSsTfOjheOVZXLeKRsVF4=",
+        "lastModified": 1787054087,
+        "narHash": "sha256-0E1OGS2qRaKobiq2ZGi+nD2djgoLrqXApJzGmRGAFt0=",
         "ref": "codetracer",
-        "rev": "6d14bb1d22dd8d27ddfe331c73a50085568adb71",
-        "revCount": 23076,
+        "rev": "0b5b5ec507d2d9c731d222184c625851377a02c8",
+        "revCount": 23101,
         "type": "git",
         "url": "https://github.com/metacraft-labs/nim"
       },
       "original": {
         "ref": "codetracer",
-        "rev": "6d14bb1d22dd8d27ddfe331c73a50085568adb71",
+        "rev": "0b5b5ec507d2d9c731d222184c625851377a02c8",
         "type": "git",
         "url": "https://github.com/metacraft-labs/nim"
       }
@@ -5030,6 +5047,7 @@
         "codetracer-native-recorder": [
           "codetracer-native-recorder"
         ],
+        "codetracer-src": "codetracer-src",
         "ct-trace-format-src": "ct-trace-format-src",
         "flake-parts": [
           "flake-parts"
@@ -5062,17 +5080,17 @@
         "stackable-hooks-src": "stackable-hooks-src"
       },
       "locked": {
-        "lastModified": 1785631810,
-        "narHash": "sha256-RRMHjUFEHXhO88X6tcFDnoLGqJIVnvQwR+02umX+TVU=",
+        "lastModified": 1787320247,
+        "narHash": "sha256-cOZ/2Op+QrzT0gArmwUCEj0u9vOuxc69+hE0xI647oU=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "65de08ff6279fecc538f94d047879894f43d7e38",
+        "rev": "8c47b5239a85970ac038fa67bbaecca962191fa1",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
         "repo": "reprobuild",
+        "rev": "8c47b5239a85970ac038fa67bbaecca962191fa1",
         "type": "github"
       }
     },

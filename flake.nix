@@ -117,7 +117,18 @@
     };
 
     reprobuild = {
-      url = "github:metacraft-labs/reprobuild/dev";
+      # PINNED to the exact revision that metacraft-labs/nixos-modules pins,
+      # so every repo in the org builds the same `repro`. nixos-modules is the
+      # single source of truth for this SHA — bump it there first, then mirror
+      # the new SHA here.
+      #
+      # This mirrors the SHA rather than `follows`-ing nixos-modules' own
+      # reprobuild node, because a bare `follows` replaces the whole input node
+      # and would drop the four overrides below: reprobuild would then be built
+      # against a different nixpkgs and against its own runquota /
+      # native-recorder pins, producing a different `repro` binary than the one
+      # this repo's shells are meant to ship.
+      url = "github:metacraft-labs/reprobuild/8c47b5239a85970ac038fa67bbaecca962191fa1";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
