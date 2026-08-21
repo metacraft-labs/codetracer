@@ -1,0 +1,36 @@
+# Cross-repo siblings cloned by setup-dev-env at workspace-lock-pinned
+# revisions (see codetracer-specs/Testing/Cross-Repo-CI-Integration.md and
+# metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2).
+#
+# ONE REPO NAME PER LINE, NO REVISIONS.  That is the whole point of the file:
+# `clone-siblings` resolves each name against the per-commit workspace lock
+# published for the commit under test, so re-running an old commit's job clones
+# the siblings THAT commit was built against.  A `name=ref` entry would pin a
+# branch TIP instead -- a different revision on every re-run -- which is what
+# `clone-siblings` emits a `::warning:: ... not reproducible` for.
+#
+# WHAT THIS LIST IS.  The cross-repo siblings of the launcher <-> recorder
+# end-to-end record gate (codetracer-specs/Testing/
+# Launcher-Recorder-Compatibility-Tests.md, milestone LRC-6): hop 1, hop 3 and
+# the trace-validation oracle.  `codetracer` itself is deliberately absent -- a
+# repo is never its own sibling, and `clone-siblings` would `rm -rf` the
+# primary checkout if it were.
+#
+# WHAT READS IT.  `clone-siblings` reads `$GITHUB_WORKSPACE/.github/sibling-repos`
+# only when its `siblings:` input is EMPTY.  Every setup-dev-env call site in
+# this repo passes an explicit `siblings:` subset today, so this file changes
+# no existing job -- `ci/test/sibling-provisioning-test.sh` asserts that, so
+# the day a job stops passing one is the day this list becomes its clone set,
+# deliberately and visibly.
+#
+# `.github/workflows/launcher-recorder-e2e.yml` passes a subset of this list:
+# the gate needs ONE recorder per matrix row, not all three, and on the
+# launcher and recorder edges it must add `codetracer` (which is a sibling
+# there) and drop the triggering repo (which cannot be one).  The same test
+# file asserts that every name that workflow can emit is declared here, so the
+# two cannot drift.
+codetracer-launcher
+codetracer-trace-format-nim
+codetracer-python-recorder
+codetracer-ruby-recorder
+codetracer-js-recorder

@@ -24,13 +24,14 @@
 #   as from the public `codetracer-python-recorder`.
 #
 # THE THREE EDGES (design section 6 table).  Each caller is a thin
-# `workflow_call` that decides WHICH repo is pinned to the commit under test:
+# `workflow_call`; WHICH repo is under test is not something a caller has to
+# say, because it is the repo that triggered the run:
 #
-#   | Trigger repo                | Pinned to github.sha | Others          |
-#   |-----------------------------|----------------------|-----------------|
-#   | codetracer-launcher         | launcher-ref         | mainline branch |
-#   | codetracer-<lang>-recorder  | recorder-ref         | mainline branch |
-#   | codetracer (desktop)        | codetracer-ref       | mainline branch |
+#   | Trigger repo                | Pinned to github.sha  | Others           |
+#   |-----------------------------|-----------------------|------------------|
+#   | codetracer-launcher         | the primary checkout  | the workspace    |
+#   | codetracer-<lang>-recorder  | the primary checkout  | lock published   |
+#   | codetracer (desktop)        | the primary checkout  | for that commit  |
 #
 #   Callers:
 #     codetracer-launcher/.github/workflows/launcher-recorder-e2e.yml
@@ -51,7 +52,7 @@
 #   cross-repo-tests.yml all carry the same "Workspace layout" header):
 #
 #     $GITHUB_WORKSPACE/../
-#       <triggering repo>/            <-- actions/checkout, at its *-ref input
+#       <triggering repo>/            <-- actions/checkout, at github.sha
 #       codetracer/                   <-- this repo: driver + desktop core
 #       codetracer-launcher/          <-- hop 1
 #       codetracer-<lang>-recorder/   <-- hop 3 + the contract fixture
@@ -64,7 +65,11 @@
 #   `$GITHUB_WORKSPACE/../codetracer` on the other two.  Every subsequent step
 #   runs with that as its working directory, so the driver and
 #   scripts/{build,detect}-siblings.sh resolve `../<name>` exactly as they do
-#   in a developer's workspace.
+#   in a developer's workspace.  That step re-asserts the invariant it exists
+#   to keep -- no emitted sibling may equal the triggering repo -- rather than
+#   relying on the filter above it having been written correctly, and
+#   ci/test/launcher-recorder-e2e-workflow-test.sh RUNS that step's script
+#   under each of the five callers' `github.repository` values to prove it.
 #
 #   On the two edges where codetracer is a sibling it is cloned by
 #   `clone-siblings` (shallow, `--submodules-optional`, on the scoped App
@@ -73,16 +78,62 @@
 #   `nix build ".?submodules=1#codetracer"` from today, private
 #   `libs/tree-sitter-nim` submodule included.
 #
-# SIBLING PINNING -- a deliberate, recorded choice
-#   Every sibling is passed to `setup-dev-env` with an EXPLICIT `name=ref`, so
-#   the workspace lock is not consulted at all (clone-siblings only clones the
-#   manifest repo when at least one entry has no ref).  That is design section
-#   6's "branch-ref pattern", the provisional v1 decision: the repo under test
-#   is pinned to `github.sha` and the rest to their mainline branch.
-#   `clone-siblings` emits a `::warning::` for each non-SHA override saying the
-#   run is not reproducible -- that warning is CORRECT and expected here; the
-#   design's open question "lock-SHA vs branch-ref pinning" is milestone LRC-6's
-#   to close, and switching to the lock is a one-line change (drop the `=ref`).
+# SIBLING PINNING -- the workspace lock, per policy (LRC-6)
+#   Every sibling below is a BARE REPO NAME.  `clone-siblings` then resolves
+#   each revision from the per-commit WORKSPACE LOCK published for the commit
+#   under test (its NEED_LOCK=1 path: it clones
+#   metacraft-labs/metacraft-manifests@latest and reads the lock through the
+#   bundled resolve-sibling-rev.sh).  The set of names comes from this repo's
+#   blessed clone-list, `.github/sibling-repos`.  Both halves are
+#   metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2, which is
+#   the org-wide rule and not this gate's to re-decide.
+#
+#   THE REPO UNDER TEST IS STILL PINNED TO `github.sha`, and gets there without
+#   an input: it is the PRIMARY `actions/checkout` (see WORKSPACE LAYOUT
+#   above), never a sibling, and inside a reusable workflow `github.sha` is the
+#   CALLER's commit.  So the checkout step below says `ref: ${{ github.sha }}`
+#   and every caller is relieved of a `*-ref` input it could only ever set to
+#   that same value.
+#
+#   WHAT THIS REPLACED.  Until LRC-6 every entry carried an explicit
+#   `name=<branch>` override, so the lock was never consulted (NEED_LOCK=0) and
+#   each sibling was cloned at whatever its mainline branch pointed at when the
+#   job happened to run -- a different revision on every re-run of the same
+#   commit.  `clone-siblings` reported exactly that, one
+#   `::warning:: ... is therefore not reproducible` per entry.  Those warnings
+#   were the workflow correctly saying it did not follow the policy above; they
+#   are gone because the deviation is.  The same migration was done for the
+#   IsoNim sibling set in commit 23d3965b ("ci: pin the IsoNim siblings by
+#   workspace lock instead of a branch tip"), which this follows.
+#
+#   PRECONDITION, AND IT IS NOT MET ON ANY EDGE TODAY.  A bare entry needs a
+#   workspace lock keyed by the TRIGGERING repo's commit
+#   (locks/<project>/<trigger>/<sha>.toml).  Measured against
+#   metacraft-labs/metacraft-manifests@latest on 2026-08-21, with this repo's
+#   own scripts/resolve-sibling-rev.sh: NONE OF THE FIVE REPOS' CURRENT `dev`
+#   HEADS HAS A LOCK -- all five resolve exit 3, "no workspace lock found".
+#   `codetracer` is the only one still being published for at all (its newest
+#   lock is for 23d3965b, this repo's HEAD~1, published 2026-08-21); the newest
+#   for `codetracer-launcher` is 2026-06-10 (one lock, ever), for
+#   `codetracer-python-recorder` 2026-07-06, for `codetracer-ruby-recorder`
+#   2026-07-07 and for `codetracer-js-recorder` 2026-08-16.
+#
+#   So EVERY edge is red until the workspace tooling publishes locks:
+#     * on `pull_request`, `clone-siblings` probes only the PR base SHA, and
+#       that is almost never a locked commit -- only 2 of `codetracer`'s last 25
+#       first-parent `dev` commits carry a lock, and the launcher and recorder
+#       repos have nothing recent at all -- so every edge, the desktop one
+#       included, fails in `Setup dev env` with "No workspace lock for <repo>";
+#     * on `push`, `github.event.before` is probed as a second candidate, so a
+#       `codetracer` push whose predecessor happens to be locked gets past
+#       `Setup dev env` and fails instead at the fixture check below.
+#   Both are loud failures naming the repo and the fix ("the commit must be
+#   published through the workspace tooling"), which is the intended behaviour
+#   for a missing pin and is strictly better than an unreproducible green -- but
+#   note that NOBODY WORKING IN THESE FIVE REPOS CAN CLEAR IT: the remedy is a
+#   `repro workspace lock` plus a push to the manifest repo.  Recorded against
+#   milestone LRC-6, whose "confirm the lock-publication path is green first"
+#   sub-deliverable is deliberately left unticked because of this.
 #
 # THE TWO PREREQUISITE BLOCKS THE DRIVER DELIBERATELY DOES NOT PROVIDE
 #   (inherited from LRC-2's step-2 deviation; see the milestones file)
@@ -132,9 +183,19 @@
 #   desktop-edge caller fails inside the driver with "contract fixture not
 #   found".  Both are loud failures, which is the intended behaviour.  `dev` is
 #   the mainline branch for product repos per
-#   metacraft-dev-guidelines/policies/branching-policy.md; if that ever changes,
-#   the `*-ref` input defaults below and the `@dev` in the two remote callers
-#   move together.
+#   metacraft-dev-guidelines/policies/branching-policy.md, and the `@dev` in the
+#   two remote callers is the last place this workflow still names a branch.
+#
+#   SINCE LRC-6 THE SIBLING REVISIONS ARE THE LOCK'S, NOT `dev`'s, so "on the
+#   mainline branch" is no longer sufficient: the lock published for the commit
+#   under test must PIN a revision of each sibling that carries what this gate
+#   needs -- in particular `<recorder>/cross-repo/launcher-compat.yml`, without
+#   which the driver hard-fails.  The lock currently published for
+#   codetracer@23d3965b pins recorder revisions from 2026-07-13/2026-07-31,
+#   which predate that fixture; the workspace lock has to be refreshed from a
+#   workspace whose recorder checkouts carry it.  The workspace-shape step
+#   below now names that failure explicitly instead of leaving it to the
+#   driver's later "contract fixture not found".
 #
 # RELATIONSHIP TO THE SHALLOW SMOKE WORKFLOWS
 #   codetracer-launcher/.github/workflows/cross-repo-recorder-packaging.yml and
@@ -170,36 +231,23 @@ on:
           the contract fixture.
         required: true
         type: string
-      codetracer-ref:
-        description: >
-          Revision of metacraft-labs/codetracer (the desktop core + this
-          driver).  The desktop edge passes github.sha; the other two edges
-          leave it at the mainline branch.
-        required: false
-        default: dev
-        type: string
-      launcher-ref:
-        description: >
-          Revision of metacraft-labs/codetracer-launcher (hop 1).  The launcher
-          edge passes github.sha.
-        required: false
-        default: dev
-        type: string
-      recorder-ref:
-        description: >
-          Revision of the recorder repo (hop 3).  The recorder edge passes
-          github.sha.
-        required: false
-        default: dev
-        type: string
-      trace-format-nim-ref:
-        description: >
-          Revision of metacraft-labs/codetracer-trace-format-nim, which
-          provides the `ct-print` trace-validation oracle (design section 5.4).
-          Never the repo under test for this gate; always mainline.
-        required: false
-        default: dev
-        type: string
+      # NO `*-ref` INPUTS, deliberately (LRC-6).  There used to be four --
+      # `codetracer-ref`, `launcher-ref`, `recorder-ref`,
+      # `trace-format-nim-ref` -- and every one of them was redundant:
+      #
+      #   * the TRIGGERING repo's revision is `github.sha`, which this workflow
+      #     can read for itself (in a reusable workflow the `github` context is
+      #     the caller's), so a caller passing `<self>-ref: ${{ github.sha }}`
+      #     was telling this workflow something it already knew;
+      #   * the OTHER three repos' revisions come from the workspace lock, per
+      #     metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2 --
+      #     see "SIBLING PINNING" in this file's header.  An input that could
+      #     override that would reintroduce exactly the unreproducible pin the
+      #     migration removed.
+      #
+      # A one-off experiment that genuinely needs a different sibling revision
+      # is a `workflow_dispatch` on the sibling's own repo plus a refreshed
+      # workspace lock, not a knob here.
     secrets:
       CI_TOKEN_PROVIDER_APP_ID:
         # Optional because some repos carry the App ID as a repository/org
@@ -234,12 +282,14 @@ jobs:
         # always the CALLER), which of the four repos that is, and emits:
         #
         #   self       -- the triggering repo's directory name
-        #   self-ref   -- the revision the primary checkout is pinned to,
-        #                 read from that repo's own *-ref input, so the caller
-        #                 keeps a single, uniform way to say "test this commit"
-        #   siblings   -- the remaining three, as clone-siblings `name=ref`
-        #                 entries; the triggering repo is DROPPED
+        #   siblings   -- the remaining three, as BARE clone-siblings entries
+        #                 (no `=ref`: the revision comes from the workspace
+        #                 lock -- see "SIBLING PINNING" in this file's header);
+        #                 the triggering repo is DROPPED
         #   ct-dir     -- the codetracer checkout every later step runs in
+        #
+        # There is no `self-ref` any more: the primary checkout is pinned to
+        # `${{ github.sha }}` directly, which is the caller's commit.
         #
         # A repo that is none of the four is refused here, loudly, rather than
         # silently producing a workspace with no codetracer in it.
@@ -254,19 +304,14 @@ jobs:
         shell: bash
         env:
           EDGE: ${{ inputs.edge }}
-          CODETRACER_REF: ${{ inputs.codetracer-ref }}
-          LAUNCHER_REF: ${{ inputs.launcher-ref }}
           RECORDER_REPO: ${{ inputs.recorder-repo }}
-          RECORDER_REF: ${{ inputs.recorder-ref }}
           RECORDER_LANG: ${{ inputs.recorder-lang }}
-          TRACE_FORMAT_NIM_REF: ${{ inputs.trace-format-nim-ref }}
+          SELF_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           SELF="${GITHUB_REPOSITORY##*/}"
           case "${SELF}" in
-            codetracer)           SELF_REF="${CODETRACER_REF}" ;;
-            codetracer-launcher)  SELF_REF="${LAUNCHER_REF}" ;;
-            "${RECORDER_REPO}")   SELF_REF="${RECORDER_REF}" ;;
+            codetracer | codetracer-launcher | "${RECORDER_REPO}") ;;
             *)
               echo "::error::launcher-recorder-e2e was called from '${GITHUB_REPOSITORY}', which is neither codetracer, codetracer-launcher nor the recorder under test (${RECORDER_REPO}). This gate's workspace layout puts the TRIGGERING repo at \$GITHUB_WORKSPACE and clones the other three beside it, so a fourth caller has no defined place in it. Add the edge deliberately rather than by calling this workflow."
               exit 1
@@ -281,13 +326,16 @@ jobs:
           fi
 
           # The four repos this gate spans, minus whichever one is the primary
-          # checkout, as clone-siblings `name=ref` entries.
+          # checkout, as BARE clone-siblings entries. Bare is the whole point:
+          # `clone-siblings` resolves each name against the workspace lock
+          # published for the commit under test (NEED_LOCK=1). A `name=<ref>`
+          # entry would take the override path instead, pin nothing, and earn a
+          # `::warning:: ... not reproducible` -- see "SIBLING PINNING" above.
           SIB_NAMES=(codetracer codetracer-launcher "${RECORDER_REPO}" codetracer-trace-format-nim)
-          SIB_REFS=("${CODETRACER_REF}" "${LAUNCHER_REF}" "${RECORDER_REF}" "${TRACE_FORMAT_NIM_REF}")
           SIB_ENTRIES=()
-          for i in "${!SIB_NAMES[@]}"; do
-            if [ "${SIB_NAMES[$i]}" != "${SELF}" ]; then
-              SIB_ENTRIES+=("${SIB_NAMES[$i]}=${SIB_REFS[$i]}")
+          for n in "${SIB_NAMES[@]}"; do
+            if [ "${n}" != "${SELF}" ]; then
+              SIB_ENTRIES+=("${n}")
             fi
           done
           if [ "${#SIB_ENTRIES[@]}" -ne 3 ]; then
@@ -295,38 +343,44 @@ jobs:
             exit 1
           fi
 
-          # An EMPTY ref is never harmless here and must not be tolerated.
-          # Empty for the primary checkout means actions/checkout silently takes
-          # the repo's DEFAULT branch -- which for codetracer is `stable`, not
-          # the commit under test -- and the gate would then report on the wrong
-          # code while looking green. Empty for a sibling means clone-siblings
-          # switches that entry to the workspace LOCK (NEED_LOCK=1), clones the
-          # manifest repo, and resolves a revision this workflow never chose.
-          if [ -z "${SELF_REF}" ]; then
-            echo "::error::the ref for the triggering repo '${SELF}' is empty. The caller must pass its own *-ref input (normally \${{ github.sha }}); an empty value would check out that repo's DEFAULT branch instead of the commit under test."
-            exit 1
-          fi
+          # THE INVARIANT, RE-ASSERTED RATHER THAN ASSUMED. The filter above is
+          # what keeps the triggering repo out of the sibling list, and the
+          # cost of it being wrong is not a failed test: the runner workspace
+          # is `.../_work/<repo>/<repo>`, `clone-siblings` clones to
+          # `$GITHUB_WORKSPACE/../<name>`, and `authenticated-clone.sh` opens
+          # with `rm -rf "$DEST"` -- so a triggering repo listed as its own
+          # sibling DELETES THE PRIMARY CHECKOUT mid-run. That defect was live
+          # once (see "WORKSPACE LAYOUT" above); this makes its return a named
+          # error in the first step instead.
+          #
+          # The `=` check is the migration's own invariant: no entry may carry
+          # an explicit revision, because revisions come from the lock.
           for e in "${SIB_ENTRIES[@]}"; do
-            if [ -z "${e#*=}" ]; then
-              echo "::error::sibling entry '${e}' has an empty ref. clone-siblings treats a trailing '=' as 'resolve from the workspace lock', which is LRC-6's decision to make, not an accident of an unset input."
+            if [ "${e}" = "${SELF}" ]; then
+              echo "::error::sibling entry '${e}' IS the triggering repo. clone-siblings would clone it to \$GITHUB_WORKSPACE/../${e}, which is \$GITHUB_WORKSPACE itself, and authenticated-clone.sh starts by 'rm -rf'-ing its destination -- deleting the primary checkout mid-run."
               exit 1
             fi
+            case "${e}" in
+              *=*)
+                echo "::error::sibling entry '${e}' carries an explicit '=<ref>'. Sibling revisions come from the per-commit workspace lock (metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2); an override pins nothing and makes the run unreproducible. Refresh the workspace lock instead."
+                exit 1
+                ;;
+            esac
           done
 
           echo "edge:                         ${EDGE}"
-          echo "triggering repo (primary):    ${SELF} @ ${SELF_REF}"
+          echo "triggering repo (primary):    ${SELF} @ ${SELF_SHA}"
           echo "recorder:                     ${RECORDER_REPO} (lang: ${RECORDER_LANG})"
           echo "codetracer checkout will be:  ${CT_DIR}"
-          echo "siblings to clone beside it:"
+          echo "siblings to clone beside it (revisions from the workspace lock):"
           for e in "${SIB_ENTRIES[@]}"; do echo "  ${e}"; done
 
           {
             echo "self=${SELF}"
-            echo "self-ref=${SELF_REF}"
             echo "ct-dir=${CT_DIR}"
-            echo "siblings<<LRC3_SIBLINGS_EOF"
+            echo "siblings<<LRC6_SIBLINGS_EOF"
             for e in "${SIB_ENTRIES[@]}"; do echo "${e}"; done
-            echo "LRC3_SIBLINGS_EOF"
+            echo "LRC6_SIBLINGS_EOF"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Mint installation token for cross-repo sibling access
@@ -346,8 +400,13 @@ jobs:
       - name: Checkout the triggering repository (the workspace root)
         # The PRIMARY checkout is the repo that triggered the run -- see
         # "WORKSPACE LAYOUT" in this file's header for why it cannot be
-        # anything else.  It is pinned to that repo's own `*-ref` input, which
-        # every caller sets to `github.sha`.
+        # anything else.  It is pinned to `github.sha`, which inside a reusable
+        # workflow is the CALLING repository's commit under test: on a push
+        # that is the pushed commit, on a pull_request the merge commit the
+        # checks run against.  This is THE repo-under-test pin, and it needs no
+        # input from the caller (LRC-6 removed the four `*-ref` inputs; before
+        # that, each caller passed `<self>-ref: ${{ github.sha }}` and this step
+        # read it back, which is the same value by a longer route).
         #
         # `submodules: recursive` matters on the desktop edge: the core build
         # needs libs/tree-sitter-nim, a PRIVATE submodule of this public repo,
@@ -355,7 +414,7 @@ jobs:
         # it is a no-op for repos that have no submodules.
         uses: actions/checkout@v5
         with:
-          ref: ${{ steps.plan.outputs.self-ref }}
+          ref: ${{ github.sha }}
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
@@ -368,10 +427,14 @@ jobs:
         # reuse workspaces" gotcha requires.  The triggering repo is NOT in the
         # list: that `rm -rf` would land on $GITHUB_WORKSPACE itself.
         #
-        # Every entry carries an EXPLICIT `=ref`, so no entry resolves from the
-        # workspace lock and the manifest repo is never cloned.  See the
-        # "SIBLING PINNING" note in this file's header for why (design section
-        # 6, provisional v1 decision; LRC-6 revisits it).
+        # Every entry is a BARE repo name, so `clone-siblings` takes its
+        # NEED_LOCK=1 path: it clones the manifest repo and resolves each
+        # revision from the per-commit workspace lock through the bundled
+        # resolve-sibling-rev.sh.  The names are a subset of this repo's
+        # `.github/sibling-repos` clone-list -- a subset because the gate needs
+        # one recorder per matrix row and because the triggering repo cannot be
+        # its own sibling.  See "SIBLING PINNING" in this file's header, and
+        # metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
           env-flavor: nix
@@ -410,6 +473,21 @@ jobs:
             echo "::error::the workspace is not laid out the way the gate needs:${missing}. Every repo this gate spans must sit beside the codetracer checkout (\$GITHUB_WORKSPACE/../<name>). If ci/test/launcher-recorder-e2e.sh is what is missing, the codetracer revision this run resolved does not carry the driver yet."
             exit 1
           fi
+
+          # THE REVISION, NOT JUST THE DIRECTORY (added by LRC-6).  Sibling
+          # revisions now come from the workspace lock, so "the recorder is
+          # checked out" no longer implies "the recorder is checked out at a
+          # revision this gate can use": a lock published before the contract
+          # fixture landed pins a revision that has no
+          # cross-repo/launcher-compat.yml, and the driver would fail forty
+          # minutes later with "contract fixture not found" and no hint as to
+          # why.  Name it here instead, with the remedy.
+          FIXTURE="${CT_DIR}/../${RECORDER_REPO}/cross-repo/launcher-compat.yml"
+          if [ ! -f "${FIXTURE}" ]; then
+            echo "::error::${RECORDER_REPO} is checked out but carries no cross-repo/launcher-compat.yml. Its revision came from the workspace lock published for this commit, so the lock pins a revision that PREDATES the contract fixture. Refresh the workspace lock ('repro workspace lock' in a workspace whose ${RECORDER_REPO} checkout carries the fixture, then push the manifest repo); do NOT paper over it with a '<name>=<ref>' sibling override."
+            exit 1
+          fi
+          echo "  OK   ${FIXTURE}"
 
       - name: Provision the musl/zig toolchain for the launcher link
         # INHERITED LRC-3 DELIVERABLE (runner prerequisites).

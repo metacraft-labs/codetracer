@@ -11,12 +11,41 @@
 # Milestone: LRC-3.
 #
 # WHAT THIS EDGE PINS.  This repository -- the codetracer-desktop core -- is the
-# one under test, so it is pinned to `github.sha`; the launcher and the recorder
-# are taken at their mainline branch.  The call uses the LOCAL path form
-# (`./.github/workflows/...`), which GitHub resolves inside the calling
-# commit, so the desktop edge always runs the version of the reusable workflow
-# that ships with the commit under test.  The other two edges necessarily
-# reference it by ref (`@dev`).
+# one under test, so it is pinned to `github.sha`.  That happens without this
+# caller saying anything: the reusable workflow makes the TRIGGERING repo its
+# primary `actions/checkout` at `${{ github.sha }}`, and inside a reusable
+# workflow that context is the caller's.  The launcher, the recorder and
+# codetracer-trace-format-nim are cloned beside it at the revisions the
+# per-commit WORKSPACE LOCK pins for this commit -- metacraft-dev-guidelines/
+# policies/ci-shared-dev-env.md section 3.2, migrated to by LRC-6.  Until LRC-6
+# this caller passed `codetracer-ref: ${{ github.sha }}` plus a `ref: dev`
+# matrix column for the recorder; both are gone, the first because it was
+# telling the reusable workflow something it already knew and the second
+# because a branch tip is not a pin.
+#
+# NOT GREEN YET, AND HONESTLY SO -- the same note the other four callers carry,
+# because this edge is no more runnable than they are.  A lock-resolved sibling
+# needs a workspace lock keyed by THIS repo's commit.  Measured against
+# metacraft-labs/metacraft-manifests@latest on 2026-08-21 with
+# scripts/resolve-sibling-rev.sh: this repo's current `dev` HEAD has NO lock
+# (exit 3), and only 2 of the last 25 first-parent `dev` commits carry one at
+# all, so on `pull_request` -- where only the PR base SHA is probed -- this edge
+# almost always fails in `Setup dev env` with "No workspace lock for
+# codetracer".  On `push`, `github.event.before` is probed too, so it can get
+# past that step and fail at the workspace-shape check instead: the newest
+# `codetracer` lock (for 23d3965b) pins the three recorders at revisions from
+# 2026-07-13/2026-07-31, all of which PREDATE `cross-repo/launcher-compat.yml`,
+# without which the driver cannot run.  Both failures are loud and name their
+# remedy, but the remedy is NOT in this repository: it is `repro workspace lock`
+# in a workspace whose recorder checkouts carry the fixture, plus a push to the
+# manifest repo.  Recorded against milestone LRC-6, deliverable 2 sub-item 4,
+# which is deliberately left unticked for exactly this reason.  Do NOT paper
+# over it by reintroducing a `<name>=<ref>` sibling override.
+#
+# The call uses the LOCAL path form (`./.github/workflows/...`), which GitHub
+# resolves inside the calling commit, so the desktop edge always runs the
+# version of the reusable workflow that ships with the commit under test.  The
+# other two edges necessarily reference it by ref (`@dev`).
 #
 # WHY THIS EDGE EXISTS ALONGSIDE `ct-test-providers`.  The existing
 # `ci/test/ct-providers.sh` gate drives the core `ct` binary DIRECTLY against
@@ -74,19 +103,14 @@ jobs:
         include:
           - recorder: codetracer-python-recorder
             lang: python
-            ref: dev
           - recorder: codetracer-ruby-recorder
             lang: ruby
-            ref: dev
           - recorder: codetracer-js-recorder
             lang: js
-            ref: dev
     name: ${{ matrix.lang }}
     uses: ./.github/workflows/launcher-recorder-e2e.yml
     with:
       edge: codetracer-desktop@${{ github.sha }} -> ${{ matrix.lang }}
-      codetracer-ref: ${{ github.sha }}
       recorder-repo: ${{ matrix.recorder }}
       recorder-lang: ${{ matrix.lang }}
-      recorder-ref: ${{ matrix.ref }}
     secrets: inherit

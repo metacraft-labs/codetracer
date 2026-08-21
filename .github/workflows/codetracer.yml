@@ -3964,6 +3964,21 @@ jobs:
         # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
 
+      - name: Check the launcher<->recorder gate's cross-repo workflow wiring
+        # The other half of the same class of defect, reached from the
+        # `workflow_call` side. `actionlint` does not check a caller's `with:`
+        # against a reusable workflow's declared `inputs:`, so a misspelled key
+        # that ALSO leaves a required input unpassed lints clean and only fails
+        # when a self-hosted runner eventually picks the job up. This suite is
+        # that missing check, and it additionally RUNS the reusable workflow's
+        # "Plan the workspace layout" script under each caller's
+        # `github.repository` to prove the triggering repo is never handed to
+        # `clone-siblings` as its own sibling -- which would `rm -rf` the
+        # primary checkout mid-run, a defect this gate has already had once.
+        # Stock bash, no network; it checks the three remote callers when their
+        # sibling checkouts are present and says so when they are not.
+        run: bash ci/test/launcher-recorder-e2e-workflow-test.sh
+
       - name: Self-test the private-registry credential preflight
         # This suite is also run by `visual-replay-regression-gate`, but that
         # job needs a GPU runner, a workspace lock and eight sibling

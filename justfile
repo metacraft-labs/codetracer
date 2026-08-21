@@ -764,6 +764,25 @@ test-desktop-capabilities:
 test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
   bash ci/test/launcher-recorder-e2e.sh {{recorder}} {{lang}}
 
+# Verify the CI WIRING of the gate above, which no linter covers: `actionlint`
+# does not check a caller's `with:`/`secrets:` against a reusable workflow's
+# declared `inputs:`, so a misspelled key that also leaves a required input
+# unpassed lints clean and fails at run time.  This EXTRACTS the reusable
+# workflow's "Plan the workspace layout" script from the YAML and RUNS it under
+# each caller's `github.repository`, proving the triggering repo is never
+# listed as its own sibling (`clone-siblings` would `rm -rf` the primary
+# checkout), that every sibling entry is bare so its revision comes from the
+# per-commit workspace lock, and that `.github/sibling-repos` declares every
+# name the workflow can emit, and that the primary `actions/checkout` still
+# pins the repo under test to the caller's `github.sha` expression -- since
+# LRC-6 dropped the `*-ref` inputs, that one line IS the repo-under-test
+# guarantee.  Thirteen mutations of real wiring, each of which must be
+# rejected, plus a positive control, keep the checker itself honest.
+# Stock bash: no Nix, no dev shell, no network.
+# See ci/test/launcher-recorder-e2e-workflow-test.sh.
+test-launcher-recorder-e2e-wiring:
+  bash ci/test/launcher-recorder-e2e-workflow-test.sh
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!
