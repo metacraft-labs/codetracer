@@ -96,7 +96,7 @@ the one `ci/deploy/docs.sh` generates.
 | Path | What |
 |------|------|
 | `content/index.md` | The home page (WebFlow landing: hero, cards, popular articles, video, help footer) |
-| `content/getting_started/`, `usage_guide/`, `reference/` | The three doc sections (order controlled by each page's `order:` front matter + `sectionOrder` in `src/docs_config.nim`) |
+| `content/getting_started/`, `usage_guide/`, `deep_review/`, `reference/` | The four doc sections (order controlled by each page's `order:` front matter + `sectionOrder` in `src/docs_config.nim` — without a `sectionOrder` entry a new section sorts *alphabetically*, ahead of Getting Started) |
 | `src/docs_config.nim` | Site config: title, logo, header/sidebar chrome (`headerLinks`, `sidebarLinks`, `sidebarThemeToggle`, `needHelp`), section order, redirects |
 | `src/{build,dev,ssr,redirects,theme_tokens}.nim` | The consumer's build/serve entry points |
 | `assets/style.css` | Book-owned CSS (theme + WebFlow-parity layout) |
@@ -105,6 +105,23 @@ the one `ci/deploy/docs.sh` generates.
 
 Add a page by dropping a Markdown file with front matter (`title`, `section`,
 `order`, optional `slug`/`aliases`) into the right `content/<section>/` folder.
+
+### Moving or renaming a page
+
+Its URL is published — on the released book, on `/nightly`, and in whatever
+links readers have already shared — so a move needs a redirect or the old URL
+starts 404ing. Add the pair to **`movedRoutes` in `src/redirects.nim`**:
+
+```nim
+(oldRoute: "/usage_guide/deep_review", newRoute: "/deep_review"),
+```
+
+The build then writes a meta-refresh stub at the old route's own `index.html`
+(the only path GitHub Pages serves for the trailing-slash URL a reader has) and
+adds the pair to `_redirects`, both carrying the channel prefix. The list is
+**append-only**: deleting an entry re-breaks the URL it was added for. Adding a
+new section is otherwise just a directory plus a `sectionOrder` entry in
+`src/docs_config.nim`.
 
 ## Changing the look (design system)
 

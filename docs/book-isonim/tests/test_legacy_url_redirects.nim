@@ -41,7 +41,12 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
     for r in redirects:
       if r.needsStub: inc needStub
     check needStub == 45
-    check stubsWritten == 45
+    check stubsWritten.legacy == 45
+    # The second family (`movedRoutes`) is counted separately so this suite
+    # keeps asserting the mdBook migration is intact even as the book's own
+    # moves accumulate. DS-1's `/usage_guide/deep_review` is the first.
+    check stubsWritten.moved == movedRoutes.len
+    check stubsWritten.moved >= 1
 
   test "representative legacy URLs have a stub pointing at the right clean URL":
     let expected = {
@@ -77,12 +82,41 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
     # The redirect stubs are ADDITIONAL to the real pages (46 M1 pages + the M5
     # `getting_started/introduction` split + the three WebFlow utility pages
     # faq/support/sign-in = 50, + the nine live-request-tracking pages + the
-    # `sign-up` page = 60, + `usage_guide/deep_review` = 61); the framework
-    # output must still be intact.
+    # `sign-up` page = 60, + the five `deep_review` section pages DS-1 split the
+    # single `usage_guide/deep_review` article into = 65); the framework output
+    # must still be intact.
     check dirExists(publicDir())
     check fileExists(publicDir() / "index.html")
     let entries = loadContentEntries(contentDir())
-    check entries.len == 61
+    check entries.len == 65
+
+  test "every moved clean route redirects to where its content went":
+    ## The second redirect family. These are URLs the SSG itself published and
+    ## the book later moved, so unlike the mdBook set there is no external
+    ## SUMMARY to enumerate them -- `movedRoutes` IS the list, and it is
+    ## append-only. Each entry has to point at a route the site really serves,
+    ## or the redirect just relocates the 404.
+    var realRoutes = initHashSet[string]()
+    for e in loadContentEntries(contentDir()):
+      realRoutes.incl e.routePath
+
+    let moved = movedRouteRedirects()
+    check moved.len == movedRoutes.len
+    check moved.len >= 1
+    for r in moved:
+      check r.needsStub
+      check r.newRoute in realRoutes
+      # The old route must NOT still be served: a live page and a redirect at
+      # the same URL means the content did not move, and the reader gets
+      # whichever the file system hands over.
+      check r.oldUrl notin realRoutes
+      # The stub lives where the real page used to be written -- `<route>/
+      # index.html` -- which is the only path GitHub Pages serves for the
+      # trailing-slash URL a reader actually has.
+      let stubPath = publicDir() / r.oldRelPath
+      check r.oldRelPath.endsWith("/index.html")
+      check fileExists(stubPath)
+      check metaRefreshTarget(readFile(stubPath)) == r.newRoute
 
   test "no legacy URL is left without a redirect":
     # Build the set of clean routes the real site actually serves, so we can
@@ -107,8 +141,29 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
         check fileExists(publicDir() / "index.html")
         check metaRefreshTarget(readFile(publicDir() / "index.html")) == ""
 
-  test "_redirects manifest lists every stubbed legacy URL as a 301":
+  test "_redirects manifest lists every intended redirect as a 301":
     let manifest = readFile(publicDir() / "_redirects")
     for r in redirects:
-      if r.needsStub:
-        check manifest.contains(r.oldUrl & " " & r.newRoute & " 301")
+      check manifest.contains(r.oldUrl & " " & r.newRoute & " 301")
+    for r in movedRouteRedirects():
+      check manifest.contains(r.oldUrl & " " & r.newRoute & " 301")
+    # Including the ONE entry that has no stub. `/index.html` is served by the
+    # real generated home page, so nothing is written there -- but the manifest
+    # describes the intended redirect rather than the files on disk, and a
+    # `_redirects`-honouring front end should still canonicalize `/index.html`
+    # onto `/`. Pinned because it is the one line whose presence is a judgement
+    # call rather than a mechanical consequence.
+    check manifest.contains("/index.html / 301")
+
+    # Every line is a well-formed three-field rule, so a malformed one cannot
+    # ride along unnoticed behind the `contains` checks above.
+    var lineCount = 0
+    for line in readFile(publicDir() / "_redirects").splitLines():
+      if line.len == 0: continue
+      inc lineCount
+      let parts = line.split(' ')
+      check parts.len == 3
+      check parts[0].startsWith("/")
+      check parts[1].startsWith("/")
+      check parts[2] == "301"
+    check lineCount == redirects.len + movedRouteRedirects().len
