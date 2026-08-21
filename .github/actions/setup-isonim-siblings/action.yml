@@ -39,23 +39,26 @@ description: |
   cloning to ``clone-siblings`` anyway, so this is the same mechanism
   with one less side effect.
 
-  WHY ``=dev`` AND NOT A BARE NAME. A bare entry resolves the revision
-  from the per-commit workspace lock, which is the reproducible form and
-  the target state. It is not reachable yet: the workspace tooling
-  currently publishes per-repo participation records for this repo's
-  commits rather than a monolithic ``reprobuild.workspace.lock.v1``
-  document, and the resolver reads those as an ABSENT lock —
+  WHY BARE NAMES. Each entry below is a bare repo name, so
+  ``clone-siblings`` resolves its revision from the per-commit workspace
+  lock published for this commit to
+  ``metacraft-labs/metacraft-manifests@latest``. That is the whole point
+  of routing sibling provisioning through one action: re-running an old
+  commit's job clones the siblings THAT commit was built against, and a
+  matched set of repos stays matched.
 
-    resolve-sibling-rev: no workspace lock found for codetracer
-      Ignored 1 routed per-repo participation record(s): ...
+  These entries carried ``=dev`` overrides for a while, and that was a
+  branch-tip pin: the revision was whatever ``dev`` happened to point at
+  when the job ran, so the same commit built against different siblings
+  on every re-run and ``clone-siblings`` emitted a ``::warning::`` per
+  entry saying so. The overrides existed because lock publication for
+  this repo had lapsed and because the IsoNim-family repos were not yet
+  members of codetracer's workspace project, so a bare entry failed the
+  job outright. Both are fixed: the project declares them and the lock
+  pins all nine.
 
-  so every bare entry would fail the job outright. The five IsoNim-family
-  repos additionally had to become members of codetracer's workspace
-  project before any lock could name them, which they now are. When the
-  tooling publishes a workspace-lock document again, dropping the nine
-  ``=dev`` suffixes is the whole change; until then ``clone-siblings``
-  emits a ``::warning::`` per entry saying, correctly, that these pin
-  nothing.
+  ``ci/test/sibling-provisioning-test.sh`` fails if any entry in this
+  block regrows a ``=<branch>`` suffix.
 
 inputs:
   gh-token:
@@ -70,15 +73,15 @@ runs:
       with:
         gh-token: ${{ inputs.gh-token }}
         siblings: |
-          isonim=dev
-          isonim-tui=dev
-          isonim-gpui=dev
-          nim-everywhere=dev
-          nim-termctl=dev
-          nim-pty=dev
-          nim-acp=dev
-          nim-agent-harbor=dev
-          nim-agents=dev
+          isonim
+          isonim-tui
+          isonim-gpui
+          nim-everywhere
+          nim-termctl
+          nim-pty
+          nim-acp
+          nim-agent-harbor
+          nim-agents
 
     - name: Seed isonim tailwind-styles.json placeholder
       shell: bash

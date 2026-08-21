@@ -32,7 +32,7 @@ if [[ ! -x $RESOLVER && ! -f $RESOLVER ]]; then
 	exit 3
 fi
 
-EXPECTED_ASSERTIONS=86
+EXPECTED_ASSERTIONS=89
 
 PASS=0
 FAIL=0
@@ -1102,6 +1102,73 @@ expect_fail "participation: a schema'd self-only lock is exit 4, not exit 3" 4 \
 	"not present in lock" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$P/j" --sha "$SHA_SELF" --no-walk
+
+# (k..m) THE REMEDY MUST BE TRUE.
+#
+# The exit-3 diagnostic is the only thing an operator sees when a commit has
+# nothing but routed records, so its "here is how to fix it" half is load
+# bearing. It used to assert that routed mode "by design does not write the
+# monolithic workspace lock document" and to send the reader off to publish one
+# "for the public tier" -- and both were wrong.
+#
+# Routed mode DOES publish a `reprobuild.workspace.lock.v1` document. HL-2
+# Decision 1 gives each routed PARTITION one, written into that partition's own
+# durable backend at the same `locks/<project>/<repo>/<sha>.toml` key, and
+# reserves the minimal per-repo record for repos no partition covers
+# (reprobuild's `prepareWorkspaceParticipation` skips a repo whose store is the
+# partition root, because the two writers would otherwise collide on the
+# trigger repo's key and the loser's push is REFUSED). So the workspace this
+# resolver serves publishes its lock into the routed TEAM backend, not "for the
+# public tier", and an operator told to add a public-tier document was being
+# sent to fix something that is not broken.
+#
+# `expect_stderr_lacks` asserts an ANCHOR present before asserting the wrong
+# wording absent: a "does not say X" check against a diagnostic that was never
+# emitted -- wrong exit code, renamed message, empty stream -- passes for the
+# wrong reason, which is exactly the vacuous green this suite exists to avoid.
+
+# expect_stderr_lacks DESC EXPECTED_EXIT ANCHOR FORBIDDEN -- <resolver args...>
+expect_stderr_lacks() {
+	local desc="$1" want_rc="$2" anchor="$3" forbidden="$4"
+	shift 5
+	run_resolver "$@"
+	if [[ $_rc -ne $want_rc ]]; then
+		bad "$desc" "exit $_rc (expected $want_rc); stderr: $_err"
+		return
+	fi
+	if [[ $_err != *"$anchor"* ]]; then
+		bad "$desc" "anchor '$anchor' absent from stderr — this check is not looking at the diagnostic it means to; got: $_err"
+		return
+	fi
+	if [[ $_err == *"$forbidden"* ]]; then
+		bad "$desc" "stderr still carries '$forbidden'"
+		return
+	fi
+	ok "$desc"
+}
+
+expect_stderr_lacks "remedy: does not claim routed mode omits the lock document" 3 \
+	"Ignored 1 routed per-repo participation record(s)" \
+	"does not write the monolithic workspace" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/a" --sha "$SHA_SELF" --no-walk
+
+# NOTE the forbidden string is "public tier", not "for the public tier": the
+# message is emitted one `echo` per output line and the phrase straddled the
+# wrap ("...document (...) for the" / "public tier alongside..."). The longer
+# spelling matched nothing and passed while the wrong remedy was still being
+# printed — a vacuous green found while writing this very contract. Forbidden
+# strings must not span a line break in the text they police.
+expect_stderr_lacks "remedy: does not misdirect the fix to the public tier" 3 \
+	"Ignored 1 routed per-repo participation record(s)" \
+	"public tier" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/a" --sha "$SHA_SELF" --no-walk
+
+expect_fail "remedy: says where routed mode DOES publish the lock document" 3 \
+	"one per routed partition" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/a" --sha "$SHA_SELF" --no-walk
 
 # =========================================================================
 

@@ -445,11 +445,25 @@ fi
 # -------------------------------------------------
 #
 # `repro locking adopt-manifest` puts a workspace into ROUTED mode (an explicit
-# `[locking] route` in the repo's VCS-private reprobuild config). In that mode
-# reprobuild's HL-2 tier isolation deliberately stops writing the monolithic
-# all-repos lock document — that document is the cross-tier leak it exists to
-# prevent — and `recordRoutedParticipation` instead writes ONE MINIMAL RECORD
-# PER REPO, through that repo's routed backend. The git-checkout backend's
+# `[locking] route` in the repo's VCS-private reprobuild config). Routed mode
+# does NOT stop publishing workspace-lock documents — an earlier version of
+# this comment, and of the exit-3 remedy below, both said it did, and both were
+# wrong. What HL-2 tier isolation replaces is the ONE all-repos document that
+# spanned every tier (that document is the cross-tier leak it exists to
+# prevent). In its place, §6 Decision 1 gives each routed PARTITION its own
+# `reprobuild.workspace.lock.v1` document — written by `executeWorkspaceLock`
+# into that partition's durable backend, at the same
+# `locks/<project>/<trigger>/<sha>.toml` key, carrying that partition's repos.
+# For the workspaces this resolver serves that partition is the TEAM tier, so
+# the lock this resolver reads is a routed artifact, not a leftover from before
+# routing.
+#
+# `recordRoutedParticipation` covers what is left over: ONE MINIMAL RECORD PER
+# REPO, through that repo's routed backend, for repos no partition lock
+# accounts for. (`prepareWorkspaceParticipation` skips any repo whose store is
+# the partition root: emitting both would collide on the trigger repo's key,
+# `GitCheckoutLockStore.putLock` would refuse the second writer, and a refused
+# team-tier write escalates to a push refusal.) The git-checkout backend's
 # records land in the SAME `locks/<project>/<repo>/<sha>.toml` namespace as the
 # lock documents, and their whole body is (reprobuild's
 # `routedParticipationBody`):
@@ -850,12 +864,17 @@ if [[ -z $CHOSEN_SHA ]]; then
 				echo "    $f"
 			done
 			echo "  Those are written by reprobuild's ROUTED locking mode ('repro locking"
-			echo "  adopt-manifest'), which by design does not write the monolithic workspace"
-			echo "  lock document. Each record pins only '$SELF_REPO' itself, so none of them"
-			echo "  can name a sibling. Treated exactly as a missing lock, never as a broken"
-			echo "  one. To make these commits resolvable, the workspace must publish a"
-			echo '  workspace-lock document (schema = "reprobuild.workspace.lock.v1") for the'
-			echo "  public tier alongside the routed records."
+			echo "  adopt-manifest'). Each record pins only '$SELF_REPO' itself, so none of"
+			echo "  them can name a sibling. Treated exactly as a missing lock, never as a"
+			echo "  broken one."
+			echo "  Routed mode DOES publish a workspace-lock document"
+			echo '  (schema = "reprobuild.workspace.lock.v1"): one per routed partition,'
+			echo "  written into that partition's own backend at this same"
+			echo "  locks/<project>/<repo>/<sha> key, covering that partition's repos. The"
+			echo "  minimal records above are what it writes for repos NO partition covers."
+			echo "  Seeing only records here therefore means no partition lock was published"
+			echo "  for this commit — not that routed mode declines to write one. Re-run"
+			echo "  'repro workspace lock' in the workspace and push the manifest repo."
 		fi
 		echo "  Every commit under cross-repo CI must be locked by the workspace tooling"
 		echo "  ('repro workspace lock' / the reprobuild post-commit + pre-push hooks, or"

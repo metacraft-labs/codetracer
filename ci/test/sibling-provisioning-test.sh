@@ -155,7 +155,7 @@ fail() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Every `siblings:` entry names an explicit ref.
+# 1. Every `siblings:` entry resolves to a REPRODUCIBLE revision.
 #
 # Deliberately a small, explicit scanner rather than a YAML library: this must
 # run on a stock runner with bash and nothing else, in the same spirit as
@@ -163,19 +163,91 @@ fail() {
 #
 # A `siblings: |` block is a YAML literal scalar; its entries are the lines
 # indented deeper than the key, up to the first line that is not.
+#
+# ## What "reproducible" means here, and why this assertion inverted
+#
+# `clone-siblings` accepts four shapes of entry, and they are not equally
+# trustworthy:
+#
+#     name                    -> the WORKSPACE LOCK for the commit under test
+#     name=<40-hex>           -> an immutable commit SHA
+#     name=${{ ... }}         -> a workflow_dispatch / repository_dispatch knob
+#     name=<branch-or-tag>    -> whatever that ref points at AT CLONE TIME
+#
+# The first two answer "what revision of sibling X does THIS commit use?" the
+# same way on every re-run, forever. The last one does not: it is a branch tip,
+# so re-running last month's build clones this month's sibling. `clone-siblings`
+# says so itself, emitting a `::warning::` per non-SHA override that the build
+# "is therefore not reproducible".
+#
+# This assertion used to demand the OPPOSITE -- an explicit `=ref` on every
+# entry -- and that was right at the time: lock publication for this repo had
+# stopped on 2026-08-02 (see the file header), so a bare entry was a live
+# dependency on a lock that did not exist and the job died in its first step.
+# Pinning each sibling to `dev` was the tourniquet.
+#
+# Publication is working again, so the tourniquet is now the wound: a mandatory
+# `=dev` is a mandatory unreproducible build. The contract is therefore stated
+# the way it should always have been -- a bare entry is the GOOD shape -- with a
+# shrink-only ceiling on the branch-tip entries that have not been converted
+# yet, so the population can only go down.
 # ---------------------------------------------------------------------------
-echo "siblings: entries pin an explicit ref"
+echo "siblings: entries pin a reproducible revision"
+
+# The sibling block whose entries are resolved from the workspace lock. Named
+# explicitly rather than inferred, so a rename or a parser regression makes
+# this suite FAIL rather than quietly assert nothing (see the anti-vacuity
+# assertions below -- this area has produced two vacuous greens already).
+readonly LOCK_RESOLVED_BLOCK='setup-isonim-siblings/action.yml'
+# The repos that block provisions, in the order it lists them. Pinned here so
+# that silently dropping one -- which would also silently drop it from the
+# "no branch tips" assertion -- is itself a failure.
+readonly LOCK_RESOLVED_REPOS='isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents'
+
+# Branch-tip entries still outstanding elsewhere in this repo, as a CEILING.
+# `<=`, never `==`: converting more of them must not fail the suite, and adding
+# one must. Lower this number as blocks are converted; there is no legitimate
+# reason to raise it.
+readonly BRANCH_TIP_CEILING=61
+
+# Classify one sibling entry's ref text. Factored out of the scanner so it can
+# be exercised directly by the self-test below: a detector that silently stops
+# firing is exactly how "nothing forbidden was found" becomes a vacuous pass.
+classify_ref() { # $1 = the text after the first '=' ('' for a bare entry)
+	local ref="$1"
+	case "$ref" in
+	'') printf 'empty\n' ;;
+	*"$ACTIONS_EXPR_OPEN"*) printf 'expr\n' ;;
+	*)
+		if [ "${#ref}" -eq 40 ] && [ -z "${ref//[0-9a-f]/}" ]; then
+			printf 'sha\n'
+		else
+			printf 'branch\n'
+		fi
+		;;
+	esac
+}
 
 sibling_blocks=0
 bad_entries=()
 entry_count=0
+branch_tip_entries=()
+lock_resolved_entries=0
+lock_resolved_repos=""
+lock_resolved_branch_tips=()
 # Per-block record of which repos each `siblings:` block provisions, used by
 # the matched-pair assertion further down. One space-delimited entry per block.
 declare -a BLOCK_REPOS=()
 declare -a BLOCK_WHERE=()
 
 for wf in "${SIBLING_SOURCE_FILES[@]}"; do
-	wf_name="${wf##*/}"
+	# Every composite action's file is called `action.yml`, so the bare
+	# basename cannot tell two of them apart -- and this suite now makes
+	# per-block assertions. Carry the action's directory for those.
+	case "$wf" in
+	"$ACTIONS_DIR"/*) wf_name="${wf#"$ACTIONS_DIR"/}" ;;
+	*) wf_name="${wf##*/}" ;;
+	esac
 	in_block=0
 	key_indent=0
 	line_no=0
@@ -201,28 +273,43 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 				block_repos="$block_repos ${stripped%%=*}"
 				entry_count=$((entry_count + 1))
 				case "$stripped" in
-				*=*)
-					# An expression-valued ref must not be able to evaluate to
-					# the empty string; `name=` is the lock fallback.
-					ref="${stripped#*=}"
+				*=*) ref="${stripped#*=}" ;;
+				*) ref="" ;;
+				esac
+				# A bare entry and a `name=` entry both resolve through the
+				# workspace lock (`clone-siblings`: "a trailing `=` falls back
+				# to the lock"), so they are the same shape and are classified
+				# together. Only their spelling differs.
+				case "$stripped" in
+				*=*) kind="$(classify_ref "$ref")" ;;
+				*) kind=bare ;;
+				esac
+				case "$kind" in
+				bare | empty) ;;
+				sha) ;;
+				expr)
+					# An expression-valued ref must supply a fallback. Without
+					# one it evaluates to the empty string on a push, which is
+					# the lock path -- fine when that was the intent, and a
+					# silent surprise when the author meant to pin something.
 					case "$ref" in
-					'')
-						bad_entries+=("$wf_name:$line_no: '$stripped' (empty ref falls back to the workspace lock)")
-						;;
-					*"$ACTIONS_EXPR_OPEN"*)
-						case "$ref" in
-						*'||'*) ;;
-						*)
-							bad_entries+=("$wf_name:$line_no: '$stripped' (expression ref with no || fallback evaluates to empty on push)")
-							;;
-						esac
+					*'||'*) ;;
+					*)
+						bad_entries+=("$wf_name:$line_no: '$stripped' (expression ref with no || fallback evaluates to empty on push)")
 						;;
 					esac
 					;;
-				*)
-					bad_entries+=("$wf_name:$line_no: '$stripped' (bare name resolves through the workspace lock)")
+				branch)
+					branch_tip_entries+=("$wf_name:$line_no: '$stripped'")
+					if [ "$wf_name" = "$LOCK_RESOLVED_BLOCK" ]; then
+						lock_resolved_branch_tips+=("$wf_name:$line_no: '$stripped'")
+					fi
 					;;
 				esac
+				if [ "$wf_name" = "$LOCK_RESOLVED_BLOCK" ]; then
+					lock_resolved_entries=$((lock_resolved_entries + 1))
+					lock_resolved_repos="$lock_resolved_repos ${stripped%%=*}"
+				fi
 				continue
 			fi
 		fi
@@ -244,12 +331,9 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 done
 
 if [ "${#bad_entries[@]}" -eq 0 ]; then
-	ok "all $entry_count sibling entries across $sibling_blocks blocks pin an explicit ref"
+	ok "all $entry_count sibling entries across $sibling_blocks blocks name a usable ref"
 else
-	fail "all sibling entries pin an explicit ref" \
-		"each entry below resolves through a workspace lock in" \
-		"metacraft-labs/metacraft-manifests, which has published nothing for this" \
-		"repo since 2026-08-02; the step fails with 'No workspace lock for codetracer'" \
+	fail "all sibling entries name a usable ref" \
 		"${bad_entries[@]}"
 fi
 
@@ -259,6 +343,117 @@ else
 	fail "the workflows still declare cross-repo siblings" \
 		"no 'siblings: |' block was found -- either the input was renamed or the" \
 		"scanner no longer matches it, and this suite is passing vacuously"
+fi
+
+# ---------------------------------------------------------------------------
+# 1a. ANTI-VACUITY: the branch-tip detector fires.
+#
+# Every assertion below this point reports a defect by NOT finding something.
+# That is the shape that has twice produced a vacuous green in this area (a
+# scan whose glob was broken reported the forbidden pattern absent), so the
+# classifier is exercised directly against known inputs first. If it stops
+# recognising a branch tip, this fails here rather than passing everywhere.
+# ---------------------------------------------------------------------------
+echo
+echo "the sibling-ref classifier still fires"
+
+classifier_bad=()
+check_classify() { # $1 = ref text, $2 = expected class
+	local got
+	got="$(classify_ref "$1")"
+	[ "$got" = "$2" ] || classifier_bad+=("classify_ref '$1' = '$got', expected '$2'")
+}
+check_classify 'dev' branch
+check_classify 'main' branch
+check_classify 'release/1.2' branch
+# One hex digit short of a commit SHA is a ref name, not a revision.
+check_classify '0123456789abcdef0123456789abcdef0123456' branch
+check_classify '0123456789abcdef0123456789abcdef01234567' sha
+check_classify '' empty
+check_classify "$ACTIONS_EXPR_OPEN inputs.isonim_ref }}" expr
+
+if [ "${#classifier_bad[@]}" -eq 0 ]; then
+	ok "classify_ref separates branch tips from commit SHAs, expressions and the lock"
+else
+	fail "classify_ref separates branch tips from commit SHAs, expressions and the lock" \
+		"the detector the assertions below depend on is broken, so they prove nothing" \
+		"${classifier_bad[@]}"
+fi
+
+# ---------------------------------------------------------------------------
+# 1b. The lock-resolved block resolves EVERY revision from the workspace lock.
+#
+# `.github/actions/setup-isonim-siblings/action.yml` is a wrapper over
+# `clone-siblings`: it contributes nine sibling names and no cloning of its
+# own. Those nine are pinned by the workspace lock published for each commit of
+# this repo to metacraft-labs/metacraft-manifests@latest, so every one of them
+# is a BARE entry and the revision comes from the lock keyed by the commit
+# under test.
+#
+# An `=<branch>` override here would resolve to that branch's tip at clone
+# time instead -- a different sibling revision on every re-run of the same
+# commit, and the coordination the lock exists to provide silently discarded.
+# `clone-siblings` already warns about each one; this makes it a failure.
+#
+# Anti-vacuity: the block must be FOUND, with the repos it is supposed to
+# carry, before "it contains no branch tip" means anything at all.
+# ---------------------------------------------------------------------------
+echo
+echo "$LOCK_RESOLVED_BLOCK resolves every sibling from the workspace lock"
+
+if [ "$lock_resolved_entries" -gt 0 ]; then
+	ok "the scanner reached $LOCK_RESOLVED_BLOCK ($lock_resolved_entries entries)"
+else
+	fail "the scanner reached $LOCK_RESOLVED_BLOCK" \
+		"no sibling entry was parsed out of it -- the file was renamed, the" \
+		"'siblings: |' key changed, or the block scanner regressed. The" \
+		"branch-tip assertion below would pass vacuously."
+fi
+
+# Order-independent comparison: the block's job is to provision this SET.
+# Both lists are space-delimited repo names, so split on whitespace explicitly
+# rather than relying on an unquoted expansion.
+read -r -a _expected_repos <<<"$LOCK_RESOLVED_REPOS"
+read -r -a _actual_repos <<<"$lock_resolved_repos"
+expected_sorted="$(printf '%s\n' "${_expected_repos[@]}" | LC_ALL=C sort | tr '\n' ' ')"
+actual_sorted="$(printf '%s\n' "${_actual_repos[@]}" | LC_ALL=C sort | tr '\n' ' ')"
+if [ "$actual_sorted" = "$expected_sorted" ]; then
+	ok "it provisions exactly the expected IsoNim-family siblings"
+else
+	fail "it provisions exactly the expected IsoNim-family siblings" \
+		"a repo silently added to or dropped from this block also silently" \
+		"enters or leaves the branch-tip assertion below" \
+		"expected: $expected_sorted" \
+		"actual:   $actual_sorted"
+fi
+
+if [ "${#lock_resolved_branch_tips[@]}" -eq 0 ]; then
+	ok "none of its $lock_resolved_entries entries pins a mutable branch tip"
+else
+	fail "none of its entries pins a mutable branch tip" \
+		"each entry below clones whatever the named branch points at when the" \
+		"job runs, so the same commit of this repo builds against a different" \
+		"sibling on every re-run. The revision must come from the workspace" \
+		"lock: drop the '=<branch>' suffix and leave the bare repo name." \
+		"${lock_resolved_branch_tips[@]}"
+fi
+
+# ---------------------------------------------------------------------------
+# 1c. Branch-tip entries elsewhere are capped, and the cap only goes down.
+#
+# The other `siblings:` blocks in this repo still carry `=dev` overrides from
+# the lock outage. Converting them is separate work; what must not happen
+# meanwhile is a NEW one appearing, which is what this ceiling prevents.
+# ---------------------------------------------------------------------------
+if [ "${#branch_tip_entries[@]}" -le "$BRANCH_TIP_CEILING" ]; then
+	ok "branch-tip sibling entries are within the ceiling (${#branch_tip_entries[@]} <= $BRANCH_TIP_CEILING)"
+else
+	fail "branch-tip sibling entries are within the ceiling" \
+		"${#branch_tip_entries[@]} entries pin a mutable branch tip; the ceiling is" \
+		"$BRANCH_TIP_CEILING. A sibling revision must come from the workspace lock or be" \
+		"an explicit 40-hex commit SHA. This ceiling is lowered as blocks are" \
+		"converted and is never raised." \
+		"${branch_tip_entries[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1053,7 +1248,7 @@ fi
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=18
+readonly EXPECTED_ASSERTIONS=23
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
