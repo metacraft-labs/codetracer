@@ -665,16 +665,13 @@ when not defined(js):
     ##
     ## Same discovery order the rest of ct uses for this backend (see
     ## `common/config.nim`, which auto-discovers it into `rrBackend.path`):
-    ## an explicit override, then the current name on `PATH`, then the legacy
-    ## name.  Returns "" when it is not installed; callers must diagnose that
-    ## rather than spawning an empty path.
+    ## an explicit override, then the current name on `PATH`.  Returns ""
+    ## when it is not installed; callers must diagnose that rather than
+    ## spawning an empty path.
     result = getEnv(NativeReplayExeEnvVar, "")
     if result.len > 0:
       return
     result = findExe("ct-native-replay")
-    if result.len > 0:
-      return
-    result = findExe("ct-rr-support")
 
   func missingNativeReplayMessage*(verb: string): string =
     ## Diagnostic for `ct review <verb>` with no native backend installed.

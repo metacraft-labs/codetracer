@@ -25,7 +25,7 @@
 ## to keep in sync.
 ##
 ## What it cannot carry is coverage or flow: those come from a review dataset
-## collected by `ct-rr-support deepreview collect`, and a `--with-diff`
+## collected by `ct-native-replay deepreview collect`, and a `--with-diff`
 ## recording has only the diff.  A review opened this way is therefore a real,
 ## navigable changeset with an honestly empty coverage table rather than an
 ## invented one.

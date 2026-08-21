@@ -48,13 +48,13 @@ pub struct DapInitResult {
 /// Optional parameters for the DAP `launch` request.
 ///
 /// When a trace directory contains an `rr/` subdirectory, the `replay-server`
-/// needs the path to `ct-rr-support` (passed as `ctRRWorkerExe` in the
+/// needs the path to `ct-native-replay` (passed as `ctRRWorkerExe` in the
 /// launch arguments) so it can spawn the RR replay worker.
 ///
 /// Callers that don't need RR support can use `Default::default()`.
 #[derive(Debug, Clone, Default)]
 pub struct DapLaunchOptions {
-    /// Path to the `ct-rr-support` binary, included as `ctRRWorkerExe`
+    /// Path to the `ct-native-replay` binary, included as `ctRRWorkerExe`
     /// in the launch request when `Some`.
     pub ct_rr_worker_exe: Option<PathBuf>,
 }
@@ -235,7 +235,7 @@ async fn wait_for_stopped_event(
 /// The `trace_folder` is passed to the `launch` request's `arguments`
 /// so the backend knows which trace to load.  When the trace is an RR
 /// recording, the caller should populate `opts.ct_rr_worker_exe` with
-/// the path to `ct-rr-support` so that the backend can start the RR
+/// the path to `ct-native-replay` so that the backend can start the RR
 /// replay worker (the replay-server expects `ctRRWorkerExe` in the launch
 /// arguments).
 ///

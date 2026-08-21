@@ -14,7 +14,7 @@ mod test_harness;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use test_harness::{
-    FlowTestConfig, Language, find_ct_rr_support, is_command_available, is_replay_backend_available, run_flow_test,
+    FlowTestConfig, Language, find_ct_native_replay, is_command_available, is_replay_backend_available, run_flow_test,
 };
 
 fn get_go_source_path() -> PathBuf {
@@ -58,7 +58,7 @@ fn is_delve_available() -> bool {
 #[test]
 fn test_go_flow_integration() {
     // Check prerequisites
-    if find_ct_rr_support().is_none() {
+    if find_ct_native_replay().is_none() {
         eprintln!("SKIPPED: ct-native-replay not found in PATH or development locations");
         return;
     }

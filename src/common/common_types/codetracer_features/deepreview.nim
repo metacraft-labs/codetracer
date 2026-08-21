@@ -33,7 +33,7 @@ type
     ##     agent session, so a dataset-backed review and a session-backed one
     ##     describe test runs identically;
     ##   * a ``testResults: Vec<TestResultData>`` field on the exported
-    ##     ``DeepReviewData``, written by ``ct-rr-support deepreview collect``
+    ##     ``DeepReviewData``, written by ``ct-native-replay deepreview collect``
     ##     from the runs it recorded;
     ##   * the mirrored ``testResults*: seq[DeepReviewTestResult]`` here, read
     ##     by ``vcs.reviewCoverageRows``' neighbour and pushed through

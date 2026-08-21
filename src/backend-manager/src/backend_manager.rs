@@ -5883,8 +5883,7 @@ impl BackendManager {
         //
         // The ct-native-replay path is resolved from (in priority order):
         //   1. `CODETRACER_CT_NATIVE_REPLAY_CMD` environment variable
-        //      (falls back to legacy `CODETRACER_CT_RR_SUPPORT_CMD`)
-        //   2. `ct-native-replay` on PATH (falls back to legacy `ct-rr-support`)
+        //   2. `ct-native-replay` beside the current executable, then on PATH
         //
         // Reference: replay-server/src/dap.rs — `LaunchRequestArguments.ctRRWorkerExe`
         let dap_launch_opts = {
@@ -5894,19 +5893,13 @@ impl BackendManager {
                 || trace_path.extension().is_some_and(|ext| ext == "ct")
                 || has_ctfs_magic(&trace_path);
             if needs_rr_support {
-                // Try new env var first, then legacy.
                 let rr_support_cmd = std::env::var("CODETRACER_CT_NATIVE_REPLAY_CMD")
-                    .or_else(|_| std::env::var("CODETRACER_CT_RR_SUPPORT_CMD"))
                     .ok()
                     .map(PathBuf::from)
                     .or_else(|| {
                         // Try sibling of the current executable first (same bin/ dir).
-                        // Check new binary name first, then legacy.
                         let exe_suffix = std::env::consts::EXE_SUFFIX;
-                        let exe_names = [
-                            format!("ct-native-replay{}", exe_suffix),
-                            format!("ct-rr-support{}", exe_suffix),
-                        ];
+                        let exe_names = [format!("ct-native-replay{}", exe_suffix)];
                         for exe_name in &exe_names {
                             if let Ok(self_exe) = std::env::current_exe()
                                 && let Some(sibling) = self_exe

@@ -588,7 +588,7 @@ test-rust:
       exit "$?"; \
     fi
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
+  # Flow tests that need ct-native-replay/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
   # and are run separately in cross-repo CI jobs.
   cargo nextest run --release --test '*' \
@@ -830,7 +830,7 @@ log-file pid_or_current_or_last kind process="default" instance_index="0":
   fi;
 
 # expected `run_name_or_last` as `run-<run-pid>` or `last`
-log name="ct-rr-support" worker_kind="stable" index="0" codetracer_tmp_dir="" run_name_or_last="last":
+log name="ct-native-replay" worker_kind="stable" index="0" codetracer_tmp_dir="" run_name_or_last="last":
   #!/usr/bin/env bash
   if [ "{{codetracer_tmp_dir}}" == "" ]; then
     tmpdir=$(just findtmp)
@@ -931,7 +931,7 @@ stop:
   killall -9 virtualization-layers db-backend node .electron-wrapped || true
   killall -9 electron || true
   killall -9 backend-manager || true
-  killall -9 ct-rr-support || true
+  killall -9 ct-native-replay || true
 
 reset-config:
   rm --force  ~/.config/codetracer/.config.yaml && \
@@ -2231,8 +2231,8 @@ test-flow-all:
   echo "╚════════════════════════════════════════════════════════════╝"
 
 # ====
-# Cross-repo integration tests (requires codetracer-rr-backend)
-# These tests build/find ct-rr-support from the rr-backend repo and run
+# Cross-repo integration tests (requires codetracer-native-backend)
+# These tests build/find ct-native-replay from the native-backend repo and run
 # the flow integration tests against it.
 
 cross-test:
@@ -2982,7 +2982,7 @@ ensure-ct-native-replay:
 #   * ``test_harness::is_mcr_available()`` requires ``ct-mcr`` ON PATH
 #     (it ignores CODETRACER_CT_MCR_CMD), so we symlink the recorder's
 #     ct_cli as ``ct-mcr`` into a scratch dir prepended to PATH.
-#   * ``test_harness::find_ct_rr_support()`` honours CT_NATIVE_REPLAY_PATH
+#   * ``test_harness::find_ct_native_replay()`` honours CT_NATIVE_REPLAY_PATH
 #     first, then PATH, then ``../../codetracer-native-backend/target/
 #     debug``; we export the explicit path so the right binary is used.
 # Tests whose language compiler is absent honest-SKIP (``SKIPPED:`` line)

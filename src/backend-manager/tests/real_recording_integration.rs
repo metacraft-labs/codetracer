@@ -137,9 +137,9 @@
 //!
 //! ## Test categories
 //!
-//! 1. **RR-based tests**: Build and record a Rust test program via `ct-rr-support`,
+//! 1. **RR-based tests**: Build and record a Rust test program via `ct-native-replay`,
 //!    then open the resulting trace through the daemon.  These tests are skipped
-//!    when `ct-rr-support` or `rr` is not available.
+//!    when `ct-native-replay` or `rr` is not available.
 //!
 //! 2. **Ruby trace tests**: Record a Ruby test program via
 //!    `codetracer-ruby-recorder`, producing real `trace.json`,
@@ -218,7 +218,7 @@ fn binary_path() -> PathBuf {
 /// Returns `true` when `REQUIRE_REAL_RECORDINGS=1` (or `true`) is set.
 ///
 /// When this env var is set, tests MUST NOT silently skip when prerequisites
-/// (replay-server, ct-rr-support, rr, nargo) are missing.  Instead they panic,
+/// (replay-server, ct-native-replay, rr, nargo) are missing.  Instead they panic,
 /// making CI catch configuration problems rather than reporting green with
 /// zero assertions executed.
 ///
@@ -312,10 +312,12 @@ fn find_db_backend() -> Option<PathBuf> {
     None
 }
 
-/// Finds the `ct-native-replay` binary (formerly ct-rr-support; same logic as replay-server test harness).
-fn find_ct_rr_support() -> Option<PathBuf> {
+/// Finds the `ct-native-replay` binary (same logic as the replay-server test harness).
+fn find_ct_native_replay() -> Option<PathBuf> {
     // Explicit environment variable (used by cross-repo test scripts).
-    // Try new name first, then legacy.
+    // `CT_RR_SUPPORT_PATH` is the spelling `codetracer-native-backend`'s
+    // `scripts/run-cross-repo-tests.sh` still exports; it stays until that
+    // repo switches over.
     for var_name in ["CT_NATIVE_REPLAY_PATH", "CT_RR_SUPPORT_PATH"] {
         if let Ok(path) = std::env::var(var_name) {
             let p = PathBuf::from(&path);
@@ -325,29 +327,28 @@ fn find_ct_rr_support() -> Option<PathBuf> {
         }
     }
 
-    // Check PATH — try new name first, then legacy.
-    for bin_name in ["ct-native-replay", "ct-rr-support"] {
-        if let Ok(output) = std::process::Command::new("which").arg(bin_name).output()
-            && output.status.success()
-        {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+    // Check PATH.
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("ct-native-replay")
+        .output()
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
         }
     }
 
     // Check common development locations relative to the session-manager crate.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // Try both new and legacy binary/repo names
     let dev_locations = [
         "../../../codetracer-native-backend/target/debug/ct-native-replay",
         "../../../codetracer-native-backend/target/release/ct-native-replay",
         "../../codetracer-native-backend/target/debug/ct-native-replay",
-        // Legacy fallbacks
-        "../../../codetracer-rr-backend/target/debug/ct-rr-support",
-        "../../../codetracer-rr-backend/target/release/ct-rr-support",
-        "../../codetracer-rr-backend/target/debug/ct-rr-support",
+        // Legacy repo name fallbacks
+        "../../../codetracer-rr-backend/target/debug/ct-native-replay",
+        "../../../codetracer-rr-backend/target/release/ct-native-replay",
+        "../../codetracer-rr-backend/target/debug/ct-native-replay",
     ];
 
     for loc in dev_locations {
@@ -364,10 +365,10 @@ fn find_ct_rr_support() -> Option<PathBuf> {
             "metacraft/codetracer-native-backend/target/debug/ct-native-replay",
             "metacraft/codetracer-main/codetracer-native-backend/target/debug/ct-native-replay",
             "codetracer-native-backend/target/debug/ct-native-replay",
-            // Legacy fallbacks
-            "metacraft/codetracer-rr-backend/target/debug/ct-rr-support",
-            "metacraft/codetracer-main/codetracer-rr-backend/target/debug/ct-rr-support",
-            "codetracer-rr-backend/target/debug/ct-rr-support",
+            // Legacy repo name fallbacks
+            "metacraft/codetracer-rr-backend/target/debug/ct-native-replay",
+            "metacraft/codetracer-main/codetracer-rr-backend/target/debug/ct-native-replay",
+            "codetracer-rr-backend/target/debug/ct-native-replay",
         ];
         for loc in home_locations {
             let path = home_path.join(loc);
@@ -663,7 +664,7 @@ fn report(test_name: &str, log_path: &Path, success: bool) {
 /// CARGO_MANIFEST_DIR.
 fn create_rr_recording(
     test_dir: &Path,
-    ct_rr_support: &Path,
+    ct_native_replay: &Path,
     log_path: &Path,
 ) -> Result<PathBuf, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -692,21 +693,21 @@ fn create_rr_recording(
     );
 
     // Build the test program.
-    let build_output = std::process::Command::new(ct_rr_support)
+    let build_output = std::process::Command::new(ct_native_replay)
         .args([
             "build",
             source_path.to_str().unwrap(),
             binary_path.to_str().unwrap(),
         ])
         .output()
-        .map_err(|e| format!("failed to run ct-rr-support build: {e}"))?;
+        .map_err(|e| format!("failed to run ct-native-replay build: {e}"))?;
 
     if !build_output.status.success() {
         let stdout = String::from_utf8_lossy(&build_output.stdout);
         let stderr = String::from_utf8_lossy(&build_output.stderr);
         log_line(log_path, &format!("build stdout: {stdout}"));
         log_line(log_path, &format!("build stderr: {stderr}"));
-        return Err(format!("ct-rr-support build failed:\n{stderr}"));
+        return Err(format!("ct-native-replay build failed:\n{stderr}"));
     }
 
     log_line(
@@ -715,7 +716,7 @@ fn create_rr_recording(
     );
 
     // Record the trace.
-    let record_output = std::process::Command::new(ct_rr_support)
+    let record_output = std::process::Command::new(ct_native_replay)
         .args([
             "record",
             "-o",
@@ -723,19 +724,19 @@ fn create_rr_recording(
             binary_path.to_str().unwrap(),
         ])
         .output()
-        .map_err(|e| format!("failed to run ct-rr-support record: {e}"))?;
+        .map_err(|e| format!("failed to run ct-native-replay record: {e}"))?;
 
     if !record_output.status.success() {
         let stdout = String::from_utf8_lossy(&record_output.stdout);
         let stderr = String::from_utf8_lossy(&record_output.stderr);
         log_line(log_path, &format!("record stdout: {stdout}"));
         log_line(log_path, &format!("record stderr: {stderr}"));
-        return Err(format!("ct-rr-support record failed:\n{stderr}"));
+        return Err(format!("ct-native-replay record failed:\n{stderr}"));
     }
 
     log_line(log_path, "recording created successfully");
 
-    // NOTE: ct-rr-support record produces only `trace_db_metadata.json` (the
+    // NOTE: ct-native-replay record produces only `trace_db_metadata.json` (the
     // extended format).  The backend-manager's `read_trace_metadata()` has a
     // fallback that reads this file directly when `trace_metadata.json` is
     // absent.  We intentionally do NOT create `trace_metadata.json` here so
@@ -752,7 +753,7 @@ fn create_rr_recording(
 /// * `binary_name` — the name for the compiled binary (no directory prefix).
 fn create_rr_recording_from_source(
     test_dir: &Path,
-    ct_rr_support: &Path,
+    ct_native_replay: &Path,
     log_path: &Path,
     source_rel_path: &str,
     binary_name: &str,
@@ -783,21 +784,21 @@ fn create_rr_recording_from_source(
     );
 
     // Build the test program.
-    let build_output = std::process::Command::new(ct_rr_support)
+    let build_output = std::process::Command::new(ct_native_replay)
         .args([
             "build",
             source_path.to_str().unwrap(),
             binary_path.to_str().unwrap(),
         ])
         .output()
-        .map_err(|e| format!("failed to run ct-rr-support build: {e}"))?;
+        .map_err(|e| format!("failed to run ct-native-replay build: {e}"))?;
 
     if !build_output.status.success() {
         let stdout = String::from_utf8_lossy(&build_output.stdout);
         let stderr = String::from_utf8_lossy(&build_output.stderr);
         log_line(log_path, &format!("build stdout: {stdout}"));
         log_line(log_path, &format!("build stderr: {stderr}"));
-        return Err(format!("ct-rr-support build failed:\n{stderr}"));
+        return Err(format!("ct-native-replay build failed:\n{stderr}"));
     }
 
     log_line(
@@ -806,7 +807,7 @@ fn create_rr_recording_from_source(
     );
 
     // Record the trace.
-    let record_output = std::process::Command::new(ct_rr_support)
+    let record_output = std::process::Command::new(ct_native_replay)
         .args([
             "record",
             "-o",
@@ -814,14 +815,14 @@ fn create_rr_recording_from_source(
             binary_path.to_str().unwrap(),
         ])
         .output()
-        .map_err(|e| format!("failed to run ct-rr-support record: {e}"))?;
+        .map_err(|e| format!("failed to run ct-native-replay record: {e}"))?;
 
     if !record_output.status.success() {
         let stdout = String::from_utf8_lossy(&record_output.stdout);
         let stderr = String::from_utf8_lossy(&record_output.stderr);
         log_line(log_path, &format!("record stdout: {stdout}"));
         log_line(log_path, &format!("record stderr: {stderr}"));
-        return Err(format!("ct-rr-support record failed:\n{stderr}"));
+        return Err(format!("ct-native-replay record failed:\n{stderr}"));
     }
 
     log_line(log_path, "recording created successfully");
@@ -858,10 +859,10 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
             .to_string());
     }
 
-    let ct_rr_support = match find_ct_rr_support() {
+    let ct_native_replay = match find_ct_native_replay() {
         Some(p) => p,
         None => {
-            let msg = "ct-rr-support not found (skipping RR-based tests)";
+            let msg = "ct-native-replay not found (skipping RR-based tests)";
             if require_real_recordings() {
                 panic!("REQUIRE_REAL_RECORDINGS is set but {msg}");
             }
@@ -880,7 +881,7 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
     let db_backend = find_db_backend()
         .ok_or_else(|| "replay-server not found (skipping real recording tests)".to_string())?;
 
-    Ok((ct_rr_support, db_backend))
+    Ok((ct_native_replay, db_backend))
 }
 
 // ---------------------------------------------------------------------------
@@ -1340,7 +1341,7 @@ async fn test_real_rr_session_launches_db_backend() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -1353,28 +1354,28 @@ async fn test_real_rr_session_launches_db_backend() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
-        // Pass ct-rr-support path so the daemon can relay it to
+        // Pass ct-native-replay path so the daemon can relay it to
         // db-backend for RR replay (via the `ctRRWorkerExe` launch arg).
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -1487,7 +1488,7 @@ async fn test_real_rr_session_reuses_existing() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -1497,15 +1498,15 @@ async fn test_real_rr_session_reuses_existing() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -1578,7 +1579,7 @@ async fn test_real_rr_trace_info_returns_metadata() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -1588,15 +1589,15 @@ async fn test_real_rr_trace_info_returns_metadata() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -1720,7 +1721,7 @@ async fn test_real_rr_dap_initialization_sequence() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -1730,15 +1731,15 @@ async fn test_real_rr_dap_initialization_sequence() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -2222,7 +2223,7 @@ async fn test_real_rr_navigate_step_over() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -2232,15 +2233,15 @@ async fn test_real_rr_navigate_step_over() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -2329,7 +2330,7 @@ async fn test_real_rr_navigate_step_in_out() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -2339,15 +2340,15 @@ async fn test_real_rr_navigate_step_in_out() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -2553,7 +2554,7 @@ async fn test_real_rr_navigate_continue_forward() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -2563,15 +2564,15 @@ async fn test_real_rr_navigate_continue_forward() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -2712,7 +2713,7 @@ async fn test_real_rr_navigate_step_back() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -2722,15 +2723,15 @@ async fn test_real_rr_navigate_step_back() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -3475,7 +3476,7 @@ async fn test_real_rr_locals_returns_variables() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -3487,26 +3488,26 @@ async fn test_real_rr_locals_returns_variables() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -3686,7 +3687,7 @@ async fn test_real_rr_evaluate_expression() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -3696,15 +3697,15 @@ async fn test_real_rr_evaluate_expression() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -3857,7 +3858,7 @@ async fn test_real_rr_stack_trace_returns_frames() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -3867,15 +3868,15 @@ async fn test_real_rr_stack_trace_returns_frames() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -4801,7 +4802,7 @@ async fn test_real_rr_breakpoint_stops_execution() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -4813,14 +4814,14 @@ async fn test_real_rr_breakpoint_stops_execution() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
@@ -4841,12 +4842,12 @@ async fn test_real_rr_breakpoint_stops_execution() {
         let bp_line: i64 = 20;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -4981,7 +4982,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -4991,7 +4992,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -5007,12 +5008,12 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         let bp_line: i64 = 19;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -5207,7 +5208,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -5217,7 +5218,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -5231,12 +5232,12 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
         let bp_line: i64 = 18;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -5386,7 +5387,7 @@ async fn test_real_rr_multiple_breakpoints() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -5396,7 +5397,7 @@ async fn test_real_rr_multiple_breakpoints() {
         };
 
         // Create an RR recording.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -5413,12 +5414,12 @@ async fn test_real_rr_multiple_breakpoints() {
         let bp_line_2: i64 = 21;
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -6210,7 +6211,7 @@ async fn send_py_flow(
     // Wait for the ct/py-flow response from the daemon.  Flow processing
     // involves replaying the trace through the RR dispatcher, which can be
     // very slow (especially for programs with loops).  The RR replay must
-    // start a new ct-rr-support worker, initialize an RR session, seek to
+    // start a new ct-native-replay worker, initialize an RR session, seek to
     // the correct position, and then step through every line of the
     // function while loading variable values at each step.  Use a
     // moderate timeout — RR flow workers often hang indefinitely, so
@@ -6374,7 +6375,7 @@ async fn test_real_rr_flow_returns_steps() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -6386,14 +6387,14 @@ async fn test_real_rr_flow_returns_steps() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
@@ -6408,12 +6409,12 @@ async fn test_real_rr_flow_returns_steps() {
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -6548,7 +6549,7 @@ async fn test_real_rr_flow_returns_steps() {
             Err(e) => {
                 let err_lower = e.to_string().to_lowercase();
                 if err_lower.contains("timeout") {
-                    // INTENTIONAL DUAL-ACCEPT: RR flow requests spawn a ct-rr-support
+                    // INTENTIONAL DUAL-ACCEPT: RR flow requests spawn a ct-native-replay
                     // worker process and are inherently slow.  Timeouts in CI or
                     // resource-constrained environments are expected behavior, not bugs.
                     // When flow succeeds, we validate the response thoroughly.
@@ -6622,7 +6623,7 @@ async fn test_real_rr_flow_diff_mode() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -6634,14 +6635,14 @@ async fn test_real_rr_flow_diff_mode() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -6652,12 +6653,12 @@ async fn test_real_rr_flow_diff_mode() {
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -7284,7 +7285,7 @@ async fn test_real_rr_calltrace_returns_calls() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -7296,26 +7297,26 @@ async fn test_real_rr_calltrace_returns_calls() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -7471,7 +7472,7 @@ async fn test_real_rr_search_calltrace_finds_function() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -7483,24 +7484,24 @@ async fn test_real_rr_search_calltrace_finds_function() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -7651,7 +7652,7 @@ async fn test_real_rr_events_returns_events() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -7663,24 +7664,24 @@ async fn test_real_rr_events_returns_events() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -7829,7 +7830,7 @@ async fn test_real_rr_events_pagination() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -7841,24 +7842,24 @@ async fn test_real_rr_events_pagination() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -8038,7 +8039,7 @@ async fn test_real_rr_events_response_timing() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -8050,19 +8051,19 @@ async fn test_real_rr_events_response_timing() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -8178,7 +8179,7 @@ async fn test_real_rr_terminal_returns_output() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -8190,24 +8191,24 @@ async fn test_real_rr_terminal_returns_output() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -9109,7 +9110,7 @@ async fn test_real_rr_single_process_trace() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -9121,26 +9122,26 @@ async fn test_real_rr_single_process_trace() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
 
         // Create an RR recording of the Rust test program (single process).
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -9473,7 +9474,7 @@ async fn test_real_rr_query_prints_hello() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -9491,17 +9492,17 @@ async fn test_real_rr_query_prints_hello() {
         }
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start the daemon with the real db-backend and the python-api path.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -9582,7 +9583,7 @@ async fn test_real_rr_query_inline_trace_bound() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -9599,16 +9600,16 @@ async fn test_real_rr_query_inline_trace_bound() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -9795,7 +9796,7 @@ async fn test_real_rr_query_timeout_kills_script() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -9812,16 +9813,16 @@ async fn test_real_rr_query_timeout_kills_script() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -9921,7 +9922,7 @@ async fn test_real_rr_query_script_error_traceback() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -9938,16 +9939,16 @@ async fn test_real_rr_query_script_error_traceback() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -10060,7 +10061,7 @@ async fn start_mcp_server_with_real_backend(
         .stderr(Stdio::piped());
 
     // Forward extra env vars to the MCP server as well (e.g.,
-    // CODETRACER_PYTHON_API_PATH, CODETRACER_CT_RR_SUPPORT_CMD).
+    // CODETRACER_PYTHON_API_PATH, CODETRACER_CT_NATIVE_REPLAY_CMD).
     for (key, value) in extra_env {
         cmd.env(key, value);
     }
@@ -10155,7 +10156,7 @@ async fn test_real_rr_mcp_trace_info() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -10165,19 +10166,19 @@ async fn test_real_rr_mcp_trace_info() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -10269,7 +10270,7 @@ async fn test_real_rr_mcp_exec_script() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -10287,21 +10288,21 @@ async fn test_real_rr_mcp_exec_script() {
         }
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -10381,7 +10382,7 @@ async fn test_real_rr_mcp_list_source_files() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -10391,19 +10392,19 @@ async fn test_real_rr_mcp_list_source_files() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -10499,7 +10500,7 @@ async fn test_real_rr_mcp_read_source_file() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -10509,19 +10510,19 @@ async fn test_real_rr_mcp_read_source_file() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -10689,7 +10690,7 @@ async fn test_real_custom_mcp_trace_info() {
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        // No ct-rr-support needed for custom traces.
+        // No ct-native-replay needed for custom traces.
         let (mut mcp, mut daemon, socket_path) =
             start_mcp_server_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
@@ -11134,7 +11135,7 @@ async fn test_real_rr_mcp_resources_list() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -11144,19 +11145,19 @@ async fn test_real_rr_mcp_resources_list() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -11279,7 +11280,7 @@ async fn test_real_rr_mcp_resource_read_info() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -11289,19 +11290,19 @@ async fn test_real_rr_mcp_resource_read_info() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -11477,7 +11478,7 @@ async fn test_real_rr_mcp_resource_read_source() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -11487,19 +11488,19 @@ async fn test_real_rr_mcp_resource_read_source() {
         };
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -11689,7 +11690,7 @@ async fn test_real_rr_mcp_error_actionable() {
         };
 
         // Start MCP server backed by real daemon + db-backend.
-        // No ct-rr-support or recording needed for error-path tests.
+        // No ct-native-replay or recording needed for error-path tests.
         let (mut mcp, mut daemon, socket_path) =
             start_mcp_server_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
@@ -11821,7 +11822,7 @@ async fn test_real_rr_mcp_response_timing() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -11839,21 +11840,21 @@ async fn test_real_rr_mcp_response_timing() {
         }
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -12576,7 +12577,7 @@ async fn test_real_rr_example_scripts_execute() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -12594,21 +12595,21 @@ async fn test_real_rr_example_scripts_execute() {
         }
 
         // Create an RR recording of the Rust test program.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
         log_line(
             &log_path,
             &format!("trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -12818,7 +12819,7 @@ async fn test_real_custom_example_scripts_execute() {
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        // No ct-rr-support needed for custom traces.
+        // No ct-native-replay needed for custom traces.
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
@@ -13071,7 +13072,7 @@ async fn test_real_noir_session_launches_db_backend() {
         );
 
         // Start the daemon with the real db-backend.
-        // No ct-rr-support needed for Noir custom-format traces.
+        // No ct-native-replay needed for Noir custom-format traces.
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
@@ -13702,7 +13703,7 @@ async fn test_real_noir_mcp_trace_info() {
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        // No ct-rr-support needed for Noir custom-format traces.
+        // No ct-native-replay needed for Noir custom-format traces.
         let (mut mcp, mut daemon, socket_path) =
             start_mcp_server_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
@@ -13911,7 +13912,7 @@ async fn test_real_rr_locals_f64_values_non_empty() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -13923,8 +13924,8 @@ async fn test_real_rr_locals_f64_values_non_empty() {
         log_line(
             &log_path,
             &format!(
-                "ct-rr-support: {}, db-backend: {}",
-                ct_rr_support.display(),
+                "ct-native-replay: {}, db-backend: {}",
+                ct_native_replay.display(),
                 db_backend.display()
             ),
         );
@@ -13932,7 +13933,7 @@ async fn test_real_rr_locals_f64_values_non_empty() {
         // Record the float test program instead of the default flow test.
         let trace_dir = create_rr_recording_from_source(
             &test_dir,
-            &ct_rr_support,
+            &ct_native_replay,
             &log_path,
             "rust/rust_float_test.rs",
             "rust_float_test",
@@ -13943,12 +13944,12 @@ async fn test_real_rr_locals_f64_values_non_empty() {
         );
 
         // Start the daemon with the real db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -14117,7 +14118,7 @@ async fn test_real_rr_mcp_exec_script_f64_locals() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -14137,7 +14138,7 @@ async fn test_real_rr_mcp_exec_script_f64_locals() {
         // Record the float test program.
         let trace_dir = create_rr_recording_from_source(
             &test_dir,
-            &ct_rr_support,
+            &ct_native_replay,
             &log_path,
             "rust/rust_float_test.rs",
             "rust_float_test",
@@ -14148,14 +14149,14 @@ async fn test_real_rr_mcp_exec_script_f64_locals() {
         );
 
         // Start MCP server backed by real daemon + db-backend.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -14434,7 +14435,7 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -14443,12 +14444,12 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
             }
         };
 
-        // Create an RR recording.  ct-rr-support emits a CTFS
+        // Create an RR recording.  ct-native-replay emits a CTFS
         // `trace.ct` container with `meta.dat` and a legacy
         // `trace_db_metadata.json` sidecar (kept for ct-native-replay
         // shell tooling); the daemon reads metadata exclusively from
         // `meta.dat` after M-REC-1.5.
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Explicitly verify the legacy bridge file is absent.
         let simple_meta = trace_dir.join("trace_metadata.json");
@@ -14469,12 +14470,12 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
         );
 
         // Start daemon and query trace info via DAP.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -14555,7 +14556,7 @@ async fn test_cli_trace_info_rr() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -14564,15 +14565,15 @@ async fn test_cli_trace_info_rr() {
             }
         };
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start daemon so the CLI can connect to it.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
-            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
         )
         .await;
 
@@ -14587,7 +14588,7 @@ async fn test_cli_trace_info_rr() {
                     "CODETRACER_REPLAY_SERVER_CMD",
                     db_backend.to_str().unwrap_or(""),
                 ),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
             ],
             60,
             &log_path,
@@ -14650,7 +14651,7 @@ async fn test_cli_trace_query_rr_inline() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -14667,17 +14668,17 @@ async fn test_cli_trace_query_rr_inline() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start daemon with Python API path for exec-script support.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -14700,7 +14701,7 @@ async fn test_cli_trace_query_rr_inline() {
                     "CODETRACER_REPLAY_SERVER_CMD",
                     db_backend.to_str().unwrap_or(""),
                 ),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
             60,
@@ -14750,7 +14751,7 @@ async fn test_cli_trace_query_rr_navigation_sequence() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -14767,17 +14768,17 @@ async fn test_cli_trace_query_rr_navigation_sequence() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Start daemon with Python API path.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -14810,7 +14811,7 @@ print(f'DONE: {len(results)} steps completed')";
                     "CODETRACER_REPLAY_SERVER_CMD",
                     db_backend.to_str().unwrap_or(""),
                 ),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
             120,
@@ -14871,7 +14872,7 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -14888,7 +14889,7 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path as it appears in the trace.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -14899,14 +14900,14 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon with Python API path.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -14941,7 +14942,7 @@ print('DONE')"
                     "CODETRACER_REPLAY_SERVER_CMD",
                     db_backend.to_str().unwrap_or(""),
                 ),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
             120,
@@ -15009,7 +15010,7 @@ async fn test_cli_trace_query_rr_flow_api() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -15026,7 +15027,7 @@ async fn test_cli_trace_query_rr_flow_api() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -15037,14 +15038,14 @@ async fn test_cli_trace_query_rr_flow_api() {
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon with Python API path.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -15083,7 +15084,7 @@ except Exception as e:
             &["trace", "query", &trace_path_str, "--timeout", "60", "-c", &script],
             &[
                 ("CODETRACER_REPLAY_SERVER_CMD", db_backend.to_str().unwrap_or("")),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
             120,
@@ -15171,7 +15172,7 @@ async fn test_cli_trace_query_rr_goto_ticks() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -15188,16 +15189,16 @@ async fn test_cli_trace_query_rr_goto_ticks() {
             ));
         }
 
-        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -15245,7 +15246,7 @@ print('GOTO_TICKS_OK')";
                     "CODETRACER_REPLAY_SERVER_CMD",
                     db_backend.to_str().unwrap_or(""),
                 ),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
             120,
@@ -15311,7 +15312,7 @@ async fn test_cli_trace_query_rr_c_flow() {
     let mut success = false;
 
     let result: Result<(), String> = async {
-        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
             Ok(paths) => paths,
             Err(reason) => {
                 log_line(&log_path, &format!("SKIP: {reason}"));
@@ -15331,7 +15332,7 @@ async fn test_cli_trace_query_rr_c_flow() {
         // Build and record the C test program.
         let trace_dir = create_rr_recording_from_source(
             &test_dir,
-            &ct_rr_support,
+            &ct_native_replay,
             &log_path,
             "c/c_flow_test.c",
             "c_flow_test",
@@ -15346,14 +15347,14 @@ async fn test_cli_trace_query_rr_c_flow() {
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon.
-        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
             &test_dir,
             &log_path,
             &db_backend,
             &[
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
         )
@@ -15399,7 +15400,7 @@ except Exception as e:
                     "CODETRACER_REPLAY_SERVER_CMD",
                     db_backend.to_str().unwrap_or(""),
                 ),
-                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
             120,

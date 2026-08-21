@@ -112,10 +112,8 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
 /// The fallback chain mirrors the discovery logic used in backend-manager's
 /// `ct/open-trace` handler:
 ///   1. Use the value from the DAP launch `ctRRWorkerExe` argument (if non-empty)
-///   2. Check `CODETRACER_CT_NATIVE_REPLAY_CMD` environment variable
-///      (falls back to legacy `CODETRACER_CT_RR_SUPPORT_CMD`)
+///   2. Check the `CODETRACER_CT_NATIVE_REPLAY_CMD` environment variable
 ///   3. Search for `ct-native-replay` on `PATH`
-///      (falls back to legacy `ct-rr-support`)
 ///
 /// This is necessary because the Nim/Electron frontend's config loader
 /// does not auto-discover `ct-native-replay` (the auto-discovery in
@@ -131,27 +129,22 @@ fn resolve_recreator_exe(from_launch_args: Option<PathBuf>) -> PathBuf {
         return path.clone();
     }
 
-    // 2. Check CODETRACER_CT_NATIVE_REPLAY_CMD environment variable,
-    //    falling back to the legacy CODETRACER_CT_RR_SUPPORT_CMD.
-    for var_name in &["CODETRACER_CT_NATIVE_REPLAY_CMD", "CODETRACER_CT_RR_SUPPORT_CMD"] {
-        if let Ok(env_path) = std::env::var(var_name)
-            && !env_path.is_empty()
-        {
-            info!("ct-native-replay: using path from {}: {}", var_name, env_path);
-            return PathBuf::from(env_path);
-        }
+    // 2. Check the CODETRACER_CT_NATIVE_REPLAY_CMD environment variable.
+    const NATIVE_REPLAY_CMD_VAR: &str = "CODETRACER_CT_NATIVE_REPLAY_CMD";
+    if let Ok(env_path) = std::env::var(NATIVE_REPLAY_CMD_VAR)
+        && !env_path.is_empty()
+    {
+        info!(
+            "ct-native-replay: using path from {}: {}",
+            NATIVE_REPLAY_CMD_VAR, env_path
+        );
+        return PathBuf::from(env_path);
     }
 
-    // 3. Search for ct-native-replay on PATH, falling back to legacy ct-rr-support.
-    for exe_name in &["ct-native-replay", "ct-rr-support"] {
-        if let Some(path) = find_on_path(exe_name) {
-            info!(
-                "ct-native-replay: discovered '{}' on PATH: {}",
-                exe_name,
-                path.display()
-            );
-            return path;
-        }
+    // 3. Search for ct-native-replay on PATH.
+    if let Some(path) = find_on_path("ct-native-replay") {
+        info!("ct-native-replay: discovered on PATH: {}", path.display());
+        return path;
     }
 
     warn!(

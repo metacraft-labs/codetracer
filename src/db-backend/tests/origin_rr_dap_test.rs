@@ -7,7 +7,7 @@
 //!
 //! # SKIP discipline
 //!
-//! Each test uses narrow probes — `find_ct_rr_support()`,
+//! Each test uses narrow probes — `find_ct_native_replay()`,
 //! `is_rr_available()`, and per-language compiler-on-PATH checks —
 //! mirroring the M3/M5/M6/M7/M8/M9 pattern. The dev shell here has
 //! neither `rr` nor `ct-native-replay`, so every test below SKIPs
@@ -172,9 +172,9 @@ struct ProtocolReverseContinue {
     watchpoint_id: Option<i64>,
 }
 
-/// Narrow probe: is `rr` on PATH AND is `ct-native-replay`
-/// (formerly `ct-rr-support`) discoverable? Returns `Some(ct_path)` on
-/// success, or prints a SKIPPED sentinel and returns `None` so the
+/// Narrow probe: is `rr` on PATH AND is `ct-native-replay` discoverable?
+/// Returns `Some(ct_path)` on success, or prints a SKIPPED sentinel and
+/// returns `None` so the
 /// caller exits 0.
 fn require_rr_and_ct_native_replay(test_label: &str) -> Option<PathBuf> {
     if !test_harness::is_rr_available() {
@@ -184,7 +184,7 @@ fn require_rr_and_ct_native_replay(test_label: &str) -> Option<PathBuf> {
         );
         return None;
     }
-    match test_harness::find_ct_rr_support() {
+    match test_harness::find_ct_native_replay() {
         Some(p) => Some(p),
         None => {
             eprintln!(

@@ -11,7 +11,7 @@ proc startBackend*(backendKind: string, isStdio: bool = true, socketPath: Option
   # `replay-server` requires a subcommand (`dap-server`) before any
   # transport flag — `replay-server --stdio` errors with
   # "unexpected argument '--stdio'".  The `rr` backend's binary
-  # (`ct-rr-support`) accepts `--stdio` directly with no subcommand.
+  # (`ct-native-replay`) accepts `--stdio` directly with no subcommand.
   let (backendExe, prelude) =
     if backendKind == "db":
       (dbBackendExe, @["dap-server"])

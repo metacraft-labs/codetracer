@@ -37,7 +37,7 @@ pub(crate) fn prepare_trace_folder(
 
     // Case 0b (MCR): if the path is a .ct file, pass it directly as the trace path.
     // db-backend detects .ct files by extension or CTFS magic bytes and routes
-    // them to ct-rr-support which spawns ct-mcr debugserver.
+    // them to ct-native-replay which spawns ct-mcr debugserver.
     if rr_trace_dir.extension().and_then(|e| e.to_str()) == Some("ct") && rr_trace_dir.is_file() {
         return Ok((rr_trace_dir.to_path_buf(), None));
     }
@@ -70,17 +70,11 @@ pub(crate) fn prepare_trace_folder(
 ///
 /// Search order:
 /// 1. `CT_NATIVE_REPLAY_BIN` / `CODETRACER_CT_NATIVE_REPLAY_CMD` environment variables
-///    (falls back to legacy `CT_RR_SUPPORT_BIN` / `CODETRACER_CT_RR_SUPPORT_CMD`)
-/// 2. Sibling repo build output (new name first, then legacy)
-/// 3. PATH search (new name first, then legacy)
-pub(crate) fn find_ct_rr_support() -> Result<PathBuf, BoxError> {
-    // 1. Explicit env var — new names first, then legacy
-    for var in &[
-        "CT_NATIVE_REPLAY_BIN",
-        "CODETRACER_CT_NATIVE_REPLAY_CMD",
-        "CT_RR_SUPPORT_BIN",            // backwards compat
-        "CODETRACER_CT_RR_SUPPORT_CMD", // backwards compat
-    ] {
+/// 2. Sibling repo build output
+/// 3. PATH search
+pub(crate) fn find_ct_native_replay() -> Result<PathBuf, BoxError> {
+    // 1. Explicit env var.
+    for var in &["CT_NATIVE_REPLAY_BIN", "CODETRACER_CT_NATIVE_REPLAY_CMD"] {
         if let Ok(val) = std::env::var(var) {
             let p = PathBuf::from(&val);
             if p.is_file() {
@@ -89,13 +83,12 @@ pub(crate) fn find_ct_rr_support() -> Result<PathBuf, BoxError> {
         }
     }
 
-    // 2. Sibling repo build output — try new names first, then legacy
+    // 2. Sibling repo build output.
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         let manifest = PathBuf::from(&manifest_dir);
         let names_and_repos: &[(&str, &str)] = &[
             ("ct-native-replay", "codetracer-native-backend"),
             ("ct-native-replay", "codetracer-rr-backend"), // legacy repo name
-            ("ct-rr-support", "codetracer-rr-backend"),    // legacy binary name
         ];
         for &(bin, repo) in names_and_repos {
             let exe_name = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
@@ -114,15 +107,13 @@ pub(crate) fn find_ct_rr_support() -> Result<PathBuf, BoxError> {
         }
     }
 
-    // 3. PATH search — new name first, then legacy
-    for bin in &["ct-native-replay", "ct-rr-support"] {
-        let exe_name = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
-        if let Some(paths) = std::env::var_os("PATH") {
-            for dir in std::env::split_paths(&paths) {
-                let candidate = dir.join(&exe_name);
-                if candidate.is_file() {
-                    return Ok(candidate);
-                }
+    // 3. PATH search.
+    let exe_name = format!("ct-native-replay{}", std::env::consts::EXE_SUFFIX);
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(&exe_name);
+            if candidate.is_file() {
+                return Ok(candidate);
             }
         }
     }

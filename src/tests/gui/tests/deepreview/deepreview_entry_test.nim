@@ -449,7 +449,7 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
 
       # 3. What the paths genuinely do NOT share is coverage, and they say so
       #    rather than inventing it.  Only a dataset collected by
-      #    `ct-rr-support deepreview collect` carries per-line coverage: a
+      #    `ct-native-replay deepreview collect` carries per-line coverage: a
       #    trace's `--with-diff` diff has none, and an agent session's
       #    evidence (`AgentServiceEvidenceFileEntry`) has none either.
       check a.coverageSummary.totalLinesCovered == 20

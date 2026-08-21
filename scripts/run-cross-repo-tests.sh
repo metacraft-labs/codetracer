@@ -26,7 +26,10 @@
 #
 # Environment variables (optional overrides):
 #   CT_NATIVE_REPLAY_PATH        Path to a pre-built ct-native-replay binary
-#                                (legacy: CT_RR_SUPPORT_PATH also accepted)
+#                                (CT_RR_SUPPORT_PATH also accepted on input:
+#                                 codetracer-native-backend's docs and its
+#                                 own scripts/run-cross-repo-tests.sh still
+#                                 use that spelling)
 #   METACRAFT_WORKSPACE_ROOT     Workspace root containing codetracer-native-backend
 #   RR_BACKEND_REF               Git ref to clone (explicit manual override).
 #                                When unset, the rr-backend revision is resolved
@@ -187,7 +190,7 @@ resolve_pin_ref() {
 }
 
 # ---------------------------------------------------------------------------
-# Find or build ct-native-replay (formerly ct-rr-support)
+# Find or build ct-native-replay
 # ---------------------------------------------------------------------------
 find_rr_backend_repo() {
 	# 1. METACRAFT_WORKSPACE_ROOT — try new name first, then legacy
@@ -215,27 +218,25 @@ find_rr_backend_repo() {
 
 find_binary_in_repo() {
 	local repo_dir="$1"
-	# Prefer new name, then legacy; prefer release, then debug
-	for bin_name in ct-native-replay ct-rr-support; do
-		for profile in release debug; do
-			local bin="$repo_dir/target/$profile/$bin_name"
-			if [[ -x $bin ]]; then
-				echo "$bin"
-				return 0
-			fi
-		done
+	# Prefer release, then debug
+	for profile in release debug; do
+		local bin="$repo_dir/target/$profile/ct-native-replay"
+		if [[ -x $bin ]]; then
+			echo "$bin"
+			return 0
+		fi
 	done
 	return 1
 }
 
-resolve_ct_rr_support() {
+resolve_ct_native_replay() {
 	# 1. Explicit env var (new name first, then legacy)
 	for var_name in CT_NATIVE_REPLAY_PATH CT_RR_SUPPORT_PATH; do
 		local val="${!var_name:-}"
 		if [[ -n $val ]]; then
 			if [[ -x $val ]]; then
 				log "Using $var_name=$val"
-				export CT_RR_SUPPORT_PATH="$val"
+				export CT_NATIVE_REPLAY_PATH="$val"
 				return 0
 			else
 				warn "$var_name='$val' is not executable; searching further"
@@ -249,8 +250,8 @@ resolve_ct_rr_support() {
 		log "Found native-backend repo at $rr_repo"
 		local bin
 		if bin="$(find_binary_in_repo "$rr_repo")"; then
-			export CT_RR_SUPPORT_PATH="$bin"
-			log "Using ct-native-replay: $CT_RR_SUPPORT_PATH"
+			export CT_NATIVE_REPLAY_PATH="$bin"
+			log "Using ct-native-replay: $CT_NATIVE_REPLAY_PATH"
 			return 0
 		fi
 
@@ -259,8 +260,8 @@ resolve_ct_rr_support() {
 			log "CI mode: building ct-native-replay in $rr_repo ..."
 			(cd "$rr_repo" && cargo build)
 			if bin="$(find_binary_in_repo "$rr_repo")"; then
-				export CT_RR_SUPPORT_PATH="$bin"
-				log "Built ct-native-replay: $CT_RR_SUPPORT_PATH"
+				export CT_NATIVE_REPLAY_PATH="$bin"
+				log "Built ct-native-replay: $CT_NATIVE_REPLAY_PATH"
 				return 0
 			fi
 			die "cargo build succeeded but ct-native-replay binary not found in $rr_repo/target/"
@@ -292,8 +293,8 @@ resolve_ct_rr_support() {
 
 		local bin
 		if bin="$(find_binary_in_repo "$CLONE_DIR")"; then
-			export CT_RR_SUPPORT_PATH="$bin"
-			log "Built ct-native-replay: $CT_RR_SUPPORT_PATH"
+			export CT_NATIVE_REPLAY_PATH="$bin"
+			log "Built ct-native-replay: $CT_NATIVE_REPLAY_PATH"
 			return 0
 		fi
 		die "Build succeeded but ct-native-replay binary not found"
@@ -309,7 +310,7 @@ Please either:
   - Set METACRAFT_WORKSPACE_ROOT to the parent of both repos"
 }
 
-resolve_ct_rr_support
+resolve_ct_native_replay
 
 # ---------------------------------------------------------------------------
 # Resolve LD_LIBRARY_PATH for ct-native-replay
@@ -319,8 +320,8 @@ resolve_ct_rr_support
 # the codetracer nix shell. We need to capture those library paths and export
 # them so the binary can run.
 resolve_rr_backend_lib_path() {
-	# If CT_NATIVE_REPLAY_LD_LIBRARY_PATH or legacy CT_RR_SUPPORT_LD_LIBRARY_PATH is set, use it.
-	local explicit_ld="${CT_NATIVE_REPLAY_LD_LIBRARY_PATH:-${CT_RR_SUPPORT_LD_LIBRARY_PATH:-}}"
+	# If CT_NATIVE_REPLAY_LD_LIBRARY_PATH is set, use it.
+	local explicit_ld="${CT_NATIVE_REPLAY_LD_LIBRARY_PATH:-}"
 	if [[ -n $explicit_ld ]]; then
 		log "Using explicit LD_LIBRARY_PATH override"
 		export LD_LIBRARY_PATH="${explicit_ld}:${LD_LIBRARY_PATH:-}"
@@ -352,13 +353,13 @@ resolve_rr_backend_lib_path() {
 	fi
 
 	# Quick check: can the binary actually run?
-	if "$CT_RR_SUPPORT_PATH" --version >/dev/null 2>&1; then
+	if "$CT_NATIVE_REPLAY_PATH" --version >/dev/null 2>&1; then
 		return 0
 	fi
 
 	# Try to find missing libs via ldd
 	local missing
-	missing="$(ldd "$CT_RR_SUPPORT_PATH" 2>/dev/null | grep 'not found' || true)"
+	missing="$(ldd "$CT_NATIVE_REPLAY_PATH" 2>/dev/null | grep 'not found' || true)"
 	if [[ -n $missing ]]; then
 		warn "ct-native-replay has missing shared libraries:"
 		warn "$missing"
@@ -439,7 +440,7 @@ run_test() {
 		test_name="$(selector_to_test_name "$selector")"
 		log "Running: $selector (db-backend test: $test_name)"
 
-		env_vars+=("CT_RR_SUPPORT_PATH=$CT_RR_SUPPORT_PATH")
+		env_vars+=("CT_NATIVE_REPLAY_PATH=$CT_NATIVE_REPLAY_PATH")
 
 		(
 			cd "$REPO_ROOT/src/db-backend"

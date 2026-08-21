@@ -161,9 +161,10 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-b
 		fi
 	fi
 	_ct_detect_summary "codetracer-native-backend (ct-native-replay available)"
-elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-native-replay" ]; then
+	# Legacy checkout directory name; the binary inside is the current one.
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
-	_ct_detect_summary "codetracer-rr-backend (ct-rr-support available, legacy)"
+	_ct_detect_summary "codetracer-rr-backend (ct-native-replay available, legacy checkout name)"
 fi
 
 # --- codetracer-native-recorder (ct-mcr / Multi-Core Recorder) ---

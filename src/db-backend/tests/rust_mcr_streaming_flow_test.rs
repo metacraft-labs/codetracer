@@ -25,7 +25,7 @@ fn find_db_backend() -> PathBuf {
 #[test]
 fn rust_mcr_streaming_flow_variables_and_values() {
     // --- pre-flight: MCR backend must be available ---
-    let ct_rr_support = match test_harness::find_ct_rr_support() {
+    let ct_native_replay = match test_harness::find_ct_native_replay() {
         Some(p) => p,
         None => {
             eprintln!("SKIPPED: ct-native-replay not found");
@@ -50,7 +50,7 @@ fn rust_mcr_streaming_flow_variables_and_values() {
 
     // --- record under MCR ---
     let recording =
-        TestRecording::create_mcr(&source_path, Language::Rust, "mcr", &ct_rr_support).expect("MCR recording failed");
+        TestRecording::create_mcr(&source_path, Language::Rust, "mcr", &ct_native_replay).expect("MCR recording failed");
 
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
