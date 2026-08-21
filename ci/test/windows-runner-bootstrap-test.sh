@@ -60,6 +60,14 @@
 #      execution on the runner.
 #   6. The set of eph-win-x64 jobs is non-empty (a rename of the runner class
 #      must not turn this suite into a vacuous pass).
+#   7. Every Windows job that reaches `setup-dev-env` -- directly or through a
+#      local composite action -- asks it for a flavor that can exist on
+#      Windows. The `nix` flavor cannot: it installs Nix through
+#      `DeterminateSystems/nix-installer-action`, which has no Windows platform
+#      mapping. `origin-dap-windows` died that way 56 times, in the wrapper
+#      action `setup-db-backend-siblings`, which hard-coded `env-flavor: nix`
+#      for all six of its callers -- four of them Linux/macOS. Section 4 has
+#      its own header with the details.
 #
 # # No mocks
 #
@@ -77,12 +85,40 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly REPO_ROOT
 WORKFLOW="${1:-$REPO_ROOT/.github/workflows/codetracer.yml}"
 readonly WORKFLOW
+# Local composite actions a job can reach `setup-dev-env` through. Section 4
+# follows that indirection: the flavor a Windows job ends up with is not
+# necessarily written in the workflow.
+ACTIONS_DIR="${2:-$REPO_ROOT/.github/actions}"
+readonly ACTIONS_DIR
 BOOTSTRAP_SCRIPT="$REPO_ROOT/ci/ensure-git-for-checkout.ps1"
 readonly BOOTSTRAP_SCRIPT
 
 # The exact display name every eph-win-x64 job must open with.
 readonly BOOTSTRAP_STEP_NAME="Ensure Git and Git Bash are on PATH"
 readonly WINDOWS_RUNNER_LABEL="eph-win-x64"
+# Every runner label that lands a job on Windows. `eph-win-x64` is the only one
+# in use today; the rest are the labels a Windows job could plausibly be moved
+# to (the hosted images the lane came from, and the arm64 class the header note
+# says to revisit). Section 4's contract is about the OS, not about one class,
+# and must not be escapable by relabelling.
+readonly WINDOWS_RUNNER_LABELS="eph-win-x64 eph-win-arm64 windows-latest windows-2025 windows-2022 windows-2019 windows-11-arm"
+# The action that materialises a job's dev environment, and the flavor of it
+# that cannot exist on Windows.
+readonly SETUP_DEV_ENV_USES="metacraft-labs/metacraft-github-actions/setup-dev-env@"
+readonly NIX_FLAVOR="nix"
+# The flavors `setup-dev-env` accepts, minus `nix`. Anything outside this set
+# fails the action's own `Validate env-flavor` step on the runner; asserting it
+# here means a typo is a red test rather than a red job.
+readonly NON_NIX_FLAVORS="windows-diy reprobuild"
+# How many places a Windows job reaches `setup-dev-env` from. Today: four --
+# `windows-rust-components` and `windows-headless-test` use it directly, and
+# `origin-dap-windows` plus `origin-dap-windows-nightly` reach it through
+# `.github/actions/setup-db-backend-siblings`. A floor rather than an equality
+# so adding a Windows job is not a test edit, but dropping below it means the
+# scanner (or the workflow) changed shape and this contract must be RETARGETED,
+# not deleted: with zero sites found, every per-site assertion below vanishes
+# and the suite passes while asserting nothing.
+readonly MIN_WINDOWS_DEV_ENV_SITES=4
 # The only origin the bootstrap may be fetched from. Everything under this
 # prefix is this repository at a pinned commit; anything else is somebody
 # else's code running on the runner before the checkout has even happened.
@@ -174,6 +210,16 @@ declare -A job_bootstrap_body=()
 # so renaming the step cannot drop it out of the contract.
 declare -a wsl_stub_jobs=()
 declare -A job_wsl_stub_body=()
+# Every job whose `runs-on:` names a Windows runner, by ANY of the labels in
+# WINDOWS_RUNNER_LABELS -- not just the one class the lane happens to use
+# today. Section 4 below walks this set; a job moved to `eph-win-arm64` or
+# back onto a hosted `windows-*` image must not fall out of the dev-env
+# contract just because the label changed.
+declare -a windows_runner_jobs=()
+# job -> its steps, each step's list-item text and body concatenated and
+# separated by a record separator (\x1e). Section 4 needs the `uses:` of every
+# step, which the two contracts above never had to look at.
+declare -A job_step_blobs=()
 
 current_job=""
 current_runs_on=""
@@ -182,6 +228,7 @@ seen_any_step=""
 seen_first_step=""
 step_index=0
 current_step_name=""
+current_step_item=""
 current_step_body=""
 
 trim_trailing() {
@@ -199,6 +246,10 @@ flush_step() {
 	if [[ $current_step_body == *'System32\bash.exe'* ]]; then
 		job_wsl_stub_body["$current_job"]+="$current_step_body"
 	fi
+	# Section 4 reads `uses:`, which for an unnamed step lives in the list-item
+	# text rather than in the body, so both halves go into the blob.
+	job_step_blobs["$current_job"]+="$current_step_item"$'\n'"$current_step_body"$'\x1e'
+	current_step_item=""
 	current_step_body=""
 }
 
@@ -206,13 +257,33 @@ flush_step() {
 # called.
 begin_step() {
 	local name="$1"
+	local item="${2:-}"
 	flush_step
 	step_index=$((step_index + 1))
 	current_step_name="$name"
+	current_step_item="$item"
 	if [ -z "$seen_any_step" ]; then
 		seen_any_step="yes"
 		seen_first_step="$name"
 	fi
+}
+
+# Is this `runs-on:` value a Windows runner? Matched against the label list
+# rather than against one hard-coded class, so retiring or adding a Windows
+# runner class cannot silently empty section 4's job set.
+is_windows_runs_on() {
+	local value="$1"
+	local label token
+	# `runs-on:` is either a scalar label or a flow sequence of labels
+	# (`[self-hosted, gpu]`); both forms must be classified, or a Windows job
+	# escapes this contract by being written the other way round.
+	value="${value//[\[\],]/ }"
+	for label in $WINDOWS_RUNNER_LABELS; do
+		for token in $value; do
+			[ "$token" = "$label" ] && return 0
+		done
+	done
+	return 1
 }
 
 flush_job() {
@@ -224,8 +295,12 @@ flush_job() {
 			wsl_stub_jobs+=("$current_job")
 		fi
 	fi
+	if [ -n "$current_job" ] && is_windows_runs_on "$current_runs_on"; then
+		windows_runner_jobs+=("$current_job")
+	fi
 	step_index=0
 	current_step_name=""
+	current_step_item=""
 	current_step_body=""
 }
 
@@ -268,11 +343,11 @@ while IFS= read -r line; do
 	if [[ $line =~ ^\ \ \ \ \ \ -\ (.*)$ ]]; then
 		step_item="$(trim_trailing "${BASH_REMATCH[1]}")"
 		if [[ $step_item =~ ^name:[[:space:]]+(.*)$ ]]; then
-			begin_step "$(trim_trailing "${BASH_REMATCH[1]}")"
+			begin_step "$(trim_trailing "${BASH_REMATCH[1]}")" "$step_item"
 		else
 			# An unnamed step. Keep the item text so the failure message can
 			# point at the thing that was inserted.
-			begin_step "<unnamed step #$((step_index + 1)): - $step_item>"
+			begin_step "<unnamed step #$((step_index + 1)): - $step_item>" "$step_item"
 		fi
 		continue
 	fi
@@ -450,13 +525,262 @@ for job in "${wsl_stub_jobs[@]+"${wsl_stub_jobs[@]}"}"; do
 done
 
 # ---------------------------------------------------------------------------
+# 4. The dev-env flavor every Windows job asks `setup-dev-env` for.
+#
+# `setup-dev-env` takes an `env-flavor`, and the `nix` one installs Nix through
+# `DeterminateSystems/nix-installer-action`. That installer has no Windows
+# platform mapping, so on any Windows runner the step dies with
+#
+#     ArchOs (X64-Windows) doesn't map to a supported Nix platform
+#
+# ...before the job reaches a single one of its own steps. `origin-dap-windows`
+# failed that way 56 times: its "Setup db-backend siblings" step is a thin
+# wrapper over `setup-dev-env`, and the wrapper hard-coded `env-flavor: nix`
+# for all six of its callers, four of which are Linux/macOS.
+#
+# The flavor is not a style choice on Windows -- `nix` cannot work there. The
+# two flavors that can are `windows-diy` (source the repo's `env.ps1`) and
+# `reprobuild`. What a Windows job needs OUT of the action is the cross-repo
+# sibling clones, which every flavor performs before it branches on flavor at
+# all.
+#
+# What is asserted:
+#
+#   a. Every step of a Windows job that reaches `setup-dev-env` -- directly, or
+#      through a local composite under `.github/actions/` -- resolves to a
+#      concrete flavor. An empty one is not benign: the composite's input has
+#      no default, so a caller that forgets it passes the empty string and the
+#      action's `Validate env-flavor` step fails the job.
+#   b. That flavor is not `nix`, and is one the action accepts.
+#   c. The set of such steps is at least MIN_WINDOWS_DEV_ENV_SITES, reached
+#      both directly and through a composite. A parser that stopped matching --
+#      the local-composite indirection is the fragile half -- would otherwise
+#      report "no violations" in exactly the same words as a clean tree.
+#
+# A local composite that a Windows job references but that does not exist is a
+# failure here too: it is the same "the indirection was renamed and nothing
+# noticed" defect, seen from the other side.
+# ---------------------------------------------------------------------------
+echo
+echo "Windows jobs' dev-env flavor"
+
+# Strip full-line comments before looking for keys: a `uses:` or `env-flavor:`
+# inside a step's explanatory comment is prose, not configuration.
+uncommented() {
+	printf '%s' "$1" | grep -vE '^[[:space:]]*#' || true
+}
+
+# The `uses:` of a step blob, whether it arrived as `- uses: x` or as a
+# `uses: x` key under `- name: ...`.
+blob_uses() {
+	uncommented "$1" |
+		grep -oE '(^|[[:space:]-])uses:[[:space:]]*[^[:space:]]+' |
+		head -1 |
+		sed -E 's/.*uses:[[:space:]]*//'
+}
+
+# The `env-flavor:` a blob passes in its `with:` block, verbatim (it may be a
+# `${{ inputs.* }}` expression when read out of a composite).
+blob_env_flavor() {
+	uncommented "$1" |
+		grep -oE '^[[:space:]]*env-flavor:[[:space:]]*.*$' |
+		head -1 |
+		sed -E 's/^[[:space:]]*env-flavor:[[:space:]]*//; s/[[:space:]]+$//'
+}
+
+# The `env-flavor:` a composite action passes to `setup-dev-env`, verbatim.
+# Scoped to the lines AFTER the `uses:` that names the action: the composite
+# also DECLARES an `env-flavor:` input, and reading that declaration instead
+# would report every caller as passing the empty string.
+composite_env_flavor() {
+	awk -v needle="$SETUP_DEV_ENV_USES" '
+		/^[[:space:]]*#/ { next }
+		index($0, needle) { seen = 1; next }
+		seen && /^[[:space:]]*env-flavor:[[:space:]]*/ {
+			sub(/^[[:space:]]*env-flavor:[[:space:]]*/, "")
+			sub(/[[:space:]]+$/, "")
+			print
+			exit
+		}
+	' "$1"
+}
+
+# The `default:` of one input of a composite action file, empty when the input
+# declares none.
+composite_input_default() {
+	awk -v want="$2" '
+		$0 ~ "^  " want ":[[:space:]]*$" { inblock = 1; next }
+		inblock && /^  [A-Za-z0-9_-]+:/ { inblock = 0 }
+		inblock && /^[[:space:]]*default:[[:space:]]*/ {
+			sub(/^[[:space:]]*default:[[:space:]]*/, "")
+			gsub(/^"|"$|^'"'"'|'"'"'$/, "")
+			print
+			exit
+		}
+	' "$1"
+}
+
+declare -a dev_env_sites=()
+declare -a dev_env_sites_direct=()
+declare -a dev_env_sites_via_composite=()
+declare -A site_flavor=()
+declare -A site_detail=()
+
+for job in "${windows_runner_jobs[@]+"${windows_runner_jobs[@]}"}"; do
+	while IFS= read -r -d $'\x1e' blob; do
+		uses="$(blob_uses "$blob")"
+		[ -n "$uses" ] || continue
+
+		site=""
+		flavor=""
+		detail=""
+		case "$uses" in
+		*"$SETUP_DEV_ENV_USES"*)
+			site="$job (direct)"
+			flavor="$(blob_env_flavor "$blob")"
+			detail="step passes env-flavor: ${flavor:-<none>}"
+			dev_env_sites_direct+=("$site")
+			;;
+		./.github/actions/*)
+			composite_name="${uses#./.github/actions/}"
+			composite_file="$ACTIONS_DIR/$composite_name/action.yml"
+			if [ ! -f "$composite_file" ]; then
+				site="$job (via $composite_name)"
+				detail="no action.yml at ${composite_file#"$REPO_ROOT/"}"
+				dev_env_sites+=("$site")
+				dev_env_sites_via_composite+=("$site")
+				site_flavor["$site"]=""
+				site_detail["$site"]="$detail"
+				continue
+			fi
+			grep -q "$SETUP_DEV_ENV_USES" "$composite_file" || continue
+			site="$job (via $composite_name)"
+			composite_flavor="$(composite_env_flavor "$composite_file")"
+			if [[ $composite_flavor =~ \$\{\{[[:space:]]*inputs\.([A-Za-z0-9_-]+)[[:space:]]*\}\} ]]; then
+				# The composite forwards one of its own inputs: the flavor is
+				# whatever the CALLING job passed, or the input's default.
+				input_name="${BASH_REMATCH[1]}"
+				flavor="$(blob_env_flavor "$blob")"
+				if [ -n "$flavor" ]; then
+					detail="job passes $input_name: $flavor to $composite_name"
+				else
+					flavor="$(composite_input_default "$composite_file" "$input_name")"
+					detail="job passes no $input_name; composite default is ${flavor:-<none>}"
+				fi
+			else
+				flavor="$composite_flavor"
+				detail="$composite_name hard-codes env-flavor: ${flavor:-<none>}"
+			fi
+			dev_env_sites_via_composite+=("$site")
+			;;
+		*)
+			continue
+			;;
+		esac
+
+		dev_env_sites+=("$site")
+		site_flavor["$site"]="$flavor"
+		site_detail["$site"]="$detail"
+	done <<<"${job_step_blobs[$job]:-}"
+done
+
+if [ "${#dev_env_sites[@]}" -ge "$MIN_WINDOWS_DEV_ENV_SITES" ]; then
+	ok "Windows jobs reach setup-dev-env from ${#dev_env_sites[@]} places (>= $MIN_WINDOWS_DEV_ENV_SITES)"
+else
+	fail "Windows jobs reach setup-dev-env from at least $MIN_WINDOWS_DEV_ENV_SITES places" \
+		"found ${#dev_env_sites[@]}. Either a Windows job stopped provisioning its" \
+		"siblings through setup-dev-env -- in which case this contract must be" \
+		"retargeted, not deleted -- or the scanner no longer matches the file." \
+		"Every per-site assertion below is generated from this set, so a short" \
+		"one reports 'no violations' while checking nothing."
+fi
+
+# The scanner reads `runs-on:` literally, so a job whose runner comes from a
+# build matrix (`runs-on: ${{ matrix.runner }}`) is classified by neither
+# branch of `is_windows_runs_on`. Today every matrix leg is Linux or macOS. If
+# a Windows leg is ever added, this contract must learn to follow the matrix
+# rather than quietly stop covering it -- which is what this assertion says out
+# loud.
+matrix_windows_legs=""
+for label in $WINDOWS_RUNNER_LABELS; do
+	# Matrix legs are written both as a bare `runner:` key under an `include:`
+	# entry and as the first key of one (`- runner: ...`); match either.
+	if grep -qE "^[[:space:]]*(-[[:space:]]+)?runner:[[:space:]]*$label([[:space:]]|#|$)" "$WORKFLOW"; then
+		matrix_windows_legs="$matrix_windows_legs $label"
+	fi
+done
+if [ -z "$matrix_windows_legs" ]; then
+	ok "no build-matrix leg selects a Windows runner behind an expression"
+else
+	fail "no build-matrix leg selects a Windows runner behind an expression" \
+		"found matrix runner value(s):$matrix_windows_legs." \
+		"A job with 'runs-on: \${{ matrix.runner }}' is classified by neither" \
+		"branch of is_windows_runs_on, so its flavor goes unchecked. Teach the" \
+		"scanner to expand the matrix before adding a Windows leg."
+fi
+
+if [ "${#dev_env_sites_direct[@]}" -gt 0 ]; then
+	ok "at least one Windows job names setup-dev-env directly (${#dev_env_sites_direct[@]})"
+else
+	fail "at least one Windows job names setup-dev-env directly" \
+		"none found, though windows-rust-components and windows-headless-test do." \
+		"The direct-use branch of the scanner above has stopped matching."
+fi
+
+if [ "${#dev_env_sites_via_composite[@]}" -gt 0 ]; then
+	ok "at least one Windows job reaches setup-dev-env through a local composite (${#dev_env_sites_via_composite[@]})"
+else
+	fail "at least one Windows job reaches setup-dev-env through a local composite" \
+		"none found, though origin-dap-windows and origin-dap-windows-nightly reach" \
+		"it through .github/actions/setup-db-backend-siblings. THIS is the half that" \
+		"hid the outage: the flavor those jobs get is not written in the workflow," \
+		"so a scanner that only reads workflow steps sees a clean file."
+fi
+
+for site in "${dev_env_sites[@]+"${dev_env_sites[@]}"}"; do
+	flavor="${site_flavor[$site]:-}"
+	detail="${site_detail[$site]:-}"
+
+	if [ -n "$flavor" ]; then
+		ok "$site resolves an env-flavor ($detail)"
+	else
+		fail "$site resolves an env-flavor" \
+			"$detail." \
+			"setup-dev-env's own 'Validate env-flavor' step rejects an empty value," \
+			"so this fails the job on the runner -- after minutes of checkout."
+	fi
+
+	flavor_ok=""
+	for candidate in $NON_NIX_FLAVORS; do
+		[ "$flavor" = "$candidate" ] && flavor_ok="yes"
+	done
+	if [ -n "$flavor_ok" ]; then
+		ok "$site asks for a Windows-capable flavor ($flavor)"
+	elif [ "$flavor" = "$NIX_FLAVOR" ]; then
+		fail "$site asks for a Windows-capable flavor" \
+			"it asks for '$NIX_FLAVOR' ($detail)." \
+			"The nix flavor installs Nix via DeterminateSystems/nix-installer-action," \
+			"which has no Windows mapping: the step dies with 'ArchOs (X64-Windows)" \
+			"doesn't map to a supported Nix platform' before the job runs anything of" \
+			"its own. Use one of: $NON_NIX_FLAVORS."
+	else
+		fail "$site asks for a Windows-capable flavor" \
+			"it asks for '${flavor:-<none>}' ($detail), which setup-dev-env does not" \
+			"accept. Use one of: $NON_NIX_FLAVORS."
+	fi
+done
+
+# ---------------------------------------------------------------------------
 # Self-accounting: a contract that is deleted or short-circuited must not leave
 # this script reporting success on fewer checks than it claims. Four fixed
 # assertions (script exists, script provisions bash, job set non-empty, WSL
-# stub-step set non-empty), six per Windows job, and two per WSL stub step.
+# stub-step set non-empty), six per Windows job, two per WSL stub step, four
+# fixed dev-env-flavor assertions (site count, no matrix-hidden Windows leg,
+# one direct, one via composite) and two per dev-env site.
 # ---------------------------------------------------------------------------
 echo
-expected_assertions=$((4 + 6 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]}))
+expected_assertions=$((4 + 6 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
+	4 + 2 * ${#dev_env_sites[@]}))
 if [ "$assertions" -ne "$expected_assertions" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$expected_assertions"
 	failures=$((failures + 1))
