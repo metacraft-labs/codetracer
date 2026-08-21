@@ -1252,7 +1252,7 @@ proc events(self: EventLogComponent) =
             emptyTable: proc: cstring =
               # TODO if self.receivedUpdates:
               """The current record appears to not have any system events like std read/write,
-              network or disc operations.</br>You can add trace point events to your code by selecting any
+              network or disc operations. You can add trace point events to your code by selecting any
               line of code and pressing "Enter"""".cstring
               # else:
               #   "Loading record events...".cstring

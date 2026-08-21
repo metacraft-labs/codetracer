@@ -646,6 +646,50 @@ suite "IsoNim Menu Shell — structure":
     check findByClass(panel, "restore").isNil
     check findAllByClass(panel, "menu-node-container").len == 0
 
+  test "caption bar host classes follow the window mode":
+    # Pure decision logic for `#menu`'s classes.  Three states, only
+    # distinguishable at runtime, so they are pinned here rather than through a
+    # render: the class cannot be set during a menu render at all — the wrapper
+    # the shell builds is discarded by `renderMenuShellInto`, and fullscreen is
+    # an OS window state no render pass observes.
+
+    # Windows/Linux draw a real frame: neither class, nothing reserved.
+    check captionBarHostClasses("menu", reserveWindowControls = false,
+                                fullscreen = false) == "menu"
+    check captionBarHostClasses("menu", reserveWindowControls = false,
+                                fullscreen = true) == "menu"
+
+    # macOS windowed: reserve room for the traffic-light buttons.
+    check captionBarHostClasses("menu", reserveWindowControls = true,
+                                fullscreen = false) ==
+      "menu " & MenuShellReservedControlsClass
+
+    # macOS fullscreen: the buttons are gone, so reclaim the space instead.
+    check captionBarHostClasses("menu", reserveWindowControls = true,
+                                fullscreen = true) ==
+      "menu " & MenuShellFullscreenClass
+
+  test "caption bar host classes never accumulate or drop foreign classes":
+    # The host is shared: `#menu` carries `menu` from index.html and anything
+    # else that gets added along the way.  Toggling fullscreen repeatedly must
+    # swap only the class this owns and leave the rest untouched and in order.
+    var classes = "menu something-else"
+    for _ in 0 .. 2:
+      classes = captionBarHostClasses(classes, true, fullscreen = true)
+      check classes == "menu something-else " & MenuShellFullscreenClass
+      classes = captionBarHostClasses(classes, true, fullscreen = false)
+      check classes == "menu something-else " & MenuShellReservedControlsClass
+
+    # Leaving macOS behind entirely strips both without touching the others.
+    check captionBarHostClasses(classes, false, false) == "menu something-else"
+
+  test "caption bar host classes tolerate messy attribute text":
+    check captionBarHostClasses("  menu   " & MenuShellFullscreenClass & "  ",
+                                true, fullscreen = false) ==
+      "menu " & MenuShellReservedControlsClass
+    check captionBarHostClasses("", true, fullscreen = false) ==
+      MenuShellReservedControlsClass
+
   test "caption bar hosts survive without navigation menu":
     let r = MockRenderer()
     let panel = renderMenuShell(
@@ -11574,9 +11618,26 @@ suite "IsoNim VCS Panel — structure":
         onClearSelectedHunks: proc() = cleared += 1,
       )
 
+      # With no files there is nothing to diff: the message replaces the editor
+      # rather than being written into the Monaco model, where it would render
+      # as a line of code with a line number beside it.  `.empty-overlay` is
+      # what earns it the shared empty-state treatment.
+      let emptyPanel = isonim_unified_diff_view.renderUnifiedDiffTab(
+        r, vm, "unifiedDiffEditor-empty", callbacks)
+      let emptyNode = findByClass(emptyPanel, "unified-diff-empty")
+      check emptyNode != nil
+      check emptyNode.textContent == isonim_unified_diff_view.UnifiedDiffEmptyText
+      check "empty-overlay" in emptyNode.attributes["class"]
+      check "hidden" notin emptyNode.attributes["class"]
+      check "hidden" in
+        findByClass(emptyPanel, "unified-diff-editor").attributes["class"]
+
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
       let panel = isonim_unified_diff_view.renderUnifiedDiffTab(
         r, vm, "unifiedDiffEditor-7", callbacks)
+
+      # Once there are files the message steps aside and the editor is shown.
+      check "hidden" in findByClass(panel, "unified-diff-empty").attributes["class"]
 
       # The Monaco host is present and empty: the editor attaches to it.
       let host = findByClass(panel, "unified-diff-editor")

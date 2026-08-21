@@ -1191,6 +1191,23 @@ data.functions.focusEditorView = focusEditorView
 
 
 proc configure(data: Data) =
+  # macOS keeps its native traffic-light buttons and paints them over the top
+  # left of the web contents (`titleBarStyle: hidden`, `index/window.nim`), so
+  # the caption bar must start clear of them.  Marked here, at startup, rather
+  # than only when the menu shell renders: the session tab bar is rendered into
+  # `#menu` by `ui/session_tabs.nim` independently of the shell, and on the
+  # welcome screen it is the only thing there — it would sit under the buttons
+  # while waiting for a shell render that never comes.
+  when defined(ctmacos):
+    # Reserve room for the traffic-light buttons the OS paints over the caption
+    # bar, and follow the window in and out of fullscreen, where they vanish.
+    applyCaptionBarWindowMode()
+    let fullscreenIpc = data.ipc
+    fullscreenIpc["on"].call(
+        fullscreenIpc, cstring"CODETRACER::window-fullscreen-changed") do (
+        sender: js, response: js):
+      setCaptionBarFullscreen(response["fullscreen"].to(bool))
+
   # Hot module reload — only active when the binary was built with
   # `-d:ctHmr`. The renderer connects to the external LiveReload
   # daemon that `just build` started; `CT_HMR=0` opts out per

@@ -101,6 +101,25 @@ proc createMainWindow*: js =
     win.loadURL(cstring(url))
 
     win.on("close", onClose)
+
+    when defined(ctmacos):
+      # macOS hides the traffic-light buttons in native fullscreen, so the
+      # caption bar must stop reserving space for them (and drop the divider
+      # that separated them from its own controls).  Nothing in the renderer can
+      # observe this — it is a window-level OS state — so push it over IPC.
+      # `ui/menu.nim`'s `setCaptionBarFullscreen` consumes it.
+      proc sendFullscreenState(fullscreen: bool) =
+        win.webContents.send(
+          cstring"CODETRACER::window-fullscreen-changed",
+          js{"fullscreen": fullscreen})
+
+      win.on("enter-full-screen", proc() = sendFullscreenState(true))
+      win.on("leave-full-screen", proc() = sendFullscreenState(false))
+      # The window can already be fullscreen when the renderer first paints
+      # (a restored macOS space, or `--start-fullscreen`), and the renderer
+      # defaults to windowed, so state the truth once the contents are live.
+      win.webContents.on("did-finish-load", proc() =
+        sendFullscreenState(cast[bool](win.isFullScreen())))
     # TODO: eventually add a shortcut and ipc message that lets us
     # open the dev tools directly from the interface, as in browsers
     let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
