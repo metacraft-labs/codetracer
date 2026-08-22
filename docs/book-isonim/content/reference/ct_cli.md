@@ -37,7 +37,7 @@ ct <command> [options] [<program>] [<args>]
 | `ct agent end-of-turn`       | Run `ct review collect` then `ct agent evidence`, for a project hook |
 | `ct agent prompt`            | Print the prompt text that teaches an agent the pair                 |
 
-See [DeepReview](../usage_guide/deep_review.md) for the workflow.
+See the [DeepReview](/deep_review) section for the workflow.
 
 #### Stylus / EVM
 
@@ -158,7 +158,8 @@ Accepts the same options as `ct record`.
 ### ct review
 
 Opens a review over an exported review dataset — the diff, its recorded
-executions, coverage and flow. See [DeepReview](../usage_guide/deep_review.md).
+executions, coverage and flow. See
+[Reading a review](/deep_review/reading).
 
 ```
 ct review <PATH>

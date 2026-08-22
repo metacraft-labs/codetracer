@@ -12,6 +12,7 @@ tests/test_nightly_channel
 tests/test_preview_channel
 tests/test_legacy_url_redirects
 tests/test_publish_output_shape
+tests/test_deep_review_section
 # `just test` runs test_dev, and the whole suite is run by hand; all four of
 # these left an untracked binary behind before they were listed here.
 tests/test_dev

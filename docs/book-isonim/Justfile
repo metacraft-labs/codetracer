@@ -6,11 +6,22 @@
 # direnv, prefix a recipe with the framework's flake -- never isonim's:
 #   nix develop path:../../../isonim-docs -c just --justfile docs/book-isonim/Justfile --working-directory docs/book-isonim build
 
-test:
+# The suites that need only `content/` + `src/`, then the ones that read the
+# built `public/` tree -- so `build` runs first rather than being a prerequisite
+# a reader has to know about. (CI builds the book but does not run these; they
+# are the hand-run gate, which is exactly why leaving the build-dependent ones
+# out of this recipe meant they were rarely run at all.)
+test: build
     nim c -r tests/test_nav_order_matches_summary.nim
     nim c -r tests/test_nightly_channel.nim
     nim c -r tests/test_preview_channel.nim
     nim c -r tests/test_dev.nim
+    nim c -r tests/test_chrome.nim
+    nim c -r tests/test_home_landing.nim
+    nim c -r tests/test_support_pages.nim
+    nim c -r tests/test_deep_review_section.nim
+    nim c -r tests/test_legacy_url_redirects.nim
+    nim c -r tests/test_publish_output_shape.nim
 
 build:
     nim c -r --hints:off -o:build/build src/build.nim
