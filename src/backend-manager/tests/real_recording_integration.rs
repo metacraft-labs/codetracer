@@ -4,6 +4,37 @@
 //! by exercising the daemon's flows against real `replay-server` instances processing
 //! real trace recordings.
 //!
+//! ## Prerequisite policy — these tests do NOT self-pass
+//!
+//! Every test here needs a real recording pipeline: `replay-server`,
+//! `ct-native-replay`, `rr`, `nargo`, or the native Ruby recorder.  A missing
+//! prerequisite is a **hard failure**, not a skip and emphatically not a pass.
+//!
+//! This inverts the previous default.  Before, each prerequisite probe
+//! returned "not found", the test logged `SKIP: ...` and `return Ok(())`, and
+//! the harness counted the test **PASSED** having executed zero assertions.
+//! Measured on a Windows host with no prerequisites present, the whole file
+//! reported `75 passed; 0 failed; 7 ignored` in 0.33 seconds — seventy-five
+//! green results, none of which had touched a trace.  A green result that
+//! means nothing is worse than a red one: it is a lie about coverage that
+//! survives review precisely because nobody looks at passing tests.
+//!
+//! The single choke point is [`prereq_missing`].  Every "not found" path in
+//! this file calls it, and it panics unless the operator explicitly opted out.
+//!
+//! * default (nothing set) — a missing prerequisite FAILS the test.
+//! * `REAL_RECORDING_INTEGRATION_ALLOW_MISSING=1` — downgrade to a printed
+//!   skip.  **LOCAL ITERATION ONLY.**  Never set this in a required CI gate.
+//!   The same `<PREFIX>_ALLOW_MISSING` shape is used by
+//!   `ci/test/launcher-recorder-e2e.sh` §5.5.
+//! * `REQUIRE_REAL_RECORDINGS=1` — the legacy spelling for "fail on missing
+//!   prerequisites".  Still honoured, now redundant, and it overrides the
+//!   opt-out so an existing CI invocation cannot be weakened by one.
+//!
+//! `#[ignore]` remains the honest way to declare a test that did not run (the
+//! Noir tests use it); it is visible in the harness summary as "ignored"
+//! rather than being counted as a success.
+//!
 //! ## M2 — Trace-Path Session Management
 //!
 //! Tests for `ct/open-trace` and `ct/trace-info` that verify the daemon can open
@@ -215,19 +246,93 @@ fn binary_path() -> PathBuf {
     path
 }
 
-/// Returns `true` when `REQUIRE_REAL_RECORDINGS=1` (or `true`) is set.
+// ---------------------------------------------------------------------------
+// Prerequisite gate — the choke point every "prerequisite is missing" path
+// in this file must pass through.
+// ---------------------------------------------------------------------------
+
+/// The name of the LOCAL-iteration opt-out.  Named after this test target so
+/// it cannot be confused with a production switch, and following the
+/// `<PREFIX>_ALLOW_MISSING` convention already established by
+/// `ci/test/launcher-recorder-e2e.sh`.
 ///
-/// When this env var is set, tests MUST NOT silently skip when prerequisites
-/// (replay-server, ct-native-replay, rr, nargo) are missing.  Instead they panic,
-/// making CI catch configuration problems rather than reporting green with
-/// zero assertions executed.
+/// **This variable must never be set in a required CI gate.**
+const ALLOW_MISSING_ENV: &str = "REAL_RECORDING_INTEGRATION_ALLOW_MISSING";
+
+/// Legacy spelling.  Before the default was inverted, these tests only failed
+/// on a missing prerequisite when `REQUIRE_REAL_RECORDINGS=1` was set — and
+/// silently *passed* otherwise.  The variable is still honoured (setting it
+/// asks for hard failure, which is now also the default) so existing CI
+/// invocations keep meaning what they meant; it always wins over the opt-out.
+const LEGACY_REQUIRE_ENV: &str = "REQUIRE_REAL_RECORDINGS";
+
+/// Decides whether a missing prerequisite may be downgraded to a printed skip.
 ///
-/// When the env var is unset, tests silently skip as before (useful for
-/// local development without all prerequisites installed).
-fn require_real_recordings() -> bool {
-    std::env::var("REQUIRE_REAL_RECORDINGS")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+/// Pure so the policy can be unit-tested without mutating process-global
+/// environment state from a test thread.
+///
+/// * default (both unset)  -> `false`: a missing prerequisite is a FAILURE.
+/// * `<ALLOW_MISSING>=1`   -> `true`:  downgrade to a printed skip.
+/// * `REQUIRE_REAL_RECORDINGS=1` -> `false`, overriding the opt-out.
+fn resolve_allow_missing(opt_out: Option<&str>, legacy_require: Option<&str>) -> bool {
+    fn truthy(v: Option<&str>) -> bool {
+        v.map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    }
+    if truthy(legacy_require) {
+        return false;
+    }
+    truthy(opt_out)
+}
+
+/// Reads the process environment and applies [`resolve_allow_missing`].
+fn allow_missing_prereqs() -> bool {
+    let opt_out = std::env::var(ALLOW_MISSING_ENV).ok();
+    let legacy = std::env::var(LEGACY_REQUIRE_ENV).ok();
+    resolve_allow_missing(opt_out.as_deref(), legacy.as_deref())
+}
+
+/// Panics unless the operator explicitly asked, via [`ALLOW_MISSING_ENV`], to
+/// downgrade a missing prerequisite to a skip.
+///
+/// Pure with respect to the environment (`allow_missing` is passed in) so the
+/// gate itself is directly unit-testable — see
+/// `prereq_gate_hard_fails_by_default` at the bottom of this file.
+fn enforce_prereq_present(allow_missing: bool, reason: &str) {
+    if !allow_missing {
+        panic!(
+            "MISSING PREREQUISITE: {reason}\n\
+             \n\
+             These tests exist to exercise a REAL recording pipeline.  With \
+             the prerequisite absent there is nothing to exercise, so this \
+             test has executed zero meaningful assertions.  Reporting that as \
+             a pass would be a lie about coverage, which is why it is a \
+             failure and not a skip.\n\
+             \n\
+             Fix: build the missing component (see \
+             src/backend-manager/CLAUDE.md and \
+             codetracer-specs/Working-with-the-CodeTracer-Repos.md).\n\
+             \n\
+             For LOCAL iteration only you may set {ALLOW_MISSING_ENV}=1 to \
+             downgrade this to a printed skip.  That variable must NEVER be \
+             set in a required CI gate; setting {LEGACY_REQUIRE_ENV}=1 \
+             overrides it."
+        );
+    }
+    eprintln!(
+        "WARNING: prerequisite missing ({reason}); continuing only because \
+         {ALLOW_MISSING_ENV}=1 is set.  This run proves nothing about the \
+         real-recording pipeline."
+    );
+}
+
+/// Convenience wrapper: [`enforce_prereq_present`] against the live environment.
+///
+/// Every prerequisite probe in this file calls this before handing back a
+/// "not found" result, so a `None`/`Err` from any of them is *proof* that the
+/// operator opted out — never a silent default.
+fn prereq_missing(reason: &str) {
+    enforce_prereq_present(allow_missing_prereqs(), reason);
 }
 
 /// Returns the path to the compiled `replay-server` (formerly `db-backend`) binary, if available.
@@ -302,13 +407,12 @@ fn find_db_backend() -> Option<PathBuf> {
         }
     }
 
-    if require_real_recordings() {
-        panic!(
-            "REQUIRE_REAL_RECORDINGS is set but replay-server was not found \
-             in the workspace target directory or PATH.  Either build \
-             replay-server first or unset the environment variable."
-        );
-    }
+    prereq_missing(
+        "replay-server (formerly db-backend) was not found in the workspace \
+         target directory, the sibling db-backend crate's target directories, \
+         or PATH.  Build it first (`cargo build -p db-backend`, or the \
+         workspace `ct` build).",
+    );
     None
 }
 
@@ -378,6 +482,12 @@ fn find_ct_native_replay() -> Option<PathBuf> {
         }
     }
 
+    prereq_missing(
+        "ct-native-replay was not found via CT_NATIVE_REPLAY_PATH, PATH, or \
+         any sibling codetracer-native-backend checkout.  Build it \
+         (`cargo build` in codetracer-native-backend) or point \
+         CT_NATIVE_REPLAY_PATH at it.",
+    );
     None
 }
 
@@ -834,11 +944,13 @@ fn create_rr_recording_from_source(
     Ok(trace_dir)
 }
 
-/// Checks whether all RR-based test prerequisites are met.  If not, returns
-/// a human-readable skip reason.
+/// Checks whether all RR-based test prerequisites are met.
 ///
-/// When `REQUIRE_REAL_RECORDINGS=1` is set, missing prerequisites cause a
-/// panic rather than a silent skip, so CI catches configuration problems.
+/// A missing prerequisite is a hard failure: every path below goes through
+/// [`prereq_missing`], which panics unless the operator set
+/// [`ALLOW_MISSING_ENV`].  An `Err` from this function is therefore only ever
+/// reachable when that opt-out is in force, so the `Err` arms at the call
+/// sites cannot silently turn a broken environment into a green test.
 fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
     // Gate: the codetracer-native-backend sibling repo must be detected by
     // detect-siblings.sh (which sets CODETRACER_RR_BACKEND_PATH). The legacy
@@ -853,33 +965,36 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
         || std::env::var("CODETRACER_RR_BACKEND_PRESENT")
             .map(|v| v == "1")
             .unwrap_or(false);
-    if !rr_backend_detected && !require_real_recordings() {
-        return Err("CODETRACER_RR_BACKEND_PATH not set \
-             (codetracer-native-backend sibling not detected, skipping RR tests)"
-            .to_string());
+    if !rr_backend_detected {
+        let msg = "CODETRACER_RR_BACKEND_PATH is not set — the \
+                   codetracer-native-backend sibling was not detected, so the \
+                   rr wrapper and libraries these tests need are not the ones \
+                   under test.  Run detect-siblings.sh (see \
+                   codetracer-specs/Working-with-the-CodeTracer-Repos.md).";
+        prereq_missing(msg);
+        return Err(msg.to_string());
     }
 
     let ct_native_replay = match find_ct_native_replay() {
         Some(p) => p,
         None => {
-            let msg = "ct-native-replay not found (skipping RR-based tests)";
-            if require_real_recordings() {
-                panic!("REQUIRE_REAL_RECORDINGS is set but {msg}");
-            }
-            return Err(msg.to_string());
+            // `find_ct_native_replay` already went through `prereq_missing`,
+            // so reaching here means the opt-out is set.
+            return Err("ct-native-replay not found (skipping RR-based tests)".to_string());
         }
     };
 
     if !is_rr_available() {
-        let msg = "rr not available (skipping RR-based tests)";
-        if require_real_recordings() {
-            panic!("REQUIRE_REAL_RECORDINGS is set but {msg}");
-        }
+        let msg = "`rr` is not available on PATH, so no RR recording can be made";
+        prereq_missing(msg);
         return Err(msg.to_string());
     }
 
-    let db_backend = find_db_backend()
-        .ok_or_else(|| "replay-server not found (skipping real recording tests)".to_string())?;
+    let db_backend = match find_db_backend() {
+        Some(p) => p,
+        // `find_db_backend` already went through `prereq_missing`.
+        None => return Err("replay-server not found (skipping real recording tests)".to_string()),
+    };
 
     Ok((ct_native_replay, db_backend))
 }
@@ -893,8 +1008,8 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
 /// Noir (nargo) is available in the codetracer dev shell and is used
 /// to record execution traces of Noir programs via `nargo trace`.
 ///
-/// When `REQUIRE_REAL_RECORDINGS=1` is set and nargo is not found,
-/// this function panics instead of returning `None`.
+/// A missing `nargo` is a hard failure (via [`prereq_missing`]); `None` is
+/// only ever returned when [`ALLOW_MISSING_ENV`] is set.
 fn find_nargo() -> Option<PathBuf> {
     if let Ok(output) = std::process::Command::new("which").arg("nargo").output()
         && output.status.success()
@@ -905,12 +1020,10 @@ fn find_nargo() -> Option<PathBuf> {
         }
     }
 
-    if require_real_recordings() {
-        panic!(
-            "REQUIRE_REAL_RECORDINGS is set but nargo was not found in PATH. \
-             Make sure to run tests from the codetracer nix dev shell."
-        );
-    }
+    prereq_missing(
+        "nargo (our Noir fork) was not found in PATH, so no Noir trace can be \
+         recorded.  Run these tests from the codetracer nix dev shell.",
+    );
     None
 }
 
@@ -1153,25 +1266,27 @@ fn create_noir_recording(test_dir: &Path, log_path: &Path) -> Result<PathBuf, St
 
 /// Checks whether Noir-based test prerequisites are met.
 ///
-/// Returns `(nargo_path, replay_server_path)` on success, or a skip reason
-/// string on failure.  When `REQUIRE_REAL_RECORDINGS=1` is set, missing
-/// prerequisites cause a panic (via the underlying `find_nargo()` /
-/// `find_db_backend()` functions) rather than a silent skip.
+/// Returns `(nargo_path, replay_server_path)`.  A missing prerequisite is a
+/// hard failure raised by the underlying [`find_nargo`] / [`find_db_backend`]
+/// probes, both of which go through [`prereq_missing`]; the `Err` arm here is
+/// reachable only when [`ALLOW_MISSING_ENV`] is set.
 ///
-/// nargo (our Noir fork) is available in the default nix dev shell but not
-/// in the nix build sandbox.  Use `REQUIRE_REAL_RECORDINGS=1` to force these
-/// tests to fail instead of skip when prerequisites are missing.
+/// nargo (our Noir fork) is available in the default nix dev shell but not in
+/// the nix build sandbox — which is why the Noir tests carry `#[ignore]` as
+/// well.  `#[ignore]` is an honest declaration that a test did not run;
+/// returning green without running is not.
 fn check_noir_prerequisites() -> Result<(PathBuf, PathBuf), String> {
+    // Both probes already went through `prereq_missing`, so reaching either
+    // `None` arm means the opt-out is set.
     let nargo = match find_nargo() {
         Some(p) => p,
-        None => {
-            let msg = "nargo not found (skipping Noir-based tests)";
-            return Err(msg.to_string());
-        }
+        None => return Err("nargo not found (skipping Noir-based tests)".to_string()),
     };
 
-    let db_backend = find_db_backend()
-        .ok_or_else(|| "db-backend not found (skipping Noir tests)".to_string())?;
+    let db_backend = match find_db_backend() {
+        Some(p) => p,
+        None => return Err("db-backend not found (skipping Noir tests)".to_string()),
+    };
 
     Ok((nargo, db_backend))
 }
@@ -15462,4 +15577,241 @@ except Exception as e:
     report("test_cli_trace_query_rr_c_flow", &log_path, success);
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// Self-tests for the prerequisite gate
+// ===========================================================================
+//
+// # Purpose
+//
+// These four tests guard ONE defect class: **a test that reports success
+// while doing nothing.**  Every other test in this file needs a real
+// recording pipeline; before the gate above existed, each one answered a
+// missing prerequisite with `return Ok(())` and the harness counted that as
+// PASSED.  Measured on a Windows host with nothing built, this file reported
+// `75 passed; 0 failed; 7 ignored` in 0.33s -- seventy-five green results
+// that had not opened a single trace.
+//
+// The tests below pin the properties that make that impossible:
+//
+//   1. the gate FAILS by default (`prereq_gate_hard_fails_by_default`);
+//   2. it downgrades ONLY under the documented, CI-forbidden opt-out
+//      (`prereq_gate_downgrades_only_under_the_documented_opt_out`);
+//   3. the default resolution of the environment is "do not allow missing",
+//      and the legacy variable cannot be weakened by the opt-out
+//      (`allow_missing_resolution_is_hard_failure_by_default`);
+//   4. every skip announcement in this file is downstream of a probe that
+//      routes through the gate, so a NEW silent skip cannot be added without
+//      this test naming it
+//      (`every_skip_site_is_routed_through_the_prerequisite_gate`).
+//
+// # Mocking policy justification (workspace AGENTS.md)
+//
+// **Nothing here is mocked, and nothing here is faked.**
+//
+//   * Tests 1-3 call the real gate functions directly.  Those functions are
+//     pure by construction -- `enforce_prereq_present` and
+//     `resolve_allow_missing` take their policy input as an argument rather
+//     than reading `std::env` -- which is deliberate: a test that mutated
+//     `REAL_RECORDING_INTEGRATION_ALLOW_MISSING` in the process environment
+//     would race every other test in this binary (Rust runs them on threads
+//     of one process), and a racy honesty test is worse than none.  Passing
+//     the policy input explicitly is the opposite of a mock: it removes the
+//     ambient state instead of substituting a fake for it.
+//
+//   * Test 4 reads THIS FILE'S OWN SOURCE, not a fixture and not a summary
+//     of it.  There is nothing to mock -- the artifact under inspection is
+//     the real artifact.
+//
+// A subprocess-based variant of test 1 (spawn this binary with a scrubbed
+// PATH and assert a non-zero exit) was considered and rejected: Cargo exposes
+// `CARGO_BIN_EXE_*` for binaries but not for test targets, so locating the
+// harness would mean guessing at `target/debug/deps/<name>-<hash>`, and a
+// test that guesses at a path is one rename away from silently passing --
+// exactly the failure mode this section exists to prevent.
+
+/// A missing prerequisite must be a FAILURE, not a pass and not a skip.
+///
+/// Mutation check: delete the `if !allow_missing` guard in
+/// `enforce_prereq_present` and this test fails with "test did not panic".
+#[test]
+#[should_panic(expected = "MISSING PREREQUISITE")]
+fn prereq_gate_hard_fails_by_default() {
+    enforce_prereq_present(false, "synthetic prerequisite (gate self-test)");
+}
+
+/// The downgrade path exists, but ONLY when the operator asked for it.
+#[test]
+fn prereq_gate_downgrades_only_under_the_documented_opt_out() {
+    // Must not panic: this is the LOCAL-iteration escape hatch.
+    enforce_prereq_present(true, "synthetic prerequisite (gate self-test)");
+}
+
+/// The default resolution of the environment is "a missing prerequisite is a
+/// failure", and the legacy `REQUIRE_REAL_RECORDINGS` switch cannot be
+/// weakened by the opt-out.
+#[test]
+fn allow_missing_resolution_is_hard_failure_by_default() {
+    // (opt_out, legacy_require, expected allow_missing)
+    let cases: &[(Option<&str>, Option<&str>, bool)] = &[
+        // Nothing set: the default is a hard failure.  This is the case that
+        // inverts the old, dishonest default.
+        (None, None, false),
+        // The documented opt-out, in both accepted spellings.
+        (Some("1"), None, true),
+        (Some("true"), None, true),
+        (Some("TRUE"), None, true),
+        // Anything else is not an opt-out.
+        (Some("0"), None, false),
+        (Some(""), None, false),
+        (Some("yes"), None, false),
+        // The legacy "require" switch wins over the opt-out, so a CI gate
+        // that sets it cannot be weakened by a stray opt-out in the env.
+        (Some("1"), Some("1"), false),
+        (Some("true"), Some("true"), false),
+        // A falsy legacy value does not re-enable skipping on its own.
+        (None, Some("0"), false),
+    ];
+    for (opt_out, legacy, expected) in cases {
+        assert_eq!(
+            resolve_allow_missing(*opt_out, *legacy),
+            *expected,
+            "resolve_allow_missing({opt_out:?}, {legacy:?}) must be {expected}"
+        );
+    }
+}
+
+/// Structural guard: every skip announcement in this file must be downstream
+/// of a prerequisite probe that routes through [`prereq_missing`].
+///
+/// This is the test that makes the defect class un-reintroducible.  Adding a
+/// new skip branch whose scrutinee is some other function -- the exact way
+/// the seventy-five self-passes were written -- fails here by name.
+///
+/// The needles are assembled with `concat!` so that this test's own source
+/// does not contain the literals it searches for; otherwise it would match
+/// itself.
+#[test]
+fn every_skip_site_is_routed_through_the_prerequisite_gate() {
+    // The probes that call `prereq_missing` before reporting "not found".
+    // Adding a name here is a deliberate act that a reviewer will see.
+    const GATED_PROBES: &[&str] = &[
+        "check_rr_prerequisites",
+        "check_noir_prerequisites",
+        "find_db_backend",
+        "find_ct_native_replay",
+        "find_nargo",
+        // `find_ruby_recorder` never returns `None` at all -- it panics
+        // outright when no CTFS-capable launcher exists -- so its callers'
+        // `None` arms are unreachable.  Listed for completeness.
+        "find_ruby_recorder",
+    ];
+
+    let source = include_str!("real_recording_integration.rs");
+    let lines: Vec<&str> = source.lines().collect();
+
+    let skip_word = concat!("SK", "IP");
+    let log_needle = concat!("log_", "line(");
+    let println_needle = format!(": {skip_word} (");
+    let match_needle = "= match ";
+
+    let mut checked = 0usize;
+    let mut offenders: Vec<String> = Vec::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        // Comments and doc comments describe the policy; they are not sites.
+        if line.trim_start().starts_with("//") {
+            continue;
+        }
+        let announces_skip = line.contains(skip_word)
+            && (line.contains(log_needle) || line.contains(&println_needle));
+        if !announces_skip {
+            continue;
+        }
+        checked += 1;
+
+        // Walk back to the nearest `= match <probe>() {` line.
+        let mut scrutinee: Option<&str> = None;
+        for back in lines[i.saturating_sub(12)..i].iter().rev() {
+            if let Some(pos) = back.find(match_needle) {
+                let rest = &back[pos + match_needle.len()..];
+                scrutinee = Some(rest.split('(').next().unwrap_or("").trim());
+                break;
+            }
+        }
+
+        match scrutinee {
+            Some(name) if GATED_PROBES.contains(&name) => {}
+            Some(name) => offenders.push(format!(
+                "line {}: skip announced for `{name}`, which is not a gated \
+                 prerequisite probe -- it can therefore report a pass while \
+                 doing nothing.  Route it through `prereq_missing`.",
+                i + 1
+            )),
+            None => offenders.push(format!(
+                "line {}: skip announced with no recognisable prerequisite \
+                 probe within 12 lines above it.  Every skip must be \
+                 downstream of a probe that calls `prereq_missing`.",
+                i + 1
+            )),
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "ungated skip site(s) found -- these can report PASSED while doing \
+         nothing:\n{}",
+        offenders.join("\n")
+    );
+
+    // Guard the guard: if a refactor renames the skip idiom out from under
+    // this scanner it must fail loudly rather than pass vacuously.
+    //
+    // `checked` counts announcement LINES, not sites: each site emits both a
+    // `log_line(.. "SKIP: ..")` and a `println!("<test>: SKIP (..)")`.  The
+    // file had 109 sites and therefore 218 such lines when this was measured.
+    // (The number originally written here was 109, i.e. the site count against
+    // a line-counting scanner -- harmless for the threshold, but the point of
+    // this test is that its numbers mean what they say.)
+    assert!(
+        checked >= 150,
+        "the skip-site scanner found only {checked} announcement line(s); it \
+         previously found 218 (across 109 sites).  Either the idiom changed \
+         (update the needles) or this test is now vacuous -- which would \
+         itself be a test that passes while doing nothing."
+    );
+
+    // The allowlist above is only meaningful if the probes on it actually
+    // enforce.  Deleting the `prereq_missing` call from, say,
+    // `find_db_backend` would leave every scrutinee name unchanged while
+    // restoring the original defect wholesale, so assert that each probe's
+    // body still refuses -- either by routing through the gate or by
+    // panicking outright, which is what `find_ruby_recorder` does.
+    let gate_call = concat!("prereq_", "missing(");
+    let mut unenforced: Vec<&str> = Vec::new();
+    for probe in GATED_PROBES {
+        let signature = format!("\nfn {probe}(");
+        let start = source
+            .find(&signature)
+            .unwrap_or_else(|| panic!("probe `{probe}` no longer exists in this file"));
+        let body = &source[start..];
+        let end = body.find("\n}\n").unwrap_or(body.len());
+        let body = &body[..end];
+        // Enforcement is either direct (calls the gate, or panics outright as
+        // `find_ruby_recorder` does) or delegated to another probe on this
+        // list -- `check_noir_prerequisites` is nothing but two such calls.
+        let delegates = GATED_PROBES
+            .iter()
+            .any(|other| other != probe && body.contains(&format!("{other}()")));
+        if !body.contains(gate_call) && !body.contains("panic!(") && !delegates {
+            unenforced.push(probe);
+        }
+    }
+    assert!(
+        unenforced.is_empty(),
+        "these prerequisite probes no longer refuse a missing prerequisite -- \
+         they can hand back `None`/`Err` silently, which puts every test that \
+         calls them back to reporting PASSED while doing nothing: {unenforced:?}"
+    );
 }
