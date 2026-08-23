@@ -168,7 +168,8 @@ jobs:
             "non-nix-build/windows/ensure-nargo.ps1",
             "non-nix-build/windows/ensure-ttd.ps1",
             "non-nix-build/windows/validate-toolchain-versions.ps1",
-            "non-nix-build/windows/validate-env-path-entries.ps1"
+            "non-nix-build/windows/validate-env-path-entries.ps1",
+            "non-nix-build/windows/validate-install-root.ps1"
           )
 
           foreach ($scriptPath in $scriptPaths) {
@@ -198,6 +199,17 @@ jobs:
         shell: pwsh
         run: |
           pwsh -File non-nix-build/windows/validate-env-path-entries.ps1
+
+      - name: Validate env.ps1 install-root resolution
+        # Extracts Get-DefaultInstallRoot and Test-DirectoryWritable from
+        # env.ps1 by AST and exercises them in isolation, including the case
+        # the fleet actually hit: a directory that EXISTS and still refuses
+        # every create. That is D: on an eph-win-x64 guest -- the read-only
+        # cloudbase-init config drive -- and it took out every Windows job at
+        # the first Ensure-* step.
+        shell: pwsh
+        run: |
+          pwsh -File non-nix-build/windows/validate-install-root.ps1
 
       - name: Validate arm64 mode routing smoke checks
         shell: pwsh
@@ -3969,6 +3981,16 @@ jobs:
         # -- which matters, because the Windows lane had no signal at all
         # for the months this went unnoticed.
         run: bash ci/test/windows-runner-bootstrap-test.sh
+
+      - name: Assert the Windows dev-deps root degrades to somewhere writable
+        # Every eph-win-x64 job died in Ensure-Ttd with "Access to the path
+        # 'D:\metacraft-dev-deps\ttd' is denied", because env.ps1 read
+        # "D:\ exists" as "there is a writable dev drive here". On these
+        # guests D: is the cloudbase-init config drive: a read-only CDFS
+        # volume. A runner must not fail for want of an optional performance
+        # feature. Static, so a Linux runner can hold the line -- the same
+        # reason the git/bash contract above lives here.
+        run: bash ci/test/windows-install-root-test.sh
 
       - name: Assert every job's sibling checkout is self-sufficient
         # Two halves of one contract, both static checks over this workflow

@@ -21,9 +21,29 @@ source "$WINDOWS_DIR/toolchain-versions.env"
 WINDBG_REQUIRED_MIN_VERSION="${WINDBG_MIN_VERSION:-1.2601.12001.0}"
 TTD_REQUIRED_MIN_VERSION="${TTD_MIN_VERSION:-1.11.584.0}"
 
+# Bash mirror of env.ps1's Get-DefaultInstallRoot. Keep the two in step; the
+# static gate in ci/test/windows-install-root-test.sh fails if they diverge.
+#
+# `[[ -d $dir ]]` is NOT the question, and `[[ -w $dir ]]` is not either. On an
+# ephemeral eph-win-x64 runner `/d/` is the cloudbase-init config drive -- a
+# read-only CDFS mount -- which passes both tests under Git-Bash (Windows ACLs
+# do not survive the POSIX permission bits MSYS synthesises) and then refuses
+# every mkdir. Creating a directory is the only probe that answers the
+# question the caller is actually asking.
+_ct_dir_writable() {
+	local dir=$1
+	[[ -n $dir && -d $dir ]] || return 1
+	local probe="$dir/.codetracer-writable-probe-$$-${RANDOM}"
+	mkdir "$probe" 2>/dev/null || return 1
+	rmdir "$probe" 2>/dev/null || true
+	return 0
+}
+
 if [[ -z ${WINDOWS_DIY_INSTALL_ROOT:-} ]]; then
-	# Prefer D: drive root when available (more space, avoids C: bloat).
-	if [[ -d /d/ ]]; then
+	# A dev drive is an OPTIONAL performance feature (more space, avoids C:
+	# bloat). Prefer it when it is really there and really writable; never
+	# fail for want of one.
+	if _ct_dir_writable /d/; then
 		WINDOWS_DIY_INSTALL_ROOT="/d/metacraft-dev-deps"
 	else
 		if [[ -n ${LOCALAPPDATA:-} ]]; then
@@ -35,7 +55,28 @@ if [[ -z ${WINDOWS_DIY_INSTALL_ROOT:-} ]]; then
 		else
 			windows_diy_local_app_data="$HOME/AppData/Local"
 		fi
-		WINDOWS_DIY_INSTALL_ROOT="$windows_diy_local_app_data/codetracer/windows-diy"
+		# The documented default, and the right fallback for CI: it PERSISTS
+		# across jobs on the long-lived Windows runners. RUNNER_TEMP does not
+		# -- Actions wipes it between jobs -- so it is a last resort only,
+		# below, where the alternative is having no root at all.
+		if _ct_dir_writable "$windows_diy_local_app_data"; then
+			WINDOWS_DIY_INSTALL_ROOT="$windows_diy_local_app_data/codetracer/windows-diy"
+		else
+			for _ct_root_candidate in "${RUNNER_TEMP:-}" "${TEMP:-}" "${TMP:-}"; do
+				if _ct_dir_writable "$_ct_root_candidate"; then
+					echo "warning: no writable dev-deps root (/d/ and LOCALAPPDATA both refused); falling back to $_ct_root_candidate. Toolchain caches will not persist across jobs." >&2
+					WINDOWS_DIY_INSTALL_ROOT="$_ct_root_candidate/codetracer/windows-diy"
+					break
+				fi
+			done
+			unset _ct_root_candidate
+		fi
+		if [[ -z ${WINDOWS_DIY_INSTALL_ROOT:-} ]]; then
+			echo "error: could not resolve any writable WINDOWS_DIY_INSTALL_ROOT (tried /d/, LOCALAPPDATA, RUNNER_TEMP, TEMP, TMP). Set WINDOWS_DIY_INSTALL_ROOT explicitly." >&2
+			# `return`, not `exit`: this file is SOURCED, and `exit` would
+			# take the caller's interactive shell down with it.
+			return 1
+		fi
 	fi
 fi
 export WINDOWS_DIY_INSTALL_ROOT

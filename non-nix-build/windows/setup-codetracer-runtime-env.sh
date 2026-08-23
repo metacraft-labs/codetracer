@@ -12,7 +12,35 @@ fi
 # on PATH by default in non-PowerShell shells.  We also add the native tool
 # bin directories as a fallback in case shims haven't been (re-)generated yet.
 # ---------------------------------------------------------------------------
-INSTALL_ROOT="${WINDOWS_DIY_INSTALL_ROOT:-D:/metacraft-dev-deps}"
+# This script is a CONSUMER of the root env.sh / env.ps1 resolved and
+# exported; it only builds PATH entries out of it. Its own fallback used to be
+# a bare `D:/metacraft-dev-deps` with no probe at all, so on any box without a
+# writable D: it disagreed with env.sh about where the toolchain lives and
+# silently produced a PATH of directories that do not exist. Mirror env.sh's
+# resolution instead of guessing: same probe, same order, same answer.
+if [[ -n ${WINDOWS_DIY_INSTALL_ROOT:-} ]]; then
+	INSTALL_ROOT="$WINDOWS_DIY_INSTALL_ROOT"
+else
+	_ct_runtime_dir_writable() {
+		local dir=$1
+		[[ -n $dir && -d $dir ]] || return 1
+		local probe="$dir/.codetracer-writable-probe-$$-${RANDOM}"
+		mkdir "$probe" 2>/dev/null || return 1
+		rmdir "$probe" 2>/dev/null || true
+		return 0
+	}
+	if _ct_runtime_dir_writable /d/; then
+		INSTALL_ROOT="/d/metacraft-dev-deps"
+	elif [[ -n ${LOCALAPPDATA:-} ]]; then
+		if command -v cygpath >/dev/null 2>&1; then
+			INSTALL_ROOT="$(cygpath -u "$LOCALAPPDATA")/codetracer/windows-diy"
+		else
+			INSTALL_ROOT="$LOCALAPPDATA/codetracer/windows-diy"
+		fi
+	else
+		INSTALL_ROOT="$HOME/AppData/Local/codetracer/windows-diy"
+	fi
+fi
 # Convert Windows drive-letter paths (D:/...) to MSYS2/Git-Bash form (/d/...)
 # so that `which` and other POSIX tools resolve executables correctly.
 if [[ $INSTALL_ROOT =~ ^([A-Za-z]):/(.*) ]]; then
@@ -24,8 +52,10 @@ fi
 # Source toolchain version pins so paths stay in sync with env.ps1.
 _tc_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/toolchain-versions.env"
 if [[ -f $_tc_file ]]; then
-	# shellcheck disable=SC1090
 	set -a
+	# The directive applies to the NEXT command, so it has to sit here rather
+	# than above `set -a`, where it was silently applying to nothing.
+	# shellcheck disable=SC1090
 	source "$_tc_file"
 	set +a
 fi

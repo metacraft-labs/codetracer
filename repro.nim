@@ -134,8 +134,32 @@ const
     ("runquota", "RUNQUOTA_SRC"),
     ("reprobuild", "CODETRACER_REPROBUILD_REPO_PATH")
   ]
-  WindowsZlibRoot = "D:/metacraft-dev-deps/zlib/1.3.1"
-  WindowsZstdRoot = "D:/metacraft-dev-deps/zstd/1.5.6/zstd-v1.5.6-win64"
+  # Relative to the Windows DIY install root. `non-nix-build/windows/
+  # ensure-zlib.ps1` and `ensure-zstd.ps1` install into `$Root/zlib/<ver>` and
+  # `$Root/zstd/<ver>` where `$Root` is whatever `Get-DefaultInstallRoot`
+  # resolved — so these READERS have to follow that root rather than pin one.
+  # They used to hard-code `D:/metacraft-dev-deps/...`, which was already
+  # wrong on any machine whose root is not D: and only stayed invisible
+  # because the bootstrap died earlier, at Ensure-Ttd.
+  WindowsZlibRelative = "zlib/1.3.1"
+  WindowsZstdRelative = "zstd/1.5.6/zstd-v1.5.6-win64"
+  # The historical default, kept verbatim so a developer box with a real D:
+  # dev drive resolves exactly as before.
+  WindowsDefaultInstallRoot = "D:/metacraft-dev-deps"
+
+# NOTE: `getEnv` here is a RUNTIME read and therefore not a tracked solver
+# input — see the buildType note at the top of this file. That is acceptable
+# for this one value because it names a per-MACHINE toolchain location rather
+# than anything that changes what is built, and because no CI lane exercises
+# it (the Windows jobs do not run tup or this Nim build; `just build-once`
+# runs only on the Linux and macOS legs).
+let
+  WindowsInstallRoot = block:
+    let fromEnv = getEnv("WINDOWS_DIY_INSTALL_ROOT").strip()
+    if fromEnv.len > 0: fromEnv.replace('\\', '/').strip(leading = false, chars = {'/'})
+    else: WindowsDefaultInstallRoot
+  WindowsZlibRoot = WindowsInstallRoot & "/" & WindowsZlibRelative
+  WindowsZstdRoot = WindowsInstallRoot & "/" & WindowsZstdRelative
   WindowsExtraPassC = @[
     "-I" & WindowsZlibRoot & "/include",
     "-I" & WindowsZstdRoot & "/include",
