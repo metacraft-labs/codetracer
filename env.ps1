@@ -54,23 +54,78 @@ function Get-RepoRoot {
   return (Split-Path -Parent $PSCommandPath)
 }
 
+# Answers "can this bootstrap actually create directories here?" by trying it,
+# not by asking whether the directory exists.
+#
+# The distinction is the whole point. On an ephemeral `eph-win-x64` runner
+# `D:\` exists and is the cloudbase-init config drive: a read-only CDFS
+# volume (`Get-CimInstance Win32_LogicalDisk` -> DriveType 5, VolumeName
+# `config-2`). An existence probe says yes, and every subsequent `New-Item`
+# under it dies with
+#
+#     New-Item : Access to the path 'D:\metacraft-dev-deps\ttd' is denied.
+#
+# which is how this surfaced: `Ensure-Ttd` is simply the FIRST bootstrap step,
+# so it took the bullet for a root that all of them would have failed on.
+#
+# There is no cheaper honest test. `Test-Path` cannot see a read-only mount,
+# ACLs do not survive the POSIX permission bits Git-Bash reports, and a
+# writable-looking directory can still refuse a create. Making the directory
+# is the only probe that answers the question the caller is actually asking.
+function Test-DirectoryWritable {
+  param([string]$Path)
+
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+
+  $probe = Join-Path $Path (".codetracer-writable-probe-" + [guid]::NewGuid().ToString("N"))
+  try {
+    New-Item -ItemType Directory -Path $probe -ErrorAction Stop | Out-Null
+    return $true
+  } catch {
+    return $false
+  } finally {
+    Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Get-DefaultInstallRoot {
+  # An explicit operator choice is honoured verbatim, writable or not: if
+  # someone pinned this root, a silent relocation would hide their mistake and
+  # scatter half-populated toolchain trees across two locations.
   $envInstallRoot = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_INSTALL_ROOT")
   if (-not [string]::IsNullOrWhiteSpace($envInstallRoot)) {
     return $envInstallRoot.Trim()
   }
 
-  # Prefer D: drive root when available (more space, avoids C: bloat).
-  if (Test-Path -LiteralPath "D:\" -PathType Container) {
+  # A dev drive is an OPTIONAL performance feature. Prefer it when it is
+  # genuinely there and genuinely writable (more space, avoids C: bloat);
+  # never fail for want of one.
+  if (Test-DirectoryWritable -Path "D:\") {
     return "D:\metacraft-dev-deps"
   }
 
+  # The documented default, and the right fallback for CI: it PERSISTS across
+  # jobs on the two long-lived Windows runners, so a cache put here survives
+  # to be reused. `RUNNER_TEMP` deliberately does not -- Actions wipes it
+  # between jobs -- so making it the primary fallback would silently convert
+  # this toolchain cache into a re-download on every single job.
   $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
-  if ([string]::IsNullOrWhiteSpace($localAppData)) {
-    throw "Could not resolve LocalApplicationData for default WINDOWS_DIY_INSTALL_ROOT."
+  if (Test-DirectoryWritable -Path $localAppData) {
+    return (Join-Path (Join-Path $localAppData "codetracer") "windows-diy")
   }
 
-  return (Join-Path (Join-Path $localAppData "codetracer") "windows-diy")
+  # Last resort. A cold cache is a slow job; no writable root at all is a dead
+  # runner, so trade the persistence away rather than throw.
+  foreach ($name in @("RUNNER_TEMP", "TEMP", "TMP")) {
+    $candidate = [Environment]::GetEnvironmentVariable($name)
+    if (Test-DirectoryWritable -Path $candidate) {
+      Write-Host "::warning::No writable dev-deps root (D:\ and LOCALAPPDATA both refused); falling back to `$env:$name. Toolchain caches will not persist across jobs."
+      return (Join-Path (Join-Path $candidate "codetracer") "windows-diy")
+    }
+  }
+
+  throw "Could not resolve any writable WINDOWS_DIY_INSTALL_ROOT (tried D:\, LOCALAPPDATA, RUNNER_TEMP, TEMP, TMP). Set WINDOWS_DIY_INSTALL_ROOT explicitly."
 }
 
 function ConvertTo-BoolFromEnv {

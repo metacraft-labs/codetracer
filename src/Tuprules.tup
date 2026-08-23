@@ -120,7 +120,16 @@ NIM_BIN = nim
 # contract). The path is matched to ensure-zstd's layout (version dir +
 # include/lib subdirs).
 ifeq (@(TUP_PLATFORM),win32)
+# `ensure-zlib.ps1` installs under whatever root `Get-DefaultInstallRoot`
+# resolved, which is only `D:/metacraft-dev-deps` on a box with a real,
+# WRITABLE D: dev drive. tup refuses environment reads at parse time by
+# design, so the seam is a tup.config entry: set `CONFIG_WINDOWS_ZLIB_DIR` in
+# `src/build-<variant>/tup.config` on a machine whose root is elsewhere. Unset
+# keeps the historical literal, so nothing moves for existing dev boxes.
+WINDOWS_ZLIB_DIR = @(WINDOWS_ZLIB_DIR)
+ifeq ($(WINDOWS_ZLIB_DIR),)
 WINDOWS_ZLIB_DIR = D:/metacraft-dev-deps/zlib/1.3.1
+endif
 # `-Wno-implicit-function-declaration` and the matching `-Wno-error` are
 # needed because the bundled `libs/zip/zip/private/libzip_all.c` uses POSIX
 # helpers (`getpid`, `unlink`, `mkstemp`) that MinGW UCRT either renames
