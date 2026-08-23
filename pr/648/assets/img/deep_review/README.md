@@ -20,7 +20,7 @@ status rather than leaving stale images in place.
 
 | File                | Where it is used | What it shows |
 | ------------------- | ---------------- | ------------- |
-| `review-window.png` | `deep_review/index.md` (Introduction) | The whole review: the VCS panel, the diff tab, and the Agent Activity panel with the roll-up. |
+| `review-window.png` | `deep_review/index.md` (Introduction) | The whole review: the VCS panel, the diff tab, and the Agent Activity panel. |
 | `diff-tab.png`      | `deep_review/reading.md` | A close-up of the diff tab: the invocation stepper, the loop stepper, the value chips, the expand control. |
 | `vcs-panel.png`     | `deep_review/reading.md` | A close-up of the VCS panel — the review's navigation surface: the `Review: <commit>` header, the trace-context selector, the totals, the `Unified Diff` toggle and the changed-file row with its coverage badge. Added by DS-1, when the section split gave that panel a walkthrough of its own and the whole-window shot proved too small to read it in. |
 
