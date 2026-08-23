@@ -11,9 +11,10 @@
  * 2. The **Editor** — a review's file opens as an ordinary editor document:
  *    a ``Content.UnifiedDiff`` Monaco tab (``unified-diff-container``) or
  *    the source file itself, depending on the toggle (§4, §5).
- * 3. The **Agent Activity panel** — the review's coverage summary, test
- *    results and per-file coverage table, in its DeepReview section
- *    (``activity-dr-*``) (§2.1).
+ * 3. The **Agent Activity panel** — the agent session that produced the
+ *    review (``agent-ha-container``) (§2.1).  It carried a DeepReview roll-up
+ *    (``activity-dr-*``) until AA-1 deleted it;
+ *    ``reviewActivityRollUpArtefacts()`` is what asserts it stays deleted.
  *
  * Until DR-R8 there was also a standalone ``DEEP REVIEW`` GL panel with its
  * own header, file list, Monaco instance, sliders and call trace, addressed
@@ -30,7 +31,8 @@
  * | ``.deepreview-unified-*``         | ``diffTabs()`` — a Monaco document  |
  * | ``.deepreview-expand-row``        | ``expandAboveLine`` / ``…BelowLine``|
  * | ``.deepreview-calltrace``         | the standard CALLTRACE panel        |
- * | its coverage / inline decorations | the Agent Activity section (§2.1)   |
+ * | its inline decorations            | the diff tab's own Monaco overlays  |
+ * | its coverage                      | ``coverageBadge()`` — the VCS row   |
  *
  * The Omniscience overlay is no longer outstanding. DR-R6 recorded it as
  * blocked on a review loading its recording (M42b); RV-5 established that the
@@ -385,51 +387,52 @@ export class DeepReviewPage {
     return this.vcsPanel().locator(".vcs-review-stats");
   }
 
-  // -- Agent Activity panel: the review's DeepReview section ---------------
+  // -- Agent Activity panel: the review's third pillar ---------------------
 
   /**
    * The AGENT ACTIVITY panel — DeepReview's third pillar.
    *
-   * DeepReview-GUI.md §2.1: "The Agent Activity panel is the third pillar,
-   * not an adjacent feature... The section is part of the existing Agent
-   * Activity panel. It is not a separate panel and does not get its own
-   * layout slot."
+   * DeepReview-GUI.md §2.1: "The primary thing the panel shows in a review is
+   * **the agent session that produced it**... There is no 'DeepReview
+   * section' in this panel."
    */
   agentActivityPanel(): Locator {
     return this.page.locator(".agent-ha-container");
   }
 
-  /** The DeepReview section rendered inside the AGENT ACTIVITY panel. */
-  reviewActivitySection(): Locator {
-    return this.agentActivityPanel().locator(".activity-dr-container");
-  }
-
-  /** The section's coverage summary card. */
-  reviewActivityCoverageCard(): Locator {
-    return this.reviewActivitySection().locator(".activity-dr-card-coverage");
-  }
-
-  /** The section's test-results card. */
-  reviewActivityTestsCard(): Locator {
-    return this.reviewActivitySection().locator(".activity-dr-card-tests");
-  }
-
-  /** One row per file in the section's per-file coverage table. */
-  reviewActivityFileRows(): Locator {
-    return this.reviewActivitySection().locator(".activity-dr-files-row");
-  }
-
-  /** The selected row of the per-file coverage table. */
-  reviewActivitySelectedFileRow(): Locator {
-    return this.reviewActivitySection().locator(
-      ".activity-dr-files-row-selected",
+  /**
+   * Everything the deleted DeepReview roll-up used to draw, as one locator.
+   *
+   * AA-1 removed the roll-up — its coverage summary, test-results row,
+   * per-file coverage table and notification feed — so this must always be
+   * empty.  It is a page-object member rather than an inline selector because
+   * two suites assert the deletion (`agent-activity-deepreview.spec.ts` and
+   * `deepreview-gui.spec.ts`) and a deletion guard that lists its selectors
+   * twice is a deletion guard that will be updated once.
+   *
+   * `agent-ha-deepreview-host` is included deliberately: it was the wrapper
+   * the panel emitted for the roll-up *unconditionally*, even with no review
+   * and no ViewModel, so it is the artefact a check for `.activity-dr-*`
+   * alone would miss.
+   */
+  reviewActivityRollUpArtefacts(): Locator {
+    return this.page.locator(
+      [
+        ".agent-ha-deepreview-host",
+        ".activity-dr-container",
+        ".activity-dr-header",
+        ".activity-dr-summary",
+        ".activity-dr-card",
+        ".activity-dr-files",
+        ".activity-dr-files-row",
+        ".activity-dr-tests",
+        ".activity-dr-test-item",
+        ".activity-dr-notifs",
+        ".activity-dr-notif-item",
+      ].join(", "),
     );
   }
 
-  /** The section's collapse/expand header. */
-  reviewActivityHeader(): Locator {
-    return this.reviewActivitySection().locator(".activity-dr-header");
-  }
 
   /**
    * The diff tab showing ``filePath``'s diff, if one is open.

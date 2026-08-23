@@ -20,7 +20,7 @@ status rather than leaving stale images in place.
 
 | File                | What it shows                                                                                     |
 | ------------------- | --------------------------------------------------------------------------------------------------- |
-| `review-window.png` | The whole review: the VCS panel, the diff tab, and the Agent Activity panel with the roll-up.      |
+| `review-window.png` | The whole review: the VCS panel, the diff tab, and the Agent Activity panel.                       |
 | `diff-tab.png`      | A close-up of the diff tab: the invocation stepper, the loop stepper, the value chips, the expand control. |
 
 ## Why they are checked in

@@ -91,7 +91,95 @@ proc loadShellTheme*(data: Data, name: cstring) =
   let shellComponent = data.shellComponent(0)
   shellComponent.shell.options.theme = shellComponent.themes[name]
 
+# ---------------------------------------------------------------------------
+# CodeTracer's Monaco colour themes
+# ---------------------------------------------------------------------------
+#
+# `monaco.editor.create({theme: "codetracerDark"})` names a theme; it does not
+# define one.  Monaco resolves an UNKNOWN theme name to its built-in `vs`
+# light theme silently — no exception, no console warning — so a surface that
+# creates an editor before anything has registered `codetracerDark` comes up
+# light-themed inside a dark application.  Nothing in the DOM says so except
+# the class Monaco stamps on the editor root (`vs` instead of `vs-dark`) and
+# the canvases it paints from the theme rather than from CSS: the minimap and
+# the overview ruler, which render as a white slab down the side of the
+# editor.
+#
+# That is exactly what a `ct review` window used to look like.  The
+# definitions lived inside `ui/editor.nim`'s source-editor bootstrap, so they
+# ran only once a *source* tab had been created; a review whose visible tab is
+# the unified diff (`ui/unified_diff.nim`) never created one, and its Monaco
+# instance therefore rendered under `vs`.
+#
+# The registration lives here, next to `loadMonacoTheme`, because
+# `ui/ui_imports` re-exports this module — so every Monaco host in the
+# frontend can reach it — and because `monacoThemeName` below makes it
+# impossible to *pick* one of these theme names without also registering it.
+#
+# `monaco.editor.setTheme` has the same silent fallback, and it is worse:
+# switching an already-correct `vs-dark` editor to an unregistered name
+# downgrades it to `vs` in place. `loadMonacoTheme` below therefore registers
+# too, so neither of the two ways to name a theme can outrun its definition.
+
+var monacoThemesDefined = false
+  ## Registration is idempotent and cheap after the first call; Monaco keeps
+  ## the definitions in a process-global registry, so redefining them on every
+  ## editor creation would be wasted work rather than a correctness problem.
+
+proc ensureMonacoThemesDefined*() =
+  ## Register `codetracerWhite` and `codetracerDark` with Monaco, once.
+  ##
+  ## Must be called before any `monaco.editor.create` /
+  ## `monaco.editor.createDiffEditor` that names one of them —
+  ## `monacoThemeName` does it for every caller that asks for a theme by
+  ## configuration, which is all of them.
+  ##
+  ## The theme documents are the checked-in Monaco theme JSONs under
+  ## `src/public/third_party/monaco-themes/themes/customThemes/json/`, read at
+  ## Nim compile time and emitted as object literals so no runtime fetch (and
+  ## no ordering against the asset pipeline) is involved.
+  if monacoThemesDefined:
+    return
+  const whiteThemeDef =
+    staticRead("../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
+  const darkThemeDef =
+    staticRead("../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
+  try:
+    {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
+    {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
+    monacoThemesDefined = true
+  except:
+    # Leave the flag down so a later caller (one running after Monaco has
+    # finished loading) retries rather than inheriting a half-registered
+    # registry.
+    cerror "renderer: defining monaco themes: " & getCurrentExceptionMsg()
+
+proc monacoThemeName*(configTheme: cstring): cstring =
+  ## The Monaco theme that matches CodeTracer's configured theme, with the
+  ## definitions guaranteed to be registered by the time it returns.
+  ##
+  ## Every Monaco host picks its theme through this one proc so that naming a
+  ## theme and defining it cannot come apart again — the failure mode is
+  ## invisible (see the note above), so the two steps are deliberately not
+  ## separable.
+  ##
+  ## `default_white` is the only light theme CodeTracer ships; `default_dark`,
+  ## `default_black` and `mac_classic` all map to `codetracerDark`, matching
+  ## `monacoThemeNames` below.
+  ensureMonacoThemesDefined()
+  if configTheme == cstring"default_white":
+    cstring"codetracerWhite"
+  else:
+    cstring"codetracerDark"
+
 proc loadMonacoTheme*(themeName: cstring) =
+  ## Switch every live Monaco instance to `themeName`.
+  ##
+  ## The definitions are registered first: `setTheme` with a name Monaco does
+  ## not know silently resolves to the built-in light `vs`, so a theme switch
+  ## in a window that had never registered them would turn a correctly dark
+  ## editor light.
+  ensureMonacoThemesDefined()
   monaco.editor.toJs.setTheme(themeName)
 
 proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.exportc.}

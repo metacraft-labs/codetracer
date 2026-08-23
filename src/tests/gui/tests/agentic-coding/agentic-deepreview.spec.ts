@@ -36,7 +36,6 @@ import * as process from "node:process";
 import {
   AgentWorkspacePage,
   CaptionBarProgressPage,
-  ActivityDeepReviewPage,
 } from "./page-objects/agentic-page";
 
 // ---------------------------------------------------------------------------
@@ -354,70 +353,36 @@ test.describe("test_acp_deepreview_extension", () => {
     // workspace components when the feature is compiled in).
     test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("CoverageUpdate notification updates the activity pane", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      // Send an agent progress message to initialise the session.
-      await sendAgentProgress(ctPage, fixture.progress);
-      await wait(500);
-
-      // Send the first CoverageUpdate notification.
-      const coverageNotif = fixture.notifications.find(
-        (n) => n.kind === "CoverageUpdate",
-      );
-      expect(coverageNotif).toBeDefined();
-      if (!coverageNotif) return;
-
-      await sendDeepReviewNotification(ctPage, coverageNotif);
-      await wait(500);
-
-      // The activity pane should have been updated. Check that the
-      // container exists (the component renders when data arrives).
-      try {
-        await activityDr.waitForReady(5000);
-        // If the container renders, verify at least one file row.
-        const rowCount = await activityDr.fileRowCount().count();
-        expect(rowCount).toBeGreaterThanOrEqual(1);
-      } catch {
-        // If the component did not render within the timeout, that
-        // is acceptable -- the IPC bridge may not be wired up in
-        // this build configuration.
-        test.skip(true, "Activity DeepReview component did not render");
-      }
-    });
-
-    test("TestComplete notification updates test results", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      const testNotif = fixture.notifications.find(
-        (n) => n.kind === "TestComplete",
-      );
-      expect(testNotif).toBeDefined();
-      if (!testNotif) return;
-
-      await sendDeepReviewNotification(ctPage, testNotif);
-      await wait(500);
-
-      try {
-        await activityDr.waitForReady(5000);
-        const testCount = await activityDr.testItemCount().count();
-        expect(testCount).toBeGreaterThanOrEqual(1);
-      } catch {
-        test.skip(true, "Activity DeepReview component did not render");
-      }
-    });
+    // AA-1 deleted the two tests that stood here — "CoverageUpdate
+    // notification updates the activity pane" and "TestComplete notification
+    // updates test results".  Both asserted that a `DeepReviewNotification`
+    // painted a row in the Agent Activity roll-up, and that roll-up is gone
+    // (DeepReview-GUI.md §2.1).  Neither is retargeted, for two reasons:
+    //
+    //   * the renderer-side handler they exercised
+    //     (`agent_activity_deepreview.onActivityDeepReviewNotification`) was
+    //     never subscribed to `IPC_DEEPREVIEW_NOTIFICATION` — measured, not
+    //     assumed: no `ipc.on` for that channel existed anywhere in the
+    //     frontend — so the assertions passed only through their own
+    //     `catch { test.skip(...) }`; and
+    //   * nothing else consumes the channel either. The same measurement that
+    //     condemns the deleted handler condemns the whole channel:
+    //     `configureIPC`'s `uiIpcHandlers` list in `ui_js.nim` names
+    //     `start-deepreview` but not `acp-deepreview-notification`, so
+    //     `agent_workspace.onAcpDeepReviewNotification` is unsubscribed too,
+    //     and the string does not occur in the built `ui.js` at all. Deleting
+    //     the roll-up's feed therefore cost nothing, because neither feed ever
+    //     received a message.
+    //
+    // What the session feed does with a run of tests is AA-2's, and gets its
+    // own coverage there.
 
     test("invalid notification kind does not crash the application", async ({ ctPage }) => {
-      // Send a notification with an unknown kind. The IPC handler in
-      // agent_workspace.nim logs a warning but does not crash.
+      // Send a notification with an unknown kind. Note this asserts far less
+      // than it appears to: with no subscriber on the channel (see above) the
+      // message is delivered to nobody, so this exercises the injection path
+      // and the app's survival, not `agent_workspace.nim`'s dispatch. Wiring
+      // the channel up is AA-2's, and this test becomes meaningful then.
       await sendDeepReviewNotification(ctPage, {
         kind: "UnknownNotificationKind",
         sessionId: "agentic-e2e-test-session-001",
@@ -994,234 +959,30 @@ test.describe("test_activity_pane_deepreview", () => {
   //   Hypothesis: Enable by setting CODETRACER_AGENTIC_E2E=1 before running tests.
   //   Some internal tests may also fail because DOM elements for the agent workspace are not
   //   rendered when the feature is disabled at compile time.
-  test.describe("live IPC", () => {
-    test.skip(
-      !agenticFeatureEnabled,
-      "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
-    );
-
-    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
-
-    test("summary cards display correct coverage, test, and function counts", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      // Initialise the session.
-      await sendAgentProgress(ctPage, fixture.progress);
-      await wait(300);
-
-      // Send all notifications from the fixture.
-      for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(ctPage, notif);
-        await wait(100);
-      }
-      await wait(500);
-
-      try {
-        await activityDr.waitForReady(5000);
-      } catch {
-        test.skip(true, "Activity DeepReview pane did not render");
-        return;
-      }
-
-      // Verify 3 summary cards (coverage, tests, functions).
-      const cardCount = await activityDr.summaryCards().count();
-      expect(cardCount).toBe(3);
-
-      // The card values should contain:
-      //   - Coverage: "61.9%" (from expectedSummary)
-      //   - Tests: "2/3" (testsPassed/testsRun)
-      //   - Functions: "3" (functionsTraced)
-      const values = await activityDr.cardValues().allTextContents();
-      expect(values.length).toBe(3);
-
-      // Coverage percentage card.
-      expect(values[0]).toContain("61.9%");
-
-      // Tests card (passed/total).
-      expect(values[1]).toContain("2/3");
-
-      // Functions card.
-      expect(values[2]).toContain("3");
-    });
-
-    test("per-file coverage table shows all files", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      await sendAgentProgress(ctPage, fixture.progress);
-      await wait(300);
-
-      for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(ctPage, notif);
-        await wait(100);
-      }
-      await wait(500);
-
-      try {
-        await activityDr.waitForReady(5000);
-      } catch {
-        test.skip(true, "Activity DeepReview pane did not render");
-        return;
-      }
-
-      // The files table should be visible (not the empty state).
-      await expect(activityDr.filesEmpty()).toBeHidden();
-
-      // There should be 3 file rows (one per CoverageUpdate notification
-      // with a unique filePath).
-      const fileRows = await activityDr.fileRows();
-      expect(fileRows).toHaveLength(fixture.expectedSummary.fileCount);
-
-      // Verify file basenames.
-      const expectedBasenames = ["feature.rs", "helper.rs", "config.rs"];
-      for (let i = 0; i < expectedBasenames.length; i++) {
-        const name = await fileRows[i].name();
-        expect(name).toBe(expectedBasenames[i]);
-      }
-    });
-
-    test("test results section shows pass/fail status and timing", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      await sendAgentProgress(ctPage, fixture.progress);
-      await wait(300);
-
-      for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(ctPage, notif);
-        await wait(100);
-      }
-      await wait(500);
-
-      try {
-        await activityDr.waitForReady(5000);
-      } catch {
-        test.skip(true, "Activity DeepReview pane did not render");
-        return;
-      }
-
-      // Verify test items count.
-      const testItems = await activityDr.testItems();
-      expect(testItems).toHaveLength(fixture.expectedSummary.testsRun);
-
-      // Verify the first test (passed).
-      const firstStatus = await testItems[0].status();
-      expect(firstStatus).toBe("PASS");
-      const firstName = await testItems[0].name();
-      expect(firstName).toContain("test_process_data_basic");
-      const firstDuration = await testItems[0].duration();
-      expect(firstDuration).toContain("42ms");
-
-      // Verify the last test (failed).
-      const lastIdx = testItems.length - 1;
-      const lastStatus = await testItems[lastIdx].status();
-      expect(lastStatus).toBe("FAIL");
-      const lastPassed = await testItems[lastIdx].isPassed();
-      expect(lastPassed).toBe(false);
-    });
-
-    test("collapsible header toggles expanded/collapsed state", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      await sendAgentProgress(ctPage, fixture.progress);
-      await wait(300);
-
-      // Send at least one notification so the component has data.
-      await sendDeepReviewNotification(ctPage, fixture.notifications[0]);
-      await wait(500);
-
-      try {
-        await activityDr.waitForReady(5000);
-      } catch {
-        test.skip(true, "Activity DeepReview pane did not render");
-        return;
-      }
-
-      // The header should be visible and have the label "DeepReview".
-      await expect(activityDr.header()).toBeVisible();
-      const headerLabel = await activityDr.headerLabel().textContent();
-      expect(headerLabel).toContain("DeepReview");
-
-      // Toggle to collapse.
-      await activityDr.toggleExpanded();
-      await wait(300);
-
-      // When collapsed, the summary cards should be hidden.
-      // The chevron should change to ">".
-      const chevronText = await activityDr.chevron().textContent();
-      // The chevron could be ">" (collapsed) or "v" (expanded).
-      // Since we toggled, it should have changed from its initial state.
-      expect(chevronText).toBeTruthy();
-
-      // The header badge (coverage percentage) should be visible when collapsed.
-      // It is only rendered when ``not self.expanded``.
-      if (chevronText === ">") {
-        await expect(activityDr.headerBadge()).toBeVisible();
-      }
-
-      // Toggle back to expand.
-      await activityDr.toggleExpanded();
-      await wait(300);
-    });
-
-    test("warning detail appears when tests have failures", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-
-      await sendAgentProgress(ctPage, fixture.progress);
-      await wait(300);
-
-      for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(ctPage, notif);
-        await wait(100);
-      }
-      await wait(500);
-
-      try {
-        await activityDr.waitForReady(5000);
-      } catch {
-        test.skip(true, "Activity DeepReview pane did not render");
-        return;
-      }
-
-      // The fixture has 1 failed test, so the warning detail should show.
-      const warnText = await activityDr.cardWarning().textContent();
-      expect(warnText).toContain("1 failed");
-    });
-  });
+  // AA-1 deleted this describe's five live-IPC tests — the summary cards, the
+  // per-file coverage table, the test-results section, the collapsible header
+  // and the failure-warning detail.  Every one of them asserted on the Agent
+  // Activity roll-up's DOM (`.activity-dr-*`), which no longer exists
+  // (DeepReview-GUI.md §2.1: "There is no 'DeepReview section' in this
+  // panel").
+  //
+  // Nothing is retargeted from them, because nothing they measured moved:
+  // they measured the roll-up's own rendering of numbers the VCS panel
+  // already carries.  The fixture-level tests above — which compute coverage,
+  // test totals and traced-function counts from the same notification stream
+  // — are untouched and keep the arithmetic covered.
+  //
+  // Worth recording, because it is the reason none of this was noticed
+  // earlier: unlike the two tests deleted from `test_acp_deepreview_extension`
+  // above, these five did carry real assertions outside their
+  // `catch { test.skip() }` — the catch wrapped only `waitForReady`.  They
+  // still never ran.  Every `live IPC` describe in this file is gated on
+  // `CODETRACER_AGENTIC_E2E === "1"`, and nothing in the repository sets that
+  // variable: not a CI workflow, not a `just` recipe, not a script.  A
+  // describe-level gate on an environment variable nobody sets is a suite
+  // that reports green while asserting nothing, which is how DOM assertions
+  // for a pane survived long past the pane.
 });
-
-// ===========================================================================
-// Test 5: test_realtime_collection
-// ===========================================================================
-//
-// Verifies that data is collected in real-time during agent execution:
-// - DeepReview notifications arrive during an active ACP session
-// - Coverage data updates incrementally as the agent modifies files
-// - Flow data appears as functions are traced
-// - Test results stream in as tests complete
-// - The CollectionComplete notification signals the end of data collection
-// - The UI updates in real-time without requiring manual refresh
-//
-// Reference: agentic_coding_test_plan.nim, suite "test_realtime_collection"
-// ===========================================================================
 
 test.describe("test_realtime_collection", () => {
   test.skip(!fixtureExists, "Agent session fixture not found");
@@ -1371,56 +1132,10 @@ test.describe("test_realtime_collection", () => {
 
     test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("incremental notifications update UI in real-time", async ({ ctPage }) => {
-      const fixture = loadFixture();
-      expect(fixture).not.toBeNull();
-      if (!fixture) return;
-
-      const activityDr = new ActivityDeepReviewPage(ctPage);
-      const captionBar = new CaptionBarProgressPage(ctPage);
-
-      // Phase 1: Idle -> Initializing -> Working
-      for (const transition of fixture.stateTransitions) {
-        await sendAgentProgress(ctPage, {
-          ...fixture.progress,
-          state: transition.state,
-        });
-        await wait(200);
-      }
-
-      try {
-        await captionBar.waitForActive(5000);
-      } catch {
-        test.skip(true, "Caption bar did not activate");
-        return;
-      }
-
-      // Phase 2: Send notifications one at a time and verify incremental
-      // updates. After each coverage notification, the file row count
-      // should increase.
-      let expectedFileCount = 0;
-
-      for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(ctPage, notif);
-        await wait(300);
-
-        if (notif.kind === "CoverageUpdate") {
-          expectedFileCount += 1;
-
-          try {
-            await activityDr.waitForReady(3000);
-            const rowCount = await activityDr.fileRowCount().count();
-            // The file count should be at least as many unique files as
-            // we have sent so far.
-            expect(rowCount).toBeGreaterThanOrEqual(1);
-          } catch {
-            // The component may not render immediately after the first
-            // notification if the layout is not configured for it.
-            // This is acceptable for incremental testing.
-          }
-        }
-      }
-    });
+    // AA-1 deleted "incremental notifications update UI in real-time": its
+    // only UI assertion was the roll-up's file-row count, and its caption-bar
+    // half is the test below.  The fixture-level "incremental coverage updates
+    // accumulate correctly" above keeps the accumulation itself covered.
 
     test("agent state transitions to Completed after CollectionComplete", async ({ ctPage }) => {
       const fixture = loadFixture();

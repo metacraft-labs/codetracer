@@ -18,7 +18,7 @@ import ../../../../ct/agent_cli
 import agent_service
 import backend/mock_backend
 import store/[replay_data_store, types]
-import viewmodels/[agent_activity_deepreview_vm, agent_activity_vm,
+import viewmodels/[agent_activity_vm,
   agent_workspace_vm, agentic_session_vm, deepreview_vm, editor_vm,
   review_entry, vcs_vm]
 import ../deepreview/lib/review_dataset_fixture
@@ -306,12 +306,11 @@ suite "agentic coding M5 evidence handoff":
       # …fed to the one review-entry routine, on the panels a review actually
       # uses.  Nothing here can even name a `DeepReviewComponent`: this is the
       # ViewModel layer.
-      let activity = createAgentActivityDeepReviewVM(f.store)
       let panel = createVCSVM()
       var documents: seq[string] = @[]
       var focusCalls = 0
       discard enterReview(
-        panel, activity, dataset,
+        panel, dataset,
         proc(action: VCSOpenAction) = documents.add(action.documentKey),
         proc() = focusCalls += 1)
 
@@ -326,14 +325,13 @@ suite "agentic coding M5 evidence handoff":
       # §7 step 2 — the first modified file opens, and the panels are focused.
       check documents == @["diff:file:src/feature.nim"]
       check focusCalls == 1
-      # §7 step 4 / §2.1 — the Agent Activity panel's DeepReview section, for
-      # a session that reported no coverage: populated and honest, not blank.
-      check activity.reviewActive.val
-      check activity.sectionVisible.val
-      check activity.fileCoverage.val.len == 1
-      check activity.fileCoverage.val[0].path == "src/feature.nim"
-      check activity.selectedFilePath.val == "src/feature.nim"
-      check not activity.testResultsAvailable.val
+      # An agent session's evidence carries no per-line coverage, and the
+      # review says so by leaving the Changed Files badge empty rather than
+      # printing "0/0" — which would read as "measured, and nothing ran".
+      # (The Agent Activity roll-up that used to restate this went with AA-1;
+      # the honesty rule is the part that outlived it.)
+      check panel.changedFiles.val[0].coverageText == ""
+      check dataset.functionsTraced == 0
 
   test "the M5 handoff constructs no DeepReview panel (source contract)":
     ## The other half: `ui/agentic_session_launcher.nim` runs inside Electron,

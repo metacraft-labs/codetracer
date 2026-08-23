@@ -5,7 +5,7 @@ import
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff,
-  agent_activity, agent_activity_deepreview, agent_workspace,
+  agent_activity, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config, utils ],
@@ -1159,25 +1159,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             AgentActivityComponent(component))
           agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
 
-        # AgentActivityDeepReview is now an IsoNim view -- its DOM
-        # is mounted by
-        # ``agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel``
-        # against the ``agentActivityDeepReviewComponent-{id}``
-        # container, and reactive effects keep it in sync.  No
-        # direct-DOM redraw hook is needed here. The
-        # legacy ``AgentActivityDeepReviewComponent`` remains as the
-        # event-bus carrier (the ``IPC_DEEPREVIEW_NOTIFICATION``
-        # handler keeps populating ``self.fileEntries`` /
-        # ``self.recentNotifications``) and
-        # ``syncLegacyAgentActivityDeepReviewIntoVM`` mirrors any
-        # rows already accumulated when the panel becomes visible.
-        # Mission goal #3 \u00a71.73.  The rich per-row affordances
-        # (per-file coverage bar, per-notification colour pills,
-        # the "Functions" summary card) remain a follow-up.
-        if state.content == Content.AgentActivityDeepReview:
-          agent_activity_deepreview.syncLegacyAgentActivityDeepReviewIntoVM(
-            AgentActivityDeepReviewComponent(component))
-          agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel()
+        # ``Content.AgentActivityDeepReview`` has no renderer of its own since
+        # AA-1 deleted the roll-up.  The id survives as the review's layout
+        # identity for the Agent Activity pillar (see the note on the
+        # ``Content`` enum), so a layout persisted by an older build still
+        # constructs its component and gets an empty pane; there is nothing to
+        # mount into it until AA-2/AA-3 render the session's own content.
 
         if state.content == Content.AgentWorkspace:
           agent_workspace.syncLegacyAgentWorkspaceIntoVM(

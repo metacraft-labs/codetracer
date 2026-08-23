@@ -1098,16 +1098,18 @@ type
     ## See codetracer-specs/GUI/Debugging-Features/Visual-Replay.md.
 
   AgentActivityDeepReviewComponent* = ref object of Component
-    ## Enhanced agent activity pane that displays DeepReview data
-    ## (coverage summary, test results, traced functions) alongside
-    ## the agent's conversation history. Integrates with the existing
-    ## AgentActivityComponent via the ACP session id.
-    sessionId*: cstring
-    drSummary*: ActivityDeepReviewSummary
-    fileEntries*: seq[ActivityFileEntry]
-    recentNotifications*: seq[DeepReviewNotification]
-    testResults*: seq[DeepReviewNotification]
-    expanded*: bool
+    ## The review's identity in the Agent Activity pillar's layout —
+    ## ``Content.AgentActivityDeepReview``.
+    ##
+    ## It carried a DeepReview roll-up (a coverage summary, a test-results
+    ## row, a per-file coverage table and a notification feed) until AA-1
+    ## removed that outright: every fact it held is one the VCS panel already
+    ## carries, and DeepReview-GUI.md §2.1 is explicit that "there is no
+    ## 'DeepReview section' in this panel".  The type survives with no state
+    ## because the *id* does — a layout persisted by an older build may host a
+    ## pane of this content, and the id is what AA-2/AA-3 will render the
+    ## session's own content into.  An instance therefore renders an empty
+    ## pane rather than failing to construct.
 
   # -- HTTP Request Panel (M3) ------------------------------------------------
   HttpRequestEntry* = object

@@ -187,15 +187,18 @@ test.describe("DeepReview GUI - main features", () => {
   //
   // Test 1b asserts the review adds no TAB; this asserts it renders no
   // element of the deleted panel anywhere in the document, and — in the same
-  // breath — that the Agent Activity panel's DeepReview section, whose name
-  // is nearly identical and which is the review's third pillar (§2.1), is
-  // still there.  Falsifiable before DR-R8: all four selectors resolved.
+  // breath — that the Agent Activity panel, whose Content id has a nearly
+  // identical name and which is the review's third pillar (§2.1), is still
+  // there.  Falsifiable before DR-R8: all four selectors resolved.
+  //
+  // Since AA-1 the panel carries no roll-up either, so the second assertion
+  // is now "present, and empty of one" rather than "present, and populated".
   //
   // Headless counterparts:
   //   test_review_startup_adds_no_review_panel in
   //   src/tests/gui/tests/layout/deepreview_layout_test.nim, and
-  //   test_agent_activity_deepreview_survives_the_deletion in
-  //   src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim.
+  //   test_the_content_id_and_its_component_survive in
+  //   src/tests/gui/tests/agent-activity-deepreview/agent_activity_rollup_removal_test.nim.
   test("Test 1c: no standalone DeepReview panel selector resolves", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -233,12 +236,11 @@ test.describe("DeepReview GUI - main features", () => {
     );
     expect(hooks).toEqual([]);
 
-    // ...while the OTHER DeepReview — the Agent Activity panel's section, a
-    // different Content id with a nearly identical name — is still rendered
-    // and still populated (§2.1).
-    await expect(dr.reviewActivitySection()).toBeVisible();
-    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
-    await expect(dr.reviewActivityFileRows()).toHaveCount(3);
+    // ...and the OTHER DeepReview — the Agent Activity panel, a different
+    // Content id with a nearly identical name — is still the review's third
+    // pillar, now showing the session rather than a roll-up (§2.1, AA-1).
+    await expect(dr.agentActivityPanel()).toBeVisible();
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
   });
 
   // -----------------------------------------------------------------------
@@ -849,6 +851,40 @@ test.describe("DeepReview GUI - main features", () => {
     );
   });
 
+  test("Test 30: the review's diff editor wears CodeTracer's own Monaco theme", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+
+    // DeepReview-GUI.md §5.3 — a review reuses the debugger's own surfaces
+    // rather than restyling them, so the diff tab must look like every other
+    // CodeTracer editor.
+    //
+    // Monaco stamps the ACTIVE theme's base onto the editor root as a class:
+    // `vs-dark` for `codetracerDark` (whose `base` is `vs-dark`), and a bare
+    // `vs` when the requested theme name was never registered and Monaco
+    // silently fell back to its built-in light default. That fallback is what
+    // the assertion below rules out: `initEditor` asks for `codetracerDark` by
+    // NAME, and a name nobody defined is not an error in Monaco — it is a
+    // light editor with a white minimap in a dark application.
+    //
+    // The class is the observable rather than a pixel because it is the one
+    // artefact that distinguishes "the theme was applied" from "the theme was
+    // requested": CSS forces `.monaco-editor { background: transparent }`, so
+    // the editor's backdrop looks right either way and only Monaco's own
+    // canvases (minimap, overview ruler) betray the fallback.
+    const editorClass = await tab
+      .locator(".monaco-editor")
+      .first()
+      .getAttribute("class");
+    expect(editorClass).toBeTruthy();
+    const classes = (editorClass ?? "").split(/\s+/);
+    expect(classes).toContain("vs-dark");
+    expect(classes).not.toContain("vs");
+  });
+
   test("Test 27: the invocation selector is an in-editor control above the function", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
@@ -1441,13 +1477,13 @@ test.describe("DeepReview GUI - main features", () => {
     expect(activeTitles).toContain(firstTitle);
     await expect(dr.diffTabFor("src/main.rs")).toBeVisible();
 
-    // Pillar 3 — the Agent Activity panel: its DeepReview section is visible,
-    // expanded, and showing this changeset's coverage (§2.1). No agent ran:
-    // the dataset alone fills it.
+    // Pillar 3 — the Agent Activity panel: present, focused, and carrying no
+    // roll-up (§2.1, AA-1).  No agent ran, so it has nothing to show — and
+    // showing nothing is the point: the changeset's coverage is pillar 2's
+    // business, on the Changed Files rows asserted above.
     expect(activeTitles).toContain("AGENT ACTIVITY");
-    await expect(dr.reviewActivitySection()).toBeVisible();
-    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
-    await expect(dr.reviewActivityFileRows()).toHaveCount(3);
+    await expect(dr.agentActivityPanel()).toBeVisible();
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
 
     // ...and all of it happened additively: nothing the editor layout
     // declares was displaced to make room for the review (issue #610).
@@ -1959,9 +1995,9 @@ test.describe("DeepReview comprehensive workflow", () => {
       await wait(500);
       expect(await dr.vcsTraceContextSelect().inputValue()).toBe("1");
 
-      // ...and the third pillar is populated from the same dataset (§2.1).
-      await expect(dr.reviewActivitySection()).toBeVisible();
-      await expect(dr.reviewActivityFileRows()).toHaveCount(3);
+      // ...and the third pillar is still there, still without a roll-up.
+      await expect(dr.agentActivityPanel()).toBeVisible();
+      await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
     });
   });
 
@@ -2100,23 +2136,28 @@ test.describe("DeepReview comprehensive workflow", () => {
       expect(options.map((o) => o.trim())).toEqual(["run-1", "run-2"]);
     });
 
-    // RV-4 deliverable 4, at the surface a user sees: the dataset carries no
-    // test results, and the pane must say so rather than show a zeroed
-    // roll-up that reads as "all tests passed" (DR-R3).
-    test("RV-4: a materialized review reports test results as unavailable", async ({ ctPage }) => {
+    // RV-4 deliverable 4, at the surface a user sees.  The card that used to
+    // say "not available for this dataset" went with the roll-up (AA-1), and
+    // the rule it encoded is what survives it: absent data is never rendered
+    // as a zero that reads as success.  So the assertion is now that the
+    // review shows nothing about tests at all — not "0/0", not "all passing",
+    // not a green pill — because it knows nothing about them.
+    test("RV-4: a materialized review claims nothing about tests it never saw", async ({ ctPage }) => {
       const dr = new DeepReviewPage(ctPage);
       await dr.waitForReady();
 
-      await expect(dr.reviewActivitySection()).toBeVisible();
-      await expect(dr.reviewActivityCoverageCard()).toBeVisible();
-      // Asserted the way the native-dataset suite asserts it
-      // (`agent-activity-deepreview.spec.ts:e2e_review_test_results_row_says_the_dataset_carries_none`):
-      // the pane must SAY the dataset carries none, not merely avoid printing
-      // a zero — an empty or errored card would pass a negative check alone.
-      const tests = await dr.reviewActivityTestsCard().textContent();
-      expect(tests).toContain("not available for this dataset");
-      expect(tests).not.toContain("all passing");
-      expect(tests ?? "").not.toMatch(/\b0 passed\b/);
+      await expect(dr.agentActivityPanel()).toBeVisible();
+      await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
+
+      const panelText = (await dr.agentActivityPanel().textContent()) ?? "";
+      expect(panelText).not.toContain("all passing");
+      expect(panelText).not.toContain("0/0");
+      expect(panelText).not.toMatch(/\b0 passed\b/);
+      // …and the coverage the dataset DOES carry is where it belongs: on the
+      // VCS panel's Changed Files row, which is the surface that survived.
+      const files = await dr.fileItems();
+      expect(files.length).toBeGreaterThan(0);
+      expect(await files[0].coverageBadge()).toBe("10/10");
     });
   });
 });

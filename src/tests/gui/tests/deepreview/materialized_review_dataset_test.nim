@@ -37,19 +37,17 @@
 ## comparison: the milestone asks that both collectors' output be accepted by
 ## the same reader, so both are run through the same code here.
 ##
-## ## No mocks beyond `MockBackendService`
+## ## No mocks at all
 ##
-## `MockBackendService` is what every ViewModel test uses to construct a
-## `ReplayDataStore`; there is no replay in this suite to mock.  The decode,
-## the projection, the review-entry routine and the datasets are all real.
+## There is no replay in this suite to mock, and since AA-1 the review-entry
+## routine writes only to `VCSVM`, which needs no backend.  The decode, the
+## projection, the entry routine and the datasets are all real.
 
 import std/[json, strutils, unittest]
 
 import isonim/core/signals
 
-import backend/mock_backend
-import store/[replay_data_store, types]
-import viewmodels/[agent_activity_deepreview_vm, review_entry, vcs_vm]
+import viewmodels/[review_entry, vcs_vm]
 
 import lib/review_dataset_json
 
@@ -77,10 +75,10 @@ type
     headerTitle: string
     documents: seq[string]
     deepReviewMode: bool
-    coveragePaths: seq[string]
-    coverageSummary: AgentDeepReviewCoverageSummary
-    reviewActive: bool
-    testResultsAvailable: bool
+    coverageBadges: seq[string]
+      ## The Changed Files rows' coverage badges.  Since AA-1 deleted the
+      ## Agent Activity roll-up this is where a reviewer reads coverage, so it
+      ## is what the assertions observe.
 
 proc enterFrom(dataset: ReviewDataset): EnteredReview =
   ## Run the production review-entry routine over a dataset, on fresh
@@ -88,13 +86,10 @@ proc enterFrom(dataset: ReviewDataset): EnteredReview =
   ## `deepreview_entry_test.nim`'s helper, and deliberately so: if a
   ## materialized dataset needed a different entry path it would not be the
   ## same feature.
-  let mock = newMockBackendService()
-  let store = createReplayDataStore(mock.toBackendService())
-  let activity = createAgentActivityDeepReviewVM(store)
   let vcs = createVCSVM()
   var documents: seq[string] = @[]
   discard enterReview(
-    vcs, activity, dataset,
+    vcs, dataset,
     proc(action: VCSOpenAction) =
       if action.documentKey notin documents:
         documents.add(action.documentKey),
@@ -103,11 +98,8 @@ proc enterFrom(dataset: ReviewDataset): EnteredReview =
   result.headerTitle = vcs.headerTitle.val
   result.deepReviewMode = vcs.deepReviewMode.val
   result.documents = documents
-  for row in activity.fileCoverage.val:
-    result.coveragePaths.add(row.path)
-  result.coverageSummary = activity.coverageSummary.val
-  result.reviewActive = activity.reviewActive.val
-  result.testResultsAvailable = activity.testResultsAvailable.val
+  for row in result.rows:
+    result.coverageBadges.add(row.coverageText)
 
 proc withoutTheFieldsTheNativeExporterOmits(fixture: string): string =
   ## The materialized dataset, reduced to the fields the NATIVE exporter
@@ -180,38 +172,49 @@ suite "RV-4: a materialized dataset is a dataset the GUI reader accepts":
     check data.files[0].diff.status == "M"
 
     let entered = enterFrom(reviewDatasetFrom(data))
-    check entered.reviewActive
+    check entered.deepReviewMode
     check entered.rows.len == 1
     check entered.rows[0].path == ReviewedFile
     # The overlay data is untouched by the missing fields: coverage is what
     # the recordings measured either way.
-    check entered.coverageSummary.totalLinesCovered == 10
+    check entered.coverageBadges == @["10/10"]
 
   test "a review entered from a materialized dataset opens its file and populates the panels":
     let entered = enterFrom(
       reviewDatasetFrom(decodeReviewDatasetJson(MaterializedReviewJson)))
     check entered.deepReviewMode
-    check entered.reviewActive
     check entered.rows.len == 1
     check entered.rows[0].path == ReviewedFile
     # DeepReview-GUI.md §7 step 2: "the first modified file opens in the
     # editor".
     check entered.documents.len == 1
     check entered.documents[0].contains(ReviewedFile)
-    check entered.coveragePaths == @[ReviewedFile]
+    check entered.coverageBadges == @["10/10"]
 
-  test "a materialized review reports the same absence of test results as any other":
-    ## RV-4 deliverable 4, at the GUI end.  `DeepReviewData` carries no
-    ## test-result field for either collector, and the Agent Activity pane
-    ## renders "not available" rather than a zeroed roll-up that would read as
-    ## "all tests passed" (DR-R3).  A new collector must not quietly change
-    ## that into a measurement.
-    let materialized = enterFrom(
-      reviewDatasetFrom(decodeReviewDatasetJson(MaterializedReviewJson)))
-    let native = enterFrom(
-      reviewDatasetFrom(decodeReviewDatasetJson(NativeReviewJson)))
-    check not materialized.testResultsAvailable
-    check not native.testResultsAvailable
+  test "a materialized review carries no test results, and does not invent any":
+    ## RV-4 deliverable 4.  Neither collector writes test results:
+    ## `DeepReviewData` has no test-name, pass/fail or duration field at all.
+    ##
+    ## AA-1 deleted the surface that used to *say* so — the Agent Activity
+    ## roll-up's "not available for this dataset" Tests card — but the rule it
+    ## encoded is what this test pins, and it binds whatever renders test
+    ## results next (AA-2): the absence must stay an absence.  A collector that
+    ## started emitting zeroed counts would turn "nothing ran" into "a suite
+    ## ran and was green", which is the fabrication the rule forbids, and this
+    ## fails the moment either fixture grows such a field.
+    for fixture in [MaterializedReviewJson, NativeReviewJson]:
+      let raw = parseJson(fixture)
+      # Not a blocklist of names somebody guessed: any top-level key with
+      # "test" in it fails, whatever it is called.  A blocklist of
+      # `testResults` / `tests` / `testRuns` is walked around by the next
+      # plausible spelling (`testSummary`, `testStats`), and the point of the
+      # rule is that the collector must not start reporting test facts at all
+      # without a surface that reports them honestly.
+      for key in raw.keys:
+        check not key.toLowerAscii.contains("test")
+      # …and the projection has nowhere to put one either.
+      let dataset = reviewDatasetFrom(decodeReviewDatasetJson(fixture))
+      check dataset.files.len > 0
 
   test "the header names the reviewed commit, which the collector read from git":
     let data = decodeReviewDatasetJson(MaterializedReviewJson)
@@ -292,18 +295,20 @@ suite "RV-4: coverage and flow survive the round trip":
     check not file.flags.isUnreachable
     check not file.flags.isPartial
 
-  test "the coverage roll-up the Agent Activity pane shows is derived from it":
-    let entered = enterFrom(
-      reviewDatasetFrom(decodeReviewDatasetJson(MaterializedReviewJson)))
+  test "the coverage badge the VCS panel shows is derived from it":
+    let dataset = reviewDatasetFrom(
+      decodeReviewDatasetJson(MaterializedReviewJson))
+    let entered = enterFrom(dataset)
     # Ten covered lines and none uncovered: the collector only writes coverage
     # records for lines it observed, so every record in the dataset is a line
     # that ran.  A collector that padded the file with zero-count records would
-    # show a coverage percentage here instead.
-    check entered.coverageSummary.totalLinesCovered == 10
-    check entered.coverageSummary.totalLinesUncovered == 0
+    # show a partial ratio here instead.
+    check entered.coverageBadges == @["10/10"]
+    check dataset.files[0].coveredLines == 10
+    check dataset.files[0].totalLines == 10
     # One function traced, across two executions of it: `reviewDatasetFrom`
     # counts distinct function keys, not flow entries.
-    check entered.coverageSummary.functionsTraced == 1
+    check dataset.functionsTraced == 1
 
   test "flow carries each invocation, its steps, its loop and its values":
     let file = reviewedFile(decodeReviewDatasetJson(MaterializedReviewJson))

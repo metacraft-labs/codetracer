@@ -280,32 +280,31 @@ const
     # component and therefore unreachable headlessly and lost on every
     # re-render.
     "src/tests/gui/tests/vcs/vcs_context_expansion_test.nim",
-    # DR-R3 — the Agent Activity panel as DeepReview's third pillar.  The
-    # panel's ViewModel, view and component all existed and were all wired to
-    # nothing: the only caller of `setCoverageSummary` / `setTestResults` /
-    # `setFileCoverage` in the repository was a storybook fixture, so the
-    # section rendered an empty shell in every real review.  The suite added
-    # here drives review entry over the same `sample-review.json` fixture the
-    # Playwright suites use and asserts the coverage summary, the per-file
-    # table, the honest "no test results in this dataset" state, and that the
-    # coverage table and the VCS panel's Changed Files list stay one
-    # selection.  The file existed before DR-R3 and was NOT listed here, so it
-    # was gated by nothing at all — the same gap DR-R1 kept finding.
+    # AA-1 — the DeepReview roll-up is deleted from the Agent Activity panel,
+    # and its layout identity is not.
     #
-    # The view half rides in `isonim_views_test.nim` (already listed above):
-    # the section now renders *inside* the Agent Activity panel, per
-    # DeepReview-GUI.md §2.1, so its rendering is that panel's business.  The
-    # focus half rides in `deepreview_layout_test.nim` (also listed).
+    # This replaces `agent_activity_deepreview_vm_test.nim`, which tested the
+    # roll-up's ViewModel: DR-R3 wired that ViewModel to a real review, and
+    # AA-1 removed the whole surface (DeepReview-GUI.md §2.1: "There is no
+    # 'DeepReview section' in this panel").  The file's behavioural claims that
+    # outlive the pane moved to the surfaces that still make them — per-file
+    # coverage to the VCS panel's Changed Files badge, the aggregate to
+    # `ReviewDataset`, and "this dataset carries no test results" to the
+    # dataset level — and each is listed in this gate through
+    # `materialized_review_dataset_test.nim` and `deepreview_entry_test.nim`.
     #
-    # DR-R8 added its deletion guard here rather than to a new file:
-    # `Content.AgentActivityDeepReview` is a DIFFERENT id from the deleted
-    # `Content.DeepReview` and the names are nearly identical, so the suite
-    # that owns this pane is where "we deleted the other one" belongs.  It
-    # asserts the pane still populates from a dataset after the deletion, and
-    # — as a native-only source contract — that its content id, registration,
-    # component and whole module stack survive while the standalone panel's
-    # id and modules are the ones that went.
-    "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim",
+    # What is left needs its own file for the reason DR-R8 gave: the two
+    # DeepReview ids have nearly identical names, and a deletion guard has to
+    # say which one went.  Here the answer is the *opposite* of DR-R8's —
+    # `Content.AgentActivityDeepReview` (39) SURVIVES, because persisted
+    # layouts store the ordinal, review mode keeps the pane visible by it, and
+    # AA-2/AA-3 render into it — so the guard asserts presence and absence in
+    # the same file, where they cannot drift apart.
+    #
+    # The rendering half rides in `isonim_views_test.nim` (already listed
+    # above): the panel that used to host the roll-up is where "no roll-up"
+    # has to be observed.
+    "src/tests/gui/tests/agent-activity-deepreview/agent_activity_rollup_removal_test.nim",
     # DR-R7 — one review-entry routine for all three launch paths.  The three
     # ways into a review (`ct review`, a trace with an associated diff,
     # the agentic handoff) used to configure review state their own way, and

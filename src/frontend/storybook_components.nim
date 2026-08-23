@@ -18,7 +18,6 @@ import viewmodel/backend/mock_backend
 import viewmodel/backend/backend_service
 import viewmodel/store/[replay_data_store, types]
 import viewmodel/viewmodels/[
-  agent_activity_deepreview_vm,
   agent_activity_vm,
   agent_workspace_vm,
   build_vm,
@@ -53,7 +52,6 @@ import viewmodel/viewmodels/[
   welcome_screen_vm,
 ]
 import viewmodel/views/[
-  isonim_agent_activity_deepreview_view,
   isonim_agent_activity_view,
   isonim_agent_workspace_view,
   isonim_auto_hide_bottom_strip_view,
@@ -811,25 +809,6 @@ proc applyAgentWorkspace(vm: AgentWorkspaceVM) =
   ])
   vm.setNotificationCount(3)
 
-proc applyAgentActivityDeepReview(vm: AgentActivityDeepReviewVM) =
-  vm.setExpanded(true)
-  vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
-    totalLinesCovered: 140, totalLinesUncovered: 24,
-    coveragePercent: 85.4, functionsTraced: 12))
-  vm.setTestResults(AgentDeepReviewTestResults(
-    testsRun: 18, testsPassed: 17, testsFailed: 1, totalDurationMs: 9200))
-  vm.setFileCoverage([
-    AgentDeepReviewFileCoverage(path: "src/main.nr", coveredLines: 72,
-                                totalLines: 80, hasFlow: true),
-    AgentDeepReviewFileCoverage(path: "src/shield.nr", coveredLines: 68,
-                                totalLines: 84, hasFlow: true),
-  ])
-  vm.appendNotification(AgentDeepReviewNotification(
-    kind: adrnkCoverageUpdate, label: "Coverage updated for src/shield.nr"))
-  vm.appendNotification(AgentDeepReviewNotification(
-    kind: adrnkTestComplete, label: "shield regression test failed",
-    passed: false))
-
 proc applyWelcome(vm: WelcomeScreenVM) =
   # M-REC-3: ``RecentTraceRecord.recordingId`` is a UUIDv7 string; the
   # fixture ids are well-known constants chosen for storybook
@@ -1261,13 +1240,6 @@ proc mountAgentActivity(container: isonim_dom.Element; fixture: string): Dispose
     mountIsoNimAgentActivityPanel(container, vm, 101, "storybook-agent-input")
     return proc() = vm.dispose())
 
-proc mountAgentActivityDeepReview(container: isonim_dom.Element; fixture: string): DisposeProc =
-  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
-    let vm = createAgentActivityDeepReviewVM(store)
-    if fixture != "empty": vm.applyAgentActivityDeepReview()
-    mountIsoNimAgentActivityDeepReviewPanel(container, vm)
-    return proc() = vm.dispose())
-
 proc mountAgentWorkspace(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createAgentWorkspaceVM(store)
@@ -1626,7 +1598,6 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
   else:
     case n
     of "agent-activity": mountAgentActivity(container, f)
-    of "agent-activity-deepreview": mountAgentActivityDeepReview(container, f)
     of "agent-workspace": mountAgentWorkspace(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)

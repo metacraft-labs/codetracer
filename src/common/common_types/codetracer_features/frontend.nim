@@ -323,6 +323,19 @@ type
     RetiredDeepReviewPanel = 36,
     AgentWorkspace = 37,
     CaptionBarProgress = 38,
+    ## The review's identity in the Agent Activity pillar's layout.
+    ##
+    ## AA-1 deleted the roll-up this pane used to draw — the coverage summary,
+    ## the test-results row, the per-file coverage table and the notification
+    ## feed (DeepReview-GUI.md §2.1: "There is no 'DeepReview section' in this
+    ## panel").  The *id* survives the deletion, unlike ordinal 36's: the panel
+    ## keeps a review role (AA-2 renders `ct test` runs into it, AA-3 renders
+    ## evidence tool calls), `index/config.reviewPillarContentIds` names it so
+    ## review mode keeps it visible where edit mode would hide it, and a layout
+    ## persisted by an older build may host a pane of it.  Its *contents*
+    ## changed, not its identity: `makeComponent` still constructs a
+    ## (stateless) component for it, which renders an empty pane until AA-2 /
+    ## AA-3 fill it with the session's own content.
     AgentActivityDeepReview = 39,
     RequestPanel = 40,
     VCS = 41,

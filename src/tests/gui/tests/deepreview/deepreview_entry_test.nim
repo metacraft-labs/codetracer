@@ -41,7 +41,7 @@ import isonim/core/[computation, owner, signals]
 
 import backend/mock_backend
 import store/[replay_data_store, types]
-import viewmodels/[agent_activity_deepreview_vm, agent_activity_vm,
+import viewmodels/[agent_activity_vm,
   agent_workspace_vm, agentic_session_vm, deepreview_vm, editor_vm,
   review_entry, vcs_vm]
 import ../../../../common/types as ct_types
@@ -224,15 +224,8 @@ type EnteredReview = object
   focusCalls: int
   traceLabels: seq[string]
   selectedTraceLabel: string
-  coveragePaths: seq[string]
-  coverageSummary: AgentDeepReviewCoverageSummary
-  activitySelectedPath: string
-  reviewActive: bool
-  sectionVisible: bool
-  sectionExpanded: bool
-  testResultsAvailable: bool
 
-proc snapshot(vcs: VCSVM; activity: AgentActivityDeepReviewVM;
+proc snapshot(vcs: VCSVM;
               documents: seq[string]; focusCalls: int): EnteredReview =
   result.rows = vcs.changedFiles.val
   result.headerTitle = vcs.headerTitle.val
@@ -244,14 +237,6 @@ proc snapshot(vcs: VCSVM; activity: AgentActivityDeepReviewVM;
     result.traceLabels.add(ctx.label)
     if ctx.id == vcs.currentTraceContextId():
       result.selectedTraceLabel = ctx.label
-  for row in activity.fileCoverage.val:
-    result.coveragePaths.add(row.path)
-  result.coverageSummary = activity.coverageSummary.val
-  result.activitySelectedPath = activity.selectedFilePath.val
-  result.reviewActive = activity.reviewActive.val
-  result.sectionVisible = activity.sectionVisible.val
-  result.sectionExpanded = activity.isExpanded.val
-  result.testResultsAvailable = activity.testResultsAvailable.val
 
 proc enterFrom(dataset: ReviewDataset): EnteredReview =
   ## Run the one review-entry routine over a launch path's dataset, on fresh
@@ -261,19 +246,16 @@ proc enterFrom(dataset: ReviewDataset): EnteredReview =
   ## document, keyed by the tab identity the host uses, so a repeated open
   ## focuses rather than duplicates.  The `focus` callback stands in for
   ## GoldenLayout retargeting the review's stacks.
-  let mock = newMockBackendService()
-  let store = createReplayDataStore(mock.toBackendService())
-  let activity = createAgentActivityDeepReviewVM(store)
   let vcs = createVCSVM()
   var documents: seq[string] = @[]
   var focusCalls = 0
   discard enterReview(
-    vcs, activity, dataset,
+    vcs, dataset,
     proc(action: VCSOpenAction) =
       if action.documentKey notin documents:
         documents.add(action.documentKey),
     proc() = focusCalls += 1)
-  snapshot(vcs, activity, documents, focusCalls)
+  snapshot(vcs, documents, focusCalls)
 
 proc changeset(dataset: ReviewDataset):
     seq[(string, string, int, int)] =
@@ -307,8 +289,8 @@ template checkEnteredState(entered: EnteredReview; launchPath: string) =
   ##
   ## A **template**, not a proc.  `unittest`'s `check` only marks the
   ## enclosing `test` as failed when it expands *inside* it (`fail` is
-  ## guarded by `when declared(testStatusIMPL)`); from a plain proc these
-  ## eighteen assertions — the contract every launch path must meet — set
+  ## guarded by `when declared(testStatusIMPL)`); from a plain proc the
+  ## assertions below — the contract every launch path must meet — would set
   ## the exit code without the case ever printing `[FAILED]`.
   checkpoint("launch path: " & launchPath)
   # §7 step 1 — the VCS panel populates with the changeset, and the first row
@@ -333,20 +315,6 @@ template checkEnteredState(entered: EnteredReview; launchPath: string) =
   # panels are focused, exactly once.
   check entered.documents == @["diff:file:src/main.rs"]
   check entered.focusCalls == 1
-  # §7 step 4 / §2.1 — the Agent Activity panel's DeepReview section: one
-  # coverage row per changed file, in the changeset's order, agreeing with the
-  # VCS panel's selection ("two views of one selection").
-  check entered.reviewActive
-  check entered.sectionVisible
-  check entered.sectionExpanded
-  check entered.coveragePaths ==
-    @["src/main.rs", "src/utils.rs", "src/config.rs"]
-  check entered.activitySelectedPath == "src/main.rs"
-  # No launch path carries test results: `DeepReviewData` has no field for
-  # them and an agent session's evidence has no pass/fail roll-up either, so
-  # all three report "not available" rather than a zeroed run that would read
-  # as "all tests passed".
-  check not entered.testResultsAvailable
 
 # ---------------------------------------------------------------------------
 
@@ -447,22 +415,18 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
       check b.rows[0].coverageText == ""
       check c.rows[0].coverageText == ""
 
-      # 3. What the paths genuinely do NOT share is coverage, and they say so
-      #    rather than inventing it.  Only a dataset collected by
-      #    `ct-native-replay deepreview collect` carries per-line coverage: a
-      #    trace's `--with-diff` diff has none, and an agent session's
-      #    evidence (`AgentServiceEvidenceFileEntry`) has none either.
-      check a.coverageSummary.totalLinesCovered == 20
-      check a.coverageSummary.totalLinesUncovered == 4
-      check a.coverageSummary.functionsTraced == 3
-      check b.coverageSummary.totalLinesCovered == 0
-      check b.coverageSummary.functionsTraced == 0
-      check c.coverageSummary.totalLinesCovered == 0
-      check c.coverageSummary.functionsTraced == 0
-      # …and the coverage table still has a row per file on those two paths,
-      # so the third pillar is populated rather than blank (§2.1).
-      check b.coveragePaths.len == 3
-      check c.coveragePaths.len == 3
+      # 3. What the paths genuinely do NOT share is per-line coverage, and
+      #    they say so rather than inventing it.  Only a dataset collected by
+      #    `ct-native-replay deepreview collect` carries it: a trace's
+      #    `--with-diff` diff has none, and an agent session's evidence
+      #    (`AgentServiceEvidenceFileEntry`) has none either.  Since AA-1 the
+      #    only surface that reports coverage is the VCS panel's Changed Files
+      #    badge, so the per-file half is asserted on the rows just above; what
+      #    is left here is the changeset aggregate, which no surface renders
+      #    now and is therefore checked on the dataset it stays derivable from.
+      check cli.functionsTraced == 3
+      check traceDiff.functionsTraced == 0
+      check agentic.functionsTraced == 0
 
       dispose()
 
@@ -476,9 +440,6 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
     ## mount attempt, and `agentic_session_launcher.syncProductPanels` re-runs
     ## `syncDeepReview` on every sync of the product panels.
     createRoot proc(dispose: proc()) =
-      let mock = newMockBackendService()
-      let store = createReplayDataStore(mock.toBackendService())
-      let activity = createAgentActivityDeepReviewVM(store)
       let vcs = createVCSVM()
       let dataset = cliLaunchDataset()
 
@@ -491,7 +452,7 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
           documents.add(action.documentKey)
       let focus = proc() = focusCalls += 1
 
-      discard enterReview(vcs, activity, dataset, open, focus)
+      discard enterReview(vcs, dataset, open, focus)
       check documents == @["diff:file:src/main.rs"]
       check opens == 1
       check focusCalls == 1
@@ -499,25 +460,21 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
       # The reviewer moves to another file, the way a click in the Changed
       # Files list does.
       check selectReviewRow(vcs, 2)
-      check syncActivitySelectionFromVCS(vcs, activity)
       check vcs.changedFiles.val[2].selected
-      check activity.selectedFilePath.val == "src/config.rs"
 
       # …and the review is re-entered, with the same dataset.
-      discard enterReview(vcs, activity, dataset, open, focus)
+      discard enterReview(vcs, dataset, open, focus)
 
       # No second open, no second document, no re-focus.
       check opens == 1
       check documents == @["diff:file:src/main.rs"]
       check focusCalls == 1
-      # …and the reviewer's own selection survived, in both views of it.
+      # …and the reviewer's own selection survived.
       check vcs.changedFiles.val[2].selected
       check not vcs.changedFiles.val[0].selected
-      check activity.selectedFilePath.val == "src/config.rs"
       # The data is still refreshed on re-entry: that is the half of
       # `syncDeepReview` that stays.
       check vcs.changedFiles.val.len == 3
-      check activity.fileCoverage.val.len == 3
 
       dispose()
 
@@ -527,20 +484,17 @@ suite "Review entry — one routine for all three launch paths (DR-R7)":
     ## before it does) must not consume it — that ordering bug is exactly why
     ## DR-R1's guard had to be checked after the review-mode test.
     createRoot proc(dispose: proc()) =
-      let mock = newMockBackendService()
-      let store = createReplayDataStore(mock.toBackendService())
-      let activity = createAgentActivityDeepReviewVM(store)
       let vcs = createVCSVM()
       var documents: seq[string] = @[]
       let open = proc(action: VCSOpenAction) =
         if action.documentKey notin documents:
           documents.add(action.documentKey)
 
-      discard enterReview(vcs, activity, ReviewDataset(title: "empty"), open)
+      discard enterReview(vcs, ReviewDataset(title: "empty"), open)
       check documents.len == 0
       check not vcs.reviewEntered.val
 
-      discard enterReview(vcs, activity, cliLaunchDataset(), open)
+      discard enterReview(vcs, cliLaunchDataset(), open)
       check documents == @["diff:file:src/main.rs"]
       check vcs.reviewEntered.val
 
@@ -867,12 +821,9 @@ suite "Review entry carries the reviewed commit (DR-R8)":
     ## Falsifiable against the code as it stood before DR-R8: `ReviewDataset`
     ## had no `commit` field and `VCSVM` no `reviewCommit` signal.
     createRoot proc(dispose: proc()) =
-      let mock = newMockBackendService()
-      let store = createReplayDataStore(mock.toBackendService())
       let vcs = createVCSVM()
-      let activity = createAgentActivityDeepReviewVM(store)
 
-      discard enterReview(vcs, activity, cliLaunchDataset(), nil)
+      discard enterReview(vcs, cliLaunchDataset(), nil)
 
       check vcs.reviewCommit.val == "a1b2c3d4e5f6..."
 
@@ -887,14 +838,11 @@ suite "Review entry carries the reviewed commit (DR-R8)":
     check abbreviatedCommit("a1b2c3d4e5f6a1b2c3d4") == "a1b2c3d4e5f6..."
 
     createRoot proc(dispose: proc()) =
-      let mock = newMockBackendService()
-      let store = createReplayDataStore(mock.toBackendService())
       let vcs = createVCSVM()
-      let activity = createAgentActivityDeepReviewVM(store)
 
       var dataset = cliLaunchDataset()
       dataset.commit = ""
-      discard enterReview(vcs, activity, dataset, nil)
+      discard enterReview(vcs, dataset, nil)
 
       check vcs.reviewCommit.val == ""
 

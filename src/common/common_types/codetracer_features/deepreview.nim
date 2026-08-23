@@ -12,18 +12,18 @@ type
   DeepReviewData* = ref object
     ## Top-level container for a complete DeepReview export.
     ##
-    ## MISSING DATA — test results.  DeepReview-GUI.md §2.1 lists "Test
-    ## results — tests run, passed, failed, and aggregate duration" among what
-    ## the Agent Activity panel's DeepReview section shows, but this type
-    ## carries no test-name, pass/fail or duration field anywhere, and neither
-    ## does the exporter that produces it
-    ## (``codetracer-native-backend/src/deepreview/json_export.rs``,
+    ## MISSING DATA — test results.  This type carries no test-name, pass/fail
+    ## or duration field anywhere, and neither does the exporter that produces
+    ## it (``codetracer-native-backend/src/deepreview/json_export.rs``,
     ## ``DeepReviewData``).  A review launched from ``ct review`` over an
-    ## exported dataset therefore has nothing to fill that row with, and the
-    ## Agent Activity pane renders an explicit "not available for this
-    ## dataset" state rather than a zeroed roll-up that would read as "all
-    ## tests passed" (DR-R3 in
-    ## ``codetracer-specs/DeepReview/DeepReview-GUI.milestones.org``).
+    ## exported dataset therefore knows nothing about test runs.
+    ##
+    ## No surface reports that today: AA-1 deleted the Agent Activity roll-up
+    ## whose Tests card used to say "not available for this dataset".  The
+    ## *rule* it encoded outlives it and binds whatever renders test results
+    ## next (AA-2): absent data is stated, never rendered as a zero — a "0/0,
+    ## all passing" row asserts that a suite ran and was green, which is a
+    ## fabricated fact rather than a missing one.
     ##
     ## Closing the gap needs, in ``codetracer-native-backend``:
     ##   * a ``TestResultData { testName, passed, durationMs, traceContextId }``
@@ -35,9 +35,7 @@ type
     ##   * a ``testResults: Vec<TestResultData>`` field on the exported
     ##     ``DeepReviewData``, written by ``ct-native-replay deepreview collect``
     ##     from the runs it recorded;
-    ##   * the mirrored ``testResults*: seq[DeepReviewTestResult]`` here, read
-    ##     by ``vcs.reviewCoverageRows``' neighbour and pushed through
-    ##     ``review_entry.populateReviewActivity``.
+    ##   * the mirrored ``testResults*: seq[DeepReviewTestResult]`` here.
     ## Adjacent to M42b (``Pxor-Bugs.milestones.org``) — same repo, same
     ## neighbourhood — but a separate change: M42b is about loading the
     ## recordings, this is about carrying a fact the recordings already know.

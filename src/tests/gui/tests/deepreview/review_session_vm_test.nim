@@ -55,7 +55,7 @@ import isonim/core/[computation, owner, signals]
 
 import backend/mock_backend
 import store/[replay_data_store, types]
-import viewmodels/[agent_activity_deepreview_vm, agent_activity_vm,
+import viewmodels/[agent_activity_vm,
   review_entry, review_session, vcs_vm]
 import ../../../../ct/review_session as ct_review_session
 import ../../../../common/types as ct_types
@@ -174,12 +174,12 @@ proc sessionOf(fixture: string): ReviewSession =
   reviewSessionFrom(decodeReviewSessionTranscript(fixture))
 
 template withReviewPanels(body: untyped) =
-  ## The three ViewModels a review touches, inside one reactive root.
+  ## The two ViewModels a review touches, inside one reactive root.  There were
+  ## three until AA-1 deleted the Agent Activity roll-up.
   createRoot proc(dispose: proc()) =
     let mock {.inject.} = newMockBackendService()
     let store {.inject.} = createReplayDataStore(mock.toBackendService())
     let vcs {.inject.} = createVCSVM()
-    let rollUp {.inject.} = createAgentActivityDeepReviewVM(store)
     let conversation {.inject.} = createAgentActivityVM(store)
     body
     dispose()
@@ -199,13 +199,13 @@ suite "RV-6: a review with no session":
       check not session.hasSession()
       check session.sessionNoticeText() == ""
 
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
 
       # The review itself is untouched by the absence.
       check vcs.changedFiles.val.len == 2
       check vcs.reviewCommit.val == "a1b2c3d4e5f6..."
-      check rollUp.reviewActive.val
+      check vcs.deepReviewMode.val
       # No session, no conversation, and — critically — no notice: there is
       # nothing to explain.
       check conversation.messages.val.len == 0
@@ -222,22 +222,26 @@ suite "RV-6: a review with no session":
         AgentActivityMessageEntry(id: "live:0", content: "still talking",
           role: aamrAgent)])
 
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation,
         session = noSession())
 
       check conversation.messages.val.len == 1
       check conversation.messages.val[0].content == "still talking"
 
-  test "review_session_absent_leaves_the_roll_up_open":
-    ## The roll-up is secondary *to a session*.  With no session it is what
-    ## the panel has to say about the review, so it stays open — which is also
-    ## the behaviour RV-1..RV-5 verified and this milestone must not weaken.
+  test "review_session_absent_leaves_the_panel_saying_nothing":
+    ## RV-6 used to demote a coverage roll-up here when a session was present
+    ## and leave it open when one was not.  AA-1 deleted the roll-up, so the
+    ## only thing left to assert is the honest one: with no session the panel
+    ## has nothing to show and says nothing — it does not invent a notice, and
+    ## it certainly does not fall back to a summary of the dataset.
     withReviewPanels:
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation,
         session = noSession())
-      check rollUp.isExpanded.val
+      check conversation.messages.val.len == 0
+      check conversation.sessionNotice.val == ""
+      check not conversation.hasSessionNotice.val
 
 # ---------------------------------------------------------------------------
 # 2. A resolvable reference renders the session's messages
@@ -251,7 +255,7 @@ suite "RV-6: a review whose session resolves":
       check session.sessionId == "session-abc"
       check session.events.len == 4
 
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
 
       let messages = conversation.messages.val
@@ -274,28 +278,32 @@ suite "RV-6: a review whose session resolves":
       # A conversation that speaks for itself needs no explanation.
       check conversation.sessionNotice.val == ""
 
-  test "review_session_resolvable_demotes_the_coverage_roll_up":
-    ## RV-6's reconciliation of §2.1: the session is primary, the roll-up is
-    ## secondary.  With a session present the roll-up starts folded rather
-    ## than occupying the panel above the conversation.
+  test "review_session_resolvable_leaves_the_panel_to_the_session":
+    ## RV-6 demoted a coverage roll-up here so the session came first; AA-1
+    ## removed the roll-up outright, so §2.1's "the primary thing the panel
+    ## shows in a review is the agent session that produced it" is now literal.
+    ## The dataset's coverage did not vanish with it — it is the VCS panel's,
+    ## which is where the reviewer reads it.
     withReviewPanels:
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = sessionOf(LoadedSessionJson))
-      check not rollUp.isExpanded.val
-      # Demoted, not removed: it still carries the review's coverage, and the
-      # reviewer can open it.
-      check rollUp.reviewActive.val
-      check rollUp.fileCoverage.val.len == 2
-      check rollUp.coverageSummary.val.totalLinesCovered == 20
+      check conversation.messages.val.len == 4
+      check vcs.changedFiles.val.len == 2
+      # The exact numbers the deleted roll-up used to assert (15/17 and 5/7 of
+      # `sampleDataset`, 20 covered lines in total), read off the surface that
+      # replaced it.  Asserted exactly rather than as "not empty", because a
+      # badge that renders the wrong coverage is the failure worth catching.
+      check vcs.changedFiles.val[0].coverageText == "15/17"
+      check vcs.changedFiles.val[1].coverageText == "5/7"
 
   test "review_session_entry_is_re_runnable":
     ## Every launch path re-syncs its data, and `enterReview` is re-run each
     ## time.  Re-entering must not duplicate the conversation.
     withReviewPanels:
       let session = sessionOf(LoadedSessionJson)
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
       check conversation.messages.val.len == 4
 
@@ -310,7 +318,7 @@ suite "RV-6: a review whose session does not resolve":
       check session.state == rssUnavailable
       check session.hasSession()
 
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
 
       check conversation.messages.val.len == 0
@@ -329,7 +337,7 @@ suite "RV-6: a review whose session does not resolve":
       let session = sessionOf(UnsupportedSessionJson)
       check session.state == rssUnsupported
 
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
 
       check conversation.messages.val.len == 0
@@ -347,7 +355,7 @@ suite "RV-6: a review whose session does not resolve":
       check session.state == rssLoaded
       check session.events.len == 0
 
-      discard enterReview(vcs, rollUp, sampleDataset(), nil,
+      discard enterReview(vcs, sampleDataset(), nil,
         conversation = conversation, session = session)
 
       check conversation.messages.val.len == 0

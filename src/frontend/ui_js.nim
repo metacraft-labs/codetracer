@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   options, json,
-  ui/[agent_activity, agent_activity_deepreview, agent_workspace, layout, editor, trace, event_log,
+  ui/[agent_activity, agent_workspace, layout, editor, trace, event_log,
       state, calltrace, menu, status,
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
@@ -1901,8 +1901,6 @@ when not defined(ctInExtension):
         video_player.initVideoPlayerVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityVMWithStore"):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
-      initPanelVM("initAgentActivityDeepReviewVMWithStore"):
-        agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentWorkspaceVMWithStore"):
         agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
       initPanelVM("installAgenticWorktreeTestHooks"):

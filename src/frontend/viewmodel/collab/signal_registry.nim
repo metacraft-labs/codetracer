@@ -512,26 +512,6 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("AgentActivityVM",
     ["messageCount", "terminalCount", "hasMessages"])
 
-  entries.addMany("AgentActivityDeepReviewVM",
-    ["coverageSummary", "testResults", "testResultsAvailable", "fileCoverage",
-     "notifications"],
-    vscBackendAuthoritative,
-    "Agent DeepReview data is service output; whether test results exist at " &
-    "all is a property of the dataset, not of the viewer.")
-  entries.addEntry("AgentActivityDeepReviewVM", "isExpanded", vscRendererLocal,
-    "Expansion of the embedded summary is local UI state.")
-  entries.addEntry("AgentActivityDeepReviewVM", "reviewActive",
-    vscBackendAuthoritative,
-    "Whether a review dataset is loaded is a session-wide fact, not a " &
-    "per-viewer one.")
-  entries.addEntry("AgentActivityDeepReviewVM", "selectedFilePath",
-    vscRendererLocal,
-    "The file under inspection is per-viewer navigation, mirroring " &
-    "VCSVM's changed-file selection.")
-  entries.addDerived("AgentActivityDeepReviewVM",
-    ["coveragePercent", "hasFailures", "notificationCount", "sectionVisible",
-     "selectedFileIndex"])
-
   entries.addMany("AgentWorkspaceVM",
     ["viewKind", "workspacePath", "sessionId", "summary", "files",
      "notificationCount"],

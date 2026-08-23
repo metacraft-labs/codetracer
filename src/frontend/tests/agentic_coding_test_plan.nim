@@ -137,8 +137,10 @@ proc updateSummaryFromTest(
 # - Send a mock IPC message on "CODETRACER::acp-deepreview-notification"
 #   with kind "CoverageUpdate" and verify the AgentWorkspaceComponent
 #   updates its fileEntries
-# - Send a "TestComplete" notification and verify the
-#   AgentActivityDeepReviewComponent updates its testResults list
+# - Send a "TestComplete" notification and verify the AgentWorkspaceComponent
+#   records it.  (The Agent Activity panel had a second consumer of the same
+#   notification until AA-1 deleted its DeepReview roll-up; the workspace
+#   panel's handler is the one that was ever actually subscribed.)
 # - Send an invalid kind and verify no crash occurs
 
 suite "test_acp_deepreview_extension":
@@ -300,21 +302,19 @@ suite "test_caption_bar_progress":
 # =========================================================================
 # Test 4: test_activity_pane_deepreview
 # =========================================================================
-# Verifies the activity pane shows DeepReview data correctly:
-# - Summary cards display coverage percentage, test counts, function counts
-# - Per-file coverage table lists files with correct coverage ratios
-# - Test results section shows pass/fail status with timing
-# - Recent notifications feed shows last N notifications
-# - Collapsible header works (expanded/collapsed toggle)
+# Verifies the coverage / test / function arithmetic a DeepReview
+# notification stream accumulates.
 #
-# Full E2E verification:
-# - Create an AgentActivityDeepReviewComponent
-# - Feed it CoverageUpdate notifications for 3 files
-# - Feed it TestComplete notifications (2 pass, 1 fail)
-# - Assert ".activity-dr-card-value" for coverage shows correct percentage
-# - Assert ".activity-dr-files-row" count equals 3
-# - Assert ".activity-dr-test-item" count equals 3
-# - Toggle the header and assert the section collapses
+# The pane this section was named for is gone: AA-1 deleted the Agent
+# Activity panel's DeepReview roll-up (summary cards, per-file coverage
+# table, test-results section, notification feed and collapsible header),
+# so the E2E half of this plan — "create an AgentActivityDeepReviewComponent
+# and assert on `.activity-dr-*`" — describes a surface that no longer
+# exists and is not to be written.
+#
+# The arithmetic below is unaffected: it is a property of the notification
+# stream, not of any pane, and the Agent Workspace panel still renders a
+# summary from the same stream.
 
 suite "test_activity_pane_deepreview":
   test "Summary updates after coverage notifications":

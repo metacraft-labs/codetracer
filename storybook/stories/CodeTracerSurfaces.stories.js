@@ -1403,12 +1403,6 @@ const meta = {
 export default meta;
 
 export const AgentActivity = story("panel", "agent-activity", "populated", "Agent Activity");
-export const AgentActivityDeepReview = story(
-  "panel",
-  "agent-activity-deepreview",
-  "populated",
-  "Agent Activity Deep Review",
-);
 export const AgentWorkspace = story("panel", "agent-workspace", "populated", "Agent Workspace");
 export const Build = story("panel", "build", "populated", "Build");
 export const Calltrace = story("panel", "calltrace", "populated", "Calltrace");

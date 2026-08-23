@@ -1893,7 +1893,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
   zoneDom.appendChild(editorDom)
 
   var lang = fromPath(self.data.services.debugger.location.path)
-  let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
+  let theme = monacoThemeName(self.data.config.theme)
   if not self.diffEditors.hasKey(lineNumber):
     discard setTimeout(proc () =
       self.diffEditors[lineNumber] = createMonacoEditor(
@@ -2440,19 +2440,11 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   # already happened.
   let readOnly = self.data.ui.readOnly or self.data.isReviewDatasetSession()
 
-  const whiteThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
-  const darkThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
-
-  cdebug "HEHE XD"
-
-  try:
-    {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
-    {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
-  except:
-    let message = getCurrentExceptionMsg()
-    cerror "editor: defining themes: " & message
-
-  let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
+  # The theme definitions used to be emitted here, which made every other
+  # Monaco surface depend on a source editor having been created first — see
+  # `renderer.ensureMonacoThemesDefined`, which now owns them and which
+  # `monacoThemeName` calls for every caller.
+  let theme = monacoThemeName(self.data.config.theme)
 
   var editorReady = false
   try:

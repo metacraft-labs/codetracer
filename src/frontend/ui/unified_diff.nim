@@ -926,10 +926,12 @@ proc initEditor(self: UnifiedDiffComponent) =
   let doc = diffDocumentFor(vm)
   let content = cstring(documentText(doc))
   self.rebuildLineLabels(doc)
-  let theme = if self.data.config.theme == cstring"default_white":
-    cstring"codetracerWhite"
-  else:
-    cstring"codetracerDark"
+  # `monacoThemeName` registers the theme documents before naming one.  A
+  # review's visible tab is this one, and nothing else in the window need ever
+  # create a source editor, so this tab cannot rely on somebody else having
+  # defined `codetracerDark` first — that dependency is what made the review
+  # window come up under Monaco's built-in light theme.
+  let theme = monacoThemeName(self.data.config.theme)
 
   self.editor = udCreateMonacoEditor(hostId, js{
     value: content,

@@ -626,7 +626,10 @@ proc reviewPillarContentIds(): seq[int] =
   ##
   ## `Content.AgentActivityDeepReview` is a DIFFERENT id from the retired
   ## `Content.DeepReview` (36); see the note on the `Content` enum.  It is
-  ## listed here because a saved layout may host it as a pane of its own.
+  ## listed here because a saved layout may host it as a pane of its own, and
+  ## it stayed listed through AA-1: that milestone deleted the roll-up the
+  ## pane drew, not the pane's identity as part of the review's Agent Activity
+  ## pillar.
   @[
     ord(Content.AgentActivity),
     ord(Content.AgentActivityDeepReview)

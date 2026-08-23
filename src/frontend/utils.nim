@@ -940,27 +940,14 @@ proc makeVideoPlayerComponent*(data: Data, id: int): VideoPlayerComponent =
   data.registerComponent(result, Content.VideoPlayer)
 
 proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
-  ## Create a new AgentActivityDeepReviewComponent.
-  ## Starts with empty DeepReview data and waits for notifications from
-  ## the agent runtime to populate coverage, test results, and flow data.
-  result = AgentActivityDeepReviewComponent(
-    id: id,
-    sessionId: cstring"",
-    drSummary: ActivityDeepReviewSummary(
-      totalLinesCovered: 0,
-      totalLinesUncovered: 0,
-      coveragePercent: 0.0,
-      testsRun: 0,
-      testsPassed: 0,
-      testsFailed: 0,
-      functionsTraced: 0,
-      lastUpdatedMs: 0
-    ),
-    fileEntries: @[],
-    recentNotifications: @[],
-    testResults: @[],
-    expanded: false
-  )
+  ## Create the review's Agent Activity pillar pane.
+  ##
+  ## It has no state of its own since AA-1 deleted the DeepReview roll-up;
+  ## the factory survives so a layout persisted by an older build — the only
+  ## thing that hosts this content id, since no shipped layout declares it —
+  ## still constructs and renders an empty pane instead of raising out of
+  ## ``makeComponent``.
+  result = AgentActivityDeepReviewComponent(id: id)
   data.registerComponent(result, Content.AgentActivityDeepReview)
 
 data.ui = Components(

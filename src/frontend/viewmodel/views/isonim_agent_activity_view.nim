@@ -2,14 +2,14 @@
 ##
 ## IsoNim DOM-rendering view for the Agent Activity panel.
 ##
-## The panel hosts DeepReview's third pillar.
-## `codetracer-specs/DeepReview/DeepReview-GUI.md` §2.1: "The section is part
-## of the existing Agent Activity panel.  It is *not* a separate panel and does
-## not get its own layout slot."  So the DeepReview section
-## (`isonim_agent_activity_deepreview_view`) is rendered *inside* this panel's
-## container rather than as a component of its own, and it paints only while a
-## review is active — a normal debugging session's Agent Activity panel is
-## unchanged (the section's container carries `hidden`).
+## The panel is DeepReview's third pillar, and what it shows in a review is
+## **the agent session that produced it** —
+## `codetracer-specs/DeepReview/DeepReview-GUI.md` §2.1.  It used to render a
+## static DeepReview roll-up (a coverage summary, a test-results row, a
+## per-file coverage table and a notification feed) beneath the conversation;
+## AA-1 removed that outright, because it restated facts the VCS panel already
+## carries and filled the panel with a summary when what the reviewer came for
+## is the session itself ("There is no 'DeepReview section' in this panel").
 
 import std/tables
 
@@ -23,8 +23,6 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
-import ../viewmodels/agent_activity_deepreview_vm
-import isonim_agent_activity_deepreview_view
 
 const AgentActivityContainerClass* = "component-container agent-ha-container"
 const AgentActivityConversationClass* = "agent-com"
@@ -44,11 +42,6 @@ const AgentActivitySessionNoticeClass* = "agent-session-notice"
   ## session".  DeepReview-GUI.md §2.1: when the backend cannot resolve the
   ## referenced session, "the panel says so explicitly.  It must not silently
   ## render an empty session, which reads as 'the agent did nothing'."
-
-const AgentActivityDeepReviewHostClass* = "agent-ha-deepreview-host"
-  ## Wrapper the DeepReview section is rendered into.  It carries `hidden`
-  ## outside a review so the host contributes neither height nor the
-  ## container's flex gap to a normal debugging session's panel.
 
 type
   AgentActivityCallbacks* = object
@@ -292,24 +285,18 @@ proc renderStopButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
 
 proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     componentId: int; commandInputId: string;
-    callbacks: AgentActivityCallbacks;
-    deepReviewVm: AgentActivityDeepReviewVM;
-    deepReviewCallbacks: AgentActivityDeepReviewCallbacks): auto =
+    callbacks: AgentActivityCallbacks): auto =
   var conversation: typeof(r.createElement("div"))
   var input: typeof(r.createElement("textarea"))
   var buttons: typeof(r.createElement("div"))
-  var deepReviewHost: typeof(r.createElement("div"))
   let inputIdValue = inputId(componentId, commandInputId)
 
   let panel = ui(r):
     tdiv(class = AgentActivityContainerClass):
-      # RV-6, amended §2.1: **the session is primary, the roll-up is
-      # secondary.**  The conversation therefore comes first in the panel and
-      # the DeepReview roll-up sits beneath it — previously the order was the
-      # other way round, which put a static coverage summary above the thing
-      # the reviewer opened the review to read.
+      # §2.1: the session is what this panel shows in a review, so the
+      # conversation is the panel's whole body above the prompt.  Nothing sits
+      # between them any more — the roll-up that used to went with AA-1.
       tdiv(ref = conversation, class = AgentActivityConversationClass)
-      tdiv(ref = deepReviewHost, class = AgentActivityDeepReviewHostClass)
       tdiv(class = AgentActivityInteractionClass):
         textarea(ref = input,
                  `type` = "text",
@@ -325,23 +312,6 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         tdiv(ref = buttons, class = "agent-buttons-container")
 
   r.attachInputEvents(input, vm, callbacks)
-
-  # DeepReview's third pillar (DeepReview-GUI.md §2.1).  Rendered once, not
-  # inside a render effect: the section owns reactive effects of its own and
-  # rebuilding it on every review-state change would re-create them.  It hides
-  # itself (`sectionVisible`) when no review is active, so a normal debugging
-  # session sees an empty host div and nothing else.
-  if deepReviewVm != nil:
-    r.appendRenderedChild(
-      deepReviewHost,
-      renderAgentActivityDeepReviewPanel(r, deepReviewVm, deepReviewCallbacks))
-    createRenderEffect proc() =
-      r.setAttribute(
-        deepReviewHost, "class",
-        if deepReviewVm.sectionVisible.val:
-          AgentActivityDeepReviewHostClass
-        else:
-          AgentActivityDeepReviewHostClass & " hidden")
 
   createRenderEffect proc() =
     r.clearChildren(conversation)
@@ -383,38 +353,24 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
 proc renderAgentActivityPanel*(r: MockRenderer; vm: AgentActivityVM;
     componentId: int; commandInputId: string = "";
-    callbacks: AgentActivityCallbacks = AgentActivityCallbacks();
-    deepReviewVm: AgentActivityDeepReviewVM = nil;
-    deepReviewCallbacks: AgentActivityDeepReviewCallbacks =
-      AgentActivityDeepReviewCallbacks()): MockNode =
-  renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks,
-                               deepReviewVm, deepReviewCallbacks)
+    callbacks: AgentActivityCallbacks = AgentActivityCallbacks()): MockNode =
+  renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks)
 
 when defined(js):
   proc renderAgentActivityPanel*(r: WebRenderer; vm: AgentActivityVM;
       componentId: int; commandInputId: string = "";
-      callbacks: AgentActivityCallbacks = AgentActivityCallbacks();
-      deepReviewVm: AgentActivityDeepReviewVM = nil;
-      deepReviewCallbacks: AgentActivityDeepReviewCallbacks =
-        AgentActivityDeepReviewCallbacks()):
+      callbacks: AgentActivityCallbacks = AgentActivityCallbacks()):
       isonim_dom.Element =
-    renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks,
-                                 deepReviewVm, deepReviewCallbacks)
+    renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks)
 
   proc mountIsoNimAgentActivityPanel*(container: isonim_dom.Element;
                                       vm: AgentActivityVM;
                                       componentId: int;
                                       commandInputId: string = "";
                                       callbacks: AgentActivityCallbacks =
-                                        AgentActivityCallbacks();
-                                      deepReviewVm:
-                                        AgentActivityDeepReviewVM = nil;
-                                      deepReviewCallbacks:
-                                        AgentActivityDeepReviewCallbacks =
-                                          AgentActivityDeepReviewCallbacks()) =
+                                        AgentActivityCallbacks()) =
     let r = WebRenderer()
     let panel = renderAgentActivityPanel(r, vm, componentId,
-                                         commandInputId, callbacks,
-                                         deepReviewVm, deepReviewCallbacks)
+                                         commandInputId, callbacks)
     # External mount interop: the AgentActivity component owns this container.
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

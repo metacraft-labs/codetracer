@@ -237,9 +237,11 @@ when defined(js):
 
     test "test_review_layout_keeps_a_docked_agent_activity_deepreview_pane":
       ## `Content.AgentActivityDeepReview` is a different id from the retired
-      ## `Content.DeepReview` and is the review's coverage/test summary.  The
-      ## bundled layout does not host it as a pane of its own, but a saved one
-      ## may, and edit mode hides it.
+      ## `Content.DeepReview`, and it is the review's identity in the Agent
+      ## Activity pillar's layout.  AA-1 deleted the roll-up the pane used to
+      ## draw but kept the id, precisely so this stays true: the bundled layout
+      ## does not host it as a pane of its own, but a saved one may, and edit
+      ## mode hides it while a review must not.
       let layout = js{
         "root": js{
           "type": cstring"row",

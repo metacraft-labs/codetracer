@@ -56,6 +56,45 @@ for cfg in default_config.yaml default_layout.json; do
 	[[ -f "${CT_BUILD_ROOT}/config/${cfg}" ]] || die \
 		"missing '${CT_BUILD_ROOT}/config/${cfg}', which ct needs before it can map a window. Seed it with: mkdir -p '${CT_BUILD_ROOT}/config' && cp ${REPO_ROOT}/src/config/default_config.yaml ${REPO_ROOT}/src/config/default_layout.json '${CT_BUILD_ROOT}/config/'"
 done
+
+# --- the build must not be older than the sources it was built from ---------
+#
+# This script photographs whatever is already in the build tree; it never
+# builds. So a checkout whose sources have moved on since the last
+# `just build-once` produces images of an OLD CodeTracer, and nothing in the
+# picture says so. A screenshot of a stale build is worse than no screenshot,
+# because it is published next to prose describing the current one and it
+# looks authoritative.
+#
+# The two artefacts checked are the two the pictures are made of: the
+# stylesheet the window loads (`src/frontend/index.html` links
+# `frontend/styles/default_dark_theme_electron.css`) and the renderer bundle
+# that draws every panel. Each is compared against the source tree it is
+# generated from, using `find -newer` so the comparison is a filesystem
+# question rather than timestamp arithmetic.
+#
+# The check is deliberately conservative: it fails on an mtime that merely
+# *looks* newer — a `git checkout` that rewrites a file with identical bytes
+# is enough — because the remedy is a ~15-second incremental build and the
+# alternative is publishing a picture nobody can reproduce. Same discipline as
+# the `<build tree>/config/` check above: name the artefact, name the remedy.
+require_not_stale() {
+	local label="$1" artefact="$2" source_root="$3" pattern="$4"
+	[[ -f ${artefact} ]] || die \
+		"missing ${label} at '${artefact}'. Build it with 'just build-once'."
+	[[ -d ${source_root} ]] || return 0
+	local newer
+	newer="$(find "${source_root}" -name "${pattern}" -newer "${artefact}" -print -quit 2>/dev/null || true)"
+	[[ -z ${newer} ]] || die \
+		"stale build: ${label} ('${artefact}') is older than its source '${newer}'. The capture photographs the build tree as-is, so this would publish images of an out-of-date CodeTracer. Rebuild with: just build-once"
+}
+require_not_stale "the window's stylesheet" \
+	"${CT_BUILD_ROOT}/frontend/styles/default_dark_theme_electron.css" \
+	"${REPO_ROOT}/src/frontend/styles" '*.styl'
+require_not_stale "the renderer bundle" \
+	"${CT_BUILD_ROOT}/ui.js" \
+	"${REPO_ROOT}/src/frontend" '*.nim'
+
 require_cmd nargo "install the CodeTracer dev shell, which provides the Noir toolchain."
 require_cmd git "install git."
 require_cmd Xvfb "install xorg-server / xvfb; the capture needs a headless X display."

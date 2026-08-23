@@ -296,10 +296,14 @@ conversation that reads as "the agent did nothing":
 - the session could not be fetched (quoting the backend's own reason),
 - the session loaded but contains no messages.
 
-Below the conversation the panel keeps a roll-up of the dataset itself:
-coverage, a per-file table, and a **Tests** tile. That tile reads `n/a` — *not
-available for this dataset* — because a review dataset carries no test results
-at all. It is not a zero.
+The session is all the panel shows. It used to keep a roll-up of the dataset
+beneath the conversation — coverage, a per-file table, a **Tests** tile — and
+that is gone: the VCS panel already reported the same facts, and a static
+summary is not what you open a review to read. Per-file coverage is the badge on
+each Changed Files row; the changeset totals are the stats line in the panel
+header. The **Tests** tile read `n/a`, and nothing replaces it, because there is
+nothing to say: a review dataset carries no test results, and no surface reports
+a zero in their place — see [Not yet available](#not-yet-available).
 
 ## Full Files mode
 
@@ -500,12 +504,12 @@ do not read it as a bug or, worse, as a measurement.
   gets a call count and coverage, but no flow overlay of its own. Following
   callees would pull an arbitrary depth of untouched code into the review.
 - **A review carries no test results.** `DeepReviewData` has no test name,
-  status or duration field, which is why the Agent Activity panel's Tests tile
-  reads *not available for this dataset*. `ct test` ships (`ct test discover`
-  works from `ct`; `ct test run` needs the standalone runner binary, which `ct`
-  tells you when it cannot run it) but issues **no test certificates** — and
-  nothing in the review surface, or in the text `ct agent prompt` prints, claims
-  otherwise.
+  status or duration field, so no review surface reports any — and none reports
+  a zero either, which would read as "a suite ran and was green". `ct test`
+  ships (`ct test discover` works from `ct`; `ct test run` needs the standalone
+  runner binary, which `ct` tells you when it cannot run it) but issues **no
+  test certificates** — and nothing in the review surface, or in the text
+  `ct agent prompt` prints, claims otherwise.
 - **Draggable context-boundary edge lines are not implemented.** The `Expand N
   lines` buttons are the supported control.
 

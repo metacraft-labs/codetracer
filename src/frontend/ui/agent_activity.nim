@@ -11,19 +11,12 @@ from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
   setSessionKey
-# DeepReview's third pillar lives inside this panel (DeepReview-GUI.md §2.1:
-# "The section is part of the existing Agent Activity panel.  It is not a
-# separate panel and does not get its own layout slot"), so the mount passes
-# the section's VM and its click callback down to the IsoNim view.
-import agent_activity_deepreview
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_agent_activity_view import
     mountIsoNimAgentActivityPanel, AgentActivityCallbacks
-  from ../viewmodel/views/isonim_agent_activity_deepreview_view import
-    AgentActivityDeepReviewCallbacks
 
 const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
@@ -505,11 +498,7 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
           continue
 
         var lang = fromPath(diffPreview.path)
-        let theme =
-          if self.data.config.theme == cstring"default_white":
-            cstring"codetracerWhite"
-          else:
-            cstring"codetracerDark"
+        let theme = monacoThemeName(self.data.config.theme)
 
         self.diffEditors[diffEditorId] = monaco.editor.createDiffEditor(
           jq(fmt"#{diffEditorId}"),
@@ -658,15 +647,7 @@ when defined(js):
           agentActivityVMInstances[componentId],
           componentId,
           safeStr(component.commandInputId),
-          component.buildAgentActivityCallbacks(),
-          # DeepReview-GUI.md §2.1 — the review's coverage summary, per-file
-          # coverage table and activity feed render inside this panel.  The
-          # section hides itself until a review populates it, so a normal
-          # debugging session is unaffected.
-          ensureAgentActivityDeepReviewVM(),
-          AgentActivityDeepReviewCallbacks(
-            onSelectFile: proc(path: string) =
-              dispatchActivityFileSelection(path)))
+          component.buildAgentActivityCallbacks())
       except:
         cerror "tryMountIsoNimAgentActivityPanel: mount EXCEPTION: " &
           getCurrentExceptionMsg()

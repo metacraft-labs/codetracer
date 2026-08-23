@@ -24,19 +24,11 @@ import
   ui_imports
 
 import git_cli
-# DeepReview's third pillar.  The pane's VM lives in
-# `ui/agent_activity_deepreview.nim`; the dependency is one-way (that module
-# never imports this one) and the coverage-table -> VCS-panel direction of the
-# shared selection travels back through its `onActivityReviewFileSelected`
-# hook, installed by `startReviewNavigation` below.
-import agent_activity_deepreview
 import agent_activity
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/review_entry
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
-from ../viewmodel/store/types as vm_store_types import
-  AgentDeepReviewFileCoverage
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -749,34 +741,9 @@ proc handleVCSFileSelection(self: VCSComponent; index: int;
     discard selectReviewRow(vm, index)
     self.data.deepReviewSelectedFileIndex = index
     self.syncLegacyVCSIntoVM()
-    # DeepReview-GUI.md §2.1: the Changed Files list and the Agent Activity
-    # panel's per-file coverage table are "two views of one selection", so a
-    # click here moves the coverage table's highlight too.
-    discard syncActivitySelectionFromVCS(
-      vm, ensureAgentActivityDeepReviewVM())
   else:
     vm.setViewMode(if self.openFileMode: vmOpenFile else: vmUnifiedDiff)
   self.dispatchOpenAction(vm.openActionFor(index, path, target, status))
-
-proc handleActivityFileSelection(self: VCSComponent; path: string) =
-  ## The reviewer clicked a row of the Agent Activity panel's per-file
-  ## coverage table — the other direction of §2.1's "two views of one
-  ## selection".
-  ##
-  ## It resolves to the same gesture a click in the Changed Files list is
-  ## (§3: "clicking a file opens that file's review representation"), so it
-  ## goes through ``handleVCSFileSelection`` rather than only moving a
-  ## highlight.
-  if self.isNil or not self.isDeepReviewMode():
-    return
-  let vm = self.ensureVCSVM()
-  if vm.isNil:
-    return
-  let index = vm.reviewRowIndexForPath(path)
-  if index < 0:
-    return
-  let row = vm.openActionForRow(index)
-  self.handleVCSFileSelection(index, row.path, row.target, row.status)
 
 proc handleTraceContextSelection(self: VCSComponent; id: int) =
   ## The reviewer picked a trace context in this panel's header
@@ -842,9 +809,6 @@ proc startReviewNavigation*(self: VCSComponent) =
   let vm = self.ensureVCSVM()
   if vm.isNil:
     return
-  # The coverage table's clicks come back through this component.
-  agent_activity_deepreview.onActivityReviewFileSelected =
-    proc(path: string) = self.handleActivityFileSelection(path)
   let dataset = self.reviewDataset()
   # RV-6 — the agent session the dataset named, already resolved by `ct`
   # (`src/ct/review_session.nim`) and forwarded through `StartOptions`.
@@ -861,7 +825,6 @@ proc startReviewNavigation*(self: VCSComponent) =
   rememberReviewSessionForAgentActivity(session)
   discard enterReview(
     vm,
-    ensureAgentActivityDeepReviewVM(),
     dataset,
     proc(action: VCSOpenAction) = self.dispatchOpenAction(action),
     proc() =

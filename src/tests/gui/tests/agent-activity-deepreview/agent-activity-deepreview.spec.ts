@@ -3,25 +3,27 @@
  *
  * `codetracer-specs/DeepReview/DeepReview-GUI.md` §2.1:
  *
- *   "The Agent Activity panel is the third pillar, not an adjacent feature...
- *    In DeepReview mode the panel gains a DeepReview section showing:
- *    coverage summary, test results, per-file coverage, recent activity...
- *    The section is populated from the same review dataset that drives the
- *    VCS panel and the editor. It must not require a live agent session: a
- *    review launched from the CLI over an exported dataset must populate it
- *    too."
+ *   "The Agent Activity panel is the third pillar, not an adjacent
+ *    feature... The primary thing the panel shows in a review is **the agent
+ *    session that produced it**... There is no 'DeepReview section' in this
+ *    panel. The coverage summary, test results row, per-file coverage table
+ *    and notification feed that once formed one are removed outright."
+ *
+ * So what this suite asserts is that the pillar is *there* — present,
+ * focused, materialised when a saved layout dropped it — and that it carries
+ * no roll-up. Those are the two halves that can fail independently: a pillar
+ * that is absent, and a pillar that is back to summarising the dataset.
  *
  * These tests launch `ct review` over `sample-review.json` — no agent
- * process, no ACP session, no live notification stream — and assert that the
- * pane is nevertheless populated from the dataset.
+ * process, no ACP session, no live notification stream — so the panel has no
+ * session to show either, and showing nothing is the correct behaviour.
  *
  * Headless counterparts (per the headless-first policy in
  * `codetracer-specs/Testing/Testing-Guidelines.md`):
  *   - src/tests/gui/tests/agent-activity-deepreview/
- *       agent_activity_deepreview_vm_test.nim   (population + selection)
+ *       agent_activity_rollup_removal_test.nim  (AA-1's deletion contract)
  *   - src/tests/gui/tests/views/isonim_views_test.nim
- *       ("... review rendering (DR-R3)" and "... hosts the DeepReview
- *        section (DR-R3)")
+ *       ("IsoNim Agent Activity Panel — no DeepReview roll-up (AA-1)")
  *   - src/tests/gui/tests/layout/deepreview_layout_test.nim
  *       ("the Agent Activity panel becomes the visible tab of its stack")
  */
@@ -41,14 +43,15 @@ const fixturesExist = fs.existsSync(sampleReviewPath);
 //   src/main.rs    15 of 17 covered lines, has flow
 //   src/utils.rs    5 of  7 covered lines, has flow
 //   src/config.rs   0 of  0 covered lines, no flow
-// => 20 covered / 4 uncovered => 83.3%
+// Since AA-1 those numbers are read on the VCS panel's Changed Files rows,
+// which is the only surface that reports them.
 test.describe("DeepReview - the Agent Activity panel is the third pillar", () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-expressions
   test.skip(!fixturesExist, "DeepReview fixtures not found");
 
   test.use({ launchMode: "deepreview", deepreviewJsonPath: sampleReviewPath });
 
-  test("e2e_review_populates_the_agent_activity_deepreview_section", async ({
+  test("e2e_review_focuses_the_agent_activity_pillar_and_shows_no_rollup", async ({
     ctPage,
   }) => {
     const dr = new DeepReviewPage(ctPage);
@@ -75,74 +78,73 @@ test.describe("DeepReview - the Agent Activity panel is the third pillar", () =>
     // the assertions above check.
     expect(allTitles).not.toContain("CALLTRACE");
 
-    // The section renders inside that panel rather than as a panel of its own,
-    // and a review opens it rather than leaving it folded away.
-    await expect(dr.reviewActivitySection()).toBeVisible();
-    await expect(dr.reviewActivitySection()).not.toHaveClass(
-      /activity-dr-collapsed/,
-    );
+    // The panel is there, and it carries no roll-up: not the section, not
+    // the cards, not the per-file table, not the feed — and not the host div
+    // the panel used to reserve for them, which was emitted unconditionally
+    // and is therefore what a `.activity-dr-*` check alone would miss.
+    await expect(dr.agentActivityPanel()).toBeVisible();
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
 
-    // Coverage summary for the changeset.
-    const coverage = await dr.reviewActivityCoverageCard().textContent();
-    expect(coverage).toContain("83.3%");
-    expect(coverage).toContain("20 covered");
-    expect(coverage).toContain("4 uncovered");
-
-    // One coverage row per changed file, in the changeset's order.
-    const rows = dr.reviewActivityFileRows();
-    await expect(rows).toHaveCount(3);
-    await expect(rows.nth(0)).toContainText("main.rs");
-    await expect(rows.nth(0)).toContainText("15/17");
-    await expect(rows.nth(1)).toContainText("utils.rs");
-    await expect(rows.nth(1)).toContainText("5/7");
-    await expect(rows.nth(2)).toContainText("config.rs");
-
-    // Review entry left the coverage table on the same file as the VCS
-    // panel's Changed Files list (§2.1, "two views of one selection").
-    await expect(dr.reviewActivitySelectedFileRow()).toHaveCount(1);
-    await expect(dr.reviewActivitySelectedFileRow()).toContainText("main.rs");
+    // The panel claims nothing about a run it never saw.  AA-1 deleted the
+    // Tests card that used to say "not available for this dataset"; the rule
+    // that card existed for is what outlives it and is asserted here — absent
+    // data is never rendered as a zero that reads as success.
+    const panelText = (await dr.agentActivityPanel().textContent()) ?? "";
+    expect(panelText).not.toContain("all passing");
+    expect(panelText).not.toContain("0/0");
+    expect(panelText).not.toMatch(/\b0 passed\b/);
+    // …and no aggregate either: the changeset's coverage percentage was the
+    // roll-up's summary card, and it is per-file on the VCS rows now.
+    expect(panelText).not.toContain("83.3%");
   });
 
-  test("e2e_review_test_results_row_says_the_dataset_carries_none", async ({
+  test("e2e_the_review_reports_per_file_coverage_on_the_changed_files_rows", async ({
     ctPage,
   }) => {
-    // `DeepReviewData` has no test-result fields at all, so a CLI-launched
-    // review has nothing to report here. "0/0 - all passing" would assert
-    // that a suite ran and was green (DR-R3, "A data gap to record, not to
-    // paper over").
+    // Where the deleted per-file coverage table's capability went.  It was
+    // never the only home of the numbers — `review_entry.changedFileRows`
+    // already put the same ratio on the VCS row (VCS-Panel.md, "Changed
+    // Files") — which is what made the table safe to delete, and this is the
+    // test that says so.
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(1000);
 
-    const tests = await dr.reviewActivityTestsCard().textContent();
-    expect(tests).toContain("not available for this dataset");
-    expect(tests).not.toContain("all passing");
-    expect(tests).not.toContain("0/0");
+    const files = await dr.fileItems();
+    expect(files.length).toBe(3);
+    expect(await files[0].name()).toContain("main.rs");
+    expect(await files[0].coverageBadge()).toBe("15/17");
+    expect(await files[1].name()).toContain("utils.rs");
+    expect(await files[1].coverageBadge()).toBe("5/7");
+    // A file the dataset measured nothing for gets no badge at all: "0/0"
+    // would read as "measured, and nothing ran".
+    expect(await files[2].name()).toContain("config.rs");
+    expect(await files[2].coverageBadge()).toBe("");
   });
 
-  test("e2e_review_coverage_table_and_vcs_panel_share_one_selection", async ({
+  test("e2e_selecting_a_changed_file_opens_it_and_moves_only_one_selection", async ({
     ctPage,
   }) => {
-    // §2.1: "Selecting a file in either the VCS panel or the per-file
-    // coverage table should agree with the other; they are two views of one
-    // selection."
+    // What is left of §2.1's "two views of one selection" now that there is
+    // one view.  The agreement had exactly two participants — the Changed
+    // Files list and the coverage table — so deleting the table leaves the
+    // list's own selection, which must still work and must still open the
+    // file (§3, "clicking a file opens that file's review representation").
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(1000);
 
-    // VCS panel -> coverage table.
     const files = await dr.fileItems();
     expect(files.length).toBe(3);
     await files[1].click();
     await wait(500);
-    await expect(dr.reviewActivitySelectedFileRow()).toContainText("utils.rs");
+    expect(await dr.activeTabTitles()).toContain("Diff: utils.rs");
 
-    // Coverage table -> VCS panel: clicking a coverage row is the same
-    // navigation gesture, so it also opens the file (§3).
-    await dr.reviewActivityFileRows().nth(0).click();
+    await files[0].click();
     await wait(500);
-    await expect(dr.reviewActivitySelectedFileRow()).toContainText("main.rs");
     expect(await dr.activeTabTitles()).toContain("Diff: main.rs");
+    // …and no second view of the selection reappeared behind our back.
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
   });
 });
 
@@ -200,11 +202,11 @@ test.describe("DeepReview - the third pillar survives a persisted edit layout", 
     // Materialised once, not once per launch step.
     expect(allTitles.filter((t) => t === "AGENT ACTIVITY").length).toBe(1);
 
-    // ...and it is populated from the dataset, which is what makes it a
-    // pillar rather than an empty tab that happens to carry the right title.
-    await expect(dr.reviewActivitySection()).toBeVisible();
-    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
-    await expect(dr.reviewActivityFileRows()).toHaveCount(3);
+    // ...and it is a real panel rather than a title with nothing behind it:
+    // the panel's own container is present, with the prompt a session would
+    // be typed into.  It carries no roll-up (AA-1).
+    await expect(dr.agentActivityPanel()).toBeVisible();
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
   });
 
   test("e2e_the_materialised_pillar_does_not_hide_the_vcs_panel", async ({
@@ -281,7 +283,7 @@ test.describe("DeepReview - a buried Agent Activity panel is brought to the fron
     expect(allTitles).toContain("FILES");
     expect(allTitles.filter((t) => t === "AGENT ACTIVITY").length).toBe(1);
 
-    await expect(dr.reviewActivitySection()).toBeVisible();
-    await expect(dr.reviewActivityCoverageCard()).toContainText("83.3%");
+    await expect(dr.agentActivityPanel()).toBeVisible();
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
   });
 });

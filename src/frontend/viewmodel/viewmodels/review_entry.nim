@@ -8,7 +8,7 @@
 ##      of its stack,
 ##   2. *the first modified file opens in the editor*,
 ##   3. flow data overlays onto its lines,
-##   4. the Agent Activity DeepReview section populates,
+##   4. the Agent Activity panel loads the session that produced the review,
 ##   5. every other panel keeps showing trace data.
 ##
 ## This module owns steps 1, 2 and 4.  It is one named routine — `enterReview`
@@ -29,25 +29,25 @@
 ##
 ## None of them configures review state of its own any more.
 ##
-## Step 4 — "The Agent Activity panel's DeepReview section populates with
-## coverage and test results" — lives here for exactly the reason §2.1 gives:
-## the section "must not require a live agent session: a review launched from
-## the CLI over an exported dataset must populate it too".  Sharing one routine
-## with the file-opening step is what makes the no-agent path and the agentic
-## handoff populate the pane identically rather than by two hand-kept-in-sync
-## code paths.
+## Step 4 — the agent session the dataset names, loaded into the Agent
+## Activity panel — lives here so the no-agent path and the agentic handoff
+## reach the same panel state rather than by two hand-kept-in-sync code paths.
+## AA-1 deleted what used to sit alongside it: a static DeepReview roll-up of
+## coverage, test results, a per-file table and a notification feed.  Every
+## fact it restated the VCS panel already carries — the changeset, the
+## per-file coverage badge and the review's stats line — so nothing moved,
+## something stopped being said twice (DeepReview-GUI.md §2.1: "There is no
+## 'DeepReview section' in this panel").
 ##
 ## Everything here is pure with respect to the DOM: the caller supplies the
 ## opener and the already-projected changeset rows, so the step is exercisable
-## headlessly (see `src/tests/gui/tests/deepreview/deepreview_vm_test.nim` and
-## `src/tests/gui/tests/agent-activity-deepreview/
-## agent_activity_deepreview_vm_test.nim`) and the imperative host
-## (`src/frontend/ui/vcs.nim`) supplies the GoldenLayout side effects.
+## headlessly (see `src/tests/gui/tests/deepreview/deepreview_vm_test.nim`) and
+## the imperative host (`src/frontend/ui/vcs.nim`) supplies the GoldenLayout
+## side effects.
 
 import isonim/core/signals
 
 import ../store/types
-import agent_activity_deepreview_vm
 import agent_activity_vm
 import review_session
 import vcs_vm
@@ -189,20 +189,6 @@ proc changedFileRows*(dataset: ReviewDataset): seq[VCSFileRow] =
       deletions: file.deletions,
       coverageText: coverageText(file.coveredLines, file.totalLines),
       selected: false))
-
-proc coverageRows*(dataset: ReviewDataset): seq[AgentDeepReviewFileCoverage] =
-  ## The dataset as the Agent Activity panel's per-file coverage rows —
-  ## DeepReview-GUI.md §2.1, "Per-file coverage — one row per file in the
-  ## review, aligned with the VCS panel's Changed Files rows".  The alignment
-  ## is literal: both projections walk `dataset.files` in order, so row *i* of
-  ## each describes the same file.
-  result = @[]
-  for file in dataset.files:
-    result.add(AgentDeepReviewFileCoverage(
-      path: file.path,
-      coveredLines: file.coveredLines,
-      totalLines: file.totalLines,
-      hasFlow: file.hasFlow))
 
 proc abbreviatedCommit*(commitSha: string): string =
   ## The display form of a review's commit: the first twelve hex characters
@@ -427,69 +413,8 @@ proc openFirstReviewFile*(vm: VCSVM; open: ReviewOpenProc):
 # §7 step 4 — the Agent Activity panel's DeepReview section (DR-R3)
 # ---------------------------------------------------------------------------
 
-proc reviewCoverageSummary*(files: openArray[AgentDeepReviewFileCoverage];
-                            functionsTraced: int):
-    AgentDeepReviewCoverageSummary {.noSideEffect.} =
-  ## The changeset's aggregate coverage — DeepReview-GUI.md §2.1, "Coverage
-  ## summary — aggregate executed / total lines and percentage for the
-  ## changeset".
-  ##
-  ## Every value is derived from the rows, which are themselves derived from
-  ## `DeepReviewFileData.coverage`; nothing is invented.  A changeset whose
-  ## files carry no coverage at all yields 0% over 0 lines rather than a
-  ## division by zero.
-  var covered = 0
-  var total = 0
-  for file in files:
-    covered += file.coveredLines
-    total += file.totalLines
-  AgentDeepReviewCoverageSummary(
-    totalLinesCovered: covered,
-    totalLinesUncovered: total - covered,
-    coveragePercent:
-      if total > 0: (covered.float / total.float) * 100.0 else: 0.0,
-    functionsTraced: functionsTraced)
-
-proc populateReviewActivity*(activity: AgentActivityDeepReviewVM;
-                             files: openArray[AgentDeepReviewFileCoverage];
-                             functionsTraced: int;
-                             sessionPresent = false) =
-  ## §7 step 4: "The Agent Activity panel's DeepReview section populates with
-  ## coverage and test results."
-  ##
-  ## `files` is the review's changeset already projected into coverage rows —
-  ## the host walks `DeepReviewData`, which is a JS object and cannot be read
-  ## from a headless build, so the projection stays on the host side and the
-  ## decision stays here.
-  ##
-  ## Test results are *not* set: `DeepReviewData` carries none (no test name,
-  ## no pass/fail, no duration), so a dataset-launched review has nothing to
-  ## report and the row is marked unavailable rather than zeroed — see
-  ## `setTestResultsUnavailable`.  A live agent session that already reported
-  ## a run keeps it: entering a review must not erase a fact somebody
-  ## observed.
-  if activity.isNil:
-    return
-  activity.setFileCoverage(files)
-  activity.setCoverageSummary(reviewCoverageSummary(files, functionsTraced))
-  if not activity.testResultsAvailable.val:
-    activity.setTestResultsUnavailable()
-  activity.setReviewActive(true)
-  # The section is collapsible, and collapsed by default so it stays out of
-  # the way of an agent conversation.
-  #
-  # RV-6 reconciles the two halves of the panel per the amended §2.1: **the
-  # session is primary, the roll-up is secondary.**  So a review that carries
-  # a session leaves the roll-up folded — the conversation is what the
-  # reviewer came for, and the coverage numbers are a summary they can open —
-  # while a review with no session opens it, because then it *is* the point
-  # of the panel ("what was run, what did it cover, and what passed").
-  # Either way the reviewer can fold or unfold it; nothing overrides them
-  # afterwards, which is what makes `setExpanded` idempotent.
-  activity.setExpanded(not sessionPresent)
-
 # ---------------------------------------------------------------------------
-# §2.1 — "two views of one selection"
+# The VCS panel's changed-files selection
 # ---------------------------------------------------------------------------
 
 proc selectedReviewPath*(vm: VCSVM): string =
@@ -520,34 +445,6 @@ proc selectReviewRowByPath*(vm: VCSVM; path: string): bool {.discardable.} =
   if index < 0:
     return false
   vm.selectReviewRow(index)
-
-proc syncActivitySelectionFromVCS*(vcs: VCSVM;
-                                   activity: AgentActivityDeepReviewVM):
-    bool {.discardable.} =
-  ## VCS panel -> per-file coverage table.  DeepReview-GUI.md §2.1:
-  ## "Selecting a file in either the VCS panel or the per-file coverage table
-  ## should agree with the other; they are two views of one selection."
-  if vcs.isNil or activity.isNil:
-    return false
-  let path = vcs.selectedReviewPath()
-  if path.len == 0:
-    return false
-  activity.setSelectedFilePath(path)
-  true
-
-proc selectActivityReviewFile*(vcs: VCSVM;
-                               activity: AgentActivityDeepReviewVM;
-                               path: string): bool {.discardable.} =
-  ## Per-file coverage table -> VCS panel: the other direction of the same
-  ## agreement.  Both views move together or neither does — a path the review
-  ## does not contain is rejected rather than half-applied, which is what
-  ## keeps "two views of one selection" true rather than approximately true.
-  if activity.isNil or path.len == 0:
-    return false
-  if not vcs.isNil and not vcs.selectReviewRowByPath(path):
-    return false
-  activity.setSelectedFilePath(path)
-  true
 
 # ---------------------------------------------------------------------------
 # The whole entry step
@@ -590,8 +487,9 @@ proc applyReviewDataset*(vcs: VCSVM; dataset: ReviewDataset;
   vcs.setDeepReviewMode(true)
   # DeepReview-GUI.md §2: the VCS panel header owns the review's session title
   # *and* its stats.  The stats summarise only what the dataset carries — file
-  # count and total +/-; coverage and test results belong to the Agent
-  # Activity panel (§2.1).
+  # count and total +/-.  Per-file coverage rides on each Changed Files row
+  # instead (`VCSFileRow.coverageText`), and test results are reported nowhere,
+  # because a review dataset has none — see `reviewStatsText`.
   vcs.setHeader(dataset.title, statsText = reviewStatsText(rows),
                 reviewCommit = dataset.commit)
   vcs.setTraceContexts(dataset.traceContexts)
@@ -617,7 +515,6 @@ proc applyReviewDataset*(vcs: VCSVM; dataset: ReviewDataset;
   vcs.setHunkState(@[], false, false)
 
 proc enterReview*(vcs: VCSVM;
-                  activity: AgentActivityDeepReviewVM;
                   dataset: ReviewDataset;
                   open: ReviewOpenProc;
                   focus: ReviewFocusProc = nil;
@@ -634,14 +531,13 @@ proc enterReview*(vcs: VCSVM;
   ##
   ##   1. the VCS panel populates with the changeset, the session title, the
   ##      stats line and the trace-context selector (steps 1, and DR-R2);
-  ##   4. the Agent Activity panel's DeepReview section populates with the
-  ##      review's coverage (step 4) — §2.1 is emphatic that this "must not
-  ##      require a live agent session", which is why it happens here rather
-  ##      than on the agentic path only;
+  ##   4. the Agent Activity panel loads the session the dataset names
+  ##      (step 4) — §2.1 is emphatic that a review "must not require a live
+  ##      agent session", so an absent reference is an ordinary no-op rather
+  ##      than an error, and it happens here rather than on the agentic path
+  ##      only;
   ##   2. the three panels are focused and the first modified file opens
   ##      (step 2) — **once**;
-  ##      and the changed-files list and the coverage table end up naming the
-  ##      same file (§2.1, "two views of one selection").
   ##
   ## Steps 3 and 5 belong to the replay data behind the review and are not
   ## this routine's to perform.
@@ -652,27 +548,23 @@ proc enterReview*(vcs: VCSVM;
   ## the data but does not open a second tab, does not drag the reviewer back
   ## to the first file, and does not re-focus over a tab they switched to.
   ##
-  ## `activity` may be nil — a host whose layout has no Agent Activity panel
-  ## still gets a navigable review.  An empty changeset does not count as
+  ## `conversation` may be nil — a host whose layout has no Agent Activity
+  ## panel still gets a navigable review.  An empty changeset does not count as
   ## entering: a dataset that arrives later still opens its first file.
   if vcs.isNil:
     return VCSOpenAction(kind: voaNone, index: -1)
   let selected = vcs.applyReviewDataset(dataset, wantedTraceContextId)
-  # RV-6, §2.1 step 4a: the agent session that produced the review, loaded
-  # into the same panel.  It happens *before* the roll-up so the roll-up can
-  # see whether a session is present and demote itself accordingly, and it
-  # happens here — in the one entry routine — so a CLI-launched review and an
-  # agentic handoff show the session identically.
+  # RV-6, §2.1 step 4: the agent session that produced the review, loaded into
+  # the Agent Activity panel.  It happens here — in the one entry routine — so
+  # a CLI-launched review and an agentic handoff show the session identically.
   #
   # An absent session is a no-op, which is what keeps a dataset with no
-  # reference reviewing exactly as it did before RV-6.
+  # reference reviewing exactly as it did before RV-6.  Since AA-1 this is the
+  # whole of what a review puts into that panel: the roll-up that used to be
+  # populated alongside it is gone.
   applyReviewSession(conversation, session)
-  populateReviewActivity(activity, dataset.coverageRows(),
-                         dataset.functionsTraced,
-                         sessionPresent = session.hasSession())
   if not vcs.reviewEntered.val and selected >= 0:
     vcs.reviewEntered.val = true
     if focus != nil:
       focus()
     result = vcs.openReviewFile(selected, open)
-  discard syncActivitySelectionFromVCS(vcs, activity)

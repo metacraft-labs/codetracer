@@ -374,11 +374,16 @@ proc reviewStatsText*(files: openArray[VCSFileRow]): string {.noSideEffect.} =
   ##
   ## Only what a review dataset actually carries is summarised: the number of
   ## changed files and the changeset's total added/removed line counts, both
-  ## of which come from ``DeepReviewData.files[].diff``.  Coverage and test
-  ## results deliberately do NOT appear here: they belong to the Agent
-  ## Activity panel (§2.1, DR-R3), and ``DeepReviewData`` carries no
-  ## test-results field at all, so a "tests 0/0" stat would be invented
-  ## rather than reported.
+  ## of which come from ``DeepReviewData.files[].diff``.
+  ##
+  ## Coverage and test results deliberately do NOT appear here.  Test results
+  ## because ``DeepReviewData`` carries no test-results field at all, so a
+  ## "tests 0/0" stat would be invented rather than reported.  Coverage
+  ## because it is per-file and already rendered per file, as the
+  ## ``coverageText`` badge on each Changed Files row; AA-1 deleted the Agent
+  ## Activity roll-up that used to show the changeset aggregate, and nothing
+  ## has needed it since.  ``ReviewDataset`` still carries the numbers if a
+  ## later milestone decides the header is the right home for them.
   if files.len == 0:
     return ""
   var additions = 0

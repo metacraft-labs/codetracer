@@ -22,8 +22,8 @@
 ## ``codetracer-specs/GUI/Layout-And-Navigation/Layout-System.md``,
 ## "DeepReview and the Layout" — "Focus, not relocation": the stack hosting
 ## each review panel is retargeted at it so the changed-file list and the
-## review's coverage/test summary are the visible tabs rather than being
-## hidden behind siblings.  No panel is added, moved or removed.
+## agent session are the visible tabs rather than being hidden behind
+## siblings.  No panel is added, moved or removed.
 ##
 ## All helpers operate on parsed ``JsonNode`` trees, so the rules are
 ## testable headlessly — no Electron, no GoldenLayout, no DOM.  The bridge
@@ -71,12 +71,13 @@ const
   TerminalOutputContentId* = 24
   VcsContentId* = 41
 
-  ## ``Content.AgentActivityDeepReview`` — the review's coverage/test summary.
-  ## DeepReview-GUI.md §2.1 renders it INSIDE the Agent Activity panel ("It is
-  ## not a separate panel and does not get its own layout slot"), but a layout
-  ## persisted by an older build may host it as a pane of its own, so it is a
-  ## different id from ``AgentActivityContentId`` and its presence does not
-  ## make the third pillar present.
+  ## ``Content.AgentActivityDeepReview`` — the review's identity in the Agent
+  ## Activity pillar's layout.  DeepReview-GUI.md §2.1 gives the review no
+  ## layout slot of its own ("It is not a separate panel and does not get its
+  ## own layout slot"), but a layout persisted by an older build may host it
+  ## as a pane, so it is a different id from ``AgentActivityContentId`` and
+  ## its presence does not make the third pillar present.  AA-1 deleted the
+  ## roll-up that pane drew; the id itself survives.
   AgentActivityDeepReviewContentId* = 39
 
 proc isComponentNode(node: JsonNode): bool {.inline.} =
@@ -148,13 +149,13 @@ proc focusReviewActivityPane*(layout: JsonNode): bool {.discardable.} =
   ## `codetracer-specs/GUI/Layout-And-Navigation/Layout-System.md`, "DeepReview
   ## and the Layout", obligation 2: "the three review panels stay wherever the
   ## user put them, but the stack hosting each is retargeted at it so the
-  ## changed-file list, the diff tab and the review's coverage/test summary are
-  ## the visible tabs rather than being hidden behind siblings.  No panel is
-  ## moved between stacks and no stack is created for one."
+  ## changed-file list, the diff tab and the agent session are the visible tabs
+  ## rather than being hidden behind siblings.  No panel is moved between
+  ## stacks and no stack is created for one."
   ##
-  ## This is the coverage/test summary half.  In the bundled default layout the
-  ## Agent Activity panel is the second tab of the CALLTRACE stack, so a review
-  ## came up with its coverage summary hidden behind the call trace.
+  ## This is the Agent Activity half.  In the bundled default layout that panel
+  ## is the second tab of the CALLTRACE stack, so a review came up with the
+  ## session that produced it hidden behind the call trace.
   ##
   ## Only the *focus* is changed: no panel is added, moved or removed, and a
   ## layout with no Agent Activity panel is left alone.  Putting an absent

@@ -130,34 +130,36 @@ test.describe("RV-6 - a resolvable session reference renders the conversation", 
     await expect(dr.vcsReviewStats()).toContainText("3 files");
   });
 
-  test("e2e_review_session_is_primary_and_the_roll_up_is_secondary", async ({
+  test("e2e_review_session_is_the_whole_of_what_the_panel_shows", async ({
     ctPage,
   }) => {
-    // The amended §2.1's ordering, asserted on the rendered DOM: the
-    // conversation precedes the coverage roll-up inside the panel, and the
-    // roll-up is folded rather than occupying the panel above the session.
+    // RV-6 made the session primary and folded the coverage roll-up beneath
+    // it; AA-1 removed the roll-up, so §2.1 is now literal — "the primary
+    // thing the panel shows in a review is the agent session that produced
+    // it", with nothing else in the panel to be primary *over*.
+    //
+    // Asserted on the rendered DOM rather than on the ViewModel, because the
+    // ordering this replaces was a DOM fact and its successor is too: the
+    // conversation is the panel's whole body above the prompt.
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(1500);
 
-    const order = await ctPage.evaluate(() => {
+    const layout = await ctPage.evaluate(() => {
       const panel = document.querySelector(".agent-ha-container");
       if (!panel) return null;
       const kids = Array.from(panel.children).map((c) => c.className);
       return {
         conversation: kids.findIndex((c) => c.includes("agent-com")),
-        rollUp: kids.findIndex((c) => c.includes("agent-ha-deepreview-host")),
+        interaction: kids.findIndex((c) => c.includes("agent-interaction")),
+        rollUpHosts: kids.filter((c) => c.includes("deepreview")).length,
       };
     });
-    expect(order).not.toBeNull();
-    expect(order!.conversation).toBeGreaterThanOrEqual(0);
-    expect(order!.rollUp).toBeGreaterThan(order!.conversation);
-
-    // Secondary, not removed: it is still there and still carries the
-    // review's coverage — the reviewer can unfold it.
-    const section = dr.reviewActivitySection();
-    await expect(section).toHaveClass(/activity-dr-collapsed/);
-    await expect(section).toContainText("83.3%");
+    expect(layout).not.toBeNull();
+    expect(layout!.conversation).toBe(0);
+    expect(layout!.interaction).toBeGreaterThan(layout!.conversation);
+    expect(layout!.rollUpHosts).toBe(0);
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
   });
 
   test("e2e_review_dataset_references_the_session_and_does_not_embed_it", async () => {
@@ -236,12 +238,15 @@ test.describe("RV-6 - a dataset with no session reference reviews normally", () 
       ctPage.locator(".agent-ha-container .msg-content"),
     ).toHaveCount(0);
 
-    // …and, with no session to be secondary to, the roll-up is what the
-    // panel has to say about the review, so it stays open. This is the
-    // RV-1..RV-5 behaviour, restated here so RV-6 cannot weaken it unnoticed.
-    const section = dr.reviewActivitySection();
-    await expect(section).toBeVisible();
-    await expect(section).not.toHaveClass(/activity-dr-collapsed/);
-    await expect(section).toContainText("83.3%");
+    // …and with no session there is nothing else for the panel to fall back
+    // on: RV-1..RV-5 left a coverage roll-up open here, and AA-1 removed it.
+    // An empty panel is the honest rendering of "this review names no
+    // session"; a summary of the dataset would be the panel answering a
+    // question nobody asked.
+    await expect(dr.agentActivityPanel()).toBeVisible();
+    await expect(dr.reviewActivityRollUpArtefacts()).toHaveCount(0);
+    const panelText =
+      (await dr.agentActivityPanel().textContent()) ?? "";
+    expect(panelText).not.toContain("83.3%");
   });
 });
