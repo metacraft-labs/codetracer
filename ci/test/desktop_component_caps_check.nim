@@ -81,11 +81,20 @@ proc binName(buf: CapBuffer): string =
   for i in 0 ..< n:
     result[i] = name[i]
 
-proc matchKind(buf: CapBuffer, cmd, ext: string): MatchKind =
+proc matchKind(buf: CapBuffer, cmd, ext: string,
+               noextFallback = false): MatchKind =
   ## Thin wrapper keeping the `cstring` views alive across the call.
+  ##
+  ## `noextFallback` is pass 2 of routing rule NTR-R1: the launcher
+  ## decides it from a level-global pre-pass (`classifySuffix`), so a
+  ## caller that wants the R1a/R1c behaviour has to say so explicitly.
   let c = cmd
   let e = ext
-  matches(buf, c.cstring, c.len, e.cstring, e.len)
+  matches(buf, c.cstring, c.len, e.cstring, e.len, noextFallback)
+
+proc suffixClass(buf: CapBuffer, ext: string): SuffixClass =
+  let e = ext
+  classifySuffix(buf, e.cstring, e.len, result)
 
 when isMainModule:
   let args = commandLineParams()
@@ -126,7 +135,7 @@ when isMainModule:
       let keyword = tokens[0]
       # Metadata keywords are not routable commands.
       if keyword in ["name", "bin", "description", "version", "help-delegate",
-                     "project", "licensed", "requires"]:
+                     "project", "licensed", "requires", "known-extensions"]:
         continue
       inc commandLines
       if tokens.len == 1:
@@ -134,8 +143,28 @@ when isMainModule:
           "`" & keyword & "` (no extensions) routes as an unqualified match")
       else:
         for ext in tokens[1 .. ^1]:
-          expect(matchKind(buf, keyword, ext) == mkExtension,
-            "`" & keyword & " " & ext & "` routes as an extension match")
+          if ext == "noext":
+            # NTR-R1's reserved routing token, not an extension. Assert
+            # its REAL semantics rather than the byte equality a literal
+            # `matches(cmd, "noext")` would satisfy by accident:
+            #   R1a  no suffix at all + the fallback -> mkExtension
+            #   R1c  an unknown suffix + the fallback -> mkExtension
+            #   without the fallback both stay mkNone.
+            expect(matchKind(buf, keyword, "", noextFallback = true) ==
+                     mkExtension,
+              "`" & keyword & " noext` routes an argument with NO suffix " &
+              "(rule NTR-R1 case R1a)")
+            expect(matchKind(buf, keyword, ".unheard-of-suffix",
+                             noextFallback = true) == mkExtension,
+              "`" & keyword & " noext` routes an argument whose suffix is " &
+              "declared by nobody and known by nobody (rule NTR-R1 case R1c)")
+            expect(matchKind(buf, keyword, "", noextFallback = false) ==
+                     mkNone,
+              "`" & keyword & " noext` does NOT route when the level scan " &
+              "did not license the fallback — the token is inert on its own")
+          else:
+            expect(matchKind(buf, keyword, ext) == mkExtension,
+              "`" & keyword & " " & ext & "` routes as an extension match")
 
     expect(commandLines > 0,
       "capability file declares at least one routable command")
@@ -144,6 +173,39 @@ when isMainModule:
     # `.this-extension-is-not-declared` cannot appear in any real declaration.
     expect(matchKind(buf, "record", ".this-extension-is-not-declared") == mkNone,
       "an undeclared extension does not match `record`")
+
+    # --- NTR-R1: `known-extensions` is a classifier, never a router --------
+    let knownLine = block:
+      var found: seq[string] = @[]
+      for rawLine in readFile(capsPath).splitLines():
+        let tokens = rawLine.strip().splitWhitespace()
+        if tokens.len >= 2 and tokens[0] == "known-extensions":
+          found = tokens[1 .. ^1]
+      found
+    expect(knownLine.len > 0,
+      "capability file declares a non-empty `known-extensions` line " &
+      "(rule NTR-R1 case R1d)")
+    for ext in knownLine:
+      let cls = suffixClass(buf, ext)
+      expect(cls.known and not cls.declared,
+        "`" & ext & "` classifies as KNOWN-but-not-declared, so the level " &
+        "scan withholds the `noext` fallback and it keeps reaching the " &
+        "registry-suggestion path (rule NTR-R1 case R1d)")
+      expect(matchKind(buf, "record", ext, noextFallback = false) == mkNone,
+        "`record " & ext & "` does not route (case R1d) — this is the " &
+        "property that rules out a bare `record` line")
+    expect(matchKind(buf, "known-extensions", knownLine[0]) == mkNone,
+      "`known-extensions` is not itself a routable command: " &
+      "`ct known-extensions " & knownLine[0] & "` matches nothing")
+
+    # A declared extension classifies the other way round.
+    let declaredCls = suffixClass(buf, ".py")
+    expect(declaredCls.declared and not declaredCls.known,
+      "`.py` classifies as DECLARED-but-not-known (rule NTR-R1 case R1b)")
+    let unknownCls = suffixClass(buf, ".unheard-of-suffix")
+    expect(not unknownCls.declared and not unknownCls.known,
+      "an unheard-of suffix classifies as neither — which is exactly the " &
+      "licence rule NTR-R1 case R1c needs")
 
     echo "PASS: ", checks, " capability-parser assertions"
     quit 0

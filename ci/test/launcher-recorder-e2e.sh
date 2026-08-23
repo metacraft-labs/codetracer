@@ -885,10 +885,35 @@ assert_declared_extension() {
 is_well_formed_extension() { [[ $1 =~ ^\.[A-Za-z0-9_]+$ ]]; }
 
 # True when the shipped capability file declares the extension for NO command.
+#
+# Scoped to the per-command extension LISTS, not to the whole file.  A
+# whole-file grep was correct until NTR-1 added the `known-extensions` line
+# (codetracer-specs/Planned-Features/Native-Target-Recognition.md §4 rule
+# R1d), which names `.rs` precisely BECAUSE no component can dispatch it:
+# the line exists to keep `ct record foo.rs` on the registry-suggestion
+# path.  A whole-file grep would match it and report the negative scenario
+# as no longer negative, even though the launcher's behaviour for `.rs` is
+# byte-for-byte what it was before.  Nothing is weakened: the scenario still
+# asserts a non-zero exit and the `no component handles` diagnostic, and the
+# extension being tested is never special-cased -- only the metadata keywords
+# are, and by the same list the rest of the tree uses.
 extension_undeclared() {
-	local esc="${1//./\\.}"
-	! grep -qE "(^|[[:space:]])$esc([[:space:]]|\$)" \
-		"$ROOT_DIR/resources/codetracer-desktop-capabilities"
+	local ext="$1"
+	! awk -v ext="$ext" '
+		{ sub(/\r$/, "") }
+		/^[ \t]*#/ { next }
+		NF == 0 { next }
+		# Capability-file metadata, not command declarations.  Mirrors
+		# reservedCapabilityKeywords in src/ct/launch/help_delegate.nim
+		# plus `known-extensions`, which by definition names extensions
+		# that are declared for NO command.
+		$1 == "name" || $1 == "version" || $1 == "bin" ||
+			$1 == "description" || $1 == "help-delegate" ||
+			$1 == "licensed" || $1 == "project" ||
+			$1 == "known-extensions" { next }
+		{ for (i = 2; i <= NF; i++) if ($i == ext) { found = 1 } }
+		END { exit(found ? 0 : 1) }
+	' "$ROOT_DIR/resources/codetracer-desktop-capabilities"
 }
 
 scenario_record() {

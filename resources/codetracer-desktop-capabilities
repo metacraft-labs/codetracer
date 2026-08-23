@@ -50,9 +50,12 @@ help-delegate
 #   codetracer-beam-recorder's is_beam_target() rejects. Full diagnosis in
 #   codetracer-beam-recorder/cross-repo/launcher-compat.yml. Revisit these
 #   four extensions when it is fixed.
-record .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc
+# `noext` and `known-extensions` are routing tokens, not file types.  Rule and
+# rationale: codetracer-specs/Planned-Features/Native-Target-Recognition.md §4.
+record .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc noext
 record-test .py
-run .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc
+run .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc noext
+known-extensions .c .cpp .rs .go .pas .f90 .d .cr .lean .adb
 replay
 list
 print

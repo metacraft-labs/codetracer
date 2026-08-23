@@ -25,15 +25,23 @@
 #        marker must EACH produce a non-zero exit naming the offending token.
 #        These are the mutation tests, wired in permanently rather than run
 #        once by hand.
-#     7. The help delegate agrees with the capability file: the built core's
+#     7..13. NTR-1 mutation scenarios for routing rule NTR-R1: the reserved
+#        `noext` token removed from `record` or from `run`, `noext` wrongly
+#        added to `record-test`, `.rs` removed from `known-extensions`, the
+#        whole `known-extensions` line deleted, an extension claimed by BOTH
+#        halves, and a non-LANGS token on `known-extensions`.  Each must be
+#        rejected with the offending token named.  Together they pin the
+#        partition `record ∪ known-extensions == LANGS`, which is what makes
+#        case R1c's "declared by nobody and known by nobody" safe.
+#     14. The help delegate agrees with the capability file: the built core's
 #        `ct-describe-commands` `file-types` lines (which drive `ct --help`
 #        and `ct record <TAB>` completion, spec §2.6) declare the same
 #        extensions the capability file routes on.  If the core binary is
 #        older than the sources that decide that output, the scenario fails
 #        with an explicit "CORE IS STALE / rebuild" diagnostic instead of
 #        four assertion failures that look like a capability-file bug.
-#     8. The COMMAND sets agree, in both directions and for EVERY command --
-#        not just the record-ish three scenario 7 compares file-types for.
+#     15. The COMMAND sets agree, in both directions and for EVERY command --
+#        not just the record-ish three scenario 14 compares file-types for.
 #        A command the core advertises but the file does not declare is
 #        listed on `ct --help` and then refused by the router ("ct: no
 #        component handles '<cmd>'"); that is exactly how `ct review`
@@ -42,7 +50,7 @@
 #        such subcommand.  Any deliberate exception must be an explicit,
 #        commented entry in CAPS_UNDECLARED_ALLOWLIST below (empty today) --
 #        never a silent omission, and a stale entry fails too.
-#     9..10. Mutation scenarios for 8, wired in rather than run by hand: a
+#     16..17. Mutation scenarios for 15, wired in rather than run by hand: a
 #        capability file with `review` deleted, and one that declares a
 #        command the core does not advertise, must each be rejected with the
 #        offending command named.
@@ -59,7 +67,7 @@
 #   production code itself (ci/test/desktop_capabilities_dispatch_check.nim
 #   imports src/ct/utilities/language_detection.nim and
 #   src/ct/trace/recorder_dispatch.nim and evaluates their real tables), and
-#   scenario 7 asks the real built `ct` binary what it declares. No component
+#   scenario 14 asks the real built `ct` binary what it declares. No component
 #   is stubbed and no fixture capability string is used: the mutation
 #   scenarios operate on byte-copies of the real resource with exactly one
 #   line edited, which are the inputs under test rather than stand-ins for
@@ -77,7 +85,7 @@
 #   ci/test/desktop-capabilities-dispatch.sh
 #
 # Environment:
-#   CODETRACER_CORE_BIN      override the built core binary used by scenario 7
+#   CODETRACER_CORE_BIN      override the built core binary used by scenario 14
 #   CODETRACER_E2E_CT_PATH   same, shared with the other ci/test scripts
 #   CODETRACER_BUILD_DIR     build tree to probe (default src/build-debug)
 #   CT_CAPS_CHECK_VERBOSE=1  echo every one of the checker's ~340 individual
@@ -159,7 +167,7 @@ if [[ -z $CORE_BIN || ! -x $CORE_BIN ]]; then
 	die "the CodeTracer core binary has not been built.
   Build it with:  just build-once
   Or set CODETRACER_CORE_BIN to a prebuilt binary.
-  (This is deliberately NOT a skip: scenario 7 asks the REAL binary what
+  (This is deliberately NOT a skip: scenario 14 asks the REAL binary what
    file types it advertises to the launcher's help/completion protocol.)"
 fi
 CORE_BIN="$(cd "$(dirname "$CORE_BIN")" && pwd)/$(basename "$CORE_BIN")"
@@ -270,8 +278,52 @@ mutate_and_expect_failure \
 	's/^name codetracer-desktop$/name codetracer-desktop\nproject pyproject.toml/' \
 	'pyproject.toml'
 
+# --- NTR-1 mutations: the `noext` token and the partition invariant --------
+# Rule NTR-R1 (Native-Target-Recognition.md §4) rests on two claims the file
+# now makes, and each has to fail loudly when broken:
+#   * `record`/`run` carry `noext`, or an extension-less argument is refused
+#     by the launcher before the core ever sees it;
+#   * `record` declared ∪ `known-extensions` == LANGS, exactly.  An extension
+#     in NEITHER half starts routing to codetracer-desktop under case R1c and
+#     is then refused there -- a silent misroute arriving through a new door.
+
+mutate_and_expect_failure \
+	"dropping 'noext' from 'record' is rejected" \
+	's/^\(record .*\) noext$/\1/' \
+	'noext'
+
+mutate_and_expect_failure \
+	"dropping 'noext' from 'run' is rejected" \
+	's/^\(run .*\) noext$/\1/' \
+	'noext'
+
+mutate_and_expect_failure \
+	"adding 'noext' to 'record-test' is rejected" \
+	's/^record-test \.py$/record-test .py noext/' \
+	'noext'
+
+mutate_and_expect_failure \
+	"dropping '.rs' from 'known-extensions' is rejected (it would fall into case R1c)" \
+	's/^\(known-extensions .*\) \.rs \(.*\)$/\1 \2/' \
+	'.rs'
+
+mutate_and_expect_failure \
+	"deleting the whole 'known-extensions' line is rejected" \
+	'/^known-extensions /d' \
+	'known-extensions'
+
+mutate_and_expect_failure \
+	"an extension on BOTH 'record' and 'known-extensions' is rejected" \
+	's/^\(known-extensions .*\)$/\1 .py/' \
+	'.py'
+
+mutate_and_expect_failure \
+	"a non-LANGS token on 'known-extensions' is rejected" \
+	's/^\(known-extensions .*\)$/\1 .zzz/' \
+	'.zzz'
+
 # ---------------------------------------------------------------------------
-# Scenario 7 — the help delegate advertises the same file types.
+# Scenario 14 — the help delegate advertises the same file types.
 #
 # The capability file drives ROUTING; `ct-describe-commands` drives the
 # launcher's help screen and path completion (spec §2.6). Before LRC-1 both
@@ -325,11 +377,24 @@ if ! "$CORE_BIN" ct-describe-commands >"$DESCRIBE_OUT" 2>"$WORK_DIR/describe.err
 fi
 
 # Sorted, space-separated extension list a capability-file command declares.
+#
+# `noext` is skipped: it is the RESERVED ROUTING TOKEN of rule NTR-R1
+# (codetracer-specs/Planned-Features/Native-Target-Recognition.md §4), not a
+# file type, so `ct-describe-commands` must NOT advertise it -- it drives
+# `ct record <TAB>` path completion, and completing on "noext" would be
+# nonsense.  Every token that begins with a dot is still compared, so the
+# narrowing cannot hide a real extension divergence.
 caps_exts() {
 	awk -v cmd="$1" '
 		{ sub(/\r$/, "") }
 		/^[ \t]*#/ { next }
-		{ if ($1 == cmd) { for (i = 2; i <= NF; i++) print $i } }
+		{
+			if ($1 == cmd) {
+				for (i = 2; i <= NF; i++) {
+					if ($i != "noext") print $i
+				}
+			}
+		}
 	' "$CAPS_SRC" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//'
 }
 
@@ -357,9 +422,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Scenario 8 — the COMMAND sets agree, in both directions, for every command.
+# Scenario 15 — the COMMAND sets agree, in both directions, for every command.
 #
-# Scenario 7 above compares `file-types` for `record` / `run` / `record-test`
+# Scenario 14 above compares `file-types` for `record` / `run` / `record-test`
 # only.  That is not enough, and the gap was live: `dev` added `review` to
 # help_delegate.nim's file-type lists but never declared it in the capability
 # file, so `ct review` was advertised on the launcher's help screen and then
@@ -403,7 +468,8 @@ caps_commands() {
 		NF == 0 { next }
 		$1 == "name" || $1 == "version" || $1 == "bin" ||
 			$1 == "description" || $1 == "help-delegate" ||
-			$1 == "licensed" || $1 == "project" { next }
+			$1 == "licensed" || $1 == "project" ||
+			$1 == "known-extensions" { next }
 		{ print $1 }
 	' "$1" | LC_ALL=C sort -u
 }
@@ -505,7 +571,7 @@ for entry in ${CAPS_UNDECLARED_ALLOWLIST[@]+"${CAPS_UNDECLARED_ALLOWLIST[@]}"}; 
 done
 
 # ---------------------------------------------------------------------------
-# Scenarios 9-10 — mutation tests for scenario 8, wired in rather than run
+# Scenarios 16-17 — mutation tests for scenario 15, wired in rather than run
 # once by hand. Each mutates a byte-copy of the real capability file and must
 # be rejected with the offending command named.
 # ---------------------------------------------------------------------------

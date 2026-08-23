@@ -173,12 +173,29 @@ const DeliberateOmissions: seq[string] = @[]
 # file claims so the claims can be compared with the dispatch tables.
 # ---------------------------------------------------------------------------
 
+const
+  KnownExtensionsKeyword = "known-extensions"
+    ## The NTR-1 keyword. It is capability-file metadata, NOT a routable
+    ## command: `caps.matches` skips the line outright
+    ## (codetracer-launcher/src/caps.nim), so it must be reserved here too
+    ## or the checker would compare it against the core's command set.
+  NoextToken = "noext"
+    ## The reserved routing token of rule NTR-R1 cases R1a/R1c. It is not
+    ## an extension and has no `LANGS` entry, so it is separated out of
+    ## the declared set below rather than compared against the core's
+    ## dispatch tables — and its PRESENCE is asserted independently, so
+    ## deleting it is a named failure rather than a silent one.
+
 const ReservedKeywords = [
   "name", "version", "bin", "description", "help-delegate", "licensed",
-  "project", "requires"]
+  "project", "requires", KnownExtensionsKeyword]
 
 proc declaredExtensions(path: string, command: string):
-    tuple[found: bool, exts: HashSet[string]] =
+    tuple[found: bool, exts: HashSet[string], routingTokens: HashSet[string]] =
+  ## Splits a command line's tokens into real extensions (leading '.')
+  ## and the reserved routing tokens of rule NTR-R1. Anything that is
+  ## neither shape stays in `exts` on purpose, so a typo is still caught
+  ## by the comparison against the core.
   for rawLine in readFile(path).splitLines():
     let line = rawLine.strip()
     if line.len == 0 or line.startsWith("#"):
@@ -190,7 +207,26 @@ proc declaredExtensions(path: string, command: string):
       continue
     result.found = true
     for token in tokens[1 .. ^1]:
-      result.exts.incl(token)
+      if token == NoextToken:
+        result.routingTokens.incl(token)
+      else:
+        result.exts.incl(token)
+
+proc knownExtensions(path: string): HashSet[string] =
+  ## The `known-extensions` line: suffixes the core RECOGNIZES as naming
+  ## a language but cannot dispatch. NTR-R1 case R1d — they never route,
+  ## and they must never appear on a command line as well (that would be
+  ## a claim to dispatch what the same file says is undispatchable).
+  for rawLine in readFile(path).splitLines():
+    let tokens = rawLine.strip().splitWhitespace()
+    if tokens.len >= 2 and tokens[0] == KnownExtensionsKeyword:
+      for token in tokens[1 .. ^1]:
+        result.incl(token)
+
+proc allLangsExtensions(): HashSet[string] =
+  ## Every extension the core's `LANGS` table names, dispatchable or not.
+  for extension, _ in LANGS:
+    result.incl("." & extension)
 
 proc declaredProjectMarkers(path: string): seq[string] =
   for rawLine in readFile(path).splitLines():
@@ -214,8 +250,24 @@ proc checkCommand(capsPath, command: string) =
   echo ""
   echo "command `", command, "`"
 
-  let (found, declared) = declaredExtensions(capsPath, command)
+  let (found, declared, routingTokens) = declaredExtensions(capsPath, command)
   expect(found, "`" & command & "` is declared in the capability file")
+
+  # --- NTR-R1: the reserved routing token ----------------------------------
+  # `record` and `run` must carry `noext`, or an extension-less argument
+  # (a native binary, a directory, `--help`, a flag before the target)
+  # stops reaching the core at all. `record-test` must NOT: it takes a
+  # test file, and nothing in the core recognizes an extension-less one.
+  if command in ["record", "run"]:
+    expect(NoextToken in routingTokens,
+      "`" & command & "` carries the reserved routing token `" & NoextToken &
+      "` (rule NTR-R1 cases R1a/R1c — without it `ct " & command &
+      " ./my-project`, `ct " & command & " --help` and `ct " & command &
+      " a.out` are refused by the launcher)")
+  else:
+    expect(NoextToken notin routingTokens,
+      "`" & command & "` does NOT carry `" & NoextToken &
+      "` (only `record` and `run` accept an uninformative suffix)")
 
   let core = coreExtensions(command)
   expect(core.len > 0,
@@ -309,6 +361,71 @@ when isMainModule:
   try:
     for command in ["record", "run", "record-test"]:
       checkCommand(capsPath, command)
+
+    # ----------------------------------------------------------------------
+    # NTR-R1: `record` declared ∪ `known-extensions` is a PARTITION of LANGS.
+    #
+    # This is the invariant that makes rule R1c safe. R1c routes any suffix
+    # that is declared by nobody AND known by nobody, on the reasoning that
+    # such a suffix is one the core has never heard of. That reasoning is
+    # only true if every LANGS extension is in exactly one of the two
+    # halves: an extension missing from both would start routing to
+    # codetracer-desktop, which would then refuse it — the silent-misroute
+    # this checker exists to prevent, arriving through a new door.
+    # ----------------------------------------------------------------------
+    echo ""
+    echo "NTR-R1 partition (record ∪ known-extensions == LANGS)"
+    let known = knownExtensions(capsPath)
+    let langs = allLangsExtensions()
+    let (_, recordDeclared, _) = declaredExtensions(capsPath, "record")
+    let (_, runDeclared, _) = declaredExtensions(capsPath, "run")
+
+    echo "    known-extensions: ", render(known)
+    echo "    LANGS:            ", $langs.len, " extensions"
+
+    expect(known.len > 0,
+      "the capability file declares a non-empty `known-extensions` line " &
+      "(guards against a vacuous partition: with it empty the union check " &
+      "would silently degrade into the declared==dispatched check)")
+
+    for extension in sortedSeq(known):
+      expect(extension.startsWith("."),
+        "`known-extensions` entry " & extension & " is written with its " &
+        "leading dot (the launcher compares the token including the dot)")
+      expect(extension in langs,
+        "`known-extensions` entry " & extension & " is a real LANGS " &
+        "extension — a suffix the core does NOT recognize must be left off " &
+        "the line entirely, so that rule R1c routes it")
+
+    for command in ["record", "run", "record-test"]:
+      let (_, declared, _) = declaredExtensions(capsPath, command)
+      let overlap = sortedSeq(declared * known)
+      expect(overlap.len == 0,
+        "`" & command & "` and `known-extensions` are disjoint" &
+        (if overlap.len == 0: ""
+         else: " — but both claim: " & overlap.join(" ") &
+           ". `known-extensions` means 'recognized and NOT dispatchable'; " &
+           "declaring the same suffix for a command says the opposite"))
+
+    for (command, declared) in [("record", recordDeclared), ("run", runDeclared)]:
+      let missing = sortedSeq(langs - declared - known)
+      expect(missing.len == 0,
+        "every LANGS extension is either dispatched by `" & command &
+        "` or listed on `known-extensions`" &
+        (if missing.len == 0: ""
+         else: " — but these are in neither: " & missing.join(" ") &
+           ". Under rule NTR-R1 case R1c the launcher treats a suffix that " &
+           "is declared by nobody and known by nobody as carrying no " &
+           "routing information, so it would route to codetracer-desktop " &
+           "and be refused there"))
+      let strayKnown = sortedSeq(known - langs)
+      expect(strayKnown.len == 0,
+        "`known-extensions` names nothing outside LANGS (stray: " &
+        strayKnown.join(" ") & ")")
+      expect(declared + known == langs,
+        "`" & command & "` ∪ `known-extensions` is exactly LANGS (" &
+        $langs.len & " extensions: " & $declared.len & " dispatched + " &
+        $known.len & " known-but-undispatchable)")
 
     echo ""
     echo "project markers"

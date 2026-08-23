@@ -348,7 +348,7 @@ func splitComponentDirName(dirName: string):
 
 const reservedCapabilityKeywords* = [
     "name", "version", "bin", "description", "help-delegate",
-    "licensed", "project"
+    "licensed", "project", "known-extensions"
   ]
   ## Capability-file line keywords that are *not* command
   ## declarations. Every other first-token is treated as a command
