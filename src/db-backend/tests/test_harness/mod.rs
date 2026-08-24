@@ -915,7 +915,11 @@ impl DapStdioTestClient {
     ///
     /// Unlike `initialize_and_launch()` (for DB traces), this passes the
     /// `recreator_exe` so the backend can spawn the replay worker.
-    pub fn initialize_and_launch_rr(&mut self, recording: &TestRecording, ct_native_replay: &Path) -> Result<(), String> {
+    pub fn initialize_and_launch_rr(
+        &mut self,
+        recording: &TestRecording,
+        ct_native_replay: &Path,
+    ) -> Result<(), String> {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;

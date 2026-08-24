@@ -49,8 +49,8 @@ fn rust_mcr_streaming_flow_variables_and_values() {
     );
 
     // --- record under MCR ---
-    let recording =
-        TestRecording::create_mcr(&source_path, Language::Rust, "mcr", &ct_native_replay).expect("MCR recording failed");
+    let recording = TestRecording::create_mcr(&source_path, Language::Rust, "mcr", &ct_native_replay)
+        .expect("MCR recording failed");
 
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
