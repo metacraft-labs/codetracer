@@ -65,10 +65,15 @@
 // Branch picker
 // ---------------------------------------------------------------------------
 
+// Inset around the branch control.  Named because the dropdown has to subtract
+// it again: an absolutely positioned child measures `top: 100%` against this
+// box's padding edge, not against the trigger it is supposed to hang from.
+VCS_BRANCH_PICKER_INSET = 0.25em
+
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  padding: 0em 0.25em 0.25em 0.25em
+  padding: 0em VCS_BRANCH_PICKER_INSET VCS_BRANCH_PICKER_INSET VCS_BRANCH_PICKER_INSET
   background: colors-ui-surface-base-panel
 
 // Styled to match .ct-input-small — consistent with other panel input fields.
@@ -111,13 +116,19 @@
 
 .vcs-branch-dropdown
   position: absolute
-  top: calc(100% + 0.125em)
-  left: 0.25em
+  // Shared with every other menu — see DROPDOWN_TRIGGER_GAP in
+  // components/shared_widgets.styl.  This picker opened 2px below its trigger
+  // while its twin, `.ct-picker-dropdown`, opened at the same 2px and the
+  // layout menu at none; all three now sit at 6px.
+  //
+  // `DROPDOWN_TRIGGER_OFFSET` cannot be used verbatim here: `.vcs-branch-picker`
+  // pads itself, and `100%` measures to the outside of that padding, so the plain
+  // offset would have measured 10px from the trigger while its twin measured 6.
+  top: "calc(100% - %s + %s)" % (VCS_BRANCH_PICKER_INSET DROPDOWN_TRIGGER_GAP)
+  left: VCS_BRANCH_PICKER_INSET
   right: 0.25em
   z-index: 100
-  background: colors-ui-surface-primary-default
-  border: 0.03125em solid colors-ui-border-primary
-  border-radius: 0.375rem
+  dropdown-surface()
   padding: 0.25em
   max-height: 12.5em
   overflow-y: auto

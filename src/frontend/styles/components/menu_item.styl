@@ -33,7 +33,10 @@
   align-items: center
   gap: 0.5em
   padding: 0 0.5em
-  height: 2.25em
+  // rem, not em: this component is used in menus whose font sizes differ (12px
+  // in the branch picker, 14px in the layout menu), and an em height made the
+  // same row 27px in one and 31.5px in the other.  2.25rem is 36px everywhere.
+  height: 2.25rem
   width: 100%
   box-sizing: border-box
   cursor: pointer

@@ -143,17 +143,27 @@
   display none
   position absolute
   right 0.25em
-  top 2.125em
+  // Below the caption bar, by DROPDOWN_TRIGGER_GAP
+  // (components/shared_widgets.styl), like the application menu on the other
+  // side of the bar.
+  //
+  // Measured from THIS element's containing block, which is `.session-tab-bar`
+  // — and the tab bar starts 0.25em down, inside `#menu`'s padding.  So the
+  // offset is the bar's height less that inset, plus the gap:
+  // 2.125em - 0.25em + 0.375em = 2.25em.  The old 2.125em was the caption bar
+  // height used as if the tab bar began at the top of the bar, which left 4px
+  // rather than 6.
+  top 2.25em
   min-width 13.75em
   max-width 22.5em
   max-height 70vh
-  overflow auto
   flex-direction column
   padding 0.25em
-  border-radius 0.375em
-  background-color colors-ui-surface-primary-default
-  border 1px solid colors-ui-border-primary
-  box-shadow 0 0.75em 1.875em rgba(0, 0, 0, 0.35)
+  dropdown-surface()
+  // After the mixin on purpose: it sets `overflow: hidden` so rows cannot spill
+  // past the rounded corners, but this menu has to scroll once enough tabs
+  // overflow to fill it.
+  overflow auto
   z-index 120
   -webkit-app-region no-drag
 
