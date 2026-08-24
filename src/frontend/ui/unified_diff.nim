@@ -130,6 +130,119 @@ proc udSetValue(editor: MonacoEditor, value: cstring)
     if (model && model.getValue() !== value) { model.setValue(value); }
   })(#, #)"""}
 
+proc udForceTokenization(model: js, maxLines: int) {.importjs: """
+  (function(model, maxLines) {
+    if (!model || typeof model.getLineCount !== 'function') { return; }
+    var count = model.getLineCount() | 0;
+    if (count <= 0) { return; }
+    var upTo = count > maxLines ? maxLines : count;
+    // `model.tokenization` is where monaco-editor 0.54 keeps it; the bare
+    // `model.forceTokenization` is the older spelling. Neither is guaranteed
+    // by `monaco.d.ts`, so a build without either must degrade to the
+    // untokenized deleted lines rather than throw during a tab mount.
+    var owner = (model.tokenization && typeof model.tokenization.forceTokenization === 'function')
+      ? model.tokenization
+      : (typeof model.forceTokenization === 'function' ? model : null);
+    if (!owner) {
+      console.warn('unified diff: this Monaco has no forceTokenization; ' +
+                   'deleted lines will render without syntax tokens');
+      return;
+    }
+    try {
+      owner.forceTokenization(upTo);
+    } catch (err) {
+      console.warn('unified diff: forcing tokenization of the original model failed', err);
+    }
+  })(#, #)""".}
+  ## Tokenize the ORIGINAL model up front, so the deleted lines are coloured.
+  ##
+  ## Monaco's inline diff draws each deletion as a `view-lines line-delete`
+  ## view zone, and it builds that zone from the ORIGINAL model's tokens —
+  ## `oe.originalRange.mapToLineArray(n => Ae.tokenization.getLineTokens(n))`
+  ## in the shipped bundle. `getLineTokens` returns whatever tokenization has
+  ## already reached; it does not ask for any.
+  ##
+  ## And nothing ever asks. Tokenization is driven by what is RENDERED, and in
+  ## an inline diff the original editor is a few-pixel gutter strip that never
+  ## renders a line of text — so every deleted line came back as one `mtk1`
+  ## run, whatever language the model was created with. UD-1 measured exactly
+  ## that and recorded `experimental.useTrueInlineView` as the only known fix;
+  ## it is not, and that option was never really a fix for this, because it
+  ## also merges each deletion and its replacement into one line, which is a UX
+  ## decision rather than a rendering one — and it would have removed the
+  ## before/after pair the `diff-intraline` view exists to show.
+  ##
+  ## Capped, because this is synchronous work proportional to the file. A diff
+  ## whose old side is longer than the cap keeps flat deleted lines past it,
+  ## which is the pre-existing behaviour rather than a new failure.
+
+proc udRebuildDeletedLineZones(diffEditor: js) {.importjs: """
+  (function(e) {
+    if (!e || typeof e.updateOptions !== 'function') { return; }
+    try {
+      // Toggled and restored in the SAME synchronous block, so the option ends
+      // where `initEditor` set it and no diff is ever computed under the other
+      // value — what the pair does is invalidate the computation that builds
+      // the zones, which is the only public way in.
+      //
+      // `ignoreTrimWhitespace` and not `renderIndicators`: both were tried in
+      // the running product and only this one rebuilds the zones. The zones
+      // are rebuilt when the DIFF result changes, not when a rendering option
+      // does, so an option the diff does not depend on invalidates nothing.
+      e.updateOptions({ ignoreTrimWhitespace: true });
+      e.updateOptions({ ignoreTrimWhitespace: false });
+    } catch (err) {
+      console.warn('unified diff: could not rebuild the deleted-line zones', err);
+    }
+  })(#)""".}
+  ## Rebuild the deleted lines' view zones, so they pick up the tokens.
+  ##
+  ## Monaco builds each zone ONCE, out of whatever `getLineTokens` answers at
+  ## that instant, and never rebuilds it when tokenization catches up — there
+  ## is no `onDidChangeTokens` path into that computation. Measured in the
+  ## running product, and the measurement is what this pair of calls is for:
+  ## the original model's line 4 (`  let y = x * 2;`) reports nine tokens with
+  ## foregrounds `[1,23,1,25,1,25,1,34,25]`, and the zone rendered from it
+  ## carries a single `mtk1` run. Forcing the tokenization earlier does not
+  ## help — it is already done by then; forcing the ZONE to be rebuilt does,
+  ## and turns the same line into `mtk1 mtk23 mtk25 mtk34 mtk17`.
+  ##
+  ## Scheduled rather than run inline, and re-checked rather than fired once:
+  ## the invalidation only helps once a zone EXISTS to be rebuilt, and the diff
+  ## is computed off the main thread, so "one macrotask later" is a guess. See
+  ## `scheduleDeletedLineTokens`.
+
+proc udDeletedLineTokenClasses(hostId: cstring): int {.importjs: """
+  (function(hostId) {
+    var host = document.getElementById(hostId);
+    if (!host) { return -1; }
+    var zones = host.querySelectorAll('.view-lines.line-delete');
+    if (zones.length === 0) { return -1; }
+    var seen = {};
+    var count = 0;
+    zones.forEach(function(zone) {
+      zone.querySelectorAll("span[class^='mtk']").forEach(function(span) {
+        var m = /\bmtk\d+\b/.exec(span.className);
+        if (m && !seen[m[0]]) { seen[m[0]] = true; count += 1; }
+      });
+    });
+    return count;
+  })(#)""".}
+  ## How many distinct `mtk<n>` token classes the deleted lines carry, or `-1`
+  ## when there is no deleted line to ask about.
+  ##
+  ## `1` is Monaco's "I have no tokens for these" answer and is what the defect
+  ## looks like; `-1` is a diff with no deletion in it, which is not a defect
+  ## and must not be retried forever.
+
+const DiffTokenizeLineLimit* = 5000
+  ## How far `udForceTokenization` will tokenize an original model in one go.
+  ##
+  ## Whole-file models (UD-2) mean this is the file's length, not a hunk's, so
+  ## it needs a ceiling. 5000 lines of a Monarch grammar is a few milliseconds;
+  ## the largest file in the review corpora is two orders of magnitude under
+  ## it, and a reviewer scrolling a 5000-line diff has other problems.
+
 proc udUpdateOptions(editor: MonacoEditor, options: JsObject)
   {.importjs: "#.updateOptions(#)".}
 
@@ -714,6 +827,23 @@ proc udMaxLineOffset(editor: MonacoEditor, lines: seq[int]): int {.importjs: """
   ## arithmetic, which is the part that decides where the values appear, is
   ## identical.
 
+proc udLineHeight(editor: MonacoEditor): int {.importjs: """
+  (function(e) {
+    // `EditorOption.lineHeight` is the supported way to ask; the numeric ids
+    // are generated and are not stable across Monaco versions, so the enum is
+    // read by name rather than hard-coded.
+    var option = (typeof monaco !== 'undefined' && monaco.editor &&
+                  monaco.editor.EditorOption)
+      ? monaco.editor.EditorOption.lineHeight
+      : undefined;
+    if (option !== undefined && typeof e.getOption === 'function') {
+      var value = e.getOption(option) | 0;
+      if (value > 0) { return value; }
+    }
+    return 0;
+  })(#)""".}
+  ## The editor's rendered line height in pixels, or 0 when it cannot be asked.
+
 proc udCharWidth(editor: MonacoEditor): float {.importjs: """
   (function(e) {
     var model = e.getModel();
@@ -1080,9 +1210,28 @@ proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
       # rows either side, which two reviewers reported in the same terms —
       # "pill tops clip the `{` of `for i in 0..4 {`", "pills overlap the lines
       # above and below by 2-4px".
+      #
+      # EXACTLY one code row, asked of Monaco rather than derived from the
+      # font size.
+      #
+      # The clearance used to be `fontSize + 22`, set by adding until nothing
+      # spilled, and it overshot: measured on a capture, the band came out
+      # 36-37px against a 23px code row, and a reviewer put the cost plainly —
+      # "the baseline rhythm skips 11px mid-hunk", "a 3-line addition doesn't
+      # read as one block". Three annotated lines of a loop body cost more
+      # vertical space than the code they annotate.
+      #
+      # A row is the right height because the band IS a row: it stands in for
+      # the line above it and a reader scans the two together. `udLineHeight`
+      # asks the editor, because the line height is Monaco's own answer to the
+      # font, the font family and the zoom, and `fontSize + n` is a guess at
+      # all three. The chip is made to fit it in `flow.styl` — a chip that
+      # spilled onto the rows either side was a real defect twice, so the two
+      # halves of this are deliberately kept next to each other in the comments.
+      let lineHeight = self.editor.udLineHeight()
       self.flowValueZoneIds.add(self.editor.udAddViewZone(js{
         afterLineNumber: annotation.modelLine,
-        heightInPx: self.data.ui.fontSize + 22,
+        heightInPx: if lineHeight > 0: lineHeight else: self.data.ui.fontSize + 16,
         domNode: dom
       }))
 
@@ -1453,12 +1602,46 @@ proc applyGutterOptions(self: UnifiedDiffComponent; pair: DiffPair) =
   # edge and is cut in half — measured, and reported by a design reviewer as
   # "a rule below but none above".  The padding is what gives that handle
   # somewhere to be.
-  let padding = js{ top: 10, bottom: 0 }
+  # `bottom` reserves the horizontal scrollbar's own height.
+  #
+  # Monaco draws that bar as an overlay at the bottom of the content, and with
+  # `scrollBeyondLastLine: false` the last line is exactly there — so the
+  # control that reveals a long line was drawn on top of it. Measured by a
+  # reviewer of the view that exists to show this: "a horizontal scrollbar thumb
+  # at the pane's bottom … it lies *on top of* the assert line, greying out
+  # `assert(final_result == expected,`", and "only 15px of its 20px line height
+  # is inside the pane". Twelve pixels of reserved space is the bar's 10px plus
+  # a hairline either side.
+  let padding = js{ top: 10, bottom: 12 }
+  # The horizontal scrollbar, set on the CODE editor rather than on the diff
+  # editor.
+  #
+  # `createDiffEditor` takes the code editors' options too, and most of them do
+  # reach both sides — but `scrollbar` set there did not, measured: with
+  # `scrollbar: { horizontal: "visible" }` in the diff editor's own option bag,
+  # a reviewer of the resulting capture found "no horizontal scrollbar,
+  # gradient, or `…` anywhere along the right edge", and the only right-edge
+  # element was the VERTICAL slider. So it is applied here, where the option
+  # unambiguously belongs to the editor that scrolls.
+  #
+  # `visible` and not the default `auto`: `auto` fades the bar out whenever the
+  # pointer is elsewhere, which is the state a reader is in for all of the time
+  # they spend reading. Every reviewer of every view has reported the shear —
+  # "cut mid-glyph, no ellipsis, no fade, no visible scroll affordance" — and a
+  # persistent bar is what VS Code's diff shows in the same place, so the
+  # overflow becomes discoverable without inventing an affordance of our own.
+  let scrollbar = js{
+    horizontal: cstring"visible",
+    horizontalScrollbarSize: 10,
+    horizontalSliderSize: 10,
+    useShadows: true
+  }
   self.editor.udUpdateOptions(js{
     lineNumbers: udLineNumberFn(self.lineLabels),
     lineNumbersMinChars: width,
     lineDecorationsWidth: 0,
-    padding: padding
+    padding: padding,
+    scrollbar: scrollbar
   })
   if not self.originalEditor.isNil:
     self.originalEditor.udUpdateOptions(js{
@@ -1486,6 +1669,11 @@ proc refreshModel(self: UnifiedDiffComponent) =
   if not self.originalEditor.isNil:
     self.originalEditor.udSetValue(cstring(documentText(pair.original)))
   self.editor.udSetValue(cstring(documentText(pair.modified)))
+  # A `setValue` throws the model's tokens away, so the deleted lines would go
+  # back to one flat run on the first expansion — the defect returning through
+  # the one gesture most likely to be used.
+  if not self.originalModel.isNil:
+    self.originalModel.udForceTokenization(DiffTokenizeLineLimit)
   self.rebuildLineLabels(pair)
   self.applyGutterOptions(pair)
   # The collapse's context width is derived from the document (see
@@ -1537,6 +1725,47 @@ proc stageSelectedHunks(self: UnifiedDiffComponent) =
   vm.clearHunkSelection()
   self.syncIntoVM()
   self.refreshModel()
+
+proc scheduleDeletedLineTokens(self: UnifiedDiffComponent; attempt: int) =
+  ## Repaint the deleted lines with their syntax tokens, once they have any.
+  ##
+  ## Three facts, all measured in the running product, force this shape:
+  ##
+  ##   1. Monaco builds each deleted line's view zone out of the ORIGINAL
+  ##      model's tokens at the instant the diff first renders, and never
+  ##      rebuilds it when tokenization catches up — `getLineTokens` is read
+  ##      inside that computation, and nothing in it observes token changes.
+  ##   2. So the tokens are not the problem and forcing them earlier does not
+  ##      help. By the time a reader looks, the original model's line 4
+  ##      (`  let y = x * 2;`) reports nine tokens with foregrounds
+  ##      `[1,23,1,25,1,25,1,34,25]` — and the zone rendered from it is one
+  ##      `mtk1` run.
+  ##   3. Invalidating the diff rebuilds the zone, and the rebuilt zone is
+  ##      coloured (`mtk1 mtk23 mtk25 mtk34 mtk17` on that same line).
+  ##
+  ## Hence: wait for a zone to exist, and repaint it only if it is monochrome.
+  ## Bounded like `scheduleLoopSliders`, and self-verifying rather than fired
+  ## blind — a nudge issued before the first render invalidates nothing, and a
+  ## fixed point that keeps re-nudging would recompute the diff forever.
+  if self.diffEditor.isNil or self.originalModel.isNil:
+    return
+  const MaxAttempts = 20
+  if attempt >= MaxAttempts:
+    return
+  let classes = udDeletedLineTokenClasses(cstring(editorHostId(self.id)))
+  if classes > 1:
+    # Already coloured — either the repaint landed or this diff never needed
+    # one. Either way there is nothing left to do and nothing to retry.
+    return
+  if classes == 1:
+    self.originalModel.udForceTokenization(DiffTokenizeLineLimit)
+    self.diffEditor.udRebuildDeletedLineZones()
+  # `classes == -1` is "no deleted line has rendered yet", which is the normal
+  # state for the first few frames and is also the permanent state of a diff
+  # that only adds lines. The attempt budget is what tells the two apart
+  # without having to ask which one this is.
+  discard windowSetTimeout(
+    proc() = self.scheduleDeletedLineTokens(attempt + 1), 150)
 
 proc initEditor(self: UnifiedDiffComponent) =
   ## Create the Monaco instance once its host element exists.
@@ -1618,7 +1847,32 @@ proc initEditor(self: UnifiedDiffComponent) =
     folding: false,
     fontSize: self.data.ui.fontSize,
     # The affordances a DOM diff could not offer, and the reason DR-R4 exists.
-    minimap: js{ enabled: true },
+    #
+    # `renderCharacters` and the column cap are UD-4's: a 52-line corpus fills
+    # the whole minimap with block glyphs, and a reviewer read the result as
+    # "a flat mid-grey ~#555 slab, far lighter than the #1e1e1e/#252526
+    # palette … reads as a misplaced scrollbar". Character shapes break the
+    # slab up into something that looks like the file it is a map of, and the
+    # cap keeps the map from claiming width the code needs — this tab is ONE
+    # PANE of a layout, not a window.
+    minimap: js{
+      enabled: true,
+      renderCharacters: true,
+      maxColumn: 60,
+      showSlider: cstring"mouseover"
+    },
+    # ONE navigation rail on the right, not two.
+    #
+    # A diff editor draws its own overview ruler beside the code editor's, and
+    # in the INLINE layout the two are redundant — the same change is marked
+    # twice, at different x and, because the two rulers scale differently, at
+    # different y. A reviewer measured exactly that: "two overview rulers side
+    # by side in #484848 … the red and green mark for the *same* change sit at
+    # different x and different y", and another read the pair as "two rails
+    # where one is needed". The code editor's own ruler carries the diff
+    # decorations' `overviewRuler` marks, so dropping the diff editor's loses
+    # no information.
+    renderOverviewRuler: false,
     contextmenu: true,
     renderLineHighlight: cstring"none",
     scrollBeyondLastLine: false,
@@ -1630,6 +1884,10 @@ proc initEditor(self: UnifiedDiffComponent) =
     cstring(documentText(pair.original)), language)
   self.modifiedModel = udCreateModel(
     cstring(documentText(pair.modified)), language)
+  # BEFORE the models are handed over, not after: Monaco builds each deleted
+  # line's view zone out of the original model's tokens at the moment the diff
+  # first renders, and never rebuilds it when tokenization catches up later.
+  self.originalModel.udForceTokenization(DiffTokenizeLineLimit)
   self.diffEditor.udSetDiffModel(self.originalModel, self.modifiedModel)
 
   self.editor = self.diffEditor.udDiffModifiedEditor()
@@ -1654,6 +1912,8 @@ proc initEditor(self: UnifiedDiffComponent) =
   # for a review; a no-op for a git-backed tab, which carries no flow.
   self.applyFlowDecorations(pair.modified)
   self.rebuildInvocationZones(pair.modified)
+
+  self.scheduleDeletedLineTokens(attempt = 0)
 
 proc tryMountUnifiedDiffTab*(componentId: int) =
   when defined(js):

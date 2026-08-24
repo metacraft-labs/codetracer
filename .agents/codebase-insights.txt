@@ -1581,3 +1581,83 @@ hunk's own leading context lines, which are unchanged too — so with
 the divider is hidden. `diff_document.diffContextLineCount` derives the option
 from the document (longest divider-to-change tail, plus one) instead of fixing
 it at three.
+
+## A deleted line's colours come from a zone built ONCE, before the tokens exist (UD-4)
+
+Monaco's inline diff draws each deletion as a `view-lines line-delete` view zone
+inside the *modified* editor and builds it from the ORIGINAL model's tokens —
+`oe.originalRange.mapToLineArray(n => Ae.tokenization.getLineTokens(n))` in the
+shipped bundle. `getLineTokens` returns whatever tokenization has already
+reached; nothing in that computation observes token changes, so the zone is
+never rebuilt when they arrive. UD-1 diagnosed the flat `mtk1` deleted lines as
+missing tokens and recorded `experimental.useTrueInlineView` as the only fix.
+Both halves were wrong. Measured in the running product:
+
+  * the tokens are present — the original model's `  let y = x * 2;` reports
+    nine tokens with foregrounds `[1,23,1,25,1,25,1,34,25]` — while the zone
+    rendered from it is a single `mtk1` run;
+  * forcing tokenization earlier changes nothing, before or after `setModel`;
+  * invalidating the DIFF rebuilds the zone, and the rebuilt one is coloured.
+
+So the recipe is: wait for a zone to exist, then invalidate the diff *once*
+while the zone is monochrome (`ui/unified_diff.scheduleDeletedLineTokens`).
+`renderIndicators` does NOT work as the invalidation — the zones follow the diff
+result, not a rendering option; toggling `ignoreTrimWhitespace` and restoring it
+in the same synchronous block does.
+
+Corollary for tests: a span in a deleted zone carries `char-delete` as well as
+its `mtk<n>`, so collecting whole `className` strings counts `"mtk1"` and
+`"mtk1 char-delete"` as two token classes and passes on a document with no
+tokens at all. Match `/\bmtk\d+\b/`.
+
+## `tup` can miss a `.nim` edit, and the build then lies quietly (UD-4)
+
+`just build-once` reported "No commands to execute" against a freshly edited
+`src/frontend/ui/unified_diff.nim`, and the Playwright suite then ran green
+against the previous build — which is the worst possible outcome for a
+red-before-green step, because the test passes for the wrong reason. `touch`ing
+the edited file made tup rebuild it immediately. After editing frontend Nim or
+styl, `touch` the file before building, and confirm the compile actually
+happened (`frontend/ui_js.nim` in tup's output) rather than trusting exit 0.
+Note also that `src/public/dist/frontend_bundle.js` is the *vendor* bundle
+(Monaco et al.) — the renderer's own code is `src/build-debug/public/ui.js`, so
+grepping the bundle for your change proves nothing.
+
+## `.code-editor .flow-loop-step-container` absolutely positions whatever wears it (UD-4)
+
+`ui/flow.renderFlow` marks the selected loop pass with `flow-loop-step-container
+active-flow-step`, and any host that copies that convention inherits
+`text_editor.styl`'s `position: absolute; width: 3.125em; margin-right: 0.625em`
+along with the highlight — because in the debugger's own band the columns are
+placed by computed offsets. In a flex band (the review's value row) that is both
+the wrong width and out of the flow, and the symptom is subtle: only the rows
+that contain a loop start on a different left edge from every other row. Reach
+for the class for the highlight, and neutralise the layout in your own scope.
+
+## The Monaco theme had no `diffEditor.*` colour at all (UD-4)
+
+`codetracerDark.json` styled the editor and the brackets and nothing about a
+diff, so every unified diff CodeTracer has ever drawn wore Monaco's `vs-dark`
+defaults — a saturated crimson removal against a desaturated olive addition,
+which three independent reviewers measured as unbalanced. The keys worth knowing
+are `diffEditor.{inserted,removed}{Line,Text}Background`,
+`diffEditorOverview.{inserted,removed}Foreground` and, for the collapsed-region
+band, `diffEditor.unchangedRegion{Background,Foreground}` — that last pair is
+the supported way to colour the "N hidden lines" band, which otherwise ignores
+any colour set on `.diff-hidden-lines .center` alone.
+
+## The fold widget is 34px of content in a 0px box, straddling two code rows (UD-4)
+
+`.monaco-editor .diff-hidden-lines` is `height: 0; transform: translateY(-10px)`
+with a 24px `.center` and two handles stacked inside it, and the widget is an
+*overlay* widget, so the stack is painted across whatever is rendered above and
+below the fold. Measured: the last code line occupied y 483..505 and the band
+came out at 501..525. Moving the offset only trades the overlap from the line
+above to the line below — five reviewers across three milestones reported one or
+the other. The fix is to make the whole stack fit one code row (two 3px handles
+plus a 16px band = 22px) and zero the transform. Monaco's own
+`diff-hidden-lines-compact` variant is an 11px text row, so a compact band is
+its idiom rather than a shrink. Note also that the widget is drawn in BOTH
+editors, and the original one is a ~30px gutter strip — that slice of a
+full-width control is the "unexplained mark at the far left of the fold" three
+reviewers inventoried.

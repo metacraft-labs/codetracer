@@ -44,7 +44,7 @@ STYLES_TUPFILE="${REPO_ROOT}/src/frontend/styles/Tupfile"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=57
+EXPECTED_ASSERTIONS=65
 
 ASSERTIONS=0
 FAILURES=0
@@ -237,6 +237,158 @@ fi
 # capture, or every UD-0 capture would be rated as broken.
 assert_contains "${BRIEF_TEXT}" "findings, not capture failures" \
 	"the brief separates known campaign gaps from capture failures"
+
+# ---------------------------------------------------------------------------
+section "each size is captured from the landing state, not the last size's"
+# ---------------------------------------------------------------------------
+
+# One Electron launch serves all three sizes of a view, which is what makes a
+# targeted re-capture cost 12 seconds. The cost of that is that a view's
+# `setup` MUTATES the surface, and the mutation used to be carried into the
+# next size on the same page. Two views were silently size-dependent because of
+# it: `diff-expanded-context` refused at `laptop` with "the boundary hid [0,0]
+# lines before and [0,0] after" — it had expanded that boundary at `wide` — and
+# `diff-flow-values` timed out at `narrow` waiting for a chip whose content
+# widget was `visibility: hidden`, because the editor was still scrolled where
+# `laptop` had left it.
+#
+# `resetDiffTabs` is driven here against a STUB page rather than grepped for,
+# so a reset that stopped closing tabs, or that stopped noticing it had failed,
+# fails this suite in a second instead of a 21-capture regeneration in ten
+# minutes. Whether it closes REAL tabs is settled by running the harness for
+# real, which no stub can stand in for.
+# shellcheck disable=SC2016  # deliberate: this is JavaScript source, and the
+# `${...}` inside it is a JS template literal that the shell must NOT expand.
+RESET_HARNESS='
+import { resetDiffTabs } from "DRIVER_PATH";
+
+// The smallest Playwright surface `resetDiffTabs` uses. `tabs` is re-derived
+// on every call, exactly as a real locator is, so a reset holding one stale
+// handle across the loop shows up as a hang rather than as a pass.
+function stubPage(tabTitles, { stubborn = false } = {}) {
+  const clicked = [];
+  const state = { titles: [...tabTitles] };
+  const filtered = (re) => ({
+    count: async () => state.titles.filter((t) => re.test(t)).length,
+    first: () => ({
+      locator: (sel) => ({
+        click: async () => {
+          if (sel !== ".lm_close_tab") throw new Error("closed the wrong thing: " + sel);
+          const i = state.titles.findIndex((t) => re.test(t));
+          clicked.push(state.titles[i]);
+          if (!stubborn) state.titles.splice(i, 1);
+        },
+      }),
+    }),
+  });
+  return {
+    clicked,
+    state,
+    page: {
+      locator: (sel) => {
+        if (sel !== ".lm_tab") throw new Error("queried the wrong thing: " + sel);
+        return { filter: ({ hasText }) => filtered(hasText) };
+      },
+      waitForTimeout: async () => {},
+    },
+  };
+}
+
+const results = [];
+
+{
+  const s = stubPage(["Diff: main.nr", "Program", "Diff: report.py"]);
+  await resetDiffTabs({ page: s.page });
+  results.push("closed=" + s.clicked.length);
+  results.push("left=" + s.state.titles.join(","));
+}
+
+{
+  const s = stubPage(["Program", "Event log"]);
+  await resetDiffTabs({ page: s.page });
+  results.push("noDiffTabsClicked=" + s.clicked.length);
+}
+
+{
+  const s = stubPage(["Diff: main.nr"], { stubborn: true });
+  try {
+    await resetDiffTabs({ page: s.page });
+    results.push("stubborn=accepted");
+  } catch (err) {
+    results.push("stubborn=" + (/could not close/.test(err.message) ? "refused" : "wrong-error"));
+  }
+}
+
+console.log(results.join(" "));
+'
+RESET_OUT="$(node --input-type=module -e "${RESET_HARNESS//DRIVER_PATH/file://${DRIVER}}" 2>&1)" || true
+assert_contains "${RESET_OUT}" "closed=2" \
+	"the size loop's reset closes every open diff tab"
+assert_contains "${RESET_OUT}" "left=Program" \
+	"the reset leaves tabs that are not diff tabs alone"
+assert_contains "${RESET_OUT}" "noDiffTabsClicked=0" \
+	"the reset closes nothing when no diff tab is open"
+assert_contains "${RESET_OUT}" "stubborn=refused" \
+	"a tab that will not close fails the capture rather than being captured over"
+
+# ---------------------------------------------------------------------------
+section "a clip frames the pane the view is about"
+# ---------------------------------------------------------------------------
+
+# A Monaco `.view-line` is laid out as wide as the WIDEST line of the whole
+# document and as tall as one row, so a clip taken from its bounding box alone
+# runs far past the diff pane into whatever panel sits beside it. The
+# `diff-long-line` capture was exactly that — a 1699x62 sliver of the status bar
+# and a neighbouring chat composer — and the reviewer sent to it spent an entire
+# budget correctly reporting the view's own subject as missing, at 1/10.
+#
+# Driven against stub locators rather than grepped for, so the arithmetic is
+# what is checked.
+# shellcheck disable=SC2016  # deliberate: this is JavaScript source, and the
+# `${...}` inside it is a JS template literal that the shell must NOT expand.
+CLIP_HARNESS='
+import { unionClip } from "DRIVER_PATH";
+
+const box = (x, y, width, height) => ({
+  count: async () => 1,
+  nth: () => ({ boundingBox: async () => ({ x, y, width, height }) }),
+  boundingBox: async () => ({ x, y, width, height }),
+});
+const viewport = { width: 1920, height: 1080 };
+const out = [];
+
+// The real `diff-long-line` shape: a one-row target 2500px wide inside a diff
+// pane that ends at x=940.
+const line = box(330, 700, 2500, 19);
+const pane = box(330, 60, 610, 900);
+
+const clamped = await unionClip(null, line, 24, viewport, pane);
+out.push("right=" + (clamped.x + clamped.width));
+out.push("height=" + clamped.height);
+out.push("insidePane=" + (clamped.x >= 330 && clamped.x + clamped.width <= 940));
+
+// Without a pane to clamp to, the same target keeps its old runaway shape —
+// which is what says the clamp, and not some other change, is what fixed it.
+const loose = await unionClip(null, line, 24, viewport, null);
+out.push("looseRight=" + (loose.x + loose.width));
+out.push("looseHeight=" + loose.height);
+
+// Growth never breaks out of a pane shorter than the minimum.
+const shortPane = box(330, 690, 610, 40);
+const inShort = await unionClip(null, line, 24, viewport, shortPane);
+out.push("shortTop=" + (inShort.y >= 690) + " shortBottom=" + (inShort.y + inShort.height <= 730));
+
+console.log(out.join(" "));
+'
+CLIP_OUT="$(node --input-type=module -e "${CLIP_HARNESS//DRIVER_PATH/file://${DRIVER}}" 2>&1)" || true
+assert_contains "${CLIP_OUT}" "insidePane=true" \
+	"a clip never reaches past the diff pane it is taken inside of"
+assert_contains "${CLIP_OUT}" "height=160" \
+	"a one-row target is grown to a height a reviewer can judge"
+assert_contains "${CLIP_OUT}" "looseRight=1920" \
+	"without a pane the same target still runs to the viewport edge (the defect)"
+assert_contains "${CLIP_OUT}" "shortTop=true shortBottom=true" \
+	"growing a clip never breaks out of a pane shorter than the minimum"
 
 # ---------------------------------------------------------------------------
 section "the driver refuses to capture something it cannot name"

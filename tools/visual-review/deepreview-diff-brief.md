@@ -30,10 +30,14 @@ instead of GitHub's PR diff, so GitHub's diff is the bar it has to clear.
 
 ## Design Goals
 
-- **Match CodeTracer's own dark theme exactly**: background `#1e1e1e`, panels
-  `#252526`, borders `#3c3c3c`, text `#cccccc`. The light theme is meant to be
-  the same layout in the light palette, equally finished — but see known gap 5:
-  it does not exist yet, and the harness will not hand you a capture that
+- **Match CodeTracer's own dark theme exactly.** Its palette, counted out of
+  the built stylesheet rather than remembered: app shell and panel surfaces
+  `#1b1b1b`, the editor's own surface `#282828`, inputs and secondary surfaces
+  `#242424`, borders `#3a3a3a`, body text `#f3f3f3`. These are CodeTracer's
+  numbers and not VS Code's; a capture measuring `#282828` behind the code is
+  wearing the right theme, not the wrong one. The light theme is meant to be
+  the same layout in the light palette, equally finished — but see the known
+  gaps: it does not exist yet, and the harness will not hand you a capture that
   pretends otherwise.
 - **IDE-quality, not prototype-quality.** The reference points, named by the
   product owner, are GitHub's PR diff, VS Code's diff editor, and Cursor.
@@ -183,32 +187,29 @@ recent work fixed, and it names no property as closed — a reviewer told what t
 expect to find good tends to find it, and a rating reached that way is worth
 nothing. Judge everything not listed here on its own merits.
 
-1. **Deleted lines are not syntax-highlighted.** Monaco's inline diff draws the
-   old revision's lines as view zones carrying no tokens at all, whatever the
-   model says, so a removed line reads in one flat colour beside an added line
-   that is coloured properly. `experimental.useTrueInlineView` changes that and
-   is deferred to UD-4, because it also merges each deletion and its
-   replacement into a single line and that is a UX decision rather than a bug
-   fix.
+1. **A deleted line carries fewer colours than its replacement.** Monaco draws
+   the old revision's lines as view zones built from the original model, and
+   the decoration-driven part of the colouring — bracket-pair colours, in
+   particular — is not part of what a zone is built from. So a removed line can
+   read slightly flatter than the added line beside it even where both are
+   tokenized.
 2. **The two `+` / `-` markers are in two columns.** Monaco's inline diff lays
    the old revision's gutter out as a separate strip to the left of the new
    one, so the `-` of a deletion and the `+` of an addition sit about 30px
    apart rather than in one rail. It is a consequence of the two-editor layout;
-   UD-4 owns whether it is worth working around.
+   the strip is where a deleted line's old number comes from, so it cannot
+   simply be removed.
 3. **The chips are not the code's colour.** They take the editor's own surface
    colour, so on a changed line the diff's add or remove wash lies behind them
    and a chip can read as part of the highlight instead of as something over
    it. Whether the annotation layer should have a colour of its own is
    undecided.
-4. **The code text is cut at the pane's right edge.** A line longer than the
-   pane is sheared through a glyph with no ellipsis, no fade and no visible
-   scroll affordance; the corpus's `assert(...)` line is 214 characters and
-   several others reach the edge. What the surface should do at that edge is
-   still undecided, so report what you see there rather than assuming a bug.
-5. **Monaco's collapsed-region handle sits over the line above it.** The blue
-   twin bars at a fold are drawn across the lines either side of the boundary,
-   so they can land on the text of the context line above.
-6. **There is no light theme yet.** `default_white` builds and loads, but its
+4. **The diff tab is one pane of a layout, not a window.** At the `wide`
+   viewport its content area is around 600px, so a line longer than that has to
+   go somewhere at the right-hand edge. What the surface does there is the
+   subject of the `diff-long-line` view; report what you see rather than
+   assuming a bug.
+5. **There is no light theme yet.** `default_white` builds and loads, but its
    palette is unfinished: the built light and dark Electron stylesheets differ
    in about 1.8% of their rules and both still paint `#282828`, so a window
    configured for it comes out dark. The harness refuses to write a capture

@@ -26,7 +26,11 @@
  * into a state; `target` says which part of the window is worth looking at.
  * Views are captured one app launch each, per theme, so that a mutating view
  * (context expansion) cannot contaminate the view captured after it. Viewport
- * sizes are looped INSIDE a launch, because resizing is not a mutation.
+ * sizes are looped INSIDE a launch — resizing is not a mutation, but a view's
+ * own `setup` is, so every size starts by closing the open diff tabs
+ * (`resetDiffTabs`). Without that a view is silently size-dependent: it is
+ * captured at `wide` from the landing state and at `laptop` and `narrow` from
+ * whatever the size before it left behind.
  *
  * VERIFICATION IS PART OF CAPTURE. Every view declares `verify`, a check that
  * the state it claims to have set up is actually on screen, and a failed check
@@ -46,6 +50,7 @@ import { _electron } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
 // The matrix
@@ -223,10 +228,14 @@ export const VIEWS = {
       "inline value chips (a `<name>` chip followed by a value box) on the loop's lines, plus the in-editor invocation stepper",
     async setup(ctx) {
       await selectFile(ctx, NOIR_FILE);
-      await diffTab(ctx)
-        .locator(".flow-parallel .review-flow-value")
-        .first()
-        .waitFor({ state: "visible", timeout: 20000 });
+      // Scroll to the chips BEFORE waiting for one, not after. The corpus's
+      // values are all on `main`, at the bottom of the file, and at the
+      // `narrow` viewport the row-below bands are view zones that push it off
+      // the first screen. Waiting first meant waiting on a content widget that
+      // was in the document and display:none, which times out rather than
+      // scrolling.
+      await scrollDiffTo(ctx, flowChips(ctx));
+      await flowChips(ctx).first().waitFor({ state: "visible", timeout: 20000 });
     },
     async verify(ctx) {
       await expectAtLeast(ctx, flowChips(ctx), 2, "inline value chips");
@@ -296,7 +305,19 @@ const hiddenLineCounts = async (ctx) =>
   expandBoundaries(ctx).evaluateAll((nodes) =>
     nodes.map((n) => Number(n.getAttribute("data-ct-hidden") ?? "-1")),
   );
-const flowChips = (ctx) => diffTab(ctx).locator(".monaco-editor .flow-parallel .review-flow-value");
+// The inline value chips.
+//
+// `visible=true` is not belt-and-braces here, it is the whole correctness of
+// this locator. A value band is a Monaco CONTENT WIDGET, and Monaco creates the
+// node for every line the overlay names whether or not that line is inside the
+// rendered range — `.view-lines` is virtualised, content widgets are not (see
+// `.agents/codebase-insights.txt`). A widget whose line is off screen is
+// display:none, so an unfiltered `count()` is satisfied by chips nobody can
+// see: at the `narrow` viewport every one of the corpus's nine bands sits on
+// `main`, all nine were below the fold, and the unfiltered locator reported
+// nine chips on a frame containing none.
+const flowChips = (ctx) =>
+  diffTab(ctx).locator(".monaco-editor .flow-parallel .review-flow-value").locator("visible=true");
 const intralineLines = (ctx) => diffLines(ctx).filter({ hasText: /fn\s+scale\(index/ });
 // Matched on a single hyphenated token rather than a phrase: Monaco renders
 // runs of spaces as U+00A0, so a literal inter-word space in the pattern is a
@@ -393,6 +414,50 @@ async function selectFile(ctx, basename) {
   await ctx.page.waitForTimeout(1500);
 }
 
+/**
+ * Closes every open diff tab, so the next size starts from the landing state.
+ *
+ * One launch serves all three sizes of a view — that is what makes a targeted
+ * re-capture cost 12 seconds instead of a minute — but a view's `setup` MUTATES
+ * the surface, and until this existed the mutation was carried into the next
+ * size on the same page. Two views were silently size-dependent because of it,
+ * and both failed deterministically rather than intermittently:
+ *
+ *   * `diff-expanded-context` expands a boundary at `wide`; at `laptop` the
+ *     boundary it went to press was already empty, and `verify` refused the
+ *     capture with "the boundary hid [0,0] lines before and [0,0] after".
+ *   * `diff-flow-values` scrolls to its chips at `wide` and `laptop`; at
+ *     `narrow` the editor was still scrolled where the previous size had left
+ *     it, the first annotated line was outside Monaco's rendered range, and its
+ *     content widget — which exists for every line named, viewport or not — was
+ *     `visibility: hidden`. The setup's `waitFor({ state: "visible" })` then
+ *     timed out on a chip that was in the document all along.
+ *
+ * Closing the tab is the reset rather than scrolling back or re-collapsing by
+ * hand, because `closeLayoutTab` -> `forgetUnifiedDiffTab` drops the tab's
+ * ViewModel, its source cache and its editor together — the same wiring
+ * `deepreview-gui.spec.ts` Test 16b asserts, where reopening a closed file
+ * starts collapsed again. Anything less than that would reset the state we
+ * happened to think of.
+ */
+export async function resetDiffTabs(ctx) {
+  const tabs = ctx.page.locator(".lm_tab").filter({ hasText: /^Diff:/ });
+  // Re-queried each time: closing a tab re-renders the header strip, so a
+  // handle taken before the loop goes stale after the first close.
+  for (let guard = 0; guard < 8; guard += 1) {
+    if ((await tabs.count()) === 0) break;
+    await tabs.first().locator(".lm_close_tab").click();
+    await ctx.page.waitForTimeout(300);
+  }
+  if ((await tabs.count()) !== 0) {
+    throw new Error(
+      "could not close the open diff tabs, so this size would have been " +
+        "captured on top of the previous size's state",
+    );
+  }
+  await ctx.page.waitForTimeout(400);
+}
+
 // ---------------------------------------------------------------------------
 // Sabotage — the methodology's calibration instrument, checklist item 7
 // ---------------------------------------------------------------------------
@@ -449,7 +514,7 @@ export function screenshotName(view, size, theme) {
  * survive the layout moving; the docs capture's fixed `-crop 600x400+270+60`
  * does not.
  */
-async function unionClip(page, locator, pad, viewport) {
+export async function unionClip(page, locator, pad, viewport, bounds) {
   const boxes = [];
   const count = await locator.count();
   for (let i = 0; i < count; i += 1) {
@@ -471,9 +536,50 @@ async function unionClip(page, locator, pad, viewport) {
   y0 = Math.max(0, y0 - pad);
   x1 = Math.min(viewport.width, x1 + pad);
   y1 = Math.min(viewport.height, y1 + pad);
+
+  // Clamped to the pane the view is about, and grown to a readable height
+  // inside it. Both halves were paid for by a reviewer's whole budget.
+  //
+  // A Monaco `.view-line` is laid out as wide as the WIDEST line of the
+  // document — the corpus's long `assert` makes that about 2500px — and as
+  // tall as one row. A clip taken from its bounding box alone is therefore a
+  // 1699x62 sliver that reaches far past the diff pane's right edge into
+  // whatever panel happens to sit there. That is not a hypothetical: the
+  // `diff-long-line` capture was exactly that, and the reviewer sent to it
+  // correctly reported the expected element missing and rated it 1/10, having
+  // been shown a status bar and a neighbouring panel's chat composer instead
+  // of the line the view exists to show.
+  //
+  // The pane's own box is the honest frame: everything inside it is the
+  // product, and a pane edge visible inside the frame is a finding rather than
+  // an artefact of the crop — which is what the review prompt promises the
+  // reviewer.
+  if (bounds) {
+    const box = await bounds.boundingBox();
+    if (box) {
+      x0 = Math.max(x0, box.x);
+      y0 = Math.max(y0, box.y);
+      x1 = Math.min(x1, box.x + box.width);
+      y1 = Math.min(y1, box.y + box.height);
+      // A single-row target leaves nothing around it to judge the row
+      // against. Grow symmetrically, never past the pane.
+      const grow = Math.max(0, MinClipHeight - (y1 - y0)) / 2;
+      y0 = Math.max(box.y, y0 - grow);
+      y1 = Math.min(box.y + box.height, y1 + grow);
+    }
+  }
   if (x1 - x0 < 8 || y1 - y0 < 8) return null;
   return { x: Math.round(x0), y: Math.round(y0), width: Math.round(x1 - x0), height: Math.round(y1 - y0) };
 }
+
+/**
+ * The least height a clip may have before it stops being reviewable.
+ *
+ * Roughly six code rows. A one-row frame gives a reviewer no vertical rhythm,
+ * no neighbouring line to compare alignment against, and no way to tell a pane
+ * edge from the crop.
+ */
+const MinClipHeight = 160;
 
 async function resizeWindow(app, page, size) {
   await app.evaluate(async ({ BrowserWindow }, s) => {
@@ -609,6 +715,9 @@ async function captureView(opts, viewName) {
       const size = SIZES[sizeName];
       await resizeWindow(app, page, size);
       const ctx = { page, app, view, viewName, size };
+      // Each size is captured from the landing state, not from whatever the
+      // previous size's setup left behind. See `resetDiffTabs`.
+      await resetDiffTabs(ctx);
       await view.setup(ctx);
       if (opts.sabotage) {
         await SABOTAGE[opts.sabotage].apply(ctx);
@@ -625,7 +734,10 @@ async function captureView(opts, viewName) {
       }
       let clip = null;
       if (targetFn) {
-        clip = await unionClip(page, targetFn(ctx), 24, size);
+        // The diff tab is the frame every clipped view is taken inside of.
+        // `review-shell` is the one view with `target: null`, and it is the
+        // whole window rather than a clip, so it never reaches this.
+        clip = await unionClip(page, targetFn(ctx), 24, size, diffTab(ctx));
         if (!clip) {
           throw new Error(
             `view '${viewName}': its target region is not on screen at size '${sizeName}'`,
@@ -732,7 +844,17 @@ async function main(argv) {
   }
 }
 
-main(process.argv.slice(2)).catch((err) => {
-  console.error(`capture-deepreview-views: ${err && err.message ? err.message : err}`);
-  process.exit(1);
-});
+// Only when run as a program. The contract suite IMPORTS this module to drive
+// `resetDiffTabs` against a stub page — a reset that silently stopped closing
+// tabs would otherwise be caught only by a full 21-capture regeneration, which
+// is exactly the ten-minute feedback loop the suite exists to avoid.
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  main(process.argv.slice(2)).catch((err) => {
+    console.error(`capture-deepreview-views: ${err && err.message ? err.message : err}`);
+    process.exit(1);
+  });
+}

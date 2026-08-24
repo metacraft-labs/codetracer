@@ -1079,6 +1079,56 @@ test.describe("DeepReview GUI - main features", () => {
     expect(Math.min(...markedWidths)).toBeLessThan(widestLine);
   });
 
+  test("UD-4: a deleted line is syntax-highlighted, not one flat run", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    // Monaco's inline diff draws each deletion as a `view-lines line-delete`
+    // view zone inside the MODIFIED editor, and builds it from the ORIGINAL
+    // model's tokens.  Those tokens are produced lazily, driven by what is
+    // rendered — and in an inline diff the original editor is a gutter strip
+    // that renders no text, so nothing ever asked for them and every deleted
+    // line came back as a single `mtk1` run.  UD-1 measured that and recorded
+    // it as needing `experimental.useTrueInlineView`; what it actually needs is
+    // for somebody to ask for the tokenization.
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    const deleted = tab.locator(`${DIFF_BODY} .view-lines.line-delete`);
+    await expect(deleted.first()).toBeVisible({ timeout: 20_000 });
+
+    // The `mtk<n>` token class ONLY. A span in a deleted zone also carries
+    // `char-delete` for the intra-line marking, so collecting whole
+    // `className` strings counts `"mtk1"` and `"mtk1 char-delete"` as two
+    // different token classes — and passes on a document with no tokens at
+    // all. That is not hypothetical: this assertion was written that way
+    // first, and it went green against a build with the fix removed.
+    const deletedTokenClasses = await deleted
+      .locator("span[class^='mtk']")
+      .evaluateAll((spans) =>
+        Array.from(
+          new Set(
+            spans
+              .map((s) => /\bmtk\d+\b/.exec(s.className)?.[0])
+              .filter((c): c is string => c !== undefined),
+          ),
+        ),
+      );
+
+    // More than one class across the deleted lines is the whole assertion: one
+    // class is Monaco's "I have no tokens for this" answer.  It is asserted on
+    // the DELETED zones alone rather than on the tab, because the tab's added
+    // and context lines have been coloured since UD-1 and would carry the
+    // assertion on their own.
+    expect(deletedTokenClasses.length).toBeGreaterThan(1);
+
+    // ... and the deletion is still a line of its own.  `useTrueInlineView`
+    // would also have produced coloured tokens, by merging each deletion and
+    // its replacement into ONE line — which is a different view, not a fixed
+    // one, and would silently delete the before/after pair the review's
+    // `diff-intraline` design view exists to show.
+    expect(await deleted.count()).toBeGreaterThan(0);
+  });
+
   test("Test 27: the invocation selector is an in-editor control above the function", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
