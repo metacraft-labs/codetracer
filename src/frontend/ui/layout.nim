@@ -1417,7 +1417,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let standaloneAutoHidePanels: seq[AutoHidePanelDef] = @[
       (content: Content.Build,         title: cstring"BUILD",          label: cstring"buildComponent-0"),
       (content: Content.BuildErrors,   title: cstring"PROBLEMS",       label: cstring"errorsComponent-0"),
-      (content: Content.SearchResults, title: cstring"SEARCH RESULTS", label: cstring"searchResultsComponent-0"),
+      (content: Content.SearchResults, title: cstring"FIND IN FILES", label: cstring"searchResultsComponent-0"),
       (content: Content.RequestPanel,  title: cstring"REQUESTS",       label: cstring"requestPanelComponent-0"),
     ]
 

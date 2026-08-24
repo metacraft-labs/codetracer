@@ -267,7 +267,7 @@ proc resolveAgainstWorkdir(trace: Trace; folders: seq[cstring]): seq[cstring] =
     else:
       result.addUniquePath(nodePath.join(trace.workdir, folder))
 
-proc fallbackLiveSourceFolders(trace: Trace): seq[cstring] =
+proc fallbackLiveSourceFolders*(trace: Trace): seq[cstring] =
   if trace.program.len > 0:
     if ($trace.program).isAbsoluteFilesystemPath:
       if pathExists(trace.program):
@@ -280,7 +280,7 @@ proc fallbackLiveSourceFolders(trace: Trace): seq[cstring] =
   if result.len == 0 and trace.workdir.len > 0 and pathExists(trace.workdir):
     result.addUniquePath(trace.workdir)
 
-proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
+proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} =
   ## Materialized/self-contained traces store source files under
   ## ``trace/files`` using relative paths from ``paths.json`` (the
   ## runtime-materialized mirror of the CTFS internal ``paths.json``
