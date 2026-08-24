@@ -1125,7 +1125,9 @@ if (-not [string]::IsNullOrWhiteSpace([string]$ttdRuntime["dbghelpDll"])) {
   [Environment]::SetEnvironmentVariable("WINDOWS_DIY_DBGHELP_DLL", [string]$ttdRuntime["dbghelpDll"], "Process")
 }
 
-$ensureTtd = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TTD" -Default $true
+# Same pairing as the .NET assertion below/above: WINDOWS_DIY_SKIP_TTD
+# suppressed Ensure-Ttd while this check kept its own $true default.
+$ensureTtd = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TTD" -Default (Test-BootstrapStepEnabled "TTD")
 if ($ensureTtd) {
   if ([string]::IsNullOrWhiteSpace($ttdExe)) {
     throw "Microsoft Time Travel Debugging is not available. Install with: winget install --id Microsoft.TimeTravelDebugging --exact --source winget"
@@ -1144,7 +1146,15 @@ if ($ensureTtd) {
 }
 
 [Environment]::SetEnvironmentVariable("DOTNET_SDK_VERSION_EFFECTIVE", $dotnetPinnedVersion, "Process")
-$ensureDotnet = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_DOTNET" -Default $true
+# The assertion defaults to whatever the PROVISIONING step decided.
+# These were two unpaired knobs: WINDOWS_DIY_SKIP_DOTNET suppressed
+# Ensure-Dotnet, while this assertion had its own default of $true -- so a
+# recorder that declared "I do not need .NET" (all of the blockchain
+# recorders set SKIP_DOTNET) still could not ACTIVATE its environment on a
+# box without SDK 9.0.310. Declaring a tool unnecessary and then refusing
+# to start without it is a contradiction the caller cannot resolve.
+# An explicit WINDOWS_DIY_ENSURE_DOTNET still wins in both directions.
+$ensureDotnet = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_DOTNET" -Default (Test-BootstrapStepEnabled "DOTNET")
 if ($ensureDotnet) {
   Assert-DotnetSdkPresent -DotnetExe $dotnetExe -PinnedSdkVersion $dotnetPinnedVersion
 }
@@ -1573,3 +1583,59 @@ Write-Host "CODETRACER_E2E_CT_PATH=$env:CODETRACER_E2E_CT_PATH"
 Write-Host "WINDOWS_DIY_GIT_BASH_BIN=$env:WINDOWS_DIY_GIT_BASH_BIN"
 Write-Host "WINDOWS_DIY_TTD_EXE=$env:WINDOWS_DIY_TTD_EXE"
 Write-Host "WINDOWS_DIY_CL_EXE=$env:WINDOWS_DIY_CL_EXE"
+
+# --- Toolchain summary: what the binaries THEMSELVES report -----------------
+#
+# Everything above prints provisioning INPUTS -- pinned versions, install
+# directories, source refs. Those are what we asked for. This block prints what
+# we actually got, and the two are not always the same.
+#
+# The concrete case that motivated it: `GCC_DIR` reads
+# `<root>\gcc\15.2.0`, and `gcc --version` on that exact path answers 16.1.0.
+# The directory name is not a fact about the compiler -- `ensure-gcc.ps1`
+# creates it as a JUNCTION into whatever `winget install
+# BrechtSanders.WinLibs.POSIX.UCRT` fetched, and winget accepts no version
+# argument. Every log line, CI record and bug report that quoted GCC_DIR was
+# therefore quoting a number no compiler ever claimed. That is the kind of
+# thing discovered months later while bisecting a miscompile.
+#
+# Reporting the self-reported version costs one process launch per tool and
+# makes the discrepancy visible on every activation instead of never. It is
+# deliberately non-fatal: a tool that is absent or refuses `--version` is
+# reported as such rather than failing an environment that may not need it.
+function Get-ReportedVersion {
+    param([string]$Exe)
+    if ([string]::IsNullOrWhiteSpace($Exe) -or -not (Test-Path -LiteralPath $Exe)) {
+        return "(not provisioned)"
+    }
+    try {
+        $line = & $Exe --version 2>&1 | Select-Object -First 1
+        if ("$line" -match '([0-9]+\.[0-9]+(\.[0-9]+)?)') { return $Matches[1] }
+        return "(no version reported)"
+    } catch {
+        return "(--version failed)"
+    }
+}
+
+function Write-ToolLine {
+    param([string]$Name, [string]$Exe, [string]$Pinned = "")
+    $reported = Get-ReportedVersion -Exe $Exe
+    $suffix = ""
+    if ($Pinned -and $reported -notmatch '^\(' -and $reported -ne $Pinned) {
+        # The whole point of the block. Say it loudly enough to notice.
+        $suffix = "   <-- MISMATCH: pinned $Pinned"
+    }
+    Write-Host ("  {0,-8} {1,-12} {2}{3}" -f $Name, $reported, $Exe, $suffix)
+}
+
+Write-Host ""
+Write-Host "codetracer toolchain -- versions as reported by the binaries:"
+Write-ToolLine -Name "gcc"  -Exe (Join-Path $gccDir "bin\gcc.exe") -Pinned $toolchain["GCC_VERSION"]
+Write-ToolLine -Name "nim"  -Exe (Join-Path $nimDir "bin" | Join-Path -ChildPath "nim.exe") -Pinned $toolchain["NIM_VERSION"]
+Write-ToolLine -Name "go"   -Exe (Join-Path $goDir "bin\go.exe") -Pinned $toolchain["GO_VERSION"]
+Write-ToolLine -Name "node" -Exe (Join-Path $nodeDir "node.exe") -Pinned $toolchain["NODE_VERSION"]
+Write-Host ""
+Write-Host "  A MISMATCH above is not cosmetic: the pinned number is what every"
+Write-Host "  log and bug report will quote, and the reported one is what built"
+Write-Host "  your artifacts. See windows/ensure-gcc.ps1 for why they diverge."
+Write-Host ""
