@@ -972,11 +972,27 @@ proc switchTabHistory*(data: Data) {.exportc, locks: 0.} =
     data.openTab(newTab.name, newTab.editorView)
 
 proc openLocation*(data: Data, path: cstring, line: int) {.async.} =
-  utils.openTab(data, path, ViewSource) # , fromPath(path))
-  # TODO add a handler like `onTabReady` and check if it's already ready first
-  discard windowSetTimeout(proc =
-    gotoLine(line, highlight=true),
-    1_000)
+  # Pass line to openTab so the built-in mechanisms handle scroll reliably:
+  #   - already-open tab  → showTab calls editor.focusLine(line) immediately
+  #   - new tab           → openNewEditorView polls every 10ms until Monaco
+  #                         is mounted, then calls focusLine
+  utils.openTab(data, path, ViewSource, line=line)
+  # Additionally apply the orange flash highlight via a poll that targets the
+  # specific tab key.  focusLine (above) only scrolls; this adds the visual
+  # indicator so the user knows exactly which line was matched.
+  let tabKey = editorTabPath(path, ViewSource)
+  proc applyHighlight() =
+    if not data.ui.editors.hasKey(tabKey):
+      discard windowSetTimeout(applyHighlight, 50)
+      return
+    let editorComp = data.ui.editors[tabKey]
+    if editorComp.isNil or isNull(editorComp.monacoEditor):
+      discard windowSetTimeout(applyHighlight, 50)
+      return
+    editorComp.monacoEditor.revealLineInCenter(
+      parseJSInt(cast[cstring](line)), Immediate)
+    highlightLine(tabKey, line)
+  discard windowSetTimeout(applyHighlight, 50)
 
 proc openFile* =
   ipc.send "CODETRACER::open-tab", js{}
