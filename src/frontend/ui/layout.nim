@@ -245,6 +245,81 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   """.}
 
 
+proc setupDropdownDismissListeners() =
+  ## Close an open dropdown when Escape is pressed or the pointer goes down
+  ## outside it.  Without this the branch picker stayed open until its own
+  ## trigger was clicked again, so it could be left hanging over the panel while
+  ## the user worked elsewhere.
+  ##
+  ## Dismissal re-clicks the menu's own trigger rather than hiding the element:
+  ## each dropdown's open state lives in its ViewModel, and hiding the DOM alone
+  ## would leave that state saying "open" — the next click on the trigger would
+  ## then appear to do nothing.
+  ##
+  ## Listeners are in the capture phase and never call `preventDefault`, so the
+  ## click that dismisses a menu still reaches whatever it landed on.
+  {.emit: """
+    (function () {
+      // One entry per dropdown:
+      //   container — the whole control; a pointer landing inside it is not a
+      //               dismissal, so the menu's own rows stay clickable;
+      //   open      — a selector that exists only while the menu is open;
+      //   trigger   — what to re-click to close it.  Null means "the element
+      //               immediately before the open menu", which is how the
+      //               event-log filters are built.
+      //
+      // Context menus are absent on purpose: `viewmodel/views/context_menu_bridge`
+      // already dismisses them on Escape and on any document click, and driving
+      // them from here as well would close them twice.
+      var DISMISSIBLE = [
+        { container: '.vcs-branch-picker',
+          open: '.vcs-branch-current-open',
+          trigger: '.vcs-branch-current-open' },
+        { container: '.layout-buttons-container',
+          open: '.layout-buttons-container.active',
+          trigger: '.layout-buttons-container.active' },
+        { container: '.session-tab-bar',
+          open: '.session-tab-bar.overflow-open',
+          trigger: '.session-tab-bar.overflow-open .session-tab-overflow' },
+        { container: '.ct-picker',
+          open: '.ct-picker-trigger--open',
+          trigger: '.ct-picker-trigger--open' },
+        { container: '.hamburger-dropdown-container',
+          open: '.dropdown-list.active',
+          trigger: null }
+      ];
+
+      function triggerFor(entry) {
+        if (entry.trigger !== null) { return document.querySelector(entry.trigger); }
+        var opened = document.querySelector(entry.open);
+        return opened === null ? null : opened.previousElementSibling;
+      }
+
+      function closeOpenMenus(isInside) {
+        for (var i = 0; i < DISMISSIBLE.length; i++) {
+          var entry = DISMISSIBLE[i];
+          if (document.querySelector(entry.open) === null) { continue; }
+          if (isInside !== null && isInside(entry.container)) { continue; }
+          var trigger = triggerFor(entry);
+          if (trigger !== null) { trigger.click(); }
+        }
+      }
+
+      document.addEventListener('mousedown', function (ev) {
+        var target = ev.target;
+        if (!target || !target.closest) { return; }
+        closeOpenMenus(function (container) {
+          return target.closest(container) !== null;
+        });
+      }, true);
+
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Escape' && ev.keyCode !== 27) { return; }
+        closeOpenMenus(null);
+      }, true);
+    })();
+  """.}
+
 proc setupSelectedPanelOutline() =
   ## Draw the selected panel's outline as ONE stroked SVG path.
   ##
@@ -1420,6 +1495,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   setupDragToPinListeners(layout)
   setupClickToFocusListeners()
   setupSelectedPanelOutline()
+  setupDropdownDismissListeners()
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
     let isEditor = panel.config.componentState.isEditor.to(bool)
     let edge = panel.edge

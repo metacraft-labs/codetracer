@@ -671,6 +671,12 @@ proc onlyRecordedEvent(self: EventLogComponent) =
   for tag in eventTags:
     self.switchEventTagSelection(tag, true)
 
+const FilterDropdownTriggerGap = 6.0
+  ## Pixels between the filter button and the menu it opens.  Mirrors
+  ## `DROPDOWN_TRIGGER_GAP` in styles/components/shared_widgets.styl, which
+  ## every menu positioned by CSS uses; this menu is positioned from JavaScript,
+  ## so it cannot read that value.
+
 proc setupFilterDropdown(self: EventLogComponent) =
   ## Wire up the #category-image filter button to show/hide the event-kind
   ## filter dropdown.  Called once from eventLogAfterRedraws after the IsoNim
@@ -764,7 +770,12 @@ proc setupFilterDropdown(self: EventLogComponent) =
     let filterButton = document.getElementById(dropDownId)
     let rect = filterButton.getBoundingClientRect()
     containerKdom.style.position = "absolute"
-    containerKdom.style.top = &"{rect.bottom}px"
+    # The gap every menu leaves below its trigger.  It lives in CSS for the
+    # menus a stylesheet can position (`DROPDOWN_TRIGGER_GAP`,
+    # styles/components/shared_widgets.styl); this one is placed from a
+    # measured rect because it is appended to `document.body`, so the same
+    # 6px has to be added here.
+    containerKdom.style.top = &"{rect.bottom + FilterDropdownTriggerGap}px"
     containerKdom.style.left = &"{rect.left}px"
     containerKdom.style.zIndex = "1000".cstring
     containerKdom.style.display = "block"
@@ -801,6 +812,31 @@ proc setupFilterDropdown(self: EventLogComponent) =
         self.dropDowns[categoryType] = not self.dropDowns[Filter]
     if not self.dropDowns[Filter] and self.focusedDropDowns[Filter]:
       cast[Element](e.target).blur())
+
+  filterBtn.addEventListener(cstring"keydown", proc(e: Event) =
+    ## Escape closes the menu, as it does for every other dropdown (see
+    ## `setupDropdownDismissListeners` in ui/layout.nim, which handles the ones
+    ## it can reach).  This menu is not in that registry: dismissal there works
+    ## by re-clicking the trigger, and this trigger's open state is carried by
+    ## focus rather than by a class — clicking it while open only toggles
+    ## `dropDowns[Filter]` back on and leaves the menu up.
+    ##
+    ## The listener sits on the button because the button is what holds focus
+    ## the whole time the menu is open: `showDropdown` focuses it, and the
+    ## container swallows mousedown so clicking a checkbox never takes focus
+    ## away.
+    if cast[KeyboardEvent](e).keyCode == ESC_KEY_CODE:
+      e.preventDefault()
+      # Escape is a global shortcut too; without this the same press would
+      # also reach the document-level handlers.
+      e.stopPropagation()
+      # Both flags first, so the `blur` below finds nothing left to close and
+      # the next click on the button opens the menu rather than toggling a
+      # state that says it is already open.
+      self.focusedDropDowns[Filter] = false
+      self.dropDowns[Filter] = false
+      hideDropdown()
+      filterBtn.blur())
 
 proc findElement(self: EventLogComponent): Element =
   var denseTable = self.denseTable
