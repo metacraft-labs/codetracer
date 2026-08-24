@@ -894,11 +894,18 @@ proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.expor
     tab.viewLine = line
     if not tab.monacoEditor.isNil:
       # echo "revealLine", line
-      tab.monacoEditor.revealLineInCenterIfOutsideViewport(parseJSInt(cast[cstring](line)), Immediate)
+      if highlight:
+        # Always center when navigating to a specific line (e.g. from Find in
+        # Files).  revealLineInCenter unconditionally scrolls the line to the
+        # middle of the viewport so the user immediately sees the result.
+        # revealLineInCenterIfOutsideViewport is used for debugger stepping
+        # where constantly re-centering would be jarring.
+        tab.monacoEditor.revealLineInCenter(parseJSInt(cast[cstring](line)), Immediate)
+        highlightLine(active, line)
+      else:
+        tab.monacoEditor.revealLineInCenterIfOutsideViewport(parseJSInt(cast[cstring](line)), Immediate)
       if change:
         data.services.editor.changeLine = false
-      if highlight:
-        highlightLine(active, line)
 
 proc focusComponent*(data: Data, component: Component) =
   cast[kdom.Element](dom.window.document.activeElement).blur()

@@ -116,21 +116,13 @@ proc renderSearchResultsPanel*(r: MockRenderer;
 
   let panel = ui(r):
     tdiv(class = "fif-panel search-results"):
-      tdiv(class = "fif-header"):
-        span(class = "fif-title"):
-          text "FIND IN FILES"
-        tdiv(class = "fif-header-actions"):
-          tdiv(class = "fif-icon-btn fif-close"):
-            text "×"
       tdiv(class = "fif-search-bar"):
-        span(class = "fif-search-icon"):
-          text "⌕"
-        span(class = "fif-chip"):
-          text "FIND IN FILES"
         input(`type` = "text",
               id = "fif-input",
-              class = "fif-input",
-              placeholder = "Search...")
+              class = "fif-input ct-input-panel ct-input-search-image",
+              placeholder = "Search in files...")
+        span(class = "fif-badge"): text "Find in Files"
+        span(class = "fif-clear-btn"): text "×"
       tdiv(ref = bodyContainer,
            class = "fif-body"):
         discard
@@ -299,39 +291,42 @@ when defined(js):
                              isonim_dom.Node(rowEl))
     groupEl
 
+  proc setNodeDisplay(node: isonim_dom.Node; display: cstring)
+      {.importjs: "#.style.display = #".}
+
   proc renderSearchResultsPanel*(r: WebRenderer;
                                  vm: SearchResultsVM): isonim_dom.Element =
     ## Render the Find in Files panel for the real DOM.
+    ##
+    ## Search bar structure:
+    ##   div.fif-search-bar           (ct-input-com-pal-like wrapper)
+    ##     span.ct-origin-badge.fif-badge   "FIF" label badge
+    ##     input.fif-input            transparent inner input, flex:1
+    ##     button.fif-clear-btn       × clear, hidden when input is empty
     var bodyContainer: isonim_dom.Element
     var inputEl: isonim_dom.Element
+    var clearBtnEl: isonim_dom.Element
 
     let panel = ui(r):
       tdiv(class = "fif-panel search-results"):
-        tdiv(class = "fif-header"):
-          span(class = "fif-title"):
-            text "FIND IN FILES"
-          tdiv(class = "fif-header-actions"):
-            tdiv(class = "fif-icon-btn fif-close",
-                 onclick = proc() =
-                   vm.setLoading(false)
-                   vm.clearResults()):
-              text "×"
         tdiv(class = "fif-search-bar"):
-          span(class = "fif-search-icon"):
-            text "⌕"
-          span(class = "fif-chip"):
-            text "FIND IN FILES"
           input(ref = inputEl,
                 `type` = "text",
                 id = "fif-input",
-                class = "fif-input",
-                placeholder = "Search...")
+                class = "fif-input ct-input-panel ct-input-search-image",
+                placeholder = "Search in files...")
+          span(class = "fif-badge"):
+            text "Find in Files"
+          span(ref = clearBtnEl,
+               class = "fif-clear-btn"):
+            text "×"
         tdiv(ref = bodyContainer,
              class = "fif-body"):
           discard
 
-    # Wire the search input: Enter → vm.onSearch (which owns all state
-    # transitions: save-recent, clear, setQuery, setLoading, IPC call).
+    # Wire the search input:
+    #   Enter      → vm.onSearch (owns all state transitions)
+    #   oninput    → show/hide the clear button based on value presence
     if not inputEl.isNil:
       isonim_dom.addEventListener(isonim_dom.Node(inputEl), cstring"keydown",
         proc(ev: isonim_dom.Event) =
@@ -341,6 +336,22 @@ when defined(js):
               vm.onSearch(qs)
           else:
             vm.setActive(true))
+      isonim_dom.addEventListener(isonim_dom.Node(inputEl), cstring"input",
+        proc(ev: isonim_dom.Event) =
+          let hasValue = isonim_dom.Node(inputEl).inputNodeValue().len > 0
+          if not clearBtnEl.isNil:
+            isonim_dom.Node(clearBtnEl).setNodeDisplay(
+              if hasValue: cstring"flex" else: cstring"none"))
+
+    # Wire the clear button: wipe the input, reset VM state.
+    if not clearBtnEl.isNil:
+      isonim_dom.addEventListener(isonim_dom.Node(clearBtnEl), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          if not inputEl.isNil:
+            isonim_dom.Node(inputEl).setInputNodeValue(cstring"")
+          isonim_dom.Node(clearBtnEl).setNodeDisplay(cstring"none")
+          vm.setLoading(false)
+          vm.clearResults())
 
     # Reactive body: rebuilt from scratch whenever signals change.
     createRenderEffect proc() =

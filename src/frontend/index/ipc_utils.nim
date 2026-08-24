@@ -40,6 +40,22 @@ proc onSearchProgram*(sender: js, response: cstring) {.async.} =
     if s.len > 0:
       searchRoots.add(s)
 
+  # Filter searchRoots to the trace workdir subtree only.
+  # Some recorders (e.g. Ruby) include gem/stdlib paths in sourceFolders,
+  # which would make rg search /nix/store/, /usr/lib/ruby/, ~/.gem/ etc.
+  # We only want to search files the user actually wrote, so we restrict to
+  # paths under the trace's working directory when one is available.
+  if not data.trace.isNil:
+    let workdir = $data.trace.workdir
+    if workdir.len > 0:
+      let filtered = searchRoots.filterIt(it.startsWith(workdir))
+      if filtered.len > 0:
+        searchRoots = filtered
+      elif searchRoots.len > 0:
+        # None of the recorded source folders are under workdir — use workdir
+        # itself as the search root so at least the project files are searched.
+        searchRoots = @[workdir]
+
   # Fallback for self-contained traces: search the materialized files tree.
   if searchRoots.len == 0 and not data.trace.isNil:
     let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
@@ -93,8 +109,9 @@ proc onSearchProgram*(sender: js, response: cstring) {.async.} =
       mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
       batch = @[]
 
-  if batch.len > 0:
-    mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
+  # Always send the final batch, even when empty, so the renderer can
+  # clear the loading shimmer when ripgrep finds no matches.
+  mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>

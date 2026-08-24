@@ -156,16 +156,17 @@ else:
     discard
 
 proc installSearchVMCallbacks*(vm: SearchResultsVM) =
-  ## Wire the ``onSearch`` callback on ``vm`` so the Find in Files input
-  ## can trigger a real search without importing the search service.
+  ## Wire callbacks on ``vm`` so the Find in Files view can trigger
+  ## searches and navigate to results without importing those services.
   ##
-  ## Responsibility of the callback (owns all state transitions):
-  ## 1. Save the previous search query+count to recent-searches if it
-  ##    had results (done BEFORE clearing so the old count is still
-  ##    readable from the VM signal).
+  ## ``onSearch`` responsibility:
+  ## 1. Save previous query+count to recent-searches if it had results.
   ## 2. Clear existing results and set the new query string.
   ## 3. Enable the loading shimmer.
   ## 4. Dispatch ``CODETRACER::search-program`` via the search service.
+  ##
+  ## ``onJumpToResult`` opens the matched file at the given line using
+  ## the same ``data.openLocation`` path the editor uses.
   vm.onSearch = proc(query: string) =
     # Save the previous search as a recent entry (if it had results).
     let prevQuery = vm.currentQuery()
@@ -178,6 +179,9 @@ proc installSearchVMCallbacks*(vm: SearchResultsVM) =
     vm.setLoading(true)
     # Dispatch the search IPC via the legacy service.
     data.services.search.searchProgram(cstring(query))
+
+  vm.onJumpToResult = proc(path: string, line: int) =
+    discard data.openLocation(cstring(path), line)
 
 proc parseRawLocation*(location: cstring): (cstring, int) =
   let tokens = location.split(cstring":")
@@ -300,8 +304,9 @@ proc syncSearchResultsAppendMatch*(matchRow: SearchResultLine) =
 proc syncSearchResultsAppendBatch*(matches: seq[SearchResultLine]) =
   ## Bulk variant of ``syncSearchResultsAppendMatch`` — append a batch
   ## of result rows in a single ``problems.val`` write so the reactive
-  ## body rebuilds only once.  No-op when the VM is not initialised.
-  if searchResultsVMInstance.isNil or matches.len == 0:
+  ## body rebuilds only once.  An empty batch is passed through so the
+  ## VM can clear the loading shimmer when ripgrep finds no matches.
+  if searchResultsVMInstance.isNil:
     return
   searchResultsVMInstance.appendResults(matches)
 

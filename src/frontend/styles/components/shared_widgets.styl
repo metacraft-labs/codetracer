@@ -234,7 +234,19 @@ body
 #dock
   height: 80%
 
+// Line-highlight flash: starts with a bright orange pulse then settles
+// to the subtle secondary surface colour for the remainder of the 2s
+// Monaco decoration lifetime set by highlightLine() in renderer.nim.
+@keyframes ct-line-flash
+  0%
+    background-color: rgba(251, 146, 60, 0.55)
+  40%
+    background-color: rgba(251, 146, 60, 0.20)
+  100%
+    background-color: colors-ui-surface-primary-secondary
+
 .highlight
+  animation: ct-line-flash 2s ease-out forwards
   background-color: colors-ui-surface-primary-secondary !important
 
 .value-expanded-compound::before
