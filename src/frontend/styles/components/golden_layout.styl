@@ -214,28 +214,20 @@
 //   filter: MENU_BUTTON_SVG_FILTER
 
 .lm_header .lm_tab .lm_close_tab
-  background-image: LAYOUT_TAB_CLOSE_ICON_PATH !important
+  tab-icon(LAYOUT_TAB_CLOSE_ICON_PATH, 0.6em 0.6em)
   width: 0.6em !important
   height: 0.6em !important
-  background-size: 0.6em 0.6em
   position: static !important
-  opacity: 1 !important
+  cursor: pointer
 
 .lm_header .lm_tab .lm_pin_tab
-  background-image: LAYOUT_TAB_PIN_ICON_PATH !important
-  background-repeat: no-repeat
-  background-position: center
-  background-size: 0.85em 0.85em
+  tab-icon(LAYOUT_TAB_PIN_ICON_PATH, 0.85em 0.85em)
   width: 0.85em !important
   height: 0.85em !important
   position: static !important
   cursor: pointer
   margin-right: 0.3em
-  opacity: 0.7
   flex-shrink: 0
-
-  &:hover
-    opacity: 1
 
 .lm_header .lm_tab
   height: 1.01em !important
