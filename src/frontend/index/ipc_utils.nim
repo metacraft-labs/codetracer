@@ -1,5 +1,5 @@
 import
-  std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
+  std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
@@ -8,6 +8,93 @@ import
   ../../common/[ ct_logging, paths ]
 
 var Object {.importc, nodecl.}: JsObject
+
+proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
+
+proc jsEmptyArray: JsObject {.importjs: "([])".}
+  ## Return a fresh empty JS array.  Used to satisfy ``nimCopy``'s
+  ## ``.length`` read when the renderer deserializes ``seq[SearchResult]``
+  ## — without this, the ``customFields`` field arrives as ``undefined``
+  ## and the copy crashes with "Cannot read properties of undefined
+  ## (reading 'length')``.
+
+proc onSearchProgram*(sender: js, response: cstring) {.async.} =
+  ## Handle ``CODETRACER::search-program`` from the renderer.
+  ##
+  ## Uses ripgrep (``rg``) to search the trace's resolved source folders for
+  ## the given query string, then streams batches of 50 results back to the
+  ## renderer as ``CODETRACER::search-results-updated`` messages so the Find
+  ## in Files panel starts populating immediately.
+  ##
+  ## Falls back to the ``outputFolder/files/`` subtree for self-contained /
+  ## imported traces that have no live source folders recorded.
+  let query = $response
+  if query.len == 0:
+    return
+
+  # Resolve the search roots from the trace metadata.
+  let sourceFolders = await sourceFoldersFromTracePaths(data.trace)
+  var searchRoots: seq[string] = @[]
+  for f in sourceFolders:
+    let s = $f
+    if s.len > 0:
+      searchRoots.add(s)
+
+  # Fallback for self-contained traces: search the materialized files tree.
+  if searchRoots.len == 0 and not data.trace.isNil:
+    let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
+    if fsExistsSync(cstring(filesRoot)):
+      searchRoots.add(filesRoot)
+    elif ($data.trace.outputFolder).len > 0:
+      searchRoots.add($data.trace.outputFolder)
+
+  if searchRoots.len == 0:
+    infoPrint "onSearchProgram: no source folders for query: ", query
+    return
+
+  # Escape the query and build the ripgrep invocation.
+  #   -n   include line numbers
+  #   -F   treat query as a literal string, not a regex
+  #   -i   case-insensitive
+  #   -H   always print the filename (even when searching a single file)
+  #   --no-heading  one line per match: path:line:text
+  let escapedQuery = query.replace("'", "'\\''")
+  let rootsArg = searchRoots.mapIt("'" & it.replace("'", "'\\''") & "'").join(" ")
+  let rgCmd = cstring(&"rg -n -F -i -H --no-heading -- '{escapedQuery}' {rootsArg}")
+
+  infoPrint "onSearchProgram: rg query=", query, " roots=", rootsArg
+
+  # rg exits with code 1 for no matches — that is not an error.
+  let (stdoutData, _, _) = await childProcessExec(rgCmd)
+
+  let lines = ($stdoutData).splitLines()
+  var batch: seq[JsObject] = @[]
+  for rawLine in lines:
+    if rawLine.len == 0:
+      continue
+    # rg -H --no-heading output:  path:linenum:text
+    # Paths on Linux do not contain colons, so the first two colons delimit.
+    let colonIdx1 = rawLine.find(':')
+    if colonIdx1 < 0:
+      continue
+    let colonIdx2 = rawLine.find(':', colonIdx1 + 1)
+    if colonIdx2 < 0:
+      continue
+    let filePath = rawLine[0 ..< colonIdx1]
+    let lineStr  = rawLine[colonIdx1 + 1 ..< colonIdx2]
+    let lineText = rawLine[colonIdx2 + 1 .. ^1]
+    var lineNum = 0
+    try:
+      lineNum = parseInt(lineStr)
+    except:
+      continue
+    batch.add(js{text: cstring(lineText), path: cstring(filePath), line: lineNum, customFields: jsEmptyArray()})
+    if batch.len >= 50:
+      mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
+      batch = @[]
+
+  if batch.len > 0:
+    mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>
@@ -108,6 +195,7 @@ proc configureIpcMain* =
     # update filesystem component
     "load-path-content"
     "open-devtools"
+    "search-program"
 
 
 proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =

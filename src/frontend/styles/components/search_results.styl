@@ -1,117 +1,295 @@
-// Search results panel — VS Code-style grouped results with highlighted matches.
+// Find in Files panel — Figma-matched layout with design system tokens.
+//
+// Class prefix: fif-  (Find In Files)
+// Legacy classes kept for wiring compatibility:
+//   .search-results        — panel root identity (auto-hide, render-panel lookups)
+//   .search-results-match-row   — Playwright E2E anchor
+//   .search-results-highlight   — match highlight span
 
-.search-results
-  font-size: 13px
-  background-color: colors-ui-surface-base-panel
-  color: colors-ui-text-primary-body
-  overflow: hidden
+// ---------------------------------------------------------------------------
+// Shimmer animation
+// ---------------------------------------------------------------------------
+
+@keyframes fif-shimmer
+  0%
+    background-position: -400px 0
+  100%
+    background-position: 400px 0
+
+// ---------------------------------------------------------------------------
+// Panel root
+// ---------------------------------------------------------------------------
+
+.fif-panel
   display: flex
   flex-direction: column
   height: 100%
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
+  font-size: 13px
+  overflow: hidden
 
-.search-results-header
+// ---------------------------------------------------------------------------
+// Header row: title + action icons
+// ---------------------------------------------------------------------------
+
+.fif-header
   display: flex
   align-items: center
-  padding: 4px 8px
-  font-size: 12px
-  color: colors-ui-text-primary-body
-  opacity: 0.8
-  border-bottom: 1px solid colors-ui-surface-primary-tertiary
+  justify-content: space-between
+  padding: 8px 10px 6px
   flex-shrink: 0
+  border-bottom: 1px solid colors-ui-border-secondary
 
-  .search-results-count
-    font-weight: 600
+.fif-title
+  font-size: 11px
+  font-weight: 700
+  letter-spacing: 0.08em
+  text-transform: uppercase
+  color: colors-ui-text-primary-body-subtle
+  user-select: none
 
-  .search-results-query-label
-    margin-left: 4px
-
-.search-results-highlight
-  background-color: rgba(234, 179, 8, 0.35)
-  color: inherit
-  border-radius: 2px
-  padding: 0 1px
-
-.search-results-find-query
-  padding: 4px 8px
-  flex-shrink: 0
-
-  input
-    width: 100%
-    box-sizing: border-box
-    padding: 3px 6px
-    font-size: 12px
-    background-color: colors-ui-surface-primary-tertiary
-    color: colors-ui-text-primary-body
-    border: 1px solid colors-ui-surface-primary-tertiary
-    border-radius: 3px
-    outline: none
-
-    &:focus
-      border-color: colors-ui-surface-primary-secondary-hover
-
-.search-results-body
-  overflow-y: auto
-  flex: 1
-
-.search-results-file-group
-  margin-bottom: 2px
-
-.search-results-file-header
+.fif-header-actions
   display: flex
   align-items: center
-  padding: 3px 8px
-  font-size: 12px
-  font-weight: 600
-  background-color: colors-ui-surface-primary-tertiary
-  color: colors-ui-text-primary-body
-  position: sticky
-  top: 0
-  z-index: 1
+  gap: 4px
 
-  .search-results-file-path
-    overflow: hidden
-    text-overflow: ellipsis
-    white-space: nowrap
-    flex: 1
-
-  .search-results-file-count
-    opacity: 0.6
-    margin-left: 4px
-    flex-shrink: 0
-
-.search-results-match-row
+.fif-icon-btn
   display: flex
-  align-items: baseline
-  padding: 2px 8px 2px 20px
+  align-items: center
+  justify-content: center
+  width: 22px
+  height: 22px
+  border-radius: 4px
   cursor: pointer
-  font-family: monospace
+  color: colors-ui-text-primary-body-subtle
+  font-size: 14px
+  line-height: 1
+
+  &:hover
+    background-color: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body
+
+.fif-close
+  font-size: 16px
+
+// ---------------------------------------------------------------------------
+// Search bar: icon + chip + input
+// ---------------------------------------------------------------------------
+
+.fif-search-bar
+  display: flex
+  align-items: center
+  margin: 8px 10px
+  padding: 5px 8px
+  background-color: colors-ui-surface-input-default
+  border: 1px solid colors-ui-border-secondary
+  border-radius: 6px
+  gap: 6px
+  flex-shrink: 0
+
+  &:focus-within
+    border-color: colors-ui-border-focus
+
+.fif-search-icon
+  display: flex
+  align-items: center
+  color: colors-ui-text-primary-body-subtle
+  flex-shrink: 0
+
+.fif-chip
+  display: inline-flex
+  align-items: center
+  padding: 1px 7px
+  background-color: colors-ui-surface-action-primary
+  color: colors-ui-text-on-action-primary
+  border-radius: 4px
+  font-size: 10px
+  font-weight: 700
+  letter-spacing: 0.06em
+  text-transform: uppercase
+  white-space: nowrap
+  flex-shrink: 0
+  user-select: none
+
+.fif-input
+  flex: 1
+  background: none
+  border: none
+  outline: none
+  color: colors-ui-text-primary-body
+  font-size: 13px
+  min-width: 0
+  padding: 0
+
+  &::placeholder
+    color: colors-ui-text-primary-body-subtle
+    opacity: 0.6
+
+// ---------------------------------------------------------------------------
+// Body: scrollable results area
+// ---------------------------------------------------------------------------
+
+.fif-body
+  flex: 1
+  overflow-y: auto
+  min-height: 0
+
+// ---------------------------------------------------------------------------
+// Empty / recent state
+// ---------------------------------------------------------------------------
+
+.fif-empty
+  padding: 12px 10px
+  display: flex
+  flex-direction: column
+  gap: 2px
+
+.fif-empty-prompt
+  color: colors-ui-text-primary-body-subtle
   font-size: 12px
-  line-height: 1.6
+  text-align: center
+  padding: 24px 0
+  opacity: 0.7
+
+.fif-recent-label
+  font-size: 11px
+  font-weight: 600
+  letter-spacing: 0.05em
+  text-transform: uppercase
+  color: colors-ui-text-primary-body-subtle
+  padding: 4px 2px 8px
+  opacity: 0.7
+
+.fif-recent-item
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding: 5px 8px
+  border-radius: 5px
+  cursor: pointer
+  gap: 8px
 
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover
 
-  .search-results-line-number
-    min-width: 40px
-    text-align: right
-    margin-right: 8px
-    opacity: 0.5
-    flex-shrink: 0
-    user-select: none
-
-  .search-results-match-text
-    overflow: hidden
-    text-overflow: ellipsis
-    white-space: nowrap
-    flex: 1
-
-.search-results-empty
-  padding: 16px
-  text-align: center
-  opacity: 0.5
+.fif-recent-query
   font-size: 12px
+  color: colors-ui-text-primary-body
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  flex: 1
 
-// Keep legacy visibility toggle working
+.fif-recent-count
+  font-size: 11px
+  color: colors-ui-text-primary-body-subtle
+  white-space: nowrap
+  flex-shrink: 0
+
+// ---------------------------------------------------------------------------
+// Loading shimmer rows
+// ---------------------------------------------------------------------------
+
+.fif-shimmer-block
+  height: 28px
+  margin: 3px 10px
+  border-radius: 4px
+  background: linear-gradient(
+    90deg,
+    colors-ui-surface-primary-tertiary 25%,
+    colors-ui-surface-primary-secondary-hover 50%,
+    colors-ui-surface-primary-tertiary 75%
+  )
+  background-size: 800px 100%
+  animation: fif-shimmer 1.4s infinite linear
+
+// ---------------------------------------------------------------------------
+// File group + header
+// ---------------------------------------------------------------------------
+
+.fif-file-group
+  margin-bottom: 1px
+
+.fif-file-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding: 4px 10px
+  background-color: colors-ui-surface-primary-tertiary
+  position: sticky
+  top: 0
+  z-index: 1
+  gap: 8px
+
+.fif-file-path
+  font-size: 12px
+  font-weight: 600
+  color: colors-ui-text-primary-body
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  flex: 1
+
+.fif-file-count
+  font-size: 11px
+  color: colors-ui-text-primary-body-subtle
+  white-space: nowrap
+  flex-shrink: 0
+
+// ---------------------------------------------------------------------------
+// Match rows
+// ---------------------------------------------------------------------------
+
+.fif-match-row
+  display: flex
+  align-items: baseline
+  padding: 3px 10px 3px 20px
+  cursor: pointer
+  font-family: monospace
+  font-size: 12px
+  line-height: 1.6
+  gap: 6px
+
+  &:hover
+    background-color: colors-ui-surface-primary-secondary-hover
+
+.fif-line-number
+  min-width: 36px
+  text-align: right
+  color: colors-ui-text-primary-body-subtle
+  font-size: 11px
+  flex-shrink: 0
+  user-select: none
+
+.fif-match-text
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  flex: 1
+  color: colors-ui-text-primary-body
+
+// ---------------------------------------------------------------------------
+// Match highlight — orange accent matching Figma
+// ---------------------------------------------------------------------------
+
+.fif-highlight
+  background-color: rgba(251, 146, 60, 0.30)
+  color: inherit
+  border-radius: 2px
+  padding: 0 1px
+
+// Keep legacy selector working (Playwright + existing E2E tests).
+.search-results-highlight
+  background-color: rgba(251, 146, 60, 0.30)
+  color: inherit
+  border-radius: 2px
+  padding: 0 1px
+
+// ---------------------------------------------------------------------------
+// Legacy visibility toggle (GoldenLayout / auto-hide shim)
+// ---------------------------------------------------------------------------
+
 .search-results-active
   display: flex
 

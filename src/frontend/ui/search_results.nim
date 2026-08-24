@@ -22,7 +22,8 @@ from ../viewmodel/store/types as vmtypes import SearchResultLine
 from ../viewmodel/viewmodels/search_results_vm import
   SearchResultsVM, createSearchResultsVM,
   setQuery, setResults, appendResults, clearResults,
-  setActive, setFilter, jumpToResult
+  setActive, setFilter, setLoading, addRecentSearch, jumpToResult,
+  currentQuery, currentResultCount
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_search_results_view import
   mountIsoNimSearchResults
@@ -38,6 +39,7 @@ var isoNimSearchResultsMounted*: bool = false
 
 proc tryMountIsoNimSearchResultsPanel*()
 proc requestFixedSearchRender*()
+proc installSearchVMCallbacks*(vm: SearchResultsVM)
 
 # ---------------------------------------------------------------------------
 # Fixed-search overlay — direct DOM renderer.
@@ -153,6 +155,30 @@ else:
   proc requestFixedSearchRender*() =
     discard
 
+proc installSearchVMCallbacks*(vm: SearchResultsVM) =
+  ## Wire the ``onSearch`` callback on ``vm`` so the Find in Files input
+  ## can trigger a real search without importing the search service.
+  ##
+  ## Responsibility of the callback (owns all state transitions):
+  ## 1. Save the previous search query+count to recent-searches if it
+  ##    had results (done BEFORE clearing so the old count is still
+  ##    readable from the VM signal).
+  ## 2. Clear existing results and set the new query string.
+  ## 3. Enable the loading shimmer.
+  ## 4. Dispatch ``CODETRACER::search-program`` via the search service.
+  vm.onSearch = proc(query: string) =
+    # Save the previous search as a recent entry (if it had results).
+    let prevQuery = vm.currentQuery()
+    let prevCount = vm.currentResultCount()
+    if prevQuery.len > 0 and prevCount > 0:
+      vm.addRecentSearch(prevQuery, prevCount)
+    # Transition to the loading state for the new query.
+    vm.clearResults()
+    vm.setQuery(query)
+    vm.setLoading(true)
+    # Dispatch the search IPC via the legacy service.
+    data.services.search.searchProgram(cstring(query))
+
 proc parseRawLocation*(location: cstring): (cstring, int) =
   let tokens = location.split(cstring":")
 
@@ -176,6 +202,7 @@ proc initSearchResultsVMWithStore*(store: ReplayDataStore) =
     isoNimSearchResultsMounted = false
   searchResultsVMStore = store
   searchResultsVMInstance = createSearchResultsVM(store)
+  installSearchVMCallbacks(searchResultsVMInstance)
   clog "SearchResultsVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimSearchResultsPanel()
 
@@ -203,6 +230,7 @@ proc initSearchResultsVM*() =
 
   searchResultsVMStore = createReplayDataStore(stubBackend)
   searchResultsVMInstance = createSearchResultsVM(searchResultsVMStore)
+  installSearchVMCallbacks(searchResultsVMInstance)
   clog "SearchResultsVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimSearchResultsPanel()
 

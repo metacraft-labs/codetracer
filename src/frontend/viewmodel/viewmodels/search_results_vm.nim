@@ -1,6 +1,6 @@
 ## viewmodels/search_results_vm.nim
 ##
-## SearchResultsVM — ViewModel for the Search Results panel.
+## SearchResultsVM — ViewModel for the Find in Files panel.
 ##
 ## Holds reactive state for:
 ## - The currently active search query string (``query``).
@@ -12,6 +12,10 @@
 ##   ``search-results-active`` and ``search-results-non-active``).
 ## - The find/filter sub-query the user types into the ``Filter
 ##   results...`` input (``filter`` signal).
+## - ``loading`` — true while the search is in flight; cleared on the
+##   first batch of results or when a new search clears the list.
+## - ``recentSearches`` — list of ``RecentSearch`` entries (query + hit
+##   count) shown in the empty state before a search is run.
 ##
 ## Derives:
 ## - ``visibleResults``: the ``results`` list filtered by the active
@@ -21,38 +25,13 @@
 ##   out.
 ## - ``resultCount``: convenience alias for ``results.val.len`` —
 ##   feeds the header count badge.
+## - ``fileCount``: number of distinct file paths in ``visibleResults``.
 ##
-## The VM has no auto-load effect: the legacy ``SearchService`` already
-## pushes results into ``data.services.search.results[SearchFixed]``
-## via the ``search-results-updated`` IPC; the search_results module
-## mirrors that payload into ``SearchResultsVM`` via the ``setResults``
-## / ``appendResults`` actions.  The contract mirrors ``ErrorsVM``
-## (1.34): events arrive through the legacy mediator subscriptions; the
-## VM is a platform-neutral facade so headless tests under
-## ``src/tests/gui/tests/views/isonim_views_test.nim`` can drive the
-## full reactive flow without needing the IPC backend.
-##
-## Usage::
-##
-##   let vm = createSearchResultsVM(store)
-##   vm.setQuery("foo")
-##   vm.setResults(@[
-##     SearchResultLine(text: "let foo = 1", path: "main.nim", line: 1),
-##     SearchResultLine(text: "echo foo",   path: "main.nim", line: 2)])
-##   echo vm.resultCount.val          # 2
-##   echo vm.active.val               # true
-##   vm.setFilter("echo")
-##   echo vm.visibleResults.val.len   # 1
-##
-## When the user clicks a result row the view calls
-## ``vm.jumpToResult(result)`` which dispatches a ``ct/jump-location``
-## request via the backend.  In production the legacy
-## ``SearchResultsComponent`` rendered an inline
-## ``data.openLocation(res.path, res.line)`` closure; routing the
-## click through the VM keeps the signal flow self-contained for
-## headless tests.
+## The VM also carries an ``onSearch`` callback that the wiring layer
+## installs (``search_results.nim``) so the view can trigger a search
+## without importing the search service directly.
 
-import std/[json, strutils]
+import std/[json, strutils, tables]
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -61,19 +40,31 @@ import ../backend/backend_service
 import ../store/[replay_data_store, types]
 
 type
+  RecentSearch* = object
+    ## A past search kept in the "recent searches" empty-state list.
+    query*: string
+    hitCount*: int
+
   SearchResultsVM* = ref object of ViewModel
-    ## Reactive state for the Search Results panel.
+    ## Reactive state for the Find in Files panel.
     ##
     ## Mutable signals:
-    ##   query         — the active workspace search query string.
-    ##   results       — every match row produced by the search pipeline.
-    ##   active        — true once a search has run (drives the legacy
-    ##                   ``search-results-active`` CSS modifier).
-    ##   filter        — find-results sub-query typed by the user.
+    ##   query           — the active workspace search query string.
+    ##   results         — every match row produced by the search pipeline.
+    ##   active          — true once a search has run (drives the legacy
+    ##                     ``search-results-active`` CSS modifier).
+    ##   filter          — find-results sub-query typed by the user.
+    ##   loading         — true while the search pipeline is running.
+    ##   recentSearches  — past searches shown in the empty state.
     ##
     ## Derived memos:
     ##   visibleResults — ``results`` filtered by ``filter``.
     ##   resultCount    — convenience: ``results.val.len``.
+    ##   fileCount      — distinct file paths in ``visibleResults``.
+    ##
+    ## Callback:
+    ##   onSearch       — installed by the wiring layer; called when the
+    ##                    user submits a query from the search input.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -81,10 +72,16 @@ type
     results*: Signal[seq[SearchResultLine]]
     active*: Signal[bool]
     filter*: Signal[string]
+    loading*: Signal[bool]
+    recentSearches*: Signal[seq[RecentSearch]]
 
     # -- Derived state --
     visibleResults*: Memo[seq[SearchResultLine]]
     resultCount*: Memo[int]
+    fileCount*: Memo[int]
+
+    # -- Callback installed by wiring layer --
+    onSearch*: proc(query: string)
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -103,12 +100,13 @@ proc setResults*(vm: SearchResultsVM; results: seq[SearchResultLine]) =
   vm.results.val = results
   if results.len > 0:
     vm.active.val = true
+    vm.loading.val = false
 
 proc appendResults*(vm: SearchResultsVM; results: seq[SearchResultLine]) =
   ## Append a batch of result rows.  Called by the legacy ``onSearchResultsUpdated``
   ## handler whenever the IPC layer streams in another set of matches.
   ## Like ``setResults``, flips ``active`` to true so the first batch
-  ## activates the panel.
+  ## activates the panel and also clears the loading spinner.
   if results.len == 0:
     return
   var entries = vm.results.val
@@ -116,10 +114,11 @@ proc appendResults*(vm: SearchResultsVM; results: seq[SearchResultLine]) =
     entries.add(r)
   vm.results.val = entries
   vm.active.val = true
+  vm.loading.val = false
 
 proc clearResults*(vm: SearchResultsVM) =
   ## Reset the result list and the active flag.  The view re-displays
-  ## the ``"Run a search to see results here."`` empty-state overlay.
+  ## the empty-state overlay (recent searches list).
   vm.results.val = @[]
   vm.active.val = false
 
@@ -133,6 +132,37 @@ proc setFilter*(vm: SearchResultsVM; filter: string) =
   ## Set the active find-results filter string.  Memoed signals
   ## (``visibleResults``) recompute automatically.
   vm.filter.val = filter
+
+proc setLoading*(vm: SearchResultsVM; on: bool) =
+  ## Show or hide the loading shimmer.  Set to ``true`` when a new
+  ## search is submitted; cleared automatically by ``appendResults`` /
+  ## ``setResults`` on the first data batch.
+  vm.loading.val = on
+
+proc addRecentSearch*(vm: SearchResultsVM; query: string; hitCount: int) =
+  ## Prepend a completed search to the recent-searches list.  Keeps at
+  ## most 10 entries; duplicate queries are promoted to the front.
+  var entries = vm.recentSearches.val
+  # Remove any existing entry for the same query so we can re-insert at
+  # the front with the updated hit count.
+  var filtered: seq[RecentSearch]
+  for e in entries:
+    if e.query != query:
+      filtered.add(e)
+  filtered.insert(RecentSearch(query: query, hitCount: hitCount), 0)
+  if filtered.len > 10:
+    filtered.setLen(10)
+  vm.recentSearches.val = filtered
+
+proc currentQuery*(vm: SearchResultsVM): string =
+  ## Return the current query string.  Convenience accessor used by the
+  ## wiring layer to read the query without importing ``Signal``.
+  vm.query.val
+
+proc currentResultCount*(vm: SearchResultsVM): int =
+  ## Return the current result count.  Convenience accessor used by the
+  ## wiring layer to read the count without importing ``Memo``.
+  vm.resultCount.val
 
 proc jumpToResult*(vm: SearchResultsVM; res: SearchResultLine) =
   ## Dispatch a jump-location request for the given result row.  The
@@ -167,6 +197,14 @@ proc filterRows(rows: seq[SearchResultLine];
        needle in $r.line:
       result.add(r)
 
+proc countDistinctPaths(rows: seq[SearchResultLine]): int =
+  ## Count the number of unique ``path`` values in ``rows``.
+  var seen: Table[string, bool]
+  for r in rows:
+    let k = if r.path.len == 0: "<unknown>" else: r.path
+    seen[k] = true
+  seen.len
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -178,13 +216,16 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
   ##
   ## Sets up:
   ## 1. Mutable signals with sensible defaults (empty query, empty
-  ##    result list, ``active`` off, empty filter).
-  ## 2. Derived memos for ``visibleResults`` and ``resultCount``.
+  ##    result list, ``active`` off, empty filter, ``loading`` off).
+  ## 2. Derived memos for ``visibleResults``, ``resultCount``, and
+  ##    ``fileCount``.
   withViewModel proc(dispose: proc()): SearchResultsVM =
     let query = createSignal("")
     let results = createSignal(newSeq[SearchResultLine]())
     let active = createSignal(false)
     let filter = createSignal("")
+    let loading = createSignal(false)
+    let recentSearches = createSignal(newSeq[RecentSearch]())
 
     let visibleResults = createMemo[seq[SearchResultLine]] proc(): seq[SearchResultLine] =
       filterRows(results.val, filter.val)
@@ -192,13 +233,19 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
     let resultCount = createMemo[int] proc(): int =
       results.val.len
 
+    let fileCount = createMemo[int] proc(): int =
+      countDistinctPaths(visibleResults.val)
+
     SearchResultsVM(
       store: store,
       query: query,
       results: results,
       active: active,
       filter: filter,
+      loading: loading,
+      recentSearches: recentSearches,
       visibleResults: visibleResults,
       resultCount: resultCount,
+      fileCount: fileCount,
       disposeProc: dispose,
     )
