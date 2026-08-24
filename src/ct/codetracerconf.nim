@@ -618,10 +618,23 @@ type
           "the recording"
       .} : string
 
+      # The MCR default and the per-host value set are stated HERE, not only
+      # in codetracer-specs: `ct record --help` is where a user looks, and
+      # "Record backend" told them nothing about either.  A value this host
+      # cannot honour is refused with a message naming the host and the valid
+      # values (see src/ct/trace/native_backend_selection.nim).
       recordBackend* {.
         name: "backend"
         defaultValue: ""
-        desc: "Record backend"
+        desc: "Native recording backend. " &
+          "MCR is the default on every " &
+          "host, and `mcr` also pins it. " &
+          "Linux additionally accepts " &
+          "`rr`; Windows accepts `ttd`. " &
+          "A value this host cannot " &
+          "honour is refused, never " &
+          "silently downgraded. Not a " &
+          "language selector: see --lang."
       .} : string
 
       recordExportFile* {.

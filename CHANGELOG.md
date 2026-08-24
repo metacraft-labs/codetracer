@@ -2,6 +2,76 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking changes
+
+- **`ct record --backend <value>` now refuses a value the host cannot honour
+  instead of silently recording with MCR.** `--backend rr` on macOS,
+  `--backend ttd` on Linux, and any value that is not a recording backend at all
+  (a misspelling) previously produced an **MCR** recording, with no diagnostic
+  and a zero exit status. A script that asked for an rr recording got an MCR one
+  and had no way to find out. Such an invocation now exits non-zero, before
+  anything is recorded, with a message naming the requested backend, the host,
+  the values valid on that host, and — in a parenthetical — where the requested
+  one *is* available, so a misspelling is distinguishable from a backend that is
+  simply not available here:
+
+  ```
+  error: --backend ttd cannot be honoured on this host.
+         requested: ttd
+         host:      linux
+         valid on linux: mcr, rr
+         (ttd is available on windows)
+  ```
+
+  **This is a behaviour change, not a bug fix, and scripts relying on the old
+  silent fallback will start failing.** The fix is to drop the flag (MCR is the
+  default on every host) or to pass `--backend mcr`, which now *pins* MCR rather
+  than coinciding with the default. The flag continues to be ignored for
+  languages with a dedicated recorder, where it names nothing the recorder can
+  act on.
+
+  Two values are **not** affected: `db` and `materialized`. They are the
+  desktop's spelling for "record with the dedicated, materialized-trace
+  recorder", they are not native backends, and the desktop puts `db` on the
+  `ct record` command line itself for every target it did not classify as
+  native — including files whose extension it does not recognise. They are
+  accepted, select nothing native, and print a `note:` on stderr when the target
+  turns out to be native.
+
+### Added
+
+- **`ct record` and `ct run` now really ask `ct-native-replay` what a target
+  is.** The core has always contained a delegation to the native backend for a
+  target that no file extension or project manifest could identify — and it had
+  always delegated to `ct-native-replay debuginfo lang`, a subcommand that has
+  never existed in any released build. The argument parse failed, stdout was
+  empty, and the empty string became "unknown language", which is
+  indistinguishable from a recognizer that looked and found nothing. The call
+  site now invokes `ct-native-replay recognize --format=json <target>` and
+  consumes its result, so an extension-less native binary is recognized from its
+  own bytes (ELF/Mach-O/PE container, Go build sections and runtime symbols,
+  DWARF `DW_AT_language`, GNAT symbols, and the DWARF source-language mix).
+
+  Two consequences worth knowing:
+
+  - Recognition is **recomputed on every invocation** and nothing is cached, so
+    a rebuilt binary can never be reported as the language its predecessor was.
+  - `--lang` **skips recognition entirely** rather than overriding it, so a
+    `--lang` recording spawns no recognizer at all. Its trace metadata is
+    correspondingly thinner: nothing computed the target's components, container
+    format, interpreter or debug info, and their absence means "not computed"
+    rather than "the target had none".
+
+  A `ct-native-replay` whose recognition schema this build of CodeTracer does not
+  understand is refused by name, with the version found and the versions
+  supported, rather than being parsed on a guess.
+
+- `ct record --help` now describes what `--backend` actually does — the MCR
+  default, the per-host value sets, and the refusal — instead of the three words
+  "Record backend".
+
 ## 25.11.1 - 2025-11-07(hotfix)
 
 Introduced a number of hotfixes for some bugs:

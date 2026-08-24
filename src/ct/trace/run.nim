@@ -81,6 +81,18 @@ proc runWithRestart(
                              stylusTrace="",
                              address="",
                              socketPath="",
+                             # NTR-2 / Q6: `ct run` inherits `ct record`'s
+                             # refusal automatically, because it goes through
+                             # the same `record()` and therefore the same
+                             # `nativeRecordingBackendForHost`.  What it CANNOT
+                             # do is ask for a backend: `ct run` declares no
+                             # `--backend` option (codetracerconf.nim's `run`
+                             # case is `restOfArgs` only), so the value here is
+                             # hardcoded empty and the default applies.  That
+                             # gap is real and is recorded rather than papered
+                             # over — run.md's identical-semantics rule is
+                             # satisfied for the REFUSAL and not yet for the
+                             # SELECTION.
                              recordBackend="",
                              withDiff="",
                              storeTraceFolderForPid = -1,

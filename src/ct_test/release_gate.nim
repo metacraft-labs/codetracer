@@ -557,6 +557,19 @@ const
     "src/tests/cli/record_dispatch_test.nim",
     "src/tests/cli/record_missing_recorder_test.nim",
     "src/tests/cli/record_dispatch_e2e_test.nim",
+    # NTR-2 (codetracer-specs/Planned-Features/Native-Target-Recognition.md).
+    # The core's delegation to `ct-native-replay recognize` and the `--backend`
+    # refusal.  Registered here for the same reason as the three above: the
+    # delegation they replace was DEAD for its whole life — `debuginfo lang` is
+    # a subcommand `ct-native-replay` has never had, so `clap` failed, stdout
+    # was empty and `toLang("")` returned LangUnknown, which is
+    # indistinguishable from a working recognizer that found nothing.  A test
+    # reachable only by a glob has nothing asserting it still exists, and this
+    # is precisely a lane where "it quietly stopped running" would reproduce
+    # the original defect.
+    "src/tests/cli/target_recognition_test.nim",
+    "src/tests/cli/record_backend_selection_test.nim",
+    "src/tests/cli/record_recognition_e2e_test.nim",
   ]
 
   CliReviewGateTests* = [

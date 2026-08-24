@@ -1,6 +1,7 @@
 import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, options],
   multitrace,
-  ../../common/[ lang, paths, types, trace_index, config ],
+  native_backend_selection,
+  ../../common/[ lang, paths, types, trace_index, config, ct_logging ],
   ../utilities/[language_detection ],
   ../cli/build,
   ../online_sharing/upload,
@@ -275,15 +276,28 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
 proc nativeRecordingBackendForHost(requested: string): string =
   ## MCR is the default native recorder. Linux can explicitly select RR,
   ## Windows can explicitly select TTD, and macOS always uses MCR.
-  let normalized = requested.toLowerAscii.strip
-  when defined(macosx):
-    "mcr"
-  elif defined(windows):
-    if normalized == "ttd": "ttd" else: "mcr"
-  elif defined(linux):
-    if normalized == "rr": "rr" else: "mcr"
-  else:
-    "mcr"
+  ##
+  ## NTR-2 / Q6: a value this host cannot honour is now a **hard error before
+  ## any recording starts**, not a silent coercion to `mcr`.  The rule itself
+  ## is a pure function of `(requested, host)` in
+  ## `native_backend_selection.nim` so every host's row can be asserted from
+  ## any host; this wrapper is the only place the compile-time host and the
+  ## exit live.
+  let selection =
+    resolveNativeRecordingBackend(requested, hostRecordingPlatform())
+  if not selection.ok:
+    for line in selection.errorLines:
+      stderr.writeLine(line)
+    quit(1)
+  # Not a refusal: the desktop's `db` sentinel arriving on the native path.
+  # stderr, so this line does not add to what `ct record`'s stdout carries
+  # beside the `recordingId:` marker the GUI and `recordTest` parse.  (stdout is
+  # not clean either way — `recordInternal` relays the recorder's merged output
+  # onto it — but the parser scans for the marker rather than reading the last
+  # line, so both stay safe.)
+  for line in selection.noteLines:
+    stderr.writeLine(line)
+  selection.backend
 
 proc nativeReplayTraceKindForBackend(backend: string): string =
   ## The replay/import layer still treats native MCR CTFS recordings as the
@@ -312,8 +326,62 @@ proc record*(lang: string,
              program: string,
              args: seq[string],
              server: bool = false): Trace =
-  let detectedLang = detectLang(program, toLang(lang))
+  # NTR-2: recognize ONCE and carry the result along this invocation's own call
+  # chain.  That is ordinary parameter passing, not a cache — Q7 decided there
+  # is no cache, and nothing here is persisted, so there is no invalidation
+  # question and an mtime-preserving rebuild cannot make a stale answer look
+  # confident.
+  #
+  # `recognized.recognitionRan` is false when `--lang` was given (Q8: the
+  # recognizer is not spawned at all) or when the folder/extension signal
+  # answered first.  A consumer of the carried result must read a missing
+  # `components` / `format` / `interpreter` / `debug_info` as "not computed",
+  # never as "the target had none".  Recording those into trace metadata is
+  # NTR-3; NTR-2 carries them and does not swallow them.
+  let recognized = detectTarget(program, toLang(lang))
+  let detectedLang = recognized.lang
+  if recognized.recognitionRan and recognized.recognition.isSome:
+    let recognition = recognized.recognition.get
+    var summary = "recognition: kind=" & recognition.kind &
+      " components=" & $recognition.components.len &
+      " diagnostics=" & $recognition.diagnostics.len
+    if recognition.format.isSome:
+      summary.add(" container=" & recognition.format.get.container)
+    if recognition.recommended.isSome:
+      summary.add(" recommended-backend=" & recognition.recommended.get.backend)
+    # Ridden on the shipping CODETRACER_LOG_LEVEL rather than on Q10's `-vv`,
+    # which does not exist yet (see the NTR-2 report and §9 Q10).  This is a
+    # trace of the carry, not the user-facing diagnostics display NTR-3 owes.
+    debugPrint summary
   # echo "DEBUG record: detectedLang=", detectedLang, " usesMaterializedTraces=", detectedLang.usesMaterializedTraces, " program=", program, " outputFolder=", outputFolder
+
+  # NTR-2 / Q6: resolve `--backend` HERE — after recognition, before any build,
+  # any recorder spawn and any trace-folder creation — so a value this host
+  # cannot honour is refused before the command does any work, and is refused
+  # for the reason the user actually got wrong rather than being reported as a
+  # missing ct-native-replay installation.
+  #
+  # It is scoped to the native path on purpose.  For a language with a
+  # dedicated recorder `--backend` names nothing the recorder can act on and
+  # has never been consulted; the desktop welcome screen relies on that, and
+  # sends `--backend db` for every recording whose target it did not classify
+  # as native (src/frontend/viewmodel/viewmodels/welcome_screen_vm.nim's
+  # `effectiveRecordBackend` -> `recordBackendWireName` ->
+  # src/frontend/index/traces.nim:1066,1199).  That the flag is still ignored
+  # there is a SEPARATE gap, recorded in the design document, not closed here.
+  #
+  # Scoping alone is NOT sufficient, which the NTR-2 review measured against
+  # the shipped binary: the GUI's classification and `usesMaterializedTraces`
+  # are different functions and they disagree, so `--backend db` also reaches
+  # the branch below for `myapp.bin` (`recordTargetAuto` in the GUI, `LangC`
+  # here) and for a `.lua` script.  The `db` sentinel is therefore handled
+  # inside `resolveNativeRecordingBackend` rather than being refused as a
+  # misspelling; see `MaterializedBackendNames`.
+  let nativeBackend =
+    if detectedLang.usesMaterializedTraces:
+      ""
+    else:
+      nativeRecordingBackendForHost(recordBackend)
   var outputFolderValue = outputFolder
   var programToRecord = program
   var nimcachePath = ""
@@ -449,7 +517,8 @@ proc record*(lang: string,
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
-      let nativeBackend = nativeRecordingBackendForHost(recordBackend)
+      # `nativeBackend` was resolved (and an unhonourable `--backend` already
+      # refused) right after recognition, above.
       let traceKind = nativeReplayTraceKindForBackend(nativeBackend)
       if useInterpose and nativeBackend != "mcr":
         echo "error: --use-interpose requires the MCR backend; current backend is '" & nativeBackend & "'."
