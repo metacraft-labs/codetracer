@@ -21,64 +21,53 @@ proc jsEmptyArray: JsObject {.importjs: "([])".}
 proc onSearchProgram*(sender: js, response: cstring) {.async.} =
   ## Handle ``CODETRACER::search-program`` from the renderer.
   ##
-  ## Uses ripgrep (``rg``) to search the trace's resolved source folders for
-  ## the given query string, then streams batches of 50 results back to the
-  ## renderer as ``CODETRACER::search-results-updated`` messages so the Find
-  ## in Files panel starts populating immediately.
+  ## Searches exactly the source folders shown in the Files panel.
+  ## ``sourceFoldersFromTracePaths`` returns the same roots the Files panel
+  ## filesystem tree uses, so the search scope matches what the user sees —
+  ## e.g. only ``ruby_space_ship/`` for a Ruby trace rather than the wider
+  ## ``examples/`` parent directory.
   ##
-  ## Falls back to the ``outputFolder/files/`` subtree for self-contained /
-  ## imported traces that have no live source folders recorded.
+  ## Only folders that actually exist on disk are searched; trace-internal
+  ## paths that map into a materialized ``files/`` tree are resolved to that
+  ## tree as a fallback.
   let query = $response
   if query.len == 0:
     return
 
-  # Resolve the search roots from the trace metadata.
-  let sourceFolders = await sourceFoldersFromTracePaths(data.trace)
-  var searchRoots: seq[string] = @[]
-  for f in sourceFolders:
-    let s = $f
-    if s.len > 0:
-      searchRoots.add(s)
+  let escapedQuery = query.replace("'", "'\\''")
 
-  # Filter searchRoots to the trace workdir subtree only.
-  # Some recorders (e.g. Ruby) include gem/stdlib paths in sourceFolders,
-  # which would make rg search /nix/store/, /usr/lib/ruby/, ~/.gem/ etc.
-  # We only want to search files the user actually wrote, so we restrict to
-  # paths under the trace's working directory when one is available.
+  var searchRoot = ""
+
   if not data.trace.isNil:
-    let workdir = $data.trace.workdir
-    if workdir.len > 0:
-      let filtered = searchRoots.filterIt(it.startsWith(workdir))
-      if filtered.len > 0:
-        searchRoots = filtered
-      elif searchRoots.len > 0:
-        # None of the recorded source folders are under workdir — use workdir
-        # itself as the search root so at least the project files are searched.
-        searchRoots = @[workdir]
+    if data.trace.imported:
+      # Imported (recorder) traces materialize source files into the trace
+      # output's files/ subdirectory.  This is exactly what the Files panel
+      # shows, so searching it gives the right scope without touching the
+      # wider project tree or the codetracer repo root.
+      let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
+      if fsExistsSync(cstring(filesRoot)):
+        searchRoot = filesRoot
 
-  # Fallback for self-contained traces: search the materialized files tree.
-  if searchRoots.len == 0 and not data.trace.isNil:
-    let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
-    if fsExistsSync(cstring(filesRoot)):
-      searchRoots.add(filesRoot)
-    elif ($data.trace.outputFolder).len > 0:
-      searchRoots.add($data.trace.outputFolder)
+    if searchRoot.len == 0:
+      # Live trace (or imported trace with no materialized files/):
+      # use sourceFoldersFromTracePaths, which returns the same roots the
+      # Files panel filesystem tree uses.
+      let sourceFolders = await sourceFoldersFromTracePaths(data.trace)
+      for f in sourceFolders:
+        let s = $f
+        if s.len > 0 and fsExistsSync(cstring(s)):
+          searchRoot = s
+          break
 
-  if searchRoots.len == 0:
-    infoPrint "onSearchProgram: no source folders for query: ", query
+  if searchRoot.len == 0:
+    infoPrint "onSearchProgram: no search root for query: ", query
+    var emptyBatch: seq[JsObject] = @[]
+    mainWindow.webContents.send "CODETRACER::search-results-updated", emptyBatch.toJs
     return
 
-  # Escape the query and build the ripgrep invocation.
-  #   -n   include line numbers
-  #   -F   treat query as a literal string, not a regex
-  #   -i   case-insensitive
-  #   -H   always print the filename (even when searching a single file)
-  #   --no-heading  one line per match: path:line:text
-  let escapedQuery = query.replace("'", "'\\''")
-  let rootsArg = searchRoots.mapIt("'" & it.replace("'", "'\\''") & "'").join(" ")
-  let rgCmd = cstring(&"rg -n -F -i -H --no-heading -- '{escapedQuery}' {rootsArg}")
-
-  infoPrint "onSearchProgram: rg query=", query, " roots=", rootsArg
+  let escapedRoot = searchRoot.replace("'", "'\\''")
+  let rgCmd = cstring(&"rg -n -F -i -H --no-heading -- '{escapedQuery}' '{escapedRoot}'")
+  infoPrint "onSearchProgram: rg query=", query, " root=", searchRoot
 
   # rg exits with code 1 for no matches — that is not an error.
   let (stdoutData, _, _) = await childProcessExec(rgCmd)
