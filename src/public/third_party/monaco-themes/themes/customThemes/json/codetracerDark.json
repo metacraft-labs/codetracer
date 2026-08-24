@@ -238,6 +238,9 @@
     "diffEditor.diagonalFill": "#4A4A4A66",
     "diffEditor.unchangedRegionBackground": "#3A3A3A",
     "diffEditor.unchangedRegionForeground": "#E8E8E8",
-    "diffEditor.unchangedCodeBackground": "#28282800"
+    "diffEditor.unchangedCodeBackground": "#28282800",
+    "minimapSlider.background": "#A6AEFF40",
+    "minimapSlider.hoverBackground": "#A6AEFF59",
+    "minimapSlider.activeBackground": "#A6AEFF73"
   }
 }
