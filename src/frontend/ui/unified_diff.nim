@@ -542,19 +542,36 @@ proc monacoDecorations(doc: DiffDocument;
   ## line, with the `+` / `-` marker in the line-decorations lane.
   result = @[]
   for decoration in decorationsFor(doc, selected):
+    # Read the four fields into locals *before* building the descriptor.
+    #
+    # `js{...}` closes over every expression it is given, and `items` over the
+    # `seq[DiffDecoration]` `decorationsFor` returns yields `lent
+    # DiffDecoration` — a borrowed view of an element of a temporary seq.
+    # Capturing that view in a closure that outlives the loop iteration is
+    # exactly the lifetime error the compiler refuses ("'decoration' is of
+    # type <lent DiffDecoration> which cannot be captured"), and it refuses it
+    # on the JavaScript backend, where this proc actually runs.  Copying the
+    # scalars out first means the closure captures owned values, which is what
+    # it needs: the descriptor is handed to Monaco and kept, while the seq
+    # backing `decoration` is gone by the time this proc returns.
+    let
+      lineNumber = decoration.line
+      lineClass = cstring(decoration.className)
+      gutterClass = cstring(decoration.gutterClassName)
+      lineNumberClass = cstring(decoration.lineNumberClassName)
     result.add(js{
       range: js{
-        startLineNumber: decoration.line,
+        startLineNumber: lineNumber,
         startColumn: 1,
-        endLineNumber: decoration.line,
+        endLineNumber: lineNumber,
         endColumn: 1
       },
       options: js{
         isWholeLine: true,
-        className: cstring(decoration.className),
-        linesDecorationsClassName: cstring(decoration.gutterClassName),
+        className: lineClass,
+        linesDecorationsClassName: gutterClass,
         # Colours the `+` / `-` the gutter LABEL carries since UD-1.
-        lineNumberClassName: cstring(decoration.lineNumberClassName)
+        lineNumberClassName: lineNumberClass
       }
     })
 
@@ -721,16 +738,21 @@ proc monacoFlowDecorations(decorations: seq[ReviewFlowDecoration]):
   ## `MonacoLineStyle.inlineClass`.
   result = @[]
   for decoration in decorations:
+    # Owned copies before the descriptor — see `monacoDecorations` above for
+    # why a `lent` loop variable cannot cross into a `js{...}` closure.
+    let
+      lineNumber = decoration.modelLine
+      inlineClass = cstring(decoration.inlineClassName)
     result.add(js{
       range: js{
-        startLineNumber: decoration.modelLine,
+        startLineNumber: lineNumber,
         startColumn: 1,
-        endLineNumber: decoration.modelLine,
+        endLineNumber: lineNumber,
         endColumn: 100000
       },
       options: js{
         isWholeLine: false,
-        inlineClassName: cstring(decoration.inlineClassName)
+        inlineClassName: inlineClass
       }
     })
 
@@ -1116,6 +1138,11 @@ proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
       continue
     if annotation.columns.len == 0:
       continue
+    # An OWNED copy of the anchor line, for the same reason `monacoDecorations`
+    # takes one: `items` over `annotations` yields `lent ReviewValueAnnotation`,
+    # and the view-zone descriptor below is a `js{...}` closure that outlives
+    # this iteration, so it cannot capture the borrow.
+    let modelLine = annotation.modelLine
     # ONE offset for every band, in both placements.
     #
     # `beside` was decided against the WIDEST annotated line, so a band at the
@@ -1230,7 +1257,7 @@ proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
       # halves of this are deliberately kept next to each other in the comments.
       let lineHeight = self.editor.udLineHeight()
       self.flowValueZoneIds.add(self.editor.udAddViewZone(js{
-        afterLineNumber: annotation.modelLine,
+        afterLineNumber: modelLine,
         heightInPx: if lineHeight > 0: lineHeight else: self.data.ui.fontSize + 16,
         domNode: dom
       }))
@@ -1509,17 +1536,23 @@ proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument) =
   # `div.ct-diff-expand-boundary`. The clearance moves the control out from
   # under it.
   let lineHeight = self.data.ui.fontSize + 22
+  # `afterLineNumber` is copied out of each `lent` zone before the descriptor
+  # closes over it — see `monacoDecorations` for the lifetime rule.
   for zone in self.reviewInvocationZonesFor(doc):
-    let dom = self.invocationZoneDom(zone)
+    let
+      dom = self.invocationZoneDom(zone)
+      afterLine = zone.afterLineNumber
     self.flowViewZoneIds.add(self.editor.udAddViewZone(js{
-      afterLineNumber: zone.afterLineNumber,
+      afterLineNumber: afterLine,
       heightInPx: lineHeight,
       domNode: dom
     }))
   for zone in self.reviewLoopZonesFor(doc):
-    let dom = self.loopZoneDom(zone)
+    let
+      dom = self.loopZoneDom(zone)
+      afterLine = zone.afterLineNumber
     self.flowViewZoneIds.add(self.editor.udAddViewZone(js{
-      afterLineNumber: zone.afterLineNumber,
+      afterLineNumber: afterLine,
       heightInPx: lineHeight,
       domNode: dom
     }))

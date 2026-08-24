@@ -297,6 +297,7 @@ test-programs/*/Cargo.lock
 src/db-backend/test-programs/*/Cargo.lock
 
 # Compiled Nim test binaries (built in-tree by `nim c -r`)
+src/ct/agent_session_api_contract_test
 src/ct/ci/bpf_monitor_test
 src/ct/ci/bpf_monitor_native_test
 src/ct/ci/bpf_native_integration_test

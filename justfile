@@ -648,6 +648,7 @@ test:
   #!/usr/bin/env bash
   set -e
   just test-build-alignment
+  just test-agent-api-contract
   just test-rust
   just test-nimsuggest
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
@@ -995,6 +996,15 @@ reset-layout:
               ~/.config/codetracer/auto_hide_state.json && \
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_layout.json ~/.config/codetracer/default_layout.json
+
+# Cross-repo API contract: the `nim-agents` / `nim-acp` surface `ct` is built
+# against. Compiles the exact calls `src/ct/review_session.nim` makes, so a
+# sibling checkout at a revision that predates them fails in seconds with a
+# named remedy, instead of as a type mismatch fifteen minutes into a full `ct`
+# build that blames the caller. See the module header for why it asserts
+# signatures rather than behaviour.
+test-agent-api-contract:
+  nim c -r --hints:off src/ct/agent_session_api_contract_test.nim
 
 # originally by Pavel/Dimo in ci.sh
 test-nimsuggest:
