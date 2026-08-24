@@ -278,20 +278,31 @@ const
     # intra-line marking appearing) is a DOM fact and is asserted in
     # `deepreview-gui.spec.ts`, because it cannot be observed here.
     "src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim",
-    # DR-R5 — context expansion in the diff tab.  Until it landed the whole
+    # DR-R5 / UD-2 — context expansion in the diff tab.  Until DR-R5 the whole
     # capability was private procs inside `ui/deepreview.nim`, a JS-only
     # module with no importable entry point, so the boundary arithmetic that
     # decides how many lines exist above a hunk near the top of a file — the
     # arithmetic that produces blank lines numbered 0 and -1 when it is wrong
-    # — was asserted by nothing.  This file asserts the window computation,
-    # its clamping at both file boundaries, the fetch-once-per-(revision,path)
-    # cache the normal-git content source needs, and that a revealed line is a
-    # plain context line of the document rather than a fourth, inert kind.
+    # — was asserted by nothing.
     #
-    # DR-R5 also grew `vcs_vm_test.nim` (already listed above) with the
-    # per-hunk expansion counters, which used to be a JS-side `JsAssoc` on the
-    # component and therefore unreachable headlessly and lost on every
-    # re-render.
+    # UD-2 changed what that arithmetic IS.  The diff tab's models are the
+    # whole file now, because a Monaco model is tokenized from its own line 1
+    # and a window starting at the first hunk tokenized the rest of a file
+    # from mid-docstring; which of those lines a reader sees is decided by
+    # Monaco's `hideUnchangedRegions`.  So this file asserts the whole-file
+    # document (every line of the new revision, the old side reconstructed
+    # from the hunks, the `@@` divider kept and the file header moved out),
+    # the collapse `collapsedRegionsFor` predicts — including a run at each
+    # edge of the file and two hunks too close together to collapse between,
+    # which is where the off-by-ones live — the offers the boundary's context
+    # menu makes, and the fetch-once-per-(revision,path) cache the whole-file
+    # model is built from.
+    #
+    # `vcs_vm_test.nim` (already listed above) carries the two properties of
+    # the removed per-hunk counters that outlive them: a re-sync of the same
+    # rows must rebuild a byte-identical document, or the host replaces the
+    # models and every region a reader expanded collapses again; and a cleared
+    # panel must produce no document at all.
     "src/tests/gui/tests/vcs/vcs_context_expansion_test.nim",
     # AA-1 — the DeepReview roll-up is deleted from the Agent Activity panel,
     # and its layout identity is not.

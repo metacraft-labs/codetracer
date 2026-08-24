@@ -445,10 +445,6 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Hunk selection uses local diff coordinates.",
     requiresStableId = true,
     stableIdNote = "Would need stable diff hunk ids if synchronized.")
-  entries.addEntry("VCSVM", "hunkExpansion", vscRendererLocal,
-    "How far each hunk's context is expanded is a local reading position.",
-    requiresStableId = true,
-    stableIdNote = "Would need stable diff hunk ids if synchronized.")
   entries.addEntry("VCSVM", "reviewCommit", vscBackendAuthoritative,
     "The commit a review's changeset belongs to is a fact of the dataset.")
   entries.addEntry("VCSVM", "reviewEntered", vscRendererLocal,

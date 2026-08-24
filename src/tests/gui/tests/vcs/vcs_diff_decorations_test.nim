@@ -140,10 +140,14 @@ suite "unified diff decoration builder (DR-R4)":
     let modifiedDecorations = decorationsFor(modified)
     let originalDecorations = decorationsFor(original)
 
-    # modified: file header, @@ divider, context, addition, addition.
-    check modified.lines.len == 5
-    # original: file header, @@ divider, context, removal.
-    check original.lines.len == 4
+    # modified: @@ divider, context, addition, addition.  Since UD-2 the file
+    # header is DOM chrome above the editor rather than line 1 of the model —
+    # line 1 is exactly what a collapsed run at the top of a file hides.
+    check modified.lines.len == 4
+    # original: @@ divider, context, removal.
+    check original.lines.len == 3
+    check pair.files.len == 1
+    check pair.files[0].headerText == "M  src/parser.rs  +2 -1"
     check modifiedDecorations.len == modified.lines.len
     check originalDecorations.len == original.lines.len
 
@@ -153,16 +157,14 @@ suite "unified diff decoration builder (DR-R4)":
     for i, decoration in originalDecorations:
       check decoration.line == i + 1
 
-    check modifiedDecorations[0].className == DiffFileHeaderClass
-    check modifiedDecorations[1].className == DiffHunkHeaderClass
-    check modifiedDecorations[2].className == DiffContextClass
+    check modifiedDecorations[0].className == DiffHunkHeaderClass
+    check modifiedDecorations[1].className == DiffContextClass
+    check modifiedDecorations[2].className == DiffAddedClass
     check modifiedDecorations[3].className == DiffAddedClass
-    check modifiedDecorations[4].className == DiffAddedClass
 
-    check originalDecorations[0].className == DiffFileHeaderClass
-    check originalDecorations[1].className == DiffHunkHeaderClass
-    check originalDecorations[2].className == DiffContextClass
-    check originalDecorations[3].className == DiffRemovedClass
+    check originalDecorations[0].className == DiffHunkHeaderClass
+    check originalDecorations[1].className == DiffContextClass
+    check originalDecorations[2].className == DiffRemovedClass
 
     # No addition reaches the old revision and no removal reaches the new one:
     # that is the whole reason there are two models rather than one.
@@ -176,23 +178,22 @@ suite "unified diff decoration builder (DR-R4)":
     for decoration in modifiedDecorations:
       if DiffHunkHeaderClass in decoration.className:
         hunkHeaderLines.add(decoration.line)
-    check hunkHeaderLines == @[2]
-    check modified.lines[1].text == "@@ -40,2 +40,3 @@"
-    check original.lines[1].text == modified.lines[1].text
-    check modified.lines[1].text.startsWith("@@")
+    check hunkHeaderLines == @[1]
+    check modified.lines[0].text == "@@ -40,2 +40,3 @@"
+    check original.lines[0].text == modified.lines[0].text
+    check modified.lines[0].text.startsWith("@@")
 
     # VCS-Panel.md: "`+` gutter marker" / "`-` gutter marker"; the dividers
     # carry none, they are not content.
     check modifiedDecorations[0].gutterClassName == ""
-    check modifiedDecorations[1].gutterClassName == ""
-    check modifiedDecorations[2].gutterClassName == DiffGutterContextClass
-    check modifiedDecorations[3].gutterClassName == DiffGutterAddedClass
-    check originalDecorations[3].gutterClassName == DiffGutterRemovedClass
+    check modifiedDecorations[1].gutterClassName == DiffGutterContextClass
+    check modifiedDecorations[2].gutterClassName == DiffGutterAddedClass
+    check originalDecorations[2].gutterClassName == DiffGutterRemovedClass
 
     # The models hold the code itself, so find / selection / copy operate on
     # the code rather than on decoration markup.
-    check documentText(original).splitLines()[3] == "  match parse(input) {"
-    check documentText(modified).splitLines()[3] == "  let token = parse(input);"
+    check documentText(original).splitLines()[2] == "  match parse(input) {"
+    check documentText(modified).splitLines()[2] == "  let token = parse(input);"
 
   test "the two models carry the file's own text, split by revision":
     ## UD-1's first structural requirement, and the one a review dataset used
@@ -337,23 +338,21 @@ suite "unified diff decoration builder (DR-R4)":
     let original = pair.original
 
     # (kind, oldNumber, newNumber) for every emitted line.
-    check modified.lines[0].kind == dlkFileHeader
+    check modified.lines[0].kind == dlkHunkHeader
     check (modified.lines[0].oldNumber, modified.lines[0].newNumber) == (0, 0)
-    check modified.lines[1].kind == dlkHunkHeader
-    check (modified.lines[1].oldNumber, modified.lines[1].newNumber) == (0, 0)
 
-    check (modified.lines[2].oldNumber, modified.lines[2].newNumber) == (40, 40)
-    check (modified.lines[3].oldNumber, modified.lines[3].newNumber) == (0, 41)
-    check (modified.lines[4].oldNumber, modified.lines[4].newNumber) == (0, 42)
-    check (original.lines[3].oldNumber, original.lines[3].newNumber) == (41, 0)
+    check (modified.lines[1].oldNumber, modified.lines[1].newNumber) == (40, 40)
+    check (modified.lines[2].oldNumber, modified.lines[2].newNumber) == (0, 41)
+    check (modified.lines[3].oldNumber, modified.lines[3].newNumber) == (0, 42)
+    check (original.lines[2].oldNumber, original.lines[2].newNumber) == (41, 0)
 
     # Blank old number on additions, blank new number on removals.
-    check oldNumberText(original.lines[3]) == "41"
-    check newNumberText(original.lines[3]) == ""
+    check oldNumberText(original.lines[2]) == "41"
+    check newNumberText(original.lines[2]) == ""
+    check oldNumberText(modified.lines[2]) == ""
+    check newNumberText(modified.lines[2]) == "41"
     check oldNumberText(modified.lines[3]) == ""
-    check newNumberText(modified.lines[3]) == "41"
-    check oldNumberText(modified.lines[4]) == ""
-    check newNumberText(modified.lines[4]) == "42"
+    check newNumberText(modified.lines[3]) == "42"
 
     # The rendered labels keep the columns aligned and the chrome unnumbered,
     # and each carries the `+` / `-` marker VCS-Panel.md requires — in the
@@ -361,23 +360,21 @@ suite "unified diff decoration builder (DR-R4)":
     # beside the numbers in an inline diff's original editor.
     # The modified editor's margin carries the new numbers...
     let newLabels = lineNumberLabels(modified, dsModified, width = 2)
-    check newLabels[0] == ""     ## file header — chrome, neither revision
-    check newLabels[1] == ""     ## `@@` divider — likewise
-    check newLabels[2] == " 40"  ## context: a blank marker, so digits align
-    check newLabels[3] == "+41"
-    check newLabels[4] == "+42"
+    check newLabels[0] == ""     ## `@@` divider — chrome, neither revision
+    check newLabels[1] == " 40"  ## context: a blank marker, so digits align
+    check newLabels[2] == "+41"
+    check newLabels[3] == "+42"
     # ... and the original editor's the old ones, in the column beside it, so
     # a context line still reads as a pair and a deleted line still carries the
     # number it had before it went.
     let oldLabels = lineNumberLabels(original, dsOriginal, width = 2)
     check oldLabels[0] == ""
-    check oldLabels[1] == ""
-    check oldLabels[2] == " 40"
-    check oldLabels[3] == "-41"
+    check oldLabels[1] == " 40"
+    check oldLabels[2] == "-41"
     # A line that exists on only one side has no number in the other column,
     # but keeps its marker so the two columns stay in step.
-    check lineNumberLabels(original, dsModified, width = 2)[3] == "-  "
-    check lineNumberLabels(modified, dsOriginal, width = 2)[3] == "+  "
+    check lineNumberLabels(original, dsModified, width = 2)[2] == "-  "
+    check lineNumberLabels(modified, dsOriginal, width = 2)[2] == "+  "
     check lineNumberWidth(modified) == 2
     check lineNumberWidth(original) == 2
     # The option Monaco is given: the number column plus the marker's
@@ -389,9 +386,9 @@ suite "unified diff decoration builder (DR-R4)":
     # per-side one: a context line of the new revision must not read as an
     # addition.
     let modifiedDecorations = decorationsFor(modified)
-    check modifiedDecorations[2].lineNumberClassName == ""
-    check modifiedDecorations[3].lineNumberClassName == DiffLineNumberAddedClass
-    check decorationsFor(original)[3].lineNumberClassName ==
+    check modifiedDecorations[1].lineNumberClassName == ""
+    check modifiedDecorations[2].lineNumberClassName == DiffLineNumberAddedClass
+    check decorationsFor(original)[2].lineNumberClassName ==
       DiffLineNumberRemovedClass
 
   test "a click resolves to the hunk it landed in, and only on a header":
@@ -403,18 +400,17 @@ suite "unified diff decoration builder (DR-R4)":
     ## view renders into and the one the click handler is attached to.
     let doc = buildDiffPair([mixedHunkFile(), secondFile()]).modified
 
-    # File 0: header(1) @@(2) ctx(3) add(4) add(5)
-    # File 2: header(6) @@(7) add(8) @@(9) add(10)
-    check doc.lines.len == 10
-    check isHunkHeaderLine(doc, 2)
-    check hunkAtLine(doc, 2) == (0, 0)
-    check not isHunkHeaderLine(doc, 1)
-    check hunkAtLine(doc, 1) == (-1, -1)   ## the file header owns no hunk
-    check hunkAtLine(doc, 5) == (0, 0)     ## a body line still names its hunk
+    # File 0: @@(1) ctx(2) add(3) add(4)
+    # File 2: @@(5) add(6) @@(7) add(8)
+    check doc.lines.len == 8
+    check isHunkHeaderLine(doc, 1)
+    check hunkAtLine(doc, 1) == (0, 0)
+    check not isHunkHeaderLine(doc, 2)
+    check hunkAtLine(doc, 4) == (0, 0)     ## a body line still names its hunk
+    check isHunkHeaderLine(doc, 5)
+    check hunkAtLine(doc, 5) == (2, 0)
     check isHunkHeaderLine(doc, 7)
-    check hunkAtLine(doc, 7) == (2, 0)
-    check isHunkHeaderLine(doc, 9)
-    check hunkAtLine(doc, 9) == (2, 1)
+    check hunkAtLine(doc, 7) == (2, 1)
     check hunkAtLine(doc, 0) == (-1, -1)
     check hunkAtLine(doc, 99) == (-1, -1)
     check not isHunkHeaderLine(doc, 99)
@@ -436,6 +432,7 @@ suite "unified diff decoration builder (DR-R4)":
     let empty = VCSDiffFileRow(fileIndex: 0, status: "M", path: "src/a.rs")
     check buildDiffPair([empty]).modified.lines.len == 0
     check buildDiffPair([empty]).original.lines.len == 0
+    check buildDiffPair([empty]).files.len == 0
 
 suite "the shapes the old synthetic document flattened (UD-1)":
   ## One interleaved document rendered an addition, a deletion and a file with
@@ -449,7 +446,12 @@ suite "the shapes the old synthetic document flattened (UD-1)":
     VCSDiffFileRow(
       fileIndex: 1, status: "A", path: "src/utils.rs",
       additions: 2, deletions: 0,
-      sourceLines: @["pub fn helper() {}", "", "// trailing"],
+      # An added file's hunk covers ALL of it — git writes `@@ -0,0 +1,N @@`
+      # — so the new-side text and the hunk's lines are the same two lines.
+      # A source line the hunk did not add would, correctly, be reconstructed
+      # onto the old side as a line that was already there, which is not what
+      # status `A` describes.
+      sourceLines: @["pub fn helper() {}", ""],
       hunks: @[VCSHunkRow(
         oldStart: 0, oldCount: 0, newStart: 1, newCount: 2,
         lines: @[
@@ -459,11 +461,19 @@ suite "the shapes the old synthetic document flattened (UD-1)":
         ])])
 
   proc deletedFile(): VCSDiffFileRow =
-    ## A file that no longer exists: every line is a removal, and there is no
-    ## new-side text at all — `git show <new>:<path>` has nothing to return.
+    ## A file that no longer exists: every line is a removal, and the new
+    ## revision holds nothing.
+    ##
+    ## ``sourceLines`` is deliberately POPULATED with the old text, because
+    ## that is what a review export can carry for a deleted file — the
+    ## collector reads the path it was given, and a fixture writes whatever it
+    ## has.  Treating it as the new side would reconstruct the file as
+    ## unchanged on both sides, which is what the diff pair did until UD-2
+    ## derived "does this file have a new side" from the hunks.
     VCSDiffFileRow(
       fileIndex: 2, status: "D", path: "src/config.rs",
       additions: 0, deletions: 2,
+      sourceLines: @["pub const N: u64 = 30;", "pub struct Config {}"],
       hunks: @[VCSHunkRow(
         oldStart: 1, oldCount: 2, newStart: 0, newCount: 0,
         lines: @[
@@ -475,13 +485,12 @@ suite "the shapes the old synthetic document flattened (UD-1)":
 
   test "an added file has content on the new side and chrome on the old one":
     let pair = buildDiffPair([addedFile()])
-    # The old side is not empty — it carries the header and the divider, which
-    # anchor the comparison — but it carries no code, so Monaco reports the
-    # whole file as an insertion.
+    # The old side is not empty — it carries the divider, which anchors the
+    # comparison — but it carries no code, so Monaco reports the whole file as
+    # an insertion.
     for line in pair.original.lines:
-      check line.kind in {dlkFileHeader, dlkHunkHeader,
-                          dlkExpandAbove, dlkExpandBelow}
-    check documentText(pair.original).splitLines()[0] == "A  src/utils.rs  +2 -0"
+      check line.kind == dlkHunkHeader
+    check pair.files[0].headerText == "A  src/utils.rs  +2 -0"
     var added = 0
     for line in pair.modified.lines:
       if line.kind == dlkAdded: added += 1
@@ -494,17 +503,21 @@ suite "the shapes the old synthetic document flattened (UD-1)":
   test "a deleted file has content on the old side and chrome on the new one":
     let pair = buildDiffPair([deletedFile()])
     for line in pair.modified.lines:
-      check line.kind in {dlkFileHeader, dlkHunkHeader,
-                          dlkExpandAbove, dlkExpandBelow}
+      check line.kind == dlkHunkHeader
     var removed = 0
     for line in pair.original.lines:
       if line.kind == dlkRemoved: removed += 1
     check removed == 2
-    check documentText(pair.modified).splitLines()[0] == "D  src/config.rs  +0 -2"
-    # A deletion has no new-side text to expand into, so no expansion control
-    # is offered — pressing one could only reveal nothing.
-    for line in pair.modified.lines & pair.original.lines:
-      check line.kind notin {dlkExpandAbove, dlkExpandBelow}
+    check pair.files[0].headerText == "D  src/config.rs  +0 -2"
+    # ... and its own old text did not leak onto the new side as context.
+    for line in pair.modified.lines:
+      check line.kind != dlkContext
+    # A deletion has no new-side text at all, so there is nothing to expand
+    # into and no boundary is offered.  Before UD-2 this file still rendered an
+    # "Expand 10 lines below" control, because the window arithmetic measured
+    # from `newStart: 0`; with the whole file as the model the case cannot
+    # arise, because the new side has no lines to hide.
+    check collapsedRegionsFor(pair, diffContextLineCount(pair)).len == 0
 
   test "a file the dataset carries no source text for still renders its hunks":
     ## `DeepReviewFileData.sourceContent` can be absent (an unreadable file, an
@@ -514,33 +527,30 @@ suite "the shapes the old synthetic document flattened (UD-1)":
     var file = mixedHunkFile()
     file.sourceLines = @[]
     let pair = buildDiffPair([file])
-    check pair.modified.lines.len == 5
-    check pair.original.lines.len == 4
-    for line in pair.modified.lines & pair.original.lines:
-      check line.kind notin {dlkExpandAbove, dlkExpandBelow}
-    check documentText(pair.modified).splitLines()[3] ==
+    check pair.modified.lines.len == 4
+    check pair.original.lines.len == 3
+    check collapsedRegionsFor(pair, diffContextLineCount(pair)).len == 0
+    check documentText(pair.modified).splitLines()[2] ==
       "  let token = parse(input);"
 
   test "an added, a deleted and a modified file share one tab without merging":
-    ## A git "Working Tree" target names several files at once.  Each file's
-    ## header is present on BOTH sides and is byte-identical, so it anchors the
-    ## comparison: without it Monaco could match one file's context lines
-    ## against another's and report a move across the file boundary.
+    ## A git "Working Tree" target names several files at once.  Since UD-2 the
+    ## file headers are DOM chrome rather than model lines, so the pair carries
+    ## them as data — one entry per file, in document order, each keeping its
+    ## own path and status so the tab can label the files it is showing.
     let pair = buildDiffPair([mixedHunkFile(), addedFile(), deletedFile()])
-    var headersModified: seq[string] = @[]
-    var headersOriginal: seq[string] = @[]
-    for line in pair.modified.lines:
-      if line.kind == dlkFileHeader:
-        headersModified.add(line.text)
-    for line in pair.original.lines:
-      if line.kind == dlkFileHeader:
-        headersOriginal.add(line.text)
-    check headersModified == @["M  src/parser.rs  +2 -1",
-                               "A  src/utils.rs  +2 -0",
-                               "D  src/config.rs  +0 -2"]
-    check headersOriginal == headersModified
+    var headers: seq[string] = @[]
+    var paths: seq[string] = @[]
+    for entry in pair.files:
+      headers.add(entry.headerText)
+      paths.add(entry.path)
+    check headers == @["M  src/parser.rs  +2 -1",
+                       "A  src/utils.rs  +2 -0",
+                       "D  src/config.rs  +0 -2"]
+    check paths == @["src/parser.rs", "src/utils.rs", "src/config.rs"]
+    check pair.files[2].fileIndex == 2
     # Every file keeps its own identity, so a click still resolves to the right
     # hunk of the right file.
-    check hunkAtLine(pair.modified, 1) == (-1, -1)
-    check isHunkHeaderLine(pair.modified, 2)
+    check isHunkHeaderLine(pair.modified, 1)
+    check hunkAtLine(pair.modified, 1) == (0, 0)
     check hunkAtLine(pair.modified, 2) == (0, 0)

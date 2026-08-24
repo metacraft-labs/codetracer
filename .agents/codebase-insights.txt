@@ -1454,3 +1454,40 @@ inside the directory.
   raw content, so copy-as-patch on a REVIEW emitted `++foo` / `--foo` — a patch
   git refuses. The goldens did not catch it because they are built from
   git-shaped rows.
+
+## Every closure built in a `for` body shares ONE binding — both backends (UD-2)
+
+Nim creates one closure environment per enclosing *routine*, not per loop
+iteration, so a `let` in a `for` body is a single slot that every closure built
+in that loop captures — each of them sees whatever the last iteration left in
+it. Two live bugs came from it in `ui/diff_expansion.nim`: right-clicking the
+"show more above" handle opened the "below" menu, and the menu's "Expand 10
+lines" item revealed all twelve. The fix is to build each closure in its own
+**proc call** (`bindBoundaryHandlers`, `menuItem`), so the captured value is a
+parameter of a fresh frame; a `let` inside the loop body is not enough.
+
+Measured on this repo's Nim 2.2.8, at module scope and inside a proc, on BOTH
+backends — `nim js` and `nim c` print `@[20, 20, 20]` for the loop-body `let`
+and `@[0, 10, 20]` for the proc-call form. This was first written up as a
+JavaScript-backend quirk; it is not one, and reading it that way would leave
+the same bug unlooked-for in native code. Anywhere a module attaches one
+handler (or builds one callback) per element in a loop, look for this first.
+
+## Monaco's overlay widgets are painted UNDER the code (UD-2)
+
+`.monaco-editor .lines-content` has `z-index: 2` and `.overlayWidgets` has
+none, so a widget in the overlay layer — which is where the diff editor's
+`hideUnchangedRegions` boundary lives — loses the hit test to `.view-line` at
+its own centre. Measured with `document.elementFromPoint`. The lift has to go
+on `.diff-hidden-lines-widget`, not on a child: `.diff-hidden-lines` carries a
+`transform`, which makes it a stacking context that a child's `z-index` can
+never escape.
+
+## `hideUnchangedRegions` will collapse a `@@` divider (UD-2)
+
+The divider is an unchanged line of both models and sits directly before the
+hunk's own leading context lines, which are unchanged too — so with
+`contextLineCount: 3` the three lines kept visible are the hunk's context and
+the divider is hidden. `diff_document.diffContextLineCount` derives the option
+from the document (longest divider-to-change tail, plus one) instead of fixing
+it at three.

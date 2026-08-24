@@ -95,27 +95,28 @@ A close-up of the hunk containing `fn scale(...)`.
 
 The whole diff tab for `main.nr`, in its initial state.
 
-- At least one **collapsed-context boundary**, reading
-  `... Expand N lines above` or `... Expand N lines below`, sitting between or
-  beside the hunks. Today it is a *line of the document*; that is the thing
-  UD-2 replaces, and it is expected to be present here.
+- At least one **collapsed-context boundary**: a horizontal band across the
+  editor saying how many lines it is hiding, with a rule at its top edge and
+  another at its bottom edge. It stands where unchanged source has been folded
+  away, between or beside the hunks.
 - At least one `@@ -N,M +N,M @@` **hunk divider**.
-- **No expanded context yet** — the collapsed region is still collapsed.
-- Missing-element examples: no `Expand` boundary anywhere (the region is not
-  collapsed, so this view is not what it claims to be); a diff showing the
-  whole file with no dividers.
+- **No expanded context yet** — the region is still collapsed.
+- Missing-element examples: no boundary anywhere (nothing is collapsed, so this
+  view is not what it claims to be); a band with no count in it; a diff showing
+  the whole file with no dividers.
 
 ### View: `diff-expanded-context`
 
 The same diff tab after the reader actuates one boundary.
 
-- **Revealed context lines** where a boundary used to be: unchanged source
-  lines carrying their own line numbers in the gutter, visually distinct from
-  both the added/removed lines and from the boundary control.
-- The rest of the diff is unchanged around them.
-- Missing-element examples: still showing `Expand N lines` in the place the
-  lines should have appeared, with no new lines; a blank band where the
-  expansion happened.
+- **Unchanged source lines where the boundary's band used to reach**, each
+  carrying its own line number in the gutter, reading as ordinary context
+  rather than as additions or removals.
+- Whatever remains hidden is still behind a boundary, and the rest of the diff
+  is unchanged around it.
+- Missing-element examples: the band still covering the same span with no new
+  lines beside it; a blank gap where the lines should be; revealed lines with
+  no line numbers.
 
 ### View: `diff-flow-values`
 
@@ -163,49 +164,37 @@ The diff tab for `report.py`.
 
 ## Known gaps this campaign is closing — findings, not capture failures
 
-These are real weaknesses of the current surface. Report them as **findings**
-if you see them; do **not** treat them as evidence that the capture is broken,
-and do not let them alone drive a rating below 4.
+These are weaknesses the surface still has. Report them as **findings** if you
+see them; do **not** treat them as evidence that the capture is broken, and do
+not let them alone drive a rating below 4.
 
-1. **Syntax highlighting is partial, and where it fails it fails oddly.**
-   UD-1 replaced the `plaintext` document with a Monaco diff editor over two
-   models carrying the reviewed file's real language, so a tokenizer now runs
-   — but it runs over a *window* of the file rather than the whole of it, and
-   a tokenizer starts from ITS line 1. A hunk that begins inside a block
-   comment or a multi-line string is therefore tokenized as if that string had
-   just opened, and everything after it comes out flat. `tools/report.py`'s
-   first hunk starts on line 4, inside the module docstring, so the
-   `diff-other-language` view shows exactly this: two English words coloured
-   as keywords inside the docstring, and the code below it in one colour.
-   Report it — it is real — but it is a *known* consequence of windowed
-   models, and UD-2 (whole-file models with `hideUnchangedRegions`) is what
-   closes it, not a colour change.
-   **Deleted lines are separately not highlighted**: Monaco's inline diff view
-   draws them as view zones with no tokens at all, whatever the model says.
-   `experimental.useTrueInlineView` fixes that and is deferred to UD-4,
-   because it also merges each deletion and insertion into one line and that
-   is a UX decision.
-2. **Word-level intra-line marking — CLOSED by UD-1.** The changed word inside
-   a partially-changed line is now marked, on both sides, by Monaco's own diff.
-   It is the single property that most separates this surface from GitHub's, so
-   if `diff-intraline` shows a whole line tinted and no inner mark, that is a
-   regression and worth leading with.
-2b. **The two `+` / `-` markers are in two columns.** Monaco's inline diff lays
+This section deliberately says what is *not finished*. It does not say what
+recent work fixed, and it names no property as closed — a reviewer told what to
+expect to find good tends to find it, and a rating reached that way is worth
+nothing. Judge everything not listed here on its own merits.
+
+1. **Deleted lines are not syntax-highlighted.** Monaco's inline diff draws the
+   old revision's lines as view zones carrying no tokens at all, whatever the
+   model says, so a removed line reads in one flat colour beside an added line
+   that is coloured properly. `experimental.useTrueInlineView` changes that and
+   is deferred to UD-4, because it also merges each deletion and its
+   replacement into a single line and that is a UX decision rather than a bug
+   fix.
+2. **The two `+` / `-` markers are in two columns.** Monaco's inline diff lays
    the old revision's gutter out as a separate strip to the left of the new
-   one, so the `-` of a deletion and the `+` of an addition are about 30px
+   one, so the `-` of a deletion and the `+` of an addition sit about 30px
    apart rather than in one rail. It is a consequence of the two-editor layout;
    UD-4 owns whether it is worth working around.
-3. **Expansion is a line of text, not a gesture.** UD-2 replaces it with a
-   draggable boundary with a visible affordance.
-4. **The values sit in a single trailing strip**, not in the debugger's own
-   parallel value columns. UD-3 fixes the placement.
-5. **There is no light theme yet.** `default_white` builds and loads, but its
+3. **The recorded values sit in a single trailing strip**, at the end of each
+   code line, rather than in the parallel value columns the debugger's own
+   Omniscience view uses. UD-3 owns the placement.
+4. **There is no light theme yet.** `default_white` builds and loads, but its
    palette is unfinished: the built light and dark Electron stylesheets differ
    in about 1.8% of their rules and both still paint `#282828`, so a window
    configured for it comes out dark. The harness refuses to write a capture
    labelled `light` that paints dark, so **you will never be handed one** — if
-   a screenshot is labelled `light`, a real light palette exists and it is
-   fair game to review as one.
+   a screenshot is labelled `light`, a real light palette exists and it is fair
+   game to review as one.
 
 ## What to Evaluate
 

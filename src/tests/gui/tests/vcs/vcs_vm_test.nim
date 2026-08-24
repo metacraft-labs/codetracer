@@ -6,6 +6,7 @@ import std/[strutils, unittest]
 import isonim/core/[signals, computation, owner]
 import viewmodels/vcs_vm
 import viewmodels/context_expansion
+import viewmodels/diff_document
 import ../../../../common/types as ct_types
 
 suite "openLayoutTab routing":
@@ -608,16 +609,30 @@ suite "VCSVM hunk editor (DR-R4)":
 
       dispose()
 
-suite "VCSVM context expansion state (DR-R5)":
-  ## DeepReview-GUI.md §4.2 requires the expand-above / expand-below controls;
-  ## how far each hunk is currently expanded is the state behind them.
+suite "VCSVM context expansion state (DR-R5, retargeted by UD-2)":
+  ## DeepReview-GUI.md §4.2 requires the expand-above / expand-below controls.
   ##
-  ## It lives on this ViewModel rather than in a JS-side ``JsAssoc`` on the
-  ## component (where ``ui/deepreview.nim:505-535`` kept it) for two reasons the
-  ## tests below are: it must survive a re-render, and it must be assertable
-  ## without a browser.  The window arithmetic itself is
-  ## ``viewmodels/context_expansion.nim`` and is tested in
-  ## ``vcs_context_expansion_test.nim``; this is only the bookkeeping.
+  ## Until UD-2 the state behind them was a per-hunk counter on this ViewModel,
+  ## and this suite asserted its bookkeeping: that it was per (file, hunk),
+  ## that repeated expansion accumulated, that it survived a re-sync, and that
+  ## it was dropped when the tab stopped describing its target.
+  ##
+  ## UD-2 removed the counter.  The diff tab's models are the whole file now
+  ## and Monaco's ``hideUnchangedRegions`` owns which of its lines are on
+  ## screen, so a counter here would be a second notion of the same window and
+  ## would drift from Monaco's the moment a reader dragged a boundary.
+  ##
+  ## Two of the four properties do not survive that change, because there is no
+  ## longer any per-hunk state to be per-hunk about.  The other two do, and they
+  ## matter more than before — Monaco's expansion lives in the *editor*, so
+  ## anything that re-publishes a model destroys it:
+  ##
+  ## - a re-sync of the same rows must produce a byte-identical document, or
+  ##   the host's ``setValue`` guard fires, the models are replaced and every
+  ##   region a reader had expanded collapses again;
+  ## - a panel that stops describing its target must produce no document, so
+  ##   the next one starts from a clean editor rather than inheriting regions
+  ##   keyed on lines that now mean something else.
 
   proc expansionFixture(): seq[VCSDiffFileRow] =
     ## Two files, two hunks each — the same shape the hunk-editor suite uses,
@@ -625,13 +640,14 @@ suite "VCSVM context expansion state (DR-R5)":
     @[
       VCSDiffFileRow(
         fileIndex: 0, status: "M", path: "src/parser.rs",
+        sourceLines: @["a1", "a2", "a3", "a4", "a5"],
         hunks: @[
-          VCSHunkRow(oldStart: 40, oldCount: 1, newStart: 40, newCount: 1,
+          VCSHunkRow(oldStart: 2, oldCount: 1, newStart: 2, newCount: 1,
             lines: @[VCSDiffLineRow(lineType: "added", content: "a",
-                                    newLine: 40)]),
-          VCSHunkRow(oldStart: 80, oldCount: 1, newStart: 80, newCount: 1,
+                                    newLine: 2)]),
+          VCSHunkRow(oldStart: 4, oldCount: 1, newStart: 4, newCount: 1,
             lines: @[VCSDiffLineRow(lineType: "added", content: "b",
-                                    newLine: 80)]),
+                                    newLine: 4)]),
         ]),
       VCSDiffFileRow(
         fileIndex: 1, status: "M", path: "src/lexer.rs",
@@ -649,84 +665,60 @@ suite "VCSVM context expansion state (DR-R5)":
     result = createVCSVM()
     result.setUnifiedDiff(true, expansionFixture())
 
-  test "test_context_expansion_state_is_per_hunk_and_per_file":
+  test "a re-sync of the same diff rebuilds a byte-identical document":
+    ## The tab re-publishes its rows into the VM on every mount attempt (a tab
+    ## drag, a layout restore, a GoldenLayout re-create).  The host only calls
+    ## ``setValue`` when the text actually changed, so an identical document is
+    ## what keeps a reader's expanded regions alive across all of those; a
+    ## document that differed by so much as a line would replace the models and
+    ## collapse everything, which is the concrete bug DR-R5 hit when the
+    ## counters lived on the component.
     createRoot proc(dispose: proc()) =
       let vm = expansionVM()
+      let before = diffPairFor(vm)
 
-      # Nothing is expanded to begin with.
-      check vm.expansionCounts(0, 0) == (0, 0)
-      check vm.expansionCounts(0, 1) == (0, 0)
-      check vm.expansionCounts(1, 0) == (0, 0)
-
-      vm.expandContextAbove(0, 0)
-
-      check vm.expansionCounts(0, 0) == (ContextExpandStep, 0)
-      # The sibling hunk of the same file is untouched...
-      check vm.expansionCounts(0, 1) == (0, 0)
-      # ...and so is a hunk of a different file.
-      check vm.expansionCounts(1, 0) == (0, 0)
-
-      # Repeated expansion accumulates rather than replacing, which is what
-      # makes a second click reveal *further* content (§4.2).
-      vm.expandContextAbove(0, 0)
-      check vm.expansionCounts(0, 0) == (2 * ContextExpandStep, 0)
-
-      # The two directions are independent counters.
-      vm.expandContextBelow(0, 0)
-      check vm.expansionCounts(0, 0) == (2 * ContextExpandStep,
-                                         ContextExpandStep)
-
-      vm.expandContextBelow(1, 1)
-      check vm.expansionCounts(1, 1) == (0, ContextExpandStep)
-      check vm.expansionCounts(0, 0) == (2 * ContextExpandStep,
-                                         ContextExpandStep)
-
-      dispose()
-
-  test "expansion state survives a re-sync of the same diff":
-    ## The tab re-publishes its rows into the VM on every mount attempt
-    ## (a tab drag, a layout restore, a GoldenLayout re-create).  If the
-    ## counters were reset there, every re-render would collapse the context
-    ## the user had revealed — the concrete bug that keeping them on the
-    ## component instead of the ViewModel invites.
-    createRoot proc(dispose: proc()) =
-      let vm = expansionVM()
-
-      vm.expandContextAbove(0, 0)
-      vm.expandContextBelow(0, 0)
       vm.setUnifiedDiff(true, expansionFixture())
+      let after = diffPairFor(vm)
 
-      check vm.expansionCounts(0, 0) == (ContextExpandStep, ContextExpandStep)
+      check documentText(after.modified) == documentText(before.modified)
+      check documentText(after.original) == documentText(before.original)
+      check after.modified.lines.len == before.modified.lines.len
+      check after.unchangedRuns.len == before.unchangedRuns.len
+      # ... and the document really does hold something, so the check above is
+      # not two empty strings agreeing with each other.
+      check before.modified.lines.len > 0
 
       dispose()
 
-  test "closing the tab resets the expansion, and it never leaks between files":
-    ## "Expansion state resets when the tab is closed and does not leak
-    ## between files" — DR-R5's deliverable.  ``clearPanel`` is what the host
-    ## calls when a diff surface stops describing its target.
+  test "a cleared panel produces no document, so the next tab starts clean":
+    ## "Expansion state resets when the tab is closed and does not leak between
+    ## files" — DR-R5's deliverable, restated for an editor that holds the
+    ## state: an empty document means a fresh diff editor with no regions,
+    ## rather than one carrying regions keyed on lines of a different file.
     createRoot proc(dispose: proc()) =
       let vm = expansionVM()
+      check diffPairFor(vm).modified.lines.len > 0
 
-      vm.expandContextAbove(0, 0)
-      vm.expandContextBelow(1, 1)
-      check vm.hunkExpansion.val.len == 2
-
-      vm.resetContextExpansion()
-      check vm.hunkExpansion.val.len == 0
-      check vm.expansionCounts(0, 0) == (0, 0)
-      check vm.expansionCounts(1, 1) == (0, 0)
-
-      vm.expandContextAbove(0, 0)
       vm.clearPanel()
-      check vm.hunkExpansion.val.len == 0
-      check vm.expansionCounts(0, 0) == (0, 0)
+      check vm.diffFiles.val.len == 0
+      check diffPairFor(vm).modified.lines.len == 0
+      check diffPairFor(vm).files.len == 0
 
       dispose()
 
-  test "an unknown hunk reports no expansion rather than inventing one":
+  test "each hunk still keeps its own identity in the whole-file document":
+    ## What the per-hunk counters were keyed on, and the reason they were:
+    ## expanding around one hunk must not disturb another, and a click must
+    ## resolve to the hunk it landed in.  The counters are gone; the keying is
+    ## not, because hunk selection and the patch builder both use it.
     createRoot proc(dispose: proc()) =
       let vm = expansionVM()
-      check vm.expansionCounts(7, 3) == (0, 0)
+      let doc = diffPairFor(vm).modified
+      var seen: seq[(int, int)] = @[]
+      for i, line in doc.lines:
+        if line.kind == dlkHunkHeader:
+          seen.add(hunkAtLine(doc, i + 1))
+      check seen == @[(0, 0), (0, 1), (1, 0), (1, 1)]
       dispose()
 
 suite "VCSVM":

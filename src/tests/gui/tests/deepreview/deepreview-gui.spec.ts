@@ -538,7 +538,12 @@ test.describe("DeepReview GUI - main features", () => {
 
     // DeepReview-GUI.md §4.1: "Each diff tab includes: A file header with path
     // and diff metadata".  All 3 files in the fixture have hunks, so each
-    // opens a tab whose document is headed by that file.
+    // opens a tab headed by that file.
+    //
+    // The header is DOM chrome above the editor since UD-2, not line 1 of the
+    // model: with `hideUnchangedRegions` on, line 1 is exactly what a
+    // collapsed run at the top of a file hides, so a header left in the model
+    // would be visible only on files whose first change is near the top.
     for (const [index, filePath] of [
       [0, "src/main.rs"],
       [1, "src/utils.rs"],
@@ -549,10 +554,12 @@ test.describe("DeepReview GUI - main features", () => {
       // Two code editors since UD-1 — the diff editor's two sides — so the
       // one the unified view renders into is named rather than assumed.
       await expect(tab.locator(DIFF_BODY)).toBeVisible();
-      const header = tab.locator(`${DIFF_BODY} .view-line`, {
-        hasText: filePath,
-      });
-      await expect(header.first()).toBeVisible({ timeout: 15_000 });
+      const header = DeepReviewPage.fileHeaders(tab);
+      await expect(header).toHaveCount(1, { timeout: 15_000 });
+      await expect(header).toBeVisible();
+      await expect(header.locator(".unified-diff-file-header-path")).toHaveText(
+        filePath,
+      );
     }
   });
 
@@ -565,10 +572,17 @@ test.describe("DeepReview GUI - main features", () => {
     // because one DOM view concatenated every file; with one tab per file the
     // same 16 added / 10 removed / 2 context lines are asserted where they
     // belong.
-    const expected: [number, string, number, number, number][] = [
-      [0, "src/main.rs", 8, 3, 2],
-      [1, "src/utils.rs", 8, 0, 0],
-      [2, "src/config.rs", 0, 7, 0],
+    //
+    // UD-2 made the models the whole file, so the context lines RENDERED are
+    // the ones `hideUnchangedRegions` leaves on screen rather than the two the
+    // hunk itself carries — which is why main.rs's context is a floor and a
+    // ceiling rather than an exact count.  The added and removed counts stay
+    // exact: a change is never collapsed, so all of them are always on screen,
+    // and that is the property this test is about.
+    const expected: [number, string, number, number, number, number][] = [
+      [0, "src/main.rs", 8, 3, 2, 25],
+      [1, "src/utils.rs", 8, 0, 0, 0],
+      [2, "src/config.rs", 0, 7, 0, 0],
     ];
 
     // UD-1 split the one model in two, so each class is counted on the side it
@@ -577,7 +591,14 @@ test.describe("DeepReview GUI - main features", () => {
     // (which is what makes Monaco treat them as unchanged and draw them once).
     // Counting them unscoped would sum the two sides and silently accept a
     // build that put an addition in the old revision.
-    for (const [index, filePath, added, removed, context] of expected) {
+    for (const [
+      index,
+      filePath,
+      added,
+      removed,
+      minContext,
+      maxContext,
+    ] of expected) {
       const tab = await openReviewDiffTab(dr, index, filePath);
       const modified = tab.locator(
         ".monaco-editor.modified-in-monaco-diff-editor .view-overlays",
@@ -595,12 +616,16 @@ test.describe("DeepReview GUI - main features", () => {
         removed,
       );
       expect(await original.locator(".ct-diff-line-added").count()).toBe(0);
-      expect(await modified.locator(".ct-diff-line-context").count()).toBe(
-        context,
-      );
-      expect(await original.locator(".ct-diff-line-context").count()).toBe(
-        context,
-      );
+      const modifiedContext = await modified
+        .locator(".ct-diff-line-context")
+        .count();
+      expect(modifiedContext).toBeGreaterThanOrEqual(minContext);
+      expect(modifiedContext).toBeLessThanOrEqual(maxContext);
+      const originalContext = await original
+        .locator(".ct-diff-line-context")
+        .count();
+      expect(originalContext).toBeGreaterThanOrEqual(minContext);
+      expect(originalContext).toBeLessThanOrEqual(maxContext);
       // Exactly one hunk per file in the fixture, rendered as a section
       // divider (VCS-Panel.md: "Hunk headers (@@ -N,M +N,M @@) shown as
       // section dividers") — on both sides, so it anchors the comparison
@@ -810,8 +835,10 @@ test.describe("DeepReview GUI - main features", () => {
   test("Test 31: the loop control picks which pass through the loop is shown", async ({ ctPage }) => {
     // §4.4: "Preserve existing interaction patterns such as loop sliders and
     // inline values."  `compute` is the fixture's only looping function, on
-    // lines 14-20, so it reaches the tab after one "expand below" click.  It
-    // recorded three passes over the header line 16:
+    // lines 14-20.  Since UD-2 those lines are in the model from the start —
+    // the model is the whole file — but they sit inside the run Monaco
+    // collapses below the hunk, so the boundary is pressed to bring them on
+    // screen first.  It recorded three passes over the header line 16:
     //   pass 1  i = 0, acc = 0
     //   pass 2  i = 1, acc = 1
     //   pass 3  i = 2, acc = 3
@@ -820,10 +847,12 @@ test.describe("DeepReview GUI - main features", () => {
     await wait(500);
 
     const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
-    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(1, {
-      timeout: 20_000,
-    });
-    await DeepReviewPage.expandBelowLine(tab).click();
+    await expect
+      .poll(async () => await DeepReviewPage.expansionBoundaries(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    await DeepReviewPage.expandAboveHandle(tab).click();
 
     const loop = DeepReviewPage.loopSelectors(tab).first();
     await expect(loop).toBeVisible({ timeout: 20_000 });
@@ -1046,11 +1075,21 @@ test.describe("DeepReview GUI - main features", () => {
     ).toBeVisible();
 
     // `main` is recorded twice in the fixture, so the control counts two.
-    // `compute` is not on screen in this hunk and gets no control at all.
     await expect(selector.first().locator(".review-invocation-label")).toHaveText(
       "main: call 1 / 2",
     );
-    expect(await selector.count()).toBe(1);
+
+    // One control per function the document shows — and since UD-2 the
+    // document is the whole file, so `compute` gets one too.  Before UD-2 the
+    // model was a window around the hunk, `compute` (lines 14-20) was not in
+    // it, and this counted exactly one.  That is a change in what the tab
+    // *contains*, not in the rule: §7's control belongs above the function it
+    // governs, and the second function is now in the tab.
+    const labels = await selector.locator(".review-invocation-label").allTextContents();
+    expect(labels).toEqual([
+      "main: call 1 / 2",
+      "compute: call 1 / 1 (4 called, 1 recorded)",
+    ]);
   });
 
   test("Test 28: stepping the selector switches the rendered invocation", async ({ ctPage }) => {
@@ -1639,16 +1678,12 @@ test.describe("DeepReview GUI - main features", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Tests 14-16: Context expansion in the diff tab (DR-R5)
+  // Tests 14-16: Context expansion in the diff tab (DR-R5, retargeted by UD-2)
   // -----------------------------------------------------------------------
-
-  // e2e_diff_tab_expand_reveals_context — the rewrite of "Test 14: expand
-  // buttons are visible around hunks", "Test 15: clicking expand above
-  // reveals additional context lines" and "Test 16: clicking expand below".
   //
-  // Same three scenarios, retargeted from the standalone DeepReview panel's
-  // `deepreview-expand-*` DOM to the Monaco diff tab, which is where
-  // DeepReview-GUI.md §4.2 puts them:
+  // e2e_diff_tab_expand_reveals_context.
+  //
+  // DeepReview-GUI.md §4.2:
   //
   //   "The user can reveal surrounding unchanged lines around the changed
   //    regions.  Required controls: Expand surrounding context above a
@@ -1656,34 +1691,49 @@ test.describe("DeepReview GUI - main features", () => {
   //    Repeated expansion loads more file content instead of merely
   //    uncovering lines that were already fetched."
   //
-  //   "Context expansion is incremental loading.  Newly revealed lines become
-  //    normal code lines in the diff tab and can receive Omniscience overlays
-  //    when matching DeepReview data exists."
+  // §4.3, which UD-2 delivers and the spec still marks "not implemented":
   //
-  // The old tests asserted only that *some* lines appeared; these assert
-  // WHICH — the revealed line numbers and their text — because the arithmetic
-  // being migrated is the clamping at a file's first and last line, and a
-  // count-only assertion passes with every off-by-one it can make.
+  //   "Each currently visible context boundary exposes a draggable edge line.
+  //    Dragging that boundary upward or downward increases the number of
+  //    visible lines without forcing the user to repeatedly press expansion
+  //    buttons."
   //
-  // Falsifiable against the ported code: before DR-R5 the diff tab had no
-  // expand controls at all (the capability lived only in `ui/deepreview.nim`,
-  // the panel DR-R8 deletes), so every locator below found nothing.
+  // What changed under these tests
+  // ------------------------------
+  // DR-R5 made the expand control a LINE of the Monaco model reading "...
+  // Expand 10 lines above", and these three tests clicked it and counted the
+  // `.ct-diff-line-revealed` decorations that appeared.
   //
-  // Fixture geometry, from `sample-review.json` — src/main.rs has one hunk at
-  // new lines 2..11 in a 25-line file, so:
-  //   above: exactly ONE hidden line (line 1, "fn main() {"), after which no
-  //          further expansion above is possible;
-  //   below: lines 12..25 hidden, so one step reveals 12..21 and a further
-  //          step is still offered.
-  // That asymmetry is deliberate — it exercises the clamp in one direction
-  // and the "more remains" branch in the other within a single fixture.
+  // UD-2 removed both.  The models are the whole file now — which is what
+  // makes the tokenizer see it from line 1, the blocker UD-1 recorded — and
+  // Monaco's own `hideUnchangedRegions` collapses what is far from a change,
+  // drawing a boundary widget with a drag handle at each end.  There are no
+  // control lines to click and no revealed lines to count, because every line
+  // is already in the document; what changes is which of them are on screen.
   //
-  // Headless counterparts:
-  //   test_context_expansion_window_reveals_lines_above_and_below and
-  //   test_context_expansion_clamps_at_file_boundaries in
-  //   src/tests/gui/tests/vcs/vcs_context_expansion_test.nim;
-  //   test_context_expansion_state_is_per_hunk_and_per_file in
-  //   src/tests/gui/tests/vcs/vcs_vm_test.nim.
+  // So the assertions moved from "a control line exists and clicking it adds
+  // decorated lines" to "a boundary exists, it says how much it is hiding,
+  // and each gesture reduces that by the right amount and puts the right
+  // line numbers in the gutter".  The line numbers are still asserted by
+  // value, for the reason the DR-R5 comment gave: a count-only assertion
+  // passes with every off-by-one it can make.
+  //
+  // Fixture geometry, from `sample-review.json` — src/main.rs is 25 lines
+  // with one hunk covering new lines 2..11, so:
+  //   above: the run above the hunk is three lines (file line 1, the `@@`
+  //          divider and the hunk's own leading context line), far less than
+  //          `contextLineCount + minimumLineCount`, so nothing is collapsed
+  //          there and NO boundary is offered — the edge case, asserted
+  //          through the UI that protects it;
+  //   below: the run after the hunk is fifteen lines, of which three stay on
+  //          screen as context, so file lines 14..25 are hidden behind one
+  //          boundary.  Its two handles reveal from its top (lines just after
+  //          the hunk) and from its bottom (the end of the file)
+  //          independently.
+  //
+  // Headless counterparts: the "which lines a boundary hides" and "the
+  // expansion menu's commands" suites in
+  // src/tests/gui/tests/vcs/vcs_context_expansion_test.nim.
 
   /// Open src/main.rs's diff tab and wait for Monaco to render its lines.
   async function openMainDiffTab(dr: DeepReviewPage) {
@@ -1696,162 +1746,421 @@ test.describe("DeepReview GUI - main features", () => {
     return tab;
   }
 
-  test("Test 14: the diff tab offers expand controls around a hunk with hidden neighbours", async ({ ctPage }) => {
+  /// The tab, once Monaco has collapsed its unchanged regions and
+  /// `ui/diff_expansion.nim` has stamped the boundaries it drew.
+  async function openMainDiffTabWithBoundary(dr: DeepReviewPage) {
+    const tab = await openMainDiffTab(dr);
+    await expect
+      .poll(async () => await DeepReviewPage.expansionBoundaries(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    return tab;
+  }
+
+  test("Test 14: the diff tab offers a draggable, visible boundary at each collapsed region", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    const tab = await openMainDiffTab(dr);
+    const tab = await openMainDiffTabWithBoundary(dr);
 
-    // VCS-Panel.md, "Unified Diff View (Editor Integration)": "Context
-    // expansion controls (Expand N lines above/below)".  Both directions are
-    // offered: main.rs's hunk has one hidden line above it and fourteen below.
-    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveCount(1, {
-      timeout: 15_000,
-    });
-    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(1);
+    // main.rs has exactly one collapsed region — below the hunk — and it
+    // carries BOTH handles, so both of §4.2's required directions are offered
+    // from it independently.
+    await expect(DeepReviewPage.expandAboveHandle(tab)).toHaveCount(1);
+    await expect(DeepReviewPage.expandBelowHandle(tab)).toHaveCount(1);
 
-    // The control names how much a click reveals, and the number is the step
-    // the ViewModel actually advances by (`ContextExpandStep`).
-    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveText(
-      /Expand\s+10\s+lines\s+above/,
+    // The affordance is there BEFORE any interaction.  Monaco's own handles
+    // are `background-color: transparent` until `:hover`, so this is the
+    // assertion that says the stylesheet's override is in force — without it
+    // the gesture exists and nobody can see that it does.
+    const painted = await DeepReviewPage.expandAboveHandle(tab).evaluate(
+      (node: Element) => {
+        const style = getComputedStyle(node);
+        return {
+          background: style.backgroundColor,
+          cursor: style.cursor,
+          height: node.getBoundingClientRect().height,
+        };
+      },
     );
-    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveText(
-      /Expand\s+10\s+lines\s+below/,
+    expect(painted.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(painted.background).not.toBe("transparent");
+    expect(painted.height).toBeGreaterThan(0);
+    // ... and it says it can be dragged, which is §4.3's whole point.
+    expect(painted.cursor).toMatch(/resize/);
+
+    // Monaco's band between the handles names how much is hidden, which is
+    // the "N lines" a reader needs before deciding to expand.
+    await expect(DeepReviewPage.collapsedBands(tab).first()).toHaveText(
+      /\d+ hidden lines/,
     );
+    expect(await DeepReviewPage.hiddenLineCounts(tab)).toEqual([12, 12]);
 
-    // Nothing is revealed until a control is pressed.
-    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(0);
-  });
-
-  test("Test 15: clicking expand above reveals the lines preceding the hunk", async ({ ctPage }) => {
-    const dr = new DeepReviewPage(ctPage);
-    await dr.waitForReady();
-    await wait(500);
-
-    const tab = await openMainDiffTab(dr);
-
-    // The hunk starts at new line 2, so line 1 is not in the diff and its
-    // number is absent from the gutter before expanding.
-    const before = await DeepReviewPage.diffNewLineNumbers(tab);
-    expect(before).not.toContain("1");
-
-    await DeepReviewPage.expandAboveLine(tab).click();
-
-    // Exactly one line exists above the hunk, so exactly one is revealed —
-    // the clamp, asserted through the UI it protects.
-    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(1, {
-      timeout: 15_000,
-    });
-
-    // ...and it is the right one: line 1 of src/main.rs, by number and by
-    // text.  A revealed line is unchanged, so it carries the same old and new
-    // number.
-    // A revealed line is unchanged, so it carries the same number in BOTH
-    // gutter columns — the new revision's and the old one's.
+    // Nothing is collapsed ABOVE the hunk: a three-line run is not worth a
+    // gesture, so no boundary is drawn there and line 1 is simply on screen.
     expect(await DeepReviewPage.diffNewLineNumbers(tab)).toContain("1");
-    expect(await DeepReviewPage.diffOldLineNumbers(tab)).toContain("1");
-    await expect(
-      // Monaco renders runs of spaces as U+00A0, so the regex uses `\s`
-      // rather than a literal space (the same trap DR-R4 hit on `@@`).
-      tab.locator(`${DIFF_BODY} .view-line`, { hasText: /fn\s+main\(\)\s+\{/ }),
-    ).toHaveCount(1);
-
-    // §4.2: "Newly revealed lines become normal code lines in the diff tab"
-    // — the revealed line is decorated as context, not as a fourth kind, so
-    // it is eligible for the Omniscience overlay DR-R6 draws on context lines.
-    await expect(
-      tab.locator(`${DIFF_BODY} .view-overlays .ct-diff-line-context.ct-diff-line-revealed`),
-    ).toHaveCount(1);
-
-    // Nothing further is hidden above, so the control is gone — a user cannot
-    // press a button that can no longer act.
-    await expect(DeepReviewPage.expandAboveLine(tab)).toHaveCount(0);
+    expect(await DeepReviewPage.expansionBoundaries(tab).count()).toBe(2);
   });
 
-  test("Test 16: clicking expand below reveals further content on each click", async ({ ctPage }) => {
+  test("Test 15: pressing a boundary reveals the default increment", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    const tab = await openMainDiffTab(dr);
+    const tab = await openMainDiffTabWithBoundary(dr);
 
-    await DeepReviewPage.expandBelowLine(tab).click();
+    // Lines 14..25 are hidden, so none of their numbers is in the gutter —
+    // while 13, the last line the boundary keeps as context, is.
+    const before = await DeepReviewPage.diffNewLineNumbers(tab);
+    expect(before).toContain("13");
+    expect(before).not.toContain("14");
+    expect(before).not.toContain("25");
 
-    // The hunk ends at new line 11 and the file has 25 lines, so one step
-    // reveals lines 12..21.
-    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(10, {
-      timeout: 15_000,
-    });
+    // A press without a drag is Monaco's own click-to-expand, by
+    // `revealLineCount` — which this tab sets to `ContextExpandStep`, the
+    // same ten lines DR-R5's button promised.
+    await DeepReviewPage.expandAboveHandle(tab).click();
+
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(tab))[0], {
+        timeout: 15_000,
+      })
+      .toBe(2);
+
+    // ... and it revealed the right ten: 14..23, from the TOP of the region,
+    // which is the end nearest the hunk.
     const afterFirst = await DeepReviewPage.diffNewLineNumbers(tab);
-    expect(afterFirst).toContain("12");
-    expect(afterFirst).toContain("21");
-    expect(afterFirst).not.toContain("22");
-    // Unchanged lines, so the old revision's column agrees.
-    expect(await DeepReviewPage.diffOldLineNumbers(tab)).toContain("21");
-    // Line 12 of main.rs is the closing brace of `fn main`.
-    await expect(
-      tab.locator(`${DIFF_BODY} .view-overlays .ct-diff-line-revealed`),
-    ).toHaveCount(10);
+    expect(afterFirst).toContain("14");
+    expect(afterFirst).toContain("23");
+    expect(afterFirst).not.toContain("24");
+    // Unchanged lines, so the old revision's column agrees — line 23 of the
+    // new revision is line 18 of the old one, five lines earlier, because the
+    // hunk replaced three lines with eight.
+    expect(await DeepReviewPage.diffOldLineNumbers(tab)).toContain("18");
 
     // §4.2's third required control: "Repeated expansion loads more file
     // content instead of merely uncovering lines that were already fetched."
-    // Four lines remain (22..25), so a second click reveals those four rather
-    // than re-revealing the first ten.
-    await DeepReviewPage.expandBelowLine(tab).click();
-    await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(14, {
-      timeout: 15_000,
-    });
+    // Two lines remain, so a second press takes those two rather than
+    // re-revealing the first ten.
+    await DeepReviewPage.expandAboveHandle(tab).click();
     const afterSecond = await DeepReviewPage.diffNewLineNumbers(tab);
-    expect(afterSecond).toContain("22");
+    expect(afterSecond).toContain("24");
     expect(afterSecond).toContain("25");
 
-    // The file is exhausted, so the control disappears.
-    await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(0);
+    // The region is exhausted, so the boundary goes: a reader cannot press
+    // something that can no longer act.
+    await expect
+      .poll(async () => await DeepReviewPage.expansionBoundaries(tab).count(), {
+        timeout: 15_000,
+      })
+      .toBe(0);
   });
 
-  test("Test 16b: expansion is per hunk and per file, and resets when the tab closes", async ({ ctPage }) => {
-    // DR-R5: "Expansion state resets when the tab is closed and does not leak
-    // between files."  Each diff tab owns its own `VCSVM`, so a second file's
-    // tab must open unexpanded however far the first was expanded.
-    //
-    // Headless counterpart: "closing the tab resets the expansion, and it
-    // never leaks between files" in
-    // src/tests/gui/tests/vcs/vcs_vm_test.nim.
+  test("Test 16: dragging a boundary reveals lines, with the count following the gesture", async ({ ctPage }) => {
+    // §4.3: "Dragging that boundary upward or downward increases the number
+    // of visible lines without forcing the user to repeatedly press expansion
+    // buttons."  Falsifiable before UD-2: `hideUnchangedRegions` was
+    // `{ enabled: false }`, so no boundary was drawn and there was nothing to
+    // drag.
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();
     await wait(500);
 
-    const mainTab = await openMainDiffTab(dr);
-    await DeepReviewPage.expandBelowLine(mainTab).click();
-    await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
-      timeout: 15_000,
-    });
+    const tab = await openMainDiffTabWithBoundary(dr);
+    const handle = DeepReviewPage.expandAboveHandle(tab);
+    const box = await handle.boundingBox();
+    expect(box).not.toBeNull();
 
-    // A different file's tab starts from nothing revealed.
+    const startX = box!.x + box!.width / 2;
+    const startY = box!.y + box!.height / 2;
+    // Monaco converts the vertical travel into lines at one line per
+    // line-height, so a drag of three line-heights reveals about three lines —
+    // "the count follows the gesture" rather than jumping by a fixed step.
+    const lineHeight = await tab
+      .locator(`${DIFF_BODY} .view-line`)
+      .first()
+      .evaluate((node: Element) => node.getBoundingClientRect().height);
+    expect(lineHeight).toBeGreaterThan(0);
+
+    await ctPage.mouse.move(startX, startY);
+    await ctPage.mouse.down();
+    // Several small steps rather than one jump: the handler reads `mousemove`,
+    // and a single event from the start to the end would also be accepted by a
+    // implementation that only listened for `mouseup`.
+    for (let step = 1; step <= 6; step++) {
+      await ctPage.mouse.move(startX, startY + (lineHeight * 3 * step) / 6);
+    }
+    await ctPage.mouse.up();
+
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(tab))[0], {
+        timeout: 15_000,
+      })
+      .toBeLessThan(12);
+
+    const hidden = (await DeepReviewPage.hiddenLineCounts(tab))[0];
+    // The drag revealed roughly the distance travelled — not the 10-line
+    // click increment, which is what tells a drag apart from a click here.
+    expect(12 - hidden).toBeGreaterThanOrEqual(2);
+    expect(12 - hidden).toBeLessThanOrEqual(5);
+    // ... and the lines it revealed are the ones nearest the hunk.
+    expect(await DeepReviewPage.diffNewLineNumbers(tab)).toContain("14");
+  });
+
+  test("Test 16c: the boundary's context menu expands more, and to the file's edge", async ({ ctPage }) => {
+    // The owner's third control: "a context menu offering more lines or the
+    // whole file in that direction", both directions independently.  Monaco
+    // has no menu on the boundary at all — this is entirely
+    // `ui/diff_expansion.nim` over `viewmodels/diff_expansion_menu.nim`.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openMainDiffTabWithBoundary(dr);
+
+    await DeepReviewPage.expandAboveHandle(tab).click({ button: "right" });
+    await expect(dr.expansionMenu()).toBeVisible({ timeout: 10_000 });
+    // 12 lines hidden: more than the 10-line increment, not more than the
+    // 50-line one, so two offers — the increment and the whole remainder.
+    await expect(dr.expansionMenuItems()).toHaveText([
+      "Expand 10 lines above",
+      "Expand all 12 lines above",
+    ]);
+
+    // "The whole file in this direction": every remaining line of the region,
+    // so the file's last line reaches the gutter and the boundary retires.
+    await dr.expansionMenuItems().last().click();
+    await expect(dr.expansionMenu()).toHaveCount(0);
+    await expect
+      .poll(async () => await DeepReviewPage.diffNewLineNumbers(tab), {
+        timeout: 15_000,
+      })
+      .toContain("25");
+    expect(await DeepReviewPage.diffNewLineNumbers(tab)).toContain("14");
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(tab))[0] ?? 0, {
+        timeout: 15_000,
+      })
+      .toBe(0);
+  });
+
+  test("Test 16d: the two directions are offered independently", async ({ ctPage }) => {
+    // Each boundary has a handle at each end, and each menu names its own
+    // direction and acts only on it.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openMainDiffTabWithBoundary(dr);
+
+    await DeepReviewPage.expandBelowHandle(tab).click({ button: "right" });
+    await expect(dr.expansionMenu()).toBeVisible({ timeout: 10_000 });
+    await expect(dr.expansionMenuItems()).toHaveText([
+      "Expand 10 lines below",
+      "Expand all 12 lines below",
+    ]);
+
+    // Ten lines from the BOTTOM of the region is the end of the file, not the
+    // lines next to the hunk — which is what "independently" means.
+    await dr.expansionMenuItems().first().click();
+    await expect(dr.expansionMenu()).toHaveCount(0);
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(tab))[0], {
+        timeout: 15_000,
+      })
+      .toBe(2);
+
+    // The discriminator, read at the TOP of the file where the viewport
+    // already is: line 13 is still the last one before the boundary and 14 is
+    // still hidden.  Pressing the *above* handle would have revealed 14 first
+    // — that is what "independently" means.
+    const numbers = await DeepReviewPage.diffNewLineNumbers(tab);
+    expect(numbers).toContain("13");
+    expect(numbers).not.toContain("14");
+
+    // ... and the lines that DID come on screen are at the end of the file.
+    await DeepReviewPage.scrollDiff(ctPage, tab, 2000);
+    await expect
+      .poll(async () => await DeepReviewPage.diffNewLineNumbers(tab), {
+        timeout: 15_000,
+      })
+      .toContain("25");
+    expect(await DeepReviewPage.diffNewLineNumbers(tab)).toContain("16");
+  });
+
+  test("Test 16e: the boundary is reachable and operable without a mouse", async ({ ctPage }) => {
+    // A drag-only control excludes people outright.  Monaco gives `div.top`
+    // no `role` and neither handle a `tabindex`, so before UD-2 a reader
+    // without a mouse could not reach the boundary at all.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openMainDiffTabWithBoundary(dr);
+    const handle = DeepReviewPage.expandAboveHandle(tab);
+
+    // Focusable, named, and announced as a button.
+    await expect(handle).toHaveAttribute("role", "button");
+    await expect(handle).toHaveAttribute("tabindex", "0");
+    await expect(handle).toHaveAttribute(
+      "aria-label",
+      /Show 10 more lines above/,
+    );
+    await handle.focus();
+    expect(
+      await handle.evaluate((node: Element) => node === document.activeElement),
+    ).toBe(true);
+
+    // Enter reveals the same increment a press does ...
+    await ctPage.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(tab))[0], {
+        timeout: 15_000,
+      })
+      .toBe(2);
+
+    // ... and Shift+Enter takes the rest of the file in that direction, which
+    // is the keyboard equivalent of the menu's last item.
+    await DeepReviewPage.expandAboveHandle(tab).focus();
+    await ctPage.keyboard.press("Shift+Enter");
+    await expect
+      .poll(async () => await DeepReviewPage.expansionBoundaries(tab).count(), {
+        timeout: 15_000,
+      })
+      .toBe(0);
+    // The file's last line is now reachable.  Scrolled to, because Monaco
+    // renders only the viewport and the whole file no longer fits in it.
+    await DeepReviewPage.scrollDiff(ctPage, tab, 2000);
+    await expect
+      .poll(async () => await DeepReviewPage.diffNewLineNumbers(tab), {
+        timeout: 15_000,
+      })
+      .toContain("25");
+  });
+
+  test("Test 16f: Shift+F10 opens the boundary's menu from the keyboard", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openMainDiffTabWithBoundary(dr);
+    await DeepReviewPage.expandAboveHandle(tab).focus();
+    await ctPage.keyboard.press("Shift+F10");
+
+    await expect(dr.expansionMenu()).toBeVisible({ timeout: 10_000 });
+    // The menu takes focus, so it can be walked and chosen from without ever
+    // touching the mouse.
+    expect(
+      await dr
+        .expansionMenuItems()
+        .first()
+        .evaluate((node: Element) => node === document.activeElement),
+    ).toBe(true);
+
+    await ctPage.keyboard.press("Enter");
+    await expect(dr.expansionMenu()).toHaveCount(0);
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(tab))[0], {
+        timeout: 15_000,
+      })
+      .toBe(2);
+  });
+
+  test("UD-2: the model is the whole file, so the tokenizer starts at line 1", async ({ ctPage }) => {
+    // The blocker UD-1 recorded, closed at its cause: a Monaco model is
+    // tokenized from its OWN line 1, and DR-R5's model began at the first
+    // hunk.  Asserted against the live models rather than against the
+    // document builder, because the builder is what the headless suite
+    // already covers and this is the claim about what Monaco is given.
+    //
+    // Falsifiable before UD-2: main.rs's modified model held 16 lines of a
+    // 25-line file and its first numbered line was the hunk's, not the
+    // file's.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    await openMainDiffTab(dr);
+
+    const shapes = await ctPage.evaluate(() =>
+      (window as never as { monaco: any }).monaco.editor
+        .getModels()
+        .map((model: any) => ({
+          language: model.getLanguageId(),
+          lineCount: model.getLineCount(),
+          first: model.getLineContent(1),
+        })),
+    );
+    const rust = shapes.filter((m: any) => m.language === "rust");
+    expect(rust.length).toBeGreaterThanOrEqual(2);
+    // 25 source lines plus the one `@@` divider §4.1 requires.  Both sides:
+    // the old revision is the new one with the hunk's old lines put back, and
+    // this hunk replaces five lines with ten, so it is five lines shorter.
+    const lineCounts = rust.map((m: any) => m.lineCount).sort((a: number, b: number) => a - b);
+    expect(lineCounts).toEqual([21, 26]);
+    // Line 1 of the model is line 1 of the file — not a file header, not a
+    // `@@` divider, and not the middle of the hunk.
+    for (const model of rust) {
+      expect(model.first).toBe("fn main() {");
+    }
+  });
+
+  test("Test 16b: expansion is per file, and resets when the tab closes", async ({ ctPage }) => {
+    // DR-R5: "Expansion state resets when the tab is closed and does not leak
+    // between files."  Since UD-2 the expansion lives in the *editor* —
+    // Monaco's unchanged regions — and each diff tab has its own editor, so a
+    // second file's tab must open collapsed however far the first was
+    // expanded, and a reopened tab must start collapsed again.
+    //
+    // Headless counterparts: "a re-sync of the same diff rebuilds a
+    // byte-identical document" and "a cleared panel produces no document" in
+    // src/tests/gui/tests/vcs/vcs_vm_test.nim.  The first is what keeps the
+    // "coming back finds it still expanded" case below true: a re-sync that
+    // changed the document by one line would re-publish the models and
+    // collapse everything.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const mainTab = await openMainDiffTabWithBoundary(dr);
+    await DeepReviewPage.expandAboveHandle(mainTab).click();
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(mainTab))[0], {
+        timeout: 15_000,
+      })
+      .toBe(2);
+
+    // A different file's tab has its own editor.  utils.rs is a wholly added
+    // 8-line file, so it has no unchanged run at all and therefore no
+    // boundary — which is also the honest answer for "nothing to expand".
     await dr.fileItemByIndex(1).click();
     const utilsTab = dr.diffTabFor("src/utils.rs");
     await expect(utilsTab).toBeVisible({ timeout: 20_000 });
     await expect(
       utilsTab.locator(DIFF_BODY_LINES),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(DeepReviewPage.revealedDecorations(utilsTab)).toHaveCount(0);
+    await expect(DeepReviewPage.expansionBoundaries(utilsTab)).toHaveCount(0);
 
-    // ...and coming back finds main.rs still expanded: the state is on the
-    // ViewModel, so it survives the tab losing and regaining focus.
+    // ...and coming back finds main.rs still expanded: the tab kept its
+    // editor, and re-syncing the same rows rebuilds the same document, so
+    // nothing replaced the models under it.
     await dr.fileItemByIndex(0).click();
     await expect(mainTab.locator(DIFF_BODY_LINES)).toBeVisible({
       timeout: 20_000,
     });
-    await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
-      timeout: 15_000,
-    });
+    await expect
+      .poll(async () => (await DeepReviewPage.hiddenLineCounts(mainTab))[0], {
+        timeout: 15_000,
+      })
+      .toBe(2);
 
-    // Closing the tab must drop its ViewModel and its source cache, so
-    // reopening the same file starts unexpanded.  This is the only coverage
-    // of the `closeLayoutTab` -> `forgetUnifiedDiffTab` wiring: the tab
-    // component is JS-only and cannot be reached headlessly, so without these
-    // four lines the test's own title would be asserting nothing.
+    // Closing the tab must drop its ViewModel, its source cache and its
+    // editor, so reopening the same file starts collapsed.  This is the only
+    // coverage of the `closeLayoutTab` -> `forgetUnifiedDiffTab` wiring: the
+    // tab component is JS-only and cannot be reached headlessly, so without
+    // these lines the test's own title would be asserting nothing.
     const mainTabHeader = ctPage
       .locator(".lm_tab")
       .filter({ hasText: /^Diff:\s*main\.rs/ })
@@ -1859,11 +2168,8 @@ test.describe("DeepReview GUI - main features", () => {
     await mainTabHeader.locator(".lm_close_tab").click();
     await expect(mainTabHeader).toHaveCount(0, { timeout: 20_000 });
 
-    const reopened = await openMainDiffTab(dr);
-    await expect(
-      reopened.locator(DIFF_BODY_LINES),
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(DeepReviewPage.revealedDecorations(reopened)).toHaveCount(0);
+    const reopened = await openMainDiffTabWithBoundary(dr);
+    expect(await DeepReviewPage.hiddenLineCounts(reopened)).toEqual([12, 12]);
   });
 
   // -----------------------------------------------------------------------
@@ -2109,21 +2415,30 @@ test.describe("DeepReview comprehensive workflow", () => {
         DeepReviewPage.diffHunkHeaderLinesIn(mainTab),
       ).toHaveCount(1);
 
-      // Step 7-8: expanding context above the hunk reveals lines that were
-      // hidden, and they arrive marked as revealed.
-      await expect(
-        DeepReviewPage.revealedDecorations(mainTab),
-      ).toHaveCount(0);
+      // Step 7-8: expanding the boundary below the hunk brings hidden lines
+      // on screen, and they arrive as ordinary context lines — DR-R5's rule
+      // that expansion adds no fourth, inert line kind, which UD-2 makes
+      // structural: they were context lines of the document all along.
+      await expect
+        .poll(
+          async () =>
+            await DeepReviewPage.expansionBoundaries(mainTab).count(),
+          { timeout: 15_000 },
+        )
+        .toBeGreaterThan(0);
+      const hiddenBefore = (
+        await DeepReviewPage.hiddenLineCounts(mainTab)
+      )[0];
+      expect(hiddenBefore).toBeGreaterThan(0);
 
-      const expandAbove = DeepReviewPage.expandAboveLine(mainTab);
-      await expect(expandAbove).toHaveCount(1, { timeout: 15_000 });
-      await expandAbove.click();
+      await DeepReviewPage.expandAboveHandle(mainTab).click();
 
-      await expect(
-        DeepReviewPage.revealedDecorations(mainTab),
-      ).toHaveCount(1, { timeout: 15_000 });
-      // A revealed line is an ordinary context line of the document — DR-R5's
-      // rule that expansion adds no fourth, inert line kind.
+      await expect
+        .poll(
+          async () => (await DeepReviewPage.hiddenLineCounts(mainTab))[0] ?? 0,
+          { timeout: 15_000 },
+        )
+        .toBeLessThan(hiddenBefore);
       await expect(
         DeepReviewPage.diffTabContextLines(mainTab).first(),
       ).toBeAttached();

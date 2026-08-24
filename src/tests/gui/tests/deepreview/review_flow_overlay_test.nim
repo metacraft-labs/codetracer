@@ -90,12 +90,12 @@ proc rowSpanning(file: ct.DeepReviewFileData; first, last: int):
     VCSDiffFileRow =
   ## A one-hunk row showing `first .. last` of the file as context lines.
   ##
-  ## This is what a tab looks like after the reader has pressed "expand below"
-  ## enough times: `ContextExpandStep` is 10 and the fixture's hunk ends at line
-  ## 11, so one click reveals 12..21 and puts `compute` — the only function in
-  ## the fixture that contains a loop — on screen. Building the row directly
-  ## rather than driving `VCSVM.expandContextBelow` keeps the loop cases about
-  ## the loop rather than about expansion, which Tests 14-16b already own.
+  ## Since UD-2 the diff tab's document holds the whole file anyway, so this is
+  ## simply what the tab shows for a file whose lines `first .. last` are all
+  ## unchanged — which is where `compute`, the only function in the fixture
+  ## that contains a loop, lives. Building the row directly keeps the loop
+  ## cases about the loop rather than about which of those lines Monaco has
+  ## currently collapsed, which Tests 14-16f already own.
   var lines: seq[VCSDiffLineRow] = @[]
   let source = file.sourceContent.split('\n')
   for number in first .. last:

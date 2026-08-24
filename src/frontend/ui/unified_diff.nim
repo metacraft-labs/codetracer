@@ -55,6 +55,7 @@ import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/diff_document
 import ../viewmodel/viewmodels/context_expansion
 import ../viewmodel/viewmodels/review_flow_overlay
+import diff_expansion
 
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -128,6 +129,11 @@ proc udSetValue(editor: MonacoEditor, value: cstring)
 
 proc udUpdateOptions(editor: MonacoEditor, options: JsObject)
   {.importjs: "#.updateOptions(#)".}
+
+proc udUpdateDiffOptions(diffEditor: js, options: JsObject)
+  {.importjs: "(function(e, o) { if (e) { e.updateOptions(o); } })(#, #)".}
+  ## Options on the DIFF editor rather than on one of its two code editors —
+  ## `hideUnchangedRegions` is the diff's, not a code editor's.
 
 proc udOnMouseDown(editor: MonacoEditor, handler: proc(e: js))
   {.importjs: "#.onMouseDown(#)".}
@@ -221,15 +227,13 @@ proc forgetUnifiedDiffTab*(componentId: int) =
   ## Drop everything a closed diff tab owned.
   ##
   ## DR-R5's deliverable: "Expansion state resets when the tab is closed and
-  ## does not leak between files."  The ViewModel holds that state, so the
-  ## reset IS dropping it — a re-opened tab gets a fresh `VCSVM` with no
-  ## expansion, no hunk selection and an empty source cache, rather than
-  ## inheriting the previous tab's revealed windows for hunk indices that may
-  ## now name entirely different hunks.
+  ## does not leak between files."  Since UD-2 the expansion lives in the
+  ## *editor* — Monaco's unchanged regions — and the editor goes with the tab's
+  ## DOM, so dropping the ViewModel, the source cache and the component
+  ## reference is the whole reset: a re-opened tab builds a fresh diff editor
+  ## with every region collapsed again, rather than inheriting regions keyed on
+  ## lines that may now belong to a different file.
   if unifiedDiffVMInstances.hasKey(componentId):
-    let vm = unifiedDiffVMInstances[componentId]
-    if not vm.isNil:
-      vm.resetContextExpansion()
     discard jsDelete(unifiedDiffVMInstances[componentId])
   if unifiedDiffSourceCaches.hasKey(componentId):
     let cache = unifiedDiffSourceCaches[componentId]
@@ -917,16 +921,25 @@ proc applyGutterOptions(self: UnifiedDiffComponent; pair: DiffPair) =
   ## and a reviewer reported the deleted lines as unnumbered.  The lane is
   ## zeroed on the modified side too, so the two gutters are the same shape.
   let width = lineNumberColumnWidth(pair)
+  # A few pixels above line 1.  UD-2's collapsed-region boundary is drawn by
+  # Monaco with `transform: translateY(-10px)`, so a region that begins at the
+  # file's first line has its upper drag handle *above* the editor's clipping
+  # edge and is cut in half — measured, and reported by a design reviewer as
+  # "a rule below but none above".  The padding is what gives that handle
+  # somewhere to be.
+  let padding = js{ top: 10, bottom: 0 }
   self.editor.udUpdateOptions(js{
     lineNumbers: udLineNumberFn(self.lineLabels),
     lineNumbersMinChars: width,
-    lineDecorationsWidth: 0
+    lineDecorationsWidth: 0,
+    padding: padding
   })
   if not self.originalEditor.isNil:
     self.originalEditor.udUpdateOptions(js{
       lineNumbers: udLineNumberFn(self.originalLineLabels),
       lineNumbersMinChars: width,
-      lineDecorationsWidth: 0
+      lineDecorationsWidth: 0,
+      padding: padding
     })
 
 proc refreshModel(self: UnifiedDiffComponent) =
@@ -949,8 +962,25 @@ proc refreshModel(self: UnifiedDiffComponent) =
   self.editor.udSetValue(cstring(documentText(pair.modified)))
   self.rebuildLineLabels(pair)
   self.applyGutterOptions(pair)
+  # The collapse's context width is derived from the document (see
+  # `initEditor`), so it moves with it: a re-published document whose hunks
+  # carry more context than the last one would otherwise have its `@@`
+  # dividers collapsed out of sight.
+  self.diffEditor.udUpdateDiffOptions(js{
+    hideUnchangedRegions: js{
+      enabled: true,
+      contextLineCount: diffContextLineCount(pair),
+      minimumLineCount: DiffMinimumLineCount,
+      revealLineCount: ContextExpandStep
+    }
+  })
   self.editor.udSetScrollTop(scrollTop)
   self.applyDecorations()
+  # Monaco rebuilds its boundary widgets for the new document, so the
+  # affordance, the accessible name and the menu have to be re-stamped onto
+  # them.  The observer in `diff_expansion` catches this too; doing it here as
+  # well makes the tab correct on the first paint rather than one frame later.
+  refreshExpansionAffordances(self.diffEditor, editorHostId(self.id))
   # The overlay is keyed on model lines, which every re-publish renumbers —
   # context expansion inserts lines above the ones it revealed — so the flow
   # decorations and the invocation selectors move with the document rather than
@@ -958,33 +988,6 @@ proc refreshModel(self: UnifiedDiffComponent) =
   # keyed on the *modified* model: flow was recorded against the new revision.
   self.applyFlowDecorations(pair.modified)
   self.rebuildInvocationZones(pair.modified)
-
-proc handleExpandClick(self: UnifiedDiffComponent; modelLine: int): bool =
-  ## DeepReview-GUI.md §4.2: "Expand surrounding context above a visible
-  ## region / Expand surrounding context below a visible region".
-  ##
-  ## Returns true when the line WAS an expand control, so the caller stops
-  ## rather than also treating the click as a hunk-selection gesture.
-  ##
-  ## The counters live on the ViewModel, so a click is state plus a re-publish
-  ## of the document: `diffPairFor` re-derives the whole window from
-  ## `(diffFiles, hunkExpansion)` and the model grows by exactly the lines the
-  ## new counters reveal.  Repeated clicks therefore load *further* content
-  ## rather than re-revealing what is already shown — §4.2's third required
-  ## control — because the counters accumulate.
-  let vm = self.ensureUnifiedDiffVM()
-  if vm.isNil:
-    return false
-  let doc = diffPairFor(vm).modified
-  let target = expandTargetAtLine(doc, modelLine)
-  if not target.present:
-    return false
-  if target.above:
-    vm.expandContextAbove(target.fileIndex, target.hunkIndex)
-  else:
-    vm.expandContextBelow(target.fileIndex, target.hunkIndex)
-  self.refreshModel()
-  true
 
 proc stageSelectedHunks(self: UnifiedDiffComponent) =
   ## VCS-Panel.md, "Hunk Operations": "Stage/unstage hunk".
@@ -1000,13 +1003,12 @@ proc stageSelectedHunks(self: UnifiedDiffComponent) =
     return
   applyPatchToIndex(cstring(patch), gitWorkingDirectory(self.data))
   # The staged hunks are no longer part of the working-tree diff, so the hunk
-  # indices the selection and the expansion counters are keyed on no longer
-  # name the same hunks, and the cached working-tree text may no longer be
-  # what the diff describes.  All three are dropped together.
+  # indices the selection is keyed on no longer name the same hunks, and the
+  # cached working-tree text may no longer be what the diff describes.  Both
+  # are dropped together.
   self.initialized = false
   self.ensureSourceCache().invalidate()
   vm.clearHunkSelection()
-  vm.resetContextExpansion()
   self.syncIntoVM()
   self.refreshModel()
 
@@ -1068,10 +1070,23 @@ proc initEditor(self: UnifiedDiffComponent) =
     diffAlgorithm: cstring"advanced",
     # Whitespace-only changes are changes in a code review.
     ignoreTrimWhitespace: false,
-    # UD-2 owns the expansion gesture and will decide whether to adopt
-    # Monaco's own collapsing.  Until then the expand controls of §4.2 are
-    # ours, and Monaco's would fight them.
-    hideUnchangedRegions: js{ enabled: false },
+    # UD-2: the models are the whole file, and this is what decides which of
+    # its lines are on screen.  It is the tab's ONLY notion of that window —
+    # DR-R5's per-hunk slice was removed rather than kept beside it.
+    #
+    #   * `contextLineCount` is computed per document rather than fixed at
+    #     three, because the `@@` divider is an unchanged line and three would
+    #     collapse it out of sight behind the hunk's own context lines
+    #     (`diff_document.diffContextLineCount` explains the arithmetic).
+    #   * `revealLineCount` is `ContextExpandStep`, the same amount §4.2's
+    #     button used to reveal, so a click, a drag-less press, a keypress and
+    #     the menu's first item all move by one increment.
+    hideUnchangedRegions: js{
+      enabled: true,
+      contextLineCount: diffContextLineCount(pair),
+      minimumLineCount: DiffMinimumLineCount,
+      revealLineCount: ContextExpandStep
+    },
     theme: theme,
     automaticLayout: true,
     folding: false,
@@ -1101,12 +1116,12 @@ proc initEditor(self: UnifiedDiffComponent) =
     let line = udMouseLine(e)
     if line <= 0:
       return
-    # The expand controls are checked first and swallow the click: a control
-    # line is not a hunk header, so the two gestures cannot both fire, but
-    # ordering them makes that explicit rather than incidental.
-    if component.handleExpandClick(line):
-      return
     component.handleHunkClick(line, udMouseShift(e), udMouseCtrl(e)))
+
+  # UD-2: the expansion gesture.  The drag and the click are Monaco's own —
+  # see `ui/diff_expansion.nim` — and this adds the affordance, the accessible
+  # name, the keyboard path and the context menu on top of them.
+  installExpansionGestures(self.diffEditor, editorHostId(self.id))
 
   self.applyDecorations()
   # §7 step 3, "Omniscience/flow data from the trace overlays onto diff lines",

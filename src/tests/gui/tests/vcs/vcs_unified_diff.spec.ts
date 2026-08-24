@@ -108,9 +108,12 @@ async function clickViewDiffOnNewestCommit(ctPage: any): Promise<void> {
 /// `modified-in-monaco-diff-editor` for the new one.  In the unified (inline)
 /// layout the modified one is the scroll a reader reads: the old revision's
 /// lines are drawn inside it as `view-lines line-delete` view zones.  The
-/// chrome (file header, `@@` divider, expansion controls) is present in BOTH
-/// models, byte-identical, so Monaco reads it as unchanged and draws it once
-/// — which is exactly why every locator below has to name a side.
+/// one piece of chrome still inside the models — the `@@` divider — is present
+/// in BOTH, byte-identical, so Monaco reads it as unchanged and draws it once
+/// — which is exactly why every locator below has to name a side.  (The file
+/// header left the model in UD-2: with `hideUnchangedRegions` on, line 1 is
+/// what a collapsed run at the top of a file hides, so it is DOM chrome above
+/// the editor now.)
 const DIFF_BODY = ".monaco-editor.modified-in-monaco-diff-editor";
 const DIFF_ORIGINAL = ".monaco-editor.original-in-monaco-diff-editor";
 
@@ -292,10 +295,10 @@ test.describe("VCS unified diff", () => {
     expect(digits(newNumbers).some((t) => t.startsWith("-"))).toBe(false);
     expect(digits(oldNumbers).some((t) => t.startsWith("-"))).toBe(true);
     expect(digits(oldNumbers).some((t) => t.startsWith("+"))).toBe(false);
-    // The chrome — file header, `@@` divider, expansion controls — belongs to
-    // neither revision and is numbered in neither column, so there are fewer
-    // numbers than there are lines.  (Monaco renders no element at all for an
-    // empty label, so the absence is counted rather than matched.)
+    // The `@@` divider belongs to neither revision and is numbered in neither
+    // column, so there are fewer numbers than there are lines.  (Monaco
+    // renders no element at all for an empty label, so the absence is counted
+    // rather than matched.)
     const renderedLines = await tab
       .locator(`${DIFF_BODY} > .overflow-guard .view-lines .view-line`)
       .count();
@@ -555,6 +558,48 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
     );
   }
 
+  test("UD-2: the whole file tokenizes, without a Monarch rule aborting it", async ({
+    ctPage,
+  }) => {
+    // The blocker UD-1 recorded, and its first casualty in normal git mode.
+    //
+    // A Monaco model is tokenized from its OWN line 1, so the diff tab's model
+    // is the whole file since UD-2.  That turned CodeTracer's Nim grammar over
+    // the *whole* of the fixture's `main.nim` rather than over a window around
+    // one hunk, and it threw:
+    //
+    //   nim: matched number of groups does not match the number of actions in
+    //   rule: (unknown)
+    //
+    // Monarch aborts the model's tokenization at that point, so every line
+    // after it renders as one untokenized run — the exact failure mode this
+    // milestone exists to remove, arriving from a different direction.  The
+    // rule (`src/frontend/languages/nimLanguage.js`, the unary-minus
+    // heuristic) declared two actions for one capture group.
+    const errors: string[] = [];
+    ctPage.on("pageerror", (error: Error) => errors.push(error.message));
+
+    await openVcsPanel(ctPage);
+    await clickViewDiffOnNewestCommit(ctPage);
+    await waitForDiffTab(ctPage);
+
+    // Tokenization is a background task, so it is given a moment to reach the
+    // end of the model before the absence of an error means anything.
+    await ctPage.waitForTimeout(2000);
+    expect(
+      errors.filter((message) => message.includes("matched number of groups")),
+    ).toEqual([]);
+
+    // ... and the result is visible: more than one token class across the
+    // rendered lines, which a model that stopped tokenizing cannot produce.
+    const classes = await ctPage
+      .locator(`.unified-diff-container ${DIFF_BODY} .view-line span span`)
+      .evaluateAll((nodes: Element[]) =>
+        Array.from(new Set(nodes.map((n) => n.className))),
+      );
+    expect(classes.filter((c) => c.startsWith("mtk")).length).toBeGreaterThan(1);
+  });
+
   test("e2e_normal_git_diff_tab_expand_fetches_content", async ({ ctPage }) => {
     // The premise, checked rather than assumed: the line this test reveals is
     // not on disk, so no implementation that reads the working tree could
@@ -588,8 +633,9 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
 
     await waitForDiffTab(ctPage);
 
-    // The diff itself carries only the edited line and git's 3 lines of
-    // context either side, so `alpha 7` is nowhere in the tab yet.
+    // The lines far from the change are collapsed behind a boundary, so
+    // `alpha 7` is not on screen yet even though the model (since UD-2, the
+    // whole file) holds it.
     await expect(
       diffTabLines(ctPage).filter({ hasText: /echo\s+"beta\s+20"/ }),
     ).toHaveCount(1, { timeout: 15_000 });
@@ -597,49 +643,69 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
       diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+7"/ }),
     ).toHaveCount(0);
 
-    // Expand above.  The control is a line of the model, clicked like any
-    // other (VCS-Panel.md: "Context expansion controls (Expand N lines
-    // above/below)").
-    const expandAbove = diffTabLines(ctPage).filter({
-      hasText: /Expand\s+\d+\s+lines\s+above/,
-    });
-    await expect(expandAbove).toHaveCount(1, { timeout: 15_000 });
-    await expandAbove.click();
+    // The collapsed region above the hunk.  Since UD-2 the control is not a
+    // line of the model but Monaco's own boundary widget, whose two drag
+    // handles `ui/diff_expansion.nim` stamps with `.ct-diff-expand-boundary`
+    // (VCS-Panel.md: "Context expansion controls (Expand N lines
+    // above/below)"; DeepReview-GUI.md §4.3: "a draggable edge line").
+    //
+    // Its `below` handle is the one wanted: each handle is named for where in
+    // its own region the lines appear, and the lines nearest the hunk are at
+    // the region's BOTTOM.  Pressing it walks back up the file, which is what
+    // "expand the context above this hunk" means to a reader.
+    // Two regions collapse on this file — one before the hunk and one after
+    // it — so the wanted handle is named by position as well as by direction:
+    // the FIRST region in line order is the one above the hunk.
+    const boundaries = ctPage.locator(
+      `.unified-diff-container ${DIFF_BODY} .ct-diff-expand-boundary[data-ct-expand="below"]`,
+    );
+    await expect(boundaries).toHaveCount(2, { timeout: 15_000 });
+    const boundary = boundaries.first();
+    const hiddenBefore = Number(
+      await boundary.getAttribute("data-ct-hidden"),
+    );
+    expect(hiddenBefore).toBeGreaterThan(10);
+    await boundary.click();
 
-    // Ten lines appear, decorated as revealed context lines.
-    await expect(
-      ctPage.locator(
-        `.unified-diff-container ${DIFF_BODY} .view-overlays .ct-diff-line-context.ct-diff-line-revealed`,
-      ),
-    ).toHaveCount(10, { timeout: 15_000 });
+    // Ten lines come on screen, ending immediately above the hunk's own
+    // context — the bottom handle reveals from the end of the collapsed run.
+    await expect
+      .poll(
+        async () => Number(await boundary.getAttribute("data-ct-hidden")),
+        { timeout: 15_000 },
+      )
+      .toBe(hiddenBefore - 10);
 
-    // ...and they are the right ten: the hunk starts at new line 18, so a
-    // step above reveals 8..17 — `echo "alpha 7"` through `echo "alpha 16"`.
-    // This line is in neither the diff nor the working tree; only
-    // `git show <rev>:<path>` has it.
+    // ...and `echo "alpha 7"` is among them.  That line is in neither the
+    // diff nor the working tree; only `git show <rev>:<path>` has it, so its
+    // appearance is what says the tab fetched the blob rather than reading
+    // the tree — the property this test exists for, and the one UD-2 makes
+    // load-bearing, because the whole-file model is built from exactly that
+    // fetch.
     await expect(
       diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+7"/ }),
     ).toHaveCount(1, { timeout: 15_000 });
-    // Revealed lines are unchanged, so they carry the same number in BOTH
-    // gutter columns.
+    // Unchanged lines, so they carry the same number in BOTH gutter columns.
     const numbers = await diffLineNumbersOn(ctPage, DIFF_BODY);
     expect(numbers).toContain("8");
     expect(numbers).toContain("17");
     expect(numbers).not.toContain("7");
     expect(await diffLineNumbersOn(ctPage, DIFF_ORIGINAL)).toContain("8");
 
-    // A second click loads FURTHER content rather than re-revealing the same
-    // window — DeepReview-GUI.md §4.2's third required control.  Seventeen
-    // lines precede the hunk, so the second step reveals the remaining seven
-    // and the control retires: expansion is exhausted, not unbounded.
-    await expandAbove.click();
+    // A second press reveals FURTHER content rather than the same window
+    // again — DeepReview-GUI.md §4.2's third required control.  The rest of
+    // the region follows, and its boundary retires once it is exhausted:
+    // expansion is bounded, not unbounded.  The region AFTER the hunk is
+    // untouched and keeps its own boundary, which is what "each region
+    // independently" means.
+    await boundary.click();
     await expect(
       diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+1"$/ }),
     ).toHaveCount(1, { timeout: 15_000 });
     const afterSecond = await diffLineNumbersOn(ctPage, DIFF_BODY);
     expect(afterSecond).toContain("2");
     expect(afterSecond).toContain("7");
-    await expect(expandAbove).toHaveCount(0);
+    await expect(boundaries).toHaveCount(1, { timeout: 15_000 });
 
     // The commit whose blob was fetched is the one the tab shows, not HEAD.
     expect(middleCommitSha).toBeTruthy();

@@ -29,7 +29,7 @@
  * | ``.deepreview-trace-select``      | ``vcsTraceContextSelect()``         |
  * | ``.deepreview-mode-toggle``       | ``modeToggle()`` — the VCS panel    |
  * | ``.deepreview-unified-*``         | ``diffTabs()`` — a Monaco document  |
- * | ``.deepreview-expand-row``        | ``expandAboveLine`` / ``…BelowLine``|
+ * | ``.deepreview-expand-row``        | ``expansionBoundaries()`` — Monaco's|
  * | ``.deepreview-calltrace``         | the standard CALLTRACE panel        |
  * | its inline decorations            | the diff tab's own Monaco overlays  |
  * | its coverage                      | ``coverageBadge()`` — the VCS row   |
@@ -281,35 +281,92 @@ export class DeepReviewPage {
     return this.diffTabLines().filter({ hasText: /@@\s-\d+,\d+\s\+\d+,\d+\s@@/ });
   }
 
-  // -- Context expansion in the diff tab (DR-R5) ---------------------------
+  // -- Context expansion in the diff tab (DR-R5, UD-2) ---------------------
   //
-  // The controls are LINES of the Monaco model, not DOM chrome
-  // (`diff_document.nim`: `dlkExpandAbove` / `dlkExpandBelow`), so they are
-  // located and clicked as rendered lines like the `@@` dividers above.
-  // Their `ct-diff-line-expand*` classes live on the decoration layer, which
-  // is a sibling of the line, so filtering by text is what identifies them
-  // here.
+  // Until UD-2 the controls were LINES of the Monaco model and were located
+  // by their text, like the `@@` dividers above.  They are not lines any more:
+  // the models are the whole file and Monaco's own `hideUnchangedRegions`
+  // collapses what is far from a change, drawing a `div.diff-hidden-lines`
+  // widget at each boundary with a drag handle at each end of it.
+  //
+  // `ui/diff_expansion.nim` stamps `.ct-diff-expand-boundary` onto both
+  // handles — together with the accessible name, the region index and the
+  // number of lines that boundary is hiding — so everything below is located
+  // through OUR class rather than through Monaco's `.top` / `.bottom`, which
+  // would silently stop matching on a Monaco upgrade.
 
-  /** The "Expand N lines above" control line of ``tab``. */
-  static expandAboveLine(tab: Locator): Locator {
-    return tab
-      .locator(`${DIFF_BODY} .view-line`)
-      .filter({ hasText: /Expand\s+\d+\s+lines\s+above/ });
+  /** Every context-expansion boundary handle of ``tab``, in line order. */
+  static expansionBoundaries(tab: Locator): Locator {
+    return tab.locator(`${DIFF_BODY} .ct-diff-expand-boundary`);
   }
 
-  /** The "Expand N lines below" control line of ``tab``. */
-  static expandBelowLine(tab: Locator): Locator {
-    return tab
-      .locator(`${DIFF_BODY} .view-line`)
-      .filter({ hasText: /Expand\s+\d+\s+lines\s+below/ });
+  /** The handle that reveals lines at the TOP of a collapsed region. */
+  static expandAboveHandle(tab: Locator): Locator {
+    return tab.locator(
+      `${DIFF_BODY} .ct-diff-expand-boundary[data-ct-expand="above"]`,
+    );
+  }
+
+  /** The handle that reveals lines at the BOTTOM of a collapsed region. */
+  static expandBelowHandle(tab: Locator): Locator {
+    return tab.locator(
+      `${DIFF_BODY} .ct-diff-expand-boundary[data-ct-expand="below"]`,
+    );
+  }
+
+  /** Monaco's own "N hidden lines" band between the two handles. */
+  static collapsedBands(tab: Locator): Locator {
+    return tab.locator(`${DIFF_BODY} .diff-hidden-lines .center`);
+  }
+
+  /** The context menu a boundary opens.  Body-level, so it is page-scoped. */
+  expansionMenu(): Locator {
+    return this.page.locator(".ct-diff-expand-menu");
+  }
+
+  expansionMenuItems(): Locator {
+    return this.page.locator(".ct-diff-expand-menu .ct-diff-expand-menu-item");
   }
 
   /**
-   * The whole-line decorations marking lines that context expansion revealed
-   * (``DiffRevealedClass``).  Monaco renders them into ``.view-overlays``.
+   * How many lines each boundary of ``tab`` is still hiding.
+   *
+   * `ui/diff_expansion.nim` re-stamps `data-ct-hidden` every time Monaco
+   * rebuilds the widgets, which is exactly when a reader expands one — so
+   * comparing this before and after a gesture is how "the gesture revealed
+   * lines" is asserted without counting rendered rows, which virtualisation
+   * makes unreliable.
    */
-  static revealedDecorations(tab: Locator): Locator {
-    return tab.locator(`${DIFF_BODY} .view-overlays .ct-diff-line-revealed`);
+  static async hiddenLineCounts(tab: Locator): Promise<number[]> {
+    const raw = await DeepReviewPage.expansionBoundaries(tab).evaluateAll(
+      (nodes: Element[]) =>
+        nodes.map((n) => Number(n.getAttribute("data-ct-hidden") ?? "-1")),
+    );
+    return raw;
+  }
+
+  /**
+   * Scroll ``tab``'s diff by ``dy`` pixels, as a wheel over the editor.
+   *
+   * Monaco virtualises: `.margin-view-overlays .line-numbers` holds only the
+   * lines it has *rendered*, which is the viewport and a little around it.  A
+   * gesture that reveals lines at the far end of a file therefore has to be
+   * followed by a scroll before the gutter can be read for them — otherwise
+   * "the line is not there" means "the line is off screen", which is not what
+   * any of these tests are about.
+   */
+  static async scrollDiff(page: Page, tab: Locator, dy: number): Promise<void> {
+    const box = await tab.locator(DIFF_BODY).boundingBox();
+    if (!box) {
+      throw new Error("the diff tab has no box to scroll over");
+    }
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, dy);
+  }
+
+  /** The file header §4.1 requires, which since UD-2 is DOM chrome. */
+  static fileHeaders(tab: Locator): Locator {
+    return tab.locator(".unified-diff-file-header");
   }
 
   /**
@@ -494,13 +551,15 @@ export class DeepReviewPage {
   /**
    * The diff tab showing ``filePath``'s diff, if one is open.
    *
-   * Matched on the file-header line of the Monaco document (DeepReview-GUI.md
-   * §4.1, "A file header with path and diff metadata"), which since DR-R4 is
-   * a line of the model rather than DOM chrome.
+   * Matched on the file header (DeepReview-GUI.md §4.1, "A file header with
+   * path and diff metadata").  DR-R4 made it a line of the Monaco model; UD-2
+   * moved it back out to DOM chrome, because with `hideUnchangedRegions` on,
+   * line 1 of a model is exactly what a collapsed run at the top of a file
+   * hides — a header nobody can see is not a header.
    */
   diffTabFor(filePath: string): Locator {
     return this.diffTabs().filter({
-      has: this.page.locator(`${DIFF_BODY} .view-line`, {
+      has: this.page.locator(".unified-diff-file-header-path", {
         hasText: filePath,
       }),
     });

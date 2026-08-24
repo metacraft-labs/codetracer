@@ -26,11 +26,17 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/vcs_vm
+import ../viewmodels/diff_document
 
 const
   UnifiedDiffContainerClass* = "component-container unified-diff-container"
   UnifiedDiffEditorClass* = "unified-diff-editor"
   UnifiedDiffToolbarHostClass* = "unified-diff-toolbar-host"
+  UnifiedDiffFileHeaderHostClass* = "unified-diff-file-header-host"
+  UnifiedDiffFileHeaderClass* = "unified-diff-file-header"
+  UnifiedDiffFileHeaderStatusClass* = "unified-diff-file-header-status"
+  UnifiedDiffFileHeaderPathClass* = "unified-diff-file-header-path"
+  UnifiedDiffFileHeaderStatsClass* = "unified-diff-file-header-stats"
 
 type
   UnifiedDiffCallbacks* = object
@@ -90,15 +96,43 @@ proc renderHunkToolbar[R](r: R; vm: VCSVM;
   r.appendRenderedChild(actions, clear)
   bar
 
+proc renderFileHeader[R](r: R; entry: DiffFileEntry): auto =
+  ## DeepReview-GUI.md §4.1: "A file header with path and diff metadata".
+  ##
+  ## It used to be line 1 of the Monaco model.  UD-2 made the model the file
+  ## itself and turned Monaco's ``hideUnchangedRegions`` on, and line 1 is
+  ## exactly what a collapsed run at the top of a file hides — so a header that
+  ## stayed in the model would be visible only on files whose first change is
+  ## near the top.  Here it is chrome the reader cannot scroll away from, which
+  ## is what a file header should have been all along.
+  ui(r):
+    tdiv(class = UnifiedDiffFileHeaderClass):
+      span(class = UnifiedDiffFileHeaderStatusClass):
+        text entry.status
+      span(class = UnifiedDiffFileHeaderPathClass):
+        text entry.path
+      span(class = UnifiedDiffFileHeaderStatsClass):
+        text fileStatsText(entry.additions, entry.deletions)
+
 proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
                                  callbacks: UnifiedDiffCallbacks): auto =
   var toolbarHost: typeof(r.createElement("div"))
+  var fileHeaderHost: typeof(r.createElement("div"))
   var editorHost: typeof(r.createElement("div"))
 
   let panel = ui(r):
     tdiv(class = UnifiedDiffContainerClass):
+      tdiv(ref = fileHeaderHost, class = UnifiedDiffFileHeaderHostClass)
       tdiv(ref = toolbarHost, class = UnifiedDiffToolbarHostClass)
       tdiv(ref = editorHost, id = editorHostId, class = UnifiedDiffEditorClass)
+
+  createRenderEffect proc() =
+    r.clearChildren(fileHeaderHost)
+    # One row per file the document actually renders, in document order.  A
+    # review's tab always names exactly one file (§4.1, "Each diff tab shows a
+    # single file"); a git target can name several, and each keeps its own row.
+    for entry in diffPairFor(vm).files:
+      r.appendRenderedChild(fileHeaderHost, renderFileHeader(r, entry))
 
   createRenderEffect proc() =
     r.clearChildren(toolbarHost)

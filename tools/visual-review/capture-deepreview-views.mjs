@@ -155,19 +155,19 @@ export const VIEWS = {
     file: NOIR_FILE,
     description:
       "The diff as it first renders, with the unchanged region between the two hunks collapsed behind an expansion control.",
-    expects: "at least one un-actuated `... Expand N lines above/below` boundary",
+    expects:
+      "at least one un-actuated context-expansion boundary, still hiding lines",
     async setup(ctx) {
       await selectFile(ctx, NOIR_FILE);
     },
     async verify(ctx) {
-      await expectAtLeast(ctx, expandLines(ctx), 1, "a collapsed-context boundary");
-      // A collapsed region that is already expanded is not a collapsed
-      // region: assert nothing has been revealed yet.
-      const revealed = await diffTab(ctx).locator(".view-overlays .ct-diff-line-revealed")
-        .count();
-      if (revealed !== 0) {
+      await expectAtLeast(ctx, expandBoundaries(ctx), 1, "a collapsed-context boundary");
+      // A region that is already fully revealed is not a collapsed region:
+      // assert every boundary is still hiding something.
+      const hidden = await hiddenLineCounts(ctx);
+      if (!hidden.some((count) => count > 0)) {
         throw new Error(
-          `view 'diff-collapsed-context': ${revealed} lines are already revealed, so this is not the collapsed state`,
+          `view 'diff-collapsed-context': every boundary reports ${JSON.stringify(hidden)} hidden lines, so this is not the collapsed state`,
         );
       }
     },
@@ -179,19 +179,38 @@ export const VIEWS = {
     description:
       "The same region after the reader expands it — the lines the collapsed boundary was hiding.",
     expects:
-      "revealed context lines where the `Expand N lines` boundary was, carrying their own line numbers",
+      "context lines the boundary was hiding, now on screen with their own line numbers",
     async setup(ctx) {
       await selectFile(ctx, NOIR_FILE);
-      await clickEditorLine(ctx, expandLines(ctx).first());
+      ctx.hiddenBeforeExpansion = await hiddenLineCounts(ctx);
+      // A press without a drag is the boundary's click-to-expand.
+      //
+      // The BOTTOM handle of the first boundary, not the top one: the corpus's
+      // first collapsed run starts at line 1 of the file, so its upper handle
+      // sits at the very top of the editor and Monaco's own
+      // `transform: translateY(-10px)` puts part of it above the editor's
+      // clipping edge, under the file header.  The lower handle reveals the
+      // lines immediately above the hunk, which is the gesture this view is
+      // about anyway.
+      await diffTab(ctx)
+        .locator('.monaco-editor.modified-in-monaco-diff-editor .ct-diff-expand-boundary[data-ct-expand="below"]')
+        .first()
+        .click();
       await ctx.page.waitForTimeout(1500);
     },
     async verify(ctx) {
-      await expectAtLeast(
-        ctx,
-        diffTab(ctx).locator(".view-overlays .ct-diff-line-revealed"),
-        1,
-        "lines revealed by the expansion",
-      );
+      // A capture is only of the EXPANDED state if the boundary is hiding
+      // fewer lines than it was — counting rendered lines would also be
+      // satisfied by a viewport that merely scrolled.
+      const before = ctx.hiddenBeforeExpansion ?? [];
+      const after = await hiddenLineCounts(ctx);
+      const revealed =
+        (before[0] ?? 0) - (after.length > 0 ? after[0] : 0);
+      if (!(before[0] > 0) || !(revealed > 0)) {
+        throw new Error(
+          `view 'diff-expanded-context': the boundary hid ${JSON.stringify(before)} lines before and ${JSON.stringify(after)} after, so nothing was revealed`,
+        );
+      }
     },
     target: (ctx) => diffTab(ctx),
   },
@@ -266,8 +285,17 @@ export const VIEWS = {
 const diffTab = (ctx) => ctx.page.locator(".unified-diff-container:visible").first();
 const diffLines = (ctx) => diffTab(ctx).locator(".monaco-editor .view-line");
 
-const expandLines = (ctx) =>
-  diffLines(ctx).filter({ hasText: /Expand\s+\d+\s+lines\s+(above|below)/ });
+// The context-expansion boundaries.  Since UD-2 they are Monaco's own
+// collapsed-region widgets rather than lines of the model, and
+// `ui/diff_expansion.nim` stamps `.ct-diff-expand-boundary` on each of the two
+// drag handles — which is what the GUI suite locates them by as well.
+const expandBoundaries = (ctx) =>
+  diffTab(ctx).locator(".monaco-editor.modified-in-monaco-diff-editor .ct-diff-expand-boundary");
+// How many lines each boundary is still hiding, re-stamped on every reveal.
+const hiddenLineCounts = async (ctx) =>
+  expandBoundaries(ctx).evaluateAll((nodes) =>
+    nodes.map((n) => Number(n.getAttribute("data-ct-hidden") ?? "-1")),
+  );
 const flowChips = (ctx) => diffTab(ctx).locator(".monaco-editor .view-lines .review-flow-value");
 const intralineLines = (ctx) => diffLines(ctx).filter({ hasText: /fn\s+scale\(index/ });
 // Matched on a single hyphenated token rather than a phrase: Monaco renders

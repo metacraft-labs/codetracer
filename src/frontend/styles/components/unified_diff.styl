@@ -7,11 +7,11 @@
 // and everything here styles what is ours on top of it:
 //
 //   .ct-diff-line-*    -> whole-line decorations, rendered by Monaco into
-//                         `.view-overlays` as `<div class="cdr …">`.  The
-//                         chrome ones (file header, `@@` divider, expansion
-//                         controls) still carry paint; the added / removed /
-//                         context ones are classification only now, because
-//                         the editor paints those.
+//                         `.view-overlays` as `<div class="cdr …">`.  The one
+//                         chrome line left in the model — the `@@` divider —
+//                         still carries paint; the added / removed / context
+//                         ones are classification only now, because the editor
+//                         paints those.
 //   .ct-diff-gutter-*  -> `linesDecorationsClassName`, rendered into
 //                         `.margin-view-overlays` as `<div class="cldr …">`.
 //                         Also classification only: the `+` / `-` markers
@@ -74,9 +74,6 @@
 .ct-diff-line-hunk-header
   background-color rgba(56, 58, 68, 0.55)
 
-.ct-diff-line-file-header
-  background-color rgba(86, 156, 214, 0.10)
-
 // A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
 // and gains a marked left edge, the way the DOM renderer's `.hunk-selected`
 // did.
@@ -94,30 +91,208 @@
 .ct-diff-line-context.ct-diff-hunk-selected
   background-color rgba(86, 156, 214, 0.08)
 
-// --- Context expansion (DR-R5) -------------------------------------------
+// --- The file header (UD-2) ----------------------------------------------
+//
+// DeepReview-GUI.md §4.1: "A file header with path and diff metadata".  It
+// used to be line 1 of the Monaco model; UD-2 turned `hideUnchangedRegions`
+// on, and line 1 is exactly what a collapsed run at the top of a file hides,
+// so it is chrome above the editor now.  Colours carried over from
+// `.ct-diff-line-file-header`, which was that model line's decoration.
+
+.unified-diff-file-header-host
+  flex-shrink 0
+
+.unified-diff-file-header
+  display flex
+  align-items baseline
+  gap 0.6em
+  padding 0.25em 0.9em
+  font-family monospace
+  font-size 0.95em
+  background-color rgba(86, 156, 214, 0.10)
+  border-bottom 1px solid rgba(86, 156, 214, 0.22)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.unified-diff-file-header-status
+  opacity 0.75
+
+.unified-diff-file-header-path
+  font-weight 600
+  overflow hidden
+  text-overflow ellipsis
+
+.unified-diff-file-header-stats
+  margin-left auto
+  opacity 0.75
+
+// --- Context expansion (DR-R5, UD-2) -------------------------------------
 //
 // DeepReview-GUI.md §4.2 requires "Expand surrounding context above/below a
-// visible region".  The controls are LINES of the model, not DOM chrome, so
-// they are styled here as whole-line decorations like everything else; the
-// colours were carried over from the standalone panel's
-// `.deepreview-expand-row` / `.deepreview-expanded-context`, so the migrated
-// controls read the way its did.  That panel and its stylesheet are both gone
-// (DR-R8); these are now the only definition.
+// visible region", and §4.3 "a draggable edge line" at each boundary.  Since
+// UD-2 both are Monaco's own: with `hideUnchangedRegions` on it draws a
+// `.diff-hidden-lines` widget at every collapsed run, whose `.top` and
+// `.bottom` children are drag handles bound to `showMoreAbove` /
+// `showMoreBelow`.
+//
+// What Monaco does NOT do is make them visible.  Its own rule is
+//
+//     .monaco-editor .diff-hidden-lines .top,
+//     .monaco-editor .diff-hidden-lines .bottom
+//       { height: 4px; background-color: transparent; … }
+//
+// with a colour only on `:hover` and `.dragging` — measured in
+// `min/vs/editor/editor.main.css`.  So before a reader touches the boundary
+// there is nothing to touch: a 4-pixel transparent strip.  A gesture nobody
+// discovers is not a feature, and these rules are what decide whether the
+// rest of this milestone is used at all.
+//
+// `ui/diff_expansion.nim` adds `.ct-diff-expand-boundary` to both handles
+// rather than the stylesheet reaching for Monaco's `.top` / `.bottom`
+// directly, so a Monaco upgrade that renames them stops painting instead of
+// painting the wrong thing.
 
-.ct-diff-line-expand
-  background-color rgba(56, 58, 68, 0.30)
+// The boundary widget must be ABOVE the code, and by default it is not.
+// Measured with `document.elementFromPoint` at the handle's own centre in the
+// running product: the hit was `div.view-line`, because Monaco gives
+// `.lines-content` `z-index: 2` while `.overlayWidgets` — which is where the
+// boundary widget lives — has none.  So the drag handle was drawn where a
+// reader could see it and could not reliably press it; only a press that
+// happened to land outside a rendered line went through.
+//
+// The lift goes on the widget rather than on the handle: `.diff-hidden-lines`
+// carries a `transform`, which makes it a stacking context, so a `z-index` on
+// the handle inside it can never raise it past a sibling of its ancestor.
+.monaco-editor .diff-hidden-lines-widget
+  z-index 3
+
+.ct-diff-expand-boundary
+  // Always visible, and shaped like something that can be grabbed.
+  //
+  // Monaco paints these handles only on `:hover`, which makes the gesture
+  // undiscoverable: a fresh reviewer sent the collapsed view before this rule
+  // existed reported the boundary as "a status label, not a control … no
+  // button outline, no chevron, no drag handle … nothing in its shape or
+  // colour promises that [it can be pressed]".  So the rule is drawn at rest,
+  // and a grab-handle pill is centred on it — the shape a reader already
+  // reads as draggable from every splitter and resizer they have used.
+  position relative
+  height 5px !important
+  // A hairline across the editor, so the boundary reads as a rule rather than
+  // as a bar laid over the code.  Monaco's own widget straddles the lines on
+  // either side of the fold by a few pixels, and a solid full-width band there
+  // was reported as "a floating blue bar [that] overlaps the code".
+  background-color rgba(86, 156, 214, 0.16) !important
+  background-clip padding-box
+  transition background-color 0.1s ease-out, box-shadow 0.1s ease-out
+
+  // The grabber, centred on the rule.
+  //
+  // Its position was measured against fresh reviewers rather than chosen.  At
+  // the LEFT it sits beside Monaco's own unfold codicon and is read as part of
+  // it — "a small blue-striped square icon at the far left … I would not guess
+  // it can be dragged".  CENTRED it is read as what it is: "I would guess the
+  // blue bars can be pressed … their vertical stacking makes me guess they can
+  // be dragged up/down to reveal lines", and asked where they would click
+  // first to see the hidden lines, that reviewer answered "on the blue bars".
+  //
+  // The cost is that it shares a row with Monaco's own band, which straddles
+  // the lines on either side of the fold by a few pixels whatever we paint —
+  // recorded for UD-4 rather than traded against discoverability, which is
+  // this milestone's deliverable.
+  &::after
+    content ''
+    position absolute
+    left 50%
+    top 50%
+    width 36px
+    height 5px
+    margin-left -18px
+    margin-top -2.5px
+    border-radius 2.5px
+    background-color rgba(86, 156, 214, 0.8)
+    transition background-color 0.1s ease-out
+
+  &:hover
+    background-color rgba(86, 156, 214, 0.55) !important
+
+    &::after
+      background-color rgba(120, 190, 240, 1)
+
+  // Keyboard reachability (§4.2's controls must not be mouse-only).  The
+  // handle is a few pixels high, so an outline on it alone is nearly
+  // invisible; the focus state rings the whole rule.
+  &:focus
+    outline none
+
+  &:focus-visible
+    background-color rgba(86, 156, 214, 0.55) !important
+    box-shadow 0 0 0 2px rgba(120, 190, 240, 0.9)
+
+    &::after
+      background-color rgba(120, 190, 240, 1)
+
+.monaco-editor .diff-hidden-lines .top.dragging,
+.monaco-editor .diff-hidden-lines .bottom.dragging
+  background-color rgba(86, 156, 214, 0.8) !important
+
+// The band between the two handles carries Monaco's "N hidden lines" text and
+// its unfold link.  It is themed from `--vscode-diffEditor-unchangedRegion*`,
+// which CodeTracer's Monaco theme does not set, so it is given the tab's own
+// colours here rather than left to a default that reads as a blank strip, and
+// a pointer cursor, so it reads as the button it is (double clicking it, or
+// pressing the unfold icon at its left, reveals the whole region).
+//
+// It carries NO border of its own: the two drag handles are the band's edges,
+// and a rule beside each of them read as a second, broken line — a design
+// reviewer reported the bars as "crossing the band's bottom rule, so the band
+// looks broken rather than clickable".
+.monaco-editor .diff-hidden-lines .center
+  background-color rgba(56, 58, 68, 0.65)
+  color rgba(220, 220, 220, 0.8)
   cursor pointer
 
   &:hover
-    background-color rgba(56, 58, 68, 0.55)
+    background-color rgba(66, 70, 84, 0.9)
+    color rgba(230, 230, 230, 1)
 
-// A revealed line is a NORMAL context line — §4.2: "Newly revealed lines
-// become normal code lines in the diff tab and can receive Omniscience
-// overlays" — so this only dims it slightly to show where the diff itself
-// ended.  It must not change the line's kind colouring, or a revealed line
-// would stop looking like the context line it is.
-.ct-diff-line-revealed
-  opacity 0.75
+// --- The boundary's context menu (UD-2) ----------------------------------
+//
+// "a context menu offering more lines or the whole file in that direction",
+// both directions independently.  Monaco has no menu on the boundary at all,
+// so this is ours; the items come from
+// `viewmodel/viewmodels/diff_expansion_menu.nim`.
+//
+// It is appended to `document.body` rather than into the editor, because the
+// editor clips its own overflow and a menu opened at a boundary near the
+// bottom of the tab would be cut in half.
+
+.ct-diff-expand-menu
+  z-index 10002
+  min-width 15em
+  padding 0.25em 0
+  border-radius 4px
+  background-color #252526
+  border 1px solid rgba(255, 255, 255, 0.12)
+  box-shadow 0 4px 14px rgba(0, 0, 0, 0.45)
+
+.ct-diff-expand-menu-item
+  display block
+  width 100%
+  padding 0.35em 1em
+  border none
+  background transparent
+  color inherit
+  font-family inherit
+  font-size 0.95em
+  text-align left
+  cursor pointer
+
+  &:hover,
+  &:focus
+    background-color rgba(86, 156, 214, 0.30)
+    outline none
 
 // --- Gutter markers ------------------------------------------------------
 
