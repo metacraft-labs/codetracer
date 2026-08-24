@@ -12,6 +12,29 @@ const
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
   SVG_NAMESPACE            = cstring"http://www.w3.org/2000/svg"
 
+const CODE_FONT_FAMILY* = cstring"SpaceMono, monospace"
+  ## The face for every code surface in the app: the editors, the trace and
+  ## agent editors, and the unified diff.
+  ##
+  ## Stated once because Monaco does not inherit it.  Each editor's font is an
+  ## option, not CSS — Monaco measures the face to lay out its own gutter and
+  ## then writes `font-family` inline onto its layers, so a stylesheet rule on
+  ## the host cannot reach it and any editor that omits the option silently
+  ## falls back to Monaco's own default (Menlo/Courier New), which is how the
+  ## unified diff came to be rendered in a different face from the editor
+  ## beside it.
+
+proc codeFontFamily*(ui: Components): cstring =
+  ## The code face to hand Monaco: whatever the user picked, else the default.
+  ##
+  ## Every editor goes through here rather than naming a face itself, so a font
+  ## chosen from the menus only has to be written to `ui.codeFontFamily` to take
+  ## effect everywhere.
+  if ui.isNil or ui.codeFontFamily.isNil or ui.codeFontFamily == cstring"":
+    CODE_FONT_FAMILY
+  else:
+    ui.codeFontFamily
+
 proc monacoLineNumbersMinChars*(lineCount: int): int =
   ## Reserve enough width for the largest line number currently visible in the
   ## editor model. We keep one extra character because the custom HTML gutter

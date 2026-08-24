@@ -1905,6 +1905,10 @@ type
     layoutSizes*:    LayoutSizes
     activeFocus*:    Component
     fontSize*:       int
+    codeFontFamily*: cstring
+      ## The face for code surfaces, when the user has chosen one.  Empty means
+      ## "use the default" — read it through `codeFontFamily()` in utils.nim
+      ## rather than directly, so the fallback lives in one place.
     monacoEditors*:  seq[MonacoEditor]
     traceMonacoEditors*: seq[MonacoEditor]
     hasLowLevelTabs*: bool
