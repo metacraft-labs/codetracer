@@ -4065,6 +4065,21 @@ jobs:
         # this comment is wrong again.
         run: bash ci/test/vm-js-lane-test.sh
 
+      - name: Self-test the DeepReview design-review harness
+        # UD-0's visual-design-iteration harness is what every later milestone
+        # of the unified-diff campaign is reviewed through, so its failure mode
+        # is the worst kind: it keeps producing ratings, for a matrix that has
+        # quietly stopped covering what changed, or against a brief that has
+        # lost the expected-elements block a reviewer needs to tell a broken
+        # capture from a rough design.
+        #
+        # The suite needs only bash, git, coreutils and node (its `ct`, `node`
+        # driver, `Xvfb` and `xdotool` are all stubs, and Electron is never
+        # launched), so running it here as well as in `lint-bash` means the
+        # contracts are checked on every run from a stock runner, regardless of
+        # the state of the dev-shell lanes.
+        run: bash tools/visual-review/deepreview-harness-test.sh
+
       - name: Assert the required jobs actually ran
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}

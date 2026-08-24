@@ -243,3 +243,9 @@ contentless
 debuginfo
 summarised
 TEMPFAIL
+colour
+colouring
+recolour
+recognisable
+travelling
+intraline

@@ -1,0 +1,18 @@
+// The Electron build of the light theme.
+//
+// `renderer.nim`'s `loadTheme` resolves the configured theme to
+// `frontend/styles/{name}_theme_electron.css`, so a config carrying
+// `theme: "default_white"` asks for THIS file by name. Until it existed the
+// href resolved to nothing, the `#theme` link went dead and the window
+// rendered as unstyled HTML — which is why the light theme could not be
+// screenshotted, reviewed or shipped.
+//
+// It is deliberately the same three lines as
+// `default_dark_theme_electron.styl`, differing only in which palette is
+// imported: the palette files carry every colour, and `codetracer.styl`
+// carries every rule. Any divergence in structure between the two entry
+// points would mean the light build is a different stylesheet rather than the
+// same stylesheet in a different palette.
+@import "default_white_theme"
+IS_EXTENSION = false
+@import "codetracer"

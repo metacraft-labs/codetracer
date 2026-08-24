@@ -86,6 +86,28 @@ capture-deep-review-assets:
   CODETRACER_BOOK_SCREENSHOT_DIR="$(pwd)/docs/book-isonim/static/img/deep_review" \
     bash scripts/docs/capture-deep-review-screenshots.sh
 
+# Capture the DeepReview design-review matrix (UD-0): every named view, at
+# every named viewport size, in both themes.
+#
+# NOT the same thing as `capture-deep-review-assets` above, which produces two
+# frozen images for the book from a fixture the book's prose quotes line for
+# line. This produces a re-capturable matrix over a much richer corpus, for the
+# visual-design-iteration loop. They share their machinery -- preflight, the
+# stale-build refusal, recording, dataset collection, Xvfb -- in
+# `scripts/docs/deep-review-capture-lib.sh`, and nothing else.
+#
+# Targeted re-capture is the common case and needs no recipe:
+#   bash tools/visual-review/capture-deepreview-views.sh --view diff-flow-values --size wide --theme dark
+capture-deepreview-design-views:
+  bash tools/visual-review/capture-deepreview-views.sh
+
+# The contract suite for that harness: the matrix covers what the campaign
+# changes, the brief has an expected-elements block per view, and targeting
+# neither re-records nor deletes the other views' captures. Never launches
+# Electron; `ci/lint/bash.sh` runs it too.
+test-deepreview-design-harness:
+  bash tools/visual-review/deepreview-harness-test.sh
+
 capture-docs-visual-page:
   #!/usr/bin/env bash
   set -euo pipefail

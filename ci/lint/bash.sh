@@ -60,3 +60,24 @@ echo '##########################################################################
 # note that `just test` (ci/test/non-gui.sh) is what actually runs it.
 shellcheck scripts/test-build-alignment.sh
 echo OK
+
+echo
+echo '###############################################################################'
+echo "DeepReview design-review harness (lint + contract suite):"
+echo '###############################################################################'
+# UD-0's visual-design-iteration harness. Neither `tools/` nor `scripts/docs/`
+# is reached by the `ci/**/*.sh` glob at the top, so both the harness and its
+# contract suite are named here. The suite is executed as well as linted for
+# the same reason the sibling-revision resolver's is: it never launches
+# Electron (it stubs `ct`, `node`, `Xvfb` and `xdotool` on PATH), so it costs
+# seconds, and if it stops running, nothing else notices that a named view was
+# dropped from the review matrix or that the design brief lost the
+# expected-elements block a view depends on.
+shellcheck \
+	scripts/docs/deep-review-capture-lib.sh \
+	scripts/docs/capture-deep-review-screenshots.sh \
+	tools/visual-review/capture-deepreview-views.sh \
+	tools/visual-review/deepreview-review-prompt.sh \
+	tools/visual-review/deepreview-harness-test.sh
+bash tools/visual-review/deepreview-harness-test.sh
+echo OK
