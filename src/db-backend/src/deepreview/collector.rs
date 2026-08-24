@@ -267,6 +267,65 @@ fn recording_id_of(recording: &Path) -> String {
     if is_uuid { name } else { String::new() }
 }
 
+/// The structure caps `max_value_chars` becomes once a value is carried as
+/// structure rather than as a rendering (UD-3, restating RV-9's fourth
+/// deliverable).
+///
+/// A rendered value is bounded by its own length; a structured one is bounded
+/// by how deep and how wide it is allowed to be, and a dataset that did not
+/// bound it would grow without limit on the first recursive data structure it
+/// met. The two caps are derived from the same knob the `--preset` scaling
+/// already moves, so a preset that asks for shorter values also asks for
+/// shallower ones and there is still one dial rather than three.
+fn structure_caps(max_value_chars: usize) -> (usize, usize) {
+    // The default `max_value_chars` is in the low hundreds, so the depth lands
+    // at 3-4 and the breadth at 32-64: deep enough for a struct of structs and
+    // wide enough for a short vector, which is what a reviewer looks at.
+    let depth = (max_value_chars / 64).clamp(2, 8);
+    let breadth = (max_value_chars / 4).clamp(8, 256);
+    (depth, breadth)
+}
+
+/// A copy of `value` cut to the structure caps.
+///
+/// Cutting rather than refusing: a value too deep or too wide keeps everything
+/// above the cut, so a reviewer sees the shape and the first elements instead
+/// of nothing. What is dropped is dropped silently at the leaves, which is the
+/// same bargain `text_repr`'s length cap already makes — and unlike that cap,
+/// the part that survives is still structure and can still be expanded.
+fn pruned_value(value: &crate::value::Value, max_value_chars: usize) -> crate::value::Value {
+    let (depth, breadth) = structure_caps(max_value_chars);
+    prune_to(value, depth, breadth)
+}
+
+fn prune_to(value: &crate::value::Value, depth: usize, breadth: usize) -> crate::value::Value {
+    let mut copy = value.clone();
+    if depth == 0 {
+        // At the cut: keep the scalar fields and the type, drop what hangs off
+        // them. The type is what makes a cut value still render as the right
+        // KIND of thing rather than as an empty one.
+        copy.elements = vec![];
+        copy.ref_value = None;
+        copy.active_variant_value = None;
+        return copy;
+    }
+    copy.elements = value
+        .elements
+        .iter()
+        .take(breadth)
+        .map(|element| prune_to(element, depth - 1, breadth))
+        .collect();
+    copy.ref_value = value
+        .ref_value
+        .as_ref()
+        .map(|inner| Box::new(prune_to(inner, depth - 1, breadth)));
+    copy.active_variant_value = value
+        .active_variant_value
+        .as_ref()
+        .map(|inner| Box::new(prune_to(inner, depth - 1, breadth)));
+    copy
+}
+
 /// Convert one `FlowViewUpdate` into the review's per-execution flow record.
 fn convert_flow(
     view: &FlowViewUpdate,
@@ -302,6 +361,13 @@ fn convert_flow(
                 value: rendered,
                 kind: value.typ.lang_type.clone(),
                 truncated,
+                // UD-3: the structure the debugger itself holds, alongside the
+                // rendering, instead of the rendering alone. This is where RV-5
+                // recorded the loss ("the materialized collector *has* the
+                // structured value and discards it") and it is a serialization
+                // change, not a new capability: `value` is already the type the
+                // frontend receives for an ordinary debugging session.
+                structured: Some(pruned_value(value, max_value_chars)),
             });
         }
         steps.push(FlowStepData {
@@ -858,4 +924,111 @@ fn collect_one(
 /// Total nodes in a call forest.
 fn count_nodes(nodes: &[CallNodeData]) -> usize {
     nodes.iter().map(|node| 1 + count_nodes(&node.children)).sum()
+}
+
+#[cfg(test)]
+mod structure_cap_tests {
+    //! UD-3 / RV-9's fourth deliverable: "the value-cap knobs restated in terms
+    //! of structure depth rather than rendered length".
+    //!
+    //! Mock objects: none. `crate::value::Value` is the real type the replay
+    //! backend builds and ships; these cases construct one and read the copy
+    //! `pruned_value` makes of it.
+    use super::{prune_to, pruned_value, structure_caps};
+    use crate::value::{Type, Value};
+    use codetracer_trace_types::TypeKind;
+
+    /// A chain of `depth` nested one-element sequences with an int at the leaf.
+    fn nest(depth: usize) -> Value {
+        let mut value = Value {
+            kind: TypeKind::Int,
+            i: "7".to_string(),
+            typ: Type {
+                kind: TypeKind::Int,
+                lang_type: "i32".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for _ in 0..depth {
+            value = Value {
+                kind: TypeKind::Seq,
+                elements: vec![value],
+                typ: Type {
+                    kind: TypeKind::Seq,
+                    lang_type: "Vec<i32>".to_string(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+        }
+        value
+    }
+
+    fn depth_of(value: &Value) -> usize {
+        value.elements.iter().map(|e| 1 + depth_of(e)).max().unwrap_or(0)
+    }
+
+    #[test]
+    fn a_value_within_the_caps_survives_unchanged() {
+        let value = nest(2);
+        assert_eq!(pruned_value(&value, 256), value);
+    }
+
+    #[test]
+    fn a_value_deeper_than_the_cap_keeps_its_shape_down_to_the_cut() {
+        // Cut, not refused: a reviewer sees the shape and the first levels
+        // rather than nothing, and what survives is still structure.
+        let pruned = prune_to(&nest(9), 3, 32);
+        assert_eq!(depth_of(&pruned), 3);
+        // The type survives the cut, so a cut value still renders as the right
+        // KIND of thing rather than as an empty one.
+        assert_eq!(pruned.typ.lang_type, "Vec<i32>");
+        assert_eq!(pruned.kind, TypeKind::Seq);
+    }
+
+    #[test]
+    fn a_value_wider_than_the_cap_keeps_its_first_elements() {
+        let wide = Value {
+            kind: TypeKind::Seq,
+            elements: (0..100)
+                .map(|i| Value {
+                    kind: TypeKind::Int,
+                    i: i.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let pruned = prune_to(&wide, 4, 8);
+        assert_eq!(pruned.elements.len(), 8);
+        assert_eq!(pruned.elements[0].i, "0");
+        assert_eq!(pruned.elements[7].i, "7");
+    }
+
+    #[test]
+    fn a_reference_and_a_variant_are_cut_the_same_way_as_elements() {
+        // Both are edges out of a value, so both are places a cycle can hide.
+        let inner = nest(5);
+        let value = Value {
+            kind: TypeKind::Ref,
+            ref_value: Some(Box::new(inner.clone())),
+            active_variant_value: Some(Box::new(inner)),
+            ..Default::default()
+        };
+        let pruned = prune_to(&value, 2, 32);
+        assert_eq!(depth_of(pruned.ref_value.as_ref().unwrap()), 1);
+        assert_eq!(depth_of(pruned.active_variant_value.as_ref().unwrap()), 1);
+    }
+
+    #[test]
+    fn the_caps_move_with_the_knob_the_presets_already_scale() {
+        // One dial, not three: `--preset`'s scaling of `max_value_chars` is
+        // what changes the structure budget too.
+        assert!(structure_caps(1024) > structure_caps(64));
+        // …and it is bounded at both ends, so neither a tiny preset nor a huge
+        // one produces a degenerate budget.
+        assert_eq!(structure_caps(0), (2, 8));
+        assert_eq!(structure_caps(usize::MAX), (8, 256));
+    }
 }

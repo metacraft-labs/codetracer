@@ -224,7 +224,7 @@ export const VIEWS = {
     async setup(ctx) {
       await selectFile(ctx, NOIR_FILE);
       await diffTab(ctx)
-        .locator(".view-lines .review-flow-value")
+        .locator(".flow-parallel .review-flow-value")
         .first()
         .waitFor({ state: "visible", timeout: 20000 });
     },
@@ -296,7 +296,7 @@ const hiddenLineCounts = async (ctx) =>
   expandBoundaries(ctx).evaluateAll((nodes) =>
     nodes.map((n) => Number(n.getAttribute("data-ct-hidden") ?? "-1")),
   );
-const flowChips = (ctx) => diffTab(ctx).locator(".monaco-editor .view-lines .review-flow-value");
+const flowChips = (ctx) => diffTab(ctx).locator(".monaco-editor .flow-parallel .review-flow-value");
 const intralineLines = (ctx) => diffLines(ctx).filter({ hasText: /fn\s+scale\(index/ });
 // Matched on a single hyphenated token rather than a phrase: Monaco renders
 // runs of spaces as U+00A0, so a literal inter-word space in the pattern is a

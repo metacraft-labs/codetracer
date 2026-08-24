@@ -751,7 +751,11 @@ proc reviewFlowStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
       if not plan.found:
         continue
       var update = FlowUpdate()
-      fillFlowUpdate(plan, update, ViewSource)
+      # The file-taking overload: it carries the structured values the
+      # materialized collector writes (UD-3) into the `FlowUpdate`, so both of
+      # a review's surfaces hold the recorder's own `Value`s rather than a
+      # synthesis from a rendering.
+      fillFlowUpdate(file, plan, update, ViewSource)
       let view = update.viewUpdates[ViewSource]
       # The loop iteration the reader picked with the diff tab's loop control,
       # for every loop this invocation entered — so a line inside a loop shows
@@ -778,11 +782,11 @@ proc reviewFlowStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
           result.add(MonacoLineStyle(
             line: position,
             afterContent: cstring(" " & reviewValueChipName(chip)),
-            afterClass: cstring(ReviewValueNameClass)))
+            afterClass: cstring(ReviewInlineValueNameClass)))
           result.add(MonacoLineStyle(
             line: position,
             afterContent: cstring(chip.text),
-            afterClass: cstring(ReviewValueBoxClass)))
+            afterClass: cstring(ReviewInlineValueBoxClass)))
 
 proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int): seq[MonacoLineStyle] =
   var lines: seq[MonacoLineStyle] = @[]

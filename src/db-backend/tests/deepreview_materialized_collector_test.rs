@@ -302,6 +302,34 @@ fn flow_carries_the_functions_steps_values_and_loop_iterations() {
         "monotonic: {positions:?}"
     );
 
+    // UD-3: alongside the rendering, the value the debugger itself holds.
+    //
+    // Red before, measured on the shipped tree: `VariableValueData` had no
+    // `structured` field at all and `convert_flow` called `text_repr()` and
+    // kept only the string, so every review value reached the frontend as a
+    // `TypeKind.Raw` synthesised from a language-type NAME.
+    for step in &flow.steps {
+        for value in &step.values {
+            let structured = value
+                .structured
+                .as_ref()
+                .unwrap_or_else(|| panic!("no structure for {}", value.name));
+            // The kind comes from the recorder rather than from guessing at
+            // `value.kind`'s spelling — the third of the four costs RV-5
+            // recorded, closed.
+            assert_ne!(
+                structured.kind,
+                codetracer_trace_types::TypeKind::Raw,
+                "{} arrived as Raw, which is what the synthesis produced",
+                value.name
+            );
+            assert_eq!(structured.typ.lang_type, value.kind);
+            // And it renders back to exactly what the collector wrote, so the
+            // structure is the same value rather than a second one.
+            assert_eq!(structured.text_repr(), value.value);
+        }
+    }
+
     // The loop itself is reported once, with its total iteration count.
     assert_eq!(file.loops.len(), 1);
     assert_eq!(file.loops[0].start_line, 3);

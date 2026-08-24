@@ -67,6 +67,65 @@ proc decodeDiff(node: JsonNode): ct_types.DeepReviewFileDiff =
     linesRemoved: node{"linesRemoved"}.getInt(0),
     hunks: hunks)
 
+proc decodeTypeKind(node: JsonNode): ct_types.TypeKind =
+  ## `TypeKind` as it is actually on the wire: an **ordinal**, not a name.
+  ##
+  ## `codetracer_trace_types::TypeKind` derives `Serialize_repr` over
+  ## `#[repr(u8)]`, so Rust writes `6` where Nim reads `Instance` — and the two
+  ## enums are declared from one list in the same order, which is what makes
+  ## the renderer's `cast[DeepReviewData](JSON.parse(...))` correct for this
+  ## field without a mapping layer. Reading the *name* here would have decoded
+  ## every value as `Raw` and the suite would have proved nothing.
+  ##
+  ## Out of range is `Raw`: a dataset written by a newer collector must still
+  ## open, and `Raw` is the fallback the enum itself documents.
+  if node == nil or node.kind != JInt:
+    return ct_types.TypeKind.Raw
+  let ordinal = node.getInt(-1)
+  if ordinal < ord(low(ct_types.TypeKind)) or
+     ordinal > ord(high(ct_types.TypeKind)):
+    return ct_types.TypeKind.Raw
+  ct_types.TypeKind(ordinal)
+
+proc decodeType(node: JsonNode): ct_types.Type =
+  if node == nil or node.kind != JObject:
+    return ct_types.Type(kind: ct_types.TypeKind.Raw, langType: "")
+  ct_types.Type(
+    kind: decodeTypeKind(node{"kind"}),
+    langType: node{"langType"}.getStr(""),
+    cType: node{"cType"}.getStr(""))
+
+proc decodeStructured(node: JsonNode): ct_types.Value =
+  ## `VariableValueData.structured` — the value as the debugger holds it
+  ## (UD-3). Nil when the collector wrote none, which is the whole native
+  ## `.dr` case.
+  ##
+  ## Only the fields a review's values can carry are read. The renderer needs
+  ## no decoder at all — it reaches the dataset through
+  ## `cast[DeepReviewData](JSON.parse(...))` and the field names already agree
+  ## one for one — so this exists for the headless lanes, and reading a field
+  ## nobody asserts on would be dead code that could still be wrong.
+  if node == nil or node.kind != JObject:
+    return nil
+  var elements: seq[ct_types.Value] = @[]
+  if node.hasKey("elements") and node["elements"].kind == JArray:
+    for element in node["elements"].items:
+      let decoded = decodeStructured(element)
+      if decoded != nil:
+        elements.add(decoded)
+  ct_types.Value(
+    kind: decodeTypeKind(node{"kind"}),
+    typ: decodeType(node{"typ"}),
+    i: node{"i"}.getStr(""),
+    f: node{"f"}.getStr(""),
+    b: node{"b"}.getBool(false),
+    c: node{"c"}.getStr(""),
+    text: node{"text"}.getStr(""),
+    r: node{"r"}.getStr(""),
+    msg: node{"msg"}.getStr(""),
+    address: node{"address"}.getStr(""),
+    elements: elements)
+
 proc decodeValues(node: JsonNode): seq[ct_types.DeepReviewVariableValue] =
   result = @[]
   if node == nil or node.kind != JArray:
@@ -76,7 +135,8 @@ proc decodeValues(node: JsonNode): seq[ct_types.DeepReviewVariableValue] =
       name: value{"name"}.getStr(""),
       value: value{"value"}.getStr(""),
       kind: value{"kind"}.getStr(""),
-      truncated: value{"truncated"}.getBool(false)))
+      truncated: value{"truncated"}.getBool(false),
+      structured: decodeStructured(value{"structured"})))
 
 proc decodeFlow(node: JsonNode): seq[ct_types.DeepReviewFunctionFlow] =
   result = @[]

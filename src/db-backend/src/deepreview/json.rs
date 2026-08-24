@@ -43,6 +43,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::value::Value;
+
 /// Complete DeepReview dataset in JSON-serializable form.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -311,11 +313,35 @@ pub struct VariableValueData {
     pub name: String,
     /// Rendered by `value::Value::text_repr`, the same rendering the debugger
     /// shows.
+    ///
+    /// Kept alongside `structured` rather than replaced by it. Two reasons,
+    /// both load-bearing: a dataset written by the native `.dr` exporter has no
+    /// structure to offer (its value pool interns one string per value), so a
+    /// reader that only understood `structured` would show such a review
+    /// nothing; and a reader older than this field keeps working, which is
+    /// what makes the schema change additive.
     pub value: String,
     /// The value's language type when the trace recorded one, `""` otherwise.
     pub kind: String,
     /// Whether the rendering above was cut short by the value length cap.
     pub truncated: bool,
+    /// The value as the debugger itself holds it — the structure, not a
+    /// rendering of it (UD-3, superseding RV-9's materialized half).
+    ///
+    /// This is `crate::value::Value`, the exact type the replay backend ships
+    /// to the frontend for an ordinary debugging session, so a review's values
+    /// arrive in the frontend as the same objects an ordinary session's do:
+    /// the type kind comes from the recorder rather than from guessing at a
+    /// language type name, a compound value keeps its `elements`, and a value
+    /// the length cap cut can still be re-rendered at full width from what is
+    /// here.
+    ///
+    /// `None` when the collector never had structure. The native `.dr`
+    /// exporter is the case that matters — see UD-3 in
+    /// `Unified-Diff-Design.milestones.org`; giving it structure needs a new
+    /// chunk kind in the binary format and a version bump with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured: Option<Value>,
 }
 
 /// Call trace tree structure.

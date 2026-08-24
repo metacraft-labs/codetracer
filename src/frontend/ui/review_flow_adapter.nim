@@ -81,9 +81,28 @@
 ##   4. **Truncation is terminal.** `truncated: true` means the collector cut
 ##      the text; there is no structure left to re-render at full width, so the
 ##      ellipsis is all a reviewer can ever see.
-## The follow-up that removes all four is RV-9, "The collectors emit structured
-## review values", in `Review-Command.milestones.org`; the four costs above are
-## its acceptance criteria.
+##
+## WHAT UD-3 CHANGED, AND WHAT IT DID NOT
+## --------------------------------------
+## Half of the above is now history and half of it is not, and the difference
+## is WHICH COLLECTOR wrote the dataset:
+##
+##   * The **materialized** collector emits the structure it always had.
+##     `db-backend/src/deepreview/json.rs` carries
+##     `VariableValueData.structured: Option<Value>` beside the rendering, and
+##     `fillFlowUpdate`'s file-taking overload at the foot of this module
+##     copies it straight into `FlowStep.beforeValues`. For such a dataset the
+##     synthesis below does not run at all: costs 1 and 3 are gone, and the
+##     data behind 2 and 4 is present (what those two still need is the chip's
+##     *interactions*, which the review's band does not wire — UD-4).
+##   * The **native `.dr`** collector still emits none. Its value pool interns
+##     one string per value (`json_export.rs::convert_flow_chunk`:
+##     `value_ref`, `type_ref`), so there is nothing to serialize without a new
+##     chunk kind in the binary format. For such a dataset everything below is
+##     exactly as RV-5 left it, all four costs included.
+##
+## So `synthesizedValueKind` is now the FALLBACK rather than the answer, and it
+## must stay: it is the whole native-collector case, not a legacy path.
 
 type
   ReviewFlowValue* = object
@@ -550,6 +569,23 @@ const
     ## `ui/flow.flowSimpleValue` applies to a before-only value box, which is
     ## the mode a review is always in (the dataset carries one rendered value
     ## per name per step).
+  ReviewInlineValueNameClass* =
+    ReviewValueNameClass & " review-inline-value"
+  ReviewInlineValueBoxClass* =
+    ReviewValueBoxClass & " review-inline-value"
+    ## The same chip, drawn as Monaco **injected text** instead of as an
+    ## element of the debugger's band (UD-3).
+    ##
+    ## The extra marker exists because the two surfaces need opposite things
+    ## from CSS. The diff tab's band is built out of the debugger's own
+    ## elements — a `.ct-omni-value` flex container holding the name and the
+    ## box — and therefore needs NO styling of its own; §5.3's full-file
+    ## surface annotates the code line itself, where an injected span cannot
+    ## have that container and must restate the box model it would have
+    ## provided. Putting the restatement on `review-flow-value` made it apply
+    ## to both and stripped the band's chips of the debugger's own padding, so
+    ## the marker that *locates* a chip and the marker that *styles* an
+    ## injected one are now two different things.
 
 func reviewValueChipName*(chip: ReviewValueChip): string =
   ## The text of the name chip.
@@ -628,6 +664,49 @@ func stepAtLine*(plan: ReviewFlowPlan; sourceLine: int;
       if step.iteration != plan.selectedLoopIteration(step.loop, iterations):
         continue
     return i
+
+func stepAtLineIteration*(plan: ReviewFlowPlan; sourceLine, iteration: int): int =
+  ## Index into `plan.steps` of the step `sourceLine` recorded on pass
+  ## `iteration`, or -1.
+  ##
+  ## The per-column counterpart of `stepAtLine`: where that proc answers "what
+  ## does this line show, given the reader's choice", this one answers "what did
+  ## this line do on pass N" for every N the band draws a column for. `-1` for
+  ## the iteration selects a step outside any loop, which is the shape a
+  ## non-loop line's single column asks for.
+  ##
+  ## A -1 answer is load-bearing rather than an error: it is how a pass that
+  ## never reached the line gets an EMPTY column instead of a neighbouring
+  ## pass's values under its heading. See `renderFlow`'s "no value" span, which
+  ## occupies the same slot in the debugger's own band.
+  result = -1
+  for i in 0 ..< plan.steps.len:
+    let step = plan.steps[i]
+    if step.position != sourceLine:
+      continue
+    if iteration < 0:
+      if step.loop > 0 and step.loop < plan.loops.len:
+        continue
+      return i
+    if step.loop <= 0 or step.loop >= plan.loops.len:
+      continue
+    if step.iteration != iteration:
+      continue
+    return i
+
+func loopAtLine*(plan: ReviewFlowPlan; sourceLine: int): int =
+  ## The plan loop index whose body contains `sourceLine`, or 0 for "none".
+  ##
+  ## Read off the steps rather than off `Loop.first`/`last`, because a step
+  ## knows which loop it was recorded inside and a line span does not
+  ## distinguish a body line from a line that merely sits between the header
+  ## and the closing brace without ever being recorded.
+  result = 0
+  for step in plan.steps:
+    if step.position != sourceLine:
+      continue
+    if step.loop > 0 and step.loop < plan.loops.len:
+      return step.loop
 
 # ---------------------------------------------------------------------------
 # Writing the FlowUpdate
@@ -832,3 +911,59 @@ proc fillFlowUpdate*[U, V](plan: ReviewFlowPlan; update: U; view: V) =
   update.location = viewUpdate.location
   update.error = false
   update.finished = true
+
+
+# ---------------------------------------------------------------------------
+# The structured values (UD-3, superseding RV-9's materialized half)
+# ---------------------------------------------------------------------------
+
+proc fillFlowUpdate*[F, U, V](file: F; plan: ReviewFlowPlan; update: U; view: V) =
+  ## `fillFlowUpdate`, and then the **structured** values where the dataset
+  ## carries them.
+  ##
+  ## Why the file rather than the plan: `ReviewFlowPlan` is a plain,
+  ## non-generic value and it must stay one, because it is what lets every
+  ## decision in this module be made once for two incompatible copies of the
+  ## type world (see the header). A `Value` cannot travel in it — naming
+  ## `Value` would pick one of the two copies — so the structure is fetched
+  ## from the dataset at the point where a real `Value` field is being
+  ## written, and `file` is what it is fetched from.
+  ##
+  ## The lookup is positional and that is safe by construction, not by luck:
+  ## `reviewFlowPlan` appends exactly one `ReviewFlowStep` per
+  ## `DeepReviewFunctionFlow.steps` entry and one `ReviewFlowValue` per
+  ## `DeepReviewFlowStep.values` entry, in order, with no filtering. The bounds
+  ## are still checked, because a plan and a file that did not come from the
+  ## same call would otherwise fail silently rather than loudly.
+  ##
+  ## A value with no structure keeps the synthesis `fillFlowValue` performed —
+  ## which is the whole native-collector case, and is why this is additive
+  ## rather than a replacement.
+  fillFlowUpdate(plan, update, view)
+  if not plan.found:
+    return
+  when compiles(file.isNil):
+    if file.isNil:
+      return
+  if plan.invocationIndex < 0 or plan.invocationIndex >= file.flow.len:
+    return
+  let flow = file.flow[plan.invocationIndex]
+  let viewUpdate = update.viewUpdates[view]
+  if viewUpdate.isNil:
+    return
+  for stepIndex in 0 ..< viewUpdate.steps.len:
+    if stepIndex >= flow.steps.len:
+      break
+    let sourceStep = flow.steps[stepIndex]
+    for valueIndex in 0 ..< sourceStep.values.len:
+      let sourceValue = sourceStep.values[valueIndex]
+      if sourceValue.structured.isNil:
+        continue
+      if valueIndex >= viewUpdate.steps[stepIndex].exprOrder.len:
+        break
+      let key = viewUpdate.steps[stepIndex].exprOrder[valueIndex]
+      # The same object in both slots, as `fillFlowUpdate` does: the dataset
+      # carries ONE value per name per step and `FlowComponent` reads whichever
+      # the reader's value mode selects.
+      viewUpdate.steps[stepIndex].beforeValues[key] = sourceValue.structured
+      viewUpdate.steps[stepIndex].afterValues[key] = sourceValue.structured

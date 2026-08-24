@@ -49,6 +49,9 @@ import std/strformat
 import isonim/core/signals
 import git_cli
 import flow_line_styles
+import flow_loop_slider
+import flow_value_dom
+import ../lib/isonim_styles
 import review_flow_adapter
 import review_flow_selection
 import ../viewmodel/viewmodels/vcs_vm
@@ -559,28 +562,34 @@ proc reviewFlowDecorationsFor(self: UnifiedDiffComponent; doc: DiffDocument):
     seq[ReviewFlowDecoration] =
   ## Every displayed invocation's per-line flow, mapped onto this document.
   result = @[]
-  let (_, fileIndex) = self.reviewFlowFile()
+  let (file, fileIndex) = self.reviewFlowFile()
   if fileIndex < 0:
     return
   for plan in self.reviewDisplayedPlans(doc):
     var update = FlowUpdate()
-    fillFlowUpdate(plan, update, ViewSource)
+    # The overload that takes the file: it fills the structured values the
+    # materialized collector now writes (UD-3) on top of everything the plan
+    # decides, so a review's `FlowStep.beforeValues` hold the recorder's own
+    # `Value`s wherever the dataset has them.
+    fillFlowUpdate(file, plan, update, ViewSource)
     result.add(reviewFlowDecorations(
       doc, fileIndex,
       flowStyledLines(update.viewUpdates[ViewSource], update.finished)))
 
-proc reviewValueAnnotationsFor(self: UnifiedDiffComponent; doc: DiffDocument):
+proc reviewValueAnnotationsFor(self: UnifiedDiffComponent; doc: DiffDocument;
+                               maxColumns: int = 1):
     seq[ReviewValueAnnotation] =
   ## Every displayed invocation's inline values (§4.4), mapped onto this
-  ## document — the values the *selected* call recorded, on the *selected* pass
-  ## through any loop containing the line.
+  ## document — the values the *selected* call recorded, and (UD-3) a column
+  ## per recorded pass through any loop containing the line, starting at the
+  ## pass the loop control names.
   result = @[]
   let (_, fileIndex) = self.reviewFlowFile()
   if fileIndex < 0:
     return
   for plan in self.reviewDisplayedPlans(doc):
     result.add(reviewValueAnnotations(
-      doc, fileIndex, plan, self.reviewLoopIterationsFor(plan)))
+      doc, fileIndex, plan, self.reviewLoopIterationsFor(plan), maxColumns))
 
 proc reviewLoopZonesFor(self: UnifiedDiffComponent; doc: DiffDocument):
     seq[ReviewLoopZone] =
@@ -612,82 +621,491 @@ proc monacoFlowDecorations(decorations: seq[ReviewFlowDecoration]):
       }
     })
 
-proc monacoValueDecorations(doc: DiffDocument;
-                            annotations: seq[ReviewValueAnnotation]):
-    seq[JsObject] =
-  ## The inline values §4.4 requires, as Monaco decorations carrying the flow
-  ## annotation classes — which is the form §7 names:
+# ---------------------------------------------------------------------------
+# The parallel value band (UD-3)
+# ---------------------------------------------------------------------------
+#
+#   "Keep the standard CodeTracer Omniscience appearance, produced by the same
+#    code path as normal debugging […] Inline variable values MUST NOT be
+#    rendered as text comments."  — DeepReview-GUI.md §4.4
+#
+# RV-5 met the "not a comment" half with Monaco *injected text* carrying the
+# debugger's class names. UD-3 replaces it, because injected text cannot be the
+# debugger's surface in the two ways that matter:
+#
+#   * it starts where the code line happens to END, so the values are a ragged
+#     trailing strip rather than the aligned columns the flow view draws — and
+#     a strip that starts further right is a strip that is cut off sooner,
+#     which is the clipping every UD-1 and UD-2 reviewer reported;
+#   * it is a flat run of spans, so a loop's several passes cannot be laid out
+#     side by side at all. RV-5 therefore showed ONE pass and made the loop
+#     control the only way to see the others.
+#
+# What replaces it is the debugger's own arrangement: one Monaco **content
+# widget** per annotated line, holding the `.flow-parallel` row that
+# `ui/flow.renderFlow` builds out of `ui/flow_value_dom.nim` — the same module,
+# the same elements — anchored at ONE `left` offset for every line, past the
+# longest line of the document, with one `.flow-parallel-values` column per
+# recorded pass.
+
+proc udAddContentWidget(editor: MonacoEditor, widget: js)
+  {.importjs: "#.addContentWidget(#)".}
+
+proc udRemoveContentWidget(editor: MonacoEditor, widget: js)
+  {.importjs: "#.removeContentWidget(#)".}
+
+proc udContentWidget(id: cstring, dom: Node, line: int): js {.importjs: """
+  (function(id, dom, line) {
+    return {
+      getId: function() { return id; },
+      getDomNode: function() { return dom; },
+      getPosition: function() {
+        // `0` is `ContentWidgetPositionPreference.EXACT`.
+        return { position: { lineNumber: line, column: 1 }, preference: [0] };
+      }
+    };
+  })(#, #, #)""".}
+  ## A Monaco content widget, built in JS rather than as a Nim `js{}` literal
+  ## of closures.
   ##
-  ##   "The inline variable values MUST NOT be rendered as text comments (e.g.
-  ##    `// x = 10`) — they must use the standard CodeTracer Omniscience visual
-  ##    style (Monaco decorations with the flow annotation classes)."
+  ## This is not stylistic. A `js{ getId: (proc: cstring = widgetId) }` inside a
+  ## LOOP closes over a variable Nim's JS backend hoists to the enclosing
+  ## function, so every widget of the pass reports the LAST id. Monaco keys
+  ## `_contentWidgets` by `getId()`, so adding N of them overwrote one map entry
+  ## N times while appending N nodes — and `removeContentWidget` then removed
+  ## exactly one of them. Measured: after stepping the invocation selector once,
+  ## 9 bands on screen became 16, the previous call's values still beside the
+  ## new call's. The JS-level factory gives each widget its own closure.
+
+proc udContentWidth(editor: MonacoEditor): int {.importjs: """
+  (function(e) {
+    var info = e.getLayoutInfo ? e.getLayoutInfo() : null;
+    return info ? (info.contentWidth | 0) : 0;
+  })(#)""".}
+  ## The editor's content area in pixels, minimap and rulers excluded. Read
+  ## through `getLayoutInfo()` rather than the cached `config.layoutInfo` that
+  ## `FlowComponent` uses, because a diff tab has no `EditorViewComponent` to
+  ## refresh that cache on resize.
+
+proc udMaxLineOffset(editor: MonacoEditor, lines: seq[int]): int {.importjs: """
+  (function(e, lines) {
+    var model = e.getModel();
+    if (!model || !lines || lines.length === 0) { return 0; }
+    var count = model.getLineCount();
+    var best = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line < 1 || line > count) { continue; }
+      // Monaco's own measurement, so it is right for tabs, for a changed font
+      // size and for a proportional font — all three of which a
+      // `column * charWidth` estimate gets wrong.
+      var offset = e.getOffsetForColumn(line, model.getLineMaxColumn(line));
+      if (offset > best) { best = offset; }
+    }
+    return best | 0;
+  })(#, #)""".}
+  ## The pixel offset of the end of the widest of `lines`.
   ##
-  ## Each chip is one decoration with *injected text* (`options.after`), which
-  ## Monaco renders as a real inline span inside the line's own DOM carrying
-  ## `inlineClassName`. That is what makes this the standard appearance rather
-  ## than a look-alike: the classes are the debugger's own (see
-  ## `ReviewValueNameClass` / `ReviewValueBoxClass`) and the span is a sibling of
-  ## the code's tokens, exactly as the flow panel's chip is a sibling of its
-  ## column's.
+  ## This is `FlowComponent.maxFlowLineWidth`: `recalculateMaxFlowLineWidth`
+  ## computes exactly this maximum, and over exactly this set — the lines that
+  ## carry flow (`for position, _ in flow.positionStepCounts`), not every line
+  ## of the file. Restated here rather than reused because that proc is a
+  ## method on a component a review has none of (RV-5 judgement call 3); the
+  ## arithmetic, which is the part that decides where the values appear, is
+  ## identical.
+
+proc udCharWidth(editor: MonacoEditor): float {.importjs: """
+  (function(e) {
+    var model = e.getModel();
+    if (!model || model.getLineCount() < 1) { return 0; }
+    // Column 11 rather than 2, so a single measurement is averaged over ten
+    // characters and a sub-pixel advance does not round to zero.
+    var column = model.getLineMaxColumn(1);
+    if (column < 11) { return 0; }
+    var offset = e.getOffsetForColumn(1, 11) - e.getOffsetForColumn(1, 1);
+    return offset > 0 ? offset / 10 : 0;
+  })(#)""".}
+  ## The width of one character of the editor's font, or 0 when it cannot be
+  ## measured yet.
+
+proc reviewCharWidthPx(self: UnifiedDiffComponent): float =
+  ## One character of the editor's font, in pixels.
   ##
-  ## A name chip and a value chip per variable, in that order, rather than one
-  ## span of joined text: the name and the value are styled differently in the
-  ## debugger and a single span could only be one of them.
+  ## Measured off the editor when it can be — `getOffsetForColumn` on a real
+  ## line is Monaco's own answer and is right for the font in force — and
+  ## estimated from the configured size otherwise, which is only ever the case
+  ## before the first layout.
+  let fontSize =
+    if self.data.isNil or self.data.ui.isNil: 14 else: self.data.ui.fontSize
+  result = float(max(fontSize, 8)) * 0.62
+  if self.editor.isNil:
+    return
+  let measured = self.editor.udCharWidth()
+  if measured > 0.0:
+    result = measured
+
+proc reviewValueBandGeometry(self: UnifiedDiffComponent;
+                             annotations: seq[ReviewValueAnnotation]):
+    tuple[maxOffsetPx: float, charWidthPx: float, contentWidthPx: float] =
+  ## The three measurements the band's placement is decided from.
   ##
-  ## The range is *collapsed at the end of the line's text* — not the
-  ## `endColumn: 100000` the class decorations above use — because injected text
-  ## is placed at the range's end position, and a column past the end of the
-  ## line is clamped by Monaco to the same place for every decoration on it. The
-  ## document's own text is the length source, so no model read is needed.
-  result = @[]
+  ## `maxOffsetPx` runs over the ANNOTATED lines only, which is
+  ## `recalculateMaxFlowLineWidth`'s rule (`for position, _ in
+  ## flow.positionStepCounts`) rather than "the widest line in the file" — a
+  ## whole-file diff tab holds plenty of long lines that carry no values, and
+  ## letting one of them push the band would move every value off screen for a
+  ## reason a reader cannot see.
+  ##
+  ## The band's own offset is NOT computed here, because it depends on how wide
+  ## the widest annotated line's column is as well as on where that line ends;
+  ## `applyFlowValueBands` puts the two together through
+  ## `reviewValueBandLeftPx`.
+  let charWidth = self.reviewCharWidthPx()
+  if self.editor.isNil:
+    return (0.0, charWidth, 0.0)
+  var lines: seq[int] = @[]
+  for annotation in annotations:
+    lines.add(annotation.modelLine)
+  let contentWidth = float(self.editor.udContentWidth())
+  let maxOffset = float(self.editor.udMaxLineOffset(lines))
+  (maxOffset, charWidth, contentWidth)
+
+proc reviewValueBandDom(self: UnifiedDiffComponent;
+                        annotation: ReviewValueAnnotation;
+                        leftPx, columnWidthPx, maxWidthPx: float;
+                        visibleColumns, chipCharBudget: int;
+                        morePassesMarker: bool): Node =
+  ## One line's band, built out of the debugger's own elements.
+  let isLoop = annotation.loop > 0
+  # A wrapper, because the node handed to `addContentWidget` is Monaco's to
+  # position: it writes `position: absolute` and its own `left`/`top` onto it
+  # every frame. The band's own offset therefore lives one level in, exactly as
+  # the debugger's does inside `makeFlowLineContainer`'s widget div.
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring"review-flow-band-host")
+  let band = flowValueBandDom(
+    leftPx, isLoop, "review-flow-band", positioned = true,
+    maxWidthPx = maxWidthPx)
+  result.appendChild(band)
+  let host =
+    if isLoop:
+      let loopValues = flowValueLoopValuesDom(annotation.loop)
+      let group = flowValueGroupDom()
+      loopValues.appendChild(group)
+      band.appendChild(loopValues)
+      group
+    else:
+      band
+  # Trailing empty columns are dropped. An empty column between two filled
+  # ones is information — "this pass did not reach the line" — and keeping the
+  # passes of the loop's several lines in step depends on it. After the last
+  # filled one there is nothing to keep in step, and what is left is a column
+  # rule with nothing beside it, which a reviewer read as "an empty 5th slot".
+  var lastFilled = -1
+  for i in 0 ..< annotation.columns.len:
+    if annotation.columns[i].values.len > 0:
+      lastFilled = i
+  var index = 0
+  for column in annotation.columns:
+    if index > lastFilled:
+      break
+    if index >= visibleColumns:
+      # The passes past the pane's edge are not drawn at all rather than drawn
+      # and clipped: a column sheared in half is what every UD-1 and UD-2
+      # reviewer reported, and the loop control is how the rest are reached.
+      break
+    let columnDom = flowValueColumnDom(
+      cstring(fmt"review-flow-values-{self.id}-{annotation.modelLine}-{index}"),
+      columnWidthPx)
+    if column.selected:
+      # The debugger marks the pass the reader is on with `active-flow-step`,
+      # and `flow.styl` styles the value boxes inside it; the review's band
+      # marks it the same way rather than inventing a highlight.
+      columnDom.setAttribute(
+        cstring"class",
+        cstring($columnDom.getAttribute(cstring"class") &
+                " flow-loop-step-container active-flow-step"))
+    columnDom.setAttribute(cstring"data-iteration", cstring($column.iteration))
+    if column.values.len == 0:
+      # A pass that never reached this line. `renderFlow` draws exactly this
+      # span in the same slot, and keeping the empty column is what stops the
+      # next pass's values sliding under this pass's heading.
+      columnDom.appendChild(flowValueEmptyDom(style(), cstring""))
+    # A column wider than the pane drops whole chips from its end rather than
+    # squeezing them — see `reviewChipsThatFit`. The marker says it happened.
+    let fitting = reviewChipsThatFit(column.values, chipCharBudget)
+    var drawn = 0
+    for chip in column.values:
+      if drawn >= fitting:
+        # Marked, not silent: a column that quietly showed three of four
+        # values would be indistinguishable from a step that recorded three.
+        #
+        # `…+N` and not a bare `…`, because the ellipsis said the wrong
+        # thing; and not a bare `+N` either, because inside a DIFF a leading
+        # `+` reads as "one added line" — two later reviewers said so
+        # independently ("in a diff `+1` reads as 'one added line'", "its
+        # meaning is inference from the brief, not obvious from the UI"). The
+        # ellipsis says "truncated" and the count says how much.
+        # Two fresh reviewers of the design corpus, independently, reported the
+        # SAME defect from it — /"Rows 1 and 3 end in `…`; row 2, identical
+        # content, does not. Unstable per-row width computation."/ and /"the
+        # trailing dim `…` on lines 7 and 9 … while the visually identical
+        # line-8 row has no `…` … reads as inconsistent/possibly broken."/
+        # Measured, the computation was neither unstable nor per-row wrong:
+        # lines 8 and 10 of `main.nr` recorded THREE values and line 9 recorded
+        # two, so the first two hide one and the third hides none. The rows look
+        # identical because what differs is exactly what is not drawn. A count
+        # says so; a bare ellipsis leaves the reader to infer a bug, which is
+        # what both of them did.
+        let hidden = column.values.len - drawn
+        let more = flowValueEmptyDom(style(), cstring("…+" & $hidden))
+        more.setAttribute(
+          cstring"class",
+          cstring($more.getAttribute(cstring"class") & " review-flow-more"))
+        more.setAttribute(
+          cstring"title",
+          cstring(fmt"{hidden} more value(s) than the pane can hold"))
+        columnDom.appendChild(more)
+        break
+      drawn += 1
+      let chipDom = flowValueContainerDom(style())
+      let nameDom = flowValueNameDom(cstring(reviewValueChipName(chip)))
+      nameDom.setAttribute(
+        cstring"class",
+        cstring(ReviewValueNameClass))
+      chipDom.appendChild(nameDom)
+      chipDom.appendChild(flowValueBoxDom(
+        id = cstring(fmt"review-flow-value-{self.id}-{annotation.modelLine}-{index}-{chip.name}"),
+        className = cstring(ReviewValueBoxClass),
+        text = cstring(chip.text),
+        iteration = column.iteration,
+        style = style()))
+      columnDom.appendChild(chipDom)
+    host.appendChild(columnDom)
+    index += 1
+  # A band that shows fewer passes than the loop recorded says so.
+  #
+  # Without this the omission is invisible and reads as missing data: a fresh
+  # reviewer, unprompted — "`let contribution = …` and `total = total +
+  # contribution;` each show only one group with no `…` truncation marker, even
+  # though they're nested inside the same `for i in 0..4` loop whose header row
+  # directly above shows four groups — reads as missing 3 of 4 passes' data."
+  # It is not missing data and it is not inconsistent: those lines' columns are
+  # WIDER (`<contribution> 0` against `<i> 0`), so fewer of them fit. The
+  # marker is what makes that legible instead of leaving the reader to infer a
+  # bug.
+  #
+  # `morePassesMarker` is whether the room the columns left over holds it —
+  # `reviewMorePassesMarkerFits`. It is drawn out of the slack and never out of
+  # a column, so a marker saying data was not shown can never itself be the
+  # reason data was not shown, and it can never be the thing drawn past the
+  # pane's edge.
+  let dropped = (lastFilled + 1) - index
+  if dropped > 0 and morePassesMarker:
+    let more = flowValueEmptyDom(style(), cstring("…+" & $dropped))
+    more.setAttribute(
+      cstring"class",
+      cstring($more.getAttribute(cstring"class") & " review-flow-more-passes"))
+    more.setAttribute(
+      cstring"title",
+      cstring(fmt"{dropped} more pass(es) than fit — the loop control reaches them"))
+    host.appendChild(more)
+
+proc clearFlowValueWidgets(self: UnifiedDiffComponent) =
+  ## Drop every band. Wholesale, and before anything is added: Monaco keys a
+  ## content widget by `getId()`, so a band left behind for a line the repaint
+  ## no longer annotates would keep showing the previous invocation's values —
+  ## the "stale value from a previous pass" failure, one level up from the one
+  ## the column rule prevents.
+  if self.editor.isNil:
+    self.flowValueWidgets = @[]
+    self.flowValueZoneIds = @[]
+    return
+  for widget in self.flowValueWidgets:
+    self.editor.udRemoveContentWidget(widget)
+  self.flowValueWidgets = @[]
+  for zoneId in self.flowValueZoneIds:
+    self.editor.udRemoveViewZone(zoneId)
+  self.flowValueZoneIds = @[]
+
+proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
+  ## Draw the parallel value band for every annotated line of the document.
+  ##
+  ## Two placements, and which one is used is MEASURED rather than chosen:
+  ##
+  ##   * **Beside the code**, in a content widget at a common left offset —
+  ##     `FlowParallel`, the placement `ui/flow.renderFlow` uses and the one
+  ##     §4.4 describes. Used whenever the pane is wide enough to hold a whole
+  ##     column past the widest annotated line.
+  ##   * **On its own row under the line**, in a Monaco view zone — the
+  ##     placement the debugger's `FlowMultiline` mode uses
+  ##     (`ui/flow.createFlowViewZone`). Used when it is not.
+  ##
+  ## The second is not a review-specific invention and it is not a compromise
+  ## on the elements: the same band, the same columns, the same chips, moved to
+  ## the row below. It exists because the diff tab is ONE PANE of a layout — in
+  ## the design corpus at 1920x1080 its content area measures about 580px, and
+  ## the file's own annotated lines run to 59 characters — so "past the longest
+  ## line" is off the right edge, and beside-the-code placement would put every
+  ## value out of sight. That is the same measurement that produced the clipped
+  ## chips every UD-1 and UD-2 reviewer reported; RV-5's trailing strip did not
+  ## fit either, and drew itself sheared rather than admitting it.
+  if not self.editorInitialized or self.editor.isNil:
+    return
+  self.clearFlowValueWidgets()
+  # Every recorded pass is asked for; how many are DRAWN is decided per line
+  # below, from the room that line's band has. A cap here would be a cap on
+  # what the loop control can ever scroll to.
+  let annotations = reviewValueAnnotationsFor(self, doc, high(int16).int)
+  let geometry = self.reviewValueBandGeometry(annotations)
+  # Both decisions — where the band starts, and whether it goes beside the code
+  # at all — are taken against the width the WIDEST annotated line's column
+  # actually needs.
+  #
+  # `reviewValueBandFitsBeside` used to be asked against a 12-character floor,
+  # which is a width no band's content is ever measured against, so the beside
+  # branch accepted panes it then overflowed. Measured on `sample-review.json`
+  # at 1920x1080: 210px of room past a band placed at 309px, against a column
+  # needing 240px — the column was drawn at its full 230px from x=618 to x=848
+  # with the pane ending at 829, and the chips that missed the 21-character
+  # budget were replaced by an ellipsis, so `<y> 20` left the screen.
+  #
+  # What gives now is the GAP first (`reviewValueBandLeftPx`'s three-argument
+  # form) and the placement only after that, because the gap is whitespace and
+  # the placement is not: a row-below band is a view zone and adds its own
+  # height to the document.
+  let widestColumnPx =
+    float(reviewWidestColumnChars(annotations)) * geometry.charWidthPx
+  let bandLeftPx = reviewValueBandLeftPx(
+    geometry.maxOffsetPx, geometry.contentWidthPx, widestColumnPx)
+  self.flowValueWidgetMax = int(bandLeftPx)
+  let beside = reviewValueBandFitsBeside(
+    geometry.contentWidthPx, bandLeftPx, widestColumnPx)
   for annotation in annotations:
     if annotation.modelLine <= 0 or annotation.modelLine > doc.lines.len:
       continue
-    let endColumn = doc.lines[annotation.modelLine - 1].text.len + 1
-    proc chip(content: string; className: string): JsObject =
-      js{
-        range: js{
-          startLineNumber: annotation.modelLine,
-          startColumn: endColumn,
-          endLineNumber: annotation.modelLine,
-          endColumn: endColumn
-        },
-        options: js{
-          # `showIfCollapsed` keeps the decoration alive on an *empty* line,
-          # whose only column is 1 and whose range is therefore degenerate.
-          showIfCollapsed: true,
-          after: js{
-            content: cstring(content),
-            inlineClassName: cstring(className),
-            # Without this Monaco lays the injected span out as if it were
-            # plain monospace text and the chips' padding overlaps the code.
-            inlineClassNameAffectsLetterSpacing: true
-          }
-        }
-      }
-    for value in annotation.values:
-      result.add(chip(" " & reviewValueChipName(value), ReviewValueNameClass))
-      result.add(chip(value.text, ReviewValueBoxClass))
+    if annotation.columns.len == 0:
+      continue
+    # ONE offset for every band, in both placements.
+    #
+    # `beside` was decided against the WIDEST annotated line, so a band at the
+    # common offset is past every line's text by construction, and a tab where
+    # it would not be does not use that placement at all.
+    #
+    # The row-below placement started out indented to the statement above it,
+    # on the reasoning that a flush row "decouples the value from the statement
+    # it belongs to" — which one reviewer said in those words. Three fresh
+    # reviewers of the result said the opposite and said it unanimously: the
+    # varying start was "the most damaging thing here", "an inconsistent left
+    # rail", "roughly four different x positions". A column a reader can scan
+    # downwards is the deliverable; attribution is answered instead by the line
+    # number the row carries, which is also what `ui/flow.createFlowViewZone`
+    # puts at the left of the debugger's own zones.
+    let lineLeft = if beside: bandLeftPx else: 0.0
+    # The row-below placement spends the head of its band on the source line
+    # number, so the columns have that much less room than the pane.
+    let prefix =
+      if beside: 0.0
+      else: ReviewValueBandLinePrefixChars * geometry.charWidthPx
+    let available = geometry.contentWidthPx - lineLeft - prefix
+    # The column's width is decided in CHARACTERS and turned into pixels once,
+    # so the box the column is drawn in and the budget its chips are measured
+    # against are the same number rather than two roundings of it. That
+    # identity is the fix for the second half of the defect: the budget used to
+    # be `available / charWidth div visible`, which on a 210px band against a
+    # 24-character column came to 21 — three characters short of the column's
+    # own width, so the last chip of `<x> 10 <y> 20` was dropped and `<y> 20`
+    # left the screen. It also made the budget depend on the OTHER columns'
+    # widths, which is why two rows with identical content could truncate
+    # differently ("rows 1 and 3 end in `…`; row 2, identical content, does
+    # not").
+    let drawnColumnChars = reviewDrawnColumnChars(
+      reviewColumnWidthChars(annotation), available, geometry.charWidthPx)
+    let columnWidth = float(drawnColumnChars) * geometry.charWidthPx
+    let visible = reviewVisibleColumnCount(
+      available, columnWidth, annotation.columns.len)
+    # The "more passes than fit" marker is drawn out of the room the columns
+    # leave over, never out of a column — see `reviewMorePassesMarkerFits`.
+    let markerFits = reviewMorePassesMarkerFits(
+      available, columnWidth, visible,
+      float(ReviewValueMorePassesChars) * geometry.charWidthPx)
+    let dom = self.reviewValueBandDom(
+      annotation, lineLeft, columnWidth, available, visible, drawnColumnChars,
+      markerFits)
+    # The same id in both placements, on the DOM node as well as on the
+    # widget: a test that asks "does the line that shows source line N carry a
+    # band" needs to name one, and `getId` is not reachable from a selector.
+    dom.setAttribute(
+      cstring"id",
+      cstring(fmt"review-flow-band-{self.id}-{annotation.modelLine}"))
+    if beside:
+      # Anchored at column 1 rather than at the end of the text: the band is
+      # positioned by its own `left`, so anchoring it to the line's end would
+      # add that line's width to a number that is meant to be the same for
+      # every line — the ragged strip, reintroduced through the back door.
+      let widget = udContentWidget(
+        cstring(fmt"review-flow-band-{self.id}-{annotation.modelLine}"),
+        dom, annotation.modelLine)
+      self.editor.udAddContentWidget(widget)
+      self.flowValueWidgets.add(widget)
+    else:
+      # The source line the row describes, drawn where the gutter's own numbers
+      # are.  `ui/flow.createFlowViewZone` prefixes the debugger's zones with a
+      # `.line-numbers` element for the same reason: a row under a line is only
+      # unambiguous while no two annotated lines are adjacent, and in a review
+      # they usually are.  Three reviewers found the ambiguity — "it fails at
+      # line 9, line 47, and wherever two annotated lines sit adjacent".
+      let number = document.createElement(cstring"div")
+      # NOT the editor's own `line-numbers` class. Monaco and
+      # `styles/index.styl` both style that selector for the gutter's own
+      # absolutely positioned column, and borrowing it inside a flex row took
+      # the band out of its zone. The look is restated in
+      # `.review-flow-band-line` instead — which is a handful of declarations,
+      # against a layout that silently breaks.
+      number.setAttribute(cstring"class", cstring"review-flow-band-line")
+      number.appendChild(document.createTextNode(
+        cstring($annotation.sourceLine)))
+      # Into the BAND, not into the host: the host has no layout of its own, so
+      # a sibling of the band there is a block above it and the band is pushed
+      # out of the zone's height onto the next code line. Measured on the
+      # captured surface, that is exactly what happened — two reviewers of it
+      # reported chips "drawn directly on top of the code glyphs at the same
+      # baseline" and "two chip groups stacked in the same pixels".
+      let bandNode = dom.firstChild
+      bandNode.insertBefore(number, bandNode.firstChild)
+      # Tall enough for the chip, which is not a line of text: a
+      # `.ct-omni-value` carries `padding: 0.25em 0.5em` and its name half
+      # another 3px below, so at a 13px font the pill is around 30px against a
+      # ~20px line. A zone sized for the FONT let the pill spill onto the code
+      # rows either side, which two reviewers reported in the same terms —
+      # "pill tops clip the `{` of `for i in 0..4 {`", "pills overlap the lines
+      # above and below by 2-4px".
+      self.flowValueZoneIds.add(self.editor.udAddViewZone(js{
+        afterLineNumber: annotation.modelLine,
+        heightInPx: self.data.ui.fontSize + 22,
+        domNode: dom
+      }))
 
 proc applyFlowDecorations(self: UnifiedDiffComponent; doc: DiffDocument) =
-  ## Repaint the whole overlay: the per-line classes and the inline values.
+  ## Repaint the whole overlay: the per-line classes and the value bands.
   ##
-  ## One collection for both, replaced wholesale, because they answer the same
-  ## question — "what did the selected invocation do here?" — and so always
-  ## change together. Splitting them would let a stale value strip outlive the
+  ## The two are repainted together, because they answer the same question —
+  ## "what did the selected invocation do here?" — and so always change
+  ## together. Letting them drift apart would leave a stale band beside the
   ## classes that say which lines ran.
   if not self.editorInitialized or self.editor.isNil:
     return
-  var decorations = monacoFlowDecorations(self.reviewFlowDecorationsFor(doc))
-  decorations.add(
-    monacoValueDecorations(doc, self.reviewValueAnnotationsFor(doc)))
+  let decorations = monacoFlowDecorations(self.reviewFlowDecorationsFor(doc))
   if self.flowDecorationCollection.isNil:
     self.flowDecorationCollection =
       self.editor.udCreateDecorationsCollection(decorations.toJs)
   else:
     self.flowDecorationCollection.udCollectionSet(decorations.toJs)
+  self.applyFlowValueBands(doc)
 
 proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument)
+proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
+                         attempt: int)
 
 proc stepInvocation(self: UnifiedDiffComponent; functionKey: string;
                     delta: int) =
@@ -707,6 +1125,35 @@ proc stepInvocation(self: UnifiedDiffComponent; functionKey: string;
       continue
     setReviewInvocationOrdinal(
       safeStr(file.path), functionKey, zone.nextOrdinal(delta))
+    self.rebuildInvocationZones(doc)
+    self.applyFlowDecorations(doc)
+    return
+
+proc setLoopIterationTo(self: UnifiedDiffComponent; functionKey: string;
+                        loopIndex, iteration: int) =
+  ## Select a pass through a loop outright, rather than by stepping.
+  ##
+  ## What the dragged slider calls. It shares `stepLoopIteration`'s clamping
+  ## through `ReviewLoopZone.nextIteration`, expressed as a delta from where
+  ## the zone currently is, so a drag and a click cannot disagree about what
+  ## the ends of the range are.
+  let vm = self.ensureUnifiedDiffVM()
+  if vm.isNil:
+    return
+  let doc = diffPairFor(vm).modified
+  let (file, _) = self.reviewFlowFile()
+  if file.isNil:
+    return
+  for zone in self.reviewLoopZonesFor(doc):
+    if zone.functionKey != functionKey or zone.loopIndex != loopIndex:
+      continue
+    let wanted = zone.nextIteration(iteration - zone.iteration)
+    if wanted == zone.iteration:
+      # A drag that landed back where it started must not repaint: the repaint
+      # rebuilds the view zones, and rebuilding the zone under the pointer
+      # cancels the drag in progress.
+      return
+    setReviewLoopIteration(safeStr(file.path), functionKey, loopIndex, wanted)
     self.rebuildInvocationZones(doc)
     self.applyFlowDecorations(doc)
     return
@@ -787,13 +1234,20 @@ proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
   ## The loop iteration control — §4.4's "loop sliders", in the same stepper
   ## register as the invocation selector directly above it.
   ##
-  ## It is a stepper rather than the debugger's dragged `noUiSlider`: that
-  ## widget is sized from `FlowComponent`'s measured layout — `ensureLoopSlider`
-  ## refuses to build it until `loopControlWidth` reads a non-zero
-  ## `flowLoops[position].flowDom.clientWidth` (the #562 fix) — state a review
-  ## has no `FlowComponent` to hold. The counter, the two
-  ## directions, the clamping at both ends and the effect on the values are the
-  ## same; the drag affordance is what is missing, and RV-10 owns it.
+  ## Stepper AND slider (UD-3, closing RV-10). The two directions and the
+  ## counter are the stepper's; the drag is `ui/flow_loop_slider.nim`'s
+  ## `ensureFlowLoopSlider`, which is the same proc `ui/flow.ensureLoopSlider`
+  ## builds the debugger's `noUiSlider` with — the same options, the same
+  ## zero-width refusal, the same #562 lessons.
+  ##
+  ## RV-10 recorded the blocker as layout state a review has no
+  ## `FlowComponent` to hold. What removed it is not a `FlowComponent` but the
+  ## observation that the measurement was never the hard part: the control is a
+  ## flex row, so the slider is the flex child that takes the space left over,
+  ## and the layout answers "how wide" without any component's fields. The
+  ## slider is still not CONSTRUCTED until that width is real — see
+  ## `scheduleLoopSliders` — because that half of #562 is about when, not about
+  ## where the number came from.
   result = document.createElement(cstring"div")
   result.setAttribute(
     cstring"class",
@@ -821,6 +1275,65 @@ proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
   result.appendChild(reviewStepButton(
     cstring"›", "review-loop-next", zone.canStepForward(),
     proc() = component.stepLoopIteration(functionKey, loopIndex, 1)))
+  # The drag affordance. Appended even when there is a single pass — the
+  # container is dropped again by `ensureFlowLoopSlider`'s zero-range refusal
+  # rather than by a second copy of the "is there anything to choose between"
+  # rule here.
+  if zone.total > 1:
+    result.appendChild(flowLoopSliderContainerDom(
+      cstring(fmt"review-loop-slider-{self.id}-{zone.functionKey}-{zone.loopIndex}"),
+      "review-loop-slider"))
+
+proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
+                         attempt: int) =
+  ## Build the loop controls' sliders once their view zones have been laid out.
+  ##
+  ## #562's primary cause, on this surface: Monaco attaches and lays out a
+  ## freshly registered view zone on a LATER frame, so during the tick in which
+  ## `rebuildInvocationZones` builds one the slider's element has no box, and a
+  ## noUiSlider constructed then is 0x2px and invisible. The debugger comes back
+  ## through `resizeFlowSlider`, driven by its own render pass and by an editor
+  ## resize observer; a review has neither, so it comes back on a timer.
+  ##
+  ## Bounded, and this matters: an unbounded retry against a tab that will
+  ## never lay out (it was closed, or GoldenLayout destroyed its DOM) is a
+  ## timer that runs forever.
+  ##
+  ## Twenty attempts over ~3s, not the eight over ~800ms it started at. The
+  ## shorter window was enough on an idle machine and not enough under load —
+  ## measured as an intermittent failure of "UD-3: the loop control carries the
+  ## debugger's dragged slider", which is exactly the shape of #562 (a slider
+  ## that exists sometimes) and must not be tuned by luck. The cost of the
+  ## longer window is a few more no-op ticks on a tab that will never lay out;
+  ## the cost of the shorter one is a control that is missing on a slow frame.
+  const MaxAttempts = 20
+  if attempt >= MaxAttempts:
+    return
+  if not self.editorInitialized or self.editor.isNil:
+    return
+  var pending = false
+  for zone in self.reviewLoopZonesFor(doc):
+    let container = document.getElementById(cstring(
+      fmt"review-loop-slider-{self.id}-{zone.functionKey}-{zone.loopIndex}"))
+    if container.isNil:
+      continue
+    let element = cast[Node](container.querySelector(
+      cstring("." & FlowLoopSliderClass)))
+    if element.isNil:
+      continue
+    let functionKey = zone.functionKey
+    let loopIndex = zone.loopIndex
+    let component = self
+    # `total - 1`: the range is over ITERATION INDICES, and the debugger's
+    # `maxLoopIteration` is the same 0-based bound.
+    if not ensureFlowLoopSlider(element, zone.total - 1, zone.iteration,
+        proc(iteration: int) =
+          component.setLoopIterationTo(functionKey, loopIndex, iteration)):
+      if zone.total > 1:
+        pending = true
+  if pending:
+    discard windowSetTimeout(
+      proc() = self.scheduleLoopSliders(doc, attempt + 1), 150)
 
 proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument) =
   ## Replace the whole set of in-editor controls — invocation selectors and loop
@@ -834,7 +1347,19 @@ proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument) =
   for zoneId in self.flowViewZoneIds:
     self.editor.udRemoveViewZone(zoneId)
   self.flowViewZoneIds = @[]
-  let lineHeight = self.data.ui.fontSize + 10
+  # Taller than a line, and the control is laid out against the BOTTOM of it.
+  #
+  # Monaco's unchanged-region boundary straddles the lines either side of its
+  # fold (UD-2 measured that and drew its own rule as a hairline because of
+  # it), and `unified_diff.styl` lifts that widget to `z-index: 3` so its drag
+  # handle can be pressed at all — above `.lines-content`, which is where a
+  # view zone lives and where no `z-index` of ours can reach. A control drawn
+  # in the top of a zone that shares a gap with a fold is therefore visible and
+  # unpressable, which is worse than either. Measured with
+  # `document.elementFromPoint` over the loop slider's handle: the hit was
+  # `div.ct-diff-expand-boundary`. The clearance moves the control out from
+  # under it.
+  let lineHeight = self.data.ui.fontSize + 22
   for zone in self.reviewInvocationZonesFor(doc):
     let dom = self.invocationZoneDom(zone)
     self.flowViewZoneIds.add(self.editor.udAddViewZone(js{
@@ -849,6 +1374,7 @@ proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument) =
       heightInPx: lineHeight,
       domNode: dom
     }))
+  self.scheduleLoopSliders(doc, attempt = 0)
 
 proc syncIntoVM*(self: UnifiedDiffComponent) =
   ## Push the tab's parsed diff into its ViewModel.  The hunk selection is left
@@ -1174,6 +1700,12 @@ proc tryMountUnifiedDiffTab*(componentId: int) =
       # id would make the next `rebuildInvocationZones` remove a zone from it.
       component.flowDecorationCollection = nil
       component.flowViewZoneIds = @[]
+      # The value bands' content widgets belong to the destroyed editor too.
+      # Dropped without `removeContentWidget`, deliberately: there is nothing
+      # left to remove them FROM, and calling it on a disposed editor throws.
+      component.flowValueWidgets = @[]
+      component.flowValueZoneIds = @[]
+      component.flowValueWidgetMax = 0
 
     if not (isoNimUnifiedDiffMountedIds.hasKey(componentId) and
             isoNimUnifiedDiffMountedIds[componentId]):

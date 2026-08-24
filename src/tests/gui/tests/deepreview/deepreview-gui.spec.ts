@@ -29,7 +29,12 @@ import { test, expect, wait } from "../../lib/fixtures";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-import { DIFF_BODY, DIFF_BODY_LINES, DeepReviewPage } from "./page-objects/deepreview-page";
+import {
+  DIFF_BODY,
+  DIFF_BODY_LINES,
+  DIFF_BODY_VALUES,
+  DeepReviewPage,
+} from "./page-objects/deepreview-page";
 
 // ---------------------------------------------------------------------------
 // Fixture paths
@@ -728,11 +733,22 @@ test.describe("DeepReview GUI - main features", () => {
     // consumer looking for a flow value box finds a review's too (§7,
     // "the flow annotations in DeepReview look identical to flow annotations
     // during normal debugging").
+    // UD-3 moved the chips out of `.view-lines`: they are the debugger's own
+    // elements in its `.flow-parallel` band now, not injected text inside the
+    // code line.  The classes asserted are the same ones, and they are still
+    // the debugger's rather than a review's.
     expect(
-      await tab.locator(".view-lines .flow-parallel-value-box").count(),
+      await tab.locator(".flow-parallel .flow-parallel-value-box").count(),
     ).toBeGreaterThan(0);
     expect(
-      await tab.locator(".view-lines .ct-omni-name").count(),
+      await tab.locator(".flow-parallel .ct-omni-name").count(),
+    ).toBeGreaterThan(0);
+    // And the container the debugger's chips take their appearance FROM —
+    // `.ct-omni-value`, the flex box `flow.styl` styles — which an injected
+    // span could not have and which is the substance of "the same code path
+    // as normal debugging".
+    expect(
+      await tab.locator(".flow-parallel .ct-omni-value").count(),
     ).toBeGreaterThan(0);
   });
 
@@ -802,6 +818,8 @@ test.describe("DeepReview GUI - main features", () => {
     expect(await DeepReviewPage.flowValueText(tab)).toContain("10");
     expect(await DeepReviewPage.flowValueText(tab)).toContain("55");
     expect(await DeepReviewPage.flowValueText(tab)).not.toContain("42");
+    // Call 1 reached BOTH lines that assign `result` — line 4 and line 10.
+    expect(await DeepReviewPage.flowValueNamesMatching(tab, "<result>")).toBe(2);
 
     await selector.locator(".review-invocation-next").click();
     await expect(selector.locator(".review-invocation-label")).toHaveText(
@@ -816,9 +834,19 @@ test.describe("DeepReview GUI - main features", () => {
     const secondCall = await DeepReviewPage.flowValueText(tab);
     expect(secondCall).toContain("84");
     expect(secondCall).toContain("903");
-    // Call 2 never reached line 10, so its `result = 55` strip is gone rather
-    // than left behind from the previous invocation.
-    expect(secondCall).not.toContain("55");
+    // Call 2 never reached line 10, so its `result` chip is gone rather than
+    // left behind from the previous invocation: ONE `<result>` (line 4), not
+    // the two call 1 shows.
+    //
+    // Counted by name rather than asserted as "the text does not contain 55",
+    // which is what this line used to say. That proxy stopped isolating line
+    // 10 when UD-3 moved the values into Monaco content widgets: a widget is
+    // created for every line the overlay names, where injected text existed
+    // only for the lines Monaco had rendered, so `compute`'s own `<acc> 55` on
+    // line 19 is now in the document whichever call of `main` is displayed.
+    // The count names the property the comment always claimed.
+    expect(await DeepReviewPage.flowValueNamesMatching(tab, "<result>")).toBe(1);
+    expect(secondCall).not.toContain("<result> 55");
 
     await selector.locator(".review-invocation-prev").click();
     await expect(selector.locator(".review-invocation-label")).toHaveText(
@@ -2104,6 +2132,200 @@ test.describe("DeepReview GUI - main features", () => {
     // `@@` divider, and not the middle of the hunk.
     for (const model of rust) {
       expect(model.first).toBe("fn main() {");
+    }
+  });
+
+  test("UD-3: the loop control carries the debugger's dragged slider", async ({ ctPage }) => {
+    // RV-10, closed. The control was a stepper because the debugger's
+    // `noUiSlider` "is sized from `FlowComponent`'s measured layout […] state
+    // a review has no `FlowComponent` to hold".
+    //
+    // Red before, measured: `.review-loop-selector` contained two buttons and
+    // a label and nothing else — no `.flow-loop-slider-container`, no
+    // `.flow-loop-slider`, and no `.noUi-base` anywhere in the diff tab.
+    //
+    // `.noUi-base` is the assertion and not `.flow-loop-slider`, for the
+    // reason `page-objects/panes/editor/omniscient-loop-controls.ts` records
+    // for the debugger's own suite: the container is ours and proves nothing;
+    // `.noUi-base` is injected by `noUiSlider.create` and is the only evidence
+    // the widget was actually constructed. That is #562's whole lesson.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(async () => await DeepReviewPage.expansionBoundaries(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    await DeepReviewPage.expandBelowHandle(tab).click();
+    const loop = DeepReviewPage.loopSelectors(tab).first();
+    await expect(loop).toBeVisible({ timeout: 20_000 });
+
+    const slider = loop.locator(".flow-loop-slider");
+    await expect(slider).toHaveCount(1, { timeout: 20_000 });
+    // Built, not merely present.
+    await expect(loop.locator(".flow-loop-slider .noUi-base")).toBeVisible({
+      timeout: 20_000,
+    });
+    // And at a real width — the #562 defect was a slider created in the tick
+    // its view zone was registered in, 0x2px and parked off to the left.
+    const box = await slider.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(20);
+  });
+
+  test("UD-3: dragging the loop control changes the pass the values show", async ({ ctPage }) => {
+    // RV-10's first acceptance criterion, in its own words: "dragging the
+    // review's loop control changes the displayed pass".
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(async () => await DeepReviewPage.expansionBoundaries(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    await DeepReviewPage.expandBelowHandle(tab).click();
+    const loop = DeepReviewPage.loopSelectors(tab).first();
+    await expect(loop).toBeVisible({ timeout: 20_000 });
+    await expect(loop.locator(".flow-loop-slider .noUi-base")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(loop.locator(".review-loop-label")).toHaveText(
+      "iteration 1 / 3",
+    );
+
+    // A real pointer drag from the handle to the right-hand end of the track,
+    // not a synthesised value change: the affordance under test is the drag.
+    const handle = loop.locator(".noUi-handle").first();
+    const track = await loop.locator(".flow-loop-slider").boundingBox();
+    const grip = await handle.boundingBox();
+    expect(track).not.toBeNull();
+    expect(grip).not.toBeNull();
+    await ctPage.mouse.move(
+      grip!.x + grip!.width / 2,
+      grip!.y + grip!.height / 2,
+    );
+    await ctPage.mouse.down();
+    await ctPage.mouse.move(
+      track!.x + track!.width,
+      grip!.y + grip!.height / 2,
+      { steps: 12 },
+    );
+    await ctPage.mouse.up();
+
+    await expect(loop.locator(".review-loop-label")).toHaveText(
+      "iteration 3 / 3",
+      { timeout: 10_000 },
+    );
+    // The values followed, which is the point — the affordance is not a
+    // decoration on a counter.
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueText(tab), {
+        timeout: 20_000,
+      })
+      .toContain("<acc> 3");
+  });
+
+  test("UD-3: the values are the debugger's parallel band, not a strip of injected text", async ({ ctPage }) => {
+    // §4.4: "Keep the standard CodeTracer Omniscience appearance, produced by
+    // the same code path as normal debugging".  Since UD-3 that is literal —
+    // the chips are `ui/flow_value_dom.nim`'s elements, the module
+    // `ui/flow.flowSimpleValue` builds its own from — so the assertion is
+    // about the DOM the debugger builds, not about a class name a look-alike
+    // could also carry.
+    //
+    // Red before, measured on the shipped tree: every chip was a Monaco
+    // injected-text span inside `.view-lines`; there was no `.flow-parallel`
+    // band and no `.ct-omni-value` container anywhere in the diff tab.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueChips(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+
+    // The band, its columns and the chip container are all present…
+    expect(await tab.locator(`${DIFF_BODY_VALUES}`).count()).toBeGreaterThan(0);
+    expect(await DeepReviewPage.flowValueColumns(tab).count()).toBeGreaterThan(0);
+    expect(
+      await tab.locator(`${DIFF_BODY_VALUES} .ct-omni-value`).count(),
+    ).toBeGreaterThan(0);
+    // …and no chip is injected text inside a code line any more.  This is the
+    // half that would still pass if the band were added ALONGSIDE the strip
+    // rather than instead of it, which would double every value on screen.
+    expect(
+      await tab.locator(`${DIFF_BODY_LINES} .review-flow-value`).count(),
+    ).toBe(0);
+  });
+
+  test("UD-3: every band starts at the same offset, so the values are columns", async ({ ctPage }) => {
+    // The property that distinguishes a column band from RV-5's trailing
+    // strip, asserted geometrically rather than by a class: a strip starts
+    // where its own code line ends, so its x varies line by line.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueChips(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(1);
+
+    const bands = tab.locator(`${DIFF_BODY_VALUES}`);
+    const count = await bands.count();
+    const lefts: number[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const box = await bands.nth(i).boundingBox();
+      if (box) lefts.push(Math.round(box.x));
+    }
+    expect(lefts.length).toBeGreaterThan(1);
+    // One offset for all of them.  A tolerance of 1px, not 0, because the
+    // boxes are measured after a fractional device-pixel layout.
+    const spread = Math.max(...lefts) - Math.min(...lefts);
+    expect(spread).toBeLessThanOrEqual(1);
+  });
+
+  test("UD-3: no value column is drawn past the pane's right edge", async ({ ctPage }) => {
+    // The finding EVERY UD-1 and UD-2 reviewer reported — "the value chips are
+    // clipped at the pane's right edge", quoted mid-word: `<contributio`,
+    // `<tota`, `<cont`.  A column that does not fit is not drawn at all now,
+    // and the loop control is how the rest are reached.
+    //
+    // Red before, measured: the chips' union bounding box ran past the
+    // modified editor's own right edge, and the last one on each line was cut
+    // through a glyph.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueChips(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+
+    const pane = await tab.locator(DIFF_BODY).first().boundingBox();
+    expect(pane).not.toBeNull();
+    const columns = DeepReviewPage.flowValueColumns(tab);
+    const count = await columns.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i += 1) {
+      const box = await columns.nth(i).boundingBox();
+      if (!box || box.width === 0) continue;
+      // `+ 1` for the same sub-pixel reason as above.
+      expect(box.x + box.width).toBeLessThanOrEqual(pane!.x + pane!.width + 1);
     }
   });
 

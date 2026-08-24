@@ -901,6 +901,29 @@ type
       ## diff decorations change when a hunk is selected or context is
       ## expanded, the flow ones when the reader picks another invocation, and
       ## a single collection would make each rebuild throw the other away.
+    flowValueWidgets*: seq[js]
+      ## The Monaco **content widgets** carrying the review's parallel value
+      ## bands (UD-3) — one per annotated line, each holding the
+      ## `.flow-parallel` row the debugger's own `ui/flow.renderFlow` builds.
+      ##
+      ## A content widget rather than an injected-text decoration, which is
+      ## what RV-5 used: injected text is part of the code line, so it starts
+      ## where that line happens to end (a ragged strip, not a column) and it
+      ## cannot hold the nested column elements the flow view lays a loop's
+      ## passes out in.  Held so a repaint can remove the previous set — Monaco
+      ## keys a content widget by the id its `getId` returns and silently keeps
+      ## the old node otherwise.
+    flowValueZoneIds*: seq[int]
+      ## Monaco view-zone ids of the value bands, when the pane is too narrow
+      ## to hold one beside the code and they are drawn on their own row under
+      ## it instead (UD-3).  Separate from `flowViewZoneIds`, which holds the
+      ## two in-editor *controls*: those are rebuilt whenever the reader's
+      ## choice changes, and the bands whenever the geometry does.
+    flowValueWidgetMax*: int
+      ## Where the value band was last laid out, in pixels from the editor's
+      ## content left.  Kept for the same reason the debugger keeps
+      ## `maxFlowLineWidth`: the band's offset is one number for every line, so
+      ## the values line up into columns a reader can scan downwards.
     flowViewZoneIds*: seq[int]
       ## Monaco view-zone ids of the review's in-editor controls — the
       ## invocation selectors (DeepReview-GUI.md §7) and the loop iteration

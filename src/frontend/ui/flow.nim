@@ -8,7 +8,15 @@ import
   origin_chain_runtime,
   # Pure loop-iteration arithmetic, factored out so it is testable on the C
   # backend — this module is JS-only. See flow_loop_math.nim.
-  flow_loop_math
+  flow_loop_math,
+  # noUiSlider's construction, its zero-width refusal and its idempotency
+  # marker, shared with the review's loop control (UD-3). See
+  # flow_loop_slider.nim.
+  flow_loop_slider,
+  # The Omniscience value chip and the parallel column band, factored out so
+  # the review's diff tab draws the same elements rather than a look-alike
+  # (UD-3, DeepReview-GUI.md §4.4). See flow_value_dom.nim.
+  flow_value_dom
 
 from trace import getConfiguration
 
@@ -1756,13 +1764,22 @@ proc flowSimpleValue*(
       showContextMenu(contextMenu, cast[int](e.toJs.clientX), cast[int](e.toJs.clientY))
 
   proc appendValueSpan(parent: Node, id: cstring, className: string, value: Value) =
-    let valueSpan = document.createElement(cstring"span")
-    valueSpan.setAttribute(cstring"id", id)
-    valueSpan.applyStyle(style)
-    if value.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-      valueSpan.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-    valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
-    valueSpan.setAttribute(cstring"class", cstring(className))
+    # The element itself comes from `ui/flow_value_dom.nim`, which the review's
+    # diff tab also builds from (UD-3) — so "the standard Omniscience
+    # appearance" is one implementation rather than two that agree today.
+    # Everything below it here is behaviour this host has and the review does
+    # not: the jump, the context menu and the tooltip.
+    let valueSpan = flowValueBoxDom(
+      id = id,
+      className = cstring(className),
+      text = value.textRepr(compact = true),
+      iteration = self.flow.steps[stepCount].iteration,
+      style = style,
+      maxWidth =
+        if value.textRepr(compact = true).len() > FLOW_VALUE_LIMIT:
+          cstring(FLOW_VALUE_MAX_WIDTH)
+        else:
+          cstring"")
     valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
       onMouseDown(e, value)
     )
@@ -1779,12 +1796,9 @@ proc flowSimpleValue*(
         let valueDom = self.renderModalValueDom(id)
         self.displayTooltip(id, valueDom)
     )
-    valueSpan.appendChild(document.createTextNode(value.textRepr(compact=true)))
     parent.appendChild(valueSpan)
 
-  result = document.createElement(cstring"span")
-  result.setAttribute(cstring"class", cstring"ct-omni-value")
-  result.applyStyle(style)
+  result = flowValueContainerDom(style)
 
   case flowValueMode:
   of BeforeValueMode:
@@ -1798,8 +1812,7 @@ proc flowSimpleValue*(
       result.appendChild(renderViewOption())
 
   if showName:
-    let nameSpan = document.createElement(cstring"span")
-    nameSpan.setAttribute(cstring"class", cstring"ct-omni-name")
+    let nameSpan = flowValueNameDom(name)
     nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
       self.jumpToLocalStep(stepCount)
     )
@@ -1812,7 +1825,6 @@ proc flowSimpleValue*(
       of BeforeAndAfterValueMode:
         discard
     )
-    nameSpan.appendChild(document.createTextNode(name))
     result.appendChild(nameSpan)
 
   if flowValueMode == BeforeValueMode:
@@ -4468,89 +4480,70 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
   let step = flowLoop.loopStep
   let maxIteration = self.maxLoopIteration(step.loop)
 
-  if maxIteration <= FLOW_ITERATION_START:
-    # Zero-range: noUiSlider would throw, and an empty container is worse than
-    # no container. Remove both.
-    if not element.toJs.noUiSlider.isNil:
-      element.toJs.noUiSlider.destroy()
-    self.removeSliderWidget(position)
-    return
-
   # Defer until the hosting view zone has been laid out. `shouldRecalcFlow`
   # records that a recalculation is still owed.
-  if not self.inExtension and self.loopControlWidth(position) == 0:
+  #
+  # ONLY outside the extension, and that has always been the rule: the
+  # extension has no `resizeFlowSlider` path to come back on
+  # (`doRenderActiveLoopIterationValues` schedules it behind
+  # `if not data.self.inExtension`, and `resizeEditorHandler` needs an
+  # `editorUI.monacoEditor` the extension does not have), so deferring there
+  # means never building the slider at all.  `requireMeasurable` below carries
+  # the same condition into `ensureFlowLoopSlider`, which would otherwise apply
+  # lesson 1 unconditionally and reintroduce exactly that.
+  let canDeferForWidth = not self.inExtension
+  if canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+     self.loopControlWidth(position) == 0:
     self.shouldRecalcFlow = true
     return
 
   let iteration = self.activeLoopIterationFor(step)
 
-  # `ctSliderMax` is our own marker for "which range is this noUiSlider
-  # instance built for". Re-creating the widget on every resize pass would both
-  # waste work and cancel an in-progress drag, so we only rebuild when the
-  # window's iteration count actually changed.
-  if not element.toJs.noUiSlider.isNil:
-    if cast[int](element.toJs.ctSliderMax) == maxIteration:
-      element.toJs.noUiSlider.set(iteration)
-      return
-    element.toJs.noUiSlider.destroy()
+  # The construction, the idempotency marker and the `slide` wiring all live in
+  # `flow_loop_slider.nim` now, shared with the review's own loop control
+  # (RV-10 / UD-3): a review can measure a slider after all, so the reason the
+  # two were different has gone and one implementation is what keeps them the
+  # same control.  Everything the DEBUGGER does with a new iteration — the
+  # active step, the jump, the counter DOM — stays here, because a review has
+  # no debugger position to move.
+  let slid = ensureFlowLoopSlider(element, maxIteration, iteration,
+    proc(loopIteration: int) =
+      let newTimeInMs = now()
+      let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
 
-  # `connect` MUST be the string shorthand, not the `[true, false]` array the
-  # option's documentation shows.
+      if activeStep.stepCount != NO_STEP_COUNT:
+        self.flowLoops[position].loopStep = activeStep
+        self.activeStep = activeStep
+      self.lastSliderUpdateTimeInMs = newTimeInMs
+      self.selectLoopIteration(step.loop, loopIteration, step.position)
+      self.updateLoopControlDom(step.position)
+      # Affect the complete move to have a delay on the update
+      # Maybe later on add to all of the EventLog components?
+      cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
+    ,
+    requireMeasurable = canDeferForWidth
+  )
+  # The width gate above measures the CONTAINER; `ensureFlowLoopSlider`
+  # measures the slider element itself, and the two can disagree — the slider's
+  # own `width: calc(...)` is applied by `resizeFlowSlider`, so on the
+  # `makeSlider` path the container can have a box in the tick the slider
+  # inside it does not.
   #
-  # Nim's JS backend compiles an `array[2, bool]` literal to
-  # `new Uint8Array([true, false])` (the packed representation it uses for
-  # arrays of small scalars). noUiSlider validates the option with
-  # `Array.isArray(entry)`, which is false for a typed array, so it took the
-  # "reject invalid input" branch and threw
-  #
-  #   noUiSlider: 'connect' option doesn't match handle count.
-  #
-  # on EVERY create. `.noUi-base` was therefore never injected, `ctSliderMax`
-  # was never recorded, the `slide` handler was never wired, and — because the
-  # throw escaped through `resizeFlowSlider` — the rest of that render pass was
-  # abandoned too. That is the remaining half of #562: the container and its
-  # width were fixed, but the widget itself had never once been constructed.
-  #
-  # `"lower"` is noUiSlider's own shorthand for exactly `[true, false]` (see
-  # `testConnect` in nouislider), so this is the same configuration expressed in
-  # a form that survives the Nim -> JS translation.
-  # https://refreshless.com/nouislider/slider-options/#section-connect
-  try:
-    noUiSlider.create(element, js{
-      "start": iteration,
-      "range": js{
-        "min": FLOW_ITERATION_START,
-        "max": maxIteration
-      },
-      "behaviour": cstring"drag-tap",
-      "connect": cstring"lower",
-      "step": 1,
-    })
-  except:
-    # A slider that cannot be constructed must not take the whole flow render
-    # pass down with it — the loop counter and its arrows are still usable
-    # without it. Report it rather than swallowing it silently.
-    cerror "flow: noUiSlider.create failed: " & getCurrentExceptionMsg()
-    return
-  element.toJs.ctSliderMax = maxIteration
-
-  var onUpdate = proc(values: seq[cstring], handle: int, unencoded: seq[float], tap: bool, positions: seq[float]) =
-    let newTimeInMs = now()
-    let loopIteration = Math.floor(unencoded[0])
-    let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
-
-    if activeStep.stepCount != NO_STEP_COUNT:
-      self.flowLoops[position].loopStep = activeStep
-      self.activeStep = activeStep
-    self.lastSliderUpdateTimeInMs = newTimeInMs
-    self.selectLoopIteration(step.loop, loopIteration, step.position)
-    self.updateLoopControlDom(step.position)
-    # Affect the complete move to have a delay on the update
-    # Maybe later on add to all of the EventLog components?
-    cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
-
-  let elementSlider = cast[JsObject](element).noUiSlider
-  elementSlider.on(cstring"slide", onUpdate)
+  # That second refusal is kept, because "never construct at zero width" is
+  # #562's actual lesson and the container's width is not evidence for it. What
+  # is NOT kept is its silence: a refusal for width must always leave a
+  # recalculation owed, or the slider is lost until some unrelated resize
+  # happens to run. Benign today — `resizeFlowSlider` applies `loopSliderStyle`
+  # before calling back in — but "benign today" is how #562 was introduced, and
+  # this is one assignment.
+  if not slid and canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+     not flowLoopSliderIsMeasurable(element):
+    self.shouldRecalcFlow = true
+  if not slid and maxIteration <= FLOW_ITERATION_START:
+    # The zero-range refusal used to remove the container here as well as
+    # destroy the widget; `ensureFlowLoopSlider` destroys, and the container is
+    # this host's to drop.
+    self.removeSliderWidget(position)
 
 proc makeSlider(self: FlowComponent, position: int) =
   if not self.flowLoops.hasKey(position):
@@ -4795,8 +4788,10 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
   var step = self.flow.steps[stepCount]
 
   if step.loop == -1:
-    result = document.createElement(cstring"div")
-    result.setAttribute(cstring"class", cstring"flow-parallel flow-parallel-value-single")
+    # Built through `flow_value_dom`, shared with the review's diff tab (UD-3).
+    # `flowLeftStyle`'s own `left` is applied on top, because this host's offset
+    # is a `calc()` in `ch` rather than a pixel count.
+    result = flowValueBandDom(0.0, isLoop = false)
     result.applyStyle(self.flowLeftStyle())
 
     var style = style()
@@ -4859,8 +4854,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
     if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
       lineClass = "flow-loop-first-line"
 
-    var res = document.createElement(cstring"div")
-    res.setAttribute(cstring"class", cstring(&"flow-parallel flow-parallel-loop {lineClass}"))
+    var res = flowValueBandDom(0.0, isLoop = true, extraClass = lineClass)
     res.applyStyle(flowLeftStyle(self))
 
     if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
@@ -4884,14 +4878,14 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
         index += 1
 
       var hasLoop = false
-      var html = document.createElement(cstring"div")
-      html.setAttribute(cstring"class", cstring(&"flow-parallel-loop-values loop-{loopID.int}"))
+      # The band's elements come from `flow_value_dom`, shared with the
+      # review's diff tab (UD-3) so both draw one implementation's columns.
+      var html = flowValueLoopValuesDom(loopID.int)
       html.addEventListener(cstring"scroll", proc(ev: Event) =
         discard
       )
 
-      let parallelGroup = document.createElement(cstring"div")
-      parallelGroup.setAttribute(cstring"class", cstring"flow-parallel-group")
+      let parallelGroup = flowValueGroupDom()
       html.appendChild(parallelGroup)
 
       for i in 0 ..< loop.iteration:
@@ -4907,16 +4901,10 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
             group.loopWidths[loopID][i] * group.baseWidth * 2 + 21
           else:
             group.loopWidths[loopID][i] * group.baseWidth
-        let columnStyle = style(
-          (StyleAttr.width, cstring($width & "px")))
-
-        # change class on width change to make sure it's re-rendered
-        let flowWidthClass = fmt"flow-parallel-values-width-{width}"
-
-        let valuesColumn = document.createElement(cstring"div")
-        valuesColumn.setAttribute(cstring"id", cstring(&"flow-values-{position}-{loopID.int}-{index}"))
-        valuesColumn.setAttribute(cstring"class", cstring(&"flow-parallel-values {flowWidthClass}"))
-        valuesColumn.applyStyle(columnStyle)
+        # `flowValueColumnDom` carries the "change the class on a width change
+        # so Monaco cannot skip the re-render" rule with it.
+        let valuesColumn = flowValueColumnDom(
+          cstring(&"flow-values-{position}-{loopID.int}-{index}"), width)
         parallelGroup.appendChild(valuesColumn)
 
         if not self.flow.positionStepCounts.hasKey(position):
@@ -4938,11 +4926,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
 
         for name in values:
           if not currentStep.beforeValues.hasKey(name) or not currentStep.afterValues.hasKey(name):
-            let noValue = document.createElement(cstring"span")
-            noValue.setAttribute(cstring"class", cstring"flow-parallel-value")
-            noValue.applyStyle(style)
-            noValue.appendChild(document.createTextNode(cstring"no value"))
-            valuesColumn.appendChild(noValue)
+            valuesColumn.appendChild(flowValueEmptyDom(style))
           else:
             valuesColumn.appendChild(flowSimpleValue(
               self,

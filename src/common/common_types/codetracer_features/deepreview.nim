@@ -255,10 +255,29 @@ type
 
   DeepReviewVariableValue* = ref object
     ## A captured variable value at a specific execution step.
+    ##
+    ## ``value`` is the collector's *rendering* and ``structured`` is the value
+    ## itself. Both are carried, and which one a reader gets depends on which
+    ## collector wrote the dataset (UD-3):
+    ##
+    ## * the **materialized** collector holds a real ``Value`` — the same type
+    ##   the replay backend ships to the frontend for an ordinary debugging
+    ##   session — and now writes it (``db-backend/src/deepreview/json.rs``,
+    ##   ``VariableValueData.structured``);
+    ## * the **native** ``.dr`` exporter holds only string-table offsets
+    ##   (``json_export.rs::convert_flow_chunk``: ``value_ref``, ``type_ref``),
+    ##   so it writes ``structured`` as nil and the rendering is all there is.
+    ##
+    ## A reader must therefore treat ``structured`` as optional rather than as
+    ## the new spelling of ``value``. ``ui/review_flow_adapter.fillFlowValue``
+    ## is the one place that decides: structure when it is there, the typed
+    ## synthesis from the rendering when it is not.
     name*: langstring
     value*: langstring
     kind*: langstring
     truncated*: bool
+    structured*: Value
+      ## The value as the debugger holds it, or nil. See above.
 
   DeepReviewCallTrace* = ref object
     ## Root of the call-trace tree.

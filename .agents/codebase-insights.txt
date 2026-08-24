@@ -1473,6 +1473,96 @@ JavaScript-backend quirk; it is not one, and reading it that way would leave
 the same bug unlooked-for in native code. Anywhere a module attaches one
 handler (or builds one callback) per element in a loop, look for this first.
 
+A third instance, and the nastiest so far, in `ui/unified_diff.nim` (UD-3): a
+`js{ getId: (proc: cstring = widgetId), ... }` built per line in a loop gave
+EVERY Monaco content widget the last line's id. Monaco keys `_contentWidgets`
+by `getId()`, so `addContentWidget` overwrote one map entry N times while
+appending N nodes, and `removeContentWidget` then removed exactly one of them.
+The symptom was not a wrong handler but a leak that looked like data: after
+stepping the invocation selector once, the previous call's values were still on
+screen beside the new call's, 9 bands becoming 16. The fix here is
+`udContentWidget`, an `importjs` factory that closes over its arguments in
+JAVASCRIPT — worth reaching for whenever a `js{}` literal of closures is built
+in a loop, because a proc call in Nim would still have to be written and the
+JS factory says what it is.
+
+## A Monaco content widget exists for every line you name; `.view-lines` does not
+
+Monaco virtualises `.view-lines` — only the lines inside the viewport have DOM
+— but `addContentWidget` creates the node for any line you register, viewport
+or not. Moving the review's inline values from injected text to content widgets
+therefore changed what a Playwright query over the whole tab returns: values
+from a function scrolled far off screen are now in the document, where before
+they simply did not exist yet. `deepreview-gui.spec.ts` Test 30 had asserted
+"the text does not contain 55" as a proxy for "line 10 is bare" and started
+matching an unrelated `<acc> 55` twenty lines away. If a test asserts the
+ABSENCE of something in a Monaco editor, it is probably relying on
+virtualisation; name the line instead.
+
+## The diff tab is one pane of a layout, not a window (UD-3)
+
+Measured in the design corpus at 1920x1080: the modified editor's content area
+is ~541px and the reviewed file's own annotated lines reach ~495px of it. Any
+design that puts something BESIDE the code — the debugger's flow band does,
+at `maxFlowLineWidth + distanceToSource` — has very little room here. The flow
+panel gets away with it because it owns a whole editor; a review does not, and
+a feature ported from one to the other has to measure rather than assume.
+
+## A fit test must ask for the width the CONTENT needs, not for a floor
+
+`ui/unified_diff.applyFlowValueBands` asked `reviewValueBandFitsBeside` for a
+twelve-character minimum column before placing the review's value band beside
+the code. Nothing is ever DRAWN at twelve characters, so the test answered a
+question no band was measured against: on `sample-review.json` at 1920x1080 it
+said yes to 210px of room for a column needing 240px, the column was drawn at
+its full width 19px past the pane's right edge, and — because the chip budget
+came from `available / charWidth div visible` rather than from the column's own
+width — the last chip of `<x> 10 <y> 20` was replaced by `…` and a recorded
+value left the screen. A floor in a fit test is almost always a bug: ask for
+the real number, and if you cannot compute it, that is the finding.
+
+Two more rules came out of fixing it, both general:
+
+  * **A "never draw zero of X" floor needs a companion that clamps X's size.**
+    `reviewVisibleColumnCount` always returned at least one column, which is
+    right — drawing none reads as "this line never executed" — but on its own
+    it is what drew a column that did not fit. `reviewDrawnColumnChars` caps
+    the width; the pair can then never put anything outside its container.
+  * **Give up whitespace before you give up a placement.** The obvious remedy
+    for "it does not fit beside the code" is the fallback placement, and here
+    that is a Monaco VIEW ZONE, which adds its own height to the document.
+    Moving all nine of the fixture's bands there cost ~315px in an 896px pane,
+    pushed the file's line 23 out of the viewport and turned four unrelated
+    expansion tests red. Shrinking the band's GAP instead
+    (`reviewValueBandLeftPx`'s three-argument form) costs nothing at all: no
+    code moves, no line hides, no chip drops, and the single left rail holds.
+
+## A loop's columns are sized per LOOP, not per line
+
+`FlowComponent.calculatePositionMaxWidth` raises
+`loopState.defaultIterationWidth` over EVERY position of the loop and every
+iteration at it, and `renderFlow` lays every line of the loop out against that
+one number. So pass 2's column starts at the same x on every line of the loop.
+UD-3's review band first sized per line, and the consequence was not only
+misalignment: a narrow line fitted more passes than a wide one, so the loop's
+header row showed four passes above body rows showing one, and a reviewer read
+that as "missing 3 of 4 passes' data". `reviewLoopColumnChars` is the per-loop
+maximum, and it is the debugger's rule rather than a review-specific one.
+
+## `ensureFlowLoopSlider(requireMeasurable)`: "never build at zero width" needs a way back
+
+#562's lesson is real, but it is only half a rule: refusing to construct until
+an element is measurable is safe exactly when somebody comes BACK. `ui/flow.nim`
+in EXTENSION mode has no such path — `resizeFlowSlider` is reachable only from
+`doRenderActiveLoopIterationValues` behind `if not data.self.inExtension`, from
+`resizeEditorHandler`, which needs an `editorUI.monacoEditor` the extension does
+not have, and from `ui/editor.nim` — so a refusal there is permanent and the
+VS Code / browser extension simply never grows a slider. That is why the shared
+`flow_loop_slider.ensureFlowLoopSlider` takes `requireMeasurable` and
+`ensureLoopSlider` passes `not self.inExtension`. Any guard of the form "not
+ready yet, come back later" needs the *later* proved for every host, not just
+for the one being worked on.
+
 ## Monaco's overlay widgets are painted UNDER the code (UD-2)
 
 `.monaco-editor .lines-content` has `z-index: 2` and `.overlayWidgets` has

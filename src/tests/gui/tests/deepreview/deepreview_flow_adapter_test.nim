@@ -329,3 +329,133 @@ suite "the synthesised values (the value-fidelity interim)":
             check not valueName.startsWith("//")
             check not ($flowValue).strip().startsWith("//")
             check "  // " notin $flowValue
+
+# ---------------------------------------------------------------------------
+# UD-3: the structured values, where the collector emits them
+# ---------------------------------------------------------------------------
+
+proc structuredFile(): ct.DeepReviewFileData =
+  ## One file whose flow carries a compound value with its structure, and a
+  ## scalar without it.
+  ##
+  ## Hand-built rather than read from a fixture, because the two cases that
+  ## matter are the two *collectors* and only one of them exists on this
+  ## machine: `sample-review.json` is shaped like the native `.dr` exporter,
+  ## which writes no structure at all, and the materialized collector's real
+  ## output is asserted in Rust
+  ## (`db-backend/tests/deepreview_materialized_collector_test.rs`, "flow
+  ## carries the functions steps values and loop iterations"). This is the
+  ## adapter's side of that seam: a dataset with structure and one without,
+  ## fed to the same code.
+  # `Instance` is what Nim calls the kind Rust calls `Struct` — the two enums
+  # are one list in one order and travel as an ordinal
+  # (`TypeKind` derives `Serialize_repr`), which is why the field names differ
+  # and the values do not.
+  let point = ct.Value(
+    kind: ct.TypeKind.Instance,
+    typ: ct.Type(kind: ct.TypeKind.Instance, langType: "Point"),
+    elements: @[
+      ct.Value(kind: ct.TypeKind.Int, typ: ct.Type(
+        kind: ct.TypeKind.Int, langType: "i32"), i: "3"),
+      ct.Value(kind: ct.TypeKind.Int, typ: ct.Type(
+        kind: ct.TypeKind.Int, langType: "i32"), i: "4")])
+  ct.DeepReviewFileData(
+    path: "src/geom.rs",
+    functions: @[ct.DeepReviewFunctionCoverage(
+      name: "origin", startLine: 1, endLine: 9, callCount: 1)],
+    loops: @[],
+    flow: @[ct.DeepReviewFunctionFlow(
+      functionKey: "origin",
+      executionIndex: 0,
+      steps: @[
+        ct.DeepReviewFlowStep(
+          line: 2, stepCount: 0, rrTicks: 0, loopId: -1, iteration: -1,
+          values: @[ct.DeepReviewVariableValue(
+            name: "p", value: "(3, 4)", kind: "Point", truncated: false,
+            structured: point)]),
+        ct.DeepReviewFlowStep(
+          line: 3, stepCount: 1, rrTicks: 1, loopId: -1, iteration: -1,
+          values: @[ct.DeepReviewVariableValue(
+            name: "n", value: "7", kind: "i32", truncated: false)])])])
+
+proc structuredUpdate(file: ct.DeepReviewFileData): ct.FlowUpdate =
+  result = ct.FlowUpdate()
+  fillFlowUpdate(file, reviewFlowPlan(file, 0), result, ct.ViewSource)
+
+suite "the structured values the collectors now emit (UD-3)":
+  ## RV-5 recorded four costs of synthesising a `Value` from a rendered string.
+  ## The materialized collector carries the structure now
+  ## (`json.rs::VariableValueData.structured`), and these are the two of the
+  ## four the adapter can close on its own.
+
+  test "a compound value arrives with its members, not as one Raw string":
+    # RV-5's cost 1, and its falsifiable form: "every such value is
+    # `TypeKind.Raw`".
+    let file = structuredFile()
+    let view = structuredUpdate(file).viewUpdates[ct.ViewSource]
+    let value = view.steps[0].beforeValues["p"]
+    check value.kind == ct.TypeKind.Instance
+    check value.elements.len == 2
+    check value.elements[0].i == "3"
+    check value.elements[1].i == "4"
+
+  test "the kind comes from the recorder, not from the type name's spelling":
+    # RV-5's cost 3: `Point` is not in `synthesizedValueKind`'s map and would
+    # have become `Raw`.  Asserted against the synthesis directly, so the test
+    # fails if the map ever grows a `Point` entry and stops proving anything.
+    check synthesizedValueKind("Point") == rvkRaw
+    let file = structuredFile()
+    let view = structuredUpdate(file).viewUpdates[ct.ViewSource]
+    check view.steps[0].beforeValues["p"].typ.langType == "Point"
+
+  test "both value slots carry the structure, as the synthesis filled both":
+    # The dataset carries ONE value per name per step and `FlowComponent` reads
+    # whichever the reader's value mode selects, so a half-filled step renders
+    # blank in the other mode — the rule `fillFlowUpdate` already follows for
+    # the synthesised value, and the structured path must not break it.
+    let file = structuredFile()
+    let view = structuredUpdate(file).viewUpdates[ct.ViewSource]
+    for slot in [view.steps[0].beforeValues["p"], view.steps[0].afterValues["p"]]:
+      check slot.kind == ct.TypeKind.Instance
+      check slot.elements.len == 2
+
+  test "a value with no structure keeps the typed synthesis":
+    # The whole native `.dr` case: no `structured`, so the adapter's own
+    # mapping still runs and the value is still an `Int` rather than nothing.
+    let file = structuredFile()
+    let view = structuredUpdate(file).viewUpdates[ct.ViewSource]
+    let value = view.steps[1].beforeValues["n"]
+    check value.kind == ct.TypeKind.Int
+    check value.i == "7"
+    check value.elements.len == 0
+
+  test "a dataset with no structure anywhere is unchanged by the new path":
+    # `sample-review.json` is shaped like the native exporter's output.  The
+    # file-taking overload must leave it exactly as the plan-only one does, or
+    # every native-collector review would change behaviour for nothing.
+    let file = sampleReview().fileNamed("src/main.rs")
+    var withFile = ct.FlowUpdate()
+    fillFlowUpdate(file, reviewFlowPlan(file, 0), withFile, ct.ViewSource)
+    let plain = flowUpdateFor(file, 0)
+    let a = withFile.viewUpdates[ct.ViewSource]
+    let b = plain.viewUpdates[ct.ViewSource]
+    check a.steps.len == b.steps.len
+    for i in 0 ..< a.steps.len:
+      check a.steps[i].exprOrder == b.steps[i].exprOrder
+      for name in a.steps[i].exprOrder:
+        check a.steps[i].beforeValues[name].kind ==
+          b.steps[i].beforeValues[name].kind
+        check a.steps[i].beforeValues[name].r == b.steps[i].beforeValues[name].r
+
+  test "a plan and a file that do not match leave the update alone":
+    # The positional lookup is safe because `reviewFlowPlan` is 1:1 with the
+    # dataset, but a caller that pairs the wrong two must fail loudly-empty
+    # rather than write somebody else's value under this name.
+    let file = structuredFile()
+    var update = ct.FlowUpdate()
+    var plan = reviewFlowPlan(file, 0)
+    plan.invocationIndex = 42
+    fillFlowUpdate(file, plan, update, ct.ViewSource)
+    let view = update.viewUpdates[ct.ViewSource]
+    check view.steps[0].beforeValues["p"].kind == ct.TypeKind.Raw
+    check view.steps[0].beforeValues["p"].r == "(3, 4)"

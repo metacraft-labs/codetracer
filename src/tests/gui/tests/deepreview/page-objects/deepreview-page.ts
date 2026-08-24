@@ -86,6 +86,18 @@ export const DIFF_ORIGINAL = ".monaco-editor.original-in-monaco-diff-editor";
  */
 export const DIFF_BODY_LINES = `${DIFF_BODY} .lines-content > .view-lines`;
 
+/**
+ * The parallel value band of the Omniscience overlay (UD-3).
+ *
+ * The values used to be Monaco *injected text*, so they lived inside
+ * `DIFF_BODY_LINES`.  They are now the debugger's own `.flow-parallel` band in
+ * a Monaco **content widget**, which Monaco parents under `.contentWidgets`
+ * inside `.overflow-guard` — still inside the modified editor, and still
+ * nowhere near the original editor's, so the scoping this selector provides is
+ * unchanged.
+ */
+export const DIFF_BODY_VALUES = `${DIFF_BODY} .flow-parallel`;
+
 
 // ---------------------------------------------------------------------------
 // File list item (VCS panel)
@@ -407,27 +419,60 @@ export class DeepReviewPage {
     return DeepReviewPage.diffLineNumbersOn(tab, DIFF_ORIGINAL);
   }
 
-  // -- The Omniscience overlay in the diff tab (RV-5) ----------------------
+  // -- The Omniscience overlay in the diff tab (RV-5, UD-3) ----------------
   //
-  // DeepReview-GUI.md §4.4 requires the standard Omniscience appearance, and
-  // §7 requires it as "Monaco decorations with the flow annotation classes".
-  // The values are therefore *injected text* decorations rendered inside the
-  // line's own DOM, carrying the debugger's own chip classes plus the two
-  // `review-flow-value-*` markers that locate them here.
+  // DeepReview-GUI.md §4.4 requires the standard Omniscience appearance,
+  // "produced by the same code path as normal debugging".  Since UD-3 that is
+  // literal: the chips are built by `ui/flow_value_dom.nim`, the module
+  // `ui/flow.flowSimpleValue` builds its own from, and they sit in the
+  // debugger's `.flow-parallel` band — one `.flow-parallel-values` column per
+  // recorded loop pass — inside a Monaco content widget.
+  //
+  // The `review-flow-value-*` markers still locate them, and the assertions
+  // that read them are unchanged; only where in the modified editor's DOM they
+  // hang has moved, from `.view-lines` to `.contentWidgets`.
 
   /** Every inline value chip — name chips and value boxes alike. */
   static flowValueChips(tab: Locator): Locator {
-    return tab.locator(`${DIFF_BODY_LINES} .review-flow-value`);
+    return tab.locator(`${DIFF_BODY_VALUES} .review-flow-value`);
   }
 
   /** The name half of each inline value chip, e.g. ``<x>``. */
   static flowValueNames(tab: Locator): Locator {
-    return tab.locator(`${DIFF_BODY_LINES} .review-flow-value-name`);
+    return tab.locator(`${DIFF_BODY_VALUES} .review-flow-value-name`);
   }
 
   /** The value half of each inline value chip, e.g. ``10``. */
   static flowValueBoxes(tab: Locator): Locator {
-    return tab.locator(`${DIFF_BODY_LINES} .review-flow-value-box`);
+    return tab.locator(`${DIFF_BODY_VALUES} .review-flow-value-box`);
+  }
+
+  /**
+   * How many name chips of ``tab`` read exactly ``name``.
+   *
+   * Counting a NAME is what isolates one variable from another variable that
+   * happens to hold the same number — the distinction "the text contains 55"
+   * cannot make.
+   */
+  static async flowValueNamesMatching(
+    tab: Locator,
+    name: string,
+  ): Promise<number> {
+    const names = await DeepReviewPage.flowValueNames(tab).allTextContents();
+    return names.filter((t) => t.replace(/[\s\u00a0]+/g, " ").trim() === name)
+      .length;
+  }
+
+  /** Every parallel value column of the band — one per recorded loop pass. */
+  static flowValueColumns(tab: Locator): Locator {
+    return tab.locator(`${DIFF_BODY_VALUES} .flow-parallel-values`);
+  }
+
+  /** The value columns drawn beside one model line. */
+  static flowValueColumnsAtLine(tab: Locator, modelLine: number): Locator {
+    return tab.locator(
+      `${DIFF_BODY} [id^="review-flow-band-"][id$="-${modelLine}"] .flow-parallel-values`,
+    );
   }
 
   /**

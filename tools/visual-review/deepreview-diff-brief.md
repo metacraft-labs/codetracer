@@ -122,17 +122,27 @@ The same diff tab after the reader actuates one boundary.
 
 A close-up of the recorded values on `main.nr`'s loop.
 
-- **At least two inline value chips**, each a two-part chip: a **name half**
-  reading a variable in angle brackets (`<contribution>`, `<total>`, `<x>`) and
-  a **value half** holding a number, drawn at the end of the code line the
-  variable belongs to.
-- The code lines those chips annotate, visible in the same frame.
+- **At least two value chips**, each a two-part chip: a **name half** reading a
+  variable in angle brackets (`<contribution>`, `<total>`, `<x>`) and a **value
+  half** holding a number.
+- The code lines those chips describe, visible in the same frame. A chip
+  belongs to the line it is drawn beside or, where the pane is too narrow for
+  that, to the line directly above it.
+- Several chips **side by side in one row**, in more than one group. A row that
+  carries two or more groups is showing successive passes through the loop; a
+  row that carries one is showing a line outside it. Both occur in this frame.
 - Typically also the **in-editor invocation stepper** — a small `‹ main: call
-  1 / 2 ›` control on its own row.
+  1 / 2 ›` control on its own row — and a **loop control**, `‹ iteration N /
+  M ›`, with a slider track beside it.
+- A row may end in a dim `+N`. That is a count of what the pane could not
+  hold — either N more values on that line, or N more passes through the loop,
+  which the loop control beside the band reaches. It is a marker, not an empty
+  chip, and two rows that look identical can carry different counts, because
+  what differs between them is exactly the part that is not drawn.
 - **This is the view most likely to be silently broken, so be strict.**
-  Missing-element examples: code lines with no chips after them at all; chips
-  showing a name but no value; chips rendered as raw text with no styling; a
-  chip strip with no code around it.
+  Missing-element examples: no chips anywhere; chips showing a name but no
+  value; chips rendered as raw text with no styling; a chip strip with no code
+  around it; every row carrying exactly one group.
 
 ### View: `diff-long-line`
 
@@ -185,10 +195,20 @@ nothing. Judge everything not listed here on its own merits.
    one, so the `-` of a deletion and the `+` of an addition sit about 30px
    apart rather than in one rail. It is a consequence of the two-editor layout;
    UD-4 owns whether it is worth working around.
-3. **The recorded values sit in a single trailing strip**, at the end of each
-   code line, rather than in the parallel value columns the debugger's own
-   Omniscience view uses. UD-3 owns the placement.
-4. **There is no light theme yet.** `default_white` builds and loads, but its
+3. **The chips are not the code's colour.** They take the editor's own surface
+   colour, so on a changed line the diff's add or remove wash lies behind them
+   and a chip can read as part of the highlight instead of as something over
+   it. Whether the annotation layer should have a colour of its own is
+   undecided.
+4. **The code text is cut at the pane's right edge.** A line longer than the
+   pane is sheared through a glyph with no ellipsis, no fade and no visible
+   scroll affordance; the corpus's `assert(...)` line is 214 characters and
+   several others reach the edge. What the surface should do at that edge is
+   still undecided, so report what you see there rather than assuming a bug.
+5. **Monaco's collapsed-region handle sits over the line above it.** The blue
+   twin bars at a fold are drawn across the lines either side of the boundary,
+   so they can land on the text of the context line above.
+6. **There is no light theme yet.** `default_white` builds and loads, but its
    palette is unfinished: the built light and dark Electron stylesheets differ
    in about 1.8% of their rules and both still paint `#282828`, so a window
    configured for it comes out dark. The harness refuses to write a capture
