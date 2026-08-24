@@ -2817,11 +2817,11 @@
     "nim-acp": {
       "flake": false,
       "locked": {
-        "lastModified": 1781681861,
-        "narHash": "sha256-YK7voA0VO5sOI/ZPCCjoLGnYzArs/N0BqRkBNwp4yhY=",
+        "lastModified": 1787080897,
+        "narHash": "sha256-stJEm9hXkqMphQEZ8ws64TVSnjoByLpw0fvZEHYJQB8=",
         "owner": "metacraft-labs",
         "repo": "nim-acp",
-        "rev": "630a8e5c2fbef8377e2b7813cc970cc5c44faad9",
+        "rev": "c7c430ad1fd64ef8c4c508c5ccdfa5a41eae69b4",
         "type": "github"
       },
       "original": {
@@ -2851,11 +2851,11 @@
     "nim-agents": {
       "flake": false,
       "locked": {
-        "lastModified": 1781681895,
-        "narHash": "sha256-L96Soq7CMRVD2LSMDw1YwhsaKKF/ILw+S5W6Biwo6O8=",
+        "lastModified": 1787080905,
+        "narHash": "sha256-4gEXcw7ZLnjMiI7Xjflq88Z4tczr9Vdf2jiDPp7kMnA=",
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "77c778efb627ea20a53a7f0c559f31b40ba0b98c",
+        "rev": "a4bc08c21fa53ca9f5de324fbaa938373b916a54",
         "type": "github"
       },
       "original": {
