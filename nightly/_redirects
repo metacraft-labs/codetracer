@@ -43,3 +43,5 @@
 /nightly/misc/troubleshooting.html /nightly/reference/troubleshooting 301
 /nightly/misc/environment_variables.html /nightly/reference/environment_variables 301
 /nightly/misc/building_docs.html /nightly/reference/building_docs 301
+/nightly/index.html /nightly/ 301
+/nightly/usage_guide/deep_review /nightly/deep_review 301

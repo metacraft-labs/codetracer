@@ -5,6 +5,11 @@
   <url><loc>https://docs.codetracer.com/nightly/sign-up</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/support</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/deep_review</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/deep_review/collecting</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/deep_review/reading</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/deep_review/agent_workflow</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/deep_review/not_yet_available</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/getting_started</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/getting_started/introduction</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/getting_started/installation</loc></url>
@@ -50,7 +55,6 @@
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/live-requests-elixir</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/live-requests-javascript</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/live-requests-native</loc></url>
-  <url><loc>https://docs.codetracer.com/nightly/usage_guide/deep_review</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/visual_recordings</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/incremental-testing</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/value-origin-tracking</loc></url>
