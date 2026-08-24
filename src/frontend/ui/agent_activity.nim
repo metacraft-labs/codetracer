@@ -509,6 +509,7 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
             automaticLayout: true,
             folding: true,
             fontSize: self.data.ui.fontSize,
+            fontFamily: codeFontFamily(self.data.ui),
             minimap: js{ enabled: false },
             renderIndentGuides: true,
             find: js{ addExtraSpaceOnTop: false },

@@ -1488,6 +1488,7 @@ proc mountMonacoEditor(self: TraceComponent): bool =
         folding: false,
         glyphMargin: false,
         fontSize: data.ui.fontSize,
+        fontFamily: codeFontFamily(data.ui),
         minimap: js{ enabled: false },
         # scrollbar: js{
         #   vertical: "visible",
