@@ -264,6 +264,19 @@ const
     # checked-in copy-as-patch golden.  That model used to live in
     # `ui/vcs.nim`, where no headless test could reach it, so porting the
     # renderer could have deleted a specified capability silently.
+    #
+    # UD-1 replaced the single synthetic model with Monaco's own diff editor
+    # over two of them, and this file is where that is pinned as data: which
+    # side each line belongs to (an addition is not in the old revision and a
+    # removal is not in the new one), that the chrome is byte-identical on both
+    # so the comparison is anchored, that the models carry the file's own text
+    # rather than the marker a review's collector attaches, that the language
+    # is resolved from the path, and that an added file, a deleted file and a
+    # file with no source text each keep a sensible shape — the three the old
+    # interleaved document flattened into one run of coloured lines.  What
+    # Monaco then DOES with the two models (a tokenizer running, the word-level
+    # intra-line marking appearing) is a DOM fact and is asserted in
+    # `deepreview-gui.spec.ts`, because it cannot be observed here.
     "src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim",
     # DR-R5 — context expansion in the diff tab.  Until it landed the whole
     # capability was private procs inside `ui/deepreview.nim`, a JS-only

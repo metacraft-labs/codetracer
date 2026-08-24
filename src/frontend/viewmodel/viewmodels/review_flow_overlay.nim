@@ -7,18 +7,24 @@
 ##    into the diff tab."
 ##   — `codetracer-specs/DeepReview/DeepReview-GUI.md` §4.4
 ##
-## The diff tab's Monaco model is a *synthetic* document — file headers, `@@`
-## dividers, expand controls and the hunks' own lines, in that order
-## (`diff_document.buildDiffDocument`) — so its line numbers are not the file's.
+## The diff tab's Monaco model still carries chrome the file itself does not —
+## file headers, `@@` dividers, expand controls — around the lines it shows
+## (`diff_document.buildDiffPair`), so its line numbers are not the file's.
 ## Everything in this module is the translation between the two, and nothing
 ## else: the classes come from `ui/flow_line_styles`, which is the body of
 ## `ui/editor.nim`'s `flowStyleLines`, so a diff line and a source line in the
 ## normal editor are decorated by the same decision with the same class.
 ##
+## Since UD-1 the tab is a Monaco *diff editor*, and everything here maps onto
+## its **modified** model — the new revision, which is the revision the flow
+## was recorded against, and the editor the unified view renders into. The old
+## revision has its own model and takes no overlay at all.
+##
 ## The restriction §4.4 asks for is structural rather than checked: a source
 ## line that is not in the document has no model line to map onto, so it cannot
 ## be decorated. Removed lines are excluded too — they have no position in the
-## new revision, which is the revision the flow was recorded against.
+## new revision — and since UD-1 they are excluded twice, because a removal is
+## not in the modified model in the first place.
 ##
 ## Three things are mapped, and §4.4 asks for all three:
 ##

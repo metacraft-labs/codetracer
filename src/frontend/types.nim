@@ -856,14 +856,44 @@ type
       ## offered ("Commit operations: Disabled (read-only view)"); the diff
       ## rendering never consults it, per "Unified Diff View (Shared)".
     initialized*: bool
+    diffEditor*: js
+      ## The Monaco **diff editor** (UD-1), or nil before the container
+      ## exists.  ``monaco.editor.createDiffEditor`` with
+      ## ``renderSideBySide: false`` is the unified view, and it owns both
+      ## revisions of the file, so the syntax highlighting and the word-level
+      ## intra-line marking come from the editor rather than from us.
     editor*: MonacoEditor
-      ## The Monaco instance, or nil before the container exists.
+      ## The diff editor's **modified** side — the new revision, and the one
+      ## the inline view actually renders into.  Everything keyed on new-side
+      ## source lines attaches here: the diff decorations, the Omniscience
+      ## overlay, the value chips, the two steppers' view zones and the click
+      ## dispatch.  Nil before the container exists.
+    originalEditor*: MonacoEditor
+      ## The diff editor's **original** side — the old revision.  It carries
+      ## its own decorations (the removed lines' classes and its half of the
+      ## dual gutter); in the unified view Monaco draws its content as deleted
+      ## lines inside the modified editor's scroll.
+    originalModel*: js
+    modifiedModel*: js
+      ## The two models, held so they can be disposed when GoldenLayout
+      ## destroys the tab's DOM.  A model created with
+      ## ``monaco.editor.createModel`` outlives the editor it was handed to —
+      ## unlike the implicit model ``monaco.editor.create`` builds from
+      ## ``value`` — so not disposing them leaks one pair per tab open.
     editorInitialized*: bool
     decorationCollection*: js
-      ## Monaco decorations collection holding the per-line diff decorations.
+      ## Monaco decorations collection holding the modified side's per-line
+      ## diff decorations.
+    originalDecorationCollection*: js
+      ## The same for the original side.  Separate because a decorations
+      ## collection belongs to one editor.
     lineLabels*: seq[cstring]
-      ## Dual old/new line-number labels, one per model line, handed to
-      ## Monaco's ``lineNumbers`` callback.
+      ## Dual old/new line-number labels for the *modified* model, one per
+      ## model line, handed to Monaco's ``lineNumbers`` callback.
+    originalLineLabels*: seq[cstring]
+      ## The same for the original model.  Two sequences rather than one
+      ## because the two models are renumbered independently — a removed line
+      ## occupies a line of the original model and none of the modified one.
     flowDecorationCollection*: js
       ## Monaco decorations collection holding the review's Omniscience flow
       ## decorations (RV-5).  A *second* collection rather than more entries in

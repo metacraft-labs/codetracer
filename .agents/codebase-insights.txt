@@ -1393,3 +1393,64 @@ inside the directory.
   compiling against the sibling `codetracer-launcher/src/caps.nim` — the launcher's
   real parser, not a local copy of the grammar — so a missing launcher checkout is
   a hard failure, not a skip.
+
+- 2026-08-24 (UD-1, Monaco language ids): `common_lang.toCLang` is NOT a Monaco
+  language id table, but `ui/editor.nim` passes it to Monaco as one. Its answers
+  include `assembly`, `noir`, `c++`, `crystal`, `ada`, `fortran`, `move`,
+  `cairo`, `solidity` and `unknown`, and the vendored monaco-editor 0.54.0
+  registers *none* of those — Monaco silently tokenizes nothing for an id it
+  does not know, so those files have been opening unhighlighted with no error
+  anywhere. The 89 ids the build really has are enumerated in
+  `node_modules/monaco-editor/min/vs/basic-languages/monaco.contribution.js`
+  (plus `json`/`css`/`html`/`typescript` from the language services, plus `nim`,
+  which `src/frontend/languages/nimLanguage.js` registers itself). Solidity is
+  `sol`, shell is `shell`. `diff_document.DiffLanguageByExtension` is a table
+  checked against that list; use it, and extend it, rather than reaching for
+  `toCLang` when the consumer is Monaco.
+  The same milestone recorded that `.nr` has no tokenizer at all and is opened
+  as `rust`, which is the substitution `editor.nim` already made by hand.
+
+- 2026-08-24 (UD-1, Monaco's inline diff editor): four measured facts that are
+  not in the docs and cost a review round each.
+  (1) `renderSideBySide: false` still creates BOTH code editors and lays the
+  original one out as a narrow strip to the LEFT — it is where a deleted line's
+  old line number comes from. Its width is derived from its
+  `lineNumbersMinChars` ALONE: 3 characters produced a 29px strip while its own
+  margin was 65px, so the line-decorations lane pushed the digits off screen and
+  the deleted lines rendered unnumbered. Zero `lineDecorationsWidth` on that
+  side, or put whatever the lane held into the line-number label.
+  (2) In the standard inline view the deleted lines are rendered as
+  `view-lines line-delete` view zones inside the MODIFIED editor and carry NO
+  syntax tokens (`mtk1` throughout) even though the original model is
+  tokenized correctly — `experimental.useTrueInlineView: true` fixes that, and
+  also merges deletion and insertion into one line, so it is a UX decision and
+  not a bug fix.
+  (3) A model is only tokenized from ITS line 1, so a windowed model that starts
+  in the middle of a block comment or a docstring tokenizes the rest of the file
+  as a string. Feeding a diff editor whole files (with
+  `hideUnchangedRegions`) is the fix; feeding it hunk windows is not.
+  (4) Playwright strict mode: `.monaco-editor .view-lines` inside a diff tab
+  matches four elements (two editors + the deleted-line view zones). Scope to
+  `.monaco-editor.modified-in-monaco-diff-editor .lines-content > .view-lines`;
+  `.first()` picks a view zone, because the zones precede the document in DOM
+  order.
+
+- 2026-08-24 (UD-1, `.line-numbers`): `styles/index.styl` sets a GLOBAL
+  `.line-numbers { width: 100% !important; padding-right: 0 !important; }`.
+  It beats Monaco's own inline `width`/`left`, so the gutter label spans the
+  whole margin and right-aligns into the line-decorations lane — which is why
+  a `+` marker drawn there is invisible and the digits touch the code. Any
+  gutter work in an editor tab has to override it with `!important` or move the
+  content out of the margin.
+
+- 2026-08-24 (UD-1, hunk-line `content` is not the file's text): the two
+  producers disagree and always have. `ui/git_cli.parseGitDiffHunks` strips the
+  unified-diff marker for every kind; the materialized collector
+  (`db-backend/src/deepreview/unified_diff.rs`) KEEPS it for added and removed
+  lines and strips it for context. `ct/agent_cli.unifiedDiffLine` documents the
+  convention and adds it back only where missing; `vcs_vm.diffLineText` is its
+  inverse and is what the diff models and `buildPatchFromSelectedHunks` go
+  through. Before UD-1 the patch builder concatenated its own prefix onto the
+  raw content, so copy-as-patch on a REVIEW emitted `++foo` / `--foo` — a patch
+  git refuses. The goldens did not catch it because they are built from
+  git-shaped rows.

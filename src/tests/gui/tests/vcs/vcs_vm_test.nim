@@ -1,7 +1,7 @@
 ## Unit tests for ``VCSVM`` and for the layout-routing rule that decides where
 ## a VCS "View Diff" tab is opened.
 
-import std/unittest
+import std/[strutils, unittest]
 
 import isonim/core/[signals, computation, owner]
 import viewmodels/vcs_vm
@@ -516,6 +516,76 @@ suite "VCSVM hunk editor (DR-R4)":
       # land on the clipboard.
       vm.clearHunkSelection()
       check vm.buildPatchFromSelectedHunks() == ""
+
+      dispose()
+
+  test "a review's rows produce a patch git can apply, not `++foo`":
+    ## The bug UD-1 exposed, pinned where it lives.
+    ##
+    ## The two producers of a hunk line's ``content`` disagree:
+    ## ``ui/git_cli.parseGitDiffHunks`` strips the unified-diff marker, while
+    ## the materialized review collector
+    ## (``db-backend/src/deepreview/unified_diff.rs``) keeps it for added and
+    ## removed lines — "the sample dataset shows added/removed lines keeping
+    ## their marker", as its own comment says.  ``buildPatchFromSelectedHunks``
+    ## concatenated its own prefix on top, so a *review's* patch came out as
+    ## ``++foo`` / ``--foo``, which ``git apply`` rejects with "patch does not
+    ## apply".
+    ##
+    ## The two goldens above cannot catch it: their fixture is git-shaped, so
+    ## there is no marker to double.  This one is collector-shaped, which is
+    ## the only shape that reproduces it.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setUnifiedDiff(true, @[
+        VCSDiffFileRow(
+          fileIndex: 0, status: "M", path: "src/main.nr",
+          additions: 1, deletions: 1,
+          hunks: @[
+            VCSHunkRow(oldStart: 6, oldCount: 3, newStart: 6, newCount: 3,
+              lines: @[
+                # Context arrives without a marker from both producers.
+                VCSDiffLineRow(lineType: "context", content: "f",
+                               oldLine: 6, newLine: 6),
+                # ... added and removed arrive WITH one from the collector.
+                VCSDiffLineRow(
+                  lineType: "removed",
+                  content: "-fn scale(index: Field, factor: Field) {",
+                  oldLine: 7),
+                VCSDiffLineRow(
+                  lineType: "added",
+                  content: "+fn scale(index: Field, multiplier: Field) {",
+                  newLine: 7),
+                VCSDiffLineRow(lineType: "context", content: "}",
+                               oldLine: 8, newLine: 8),
+              ]),
+          ]),
+      ])
+      vm.selectHunk(0, 0)
+
+      const goldenPatch =
+        "diff --git a/src/main.nr b/src/main.nr\n" &
+        "--- a/src/main.nr\n" &
+        "+++ b/src/main.nr\n" &
+        "@@ -6,3 +6,3 @@\n" &
+        " f\n" &
+        "-fn scale(index: Field, factor: Field) {\n" &
+        "+fn scale(index: Field, multiplier: Field) {\n" &
+        " }\n"
+
+      check vm.buildPatchFromSelectedHunks() == goldenPatch
+
+      # Stated separately from the golden so a future edit to the fixture
+      # cannot quietly reintroduce the doubling: no body line of the patch may
+      # carry two markers.  The `---` / `+++` file headers are exempt, and are
+      # the reason a bare `"++" notin patch` would not have worked.
+      let patchLines: seq[string] =
+        vm.buildPatchFromSelectedHunks().splitLines()
+      for i, line in patchLines:
+        if i < 3 or line.len == 0:
+          continue
+        check not line.startsWith("++")
+        check not line.startsWith("--")
 
       dispose()
 

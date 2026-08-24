@@ -259,7 +259,25 @@ suite "the expanded document (DR-R5)":
       hunks: @[hunkAt(40, 12)])
 
   test "expand controls appear around a hunk that has hidden neighbours":
-    let doc = buildDiffDocument([expandableFile()])
+    let pair = buildDiffPair([expandableFile()])
+    let doc = pair.modified
+    # UD-1: the control is chrome, and chrome is on BOTH sides of the diff
+    # editor, byte-identical, or Monaco would report the control itself as an
+    # inserted line.  Asserted first, because it is the property the split
+    # could silently lose.
+    var controlsAbove: seq[string] = @[]
+    var controlsBelow: seq[string] = @[]
+    for line in pair.original.lines:
+      if line.kind == dlkExpandAbove: controlsAbove.add(line.text)
+      if line.kind == dlkExpandBelow: controlsBelow.add(line.text)
+    for line in pair.modified.lines:
+      if line.kind == dlkExpandAbove:
+        check controlsAbove.len > 0 and line.text == controlsAbove[0]
+      if line.kind == dlkExpandBelow:
+        check controlsBelow.len > 0 and line.text == controlsBelow[0]
+    check controlsAbove.len == 1
+    check controlsBelow.len == 1
+
     var aboveControls = 0
     var belowControls = 0
     for line in doc.lines:
@@ -280,7 +298,7 @@ suite "the expanded document (DR-R5)":
   test "a file with no source text offers no controls":
     var file = expandableFile()
     file.sourceLines = @[]
-    let doc = buildDiffDocument([file])
+    let doc = buildDiffPair([file]).modified
     for line in doc.lines:
       check line.kind notin {dlkExpandAbove, dlkExpandBelow}
 
@@ -288,7 +306,7 @@ suite "the expanded document (DR-R5)":
     let expansion = @[VCSHunkExpansion(fileIndex: 0, hunkIndex: 0,
                                        above: ContextExpandStep,
                                        below: ContextExpandStep)]
-    let doc = buildDiffDocument([expandableFile()], expansion)
+    let doc = buildDiffPair([expandableFile()], expansion).modified
 
     var revealed: seq[DiffDocumentLine] = @[]
     for line in doc.lines:
@@ -334,7 +352,7 @@ suite "the expanded document (DR-R5)":
   test "the expand control resolves back to the hunk it belongs to":
     ## The Monaco host maps a click position through this; nothing else turns a
     ## screen position into an expansion request.
-    let doc = buildDiffDocument([expandableFile()])
+    let doc = buildDiffPair([expandableFile()]).modified
     var aboveLine = 0
     var belowLine = 0
     for i, line in doc.lines:
@@ -361,7 +379,7 @@ suite "the expanded document (DR-R5)":
     ## user cannot keep clicking a button that can no longer do anything.
     let expansion = @[VCSHunkExpansion(fileIndex: 0, hunkIndex: 0,
                                        above: 100, below: 200)]
-    let doc = buildDiffDocument([expandableFile()], expansion)
+    let doc = buildDiffPair([expandableFile()], expansion).modified
     var revealed = 0
     for line in doc.lines:
       if line.revealed: revealed += 1

@@ -51,6 +51,42 @@
 
 import type { Locator, Page } from "@playwright/test";
 
+/**
+ * The code editor a unified diff tab actually renders into.
+ *
+ * Since UD-1 the tab holds a Monaco **diff editor**, which is two code
+ * editors: `original-in-monaco-diff-editor` for the old revision and
+ * `modified-in-monaco-diff-editor` for the new one.  In the unified (inline)
+ * layout the modified editor is the scroll a reader reads — the old
+ * revision's lines are drawn inside it as `view-lines line-delete` view zones
+ * — and every overlay this file locates (the value chips, the revealed-line
+ * decorations, the invocation selector) is attached to it.
+ *
+ * Scoping to it is what keeps these accessors returning ONE element each.
+ * The diff tab's chrome — the file header, the `@@` divider, the expansion
+ * controls — is present in BOTH models, byte-identical, so that Monaco reads
+ * it as unchanged and draws it once; an unscoped `.monaco-editor .view-line`
+ * therefore matches each of those lines twice and every accessor built on it
+ * fails Playwright's strict mode.
+ */
+export const DIFF_BODY = ".monaco-editor.modified-in-monaco-diff-editor";
+
+/** The old revision's editor — where a removed line's decorations live. */
+export const DIFF_ORIGINAL = ".monaco-editor.original-in-monaco-diff-editor";
+
+/**
+ * The modified editor's OWN line container, excluding its view zones.
+ *
+ * `DIFF_BODY .view-lines` is not enough: in the unified layout the deleted
+ * lines are drawn as `view-lines line-delete` view zones *inside* the modified
+ * editor, and they come first in document order — so a `.first()` on the
+ * looser selector picks a deleted-line zone rather than the document.  The
+ * real container is a direct child of `.lines-content`; the zones are under
+ * `.lines-content > .view-zones`.
+ */
+export const DIFF_BODY_LINES = `${DIFF_BODY} .lines-content > .view-lines`;
+
+
 // ---------------------------------------------------------------------------
 // File list item (VCS panel)
 // ---------------------------------------------------------------------------
@@ -234,7 +270,7 @@ export class DeepReviewPage {
    * a changed-file row's "+8-3" summary.)
    */
   diffTabLines(): Locator {
-    return this.diffTabs().locator(".monaco-editor .view-line");
+    return this.diffTabs().locator(`${DIFF_BODY} .view-line`);
   }
 
   /** The `@@ -N,M +N,M @@` section dividers, as rendered lines. */
@@ -257,14 +293,14 @@ export class DeepReviewPage {
   /** The "Expand N lines above" control line of ``tab``. */
   static expandAboveLine(tab: Locator): Locator {
     return tab
-      .locator(".monaco-editor .view-line")
+      .locator(`${DIFF_BODY} .view-line`)
       .filter({ hasText: /Expand\s+\d+\s+lines\s+above/ });
   }
 
   /** The "Expand N lines below" control line of ``tab``. */
   static expandBelowLine(tab: Locator): Locator {
     return tab
-      .locator(".monaco-editor .view-line")
+      .locator(`${DIFF_BODY} .view-line`)
       .filter({ hasText: /Expand\s+\d+\s+lines\s+below/ });
   }
 
@@ -273,24 +309,45 @@ export class DeepReviewPage {
    * (``DiffRevealedClass``).  Monaco renders them into ``.view-overlays``.
    */
   static revealedDecorations(tab: Locator): Locator {
-    return tab.locator(".view-overlays .ct-diff-line-revealed");
+    return tab.locator(`${DIFF_BODY} .view-overlays .ct-diff-line-revealed`);
   }
 
   /**
-   * The dual old/new gutter labels of ``tab``, whitespace-normalised.
+   * The gutter labels of one side of ``tab``'s diff editor, normalised.
    *
    * Asserting the revealed *line numbers* rather than only the revealed line
    * count is what distinguishes "expansion revealed the right lines" from
    * "expansion revealed some lines" — the off-by-one this milestone's clamping
    * tests exist for would pass the second and fail the first.
+   *
+   * DR-R4 had one model and therefore one gutter, so it padded the old and
+   * the new number into a single label and this returned pairs like `"1 1"`.
+   * UD-1 has two editors side by side, and each carries its own revision's
+   * number in its own margin — the way VS Code's inline diff draws it — so
+   * the pair is now read as two columns.  A line present in both revisions
+   * appears in both; an addition only in the new column, a removal only in
+   * the old one.
    */
-  static async diffLineNumbers(tab: Locator): Promise<string[]> {
+  static async diffLineNumbersOn(
+    tab: Locator,
+    side: string,
+  ): Promise<string[]> {
     const raw = await tab
-      .locator(".margin-view-overlays .line-numbers")
+      .locator(`${side} .margin-view-overlays .line-numbers`)
       .allTextContents();
     // Monaco preserves the label's padding with U+00A0, which no `\s` class
     // matches, so it is normalised to an ordinary space first.
-    return raw.map((t) => t.replace(/ /g, " ").trim().replace(/\s+/g, " "));
+    return raw.map((t) => t.replace(/\u00a0/g, " ").trim().replace(/\s+/g, " "));
+  }
+
+  /** The new revision's gutter column. */
+  static diffNewLineNumbers(tab: Locator): Promise<string[]> {
+    return DeepReviewPage.diffLineNumbersOn(tab, DIFF_BODY);
+  }
+
+  /** The old revision's column, where a deleted line keeps its number. */
+  static diffOldLineNumbers(tab: Locator): Promise<string[]> {
+    return DeepReviewPage.diffLineNumbersOn(tab, DIFF_ORIGINAL);
   }
 
   // -- The Omniscience overlay in the diff tab (RV-5) ----------------------
@@ -303,17 +360,17 @@ export class DeepReviewPage {
 
   /** Every inline value chip — name chips and value boxes alike. */
   static flowValueChips(tab: Locator): Locator {
-    return tab.locator(".monaco-editor .view-lines .review-flow-value");
+    return tab.locator(`${DIFF_BODY_LINES} .review-flow-value`);
   }
 
   /** The name half of each inline value chip, e.g. ``<x>``. */
   static flowValueNames(tab: Locator): Locator {
-    return tab.locator(".monaco-editor .view-lines .review-flow-value-name");
+    return tab.locator(`${DIFF_BODY_LINES} .review-flow-value-name`);
   }
 
   /** The value half of each inline value chip, e.g. ``10``. */
   static flowValueBoxes(tab: Locator): Locator {
-    return tab.locator(".monaco-editor .view-lines .review-flow-value-box");
+    return tab.locator(`${DIFF_BODY_LINES} .review-flow-value-box`);
   }
 
   /**
@@ -443,7 +500,7 @@ export class DeepReviewPage {
    */
   diffTabFor(filePath: string): Locator {
     return this.diffTabs().filter({
-      has: this.page.locator(".monaco-editor .view-line", {
+      has: this.page.locator(`${DIFF_BODY} .view-line`, {
         hasText: filePath,
       }),
     });
@@ -588,7 +645,7 @@ export class DeepReviewPage {
   static diffHunkHeaderLinesIn(tab: Locator): Locator {
     // See `diffHunkHeaderLines` for why the regex avoids a literal space.
     return tab
-      .locator(".monaco-editor .view-line")
+      .locator(`${DIFF_BODY} .view-line`)
       .filter({ hasText: /@@\s-\d+,\d+\s\+\d+,\d+\s@@/ });
   }
 

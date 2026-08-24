@@ -101,9 +101,22 @@ async function clickViewDiffOnNewestCommit(ctPage: any): Promise<void> {
   await diffButton.click();
 }
 
+/// The code editor a unified diff tab renders into.
+///
+/// Since UD-1 the tab holds a Monaco **diff editor**, which is two code
+/// editors — `original-in-monaco-diff-editor` for the old revision and
+/// `modified-in-monaco-diff-editor` for the new one.  In the unified (inline)
+/// layout the modified one is the scroll a reader reads: the old revision's
+/// lines are drawn inside it as `view-lines line-delete` view zones.  The
+/// chrome (file header, `@@` divider, expansion controls) is present in BOTH
+/// models, byte-identical, so Monaco reads it as unchanged and draws it once
+/// — which is exactly why every locator below has to name a side.
+const DIFF_BODY = ".monaco-editor.modified-in-monaco-diff-editor";
+const DIFF_ORIGINAL = ".monaco-editor.original-in-monaco-diff-editor";
+
 /// The diff tab's Monaco editor, once it has rendered its content.
 function diffEditor(ctPage: any) {
-  return ctPage.locator(".unified-diff-container .monaco-editor").first();
+  return ctPage.locator(`.unified-diff-container ${DIFF_BODY}`).first();
 }
 
 /// The rendered lines whose text is a hunk header.  Monaco renders the model
@@ -111,7 +124,7 @@ function diffEditor(ctPage: any) {
 /// sees — and the click target the hunk editor listens on.
 function hunkHeaderLines(ctPage: any) {
   return ctPage
-    .locator(".unified-diff-container .monaco-editor .view-line")
+    .locator(`.unified-diff-container ${DIFF_BODY} .view-line`)
     // `\s` rather than a literal space, and unanchored: Monaco renders runs
     // of spaces as U+00A0 to preserve their width, and matches `hasText`
     // regexes against the element's raw text rather than a normalized copy.
@@ -158,14 +171,14 @@ test.describe("VCS unified diff", () => {
       .poll(
         async () =>
           await ctPage
-            .locator(".unified-diff-container .view-overlays .ct-diff-line-added")
+            .locator(`.unified-diff-container ${DIFF_BODY} .view-overlays .ct-diff-line-added`)
             .count(),
         { timeout: 15_000 },
       )
       .toBeGreaterThan(0);
     await expect(
       ctPage
-        .locator(".unified-diff-container .view-overlays .ct-diff-line-removed")
+        .locator(`.unified-diff-container ${DIFF_ORIGINAL} .view-overlays .ct-diff-line-removed`)
         .first(),
     ).toBeAttached({ timeout: 15_000 });
     await expect(hunkHeaderLines(ctPage).first()).toHaveText(
@@ -199,37 +212,94 @@ test.describe("VCS unified diff", () => {
 
     const tab = ctPage.locator(".unified-diff-container").first();
 
-    // A real editor: Monaco's own view layers are there.
-    await expect(tab.locator(".monaco-editor")).toBeVisible();
-    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible();
-    // ... including the minimap, one of the affordances a DOM diff cannot give.
-    await expect(tab.locator(".monaco-editor .minimap")).toBeAttached();
-
-    // The lines carry the diff decoration classes.
-    const overlays = tab.locator(".view-overlays");
-    await expect(overlays.locator(".ct-diff-line-added").first()).toBeAttached();
-    await expect(overlays.locator(".ct-diff-line-removed").first()).toBeAttached();
-    await expect(overlays.locator(".ct-diff-line-context").first()).toBeAttached();
+    // A real editor: Monaco's own view layers are there.  Since UD-1 it is a
+    // real *diff* editor in the unified (inline) layout — two code editors,
+    // one per revision — which is what makes the highlighting and the
+    // word-level marking Monaco's job rather than ours.
+    await expect(tab.locator(".monaco-diff-editor")).toBeVisible();
+    await expect(tab.locator(".monaco-diff-editor.side-by-side")).toHaveCount(0);
+    await expect(diffEditor(ctPage)).toBeVisible();
     await expect(
-      overlays.locator(".ct-diff-line-hunk-header").first(),
+      tab.locator(`${DIFF_BODY} > .overflow-guard .view-lines`).first(),
+    ).toBeVisible();
+    // ... including the minimap, one of the affordances a DOM diff cannot give.
+    await expect(tab.locator(`${DIFF_BODY} .minimap`)).toBeAttached();
+
+    // The lines carry the diff decoration classes, each on the side that has
+    // those lines: an addition exists only in the new revision and a removal
+    // only in the old one, which is the whole reason there are two models.
+    const modified = tab.locator(`${DIFF_BODY} .view-overlays`);
+    const original = tab.locator(`${DIFF_ORIGINAL} .view-overlays`);
+    await expect(modified.locator(".ct-diff-line-added").first()).toBeAttached();
+    await expect(original.locator(".ct-diff-line-removed").first()).toBeAttached();
+    await expect(modified.locator(".ct-diff-line-context").first()).toBeAttached();
+    await expect(
+      modified.locator(".ct-diff-line-hunk-header").first(),
+    ).toBeAttached();
+    await expect(modified.locator(".ct-diff-line-removed")).toHaveCount(0);
+    await expect(original.locator(".ct-diff-line-added")).toHaveCount(0);
+
+    // ... and the `+` / `-` gutter markers are in each side's margin layer.
+    await expect(
+      tab.locator(`${DIFF_BODY} .margin-view-overlays .ct-diff-gutter-added`).first(),
+    ).toBeAttached();
+    await expect(
+      tab
+        .locator(`${DIFF_ORIGINAL} .margin-view-overlays .ct-diff-gutter-removed`)
+        .first(),
     ).toBeAttached();
 
-    // ... and the `+` / `-` gutter markers are in the margin layer.
-    const margin = tab.locator(".margin-view-overlays");
-    await expect(margin.locator(".ct-diff-gutter-added").first()).toBeAttached();
-    await expect(margin.locator(".ct-diff-gutter-removed").first()).toBeAttached();
+    // Monaco computed the diff itself, rather than being handed a document
+    // that already looked like one: these are ITS classes, and `char-insert`
+    // is the word-level intra-line marking a synthetic single model could not
+    // produce at all.
+    await expect(tab.locator(".line-insert").first()).toBeAttached();
+    await expect(tab.locator(".line-delete").first()).toBeAttached();
+    await expect
+      .poll(async () => await tab.locator(".char-insert").count(), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(0);
 
     // The old DOM diff surface is gone from the page entirely — the VCS panel
     // no longer renders one either.
     await expect(ctPage.locator(".deepreview-unified-line")).toHaveCount(0);
     await expect(ctPage.locator(".deepreview-unified-diff")).toHaveCount(0);
 
-    // Dual old/new line numbers, as the DOM renderer's two gutter columns
-    // provided: a context line's label carries both.
-    const lineNumbers = await tab
-      .locator(".margin-view-overlays .line-numbers")
+    // Old and new line numbers, as the DOM renderer's two gutter columns
+    // provided — one column per revision now that each revision has its own
+    // editor, so a context line is numbered in both.
+    const newNumbers = await tab
+      .locator(`${DIFF_BODY} .margin-view-overlays .line-numbers`)
       .allTextContents();
-    expect(lineNumbers.some((t) => /\d+\s+\d+/.test(t))).toBe(true);
+    const oldNumbers = await tab
+      .locator(`${DIFF_ORIGINAL} .margin-view-overlays .line-numbers`)
+      .allTextContents();
+    const digits = (labels: string[]) =>
+      labels.map((t) => t.replace(/ /g, " ").trim()).filter((t) => t !== "");
+    expect(digits(newNumbers).length).toBeGreaterThan(0);
+    expect(digits(oldNumbers).length).toBeGreaterThan(0);
+    // Each label is ONE number with its `+` / `-` / blank marker, not the
+    // padded pair DR-R4 packed into a single gutter: with two editors the pair
+    // is two columns, and a label carrying both numbers would mean the pair had
+    // been drawn twice, once per side.
+    for (const label of digits(newNumbers).concat(digits(oldNumbers))) {
+      expect(label).toMatch(/^[-+]?\s*\d+$/);
+    }
+    // ... and the markers VCS-Panel.md requires are in it: `+` only on the new
+    // revision's column, `-` only on the old one.
+    expect(digits(newNumbers).some((t) => t.startsWith("+"))).toBe(true);
+    expect(digits(newNumbers).some((t) => t.startsWith("-"))).toBe(false);
+    expect(digits(oldNumbers).some((t) => t.startsWith("-"))).toBe(true);
+    expect(digits(oldNumbers).some((t) => t.startsWith("+"))).toBe(false);
+    // The chrome — file header, `@@` divider, expansion controls — belongs to
+    // neither revision and is numbered in neither column, so there are fewer
+    // numbers than there are lines.  (Monaco renders no element at all for an
+    // empty label, so the absence is counted rather than matched.)
+    const renderedLines = await tab
+      .locator(`${DIFF_BODY} > .overflow-guard .view-lines .view-line`)
+      .count();
+    expect(renderedLines).toBeGreaterThan(digits(newNumbers).length);
   });
 
   // e2e_unified_diff_hunk_selection_and_copy (DR-R4).
@@ -466,14 +536,19 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
 
   /// The rendered lines of the diff tab.
   function diffTabLines(ctPage: any) {
-    return ctPage.locator(".unified-diff-container .monaco-editor .view-line");
+    return ctPage.locator(`.unified-diff-container ${DIFF_BODY} .view-line`);
   }
 
-  /// The dual old/new gutter labels, whitespace-normalised.  Monaco pads them
-  /// with U+00A0 to keep the two columns aligned.
-  async function diffLineNumbers(ctPage: any): Promise<string[]> {
+  /// One side's gutter labels, whitespace-normalised.  Monaco pads them with
+  /// U+00A0 to keep the column aligned.
+  ///
+  /// DR-R4 had one model and padded the old and the new number into a single
+  /// label, so this returned pairs like `"8 8"`.  UD-1's diff editor gives
+  /// each revision its own margin — the way VS Code's inline diff draws it —
+  /// so the pair is now two columns and each is read on its own side.
+  async function diffLineNumbersOn(ctPage: any, side: string): Promise<string[]> {
     const raw = await ctPage
-      .locator(".unified-diff-container .margin-view-overlays .line-numbers")
+      .locator(`.unified-diff-container ${side} .margin-view-overlays .line-numbers`)
       .allTextContents();
     return raw.map((t: string) =>
       t.replace(/\u00a0/g, " ").trim().replace(/\s+/g, " "),
@@ -534,7 +609,7 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
     // Ten lines appear, decorated as revealed context lines.
     await expect(
       ctPage.locator(
-        ".unified-diff-container .view-overlays .ct-diff-line-context.ct-diff-line-revealed",
+        `.unified-diff-container ${DIFF_BODY} .view-overlays .ct-diff-line-context.ct-diff-line-revealed`,
       ),
     ).toHaveCount(10, { timeout: 15_000 });
 
@@ -545,10 +620,13 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
     await expect(
       diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+7"/ }),
     ).toHaveCount(1, { timeout: 15_000 });
-    const numbers = await diffLineNumbers(ctPage);
-    expect(numbers).toContain("8 8");
-    expect(numbers).toContain("17 17");
-    expect(numbers).not.toContain("7 7");
+    // Revealed lines are unchanged, so they carry the same number in BOTH
+    // gutter columns.
+    const numbers = await diffLineNumbersOn(ctPage, DIFF_BODY);
+    expect(numbers).toContain("8");
+    expect(numbers).toContain("17");
+    expect(numbers).not.toContain("7");
+    expect(await diffLineNumbersOn(ctPage, DIFF_ORIGINAL)).toContain("8");
 
     // A second click loads FURTHER content rather than re-revealing the same
     // window — DeepReview-GUI.md §4.2's third required control.  Seventeen
@@ -558,9 +636,9 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
     await expect(
       diffTabLines(ctPage).filter({ hasText: /echo\s+"alpha\s+1"$/ }),
     ).toHaveCount(1, { timeout: 15_000 });
-    const afterSecond = await diffLineNumbers(ctPage);
-    expect(afterSecond).toContain("2 2");
-    expect(afterSecond).toContain("7 7");
+    const afterSecond = await diffLineNumbersOn(ctPage, DIFF_BODY);
+    expect(afterSecond).toContain("2");
+    expect(afterSecond).toContain("7");
     await expect(expandAbove).toHaveCount(0);
 
     // The commit whose blob was fetched is the one the tab shows, not HEAD.

@@ -167,15 +167,34 @@ These are real weaknesses of the current surface. Report them as **findings**
 if you see them; do **not** treat them as evidence that the capture is broken,
 and do not let them alone drive a rating below 4.
 
-1. **No syntax highlighting.** The diff document is currently created as
-   `plaintext`, so no tokenizer runs and code renders in one colour. UD-1
-   fixes this. Once it lands, the `diff-other-language` view is the one that
-   proves the highlighting follows the *file*, so from that milestone on, flat
-   Python in that view is a finding worth leading with.
-2. **No word-level intra-line marking.** In `diff-intraline` the whole line is
-   currently tinted, rather than the changed word being marked inside it. UD-1
-   fixes this; it is the single property that most separates this surface from
-   GitHub's.
+1. **Syntax highlighting is partial, and where it fails it fails oddly.**
+   UD-1 replaced the `plaintext` document with a Monaco diff editor over two
+   models carrying the reviewed file's real language, so a tokenizer now runs
+   — but it runs over a *window* of the file rather than the whole of it, and
+   a tokenizer starts from ITS line 1. A hunk that begins inside a block
+   comment or a multi-line string is therefore tokenized as if that string had
+   just opened, and everything after it comes out flat. `tools/report.py`'s
+   first hunk starts on line 4, inside the module docstring, so the
+   `diff-other-language` view shows exactly this: two English words coloured
+   as keywords inside the docstring, and the code below it in one colour.
+   Report it — it is real — but it is a *known* consequence of windowed
+   models, and UD-2 (whole-file models with `hideUnchangedRegions`) is what
+   closes it, not a colour change.
+   **Deleted lines are separately not highlighted**: Monaco's inline diff view
+   draws them as view zones with no tokens at all, whatever the model says.
+   `experimental.useTrueInlineView` fixes that and is deferred to UD-4,
+   because it also merges each deletion and insertion into one line and that
+   is a UX decision.
+2. **Word-level intra-line marking — CLOSED by UD-1.** The changed word inside
+   a partially-changed line is now marked, on both sides, by Monaco's own diff.
+   It is the single property that most separates this surface from GitHub's, so
+   if `diff-intraline` shows a whole line tinted and no inner mark, that is a
+   regression and worth leading with.
+2b. **The two `+` / `-` markers are in two columns.** Monaco's inline diff lays
+   the old revision's gutter out as a separate strip to the left of the new
+   one, so the `-` of a deletion and the `+` of an addition are about 30px
+   apart rather than in one rail. It is a consequence of the two-editor layout;
+   UD-4 owns whether it is worth working around.
 3. **Expansion is a line of text, not a gesture.** UD-2 replaces it with a
    draggable boundary with a visible affordance.
 4. **The values sit in a single trailing strip**, not in the debugger's own

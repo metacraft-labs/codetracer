@@ -146,7 +146,7 @@ suite "flow decorations land on the diff tab's own line numbers":
 
   test "every decoration names the model line holding that source line":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let decorations = reviewFlowDecorations(doc, 0, styledFor(file, 0))
     check decorations.len > 0
     for decoration in decorations:
@@ -159,7 +159,7 @@ suite "flow decorations land on the diff tab's own line numbers":
     # screen and gets nothing, which is the restriction §4.4 asks for — here
     # structural rather than checked, because an absent line has no model line.
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let decorations = reviewFlowDecorations(doc, 0, styledFor(file, 0))
     var sourceLines: seq[int] = @[]
     for decoration in decorations:
@@ -172,7 +172,7 @@ suite "flow decorations land on the diff tab's own line numbers":
 
   test "executed lines are hits and unexecuted ones are skips":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let decorations = reviewFlowDecorations(doc, 0, styledFor(file, 0))
     for decoration in decorations:
       let expected =
@@ -184,9 +184,25 @@ suite "flow decorations land on the diff tab's own line numbers":
     # A removed line has no position in the revision the flow was recorded
     # against, so annotating it would attribute the new file's execution to the
     # old file's text.
+    #
+    # Since UD-1 this is guaranteed twice over, and both halves are asserted:
+    # the overlay still refuses any line whose kind is not added or context,
+    # AND the document it is given — the diff editor's *modified* model —
+    # structurally cannot contain a removal, because removals are what the
+    # *original* model is for.
     let file = sampleReview().fileNamed("src/config.rs")   # deleted file
-    let doc = buildDiffDocument([rowFor(file)])
-    check reviewFlowDecorations(doc, 0, styledFor(file, 0)).len == 0
+    let pair = buildDiffPair([rowFor(file)])
+    check reviewFlowDecorations(pair.modified, 0, styledFor(file, 0)).len == 0
+    for line in pair.modified.lines:
+      check line.kind != dlkRemoved
+    # The old side is where they went, so the fixture really does carry them
+    # and this is not passing because the file has no removals at all.
+    var removals = 0
+    for line in pair.original.lines:
+      if line.kind == dlkRemoved: removals += 1
+    check removals > 0
+    # And the overlay refuses them even when handed the side that has them.
+    check reviewFlowDecorations(pair.original, 0, styledFor(file, 0)).len == 0
 
   test "the classes are the standard Omniscience ones, never a comment":
     # DeepReview-GUI.md §4.4: "Inline variable values MUST NOT be rendered as
@@ -194,7 +210,7 @@ suite "flow decorations land on the diff tab's own line numbers":
     # replaces the deleted panel's `deepreview-inline-value` after-content
     # decorations.
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     for decoration in reviewFlowDecorations(doc, 0, styledFor(file, 0)):
       check decoration.inlineClassName.startsWith("line-flow-")
       check "deepreview-inline-value" notin decoration.inlineClassName
@@ -202,7 +218,7 @@ suite "flow decorations land on the diff tab's own line numbers":
 
   test "no flow means no decoration, not a blank overlay":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     check reviewFlowDecorations(doc, 0, @[]).len == 0
 
 suite "the inline values §4.4 requires are on the diff tab":
@@ -222,7 +238,7 @@ suite "the inline values §4.4 requires are on the diff tab":
     #   line 4  result = 55
     #   line 10 result = 55
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let plan = reviewFlowPlan(file, invocationOf(file, "main", 0))
     let annotations = reviewValueAnnotations(doc, 0, plan)
     check annotations.len > 0
@@ -233,7 +249,7 @@ suite "the inline values §4.4 requires are on the diff tab":
 
   test "every annotation names the model line holding that source line":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let plan = reviewFlowPlan(file, invocationOf(file, "main", 0))
     let annotations = reviewValueAnnotations(doc, 0, plan)
     check annotations.len > 0
@@ -247,7 +263,7 @@ suite "the inline values §4.4 requires are on the diff tab":
     # matters: its line 1 DOES record `input`, and its hunk shows line 1.
     # Line 12 of main.rs is off screen and must stay bare.
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let plan = reviewFlowPlan(file, invocationOf(file, "main", 0))
     let annotations = reviewValueAnnotations(doc, 0, plan)
     for annotation in annotations:
@@ -258,7 +274,7 @@ suite "the inline values §4.4 requires are on the diff tab":
     # Call 1 computes 55 from x = 10; call 2 computes 903 from x = 42. This is
     # the assertion Test 26's "hit count > 0" cannot make.
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let firstCall = reviewValueAnnotations(
       doc, 0, reviewFlowPlan(file, invocationOf(file, "main", 0)))
     let secondCall = reviewValueAnnotations(
@@ -274,7 +290,7 @@ suite "the inline values §4.4 requires are on the diff tab":
 
   test "a string value reads back as the collector rendered it":
     let file = sampleReview().fileNamed("src/utils.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let plan = reviewFlowPlan(file, invocationOf(file, "format_output", 0))
     let annotations = reviewValueAnnotations(doc, 0, plan)
     check annotations.chipsAt(2) == @["<trimmed>\"hello world\""]
@@ -282,7 +298,7 @@ suite "the inline values §4.4 requires are on the diff tab":
 
   test "a truncated value carries the collector's marker":
     let file = sampleReview().fileNamed("src/utils.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let plan = reviewFlowPlan(file, invocationOf(file, "format_output", 0))
     let annotations = reviewValueAnnotations(doc, 0, plan)
     let first = annotations.chipsAt(1)
@@ -306,7 +322,7 @@ suite "the inline values §4.4 requires are on the diff tab":
     check "deepreview-inline-value" notin ReviewValueNameClass
     check "deepreview-inline-value" notin ReviewValueBoxClass
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     for text in reviewValueAnnotations(
         doc, 0, reviewFlowPlan(file, invocationOf(file, "main", 0))).chipTexts():
       check "//" notin text
@@ -314,12 +330,16 @@ suite "the inline values §4.4 requires are on the diff tab":
 
   test "a removed file's lines are never annotated":
     let file = sampleReview().fileNamed("src/config.rs")
-    let doc = buildDiffDocument([rowFor(file)])
-    check reviewValueAnnotations(doc, 0, reviewFlowPlan(file, 0)).len == 0
+    let pair = buildDiffPair([rowFor(file)])
+    check reviewValueAnnotations(pair.modified, 0,
+                                 reviewFlowPlan(file, 0)).len == 0
+    # Handed the side that DOES hold the deleted text, it still refuses.
+    check reviewValueAnnotations(pair.original, 0,
+                                 reviewFlowPlan(file, 0)).len == 0
 
   test "a plan that found nothing draws no strip":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     check reviewValueAnnotations(doc, 0, reviewFlowPlan(file, 99)).len == 0
 
 suite "the loop iteration control, and the values it selects":
@@ -346,7 +366,7 @@ suite "the loop iteration control, and the values it selects":
 
   test "the control sits immediately above the loop's first visible line":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowSpanning(file, 12, 21)])
+    let doc = buildDiffPair([rowSpanning(file, 12, 21)]).modified
     let zones = reviewLoopZones(doc, 0, computePlan(file))
     check zones.len == 1
     check zones[0].loopIndex == 1
@@ -360,12 +380,12 @@ suite "the loop iteration control, and the values it selects":
 
   test "a loop the tab does not show gets no control":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])   # the hunk stops at line 11
+    let doc = buildDiffPair([rowFor(file)]).modified   # the hunk stops at line 11
     check reviewLoopZones(doc, 0, computePlan(file)).len == 0
 
   test "a function with no loop offers no control":
     let file = sampleReview().fileNamed("src/utils.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let plan = reviewFlowPlan(file, invocationOf(file, "format_output", 0))
     check reviewLoopZones(doc, 0, plan).len == 0
 
@@ -375,7 +395,7 @@ suite "the loop iteration control, and the values it selects":
     #   pass 2  i = 1, acc = 1
     #   pass 3  i = 2, acc = 3
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowSpanning(file, 12, 21)])
+    let doc = buildDiffPair([rowSpanning(file, 12, 21)]).modified
     let plan = computePlan(file)
     check reviewValueAnnotations(doc, 0, plan, @[(1, 0)]).chipsAt(16) ==
       @["<i>0", "<acc>0"]
@@ -391,7 +411,7 @@ suite "the loop iteration control, and the values it selects":
 
   test "lines outside the loop are unaffected by the choice":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowSpanning(file, 12, 21)])
+    let doc = buildDiffPair([rowSpanning(file, 12, 21)]).modified
     let plan = computePlan(file)
     for iteration in 0 .. 2:
       check reviewValueAnnotations(doc, 0, plan, @[(1, iteration)]).chipsAt(15) ==
@@ -401,7 +421,7 @@ suite "the loop iteration control, and the values it selects":
 
   test "the iteration is clamped rather than wrapped at both ends":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowSpanning(file, 12, 21)])
+    let doc = buildDiffPair([rowSpanning(file, 12, 21)]).modified
     let plan = computePlan(file)
     check plan.selectedLoopIteration(1, @[(1, 9)]) == 2
     check plan.selectedLoopIteration(1, @[(1, -3)]) == 0
@@ -439,7 +459,7 @@ suite "the invocation selector is anchored to the code it governs":
     # the function occupies on screen — the arithmetic
     # `createLoopViewZones` uses for the loop slider (`loop.first - 1`).
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let zones = reviewInvocationZones(doc, 0, reviewFunctionInvocations(file))
     check zones.len == 1
     check zones[0].functionKey == "main"
@@ -452,14 +472,14 @@ suite "the invocation selector is anchored to the code it governs":
     # control detached from its lines is exactly what §7 forbids ("A control in
     # a panel header would be detached from the lines it governs").
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let zones = reviewInvocationZones(doc, 0, reviewFunctionInvocations(file))
     for zone in zones:
       check zone.functionKey != "compute"
 
   test "the control selects the invocation and reads like the loop counter":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let functions = reviewFunctionInvocations(file)
     let first = reviewInvocationZones(doc, 0, functions)[0]
     check first.total == 2
@@ -481,7 +501,7 @@ suite "the invocation selector is anchored to the code it governs":
     # the two calls of `main` visited different lines, so the overlay the tab
     # draws must differ.
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let functions = reviewFunctionInvocations(file)
     let firstZone = reviewInvocationZones(doc, 0, functions)[0]
     let secondZone = reviewInvocationZones(doc, 0, functions, @[("main", 1)])[0]
@@ -500,7 +520,7 @@ suite "the invocation selector is anchored to the code it governs":
 
   test "the ordinal is clamped rather than wrapped at both ends":
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let functions = reviewFunctionInvocations(file)
     check reviewInvocationZones(doc, 0, functions, @[("main", 9)])[0].ordinal == 1
     check reviewInvocationZones(doc, 0, functions, @[("main", -4)])[0].ordinal == 0
@@ -516,7 +536,7 @@ suite "a function the changeset only calls (RV-4 gap 8)":
     # selector offering "call 1 / 2" would render the first invocation twice and
     # claim the second was what the reader is looking at.
     let file = sampleReview().fileNamed("src/utils.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let zones = reviewInvocationZones(doc, 0, reviewFunctionInvocations(file))
     check zones.len == 1
     check zones[0].functionKey == "format_output"
@@ -541,7 +561,7 @@ suite "a function the changeset only calls (RV-4 gap 8)":
 
   test "a file with no functions offers no controls":
     let file = sampleReview().fileNamed("src/config.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     check reviewInvocationZones(doc, 0, reviewFunctionInvocations(file)).len == 0
 
 suite "the reader's invocation choice is shared by a review's two surfaces":
@@ -573,7 +593,7 @@ suite "the reader's invocation choice is shared by a review's two surfaces":
   test "the stored choice is what the zones render":
     setReviewInvocationOrdinal("src/main.rs", "main", 1)
     let file = sampleReview().fileNamed("src/main.rs")
-    let doc = buildDiffDocument([rowFor(file)])
+    let doc = buildDiffPair([rowFor(file)]).modified
     let functions = reviewFunctionInvocations(file)
     var ordinals: seq[(string, int)] = @[]
     for fn in functions:

@@ -29,7 +29,7 @@ import { test, expect, wait } from "../../lib/fixtures";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-import { DeepReviewPage } from "./page-objects/deepreview-page";
+import { DIFF_BODY, DIFF_BODY_LINES, DeepReviewPage } from "./page-objects/deepreview-page";
 
 // ---------------------------------------------------------------------------
 // Fixture paths
@@ -519,9 +519,15 @@ test.describe("DeepReview GUI - main features", () => {
     await dr.fileItemByIndex(index).click();
     const tab = dr.diffTabFor(filePath);
     await expect(tab).toBeVisible({ timeout: 20_000 });
-    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible({
-      timeout: 20_000,
-    });
+    // The MODIFIED side is the one the unified diff view renders into: since
+    // UD-1 the tab holds a `.monaco-diff-editor` with two code editors, and
+    // the old revision's deleted lines are drawn as `.view-lines line-delete`
+    // view zones inside this one.  Naming it explicitly is not just strict-mode
+    // hygiene — an unscoped `.monaco-editor .view-lines` matches four elements
+    // here, and one of them is the *other* revision.
+    await expect(
+      tab.locator(DIFF_BODY_LINES),
+    ).toBeVisible({ timeout: 20_000 });
     return tab;
   }
 
@@ -540,8 +546,10 @@ test.describe("DeepReview GUI - main features", () => {
     ] as [number, string][]) {
       const tab = await openReviewDiffTab(dr, index, filePath);
       // A real editor, not a DOM diff.
-      await expect(tab.locator(".monaco-editor")).toBeVisible();
-      const header = tab.locator(".monaco-editor .view-line", {
+      // Two code editors since UD-1 — the diff editor's two sides — so the
+      // one the unified view renders into is named rather than assumed.
+      await expect(tab.locator(DIFF_BODY)).toBeVisible();
+      const header = tab.locator(`${DIFF_BODY} .view-line`, {
         hasText: filePath,
       });
       await expect(header.first()).toBeVisible({ timeout: 15_000 });
@@ -563,31 +571,57 @@ test.describe("DeepReview GUI - main features", () => {
       [2, "src/config.rs", 0, 7, 0],
     ];
 
+    // UD-1 split the one model in two, so each class is counted on the side it
+    // belongs to: additions exist only in the new revision, removals only in
+    // the old one, and the context and the chrome exist identically in both
+    // (which is what makes Monaco treat them as unchanged and draw them once).
+    // Counting them unscoped would sum the two sides and silently accept a
+    // build that put an addition in the old revision.
     for (const [index, filePath, added, removed, context] of expected) {
       const tab = await openReviewDiffTab(dr, index, filePath);
-      const overlays = tab.locator(".view-overlays");
+      const modified = tab.locator(
+        ".monaco-editor.modified-in-monaco-diff-editor .view-overlays",
+      );
+      const original = tab.locator(
+        ".monaco-editor.original-in-monaco-diff-editor .view-overlays",
+      );
       await expect
-        .poll(async () => await overlays.locator(".ct-diff-line-added").count(), {
+        .poll(async () => await modified.locator(".ct-diff-line-added").count(), {
           timeout: 15_000,
         })
         .toBe(added);
-      expect(await overlays.locator(".ct-diff-line-removed").count()).toBe(
+      expect(await modified.locator(".ct-diff-line-removed").count()).toBe(0);
+      expect(await original.locator(".ct-diff-line-removed").count()).toBe(
         removed,
       );
-      expect(await overlays.locator(".ct-diff-line-context").count()).toBe(
+      expect(await original.locator(".ct-diff-line-added").count()).toBe(0);
+      expect(await modified.locator(".ct-diff-line-context").count()).toBe(
+        context,
+      );
+      expect(await original.locator(".ct-diff-line-context").count()).toBe(
         context,
       );
       // Exactly one hunk per file in the fixture, rendered as a section
       // divider (VCS-Panel.md: "Hunk headers (@@ -N,M +N,M @@) shown as
-      // section dividers").
-      expect(await overlays.locator(".ct-diff-line-hunk-header").count()).toBe(1);
+      // section dividers") — on both sides, so it anchors the comparison
+      // instead of reading as an inserted line.
+      expect(await modified.locator(".ct-diff-line-hunk-header").count()).toBe(1);
+      expect(await original.locator(".ct-diff-line-hunk-header").count()).toBe(1);
 
-      // ...and the `+` / `-` gutter markers VCS-Panel.md requires.
-      const margin = tab.locator(".margin-view-overlays");
-      expect(await margin.locator(".ct-diff-gutter-added").count()).toBe(added);
-      expect(await margin.locator(".ct-diff-gutter-removed").count()).toBe(
-        removed,
-      );
+      // ...and the `+` / `-` gutter markers VCS-Panel.md requires, each in the
+      // margin of the revision that has those lines.
+      expect(
+        await tab
+          .locator(".modified-in-monaco-diff-editor .margin-view-overlays")
+          .locator(".ct-diff-gutter-added")
+          .count(),
+      ).toBe(added);
+      expect(
+        await tab
+          .locator(".original-in-monaco-diff-editor .margin-view-overlays")
+          .locator(".ct-diff-gutter-removed")
+          .count(),
+      ).toBe(removed);
     }
   });
 
@@ -630,7 +664,7 @@ test.describe("DeepReview GUI - main features", () => {
     await wait(500);
 
     const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
-    const lines = tab.locator(".monaco-editor .view-lines");
+    const lines = tab.locator(DIFF_BODY_LINES);
 
     // `main`'s first invocation runs on lines 1-4 and 10; the hunk shows 2-11,
     // so four of those five lines are on screen and get `line-flow-hit`.  The
@@ -875,14 +909,117 @@ test.describe("DeepReview GUI - main features", () => {
     // requested": CSS forces `.monaco-editor { background: transparent }`, so
     // the editor's backdrop looks right either way and only Monaco's own
     // canvases (minimap, overview ruler) betray the fallback.
-    const editorClass = await tab
+    //
+    // Since UD-1 the tab holds a diff editor, so there are two code editors
+    // and BOTH are asserted: a theme handed to `createDiffEditor` but not
+    // propagated to one of its sides would put a light pane next to a dark
+    // one, which is worse than a uniformly wrong theme because it looks
+    // deliberate.
+    const editorClasses = await tab
       .locator(".monaco-editor")
-      .first()
-      .getAttribute("class");
-    expect(editorClass).toBeTruthy();
-    const classes = (editorClass ?? "").split(/\s+/);
-    expect(classes).toContain("vs-dark");
-    expect(classes).not.toContain("vs");
+      .evaluateAll((nodes) => nodes.map((n) => n.className));
+    expect(editorClasses.length).toBeGreaterThanOrEqual(2);
+    for (const editorClass of editorClasses) {
+      const classes = editorClass.split(/\s+/);
+      expect(classes).toContain("vs-dark");
+      expect(classes).not.toContain("vs");
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // UD-1: a real diff editor.
+  //
+  // Before UD-1 the tab was one Monaco editor over an assembled diff document
+  // created with `language: "plaintext"` (`ui/unified_diff.nim`), and its own
+  // comment said why: the document interleaved `@@` headers, `+`/`-` prefixes
+  // and file dividers, which no tokenizer describes.  Two visible weaknesses
+  // followed and are what these two scenarios pin:
+  //
+  //   * no syntax highlighting, because no tokenizer ran;
+  //   * no word-level intra-line marking, because a single document has no
+  //     "before" and "after" for Monaco to compare.
+  //
+  // Falsifiable before UD-1: the tab held no `.monaco-diff-editor` at all, its
+  // only model's language id was `plaintext`, and `.char-insert` /
+  // `.char-delete` had count 0 everywhere on the page.
+  //
+  // Headless counterparts: `the two models carry the file's own text, split by
+  // revision`, `the language is resolved from the file path` and
+  // `a partially changed line reaches Monaco as two comparable lines` in
+  // src/tests/gui/tests/vcs/vcs_diff_decorations_test.nim — which can assert
+  // what is HANDED to Monaco but not what Monaco then does with it, so the two
+  // halves are split across the two lanes deliberately.
+
+  test("UD-1: the diff tab is a diff editor over two models in the reviewed language", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+
+    // Monaco's own diff editor, in the unified (inline) layout.
+    await expect(tab.locator(".monaco-diff-editor")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(tab.locator(".monaco-diff-editor.side-by-side")).toHaveCount(0);
+
+    // Both of its models carry the reviewed file's language, so a tokenizer
+    // runs over each.  Read from Monaco rather than from the DOM because the
+    // language id is the property under test; the DOM check below is what says
+    // the tokenizer actually produced something.
+    const languages = await ctPage.evaluate(() => {
+      const monacoGlobal = (window as unknown as {
+        monaco?: { editor: { getModels(): { getLanguageId(): string }[] } };
+      }).monaco;
+      if (!monacoGlobal) return null;
+      return monacoGlobal.editor.getModels().map((m) => m.getLanguageId());
+    });
+    expect(languages).not.toBeNull();
+    // `src/main.rs` — Rust, and at least two models because a diff editor has
+    // an original and a modified side.
+    expect((languages ?? []).filter((l) => l === "rust").length).toBeGreaterThanOrEqual(2);
+
+    // ... and the tokenizer ran: Monaco paints each token class as `mtk<n>`,
+    // and a plaintext model produces exactly one class for the whole document.
+    const tokenClasses = await tab
+      .locator(`${DIFF_BODY_LINES} span[class^='mtk']`)
+      .evaluateAll((spans) =>
+        Array.from(new Set(spans.map((s) => s.className))),
+      );
+    expect(tokenClasses.length).toBeGreaterThan(1);
+  });
+
+  test("UD-1: a partially changed line is marked word by word", async ({ ctPage }) => {
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    // `src/main.rs` changes `let y = x * 2;` into `let y = x * 3;` — one
+    // character of one line.  That is the case a coloured diff and a good diff
+    // disagree about: a coloured diff paints the whole line, a good one points
+    // at the `2` and the `3`.  Monaco computes this itself once it owns both
+    // sides, which is why UD-1 is a structural change and not a styling one.
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+
+    await expect
+      .poll(async () => await tab.locator(".char-insert").count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+    expect(await tab.locator(".char-delete").count()).toBeGreaterThan(0);
+
+    // The marking must be *narrower than the line*: a `char-insert` spanning
+    // the whole added line is Monaco reporting "everything changed", which is
+    // exactly the state UD-1 replaces.  The changed line is 15 characters and
+    // one of them differs, so the marked run is short.
+    const markedWidths = await tab
+      .locator(".char-insert")
+      .evaluateAll((nodes) => nodes.map((n) => (n as HTMLElement).offsetWidth));
+    const lineWidths = await tab
+      .locator(".view-lines .view-line")
+      .evaluateAll((nodes) => nodes.map((n) => (n as HTMLElement).offsetWidth));
+    const widestLine = Math.max(...lineWidths, 1);
+    expect(Math.min(...markedWidths)).toBeLessThan(widestLine);
   });
 
   test("Test 27: the invocation selector is an in-editor control above the function", async ({ ctPage }) => {
@@ -925,7 +1062,7 @@ test.describe("DeepReview GUI - main features", () => {
     const selector = tab.locator(".review-invocation-selector").first();
     await expect(selector).toBeVisible({ timeout: 20_000 });
 
-    const lines = tab.locator(".monaco-editor .view-lines");
+    const lines = tab.locator(DIFF_BODY_LINES);
     await expect
       .poll(async () => await lines.locator(".line-flow-hit").count(), {
         timeout: 20_000,
@@ -989,7 +1126,7 @@ test.describe("DeepReview GUI - main features", () => {
     await expect(
       dr
         .diffTabFor("src/utils.rs")
-        .locator(".monaco-editor .view-line", { hasText: "@@ -0,0 +1,8 @@" })
+        .locator(`${DIFF_BODY} .view-line`, { hasText: "@@ -0,0 +1,8 @@" })
         .first(),
     ).toBeVisible({ timeout: 15_000 });
 
@@ -998,7 +1135,7 @@ test.describe("DeepReview GUI - main features", () => {
     await expect(
       dr
         .diffTabFor("src/main.rs")
-        .locator(".monaco-editor .view-line", { hasText: "@@ -2,5 +2,10 @@" })
+        .locator(`${DIFF_BODY} .view-line`, { hasText: "@@ -2,5 +2,10 @@" })
         .first(),
     ).toBeVisible({ timeout: 15_000 });
   });
@@ -1553,7 +1690,7 @@ test.describe("DeepReview GUI - main features", () => {
     await dr.fileItemByIndex(0).click();
     const tab = dr.diffTabFor("src/main.rs");
     await expect(tab).toBeVisible({ timeout: 20_000 });
-    await expect(tab.locator(".monaco-editor .view-lines")).toBeVisible({
+    await expect(tab.locator(DIFF_BODY_LINES)).toBeVisible({
       timeout: 20_000,
     });
     return tab;
@@ -1596,8 +1733,8 @@ test.describe("DeepReview GUI - main features", () => {
 
     // The hunk starts at new line 2, so line 1 is not in the diff and its
     // number is absent from the gutter before expanding.
-    const before = await DeepReviewPage.diffLineNumbers(tab);
-    expect(before).not.toContain("1 1");
+    const before = await DeepReviewPage.diffNewLineNumbers(tab);
+    expect(before).not.toContain("1");
 
     await DeepReviewPage.expandAboveLine(tab).click();
 
@@ -1610,19 +1747,21 @@ test.describe("DeepReview GUI - main features", () => {
     // ...and it is the right one: line 1 of src/main.rs, by number and by
     // text.  A revealed line is unchanged, so it carries the same old and new
     // number.
-    const after = await DeepReviewPage.diffLineNumbers(tab);
-    expect(after).toContain("1 1");
+    // A revealed line is unchanged, so it carries the same number in BOTH
+    // gutter columns — the new revision's and the old one's.
+    expect(await DeepReviewPage.diffNewLineNumbers(tab)).toContain("1");
+    expect(await DeepReviewPage.diffOldLineNumbers(tab)).toContain("1");
     await expect(
       // Monaco renders runs of spaces as U+00A0, so the regex uses `\s`
       // rather than a literal space (the same trap DR-R4 hit on `@@`).
-      tab.locator(".monaco-editor .view-line", { hasText: /fn\s+main\(\)\s+\{/ }),
+      tab.locator(`${DIFF_BODY} .view-line`, { hasText: /fn\s+main\(\)\s+\{/ }),
     ).toHaveCount(1);
 
     // §4.2: "Newly revealed lines become normal code lines in the diff tab"
     // — the revealed line is decorated as context, not as a fourth kind, so
     // it is eligible for the Omniscience overlay DR-R6 draws on context lines.
     await expect(
-      tab.locator(".view-overlays .ct-diff-line-context.ct-diff-line-revealed"),
+      tab.locator(`${DIFF_BODY} .view-overlays .ct-diff-line-context.ct-diff-line-revealed`),
     ).toHaveCount(1);
 
     // Nothing further is hidden above, so the control is gone — a user cannot
@@ -1644,13 +1783,15 @@ test.describe("DeepReview GUI - main features", () => {
     await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(10, {
       timeout: 15_000,
     });
-    const afterFirst = await DeepReviewPage.diffLineNumbers(tab);
-    expect(afterFirst).toContain("12 12");
-    expect(afterFirst).toContain("21 21");
-    expect(afterFirst).not.toContain("22 22");
+    const afterFirst = await DeepReviewPage.diffNewLineNumbers(tab);
+    expect(afterFirst).toContain("12");
+    expect(afterFirst).toContain("21");
+    expect(afterFirst).not.toContain("22");
+    // Unchanged lines, so the old revision's column agrees.
+    expect(await DeepReviewPage.diffOldLineNumbers(tab)).toContain("21");
     // Line 12 of main.rs is the closing brace of `fn main`.
     await expect(
-      tab.locator(".view-overlays .ct-diff-line-revealed"),
+      tab.locator(`${DIFF_BODY} .view-overlays .ct-diff-line-revealed`),
     ).toHaveCount(10);
 
     // §4.2's third required control: "Repeated expansion loads more file
@@ -1661,9 +1802,9 @@ test.describe("DeepReview GUI - main features", () => {
     await expect(DeepReviewPage.revealedDecorations(tab)).toHaveCount(14, {
       timeout: 15_000,
     });
-    const afterSecond = await DeepReviewPage.diffLineNumbers(tab);
-    expect(afterSecond).toContain("22 22");
-    expect(afterSecond).toContain("25 25");
+    const afterSecond = await DeepReviewPage.diffNewLineNumbers(tab);
+    expect(afterSecond).toContain("22");
+    expect(afterSecond).toContain("25");
 
     // The file is exhausted, so the control disappears.
     await expect(DeepReviewPage.expandBelowLine(tab)).toHaveCount(0);
@@ -1692,14 +1833,14 @@ test.describe("DeepReview GUI - main features", () => {
     const utilsTab = dr.diffTabFor("src/utils.rs");
     await expect(utilsTab).toBeVisible({ timeout: 20_000 });
     await expect(
-      utilsTab.locator(".monaco-editor .view-lines"),
+      utilsTab.locator(DIFF_BODY_LINES),
     ).toBeVisible({ timeout: 20_000 });
     await expect(DeepReviewPage.revealedDecorations(utilsTab)).toHaveCount(0);
 
     // ...and coming back finds main.rs still expanded: the state is on the
     // ViewModel, so it survives the tab losing and regaining focus.
     await dr.fileItemByIndex(0).click();
-    await expect(mainTab.locator(".monaco-editor .view-lines")).toBeVisible({
+    await expect(mainTab.locator(DIFF_BODY_LINES)).toBeVisible({
       timeout: 20_000,
     });
     await expect(DeepReviewPage.revealedDecorations(mainTab)).toHaveCount(10, {
@@ -1720,7 +1861,7 @@ test.describe("DeepReview GUI - main features", () => {
 
     const reopened = await openMainDiffTab(dr);
     await expect(
-      reopened.locator(".monaco-editor .view-lines"),
+      reopened.locator(DIFF_BODY_LINES),
     ).toBeVisible({ timeout: 20_000 });
     await expect(DeepReviewPage.revealedDecorations(reopened)).toHaveCount(0);
   });

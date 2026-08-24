@@ -14,12 +14,23 @@
 ## keyboard navigation, and no surface on which the Omniscience decorations of
 ## DR-R6 could be drawn at all.
 ##
+## UD-1 changed what the tab *is*, again: it is Monaco's own **diff editor** in
+## inline mode (``renderSideBySide: false``) over two real models, rather than
+## one editor over an assembled diff document created with
+## ``language: "plaintext"``.  The three weaknesses that followed from that one
+## constant — no syntax highlighting, no word-level intra-line marking, and an
+## expand control that could only be a *line of the document* — are answered by
+## the editor owning both revisions and the models carrying the reviewed file's
+## real language.  See
+## ``codetracer-specs/DeepReview/Unified-Diff-Design.milestones.org``.
+##
 ## What lives where
 ## ----------------
-## - ``viewmodel/viewmodels/diff_document.nim`` — pure: rows in, model text and
-##   one decoration per line out.  It never sees a mode, which is
-##   VCS-Panel.md's "the diff rendering code does NOT check which mode is
-##   active" made structural.
+## - ``viewmodel/viewmodels/diff_document.nim`` — pure: rows in, the two model
+##   texts (``DiffPair``) and one decoration per line out, plus the language the
+##   models are created with.  It never sees a mode, which is VCS-Panel.md's
+##   "the diff rendering code does NOT check which mode is active" made
+##   structural.
 ## - ``viewmodel/viewmodels/vcs_vm.nim`` — the hunk editor's selection model
 ##   and its patch builder, shared with the docked panel's state rather than
 ##   duplicated here.
@@ -67,8 +78,36 @@ var isoNimUnifiedDiffMountedIds {.used.}: JsAssoc[int, bool] =
 # Monaco FFI
 # ---------------------------------------------------------------------------
 
-proc udCreateMonacoEditor(divId: cstring, options: JsObject): MonacoEditor
-  {.importjs: "monaco.editor.create(document.getElementById(#), #)".}
+proc udCreateDiffEditor(divId: cstring, options: JsObject): js
+  {.importjs: "monaco.editor.createDiffEditor(document.getElementById(#), #)".}
+  ## UD-1: the unified diff is Monaco's own diff editor in inline mode.
+  ##
+  ## The binding already existed (`lib/monaco_lib.nim`'s `createDiffEditor`,
+  ## used by `ui/agent_activity.nim`); this is the same call reached the same
+  ## way the rest of this module reaches Monaco, by element id rather than by
+  ## the `MonacoEditorOptions` object, because the option set a diff editor
+  ## takes (`renderSideBySide`, `hideUnchangedRegions`, `diffAlgorithm`,
+  ## `experimental.useTrueInlineView`) is wider than that record describes.
+
+proc udCreateModel(value: cstring, language: cstring): js
+  {.importjs: "monaco.editor.createModel(#, #)".}
+  ## A real model with a real language, which is the whole point of UD-1: a
+  ## tokenizer runs over it.
+
+proc udDisposeModel(model: js)
+  {.importjs: "(function(m) { if (m) { m.dispose(); } })(#)".}
+
+proc udSetDiffModel(editor: js, original: js, modified: js)
+  {.importjs: "#.setModel({ original: #, modified: # })".}
+
+proc udDiffModifiedEditor(editor: js): MonacoEditor
+  {.importjs: "#.getModifiedEditor()".}
+
+proc udDiffOriginalEditor(editor: js): MonacoEditor
+  {.importjs: "#.getOriginalEditor()".}
+
+proc udDisposeDiffEditor(editor: js)
+  {.importjs: "(function(e) { if (e) { e.dispose(); } })(#)".}
 
 proc udCreateDecorationsCollection(editor: MonacoEditor, decorations: js): js
   {.importjs: "#.createDecorationsCollection(#)".}
@@ -77,7 +116,15 @@ proc udCollectionSet(collection: js, decorations: js)
   {.importjs: "#.set(#)".}
 
 proc udSetValue(editor: MonacoEditor, value: cstring)
-  {.importjs: "#.getModel().setValue(#)".}
+  {.importjs: """
+  (function(editor, value) {
+    var model = editor.getModel();
+    // `setValue` on an unchanged value still resets the undo stack and
+    // re-runs the tokenizer over the whole document; on a diff editor it also
+    // forces a full re-diff of both sides. Expansion re-publishes both models
+    // on every click, and only one of them usually changes.
+    if (model && model.getValue() !== value) { model.setValue(value); }
+  })(#, #)"""}
 
 proc udUpdateOptions(editor: MonacoEditor, options: JsObject)
   {.importjs: "#.updateOptions(#)".}
@@ -385,33 +432,51 @@ proc monacoDecorations(doc: DiffDocument;
       options: js{
         isWholeLine: true,
         className: cstring(decoration.className),
-        linesDecorationsClassName: cstring(decoration.gutterClassName)
+        linesDecorationsClassName: cstring(decoration.gutterClassName),
+        # Colours the `+` / `-` the gutter LABEL carries since UD-1.
+        lineNumberClassName: cstring(decoration.lineNumberClassName)
       }
     })
 
-proc rebuildLineLabels(self: UnifiedDiffComponent; doc: DiffDocument) =
-  ## Recompute the dual old/new gutter labels for the document.
+proc rebuildLineLabels(self: UnifiedDiffComponent; pair: DiffPair) =
+  ## Recompute the dual old/new gutter labels for both models.
   ##
-  ## Monaco's ``lineNumbers`` callback closes over this sequence, so it must be
-  ## refilled — not replaced — whenever the model's content changes, or the
-  ## gutter keeps describing the previous document.
+  ## Monaco's ``lineNumbers`` callback closes over these sequences, so they
+  ## must be refilled — not replaced — whenever a model's content changes, or
+  ## the gutter keeps describing the previous document.
+  # The NUMBER column's width; `lineNumberColumnWidth` adds the marker's
+  # character on top of it for the option Monaco is given.
+  let width = max(lineNumberWidth(pair.original), lineNumberWidth(pair.modified))
   self.lineLabels.setLen(0)
-  for label in lineNumberLabels(doc, lineNumberWidth(doc)):
+  for label in lineNumberLabels(pair.modified, dsModified, width):
     self.lineLabels.add(cstring(label))
+  self.originalLineLabels.setLen(0)
+  for label in lineNumberLabels(pair.original, dsOriginal, width):
+    self.originalLineLabels.add(cstring(label))
 
 proc applyDecorations(self: UnifiedDiffComponent) =
+  ## Publish each side's per-line decorations onto its own editor.
   if not self.editorInitialized or self.editor.isNil:
     return
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
-  let doc = diffDocumentFor(vm)
-  let decorations = monacoDecorations(doc, vm.selectedHunks.val)
+  let pair = diffPairFor(vm)
+  let selected = vm.selectedHunks.val
+  let decorations = monacoDecorations(pair.modified, selected)
   if self.decorationCollection.isNil:
     self.decorationCollection =
       self.editor.udCreateDecorationsCollection(decorations.toJs)
   else:
     self.decorationCollection.udCollectionSet(decorations.toJs)
+  if self.originalEditor.isNil:
+    return
+  let originalDecorations = monacoDecorations(pair.original, selected)
+  if self.originalDecorationCollection.isNil:
+    self.originalDecorationCollection =
+      self.originalEditor.udCreateDecorationsCollection(originalDecorations.toJs)
+  else:
+    self.originalDecorationCollection.udCollectionSet(originalDecorations.toJs)
 
 # ---------------------------------------------------------------------------
 # The review's Omniscience overlay (RV-5)
@@ -629,7 +694,7 @@ proc stepInvocation(self: UnifiedDiffComponent; functionKey: string;
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
-  let doc = diffDocumentFor(vm)
+  let doc = diffPairFor(vm).modified
   let (file, _) = self.reviewFlowFile()
   if file.isNil:
     return
@@ -651,7 +716,7 @@ proc stepLoopIteration(self: UnifiedDiffComponent; functionKey: string;
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
-  let doc = diffDocumentFor(vm)
+  let doc = diffPairFor(vm).modified
   let (file, _) = self.reviewFlowFile()
   if file.isNil:
     return
@@ -806,7 +871,7 @@ proc handleHunkClick(self: UnifiedDiffComponent; modelLine: int;
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
-  let doc = diffDocumentFor(vm)
+  let doc = diffPairFor(vm).modified
   if not isHunkHeaderLine(doc, modelLine):
     return
   let pair = hunkAtLine(doc, modelLine)
@@ -831,8 +896,41 @@ proc copySelectedHunks(self: UnifiedDiffComponent) =
       vm.setHunkCopyFeedback(false),
     2000)
 
+proc applyGutterOptions(self: UnifiedDiffComponent; pair: DiffPair) =
+  ## Give each side of the diff editor its own dual old/new gutter.
+  ##
+  ## Per side rather than once on the diff editor, because a diff editor's
+  ## options are handed to both of its code editors and the two models are
+  ## renumbered independently: one callback would label the deleted lines with
+  ## the *modified* model's numbers, which is how a removed line ends up
+  ## claiming the line number of whatever now stands in its place.
+  ##
+  ## The width is shared (``lineNumberColumnWidth``) so the two columns are the
+  ## same size and read as one gutter rather than two.
+  ##
+  ## ``lineDecorationsWidth: 0`` on both, with the `+` / `-` marker carried
+  ## inside the label instead (``diff_document.lineNumberLabels``).  Monaco
+  ## sizes the *original* editor of an inline diff from its
+  ## ``lineNumbersMinChars`` alone — measured: 3 characters produced a 29px
+  ## strip around a 65px margin — so a decorations lane beside the numbers
+  ## there is not clipped gracefully, it takes the numbers off screen with it,
+  ## and a reviewer reported the deleted lines as unnumbered.  The lane is
+  ## zeroed on the modified side too, so the two gutters are the same shape.
+  let width = lineNumberColumnWidth(pair)
+  self.editor.udUpdateOptions(js{
+    lineNumbers: udLineNumberFn(self.lineLabels),
+    lineNumbersMinChars: width,
+    lineDecorationsWidth: 0
+  })
+  if not self.originalEditor.isNil:
+    self.originalEditor.udUpdateOptions(js{
+      lineNumbers: udLineNumberFn(self.originalLineLabels),
+      lineNumbersMinChars: width,
+      lineDecorationsWidth: 0
+    })
+
 proc refreshModel(self: UnifiedDiffComponent) =
-  ## Re-publish the document into the live Monaco model.
+  ## Re-publish both documents into the live Monaco models.
   ##
   ## Content, gutter labels, gutter width and decorations move together: a
   ## model whose text changed under stale labels would number the wrong lines.
@@ -841,25 +939,25 @@ proc refreshModel(self: UnifiedDiffComponent) =
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
-  let doc = diffDocumentFor(vm)
+  let pair = diffPairFor(vm)
   # `setValue` scrolls the viewport back to the top, which would throw the
   # reader out of the region they just expanded.  Expansion is the operation
-  # that made this matter: it re-publishes the model on every click.
+  # that made this matter: it re-publishes the models on every click.
   let scrollTop = self.editor.udScrollTop()
-  self.editor.udSetValue(cstring(documentText(doc)))
-  self.rebuildLineLabels(doc)
-  self.editor.udUpdateOptions(js{
-    lineNumbers: udLineNumberFn(self.lineLabels),
-    lineNumbersMinChars: 2 * lineNumberWidth(doc) + 2
-  })
+  if not self.originalEditor.isNil:
+    self.originalEditor.udSetValue(cstring(documentText(pair.original)))
+  self.editor.udSetValue(cstring(documentText(pair.modified)))
+  self.rebuildLineLabels(pair)
+  self.applyGutterOptions(pair)
   self.editor.udSetScrollTop(scrollTop)
   self.applyDecorations()
   # The overlay is keyed on model lines, which every re-publish renumbers —
   # context expansion inserts lines above the ones it revealed — so the flow
   # decorations and the invocation selectors move with the document rather than
-  # being left pointing at whatever now occupies their old positions.
-  self.applyFlowDecorations(doc)
-  self.rebuildInvocationZones(doc)
+  # being left pointing at whatever now occupies their old positions.  It is
+  # keyed on the *modified* model: flow was recorded against the new revision.
+  self.applyFlowDecorations(pair.modified)
+  self.rebuildInvocationZones(pair.modified)
 
 proc handleExpandClick(self: UnifiedDiffComponent; modelLine: int): bool =
   ## DeepReview-GUI.md §4.2: "Expand surrounding context above a visible
@@ -869,7 +967,7 @@ proc handleExpandClick(self: UnifiedDiffComponent; modelLine: int): bool =
   ## rather than also treating the click as a hunk-selection gesture.
   ##
   ## The counters live on the ViewModel, so a click is state plus a re-publish
-  ## of the document: `diffDocumentFor` re-derives the whole window from
+  ## of the document: `diffPairFor` re-derives the whole window from
   ## `(diffFiles, hunkExpansion)` and the model grows by exactly the lines the
   ## new counters reveal.  Repeated clicks therefore load *further* content
   ## rather than re-revealing what is already shown — §4.2's third required
@@ -877,7 +975,7 @@ proc handleExpandClick(self: UnifiedDiffComponent; modelLine: int): bool =
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return false
-  let doc = diffDocumentFor(vm)
+  let doc = diffPairFor(vm).modified
   let target = expandTargetAtLine(doc, modelLine)
   if not target.present:
     return false
@@ -923,26 +1021,57 @@ proc initEditor(self: UnifiedDiffComponent) =
   if vm.isNil:
     return
 
-  let doc = diffDocumentFor(vm)
-  let content = cstring(documentText(doc))
-  self.rebuildLineLabels(doc)
+  let pair = diffPairFor(vm)
+  self.rebuildLineLabels(pair)
   # `monacoThemeName` registers the theme documents before naming one.  A
   # review's visible tab is this one, and nothing else in the window need ever
   # create a source editor, so this tab cannot rely on somebody else having
   # defined `codetracerDark` first — that dependency is what made the review
   # window come up under Monaco's built-in light theme.
   let theme = monacoThemeName(self.data.config.theme)
+  let language = cstring(pair.language)
 
-  self.editor = udCreateMonacoEditor(hostId, js{
-    value: content,
-    # The document interleaves several revisions of the file with `@@`
-    # dividers, so no language's tokenizer describes it; syntax colouring here
-    # would fight the diff's own added/removed colouring.
-    language: cstring"plaintext",
-    # DeepReview-GUI.md §5.1, "Keep the review representation read-only by
-    # default" — and an editable diff buffer has nowhere to write back to.
+  self.diffEditor = udCreateDiffEditor(hostId, js{
+    # UD-1: the unified view is Monaco's diff editor with the side-by-side
+    # layout turned off.  Everything the old synthetic document could not do
+    # follows from the editor now owning both revisions:
+    #   * a tokenizer runs, because each model has a real language;
+    #   * the intra-line marking is computed, because there is a before and an
+    #     after to compare.
+    renderSideBySide: false,
+    # ... and stays off.  Monaco otherwise silently switches to the two-pane
+    # layout whenever the tab is wider than `renderSideBySideInlineBreakpoint`,
+    # which would make the view's identity depend on the window size.
+    useInlineViewWhenSpaceIsLimited: false,
+    # VCS-Panel.md requires `+` / `-` gutter markers, and there must be
+    # exactly one set of them.  Ours are in the gutter LABEL since UD-1
+    # (`diff_document.lineNumberLabels` emits `+42` / `-41` / ` 40`, coloured
+    # by the `lineNumberClassName` decoration), because the line-decorations
+    # lane they used to live in does not fit in the inline diff's original
+    # editor — see `applyGutterOptions`.  Monaco's own indicators are
+    # therefore turned off rather than stacked on top of them, which is what
+    # put a codicon and a `+` in the same 12 pixels.
+    renderIndicators: false,
+    # Neither side is writable: DeepReview-GUI.md §5.1, "Keep the review
+    # representation read-only by default", and a diff buffer has nowhere to
+    # write back to.  `originalEditable` defaults to false; it is stated
+    # because the *modified* side is the one `readOnly` covers.
     readOnly: true,
+    originalEditable: false,
     domReadOnly: true,
+    # The gutter's revert arrows and its context menu are write gestures.
+    renderMarginRevertIcon: false,
+    renderGutterMenu: false,
+    # `advanced` is Monaco's current diffing algorithm and the one that
+    # produces the word-level marking this milestone is about; `legacy` is
+    # kept only for compatibility.
+    diffAlgorithm: cstring"advanced",
+    # Whitespace-only changes are changes in a code review.
+    ignoreTrimWhitespace: false,
+    # UD-2 owns the expansion gesture and will decide whether to adopt
+    # Monaco's own collapsing.  Until then the expand controls of §4.2 are
+    # ours, and Monaco's would fight them.
+    hideUnchangedRegions: js{ enabled: false },
     theme: theme,
     automaticLayout: true,
     folding: false,
@@ -951,13 +1080,21 @@ proc initEditor(self: UnifiedDiffComponent) =
     minimap: js{ enabled: true },
     contextmenu: true,
     renderLineHighlight: cstring"none",
-    lineNumbers: udLineNumberFn(self.lineLabels),
-    lineNumbersMinChars: 2 * lineNumberWidth(doc) + 2,
-    lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
     scrollBeyondLastLine: false,
     glyphMargin: false
   })
+
+  # Two real models, each with the language resolved from the reviewed file.
+  self.originalModel = udCreateModel(
+    cstring(documentText(pair.original)), language)
+  self.modifiedModel = udCreateModel(
+    cstring(documentText(pair.modified)), language)
+  self.diffEditor.udSetDiffModel(self.originalModel, self.modifiedModel)
+
+  self.editor = self.diffEditor.udDiffModifiedEditor()
+  self.originalEditor = self.diffEditor.udDiffOriginalEditor()
   self.editorInitialized = true
+  self.applyGutterOptions(pair)
 
   let component = self
   self.editor.udOnMouseDown(proc(e: js) =
@@ -974,8 +1111,8 @@ proc initEditor(self: UnifiedDiffComponent) =
   self.applyDecorations()
   # §7 step 3, "Omniscience/flow data from the trace overlays onto diff lines",
   # for a review; a no-op for a git-backed tab, which carries no flow.
-  self.applyFlowDecorations(doc)
-  self.rebuildInvocationZones(doc)
+  self.applyFlowDecorations(pair.modified)
+  self.rebuildInvocationZones(pair.modified)
 
 proc tryMountUnifiedDiffTab*(componentId: int) =
   when defined(js):
@@ -1001,8 +1138,21 @@ proc tryMountUnifiedDiffTab*(componentId: int) =
       # blank, because the mounted flag alone said the work was already done.
       isoNimUnifiedDiffMountedIds[componentId] = false
       component.editorInitialized = false
+      # A diff editor's two models are created explicitly and therefore
+      # outlive it; disposing the editor without them leaks a model pair —
+      # and with it a tokenizer's state — on every tab drag or layout
+      # restore.  Order matters: the editor first, so nothing is holding the
+      # models when they go.
+      udDisposeDiffEditor(component.diffEditor)
+      udDisposeModel(component.originalModel)
+      udDisposeModel(component.modifiedModel)
+      component.diffEditor = nil
+      component.originalModel = nil
+      component.modifiedModel = nil
       component.editor = nil
+      component.originalEditor = nil
       component.decorationCollection = nil
+      component.originalDecorationCollection = nil
       # The review overlay's two handles belong to the destroyed Monaco
       # instance as much as `decorationCollection` does: a stale collection
       # would be written to an editor that no longer exists, and a stale zone

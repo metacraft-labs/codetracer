@@ -1,15 +1,23 @@
-// Unified diff editor tab (DR-R4).
+// Unified diff editor tab (DR-R4, UD-1).
 //
-// The tab is a real Monaco editor whose model holds the assembled diff text
-// (src/frontend/viewmodel/viewmodels/diff_document.nim), so everything here
-// styles Monaco's own decoration layers rather than a DOM diff:
+// Since UD-1 the tab is Monaco's own DIFF editor in the inline layout, over
+// two models built by src/frontend/viewmodel/viewmodels/diff_document.nim, so
+// the added / removed wash and the word-level intra-line marking are the
+// EDITOR's (`.line-insert` / `.line-delete` / `.char-insert` / `.char-delete`)
+// and everything here styles what is ours on top of it:
 //
 //   .ct-diff-line-*    -> whole-line decorations, rendered by Monaco into
-//                         `.view-overlays` as `<div class="cdr …">`
+//                         `.view-overlays` as `<div class="cdr …">`.  The
+//                         chrome ones (file header, `@@` divider, expansion
+//                         controls) still carry paint; the added / removed /
+//                         context ones are classification only now, because
+//                         the editor paints those.
 //   .ct-diff-gutter-*  -> `linesDecorationsClassName`, rendered into
-//                         `.margin-view-overlays` as `<div class="cldr …">`;
-//                         these draw the `+` / `-` markers VCS-Panel.md
-//                         ("Unified Diff View (Editor Integration)") requires
+//                         `.margin-view-overlays` as `<div class="cldr …">`.
+//                         Also classification only: the `+` / `-` markers
+//                         VCS-Panel.md ("Unified Diff View (Editor
+//                         Integration)") requires moved into the gutter
+//                         LABEL, and `.ct-diff-linenum-*` colours them there.
 //
 // Colours were carried over from the pre-DR-R4 DOM renderer's
 // `deepreview-unified-line-*` rules so the diff read the same after the port.
@@ -31,20 +39,35 @@
   min-height 0
   width 100%
 
-  // Dual old/new line numbers are one padded label per line, so the gutter has
-  // to keep the padding that aligns the two columns.
+  // The old/new line numbers are one column per side of the diff editor —
+  // the original editor's margin carries the old numbers, the modified
+  // editor's the new ones — and each label is `<marker><number>`
+  // (`diff_document.lineNumberLabels`).  `white-space: pre` keeps the padding
+  // that aligns the digits under each other.
+  //
+  // The `!important` is not decoration: the global `.line-numbers` rule in
+  // `styles/index.styl` sets `padding-right: 0 !important`, so without it the
+  // digits sit flush against the first character of the code — which is
+  // exactly what a design review reported ("10def format_row").
   .line-numbers
     white-space pre
     text-align right
+    padding-right 0.9em !important
 
 // --- Whole-line decorations ---------------------------------------------
 
-.ct-diff-line-added
-  background-color rgba(63, 185, 80, 0.10)
-
-.ct-diff-line-removed
-  background-color rgba(248, 81, 73, 0.10)
-
+// UD-1: the added / removed wash is now MONACO's.  A diff editor paints
+// `.line-insert` and `.line-delete` over the lines it decided changed, and it
+// paints them over the editor's full scroll width; ours were painted over the
+// model's own line width, so the two disagreed at the right-hand edge and left
+// a visible seam where one band stopped and the other carried on.
+//
+// The classes are still emitted — they are the diff document's own
+// classification, they carry the hunk-selection modifier below, and the GUI
+// suites assert on them — but the paint belongs to whoever computed the diff,
+// and after this milestone that is the editor.
+.ct-diff-line-added,
+.ct-diff-line-removed,
 .ct-diff-line-context
   background-color transparent
 
@@ -102,15 +125,31 @@
   text-align center
   user-select none
 
-.ct-diff-gutter-added::before
-  content "+"
-  color #3fb950
-
-.ct-diff-gutter-removed::before
-  content "-"
-  color #f85149
-
+// UD-1 moved the visible marker into the gutter LABEL
+// (`diff_document.lineNumberLabels` emits `+42` / `-41` / ` 40`), so these
+// classes are now the classification only — the seam the GUI suites assert
+// the added / removed / context decision on, and the hook any future gutter
+// affordance hangs from.
+//
+// They stopped drawing the glyph because they cannot: Monaco sizes the
+// *original* editor of an inline diff from its `lineNumbersMinChars` alone,
+// and a line-decorations lane beside the numbers there does not fit at any
+// width Monaco grants — measured, it took the old line numbers off screen
+// with it, and a design review reported the deleted lines as unnumbered.
+// One marker, in a column that exists on both sides, is the resolution.
+.ct-diff-gutter-added::before,
+.ct-diff-gutter-removed::before,
 .ct-diff-gutter-context::before
-  // A blank marker, so context lines keep the same content indent as changed
-  // ones instead of shifting left.
-  content " "
+  content ""
+
+// The marker's colour comes from the label it now lives in.  Monaco applies a
+// decoration's `lineNumberClassName` to that line's gutter label
+// (`IModelDecorationOptions.lineNumberClassName`, monaco-editor 0.54), which
+// is the one hook that can colour a *specific* line's number — the polarity
+// has to be per line, not per side, or every context line in the new revision
+// would read as an addition.
+.ct-diff-linenum-added
+  color #3fb950 !important
+
+.ct-diff-linenum-removed
+  color #f85149 !important

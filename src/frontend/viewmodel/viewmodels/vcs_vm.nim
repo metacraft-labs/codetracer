@@ -90,6 +90,9 @@ type
   VCSDiffLineRow* = object
     lineType*: string
     content*: string
+      ## The line as the data source wrote it, which is **not** uniformly the
+      ## file's own text: see ``diffLineText`` for the one rule that turns it
+      ## into that.
     oldLine*: int
     newLine*: int
 
@@ -292,6 +295,44 @@ proc `==`*(a, b: VCSFileRow): bool {.noSideEffect.} =
 proc `==`*(a, b: VCSDiffLineRow): bool {.noSideEffect.} =
   a.lineType == b.lineType and a.content == b.content and
     a.oldLine == b.oldLine and a.newLine == b.newLine
+
+proc diffLineText*(lineType, content: string): string {.noSideEffect.} =
+  ## The **file's own text** for one diff line, with the unified-diff marker
+  ## removed if the data source attached one.
+  ##
+  ## The two producers disagree, and have since before the Monaco port:
+  ##
+  ## * ``ui/git_cli.parseGitDiffHunks`` strips the marker (``rawLine[1 .. ^1]``)
+  ##   for every kind;
+  ## * the materialized collector
+  ##   (``db-backend/src/deepreview/unified_diff.rs``) keeps it for added and
+  ##   removed lines and strips it for context lines — "the sample dataset
+  ##   shows added/removed lines keeping their marker", as its own comment
+  ##   says.
+  ##
+  ## ``ct/agent_cli.unifiedDiffLine`` already resolves the same disagreement in
+  ## the *other* direction, and states the convention: "Collectors write
+  ## added/removed content with its marker already attached and context content
+  ## without one, so the marker is added only where it is missing."  This is
+  ## exactly its inverse, so a round trip through the two is the identity, and
+  ## the residual ambiguity (a file line whose own first character is ``+`` on
+  ## an added line) is the same ambiguity that function already accepts.
+  ##
+  ## UD-1 is what forced this to be stated once rather than tolerated twice: a
+  ## real Monaco diff editor owns *both sides* of the text and computes the
+  ## word-level marking itself, so a stray ``+`` in the model is not a cosmetic
+  ## blemish — it is a character that differs on every changed line, and it
+  ## would be marked as the change.
+  case lineType
+  of "added", "add":
+    if content.len > 0 and content[0] == '+': content[1 .. ^1] else: content
+  of "removed", "delete", "deleted":
+    if content.len > 0 and content[0] == '-': content[1 .. ^1] else: content
+  else:
+    content
+
+proc diffLineText*(line: VCSDiffLineRow): string {.noSideEffect.} =
+  diffLineText(line.lineType, line.content)
 
 proc `==`*(a, b: VCSHunkRow): bool {.noSideEffect.} =
   a.oldStart == b.oldStart and a.oldCount == b.oldCount and
@@ -709,7 +750,11 @@ proc buildPatchFromSelectedHunks*(vm: VCSVM): string =
           of "added": "+"
           of "removed": "-"
           else: " "
-        parts.add(prefix & line.content)
+        # `diffLineText` first: a review's rows carry the marker already, so
+        # concatenating the prefix onto the raw content emitted `++foo` and
+        # `--foo` — a patch git refuses. Rows parsed from `git diff` are
+        # unaffected, which is why the goldens below did not catch it.
+        parts.add(prefix & diffLineText(line))
 
   if parts.len == 0:
     return ""

@@ -1,10 +1,13 @@
 ## The unified diff as an editor *document*: pure text + pure decorations.
 ##
-## DR-R4 (``codetracer-specs/DeepReview/DeepReview-GUI.milestones.org``) turns
-## the unified diff into a real Monaco tab.  This module is the seam that makes
-## that testable without a browser: diff rows in, one document line and one
-## decoration per rendered line out.  Nothing here touches Monaco, the DOM or
-## any signal — the host (``ui/unified_diff.nim``) only turns
+## DR-R4 (``codetracer-specs/DeepReview/DeepReview-GUI.milestones.org``) turned
+## the unified diff into a real Monaco tab; UD-1
+## (``codetracer-specs/DeepReview/Unified-Diff-Design.milestones.org``) turned
+## it into a real Monaco *diff editor*.  This module is the seam that makes
+## both testable without a browser: diff rows in, TWO documents
+## (``DiffPair``) and one decoration per rendered line out, plus the Monaco
+## language id the models are created with.  Nothing here touches Monaco, the
+## DOM or any signal — the host (``ui/unified_diff.nim``) only turns
 ## ``documentText`` into a model and ``decorationsFor`` into a Monaco
 ## decoration collection.
 ##
@@ -64,8 +67,45 @@ type
       ## unchanged line.  The flag only adds a marker class, so nothing
       ## downstream has to learn a new case.
 
+  DiffSide* = enum
+    ## Which revision of the file a document describes.
+    dsOriginal  ## the old revision — the diff editor's `original` model
+    dsModified  ## the new revision — the diff editor's `modified` model
+
   DiffDocument* = object
     lines*: seq[DiffDocumentLine]
+
+  DiffPair* = object
+    ## The two documents a Monaco **diff editor** compares (UD-1).
+    ##
+    ## Before UD-1 there was one document, interleaving both revisions, and it
+    ## was created with ``language: "plaintext"`` because no tokenizer
+    ## describes such a thing.  Every weakness of the old surface followed from
+    ## that: no syntax highlighting, because no tokenizer ran; no word-level
+    ## marking, because a single document has no *before* and *after* to
+    ## compare.
+    ##
+    ## So the document is split in two.  ``original`` holds the old revision's
+    ## lines, ``modified`` the new revision's, and Monaco is given both and
+    ## asked to diff them itself — which is also how the intra-line marking
+    ## arrives: it is computed by the editor, not written by us.
+    ##
+    ## The two sides share their **chrome** — the file header, the ``@@``
+    ## divider and the expansion controls, which DeepReview-GUI.md §4.1 and
+    ## §4.2 require.  Shared, and byte-identical, so Monaco classifies them as
+    ## unchanged and draws each exactly once; they are also what anchors the
+    ## comparison, so a hunk's lines cannot be matched against a neighbouring
+    ## hunk's or, in a multi-file target, against another file's.
+    ##
+    ## ``modified`` is a ``DiffDocument`` and not a new shape because it is the
+    ## document the Omniscience overlay maps onto: flow, values and the two
+    ## steppers are all keyed on new-side source lines
+    ## (``review_flow_overlay.nim``), and the new side *is* ``modified``.
+    original*: DiffDocument
+    modified*: DiffDocument
+    language*: string
+      ## The Monaco language id both models are created with — resolved from
+      ## the file path, so the reviewed language is tokenized.
 
   DiffExpandTarget* = object
     ## What an expand control at some model line would expand.
@@ -82,7 +122,15 @@ type
     ## One Monaco whole-line decoration.
     line*: int             ## 1-based model line number
     className*: string     ## whole-line class (background / colour)
-    gutterClassName*: string  ## ``linesDecorationsClassName`` — the +/- marker
+    gutterClassName*: string
+      ## ``linesDecorationsClassName`` — the classification of the line, in
+      ## the margin's decorations lane.  Since UD-1 the visible `+` / `-`
+      ## marker is in the gutter *label* instead (``lineNumberLabels``); this
+      ## remains the seam the GUI suites assert the added / removed / context
+      ## decision on.
+    lineNumberClassName*: string
+      ## ``IModelDecorationOptions.lineNumberClassName`` — colours THIS line's
+      ## gutter label, which is where the marker now lives.
 
 const
   DiffLineBaseClass* = "ct-diff-line"
@@ -112,10 +160,165 @@ const
   DiffGutterRemovedClass* = "ct-diff-gutter ct-diff-gutter-removed"
   DiffGutterContextClass* = "ct-diff-gutter ct-diff-gutter-context"
 
+  ## Applied to the line's *gutter label* rather than to the line-decorations
+  ## lane (Monaco's ``IModelDecorationOptions.lineNumberClassName``), because
+  ## UD-1 moved the `+` / `-` marker into the label — see
+  ## ``lineNumberLabels``.  These are what colour it, and they have to be per
+  ## line rather than per side: every context line of the new revision would
+  ## otherwise read as an addition.
+  DiffLineNumberAddedClass* = "ct-diff-linenum-added"
+  DiffLineNumberRemovedClass* = "ct-diff-linenum-removed"
+
   DiffEmptyDocumentText* = "No changes to show."
     ## The model text of a diff tab whose target produced no hunks.  A Monaco
     ## model cannot be empty and still be an editor, and a blank buffer would
     ## read as "still loading".
+
+const
+  DiffPlainLanguage* = "plaintext"
+    ## What a file whose language Monaco cannot tokenize is opened as.
+    ##
+    ## Monaco's own fallback for an id it does not know is to tokenize nothing,
+    ## which looks identical — but naming the fallback explicitly is what lets
+    ## ``diffLanguageForPath`` be asserted on, and what stops an unregistered
+    ## id (see below) from being mistaken for a working one.
+
+  DiffLanguageByExtension*: seq[(string, string)] = @[
+    # ---- the ids below are exactly the ones the vendored Monaco registers ---
+    #
+    # monaco-editor 0.54.0 (`node_modules/monaco-editor`, vendored at
+    # `src/public/third_party/monaco-editor/min`) registers 89 language ids in
+    # `vs/basic-languages/monaco.contribution.js`, plus `json`, `css`, `html`
+    # and `typescript` from the language-service contributions, plus `nim`,
+    # which CodeTracer registers itself in
+    # `src/frontend/languages/nimLanguage.js`.  Anything else is silently not
+    # tokenized, so every value here was checked against that list rather than
+    # guessed.
+    #
+    # This is deliberately NOT `common_lang.toCLang`, which `ui/editor.nim`
+    # passes to Monaco today: that function answers "what is this language
+    # called", and its answers include `assembly`, `noir`, `c++`, `crystal`,
+    # `ada`, `fortran`, `move`, `cairo` and `unknown` — none of which Monaco
+    # has ever registered, so an editor opened on those files has been getting
+    # no highlighting at all.  See `.agents/codebase-insights.txt`.
+    ("c", "c"), ("h", "c"),
+    ("cpp", "cpp"), ("cxx", "cpp"), ("cc", "cpp"), ("hpp", "cpp"),
+    ("hxx", "cpp"), ("hh", "cpp"), ("ipp", "cpp"),
+    ("cs", "csharp"),
+    ("rs", "rust"),
+    # Noir has no Monaco tokenizer.  Rust is what `ui/editor.nim` already
+    # substitutes for it ("if lang == LangNoir: lang = LangRust"), and the two
+    # share `fn`, `let`, `mut`, `struct`, `impl`, `//` and the literal forms,
+    # so the substitution is a good approximation rather than a shrug.
+    ("nr", "rust"),
+    ("nim", "nim"), ("nims", "nim"), ("nimble", "nim"),
+    ("go", "go"),
+    ("py", "python"), ("pyi", "python"),
+    ("rb", "ruby"), ("gemspec", "ruby"),
+    ("js", "javascript"), ("mjs", "javascript"), ("cjs", "javascript"),
+    ("jsx", "javascript"),
+    ("ts", "typescript"), ("tsx", "typescript"), ("mts", "typescript"),
+    ("cts", "typescript"),
+    ("java", "java"),
+    ("kt", "kotlin"), ("kts", "kotlin"),
+    ("scala", "scala"), ("sc", "scala"),
+    ("swift", "swift"),
+    ("dart", "dart"),
+    ("jl", "julia"),
+    ("lua", "lua"),
+    ("php", "php"),
+    ("ex", "elixir"), ("exs", "elixir"),
+    ("pl", "perl"), ("pm", "perl"),
+    ("r", "r"),
+    ("sol", "sol"),
+    ("sh", "shell"), ("bash", "shell"), ("zsh", "shell"),
+    ("ps1", "powershell"),
+    ("pas", "pascal"), ("pp", "pascal"),
+    ("sv", "systemverilog"), ("svh", "systemverilog"),
+    ("v", "verilog"), ("vh", "verilog"),
+    ("vb", "vb"),
+    ("tcl", "tcl"),
+    ("m", "objective-c"),
+    ("clj", "clojure"), ("cljs", "clojure"),
+    ("fs", "fsharp"), ("fsx", "fsharp"),
+    ("proto", "proto"),
+    ("graphql", "graphql"), ("gql", "graphql"),
+    ("hcl", "hcl"), ("tf", "hcl"),
+    ("sql", "sql"),
+    ("json", "json"),
+    ("yaml", "yaml"), ("yml", "yaml"),
+    ("xml", "xml"),
+    ("html", "html"), ("htm", "html"),
+    ("css", "css"), ("scss", "scss"), ("less", "less"),
+    ("md", "markdown"), ("markdown", "markdown"),
+    ("ini", "ini"), ("toml", "ini"), ("cfg", "ini"),
+    ("bat", "bat"), ("cmd", "bat"),
+    ("dockerfile", "dockerfile"),
+    ("st", "st"),
+    ("rst", "restructuredtext"),
+  ]
+
+proc diffFileExtension*(path: string): string {.noSideEffect.} =
+  ## The lowercased extension of ``path``, without the dot, or "".
+  ##
+  ## Hand-rolled rather than ``os.splitFile`` so this module stays free of
+  ## ``std/os``: it is compiled to JavaScript for the renderer as well as
+  ## natively for the ViewModel suites, and the JS backend's ``os`` is a
+  ## partial emulation.  A dot in a *directory* name must not be read as the
+  ## file's extension, hence the separator scan.
+  var lastDot = -1
+  var lastSep = -1
+  for i, c in path:
+    if c == '.':
+      lastDot = i
+    elif c == '/' or c == '\\':
+      lastSep = i
+      lastDot = -1
+  if lastDot <= lastSep + 1 or lastDot == path.high:
+    # No dot after the last separator, a leading dot (`.gitignore` is not an
+    # extension of nothing), or a trailing dot.
+    return ""
+  path[lastDot + 1 .. ^1].toLowerAscii
+
+proc diffLanguageForPath*(path: string): string {.noSideEffect.} =
+  ## The Monaco language id a diff tab on ``path`` opens its models with.
+  ##
+  ## UD-1's second deliverable: "the language resolved from the file so the
+  ## reviewed language is tokenized".  The old surface hard-coded
+  ## ``plaintext``, and this is what replaces that constant.
+  ##
+  ## A path with no usable extension resolves to ``plaintext`` rather than to a
+  ## guess: a wrongly tokenized file is worse than an untokenized one, because
+  ## it looks authoritative.
+  let extension = diffFileExtension(path)
+  if extension.len == 0:
+    return DiffPlainLanguage
+  for entry in DiffLanguageByExtension:
+    if entry[0] == extension:
+      return entry[1]
+  DiffPlainLanguage
+
+proc diffLanguageForFiles*(files: openArray[VCSDiffFileRow]): string
+    {.noSideEffect.} =
+  ## The language a whole diff target is tokenized as.
+  ##
+  ## A review's diff tab shows exactly one file — DeepReview-GUI.md §4.1,
+  ## "Each diff tab shows a single file" — so this is normally that file's
+  ## language.  A *git* target can name several ("Working Tree"), and there the
+  ## honest answer is only a language if they agree: tokenizing a Python file
+  ## as Rust because it shares a tab with one would be worse than tokenizing
+  ## neither.
+  result = ""
+  for file in files:
+    if file.hunks.len == 0:
+      continue
+    let language = diffLanguageForPath(file.path)
+    if result.len == 0:
+      result = language
+    elif result != language:
+      return DiffPlainLanguage
+  if result.len == 0:
+    result = DiffPlainLanguage
 
 proc hunkHeaderText*(hunk: VCSHunkRow): string {.noSideEffect.} =
   ## The `@@` section divider.  Identical to the string the pre-DR-R4 DOM
@@ -161,28 +364,57 @@ proc expandAboveText*(): string {.noSideEffect.} =
 proc expandBelowText*(): string {.noSideEffect.} =
   "... Expand " & $ContextExpandStep & " lines below"
 
-proc buildDiffDocument*(files: openArray[VCSDiffFileRow];
-                        expansion: openArray[VCSHunkExpansion] = []):
-                        DiffDocument =
-  ## Assemble the document a diff tab's Monaco model holds.
+proc buildDiffPair*(files: openArray[VCSDiffFileRow];
+                    expansion: openArray[VCSHunkExpansion] = []): DiffPair =
+  ## Assemble the two documents a diff tab's Monaco **diff editor** compares.
   ##
   ## Order is exactly the render order of the rows: for each file, its header,
   ## then for each hunk the `@@` divider, the expand-above control, the lines
   ## expansion has revealed above, the hunk's own lines, the lines revealed
   ## below, and the expand-below control.  That is the order the standalone
-  ## panel's DOM renderer used (``isonim_deepreview_view.nim``), so the
-  ## migrated surface reads identically.  Files with no hunks are skipped —
-  ## they have nothing to show and a bare header would read as an empty diff
-  ## for a file that was not, in fact, part of the changeset the target named.
+  ## panel's DOM renderer used (``isonim_deepreview_view.nim``), and the order
+  ## the pre-UD-1 single document used, so the surface reads the same.  Files
+  ## with no hunks are skipped — they have nothing to show and a bare header
+  ## would read as an empty diff for a file that was not, in fact, part of the
+  ## changeset the target named.
+  ##
+  ## What changed in UD-1 is *where each line goes*:
+  ##
+  ## | line              | original | modified |
+  ## |-------------------+----------+----------|
+  ## | file header       | yes      | yes      |
+  ## | ``@@`` divider    | yes      | yes      |
+  ## | expand control    | yes      | yes      |
+  ## | context           | yes      | yes      |
+  ## | revealed context  | yes      | yes      |
+  ## | removed           | yes      | no       |
+  ## | added             | no       | yes      |
+  ##
+  ## and that the code lines carry ``diffLineText`` — the file's own text —
+  ## rather than the raw ``content`` a review's collector writes with its
+  ## ``+``/``-`` marker still attached.  Feeding the marker to a diff editor
+  ## would put a differing character on *every* changed line, which is exactly
+  ## what the word-level marking would then report.
+  ##
+  ## Everything present on both sides is byte-identical, so Monaco classifies
+  ## it as unchanged and renders it once.
   ##
   ## ``expansion`` defaults to empty, which is exactly "nothing expanded yet":
   ## the controls still appear wherever hidden lines exist, so a caller that
   ## does not track expansion still gets a correct, if static, document.
-  result.lines = @[]
+  result.original.lines = @[]
+  result.modified.lines = @[]
+  result.language = diffLanguageForFiles(files)
+
+  # Local so the "both sides" cases below cannot drift apart by editing one.
+  proc bothSides(pair: var DiffPair; line: DiffDocumentLine) =
+    pair.original.lines.add(line)
+    pair.modified.lines.add(line)
+
   for file in files:
     if file.hunks.len == 0:
       continue
-    result.lines.add(DiffDocumentLine(
+    result.bothSides(DiffDocumentLine(
       kind: dlkFileHeader,
       text: fileHeaderText(file),
       fileIndex: file.fileIndex,
@@ -191,7 +423,7 @@ proc buildDiffDocument*(files: openArray[VCSDiffFileRow];
       let counts = expansionCountsIn(expansion, file.fileIndex, hunkIndex)
       let window = expansionWindow(hunk, file.sourceLines, counts[0], counts[1])
 
-      result.lines.add(DiffDocumentLine(
+      result.bothSides(DiffDocumentLine(
         kind: dlkHunkHeader,
         text: hunkHeaderText(hunk),
         fileIndex: file.fileIndex,
@@ -200,15 +432,15 @@ proc buildDiffDocument*(files: openArray[VCSDiffFileRow];
       # The control is offered only while a further click would reveal
       # something, so a user never presses a button that cannot act.
       if window.canExpandAbove:
-        result.lines.add(DiffDocumentLine(
+        result.bothSides(DiffDocumentLine(
           kind: dlkExpandAbove,
           text: expandAboveText(),
           fileIndex: file.fileIndex,
           hunkIndex: hunkIndex))
       for line in window.above:
-        result.lines.add(DiffDocumentLine(
+        result.bothSides(DiffDocumentLine(
           kind: lineKindFor(line.lineType),
-          text: line.content,
+          text: diffLineText(line),
           oldNumber: line.oldLine,
           newNumber: line.newLine,
           fileIndex: file.fileIndex,
@@ -216,32 +448,40 @@ proc buildDiffDocument*(files: openArray[VCSDiffFileRow];
           revealed: true))
 
       for line in hunk.lines:
-        result.lines.add(DiffDocumentLine(
+        let documentLine = DiffDocumentLine(
           kind: lineKindFor(line.lineType),
-          text: line.content,
+          text: diffLineText(line),
           oldNumber: line.oldLine,
           newNumber: line.newLine,
           fileIndex: file.fileIndex,
-          hunkIndex: hunkIndex))
+          hunkIndex: hunkIndex)
+        case documentLine.kind
+        of dlkRemoved:
+          # No position in the new revision — it is what the old side had.
+          result.original.lines.add(documentLine)
+        of dlkAdded:
+          result.modified.lines.add(documentLine)
+        else:
+          result.bothSides(documentLine)
 
       for line in window.below:
-        result.lines.add(DiffDocumentLine(
+        result.bothSides(DiffDocumentLine(
           kind: lineKindFor(line.lineType),
-          text: line.content,
+          text: diffLineText(line),
           oldNumber: line.oldLine,
           newNumber: line.newLine,
           fileIndex: file.fileIndex,
           hunkIndex: hunkIndex,
           revealed: true))
       if window.canExpandBelow:
-        result.lines.add(DiffDocumentLine(
+        result.bothSides(DiffDocumentLine(
           kind: dlkExpandBelow,
           text: expandBelowText(),
           fileIndex: file.fileIndex,
           hunkIndex: hunkIndex))
 
-proc diffDocumentFor*(vm: VCSVM): DiffDocument =
-  ## The document for the diff a panel currently holds.
+proc diffPairFor*(vm: VCSVM): DiffPair =
+  ## The two documents for the diff a panel currently holds.
   ##
   ## This reads ``vm.diffFiles`` and ``vm.hunkExpansion`` and *nothing else* —
   ## in particular not ``vm.deepReviewMode``.  That is the mode-agnosticism
@@ -252,7 +492,7 @@ proc diffDocumentFor*(vm: VCSVM): DiffDocument =
   ## difference is answered before the rows reach here: whoever filled
   ## ``VCSDiffFileRow.sourceLines`` has already decided whether that text came
   ## from a review export or from ``git show``.
-  buildDiffDocument(vm.diffFiles.val, vm.hunkExpansion.val)
+  buildDiffPair(vm.diffFiles.val, vm.hunkExpansion.val)
 
 proc documentText*(doc: DiffDocument): string {.noSideEffect.} =
   ## The Monaco model's value.
@@ -273,6 +513,17 @@ proc classFor*(kind: DiffLineKind): string {.noSideEffect.} =
   of dlkExpandAbove: DiffExpandAboveClass
   of dlkExpandBelow: DiffExpandBelowClass
 
+proc lineNumberClassFor*(kind: DiffLineKind): string {.noSideEffect.} =
+  ## The class that colours the `+` / `-` marker now carried by the label.
+  ##
+  ## A context line gets none: its number is ordinary chrome, and colouring it
+  ## would make an unchanged line read as a change.
+  case kind
+  of dlkAdded: DiffLineNumberAddedClass
+  of dlkRemoved: DiffLineNumberRemovedClass
+  of dlkContext, dlkFileHeader, dlkHunkHeader,
+     dlkExpandAbove, dlkExpandBelow: ""
+
 proc gutterClassFor*(kind: DiffLineKind): string {.noSideEffect.} =
   ## The class that draws the `+` / `-` gutter marker VCS-Panel.md requires.
   ## Headers and the expand controls get none: they are chrome, not content.
@@ -290,23 +541,58 @@ proc oldNumberText*(line: DiffDocumentLine): string {.noSideEffect.} =
 proc newNumberText*(line: DiffDocumentLine): string {.noSideEffect.} =
   if line.newNumber > 0: $line.newNumber else: ""
 
-proc lineNumberLabels*(doc: DiffDocument; width = 4): seq[string] =
-  ## Dual old/new line numbers, one label per model line, in the order Monaco
-  ## asks for them.
+proc lineMarkerFor*(kind: DiffLineKind): string {.noSideEffect.} =
+  ## The `+` / `-` marker VCS-Panel.md requires, as a character.
+  ##
+  ## A *space* for a context line rather than nothing, so the numbers of
+  ## changed and unchanged lines stay in the same column — the same reason
+  ## `DiffGutterContextClass` used to draw a blank marker.
+  case kind
+  of dlkAdded: "+"
+  of dlkRemoved: "-"
+  of dlkContext: " "
+  of dlkFileHeader, dlkHunkHeader, dlkExpandAbove, dlkExpandBelow: ""
+
+proc lineNumberLabels*(doc: DiffDocument; side: DiffSide; width = 4):
+    seq[string] =
+  ## One `<marker><number>` gutter label per model line, for one side of the
+  ## diff editor.
   ##
   ## The pre-DR-R4 DOM renderer drew two gutter columns
-  ## (``deepreview-unified-gutter-old`` / ``-new``); Monaco has one, so the two
-  ## numbers are padded into a single right-aligned label and the gutter is
-  ## given ``white-space: pre`` so the padding survives.  ``width`` is the
-  ## per-column width the host derives from the largest number in the document.
+  ## (``deepreview-unified-gutter-old`` / ``-new``), and DR-R4 kept both by
+  ## padding them into a single label, because one synthetic model had only one
+  ## gutter to put them in.
+  ##
+  ## UD-1 has two editors, so the two columns are back to being two columns:
+  ## the original editor's margin carries the old numbers and the modified
+  ## editor's carries the new ones, side by side in the order Monaco lays them
+  ## out.  That is also how VS Code's inline diff draws it.  Emitting both
+  ## numbers on both sides — which is what the DR-R4 label did — produced four
+  ## columns, two of them duplicates, and clipped the old numbers away
+  ## entirely: Monaco sizes the original editor of an inline diff from its
+  ## ``lineNumbersMinChars`` alone, so a margin wider than that is simply cut
+  ## off, and a reviewer reported the deleted lines as unnumbered.
+  ##
+  ## The marker is part of the *label* rather than a decoration in Monaco's
+  ## line-decorations lane, for the same reason.  That lane is to the right of
+  ## the numbers, and it does not fit beside them in the original editor's
+  ## strip at any width Monaco will grant it; putting the marker in the label
+  ## costs one character, is symmetric across the two sides, and reads the way
+  ## a unified diff has always read.
+  ##
+  ## ``width`` is the number column's width, derived from the largest number in
+  ## either document so the two margins agree.  The gutter is given
+  ## ``white-space: pre`` so the padding survives.
   result = newSeq[string](doc.lines.len)
   for i, line in doc.lines:
-    if line.kind in {dlkFileHeader, dlkHunkHeader,
-                     dlkExpandAbove, dlkExpandBelow}:
+    let marker = lineMarkerFor(line.kind)
+    if marker.len == 0:
+      # Chrome, present on both sides and belonging to neither revision.
       result[i] = ""
     else:
-      result[i] = align(oldNumberText(line), width) & " " &
-                  align(newNumberText(line), width)
+      result[i] = marker & align(
+        if side == dsOriginal: oldNumberText(line) else: newNumberText(line),
+        width)
 
 proc lineNumberWidth*(doc: DiffDocument): int {.noSideEffect.} =
   ## Digits needed by the widest line number in the document, minimum 1.
@@ -315,6 +601,16 @@ proc lineNumberWidth*(doc: DiffDocument): int {.noSideEffect.} =
     let n = max(len(oldNumberText(line)), len(newNumberText(line)))
     if n > result:
       result = n
+
+proc lineNumberColumnWidth*(pair: DiffPair): int {.noSideEffect.} =
+  ## Characters one side's gutter needs: the widest number plus its marker.
+  ##
+  ## Shared by both sides so the two columns are the same size and read as one
+  ## gutter.  It is what the host passes to Monaco as ``lineNumbersMinChars``,
+  ## and — because Monaco sizes the inline diff's original editor from exactly
+  ## that number — it is also what decides whether the old numbers are visible
+  ## at all.
+  max(lineNumberWidth(pair.original), lineNumberWidth(pair.modified)) + 1
 
 proc isHunkSelected(selected: openArray[(int, int)];
                     fileIndex, hunkIndex: int): bool {.noSideEffect.} =
@@ -344,7 +640,8 @@ proc decorationsFor*(doc: DiffDocument;
     result[i] = DiffDecoration(
       line: i + 1,
       className: className,
-      gutterClassName: gutterClassFor(line.kind))
+      gutterClassName: gutterClassFor(line.kind),
+      lineNumberClassName: lineNumberClassFor(line.kind))
 
 proc hunkAtLine*(doc: DiffDocument; modelLine: int): (int, int) {.noSideEffect.} =
   ## The (fileIndex, hunkIndex) a 1-based model line belongs to, or (-1, -1).
