@@ -40,6 +40,55 @@ All notable changes to this project will be documented in this file.
   accepted, select nothing native, and print a `note:` on stderr when the target
   turns out to be native.
 
+- **The replay-worker socket now carries the language as a *name*, not as an
+  enum ordinal, so `codetracer` and `ct-native-replay` must be upgraded
+  together.** The `LoadLocals`, `LoadValue`, `LoadReturnValue` and
+  `EvaluateWithAddress` queries used to put `Lang` on the wire as a
+  `serde_repr` integer, which made the *declaration order* of two
+  independently-maintained enums — one in this repository, one in
+  `codetracer-native-backend` — a binary contract. The two had already
+  diverged (the backend has a `Small` variant this one does not; this one has
+  the whole blockchain-VM block the backend does not), so the integers agreed
+  only for the low ordinals and silently disagreed above them. They now travel
+  as `"c"`, `"cpp"`, `"rust"`, … and a name the backend cannot debug is
+  rejected at the boundary, by name, instead of being narrowed onto a default.
+
+  **This is deliberately not backward compatible in either direction.**
+  `ct-native-replay` is discovered on `PATH` rather than bundled, so a
+  mismatched pair is a real deployment state. It fails loudly rather than
+  misreading: the worker answers `error: parsing query error: … expected a
+  string` (old core, new worker) or `… invalid type: string`, `expected u8`
+  (new core, old worker), and the core surfaces that as a query error. Nothing
+  decodes a value with the wrong language's loader.
+
+  The failure is, however, **partial and therefore easy to misread**: every
+  query that does not carry a language — stepping, breakpoints, the callstack,
+  jumping — keeps working on a skewed pair, so a session starts and navigates
+  normally and only the *variables* fail to load. If values fail while
+  everything else works, check that `ct-native-replay --version` comes from the
+  same release as `ct`.
+
+### Fixed
+
+- **Values in C and C++ code are no longer decoded with the Rust value
+  loader when the replay stops inside a header.** Neither `.h` nor any of the
+  C++ header spellings (`.hpp`, `.hh`, `.hxx`, `.h++`, `.ipp`, `.tcc`) mapped
+  to a language, so an rr replay stopping in an inline function, a template
+  body, or any `std::` internal resolved to `Unknown` — and the native worker's
+  value-loader lookup ended in a catch-all that handed `Unknown` to the **Rust**
+  loader. Locals in those frames were rendered as Rust-shaped values with no
+  diagnostic anywhere. The header extensions are now mapped, the catch-all is
+  gone, and a language with no value loader is reported as an error and
+  degraded to the raw debugger representation instead of being guessed at.
+
+- **A binary whose language cannot be determined is now recorded as
+  `unknown` rather than as `c`.** `ct-native-replay record` treated "no DWARF
+  evidence and no recognisable source extension" as C — one branch even printed
+  `lang: Unknown (defaulting to C)` — which was indistinguishable from a real C
+  binary to everything downstream, including the code that then declined to
+  consult the source extensions because it thought the language was already
+  known.
+
 ### Added
 
 - **`ct record` and `ct run` now really ask `ct-native-replay` what a target

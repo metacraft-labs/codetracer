@@ -119,6 +119,31 @@ const WASM_LANGS = {
 }.toTable()
 
 proc detectLangFromPath*(path: string, isWasm: bool): Lang =
+  ## Map a path's file extension onto a `Lang`, or `LangUnknown` when the
+  ## extension is not one this build knows.
+  ##
+  ## ## Why the final `return LangUnknown` is written out
+  ##
+  ## It used to be absent.  Nim initialises `result` to the enum's **zero
+  ## value**, and `LangC` is ordinal 0, so every path whose extension was not
+  ## in `LANGS` fell off the end of this proc and was reported as **C**.  That
+  ## is not a hypothetical: `a.out`, `my.project`, `python3.11`, `libfoo.so.1`,
+  ## `data.json`, `notes.txt` and `archive.tar.gz` all resolved to `LangC`.
+  ## Only a name with no dot at all reached the `ext.len <= 1` guard above and
+  ## produced `LangUnknown`.
+  ##
+  ## The damage was not cosmetic.  `detectTarget` treats any non-`LangUnknown`
+  ## answer as "detection succeeded" and stops the ladder there, so a confident
+  ## wrong `LangC` for an extensionless-but-dotted native binary pre-empted the
+  ## `ct-native-replay recognize` delegation entirely — `ct record ./a.out`
+  ## printed "Assuming recording language LangC" and never spawned the
+  ## recognizer.
+  ##
+  ## The explicit return is required **regardless of which value is ordinal
+  ## zero**.  A proc whose correctness depends on the enum's declaration order
+  ## is not correct; it is merely lucky, and the luck is invisible at the call
+  ## site.  `lang_detection_test.nim` asserts the returned value directly so a
+  ## future reordering of `Lang` cannot quietly reintroduce the defect.
   let ext = path.splitFile.ext
   if ext.len <= 1:
     return LangUnknown
@@ -128,9 +153,11 @@ proc detectLangFromPath*(path: string, isWasm: bool): Lang =
     return WASM_LANGS[extension]
 
   if LANGS.hasKey(extension):
-    result = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
-    if result != LangUnknown:
-      return result
+    let known = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
+    if known != LangUnknown:
+      return known
+
+  LangUnknown
 
 
 type

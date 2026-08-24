@@ -8,11 +8,20 @@ import os
 
 type
   Lang* = enum ## Identifies a programming language implementation
-    ## Ordinals MUST match the Rust `Lang` enum in codetracer-native-backend/src/lang.rs
-    ## which uses `#[repr(u8)]` with `serde_repr` for cross-process trace
-    ## serialization.  Historical context (pre-M-REC-1.5): the integer
-    ## previously appeared inside the retired trace_db_metadata.json
-    ## sidecar.
+    ## Ordinals MUST match the Rust `Lang` enum in src/db-backend/src/lang.rs,
+    ## which uses `#[repr(u8)]` with `serde_repr`.  That is the enum on the
+    ## other side of the `ct/load-locals` DAP hop, where `lang` is still sent
+    ## as an integer (see `frontend/viewmodel/store/replay_data_store.nim`).
+    ##
+    ## It is NOT `codetracer-native-backend/src/lang.rs`, which this comment
+    ## used to name: that enum has a `Small` variant at ordinal 21, so the two
+    ## diverge from 21 onwards (`PythonDb` is 21 here and 22 there) and have
+    ## different lengths.  Nothing carries an ordinal between this enum and
+    ## that one; the replay worker socket between the two Rust crates now
+    ## carries language *names*.
+    ##
+    ## Historical context (pre-M-REC-1.5): the integer previously appeared
+    ## inside the retired trace_db_metadata.json sidecar.
     LangC,        # 0
     LangCpp,      # 1
     LangRust,     # 2

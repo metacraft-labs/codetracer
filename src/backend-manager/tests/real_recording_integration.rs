@@ -1549,13 +1549,22 @@ async fn test_real_rr_session_launches_db_backend() {
             "first open should not be cached"
         );
 
-        // The fallback to trace_db_metadata.json resolves the lang integer
-        // field (2 = Rust) via lang_id_to_name(), giving us correct language
-        // detection even for compiled binaries without file extensions.
+        // Language detection for a compiled binary with no file extension.
+        //
+        // NOT via a lang integer: `trace_db_metadata.json` was retired in
+        // M-REC-1.5 (`TraceMetadataError::MissingCtFile` says so in as many
+        // words) and `lang_id_to_name()` no longer exists anywhere in the
+        // tree.  What actually resolves this is a *string* extension hint —
+        // `ct-native-replay record` appends the detected language's canonical
+        // source extension to the `meta.dat::program` value
+        // (`record.rs::program_with_lang_extension_hint`), and the daemon's
+        // `trace_metadata.rs::detect_language` reads that extension back.
+        // When it yields "unknown", `read_trace_metadata` then falls back to
+        // the recorded source paths.
         let language = body.get("language").and_then(Value::as_str).unwrap_or("");
         assert_eq!(
             language, "rust",
-            "language should be 'rust' (from trace_db_metadata.json lang field)"
+            "language should be 'rust' (from the meta.dat program extension hint)"
         );
         log_line(&log_path, &format!("language: {language}"));
 
@@ -1756,12 +1765,14 @@ async fn test_real_rr_trace_info_returns_metadata() {
             "trace-info 'tracePath' should be a non-empty string, got body: {body}"
         );
 
-        // The fallback to trace_db_metadata.json resolves the lang integer
-        // field (2 = Rust) via lang_id_to_name().
+        // Resolved from the `meta.dat::program` extension hint that
+        // `ct-native-replay record` appends, not from a lang integer: the
+        // `trace_db_metadata.json` sidecar and `lang_id_to_name()` are both
+        // gone (M-REC-1.5).
         let language = body.get("language").and_then(Value::as_str).unwrap_or("");
         assert_eq!(
             language, "rust",
-            "trace-info 'language' should be 'rust' (from trace_db_metadata.json), got body: {body}"
+            "trace-info 'language' should be 'rust' (from the meta.dat program extension hint), got body: {body}"
         );
         log_line(&log_path, &format!("language: {language}"));
 
@@ -11503,14 +11514,16 @@ async fn test_real_rr_mcp_resource_read_info() {
             Some(trace_path_str.as_str()),
             "M11-RR-2: tracePath should match"
         );
-        // The fallback to trace_db_metadata.json resolves the lang integer
-        // field (2 = Rust) via lang_id_to_name().
+        // Resolved from the `meta.dat::program` extension hint that
+        // `ct-native-replay record` appends, not from a lang integer: the
+        // `trace_db_metadata.json` sidecar and `lang_id_to_name()` are both
+        // gone (M-REC-1.5).
         let language = info["language"]
             .as_str()
             .expect("M11-RR-2: language should be a string");
         assert_eq!(
             language, "rust",
-            "M11-RR-2: language should be 'rust' (from trace_db_metadata.json lang field)"
+            "M11-RR-2: language should be 'rust' (from the meta.dat program extension hint)"
         );
 
         // `totalEvents` should be a non-negative number.  The `.expect()`
@@ -14622,7 +14635,7 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
         let language = body.get("language").and_then(Value::as_str).unwrap_or("");
         assert_eq!(
             language, "rust",
-            "language should be 'rust' from trace_db_metadata.json lang=2, got: {language}"
+            "language should be 'rust' from the meta.dat program extension hint, got: {language}"
         );
 
         let program = body.get("program").and_then(Value::as_str).unwrap_or("");

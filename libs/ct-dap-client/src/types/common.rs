@@ -1,7 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-/// Language enum matching db-backend's Lang (repr(u8)).
+/// A `repr(u8)` language tag for the test DAP client.
+///
+/// This is NOT db-backend's `Lang`, despite what this comment used to claim:
+/// it has 21 variants against that enum's 40 and diverges from ordinal 6
+/// (`Fortran` there, `Python` here).  It is not live-reachable — this crate is
+/// a `[dev-dependencies]` entry used only by `src/db-backend/tests/*`, and the
+/// only value any of them constructs is `Lang::C`, which is 0 on both sides.
+/// Left as-is rather than widened: the tests do not exercise any other value,
+/// and a second 40-variant copy would be one more thing to keep in step.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum Lang {
