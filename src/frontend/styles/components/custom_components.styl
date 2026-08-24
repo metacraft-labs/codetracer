@@ -5,12 +5,34 @@
   align-items: center;
 
 #isonim-debug-controls
-  -webkit-app-region: no-drag
+  // The caption bar's left region drags; the control row inside it does not.
+  //
+  // This element is not the toolbar — it is the bar's left THIRD.  `#menu` gives
+  // it `flex: 1 1 0` so it takes an equal share of the leftover space with the
+  // session tab bar, which is what centres the command prompt between them (see
+  // components/menu_bar.styl).  So it is as wide as the tab strip opposite —
+  // ~887px on this display — while the buttons it holds come to ~520px.
+  //
+  // Marking this container `no-drag` therefore froze the whole 887px, including
+  // the ~367px of empty bar after the last button.  That is why the gap left of
+  // the command prompt would not move the window while the identical gap on its
+  // right would: the tab bar opposite has had the other arrangement all along
+  // (components/session_tabs.styl — "Empty bar area is draggable; child
+  // tabs/buttons override with no-drag").
+  //
+  // The opt-out is scoped to the direct child rather than to the buttons so the
+  // hole is exactly the control row: it then tracks the row's width by itself
+  // when buttons are added or removed, and the gaps between buttons stay
+  // non-draggable, so missing a button by a pixel does not drag the window.
+  -webkit-app-region: drag
   display: flex
   align-items: center
   align-self: center
   flex: 0 0 auto
   order: 2
+
+  > *
+    -webkit-app-region: no-drag
 
   .isonim-debug-controls
     height: 2.1em

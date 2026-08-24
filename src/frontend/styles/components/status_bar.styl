@@ -147,6 +147,11 @@
   flex-direction: column-reverse
   font-family: "SpaceGrotesk"
 
+  // Toasts stack above the bar and carry buttons; they must never become a
+  // window handle if one ever overlaps the footer.
+  > #active-notifications
+    -webkit-app-region: no-drag
+
 
   #status-base
     // Hosts the auto-hide bottom tab strip (#auto-hide-bottom-strip) alongside
@@ -225,6 +230,32 @@
     overflow: visible   // allow tab curve pseudo-elements to bleed above the bar
     padding-top: 0.25em    // breathing room so curves are visible above the tabs
     padding-bottom: 0.25em // mirrors side-strip padding-left/right: 0.25em
+
+    // The footer drags the window, like the caption bar does.
+    //
+    // Same arrangement as `#menu` (components/menu_bar.styl) and
+    // `.session-tab-bar` (components/session_tabs.styl): the bar drags, and the
+    // things it holds opt out, so only the space between them is a handle.
+    // Declared on the bar rather than on the empty area because there is no
+    // element for the empty area — it is whatever the tab strip does not fill.
+    -webkit-app-region: drag
+
+    // Readouts and controls behave normally: `.status-right` carries the
+    // location text, and text inside a drag region cannot be selected.
+    > *
+      -webkit-app-region: no-drag
+
+    // ...except the tab strip, which is `flex: 1` and so spans the whole bar
+    // (components/auto_hide.styl).  Marking it `no-drag` with the rest would
+    // freeze the footer end to end, because the empty area IS the strip's
+    // unfilled remainder — the same mistake the caption bar's left region made,
+    // where a `no-drag` container froze the 300-odd px of bar beside the debug
+    // toolbar.  So the strip drags and its tabs opt out individually.
+    > #auto-hide-bottom-strip
+      -webkit-app-region: drag
+
+      .auto-hide-strip-tab
+        -webkit-app-region: no-drag
 
     .checkbox
       display: inherit
