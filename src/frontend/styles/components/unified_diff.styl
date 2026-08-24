@@ -33,10 +33,21 @@
 //                         Integration)") requires moved into the gutter
 //                         LABEL, and `.ct-diff-linenum-*` colours them there.
 //
-// Colours were carried over from the pre-DR-R4 DOM renderer's
-// `deepreview-unified-line-*` rules so the diff read the same after the port.
-// That renderer and its stylesheet are both gone (DR-R8); these are now the
-// only definition.
+// COLOUR.  Every colour below is a design-system token, and where the editor
+// already colours the same concept the diff now uses the editor's own token:
+// an added marker is `text/success/primary` and a removed one
+// `text/error/primary`, exactly as `.diff-added-gutter` / `.diff-deleted-gutter`
+// in components/text_editor.styl paint them.  Selection is `border/action`, the
+// same indigo as the focus ring and the open branch picker.
+//
+// The row washes are the same tokens at low alpha rather than separate colours,
+// so a row and its marker are one hue at two strengths and cannot drift apart.
+//
+// Before this they were literals carried over from the pre-DR-R4 DOM renderer
+// (`deepreview-unified-line-*`) — GitHub's palette, not ours: #3fb950 against
+// the editor's #bbf7d0 for the same "added" idea, and #f85149 against #fca5a5
+// for "removed".  That renderer and its stylesheet are both gone (DR-R8), so
+// there was nothing left for them to stay consistent with.
 
 .unified-diff-container
   display flex
@@ -92,9 +103,34 @@
   // and the gap falls back to the lane's own width — the same 8px, rather
   // than to nothing.
   .line-numbers
+    // Same type as the editor's line numbers — one definition, in
+    // components/text_editor.styl.  Without it this gutter fell back to
+    // Monaco's own metrics: 16px at weight 400 against the editor's 14px at
+    // 300, so the two panels showed visibly different numbers.
+    line-number-type()
+    // The editor dims its numbers to half strength — `opacity: 0.5` on
+    // `.gutter-line` (components/text_editor.styl), the box that holds the
+    // number inside its gutter markup.  Both gutters already share the colour
+    // token; without this the diff painted it at full strength and simply read
+    // brighter than the editor beside it.
+    //
+    // The same mechanism rather than a pre-blended colour, so the two stay
+    // identical if the token behind them moves.  It lives here and not in
+    // `line-number-type()` because the editor applies it one level further in:
+    // putting it in the shared mixin would multiply with `.gutter-line`'s own
+    // 0.5 and take the editor down to a quarter.
+    opacity 0.5
     white-space pre
     text-align right
     padding-right 8px !important
+
+    // ...except the line the cursor is on, which `.active-line-number` in
+    // components/text_editor.styl brightens for both gutters.  The lift has to
+    // be repeated here: that rule and the `opacity 0.5` above tie on
+    // specificity, and this file loads later, so without it the dimming wins
+    // and halves the brighter colour straight back down.
+    &.active-line-number
+      opacity 1
 
 // --- Whole-line decorations ---------------------------------------------
 
@@ -214,10 +250,10 @@
 // Restrict the wash to lines that have no kind colour of their own, and let
 // the left edge carry selection everywhere else.
 .ct-diff-hunk-selected
-  box-shadow inset 0.1875em 0 0 0 #569cd6
+  box-shadow inset 0.1875em 0 0 0 colors-ui-border-action
 
 .ct-diff-line-context.ct-diff-hunk-selected
-  background-color rgba(86, 156, 214, 0.08)
+  background-color rgba(colors-ui-border-action, 0.10)
 
 // --- The file header (UD-2) ----------------------------------------------
 //

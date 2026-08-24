@@ -401,7 +401,16 @@ proc loadFromReview(self: UnifiedDiffComponent): bool =
 
 proc loadFromGit(self: UnifiedDiffComponent) =
   ## Fill the tab by asking git for the target's diff.
-  let cwd = gitWorkingDirectory(self.data)
+  ##
+  ## The REPOSITORY ROOT, not the opened project folder: three of the four
+  ## targets below carry a `--` pathspec, and git resolves those against the
+  ## current directory while the paths themselves come from
+  ## `git diff-tree --numstat`, which is relative to the root.  Opening a
+  ## project at a subdirectory made the two disagree, and every per-file and
+  ## per-commit diff came back empty — silently, since git treats "no path
+  ## matched" as an empty diff rather than an error.  Only the two targets with
+  ## no pathspec (Working Tree, whole-commit) ever worked.
+  let cwd = gitRepositoryRoot(self.data)
   var args: seq[cstring] = @[]
   var sessionTitle = cstring"Working Tree Changes"
   let target = self.rawTarget()
@@ -1942,6 +1951,7 @@ proc initEditor(self: UnifiedDiffComponent) =
     automaticLayout: true,
     folding: false,
     fontSize: self.data.ui.fontSize,
+    fontFamily: codeFontFamily(self.data.ui),
     # The affordances a DOM diff could not offer, and the reason DR-R4 exists.
     #
     # `renderCharacters` and the column cap are UD-4's: a 52-line corpus fills

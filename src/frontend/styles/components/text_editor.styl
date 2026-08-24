@@ -193,19 +193,18 @@
   flex-direction: column
   // border: 0.0625em solid grey
   position: fixed
-  background-color: colors-ui-surface-input-default
-  border-radius: 0.5em
+  dropdown-surface()
   font-family: "SpaceGrotesk"
   font-size: 0.875em
   z-index: 1000
 
 .context-menu-item-container
   &:first-child .context-menu-item
-    border-radius: 0.5em 0.5em 0 0
+    border-radius: DROPDOWN_RADIUS DROPDOWN_RADIUS 0 0
 
   &:last-child .context-menu-item
     border-bottom: none
-    border-radius: 0 0 0.5em 0.5em
+    border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
 
 .context-menu-item
   // No per-item border-radius or margins — items flow flush like the main menu
@@ -818,19 +817,70 @@
     cursor: default
 //font-weight: bold
 
-.line-numbers
+// The type treatment of a Monaco line number: face, size, weight, and the
+// sub-pixel nudge that settles it on the line box.
+//
+// APPEARANCE ONLY, and shared for that reason — the unified diff calls it too
+// (components/unified_diff.styl), so the two editors cannot drift into
+// different-looking gutters again.  What is deliberately NOT here is layout:
+// the width of the lane and what the number aligns against differ by editor,
+// and it was exactly a layout property leaking across that stretched the
+// diff's labels over its `+`/`-` markers.
+line-number-type()
+  font-family: "SpaceMono"
+  font-weight: 300
+  line-height: inherit
+  font-size: 0.875rem !important
+  padding-top: 0.0625em !important
+
+// The line the cursor is on.
+//
+// Monaco marks it with `.active-line-number`, and both gutters already change
+// COLOUR for it rather than opacity — #858585 to #C6C6C6.  Two problems with
+// that: neither value is one of ours (they are Monaco's built-in vs-dark
+// defaults, see the note in ui/editor.nim's theme file), and both were then
+// halved by the resting `opacity: 0.5`, so the active number landed at an
+// effective rgb(119,119,119) — barely a step up from its neighbours.
+//
+// Here it is a design token at full strength: `text/primary/label`, the role
+// the UI uses for a label that is currently the subject.  The dimming is lifted
+// for this one row, which is what makes it read as selected at all.
+//
+// Applies to both gutters, so it is deliberately NOT inside the `:not()` below:
+// the editor nests its number one level deeper, in `.gutter-line`, so that box
+// has to be undimmed too or the wrapper's full opacity is undone by the child.
+.line-numbers.active-line-number
+  color: colors-ui-text-primary-label !important
+  opacity: 1
+
+  .gutter-line
+    color: colors-ui-text-primary-label !important
+    opacity: 1
+
+// Scoped away from the unified diff on purpose.
+//
+// `width: 100% !important` beats the `width` Monaco writes inline, which is how
+// every other editor here gets its line numbers pushed right, up against the
+// code.  That works where the gutter holds nothing else.
+//
+// The unified diff's gutter does hold something else: Monaco splits it into a
+// line-number lane and a decorations lane (the `+` / `-` markers in
+// components/unified_diff.styl), and `100%` is the width of BOTH.  Stretching
+// the label across the pair right-aligned it to the code edge, which left the
+// slack on the left of the gutter and covered the markers completely — they
+// were rendering, with `.line-numbers` painted over them.
+//
+// There is no way to give Monaco's inline width back from another rule, so the
+// fix is for this one not to match.
+.line-numbers:not(.unified-diff-editor *)
   // border-right: 0.0625em solid colors-ui-border-primary
+  line-number-type()
   width: 100% !important
   display: block !important
   box-sizing: border-box
   margin-left: 0 !important
-  font-weight: 300
   text-align: right !important
-  font-family: "SpaceMono"
-  line-height: inherit
-  font-size: 0.875rem !important
   margin-top: 0em !important
-  padding-top: 0.0625em !important
   padding-right: 0 !important
   // color: LINE_NUMBERS_TEXT_COLOR !important
 

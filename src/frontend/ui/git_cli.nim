@@ -124,6 +124,22 @@ proc gitWorkingDirectory*(data: Data): cstring =
     return folder
   electronProcess.cwd()
 
+proc gitRepositoryRoot*(data: Data): cstring =
+  ## Absolute path of the git work tree root.
+  ##
+  ## Use this, NOT `gitWorkingDirectory`, for any command carrying a `--`
+  ## pathspec.  Git resolves a pathspec against the CURRENT DIRECTORY, while
+  ## every path the VCS panel holds comes from `git diff-tree --numstat`, which
+  ## reports relative to the repository ROOT.  When the opened project folder is
+  ## a subdirectory the two disagree and git silently matches nothing — no
+  ## error, just an empty diff, because an empty diff is a legitimate answer.
+  ##
+  ## `rev-parse --show-toplevel` returns empty outside a work tree, so the
+  ## working directory stays the fallback.
+  let cwd = gitWorkingDirectory(data)
+  let top = gitExec(@[cstring"rev-parse", cstring"--show-toplevel"], cwd)
+  if top.isNil or top.len == 0: cwd else: top
+
 proc parseGitDiffHunks*(diffOutput: string): seq[DeepReviewFileData] =
   ## Parse the output of ``git diff`` into ``DeepReviewFileData`` values.
   ##
