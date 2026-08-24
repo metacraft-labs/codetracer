@@ -80,8 +80,9 @@ type
     resultCount*: Memo[int]
     fileCount*: Memo[int]
 
-    # -- Callback installed by wiring layer --
+    # -- Callbacks installed by wiring layer --
     onSearch*: proc(query: string)
+    onJumpToResult*: proc(path: string, line: int)
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -105,8 +106,9 @@ proc setResults*(vm: SearchResultsVM; results: seq[SearchResultLine]) =
 proc appendResults*(vm: SearchResultsVM; results: seq[SearchResultLine]) =
   ## Append a batch of result rows.  Called by the legacy ``onSearchResultsUpdated``
   ## handler whenever the IPC layer streams in another set of matches.
-  ## Like ``setResults``, flips ``active`` to true so the first batch
-  ## activates the panel and also clears the loading spinner.
+  ## An empty batch still clears the loading shimmer so the empty-state
+  ## is shown when ripgrep produces no matches.
+  vm.loading.val = false
   if results.len == 0:
     return
   var entries = vm.results.val
@@ -114,7 +116,6 @@ proc appendResults*(vm: SearchResultsVM; results: seq[SearchResultLine]) =
     entries.add(r)
   vm.results.val = entries
   vm.active.val = true
-  vm.loading.val = false
 
 proc clearResults*(vm: SearchResultsVM) =
   ## Reset the result list and the active flag.  The view re-displays
@@ -165,18 +166,17 @@ proc currentResultCount*(vm: SearchResultsVM): int =
   vm.resultCount.val
 
 proc jumpToResult*(vm: SearchResultsVM; res: SearchResultLine) =
-  ## Dispatch a jump-location request for the given result row.  The
-  ## legacy view called ``data.openLocation(res.path, res.line)``
-  ## directly; routing this via the backend keeps the signal flow
-  ## self-contained for headless tests.  In production the legacy
-  ## ``SearchResultsComponent`` is no longer rendered, so the VM is the
-  ## single source for jump dispatch — the ``ct/jump-location`` request
-  ## is the same one ``ErrorsVM.jumpToProblem`` issues.
-  let args = %*{
-    "path": res.path,
-    "line": res.line,
-  }
-  discard vm.store.backend.send("ct/jump-location", args)
+  ## Open the source file at the matched line.  Delegates to the
+  ## ``onJumpToResult`` callback installed by the wiring layer
+  ## (``search_results.nim``) which calls ``data.openLocation`` — the
+  ## same path the editor uses for file navigation.  Falls back to the
+  ## backend ``ct/jump-location`` request when no callback is wired
+  ## (e.g. in headless tests).
+  if not vm.onJumpToResult.isNil:
+    vm.onJumpToResult(res.path, res.line)
+  else:
+    let args = %*{"path": res.path, "line": res.line}
+    discard vm.store.backend.send("ct/jump-location", args)
 
 # ---------------------------------------------------------------------------
 # Helpers

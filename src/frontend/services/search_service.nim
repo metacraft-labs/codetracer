@@ -71,6 +71,8 @@ data.services.search.onSearchResultsUpdated = proc(self: SearchService, results:
         text: (if r.text.isNil: "" else: $r.text),
         path: (if r.path.isNil: "" else: $r.path),
         line: r.line))
+    # Always invoke the hook even for an empty batch so the VM can clear
+    # the loading shimmer when ripgrep produces no matches.
     if not syncSearchResultsAppendBatchHook.isNil:
       syncSearchResultsAppendBatchHook(rows)
     if not self.query.query.isNil and
