@@ -71,10 +71,16 @@ start_runquotad() {
 		fail "runquotad is required for e2e test; set RUNQUOTAD_BIN or RUNQUOTA_SOCKET"
 	fi
 
-	runquota_socket="/tmp/reprobuild-e2e.$$.$RANDOM.sock"
+	# A directory of its own, not a socket dropped into a shared /tmp --
+	# see the long note in scripts/build-once.sh. runquotad verifies the
+	# socket's parent directory before binding and refuses a root-owned
+	# 1777 /tmp; a directory that does not exist yet it creates itself,
+	# with the mode it requires.
+	runquota_dir="/tmp/reprobuild-e2e.$$.$RANDOM"
+	runquota_socket="$runquota_dir/runquota.sock"
 	runquota_log=".repro/runquota/macos-daemon-build-runquotad.log"
 	mkdir -p .repro/runquota
-	rm -f "$runquota_socket"
+	rm -rf "$runquota_dir"
 
 	"$runquotad_bin" \
 		--socket "$runquota_socket" \
@@ -83,7 +89,7 @@ start_runquotad() {
 		--pool console=1 \
 		>"$runquota_log" 2>&1 &
 	runquotad_pid="$!"
-	trap 'if [ -n "${runquotad_pid:-}" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi' EXIT
+	trap 'if [ -n "${runquotad_pid:-}" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi; rm -rf "${runquota_dir:-}"' EXIT
 
 	for _ in {1..300}; do
 		if grep -q "runquotad listening" "$runquota_log" 2>/dev/null; then
@@ -91,11 +97,13 @@ start_runquotad() {
 			return
 		fi
 		if ! kill -0 "$runquotad_pid" 2>/dev/null; then
+			sed 's/^/  runquotad: /' "$runquota_log" >&2 2>/dev/null || true
 			fail "runquotad exited before becoming ready. See $runquota_log"
 		fi
 		sleep 0.05
 	done
 
+	sed 's/^/  runquotad: /' "$runquota_log" >&2 2>/dev/null || true
 	fail "runquotad did not become ready. See $runquota_log"
 }
 
