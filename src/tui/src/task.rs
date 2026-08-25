@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_repr::*;
 use std::collections::HashMap;
 
-use crate::lang::*;
 use crate::value::Value;
+use ct_lang::Lang;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

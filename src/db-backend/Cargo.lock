@@ -475,10 +475,22 @@ dependencies = [
 name = "ct-dap-client"
 version = "0.1.0"
 dependencies = [
+ "ct-lang",
  "libc",
  "log",
  "serde",
  "serde_json",
+ "serde_repr",
+]
+
+[[package]]
+name = "ct-lang"
+version = "0.1.0"
+dependencies = [
+ "num-derive",
+ "num-traits",
+ "schemars 0.8.22",
+ "serde",
  "serde_repr",
 ]
 
@@ -1589,6 +1601,7 @@ dependencies = [
  "console_error_panic_hook",
  "criterion",
  "ct-dap-client",
+ "ct-lang",
  "env_logger",
  "filetime",
  "futures",

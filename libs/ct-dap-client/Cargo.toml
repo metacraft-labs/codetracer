@@ -6,6 +6,10 @@ description = "DAP client library for CodeTracer's db-backend, covering the full
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+# The canonical Rust `Lang` enum, shared with db-backend and the TUI.
+# `types::common` re-exports it.  A leaf crate by design: this crate is a
+# dev-dependency of db-backend, so it cannot depend on db-backend for the type.
+ct-lang = { path = "../ct-lang" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_repr = "0.1"

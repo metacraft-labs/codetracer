@@ -1,41 +1,23 @@
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-/// A `repr(u8)` language tag for the test DAP client.
+/// The `repr(u8)` language tag, re-exported from the canonical definition in
+/// `libs/ct-lang`.
 ///
-/// This is NOT db-backend's `Lang`, despite what this comment used to claim:
-/// it has 21 variants against that enum's 40 and diverges from ordinal 6
-/// (`Fortran` there, `Python` here).  It is not live-reachable — this crate is
-/// a `[dev-dependencies]` entry used only by `src/db-backend/tests/*`, and the
-/// only value any of them constructs is `Lang::C`, which is 0 on both sides.
-/// Left as-is rather than widened: the tests do not exercise any other value,
-/// and a second 40-variant copy would be one more thing to keep in step.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
-pub enum Lang {
-    #[default]
-    C = 0,
-    Cpp,
-    Rust,
-    Nim,
-    Go,
-    Pascal,
-    Python,
-    Ruby,
-    RubyDb,
-    Javascript,
-    Bash,
-    Zsh,
-    Lua,
-    Asm,
-    Noir,
-    RustWasm,
-    CppWasm,
-    PythonDb,
-    Unknown,
-    Elixir,
-    Erlang,
-}
+/// This crate used to hand-write its own 21-variant copy, which diverged from
+/// db-backend's list at ordinal 6 (`Fortran` there, `Python` here).  The
+/// divergence was never observed because the only value any test constructs is
+/// `Lang::C`, which is 0 on both sides — but the ordinal is not private to this
+/// crate: `types::tracepoint`'s requests carry it over DAP to db-backend, which
+/// reads it back with `serde_repr`.  Any other value would have decoded as a
+/// different language there.
+///
+/// `ct-lang` is a leaf crate (no build script, no path dependencies), so taking
+/// the canonical definition costs this crate nothing.  Depending on db-backend
+/// instead was not an option: db-backend has *this* crate as a
+/// `[dev-dependencies]` entry, and its build script compiles the Nim MCR
+/// emulator.
+pub use ct_lang::Lang;
 
 /// Kinds of I/O or log events (repr(u8), matching codetracer_trace_types).
 #[derive(Debug, Default, Copy, Clone, PartialEq, Serialize_repr, Deserialize_repr)]

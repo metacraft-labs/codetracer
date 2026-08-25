@@ -43,15 +43,21 @@
 ## keys.  Adding a language without updating the JS map now fails here, at the
 ## table, instead of in a renderer that shows the wrong syntax highlighting.
 ##
-## ## 3. The Nim `Lang` enum is the same list as db-backend's Rust `Lang`
+## ## 3. The Nim `Lang` enum is the same list as the canonical Rust `Lang`
 ##
 ## `ct/load-locals` sends `CtLoadLocalsArguments.lang` as an **integer**: the
 ## Nim side writes `ord(Lang)` (see
 ## `src/frontend/viewmodel/store/replay_data_store.nim`) and the Rust side
-## reads it with `serde_repr` into `src/db-backend/src/lang.rs`'s `Lang`.  The
-## two enums are hand-maintained copies and nothing checks that they agree —
-## a variant inserted in the middle of either one silently re-points every
-## ordinal above it, and the wrong value loader then decodes the frame.
+## reads it with `serde_repr` into the `Lang` declared in
+## `libs/ct-lang/src/lib.rs`.  The two enums are hand-maintained copies and
+## nothing checks that they agree — a variant inserted in the middle of either
+## one silently re-points every ordinal above it, and the wrong value loader
+## then decodes the frame.
+##
+## The Rust definition used to live in `src/db-backend/src/lang.rs`; that file
+## now re-exports it (`pub use ct_lang::{lang_wire, Lang}`) so that
+## `src/tui` and `libs/ct-dap-client` can share the one definition without
+## taking on db-backend's `build.rs` — see property 4.
 ##
 ## (The doc comment on the Nim enum used to name
 ## `codetracer-native-backend/src/lang.rs` as its partner.  That was wrong:
@@ -64,8 +70,46 @@
 ## The test below parses the `pub enum Lang { … }` block out of the Rust source
 ## and compares it to `Lang`, name by name and ordinal by ordinal.
 ##
+## ## 4. There is exactly ONE ordinal-carrying `Lang` in the Rust tree
+##
+## Property 3 only pins the copy it is pointed at.  The reason this file exists
+## at all is that there used to be *three* Rust copies, and the ones nobody was
+## checking were the ones that had rotted:
+##
+## * `src/tui/src/lang.rs` had **37** variants.  It stopped at `Solana` and was
+##   missing `Elixir`, `Erlang` and `Php` — while still writing the ordinal into
+##   the shared `trace_index.db` `lang` column and sending it to the backend in
+##   `ConfigureArg`.  The live database on a developer machine already holds
+##   rows at `lang = 37` (`LangElixir`), past that copy's last ordinal of 36 —
+##   an ordinal it decoded as `None`, which the TUI's
+##   `.expect("expected valid lang")` would have turned into a panic.  (No
+##   count is quoted here on purpose: that database is written by ordinary
+##   development and the number moves.  Three successive readings during this
+##   work gave 24, 25 and 26.  The claim that matters is that the population is
+##   non-empty, not its size.)
+## * `libs/ct-dap-client/src/types/common.rs` had **21**, diverging from ordinal
+##   6 (`Fortran` canonically, `Python` there), and its tracepoint requests
+##   carry that ordinal over DAP to db-backend.
+##
+## Both are gone: they now consume `libs/ct-lang`.  The sweep below walks every
+## `.rs` file in the repository and fails if an `enum Lang` appears anywhere
+## outside a small, documented allowlist — so re-introducing a private copy is a
+## test failure rather than a silent divergence that surfaces years later as a
+## mislabelled trace.  The allowlist's non-canonical entries are additionally
+## checked to carry no `#[repr(...)]` and no `serde_repr` derive, which are what
+## turn an enum's ordinal into a wire value in the first place.  That attribute
+## check anchors its look-back on the previous top-level item rather than on a
+## fixed character count, because an attribute padded far enough above its
+## declaration by doc comments would otherwise escape the window and be read as
+## absent — see `sweepRustLangDecls`.
+##
+## ## 5. The former copy sites consume the canonical definition
+##
+## The complement of property 4: the three sites are checked positively, so
+## "the duplicate is gone" cannot be satisfied by deleting the consumer.
+##
 ## Mocking justification (workspace policy on mock objects): none.  There is no
-## mock in this file.  Property 1 calls the production proc; properties 2 and 3
+## mock in this file.  Property 1 calls the production proc; properties 2–5
 ## read the production source files.
 ##
 ## Compile and run:
@@ -80,7 +124,15 @@ const
   RepoRoot = ThisFile.parentDir.parentDir.parentDir.parentDir
     ## src/tests/cli/<this> -> src/tests/cli -> src/tests -> src -> <repo>
   TraceMetadataPath = RepoRoot / "src" / "frontend" / "trace_metadata.nim"
+  CtLangPath = RepoRoot / "libs" / "ct-lang" / "src" / "lib.rs"
+    ## The single canonical Rust `Lang`.
+  CtLangManifestPath = RepoRoot / "libs" / "ct-lang" / "Cargo.toml"
   DbBackendLangPath = RepoRoot / "src" / "db-backend" / "src" / "lang.rs"
+    ## Re-exports `CtLangPath`'s `Lang`; keeps `lang_from_context`.
+  CtDapClientLangPath =
+    RepoRoot / "libs" / "ct-dap-client" / "src" / "types" / "common.rs"
+  TuiLangPath = RepoRoot / "src" / "tui" / "src" / "lang.rs"
+    ## Deleted.  Must stay deleted.
 
 # ---------------------------------------------------------------------------
 # Property 1 — detectLangFromPath returns LangUnknown for what it does not know
@@ -314,12 +366,12 @@ suite "trace_metadata.nim's JS LANG map is the Lang enum, entry for entry":
       seen.incl(ordinal)
 
 # ---------------------------------------------------------------------------
-# Property 3 — the Nim Lang enum matches db-backend's Rust Lang enum
+# Property 3 — the Nim Lang enum matches the canonical Rust Lang enum
 # ---------------------------------------------------------------------------
 
-proc parseRustLangEnum(source: string): seq[string] =
+proc parseRustLangEnum(source: string, path: string): seq[string] =
   ## Extract the variant names of `pub enum Lang { ... }` from
-  ## `src/db-backend/src/lang.rs`, in declaration order.
+  ## `libs/ct-lang/src/lib.rs`, in declaration order.
   ##
   ## Deliberately strict for the same reason as `parseJsLangMap`: an
   ## anti-drift check that quietly finds nothing to compare is worse than no
@@ -329,16 +381,17 @@ proc parseRustLangEnum(source: string): seq[string] =
   let startIdx = source.find(startMarker)
   if startIdx < 0:
     raise newException(ValueError,
-      "could not find `" & startMarker & "` in " & DbBackendLangPath &
+      "could not find `" & startMarker & "` in " & path &
       ".  The enum moved or was renamed; this check must be updated to " &
       "follow it, not deleted — `ct/load-locals` still sends `lang` as an " &
-      "ordinal over that boundary.")
+      "ordinal over that boundary, and the persisted " &
+      "`trace_index.db.recordings.lang` column stores it.")
 
   let bodyStart = startIdx + startMarker.len
   let endIdx = source.find("\n}", bodyStart)
   if endIdx < 0:
     raise newException(ValueError,
-      "found `" & startMarker & "` in " & DbBackendLangPath &
+      "found `" & startMarker & "` in " & path &
       " but no closing brace after it.")
 
   for rawLine in source[bodyStart ..< endIdx].splitLines():
@@ -366,18 +419,18 @@ func nimNameFor(rustVariant: string): string =
   ## difference and not an ordinal difference.
   "Lang" & rustVariant
 
-suite "the Nim Lang enum is db-backend's Rust Lang enum, ordinal for ordinal":
+suite "the Nim Lang enum is the canonical Rust Lang enum, ordinal for ordinal":
 
   setup:
-    check fileExists(DbBackendLangPath)
+    check fileExists(CtLangPath)
 
   test "the Rust enum parses and is not empty":
-    let variants = parseRustLangEnum(readFile(DbBackendLangPath))
+    let variants = parseRustLangEnum(readFile(CtLangPath), CtLangPath)
     check variants.len > 0
-    checkpoint("parsed " & $variants.len & " variants from " & DbBackendLangPath)
+    checkpoint("parsed " & $variants.len & " variants from " & CtLangPath)
 
   test "both enums have the same number of values":
-    let variants = parseRustLangEnum(readFile(DbBackendLangPath))
+    let variants = parseRustLangEnum(readFile(CtLangPath), CtLangPath)
     var nimCount = 0
     for _ in Lang:
       inc nimCount
@@ -386,13 +439,13 @@ suite "the Nim Lang enum is db-backend's Rust Lang enum, ordinal for ordinal":
     if variants.len != nimCount:
       checkpoint(
         "the Nim Lang enum has " & $nimCount & " values but the Rust Lang " &
-        "enum in " & DbBackendLangPath & " has " & $variants.len & ".  " &
+        "enum in " & CtLangPath & " has " & $variants.len & ".  " &
         "`ct/load-locals` sends `lang` as an integer across that boundary, " &
         "so a length difference means some ordinals decode as a different " &
         "language or as an out-of-range value.")
 
   test "every ordinal names the same language on both sides":
-    let variants = parseRustLangEnum(readFile(DbBackendLangPath))
+    let variants = parseRustLangEnum(readFile(CtLangPath), CtLangPath)
     var index = 0
     for value in Lang:
       if index >= variants.len:
@@ -404,7 +457,7 @@ suite "the Nim Lang enum is db-backend's Rust Lang enum, ordinal for ordinal":
       if nimName.toLowerAscii != expected.toLowerAscii:
         checkpoint(
           "ordinal " & $index & " is `" & nimName & "` in the Nim Lang enum " &
-          "but `" & variants[index] & "` in " & DbBackendLangPath & ".  " &
+          "but `" & variants[index] & "` in " & CtLangPath & ".  " &
           "Every `ct/load-locals` request for a language at or above this " &
           "ordinal would be decoded as the wrong language by the backend, " &
           "and the wrong value loader would then read the frame.")
@@ -418,3 +471,302 @@ suite "the Nim Lang enum is db-backend's Rust Lang enum, ordinal for ordinal":
     check ord(LangPythonDb) == 21
     check ord(LangUnknown) == 22
     check ord(LangC) == 0
+
+# ---------------------------------------------------------------------------
+# Property 4 — exactly one ordinal-carrying `Lang` exists in the Rust tree
+# ---------------------------------------------------------------------------
+
+type RustLangDecl = object
+  ## One `enum Lang` found by the repository sweep.
+  relPath: string   ## repo-relative, `/`-separated
+  isRepr: bool      ## carries a `#[repr(...)]` attribute
+  isSerdeRepr: bool ## carries a `Serialize_repr` / `Deserialize_repr` derive
+
+const
+  CanonicalRustLang = "libs/ct-lang/src/lib.rs"
+    ## The one file allowed to declare the ordinal-carrying `Lang`.
+
+  # Files that declare an enum which merely *shares the name* `Lang`.  Each is
+  # a local selector whose integer value never leaves its crate; neither is a
+  # copy of the ordinal enum, and the assertions below pin that distinction
+  # rather than trusting the comment.
+  #
+  # If you are here because a new entry is needed: adding one is a decision to
+  # maintain another type called `Lang`.  Prefer reusing `ct_lang::Lang`.
+  NameOnlyLangDecls = [
+    # 13 variants; selects a tree-sitter grammar for the Value-Origin-Tracking
+    # classifier.  No `repr`, no serde; the ordinal is never serialised.
+    "libs/origin-classifier/src/kinds.rs",
+    # 2 variants (JavaScript, Python); private to the module and selects which
+    # source formatter to shell out to.  No `repr`, no serde.
+    "src/db-backend/src/autoformat.rs",
+  ]
+
+  # Directory names that are never part of this repository's own Rust sources.
+  SweepSkipDirs = ["target", "node_modules", ".git", ".direnv", "dist"]
+
+  # A floor on the sweep's reach.  The tree held 448 `.rs` files when this was
+  # written; if a future refactor breaks the walk, the sweep must fail loudly
+  # instead of "finding no duplicates" across zero files.
+  MinRustFilesSwept = 300
+
+proc sweepRustLangDecls(root: string): seq[RustLangDecl] =
+  ## Walk every `.rs` file under `root` and report each `enum Lang`
+  ## declaration, with the two attributes that would make its ordinal a wire
+  ## value.
+  ##
+  ## The walk prunes `SweepSkipDirs` *before* descending rather than filtering
+  ## the paths afterwards.  `src/db-backend/target` alone is several gigabytes
+  ## of build artefacts; walking into it and discarding the results would turn
+  ## a sub-second check into a multi-minute one, and a slow test is a test that
+  ## gets removed from the lane.
+  result = @[]
+  var swept = 0
+  var pending = @[""] # repo-relative directories, "" is the root itself
+  while pending.len > 0:
+    let relDir = pending.pop()
+    let absDir = if relDir.len == 0: root else: root / relDir
+    for kind, entry in walkDir(absDir, relative = true, checkDir = true):
+      let rel = if relDir.len == 0: entry else: relDir & "/" & entry
+      case kind
+      of pcDir:
+        if entry notin SweepSkipDirs:
+          pending.add(rel)
+      of pcFile:
+        if not entry.endsWith(".rs"):
+          continue
+        inc swept
+        let source = readFile(root / rel)
+        # `enum Lang` with a word boundary after it: matches
+        # `pub enum Lang {`, `enum Lang {` and `pub(crate) enum Lang {`, but
+        # not `enum Language`.
+        var searchFrom = 0
+        while true:
+          let idx = source.find("enum Lang", searchFrom)
+          if idx < 0:
+            break
+          searchFrom = idx + "enum Lang".len
+          let after = if searchFrom < source.len: source[searchFrom] else: ' '
+          if after in {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+            continue # `enum Language`, `enum LangKind`, ...
+          # Look back over the attribute block that precedes the declaration:
+          # everything between the end of the previous top-level item (a `}` in
+          # column 0) and this declaration.  That span is exactly the
+          # attribute-and-doc-comment block belonging to this enum.
+          #
+          # This used to be a fixed 600-character window, which was not enough.
+          # Rust lets an attribute sit any distance above its item, separated by
+          # doc comments, and a mutation that padded `#[repr(u8)]` 812
+          # characters above `pub enum Lang` with ten `///` lines slipped past
+          # the window entirely: the sweep reported `isRepr = false` for an enum
+          # that genuinely carried an ordinal, and the whole suite stayed green.
+          # Anchoring on the previous item instead has no length limit, so the
+          # attribute cannot be pushed out of range.
+          let prevItemEnd = if idx == 0: -1 else: source.rfind("\n}", 0, idx - 1)
+          let windowStart = if prevItemEnd < 0: 0 else: prevItemEnd
+          let preamble = source[windowStart ..< idx]
+          result.add(RustLangDecl(
+            relPath: rel.replace('\\', '/'),
+            isRepr: preamble.contains("#[repr("),
+            isSerdeRepr: preamble.contains("Serialize_repr") or
+                         preamble.contains("Deserialize_repr")))
+      else:
+        # Symlinks and special files: a symlinked directory could re-enter the
+        # tree and loop, and a symlinked `.rs` is always reachable by its real
+        # path too, so neither needs following.
+        discard
+  if swept < MinRustFilesSwept:
+    raise newException(ValueError,
+      "the `.rs` sweep visited only " & $swept & " files under " & root &
+      ", below the floor of " & $MinRustFilesSwept & ".  The walk is broken " &
+      "or the tree moved; a sweep that inspects nothing reports `no " &
+      "duplicates` for the wrong reason.  Fix the walk — do not lower the " &
+      "floor to make this pass.")
+
+suite "libs/ct-lang holds the only ordinal-carrying Rust `Lang`":
+
+  setup:
+    check fileExists(CtLangPath)
+    check fileExists(CtLangManifestPath)
+
+  test "the sweep finds the canonical declaration":
+    let decls = sweepRustLangDecls(RepoRoot)
+    var canonical: seq[RustLangDecl] = @[]
+    for decl in decls:
+      if decl.relPath == CanonicalRustLang:
+        canonical.add(decl)
+    check:
+      canonical.len == 1
+    if canonical.len != 1:
+      checkpoint(
+        "expected exactly one `enum Lang` in " & CanonicalRustLang &
+        " but the sweep found " & $canonical.len & ".  Every other property " &
+        "in this file compares against that declaration.")
+    else:
+      check:
+        canonical[0].isRepr
+        canonical[0].isSerdeRepr
+      if not canonical[0].isRepr or not canonical[0].isSerdeRepr:
+        checkpoint(
+          CanonicalRustLang & "'s `Lang` lost its `#[repr(...)]` or its " &
+          "`serde_repr` derive.  Both are load-bearing: `ct/load-locals` " &
+          "sends the ordinal as an integer and the persisted " &
+          "`recordings.lang` column stores it.")
+
+  test "no `enum Lang` exists outside the canonical file and the allowlist":
+    let decls = sweepRustLangDecls(RepoRoot)
+    var allowed = initHashSet[string]()
+    allowed.incl(CanonicalRustLang)
+    for path in NameOnlyLangDecls:
+      allowed.incl(path)
+
+    var unexpected: seq[string] = @[]
+    for decl in decls:
+      if decl.relPath notin allowed:
+        unexpected.add(decl.relPath)
+    unexpected.sort()
+    check:
+      unexpected.len == 0
+    if unexpected.len > 0:
+      checkpoint(
+        "found " & $unexpected.len & " unapproved `enum Lang` " &
+        "declaration(s): " & unexpected.join(", ") & ".\n" &
+        "  This repository used to carry three hand-written Rust copies of " &
+        "the language enum.  Two of them had silently fallen behind: " &
+        "`src/tui/src/lang.rs` was missing Elixir/Erlang/Php while still " &
+        "writing the ordinal into the shared trace_index.db, and " &
+        "`libs/ct-dap-client` diverged from ordinal 6 while sending the " &
+        "ordinal over DAP.  Depend on `ct-lang` instead.  If the new enum " &
+        "genuinely is not the language ordinal, add it to " &
+        "`NameOnlyLangDecls` above with a comment saying why.")
+
+  test "every allowlisted `enum Lang` is actually present":
+    # The allowlist must not rot into a list of files that no longer exist:
+    # a stale entry would silently widen what the previous test permits.
+    let decls = sweepRustLangDecls(RepoRoot)
+    var found = initHashSet[string]()
+    for decl in decls:
+      found.incl(decl.relPath)
+    for path in NameOnlyLangDecls:
+      check:
+        path in found
+      if path notin found:
+        checkpoint(
+          "`" & path & "` is on `NameOnlyLangDecls` but no longer declares " &
+          "an `enum Lang`.  Remove the entry; leaving it in place widens " &
+          "the allowlist for a file that could later gain a real copy.")
+
+  test "the name-only `Lang` enums carry no ordinal contract":
+    # What separates them from the canonical enum is not their names, it is
+    # that their integer value never crosses a boundary.  Pin that: if one of
+    # them ever gains `#[repr(u8)]` or a `serde_repr` derive it becomes a
+    # second wire enum, and it must come back here for a decision.
+    let decls = sweepRustLangDecls(RepoRoot)
+    for decl in decls:
+      if decl.relPath == CanonicalRustLang:
+        continue
+      check:
+        not decl.isRepr
+        not decl.isSerdeRepr
+      if decl.isRepr or decl.isSerdeRepr:
+        checkpoint(
+          "`" & decl.relPath & "` declares an `enum Lang` with " &
+          (if decl.isRepr: "`#[repr(...)]` " else: "") &
+          (if decl.isSerdeRepr: "a `serde_repr` derive " else: "") &
+          "— that makes its ordinal a serialised value, which is exactly " &
+          "what `ct-lang` exists to keep in one place.")
+
+  test "ct-lang is a leaf crate, so every consumer can afford to depend on it":
+    # The whole reason the enum is not simply db-backend's is that db-backend
+    # has a build.rs which compiles the Nim MCR emulator, plus path
+    # dependencies that reach into sibling repositories: making `src/tui`
+    # depend on it grew the resolved dependency graph from 161 packages to
+    # 385 and required `codetracer-native-recorder` to be present and built.
+    # If ct-lang ever grows a build script or a path dependency, that
+    # rationale silently collapses and the TUI stops being buildable on its
+    # own.
+    let manifest = readFile(CtLangManifestPath)
+    let hasBuildScript = fileExists(RepoRoot / "libs" / "ct-lang" / "build.rs")
+    check:
+      not manifest.contains("[build-dependencies]")
+      not manifest.contains("path =")
+      not hasBuildScript
+    if manifest.contains("[build-dependencies]") or
+       manifest.contains("path =") or hasBuildScript:
+      checkpoint(
+        CtLangManifestPath & " gained a build script or a path dependency.  " &
+        "`ct-lang` is depended on by `src/tui` and `libs/ct-dap-client`, " &
+        "both of which build standalone; keep it a leaf.")
+
+# ---------------------------------------------------------------------------
+# Property 5 — the former copy sites consume the canonical definition
+# ---------------------------------------------------------------------------
+
+proc declaresCargoDep(manifestPath, crateName: string): bool =
+  ## True if `manifestPath` declares `crateName` as a dependency.  Matches the
+  ## `name = { ... }` form these manifests use; deliberately does not try to be
+  ## a TOML parser.
+  for rawLine in readFile(manifestPath).splitLines():
+    let line = rawLine.strip()
+    if line.startsWith("#"):
+      continue
+    if line.startsWith(crateName & " ") or line.startsWith(crateName & "="):
+      return true
+  false
+
+suite "the deleted Lang copies stay deleted and their sites use ct-lang":
+
+  test "src/tui/src/lang.rs does not exist":
+    check:
+      not fileExists(TuiLangPath)
+    if fileExists(TuiLangPath):
+      checkpoint(
+        TuiLangPath & " is back.  The TUI supports every language the GUI " &
+        "supports by definition; it must not carry its own list.  The copy " &
+        "that used to live here had 37 of the 40 variants and wrote the " &
+        "ordinal into the same trace_index.db the Nim core reads.")
+
+  test "src/db-backend/src/lang.rs re-exports rather than redeclares":
+    check fileExists(DbBackendLangPath)
+    let source = readFile(DbBackendLangPath)
+    check:
+      source.contains("pub use ct_lang::")
+      not source.contains("enum Lang")
+    if not source.contains("pub use ct_lang::"):
+      checkpoint(
+        DbBackendLangPath & " no longer re-exports `ct_lang`.  Every " &
+        "`use crate::lang::Lang` in db-backend resolves through that " &
+        "re-export.")
+    if source.contains("enum Lang"):
+      checkpoint(
+        DbBackendLangPath & " declares an `enum Lang` again.  The Rust " &
+        "definition belongs in " & CanonicalRustLang & " so that src/tui " &
+        "and libs/ct-dap-client can share it without db-backend's build.rs.")
+
+  test "libs/ct-dap-client re-exports rather than redeclares":
+    check fileExists(CtDapClientLangPath)
+    let source = readFile(CtDapClientLangPath)
+    check:
+      source.contains("pub use ct_lang::Lang")
+      not source.contains("enum Lang")
+    if source.contains("enum Lang"):
+      checkpoint(
+        CtDapClientLangPath & " declares an `enum Lang` again.  Its 21-" &
+        "variant copy diverged from ordinal 6 onwards while its tracepoint " &
+        "requests carried that ordinal over DAP to db-backend.")
+
+  test "all three crates declare the ct-lang dependency":
+    # The positive half of property 4: a consumer must not satisfy "no
+    # duplicate enum" by quietly dropping the shared type instead.
+    for manifest in [
+      RepoRoot / "src" / "tui" / "Cargo.toml",
+      RepoRoot / "src" / "db-backend" / "Cargo.toml",
+      RepoRoot / "libs" / "ct-dap-client" / "Cargo.toml",
+    ]:
+      check fileExists(manifest)
+      check:
+        declaresCargoDep(manifest, "ct-lang")
+      if not declaresCargoDep(manifest, "ct-lang"):
+        checkpoint(
+          manifest & " no longer declares a `ct-lang` dependency, so it is " &
+          "no longer sharing the canonical Lang enum.")

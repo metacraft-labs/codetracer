@@ -8,10 +8,19 @@ import os
 
 type
   Lang* = enum ## Identifies a programming language implementation
-    ## Ordinals MUST match the Rust `Lang` enum in src/db-backend/src/lang.rs,
-    ## which uses `#[repr(u8)]` with `serde_repr`.  That is the enum on the
-    ## other side of the `ct/load-locals` DAP hop, where `lang` is still sent
-    ## as an integer (see `frontend/viewmodel/store/replay_data_store.nim`).
+    ## Ordinals MUST match the canonical Rust `Lang` enum in
+    ## libs/ct-lang/src/lib.rs, which uses `#[repr(u8)]` with `serde_repr`.
+    ## That is the enum on the other side of the `ct/load-locals` DAP hop,
+    ## where `lang` is still sent as an integer (see
+    ## `frontend/viewmodel/store/replay_data_store.nim`).
+    ##
+    ## This used to name src/db-backend/src/lang.rs.  That file now only
+    ## re-exports the enum (`pub use ct_lang::{lang_wire, Lang}`); the
+    ## declaration moved to the leaf crate `libs/ct-lang` so that
+    ## `src/db-backend` and `libs/ct-dap-client` could stop keeping their own
+    ## divergent copies.  `src/tests/cli/lang_enum_contract_test.nim` asserts
+    ## this list against that one, name for name and ordinal for ordinal, and
+    ## asserts that no second ordinal-carrying `Lang` exists in the Rust tree.
     ##
     ## It is NOT `codetracer-native-backend/src/lang.rs`, which this comment
     ## used to name: that enum has a `Small` variant at ordinal 21, so the two
