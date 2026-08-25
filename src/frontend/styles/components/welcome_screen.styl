@@ -106,6 +106,9 @@
         width: 19em
         font-size: 2em
         letter-spacing: -0.02em
+        // In rem, not em: this element's own `font-size: 2em` makes 1em == 32px
+        // here, so `1em` would read as 16px and mean 32px.  2rem is 32px, plainly.
+        line-height: 2rem
 
       .welcome-version
         color: colors-ui-text-primary-disabled
