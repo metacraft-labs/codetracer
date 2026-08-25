@@ -1,3 +1,9 @@
+## NOT-A-TEST-LANE-FILE: this is the Test Explorer's VIEWMODEL — production
+## frontend code that happens to start with `test_` because the panel it backs
+## is the test explorer. It declares no `suite`/`test` blocks. Its behaviour is
+## asserted by `src/frontend/viewmodel/tests/unit/test_test_explorer_vm.nim`
+## (the `m16-release-gate` and `vm-unit` lanes).
+
 ## Headless ViewModel state for CodeTracer test discovery and execution.
 ##
 ## This module intentionally contains no rendering logic.  It converts the

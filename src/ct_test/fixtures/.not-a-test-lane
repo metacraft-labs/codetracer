@@ -1,0 +1,7 @@
+Fixture projects for ct-test's framework detectors and providers — sample
+source trees that the discovery/provider suites POINT AT, not tests of this
+repo. Several of them (nim_unittest_project/tests/test_lexical_edge_cases.nim
+in particular) exist precisely to be mis-scanned, so running them, or editing
+them to carry a per-file marker, would change the thing they are a fixture
+for. Their real assertions live in src/ct_test/nim_unittest_provider_test.nim,
+discovery_test.nim and rust_libtest_provider_test.nim.

@@ -1,3 +1,9 @@
+## NOT-A-TEST-LANE-FILE: this is the ct-test PROVIDER IMPLEMENTATION for
+## Node's built-in `node:test` runner — named after the framework it drives,
+## hence the `*_test.nim` collision. It declares no `suite`/`test` blocks. Its
+## behaviour is asserted by `src/ct_test/js_providers_test.nim` (the
+## `ct-providers` lane).
+
 import std/[os, strutils, tables]
 
 import ../contracts

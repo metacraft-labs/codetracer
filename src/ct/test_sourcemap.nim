@@ -198,21 +198,27 @@ suite "macro_sourcemap schema-2 parser":
     # codetracer-nim SHA 82da134b8. Skipped (not failed) if the file is
     # not present in the CI sandbox.
     const realPath = "/tmp/macro_sourcemap_m2_test_bin.json"
+    # The `else` is load-bearing. `std/unittest`'s `skip()` only MARKS the
+    # running case as skipped; it does not leave the body, so the checks below
+    # used to run anyway against a file that was never loaded and reported four
+    # failures on any machine without that fixture. Nothing noticed, because
+    # until this lane existed no runner compiled this file at all.
     if not fileExists(realPath):
       skip()
-    let (ok, sm) = loadMacroSourcemap(realPath)
-    check ok
-    check sm.schema == 2
-    check sm.expansions.len >= 1
-    # `doAssert` is the smoking-gun expansion for the `a + 5 == 47` fixture.
-    var sawDoAssert = false
-    for exp in sm.expansions:
-      if exp.name == "doAssert":
-        sawDoAssert = true
-        # Site must carry a non-zero column (the macro is called at
-        # `  doAssert ...` which sits at column >= 2).
-        check exp.site[2] >= 0
-    check sawDoAssert
-    # The `expressionLocations` table must be non-empty for any real
-    # macro expansion — that's the schema-2 deliverable.
-    check sm.expressionLocations.len > 0
+    else:
+      let (ok, sm) = loadMacroSourcemap(realPath)
+      check ok
+      check sm.schema == 2
+      check sm.expansions.len >= 1
+      # `doAssert` is the smoking-gun expansion for the `a + 5 == 47` fixture.
+      var sawDoAssert = false
+      for exp in sm.expansions:
+        if exp.name == "doAssert":
+          sawDoAssert = true
+          # Site must carry a non-zero column (the macro is called at
+          # `  doAssert ...` which sits at column >= 2).
+          check exp.site[2] >= 0
+      check sawDoAssert
+      # The `expressionLocations` table must be non-empty for any real
+      # macro expansion — that's the schema-2 deliverable.
+      check sm.expressionLocations.len > 0

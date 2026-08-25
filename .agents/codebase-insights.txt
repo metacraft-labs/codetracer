@@ -1801,48 +1801,130 @@ behind `when not defined(js)` because it needs the OS CSPRNG).
 and NO password protection anywhere on this path — AS-3 adds them. A test
 asserts the enum's cardinality so widening it has to be deliberate.
 
-## Most Nim test lanes enumerate BY NAME, so they omit silently
+## Nim test lanes are DISCOVERED now, and a guard keeps them that way
 
-Only five lanes discover Nim tests by globbing: `src/tests/gui/tests` (twice,
-for the native and js ViewModel lanes), `src/tests/cli`, `src/ct/trace`, and
-`test_column_*_vm.nim` / `test_formatted_view_step_*_vm.nim` /
-`test_statement_step_*_vm.nim` under `src/frontend/viewmodel/tests/unit`.
-Everything else is a hand-maintained list of paths in the `justfile` or in
-`ci/test/*.sh`.
+Lanes used to enumerate by name, and a name list omits silently. Measured
+before the fix: 61 test-shaped `.nim` files carrying real `suite`/`test` blocks
+were reached by NO lane — every `src/ct_test/incremental/test_*.nim`, all
+thirteen `test_collab_*.nim`, ALL FIVE `src/common/*_test.nim` (including
+`trace_index_test.nim`, the M-REC-8 recording-id identity suite), six of the
+eight `src/frontend/tests/*_test.nim`, the three `src/ct/launch/*_test.nim`,
+`src/ct/test_sourcemap.nim`, `src/ct/utilities/zip_test.nim`, the four GUI
+suites needing `headless_session`, and the ten `docs/book-isonim/tests/*`.
 
-Measured against the tree: 52 files containing real `suite`/`test` blocks are
-reached by NO lane — every `src/ct_test/incremental/test_*.nim`, every
-`src/frontend/viewmodel/tests/unit/test_collab_*.nim`, ALL FIVE
-`src/common/*_test.nim` (including `trace_index_test.nim`, the M-REC-8
-recording-id identity suite), six of the eight `src/frontend/tests/*_test.nim`,
-`src/ct/test_sourcemap.nim`, `src/ct/utilities/zip_test.nim`, the three
-`src/ct/launch/*_test.nim`, and the ten `docs/book-isonim/tests/*` (which do
-have a `test` recipe in their own `Justfile`, which nothing invokes).
+The shape of the fix, and where to look:
 
-Before adding a test, check which lane will actually reach it. A file whose
-name is only in `release_gate.nim` runs nowhere; a file reached only by a glob
-has nothing asserting it still exists. Registering in both is the pattern the
-repo has converged on.
+* `ci/lib/test-lane-files.sh` — THE single source of truth for which files each
+  lane runs and with which nim flags. `test_lane_ids`, `test_lane_files <id>`,
+  `test_lane_backend`, `test_lane_extra_flags`. Almost every lane is a glob; the
+  four that stay enumerated (`m16-release-gate`, `ct-providers`,
+  `visual-replay-gate`, `agentic-headless`) each say in a comment what a glob
+  could not express.
+* `ci/lib/run-nim-test-lane.sh` — THE single loop that compiles, runs and
+  classifies. Six recipes used to carry hand-copied versions of it.
+* `ci/test/test-lane-coverage.sh` — the guard. "Test-shaped" has TWO arms and
+  the second one matters: NAME (`test_*.nim` / `*_test.nim` / `*_tests.nim` /
+  `tests_*.nim`, case-insensitive, `.nims` too) **or** CONTENT (imports
+  `unittest` AND declares a column-0 `suite`/`test`). The name-only version
+  shipped with a hole it could not see: five suites, 72 cases, 176 assertions —
+  including `src/tests/gui/tests/integration/real_backend.nim`, an unrun TWIN
+  of `real_backend_test.nim` in the same directory, each carrying a fix the
+  other never got (the twin had the `trace-`-prefix removal from 31812021; the
+  `_test` copy had the dual-backend work from e3bb3de7). A name-based rule
+  cannot find that, because the twin's whole problem is its name. The twins are
+  merged now, into the `_test` name.
+  Every test-shaped file must be in a lane or declare, IN ITSELF, that it is
+  not a test:
+  `## NOT-A-TEST-LANE-FILE: <reason>` in its first 40 lines, or a
+  `.not-a-test-lane` file in its directory (whose contents are the reason —
+  an EMPTY one silences nothing). It also fails when a lane names a file that
+  does not exist, which is how `agent_activity_deepreview_vm_test.nim` stayed
+  in `scripts/test-codetracer-agentic-headless.sh` for months after AA-1
+  deleted it. Runs in `ci/lint/nim.sh`; `just test-lane-coverage`.
+* `just test-lanes` prints every lane and its files without running anything.
 
-Beware the false positives when counting: `src/ct_test/frameworks/go_test.nim`
-and `js_node_test.nim` are provider *implementations*,
-`src/frontend/viewmodel/viewmodels/test_explorer_vm.nim` and
-`test_run_summary_vm.nim` are ViewModels for the test explorer, and
-`src/ct_test/fixtures/nim_unittest_project/tests/*` are fixtures for the
-framework detector — none of them are tests of this repo.
+DEFERRED, and the justfile says so at the head of the lane block: none of the
+13 new recipes is in a workflow, in `ci/verdict/required-jobs.txt`, or in an
+aggregate recipe yet — 76 of the 220 files the lane library resolves are in
+lanes no pipeline runs. Seven of those lanes are red for reasons of their
+own (see the justfile comment for the list). The GUARD does run, in
+`ci/lint/nim.sh`, so the class stays closed even while the lanes wait.
+
+When a lane's file selection moves, guards that PIN JUSTFILE TEXT break without
+any test losing coverage. Three did: `release_gate_test.nim`,
+`ci/test/test-lane-report-test.sh` and `ci/test/vm-js-lane-test.sh` each
+asserted a literal that had moved into `ci/lib/`. All three now FOLLOW THE
+DELEGATION (and the first ASKS the lane library what a lane resolves to, rather
+than grepping for the glob's text). If you add such a guard, assert the
+behaviour, not the layout.
+
+So: to add a test, drop it in a directory a lane already globs and it runs. If
+you must put it somewhere new, the guard tells you by name on the next lint.
+
+Beware the false positives when counting test-shaped files — all of them now
+carry a marker saying so: `src/ct_test/frameworks/{go,js_node}_test.nim` are
+provider *implementations*, `src/frontend/viewmodel/viewmodels/test_*_vm.nim`
+are ViewModels, `src/ct/cli/e2e_tests.nim` is a subcommand, and
+`src/ct_test/fixtures/**` plus `src/db-backend/test-programs/**` are covered by
+directory markers.
+
+## What turning the lights on found (the 61 dark files)
+
+Almost all of them passed — but the ones that did not had rotted in ways only a
+compiler or a run could see, which is the argument for the guard:
+
+* `src/ct/utilities/zip_test.nim` did not PARSE: a multi-line `import` was
+  missing its commas, so the file had been dead since it was written.
+* `std/unittest`'s `skip()` only MARKS the case skipped — it does NOT leave the
+  body, and `return` is rejected inside a test body ("'return' not allowed
+  here"). The ONLY correct shape is `if cond: skip() else: <body>`, which is
+  what `src/frontend/viewmodel/tests/unit/recorder_gate.nim`'s
+  `requireRecorderOrSkip` already does; copy that. Found live in two files:
+  `src/ct/test_sourcemap.nim` (4 checks, which also needed `--mm:refc` because
+  its subject calls `GC_disable`) and
+  `src/frontend/tests/idle_timeout_integration_test.nim` (6 cases, which
+  reported FAILED where they meant SKIPPED on any machine without a built
+  `server_index.js`). That file also carried `check available or true` — a
+  tautology counted as a passing case forever; deleted.
+* A `check` inside a plain `proc` does NOT fail its case: `std/unittest`'s
+  `fail()` needs `testStatusIMPL` in scope, and in a proc there is none, so it
+  prints the message, sets `programResult` and lets the case report `[OK]`.
+  Extract shared assertions as a `template`, never a `proc` — a proc may
+  COMPUTE (see `laneFilesFor` in `release_gate_test.nim`) but must not assert.
+  Measured on that file's CLI-lane helper: as a proc, 5 OK / 0 FAILED with the
+  subject broken; as a template, 2 OK / 3 FAILED.
+* `real_backend_test.nim` and `multi_session_test.nim` walked five `parentDir`s
+  to reach the repo root when their depth needs six, so every path they built
+  had a doubled `src/` (`.../src/src/build-debug/...`). Both files still name
+  their pre-move home in their own headers. Fixing it took
+  `multi_session_test` from 0/16 to 16/16 and `real_backend_test` from 0/35 to
+  29/35.
+* `src/ct/online_sharing/online_sharing_test.nim` did not compile at all
+  (`findTraceForArgs` matched no current signature). It performs a LIVE
+  round-trip against the sharing service, so it must never run in CI — it is
+  compile-checked instead, by `just test-online-sharing-compile`, because a
+  compile is the weakest check that would have caught the rot.
 
 ## Two suites in `src/ct/online_sharing/` ran in no lane (AS-1)
 
 `upload_wire_format_test.nim` — 35 assertions over 11 cases pinning the exact
 JSON keys and URL paths the sharing client sends — and
 `collab_invite_url_test.nim` were reachable by no justfile recipe and no CI
-script. Both are now named in `just test-mcr-enrichment-units`. That lane
-registers by name on purpose: globbing the directory would drag in
-`online_sharing_test.nim`, a live network round-trip that also no longer
-compiles. If you add a `*_test.nim` there, add it to the recipe — the list is
-the only thing that reaches it. Both need `-d:ssl -d:useOpenssl3` because
-`api_client.nim` pulls in `std/net`'s `newContext`; neither opens a TLS
-connection.
+script.
+
+SUPERSEDED, and instructively so. The fix at the time added
+`upload_wire_format_test.nim` to `just test-mcr-enrichment-units` BY NAME and
+missed `collab_invite_url_test.nim` in the same directory — while rewriting
+this note to claim the name list was deliberate and that there was "one other
+`*_test.nim` file in that directory" when there were two. That is the whole
+argument for discovery in one milestone.
+
+The lane now GLOBS `src/ct/online_sharing` and rejects exactly one file:
+`online_sharing_test.nim`, the live round-trip, which has its own compile-only
+lane. Add a `*_test.nim` there and it runs; you do not have to remember
+anything. The lane's `-d:ssl -d:useOpenssl3` (needed because `api_client.nim`
+pulls in `std/net`'s `newContext`; nothing opens a TLS connection) lives in
+`ci/lib/test-lane-files.sh` with the lane, not in the recipe.
 
 ## An unknown *kind* is refused, but an unknown *role* is not (open defect)
 

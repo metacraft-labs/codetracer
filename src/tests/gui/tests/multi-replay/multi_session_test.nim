@@ -51,7 +51,14 @@ proc findReplayServer(): string =
   if envBin.len > 0 and fileExists(envBin):
     return envBin
   let thisFile = currentSourcePath()
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir
+  # SIX `parentDir`s, not five: this file lives at
+  # src/tests/gui/tests/multi-replay/, so five levels up lands on
+  # `<repo>/src` and every path built from it gained a doubled `src/`
+  # (`.../src/src/build-debug/...`). The file's own header still names
+  # its old home under src/frontend/viewmodel/tests/ — it was moved one
+  # level deeper and the arithmetic was never updated, which no one saw
+  # because no lane compiled or ran this file.
+  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
   let candidate = repoRoot / "src" / "build-debug" / "bin" / "replay-server"
   if fileExists(candidate):
     return candidate
@@ -60,7 +67,9 @@ proc findReplayServer(): string =
     "build it with 'cargo build' in src/db-backend/. Tried: " & candidate)
 
 proc repoRoot(): string =
-  currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
+  ## Six levels up, for the same reason spelled out in `findReplayServer`
+  ## above: five lands on `<repo>/src`.
+  currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
 
 proc findTestTrace(): string =
   ## Locate the built-in Wasm test trace (src/db-backend/trace/).

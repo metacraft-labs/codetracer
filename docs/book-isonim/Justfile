@@ -8,9 +8,17 @@
 
 # The suites that need only `content/` + `src/`, then the ones that read the
 # built `public/` tree -- so `build` runs first rather than being a prerequisite
-# a reader has to know about. (CI builds the book but does not run these; they
-# are the hand-run gate, which is exactly why leaving the build-dependent ones
-# out of this recipe meant they were rarely run at all.)
+# a reader has to know about.
+#
+# WHO RUNS THIS: `just test-book-isonim` in the codetracer repo root, which is
+# the only invoker. This used to say "CI builds the book but does not run
+# these; they are the hand-run gate" -- and nothing in codetracer's justfile,
+# in ci/, or in any workflow ever called this recipe, so "hand-run gate" and
+# "never run" were indistinguishable for ten suites and 63 cases. They all
+# pass; nobody knew, because nobody was asking. codetracer's
+# `ci/test/test-lane-coverage.sh` now counts these ten files as covered BY that
+# recipe, so deleting the caller makes the guard go red instead of making the
+# suites silently disappear again.
 test: build
     nim c -r tests/test_nav_order_matches_summary.nim
     nim c -r tests/test_nightly_channel.nim

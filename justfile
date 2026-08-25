@@ -1149,7 +1149,8 @@ test-frontend-js:
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test"' EXIT
+  ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1174,6 +1175,15 @@ test-frontend-js:
   # has no `window`, so alias it to the global object before loading the
   # bundle.  Nothing else in this test needs a DOM.
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$scratchpad_dispatch_test"
+  echo ""
+  # `src/frontend/tests/ipc_registry_test.nim` imports `std/jsffi`, so the C
+  # backend refuses it outright ("Module jsFFI is designed to be used with the
+  # JavaScript backend").  It ran in no lane at all until this line existed —
+  # two real cases over the socket-rebinding path that could not fail a build.
+  echo "Running IPC registry rebind tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$ipc_registry_test" js src/frontend/tests/ipc_registry_test.nim
+  node "$ipc_registry_test"
   echo ""
   echo "Running Nim language definition tests..."
   node src/frontend/tests/nimLanguage.test.mjs
@@ -1252,59 +1262,13 @@ test-cli-record: vm-test-prereqs
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-cli-record.log) 2>&1
-  echo "=== ct record CLI dispatch tests ==="
-
   # Discover the sibling recorders the e2e test records with, the same way
-  # test-vm-recorder-gated does.
+  # test-vm-recorder-gated does.  Everything after this — which files, which
+  # flags, how a run is classified — is ci/lib/run-nim-test-lane.sh, so this
+  # recipe cannot drift away from the other lanes' reporting the way six
+  # hand-copied loops did.
   source scripts/detect-siblings.sh
-  # Shared classifier: exit status before the [OK]/[FAILED] tally.
-  source ci/lib/test-lane-report.sh
-
-  failed=0
-  passed=0
-  for f in $(find src/tests/cli -name '*_test.nim' | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/cli-$name"
-    echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1) && rc=0 || rc=$?
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    verdict=$(classify_test_run "$rc" "$oks" "$fails")
-    test_run_headline "$verdict" "$rc" "$oks" "$fails"
-    case "$verdict" in
-      ok)
-        passed=$((passed + 1))
-        ;;
-      no-results)
-        echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      partial)
-        # `-B` is load-bearing, not decoration.  Nim's `unittest` prints the
-        # evidence -- `checkpoint` output, `Check failed: <expr>` and the
-        # `<name> was <value>` lines -- BEFORE the `[FAILED] <test name>`
-        # marker.  A window of `-A 12` alone therefore reports *that* a test
-        # failed while showing none of *why*, which is how a real defect in
-        # this repo's own trace_index migration cost a full extra
-        # reproduce-from-scratch cycle: the lane said
-        # `[FAILED] recording a real program produces a real container` and
-        # discarded the `[codetracer] FATAL:` line immediately above it that
-        # named the cause.
-        echo "$output" | grep -B 25 -A 12 '\[FAILED\]' | head -120 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      *)
-        echo "$output" | tail -30 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-    esac
-  done
-  echo ""
-  echo "CLI: $passed passed, $failed failed"
-  [ "$failed" -eq 0 ]
+  bash ci/lib/run-nim-test-lane.sh cli-record
 
 # Run CLI record smoke tests for all supported languages.
 # Exercises the full `ct record` code path (language detection → recorder
@@ -2393,97 +2357,29 @@ vm-test-prereqs:
 # Compile and run all ViewModel headless tests with the native (C) backend.
 test-vm-native: vm-test-prereqs
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-vm-native.log) 2>&1
-  echo "=== ViewModel tests (native backend) ==="
-  # The shared classifier: it reads the exit status BEFORE the [OK]/[FAILED]
-  # tally, which is what stops a SEGV-ed binary from being reported as an
-  # ordinary PARTIAL. See ci/lib/test-lane-report.sh for the incident.
-  source ci/lib/test-lane-report.sh
-  failed=0
-  passed=0
-  for f in $(find src/tests/gui/tests -name '*_test.nim' \
-    ! -name 'vm_test_helpers.nim' \
-    ! -path '*/integration/real_backend_test.nim' \
-    ! -path '*/integration/language_smoke_test.nim' \
-    ! -path '*/multi-replay/*' \
-    ! -path '*/noir-space-ship/*' \
-    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
-    | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/vm-native-$name"
-    echo -n "  $f ... "
-    # Compile and run as SEPARATE steps.
-    #
-    # This used to be a single `nim c -r`, which conflated three
-    # outcomes into one bucket. `welcome_screen_vm_test` compiles
-    # perfectly and then dies at process start with
-    #
-    #     could not load: libsqlite3.so(|.0)
-    #
-    # because the test dlopen's sqlite through db_connector. The old
-    # reporting called that a "COMPILE ERROR" and then printed only
-    # lines matching `Error:` — and that diagnostic does not match, so
-    # the one line naming the missing library was thrown away and all
-    # anybody saw was `execution of an external program failed`. An
-    # environmental gap must name what is missing; this one hid it.
-    #
-    # Splitting the steps also lets the run inherit CT_LD_LIBRARY_PATH
-    # (the dev shell's sqlite/pcre/glib/openssl/zstd set) the same way
-    # `test-bpf-native-integration` already does, WITHOUT putting those
-    # libraries in front of the Nim compiler's own loader path.
-    if ! compile_output=$(nim c --hints:off \
-      --path:src/frontend/viewmodel \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1); then
-      echo "COMPILE ERROR"
-      echo "$compile_output" | grep 'Error:' | head -2 | sed 's/^/    /'
-      failed=$((failed + 1))
-      continue
-    fi
-    ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
-    output=$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-      "$cache/$name" 2>&1) && rc=0 || rc=$?
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    verdict=$(classify_test_run "$rc" "$oks" "$fails")
-    test_run_headline "$verdict" "$rc" "$oks" "$fails"
-    case "$verdict" in
-      ok)
-        passed=$((passed + 1))
-        ;;
-      no-results)
-        # It built, so this is not a compile error: the binary could not
-        # run, or ran and reported nothing. Either way show its whole
-        # output — the reason is in there, and filtering is what lost it
-        # last time.
-        echo "$output" | head -20 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      crashed)
-        # Show what it managed to report AND how it died — the traceback is
-        # in the tail and names the line, which is the only thing that turns
-        # "it crashed" into "here is the case that crashed it".
-        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-        echo "$output" | tail -20 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      silent-failure)
-        echo "$output" | grep -E 'Check failed|Error|Exception|SIGSEGV' \
-          | head -20 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      *)
-        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-    esac
-  done
-  echo ""
-  echo "Native: $passed passed, $failed failed"
-  [ "$failed" -eq 0 ]
+  # Which files this lane runs, and which flags they need, is
+  # ci/lib/test-lane-files.sh; how a run is compiled, executed and classified
+  # is ci/lib/run-nim-test-lane.sh.  Both details used to live inline here, in
+  # a loop that five other recipes had each copied and then drifted from.
+  #
+  # Two behaviours that were hard-won and now live in the runner, so every lane
+  # gets them:
+  #
+  #   * Compile and run are SEPARATE steps.  As one `nim c -r` they were not:
+  #     `welcome_screen_vm_test` compiles perfectly and then dies at process
+  #     start with `could not load: libsqlite3.so(|.0)` because it dlopen's
+  #     sqlite through db_connector.  The old reporting called that a "COMPILE
+  #     ERROR" and printed only lines matching `Error:` — which that diagnostic
+  #     does not match, so the one line naming the missing library was thrown
+  #     away and all anybody saw was `execution of an external program failed`.
+  #
+  #   * The RUN inherits CT_LD_LIBRARY_PATH (the dev shell's
+  #     sqlite/pcre/glib/openssl/zstd set); the COMPILE does not, so those
+  #     libraries never get in front of the Nim compiler's own loader path.
+  bash ci/lib/run-nim-test-lane.sh vm-native
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
@@ -2507,101 +2403,267 @@ test-vm-native: vm-test-prereqs
 # CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-vm-js.log) 2>&1
-  echo "=== ViewModel tests (JS backend) ==="
-  # Same shared classifier the native lane uses: exit status before tally.
-  source ci/lib/test-lane-report.sh
-  failed=0
-  passed=0
-  for f in $(find src/tests/gui/tests -name '*_test.nim' \
-    ! -name 'vm_test_helpers.nim' \
-    ! -path '*/integration/real_backend_test.nim' \
-    ! -path '*/integration/language_smoke_test.nim' \
-    ! -path '*/multi-replay/*' \
-    ! -path '*/noir-space-ship/*' \
-    ! -path '*/agentic-coding/*' \
-    ! -path '*/request-panel/demo_recipe_vm_test.nim' \
-    ! -path '*/request-panel/python_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/ruby_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/php_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/elixir_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/js_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/native_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/remote_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/request_span_conformance_test.nim' \
-    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
-    | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/vm-js-$name"
-    echo -n "  $f ... "
-    # `-d:nodejs` is load-bearing, not decoration.
-    #
-    # Nim auto-defines `nodejs` only for `nim js -r`. This lane compiles and
-    # runs as separate steps (same split, and for the same reasons, as the
-    # native lane above), so the define is absent unless spelled out -- and
-    # without it `std/exitprocs.setProgramResult` is undeclared, so
-    # `std/unittest` substitutes a no-op and the process exits 0 even when a
-    # test fails. The compiler says exactly that:
-    #
-    #     unittest.nim: Warning: setProgramResult not available on platform,
-    #       unittest will not give failing exit code on test failure
-    #
-    # and the old `>/dev/null 2>&1` on the compile threw the warning away.
-    # Measured on this repo's Nim with a suite whose only test fails:
-    # `nim js` -> node exits 0; `nim js -d:nodejs` -> node exits 1.
-    #
-    # So the `$exitcode` arm below was dead twice over. The define is what
-    # makes the exit code mean anything at all, and capturing it with
-    # `|| exitcode=$?` is what lets this recipe SEE it -- the old
-    # `output=$(...)` followed by `exitcode=$?` could never observe a failure,
-    # because under this recipe's `set -e` a non-zero `node` killed the whole
-    # loop before the assignment was read.
-    if ! compile_output=$(nim js -d:nodejs --hints:off \
-      --path:src/frontend/viewmodel \
-      --nimcache:"$cache" \
-      -o:"$cache/$name.js" \
-      "$f" 2>&1); then
-      echo "COMPILE ERROR"
-      echo "$compile_output" | grep 'Error:' | head -2 | sed 's/^/    /'
-      failed=$((failed + 1))
-      continue
-    fi
-    exitcode=0
-    output=$(node "$cache/$name.js" 2>&1) || exitcode=$?
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    verdict=$(classify_test_run "$exitcode" "$oks" "$fails")
-    test_run_headline "$verdict" "$exitcode" "$oks" "$fails"
-    case "$verdict" in
-      ok)
-        passed=$((passed + 1))
-        ;;
-      no-results)
-        # Built, so not a compile error: it could not run, or ran and reported
-        # nothing. Without this guard the lane scored a silent no-op as
-        # `OK (0 tests)`, which is the one result a test lane must never invent.
-        echo "$output" | head -20 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      crashed)
-        echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
-        echo "$output" | tail -20 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      *)
-        echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-    esac
-  done
-  echo ""
-  echo "JS: $passed passed, $failed failed"
-  [ "$failed" -eq 0 ]
+  # Same runner as the native lane; ci/lib/test-lane-files.sh derives this
+  # lane's file set FROM the native lane's, minus what cannot compile or run
+  # under `nim js`, so the two can no longer disagree about the shared part.
+  #
+  # `-d:nodejs` is applied by the runner and is load-bearing, not decoration.
+  # Nim auto-defines `nodejs` only for `nim js -r`; this lane compiles and runs
+  # as separate steps, so without the explicit define
+  # `std/exitprocs.setProgramResult` is undeclared, `std/unittest` substitutes
+  # a no-op, and node exits 0 even when a test fails.  The compiler says so:
+  #
+  #     unittest.nim: Warning: setProgramResult not available on platform,
+  #       unittest will not give failing exit code on test failure
+  #
+  # and the old `>/dev/null 2>&1` on the compile threw that warning away.
+  bash ci/lib/run-nim-test-lane.sh vm-js
 
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
+
+# ====
+# Lanes converted from hand-maintained path lists to DISCOVERY.
+#
+# Everything below shares one runner (ci/lib/run-nim-test-lane.sh) and one file
+# selector (ci/lib/test-lane-files.sh).  That split is the point: a lane is now
+# DATA — "this directory, this pattern, these flags" — so a new test file in a
+# covered directory is picked up by its lane with nobody editing anything, and
+# `just test-lane-coverage` fails BY NAME on any test-shaped file that still
+# matches no lane.
+#
+# Before this existed, 61 test-shaped `.nim` files carrying real `suite`/`test`
+# blocks ran in no lane at all, including all five `src/common/*_test.nim` —
+# among them `trace_index_test.nim`, the M-REC-8 recording-id identity suite
+# the artifact store's id decision rests on — and every
+# `src/ct_test/incremental/test_*.nim`.  `src/ct/utilities/zip_test.nim` had
+# rotted into a file that did not even parse, which is what happens to code
+# nothing compiles.
+#
+# ---------------------------------------------------------------------------
+# DEFERRED, AND SAY SO: NONE OF THE 13 RECIPES BELOW IS IN A PIPELINE YET.
+# ---------------------------------------------------------------------------
+# "Picked up by its lane" is NOT the same as "runs in CI", and for these
+# thirteen the second is currently false.  No workflow, no entry in
+# ci/verdict/required-jobs.txt, and no aggregate recipe invokes any of them —
+# 76 of the 220 files the lane library resolves are in lanes no pipeline runs
+# (`test_lane_all_files | wc -l` for the 220; the reachable 144 are the lanes
+# behind `just test-vm`, `test-cli-record`, `test-ct-trace-units`,
+# `test-mcr-enrichment-units`, `test-m16-release-gate`, `test-ct-providers`,
+# `test-visual-replay-gate`, `test-vm-recorder-gated` and
+# `test-no-sidecar-manifests`).  A reader who assumed otherwise would be repeating this
+# campaign's own mistake one level up, so it is written down here rather than
+# left to be discovered.
+#
+# WHY it is deferred: seven of these lanes are red for reasons that are not
+# theirs to fix, and wiring a red lane into a required job breaks every build
+# for everybody:
+#
+#   test-frontend-units          cross_process_origin_vm_test needs an
+#                                uncommitted rr/MCR cross-process recording
+#   test-vm-collab-units         the collab signal registry has drifted from
+#                                the ViewModels (30 unclassified, 1 stale) —
+#                                a real, pre-existing red
+#   test-vm-collab-integration   test_collab_m8_cross_frontend needs
+#                                libgpui_nim_shim.so
+#   test-ct-test-incremental     test_io_mon_readfiles_materialized asserts an
+#                                insertion order the impl returns sorted
+#   test-vm-gui-headless         noir_space_ship_test: recorded traces come
+#                                back "unrecognized format"; real_backend_test
+#                                needs the Python recorder installed
+#   test-ct-test-incremental-e2e needs a buildable Python recorder sibling
+#   test-online-sharing-compile  online_sharing_test.nim does not compile
+#
+# The five that are GREEN today and could be promoted as-is:
+#   test-common-units  test-ct-cli-units  test-vm-unit  test-book-isonim
+#   test-lane-coverage (already runs, via ci/lint/nim.sh)
+# (`test-lanes` is the thirteenth recipe; it prints lane contents and runs
+#  nothing, so it is neither red nor promotable.)
+#
+# What IS closed regardless of the above: the guard.  `test-lane-coverage`
+# runs in the `lint-nim` job, so a NEW dark file is caught on every push even
+# while these lanes wait for a pipeline.  The deferral is about running the
+# 61 rescued files in CI, not about the class staying closed.
+
+# The guard that closes the class: every test-shaped Nim file must be run by a
+# lane or declare, in itself, that it is not a test of this repo.  Pure bash +
+# git, no toolchain, runs in about a second — it is wired into `ci/lint/nim.sh`
+# so the answer arrives in the lint stage rather than after a build.
+test-lane-coverage:
+  bash ci/test/test-lane-coverage.sh
+
+# Print what each lane runs, without running anything.  Useful when deciding
+# where a new test file belongs.
+test-lanes:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source ci/lib/test-lane-files.sh
+  while read -r lane; do
+    printf '%s — %s\n' "$lane" "$(test_lane_description "$lane")"
+    test_lane_files "$lane" | sed 's/^/    /'
+  done < <(test_lane_ids)
+
+# src/common unit suites.  ALL FIVE ran in no lane until this recipe existed,
+# `trace_index_test.nim` — the M-REC-8 recording-id identity suite — among them.
+test-common-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-common-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh common-units
+
+# The `ct` CLI's unit suites outside src/ct/trace: the three
+# src/ct/launch/*_test.nim, src/ct/test_sourcemap.nim and
+# src/ct/utilities/zip_test.nim.  Needs `--mm:refc` because src/ct/sourcemap.nim
+# calls `GC_disable`, which does not exist under ORC.
+test-ct-cli-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-cli-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-cli-units
+
+# src/frontend/tests suites that compile with the C backend.  Six of the eight
+# files in that directory ran nowhere; the other two are `just test-frontend-js`.
+test-frontend-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-frontend-units.log) 2>&1
+  # `idle_timeout_integration_test.nim` launches the real `ct host` (node +
+  # server_index.js) and finds it through `codetracerExeDir`, which resolves
+  # from CODETRACER_PREFIX outside the `ct` entrypoint.  Without this the
+  # lookup lands in the nimcache directory the test binary happens to sit in,
+  # server_index.js is not there, and the suite reports six failures rather
+  # than the skip it intends -- `std/unittest`'s `skip()` MARKS a case but does
+  # not leave its body, so each guarded test ran on anyway.  Pointing at the
+  # build tree makes all seven cases run for real.
+  export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$PWD/src/build-debug}"
+  bash ci/lib/run-nim-test-lane.sh frontend-native-units
+
+# ViewModel unit suites under src/frontend/viewmodel/tests/unit that are
+# neither recorder-gated nor collab.  Discovery: anything added to that
+# directory lands here without an edit.
+test-vm-unit: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-unit.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-unit
+
+# The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
+# half is pure Nim and cheap; the integration/soak half opens real localhost
+# sockets and links the GPUI shim, so it is a separate recipe rather than a
+# subset of a lane that is supposed to stay fast.
+test-vm-collab-units: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-collab-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-collab-units
+
+test-vm-collab-integration: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-collab-integration.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-collab-integration
+
+# ct-test's incremental engine: fourteen suites under src/ct_test/incremental,
+# none of which was reachable by any recipe or CI script.
+test-ct-test-incremental:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-test-incremental.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-test-incremental
+
+# The live-recorder counterpart of the lane above: records with a real Python
+# recorder sibling, so it is gated behind having one built.
+test-ct-test-incremental-e2e:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-test-incremental-e2e.log) 2>&1
+  source scripts/detect-siblings.sh
+  bash ci/lib/run-nim-test-lane.sh ct-test-incremental-e2e
+
+# GUI ViewModel suites that spawn a real backend process (`headless_session` /
+# `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until
+# this recipe existed those exclusions pointed at nothing, so three of the four
+# files ran nowhere at all.
+test-vm-gui-headless: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-gui-headless.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-gui-headless
+
+# `src/ct/online_sharing/online_sharing_test.nim` performs a live
+# upload/download/delete round-trip against the production sharing service, so
+# it must never RUN in CI.  It is still compiled, because "never run" is how it
+# rotted: at the time this lane was written it did not compile at all
+# (`findTraceForArgs` at line 21 matches no current signature, and
+# `extractInfoFromKey` no longer exists).  A compile is the weakest check that
+# would have caught that, and it costs seconds.
+test-online-sharing-compile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-online-sharing-compile.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh online-sharing-live --compile-only
+
+# The docs/book-isonim SSG suites.
+#
+# THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when
+# the isonim-docs sibling is present — and a LOUD SKIP when it is not.  They
+# were neither before: `docs/book-isonim/Justfile` has a `test` recipe that
+# nothing in this repo, and nothing in any workflow, ever invoked, so ten
+# suites with 63 cases sat in a state where "hand-run gate" and "never run"
+# were indistinguishable.  The book cannot build without ../../../isonim-docs
+# (its nimble requires it), which is why this cannot be an unconditional lane;
+# saying so out loud, and failing rather than silently passing when the sibling
+# is missing but CT_BOOK_ISONIM_REQUIRED=1, is what makes the answer explicit.
+test-book-isonim:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-book-isonim.log) 2>&1
+  echo "=== docs/book-isonim SSG suites ==="
+  if [ ! -d "../isonim-docs" ]; then
+    echo "MISSING-SIBLING SKIP: ../isonim-docs is not checked out."
+    echo "  docs/book-isonim is built on the isonim-docs SSG framework and its"
+    echo "  nimble requires ../../../isonim-docs, so neither the book nor its"
+    echo "  tests can compile without it."
+    if [ "${CT_BOOK_ISONIM_REQUIRED:-0}" = "1" ]; then
+      echo "ERROR: CT_BOOK_ISONIM_REQUIRED=1 but the sibling is absent." >&2
+      exit 1
+    fi
+    exit 0
+  fi
+  # The book's own Justfile stays the source of truth for HOW to build and run
+  # the suites (`build` first, then the ten files, in that order because four
+  # of them read the built public/ tree). This recipe exists to make sure
+  # SOMETHING invokes it.
+  #
+  # The codetracer dev shell already provides a `nim` that compiles the book,
+  # so the plain invocation is tried first. The `nix develop` fallback is for
+  # a bare shell; it is second, not first, because the framework flake resolves
+  # sibling inputs by hash and a workspace whose siblings are ahead of that pin
+  # fails to evaluate at all — which would turn a green suite into an
+  # infrastructure error.
+  if just --justfile docs/book-isonim/Justfile \
+       --working-directory docs/book-isonim test; then
+    exit 0
+  fi
+  echo "ambient toolchain could not run the book suites; retrying in the framework dev shell" >&2
+  nix develop path:../isonim-docs -c just \
+    --justfile docs/book-isonim/Justfile \
+    --working-directory docs/book-isonim test
+
 
 # RS-M12: assert no recorder writes a sidecar manifest any more.
 #
@@ -2648,141 +2710,39 @@ test-no-sidecar-manifests: vm-test-prereqs
 # their own cheap lane rather than gated behind either of those.
 test-ct-trace-units:
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-trace-units.log) 2>&1
-  echo "=== ct trace-layer unit tests ==="
-  # Shared classifier: exit status before the [OK]/[FAILED] tally.
-  source ci/lib/test-lane-report.sh
-  failed=0
-  passed=0
-  total_oks=0
-  for f in $(find src/ct/trace -name '*_test.nim' | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/ct-trace-$name"
-    echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1) && rc=0 || rc=$?
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    total_oks=$((total_oks + oks))
-    verdict=$(classify_test_run "$rc" "$oks" "$fails")
-    test_run_headline "$verdict" "$rc" "$oks" "$fails"
-    case "$verdict" in
-      ok)
-        passed=$((passed + 1))
-        ;;
-      no-results)
-        echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      partial)
-        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      *)
-        echo "$output" | tail -30 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-    esac
-  done
-  echo ""
-  echo "ct trace units: $passed file(s) passed, $failed failed, $total_oks case(s)"
-  # Guard against a vacuous pass: a glob that silently matches nothing,
-  # or suites that compile but assert nothing, must not read as green.
-  if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
-    echo "ERROR: no ct trace-layer test cases ran"
-    exit 1
-  fi
-  [ "$failed" -eq 0 ]
+  bash ci/lib/run-nim-test-lane.sh ct-trace-units
 
 # Compile + run the `ct upload` MCR-enrichment unit suites
 # (src/ct/online_sharing).
 #
-# Registered by NAME rather than by a directory glob on purpose: exactly one
-# `*_test.nim` file in that directory is deliberately excluded —
-# `online_sharing_test.nim`, a live upload/download/delete round-trip against
-# the sharing service, which says so in its own header ("not part of any
-# automated test runner").  Globbing the directory would drag a network test
-# into a unit lane.  Every OTHER `*_test.nim` there must be listed below; if
-# you add one, add it here, because a name list silently omits what it forgets.
+# DISCOVERED, not enumerated.  This recipe used to carry a four-name list and a
+# comment explaining that the list was deliberate ("Every OTHER `*_test.nim`
+# there must be listed below; if you add one, add it here, because a name list
+# silently omits what it forgets").  The comment was right about the mechanism
+# and wrong about the remedy: the milestone that wrote it added
+# `upload_wire_format_test.nim` by name and missed `collab_invite_url_test.nim`
+# sitting in the same directory — while asserting there was "one other
+# `*_test.nim` file in that directory" when there were two.
 #
-# Two files were added after that rule was written, both of which had been
-# running NOWHERE — reachable by no recipe and no CI script, so their
-# assertions could not fail a build:
+# So the rule is inverted now.  ci/lib/test-lane-files.sh globs the directory
+# and rejects exactly one file by name: `online_sharing_test.nim`, a live
+# upload/download/delete round-trip against the sharing service, which has its
+# own compile-only lane (`just test-online-sharing-compile`).  A new suite in
+# this directory runs on the next CI run without anyone editing anything, and
+# ci/test/test-lane-coverage.sh fails by name if one ever slips out again.
 #
-#   * `upload_wire_format_test.nim` — 35 assertions over 11 cases pinning the
-#     exact JSON keys and URL paths the sharing client sends (the M-REC-8
-#     upload-url/confirm-upload/download-url grammar, plus the M31 finalize
-#     body).  The path builders it pins are now derived from the artifact kind
-#     registry, so the suite that proves the wire did not move is precisely the
-#     one that has to run.
-#   * `collab_invite_url_test.nim` — the collab invite URL grammar and the
-#     native invite bootstrap.
-#
-# Both need `-d:ssl -d:useOpenssl3` because `api_client.nim` pulls in
-# `std/net`'s `newContext`; neither opens a TLS connection.
-#
-# Before this recipe existed, `src/ct/online_sharing/test_mcr_enrichment.nim`
-# was run by nothing at all — 34 assertions that could not fail a build.  The
-# member-check suite added alongside it pins that `ct upload` does not replace
-# the user's recording with a lossier export just because the exporter exited 0
-# (CTFS-Binary-Format.md §5d).
+# The lane's files need `-d:ssl -d:useOpenssl3` because `api_client.nim` pulls
+# in `std/net`'s `newContext`; none of them opens a TLS connection.  Those
+# flags live with the lane definition, not here.
 test-mcr-enrichment-units:
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-mcr-enrichment-units.log) 2>&1
-  echo "=== ct upload MCR-enrichment unit tests ==="
-  # Shared classifier: exit status before the [OK]/[FAILED] tally.
-  source ci/lib/test-lane-report.sh
-  failed=0
-  passed=0
-  total_oks=0
-  for f in src/ct/online_sharing/test_mcr_enrichment.nim \
-           src/ct/online_sharing/mcr_enrichment_member_check_test.nim \
-           src/ct/online_sharing/upload_wire_format_test.nim \
-           src/ct/online_sharing/collab_invite_url_test.nim; do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/mcr-enrichment-$name"
-    echo -n "  $f ... "
-    output=$(nim c -r --hints:off -d:ssl -d:useOpenssl3 \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1) && rc=0 || rc=$?
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    total_oks=$((total_oks + oks))
-    verdict=$(classify_test_run "$rc" "$oks" "$fails")
-    test_run_headline "$verdict" "$rc" "$oks" "$fails"
-    case "$verdict" in
-      ok)
-        passed=$((passed + 1))
-        ;;
-      no-results)
-        echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      partial)
-        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-      *)
-        echo "$output" | tail -30 | sed 's/^/    /'
-        failed=$((failed + 1))
-        ;;
-    esac
-  done
-  echo ""
-  echo "mcr enrichment units: $passed file(s) passed, $failed failed, $total_oks case(s)"
-  # Guard against a vacuous pass, the same way test-ct-trace-units does.
-  if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
-    echo "ERROR: no MCR-enrichment test cases ran"
-    exit 1
-  fi
-  [ "$failed" -eq 0 ]
+  bash ci/lib/run-nim-test-lane.sh mcr-enrichment-units
 
 # Compile + run the recorder-gated ViewModel headless tests that live under
 # src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /

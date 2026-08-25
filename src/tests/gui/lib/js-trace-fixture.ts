@@ -122,7 +122,7 @@ const CHROME_FIXTURE_PROGRAM =
  *
  * This is not a reduction in language coverage: Python trace-open coverage
  * lives in the specs that are actually *about* Python (`tests/languages/**`,
- * `tests/integration/real_backend.nim`) and in the other `py_console_logs`
+ * `tests/integration/real_backend_test.nim`) and in the other `py_console_logs`
  * users, none of which this helper touches.
  */
 export function recordChromeTraceFixture(name: string): JsTraceFixture {

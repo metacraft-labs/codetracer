@@ -1,3 +1,10 @@
+## NOT-A-TEST-LANE-FILE: this is the run-summary VIEWMODEL for Agent Activity
+## (AA-2) — production frontend code named after the `ct test` runs it renders,
+## hence the `test_*` collision. It declares no `suite`/`test` blocks. Its
+## behaviour is asserted by
+## `src/tests/gui/tests/agent-activity/test_run_summary_vm_test.nim` (the
+## `vm-native` / `vm-js` lanes).
+
 ## viewmodels/test_run_summary_vm.nim
 ##
 ## AA-2 — a `ct test` execution, as the Agent Activity session feed sees it.

@@ -76,7 +76,12 @@ run_regression_gate() {
 	run_nim "src/tests/gui/tests/agent-workspace/agent_workspace_vm_test.nim"
 	run_nim "src/tests/gui/tests/vcs/vcs_vm_test.nim"
 	run_nim "src/tests/gui/tests/deepreview/deepreview_vm_test.nim"
-	run_nim "src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim"
+	# Was `agent_activity_deepreview_vm_test.nim` — a file AA-1 deleted. The
+	# lane went on naming it, so this gate quietly ran one fewer test than it
+	# claimed for as long as that name survived. `ci/test/test-lane-coverage.sh`
+	# now fails on any lane entry that does not exist on disk, which is what
+	# makes the next such rename loud instead of silent.
+	run_nim "src/tests/gui/tests/agent-activity-deepreview/agent_activity_rollup_removal_test.nim"
 	run_cmd "collab-signal-registry" nim c -r src/frontend/viewmodel/tests/unit/test_collab_signal_registry.nim
 	run_rust "db-backend-dap-protocol" "cd src/db-backend && cargo test --no-default-features --test dap_protocol"
 	run_rust "backend-manager-routing" "cd src/backend-manager && cargo test --bin session-manager && cargo test --test real_recording_integration test_real_rr_ && cargo test --test dive_in_url_fetch_test && cargo test --test meta_dat_metadata_loading"

@@ -1,6 +1,10 @@
+# The commas below are load-bearing: a multi-line `import` is a comma-separated
+# list, and without them the second and third lines are read as a continuation
+# of the first, which Nim rejects with `invalid indentation` on line 3. The file
+# sat in that state because no lane compiled it.
 import
-  std/[unittest, os, strutils, streams]
-  ../utilities/zip
+  std/[unittest, os, strutils, streams],
+  ./zip,
   ../../common/paths
 
 suite "zipFolder / unzipIntoFolder":

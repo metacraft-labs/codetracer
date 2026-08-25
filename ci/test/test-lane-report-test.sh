@@ -277,27 +277,74 @@ fi
 # the call sites. Comments are stripped first for the same reason
 # vm-js-lane-test.sh strips them: this justfile explains the defect in prose
 # that necessarily quotes the tokens under test.
+#
+# A lane satisfies this TWO ways, and both are followed rather than assumed:
+#
+#   a. it sources ci/lib/test-lane-report.sh and calls classify_test_run in its
+#      own body (test-vm-recorder-gated still does, because its
+#      MISSING-RECORDER SKIP handling sits between the verdict and the tally);
+#   b. it hands off to ci/lib/run-nim-test-lane.sh, the shared compile-run-report
+#      loop, which does both on the lane's behalf.
+#
+# (b) is why this check had to change: five of these six lanes stopped carrying
+# the loop and started delegating, and a guard pinned to "the recipe body
+# contains classify_test_run" reported that as five lanes losing the
+# classifier. They had not; the classifier had moved. Following the delegation
+# is what keeps this assertion about BEHAVIOUR rather than about layout.
+#
+# The runner is verified once, here, rather than trusted: if it stopped
+# classifying, every delegating lane would silently satisfy (b) while doing
+# nothing of the sort.
+runner_rel="ci/lib/run-nim-test-lane.sh"
+runner_abs="${REPO_ROOT}/${runner_rel}"
+runner_classifies=0
+if [ -f "${runner_abs}" ] &&
+	grep -qE 'source "?\$?\{?[a-z_]*\}?/?ci/lib/test-lane-report\.sh"?' "${runner_abs}" &&
+	grep -q 'classify_test_run' "${runner_abs}"; then
+	runner_classifies=1
+fi
+
 # shellcheck disable=SC2001 # parameter expansion cannot express this trim
 justfile_code="$(sed 's/[[:space:]]*#.*$//' <"${JUSTFILE}")"
+
+# Every justfile recipe that compiles and runs Nim test files. The five that
+# delegate, the one that still loops inline, and the lanes added when the file
+# selection moved into ci/lib/test-lane-files.sh -- listed so a new lane cannot
+# quietly opt out of the classifier by being new.
+lane_names=(
+	test-vm-native test-vm-js test-cli-record test-ct-trace-units
+	test-mcr-enrichment-units test-vm-recorder-gated
+	test-common-units test-ct-cli-units test-frontend-units test-vm-unit
+	test-vm-collab-units test-vm-collab-integration test-ct-test-incremental
+	test-ct-test-incremental-e2e test-vm-gui-headless test-online-sharing-compile
+)
 missing_lanes=()
-for lane in test-vm-native test-vm-js test-cli-record test-ct-trace-units \
-	test-mcr-enrichment-units test-vm-recorder-gated; do
+delegating=0
+inline=0
+for lane in "${lane_names[@]}"; do
 	lane_body="$(awk -v target="^${lane}( |:)" '
 		$0 ~ target { inrec = 1; next }
 		inrec && /^[^[:space:]]/ { exit }
 		inrec { print }
 	' <<<"${justfile_code}")"
-	if ! grep -q 'source ci/lib/test-lane-report.sh' <<<"${lane_body}" ||
-		! grep -q 'classify_test_run' <<<"${lane_body}"; then
+	if [ -z "${lane_body}" ]; then
+		missing_lanes+=("${lane} (no such recipe)")
+	elif grep -qE 'source "?\$?\{?[a-z_]*\}?/?ci/lib/test-lane-report\.sh"?' <<<"${lane_body}" &&
+		grep -q 'classify_test_run' <<<"${lane_body}"; then
+		inline=$((inline + 1))
+	elif grep -q "${runner_rel}" <<<"${lane_body}" && [ "${runner_classifies}" -eq 1 ]; then
+		delegating=$((delegating + 1))
+	else
 		missing_lanes+=("${lane}")
 	fi
 done
 
 if [ "${#missing_lanes[@]}" -eq 0 ]; then
-	ok "all six compile-and-run lanes classify through the shared library"
+	ok "all ${#lane_names[@]} compile-and-run lanes classify through the shared library" \
+		"(${delegating} via ${runner_rel}, ${inline} inline)"
 else
-	fail "all six compile-and-run lanes classify through the shared library" \
-		"These do not source it and/or do not call classify_test_run:" \
+	fail "all ${#lane_names[@]} compile-and-run lanes classify through the shared library" \
+		"These neither classify inline nor delegate to a runner that does:" \
 		"${missing_lanes[*]}" \
 		"A lane with its own inline if-chain is a lane this suite cannot" \
 		"protect, and an inline chain is exactly how the defect got in."

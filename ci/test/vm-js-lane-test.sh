@@ -72,7 +72,7 @@ JUSTFILE="${REPO_ROOT}/justfile"
 # Every contract below, counted once, whether or not this environment can run
 # it. Bump deliberately when adding one -- the reconciliation at the end fails
 # loudly if this disagrees with what actually ran.
-TOTAL_CONTRACTS=8
+TOTAL_CONTRACTS=9
 
 pass_count=0
 skip_count=0
@@ -126,20 +126,60 @@ recipe_code="$(sed 's/[[:space:]]*#.*$//' <<<"${recipe}")"
 # shell command is one line.
 recipe_joined="$(sed -e ':a' -e '/\\$/{N;s/\\\n//;ba' -e '}' <<<"${recipe_code}")"
 
+# FOLLOW THE DELEGATION.
+#
+# The compile-and-run logic that the shape contracts below pin used to live
+# inline in this recipe. It now lives in ci/lib/run-nim-test-lane.sh, shared by
+# every Nim test lane, and the recipe is a one-line hand-off. Grepping only the
+# recipe after that change found no `nim js` at all and this suite failed --
+# not because the lane stopped passing -d:nodejs, but because the guard was
+# pinned to WHERE the code was written rather than to WHAT it does.
+#
+# So resolve the hand-off and inspect wherever the code actually is. If the
+# recipe stops delegating and grows its own loop back, the `nim js` guard below
+# still fires against the recipe itself; if it delegates to a script that is
+# missing, that is named explicitly.
+lane_id="$(grep -oE 'run-nim-test-lane\.sh[[:space:]]+[a-z0-9-]+' <<<"${recipe_joined}" |
+	awk '{print $2}' | head -n1)"
+lane_joined="${recipe_joined}"
+if [ -n "${lane_id}" ]; then
+	runner="${REPO_ROOT}/ci/lib/run-nim-test-lane.sh"
+	[ -f "${runner}" ] || fail "the recipe's delegation target exists" \
+		"test-vm-js hands off to run-nim-test-lane.sh, which is not at ${runner}."
+	# shellcheck disable=SC2001 # parameter expansion cannot express this trim
+	runner_code="$(sed 's/[[:space:]]*#.*$//' <"${runner}")"
+	runner_joined="$(sed -e ':a' -e '/\\$/{N;s/\\\n//;ba' -e '}' <<<"${runner_code}")"
+	lane_joined="${recipe_joined}"$'\n'"${runner_joined}"
+fi
+
 # Guard against either transform going wrong and silently emptying the
 # haystack, which would make every contract below pass vacuously.
-grep -q 'nim js' <<<"${recipe_joined}" ||
+grep -q 'nim js' <<<"${lane_joined}" ||
 	fail "the comment stripper preserved the recipe's nim js invocation" \
 		"After stripping comments and folding continuations there is no" \
 		"'nim js' left, so the shape contracts would be checking an empty string."
 
 echo "test-vm-js lane contracts"
 
+# 0. The shared runner has a `nim js` arm AND a `nim c` arm, so finding
+#    `-d:nodejs` in it proves nothing about THIS lane unless this lane is the
+#    one that takes the js arm. Ask the lane library, which is the single
+#    source of truth for that choice.
+if [ -z "${lane_id}" ]; then
+	ok "test-vm-js runs its own inline loop (no delegation to resolve)"
+elif [ "$(bash -c "source '${REPO_ROOT}/ci/lib/test-lane-files.sh' && test_lane_backend ${lane_id}")" = "js" ]; then
+	ok "the lane library routes ${lane_id} through the runner's js backend"
+else
+	fail "the lane library routes ${lane_id} through the runner's js backend" \
+		"test_lane_backend ${lane_id} did not answer 'js', so this lane would" \
+		"compile with the C backend and every js contract below is vacuous."
+fi
+
 # --- static: the recipe's shape -------------------------------------------
 
 # 1. The define that makes an exit code exist at all. Anchored to the actual
 #    `nim js` invocation, not merely present somewhere in the recipe.
-if grep -qE 'nim js[[:space:]]+-d:nodejs' <<<"${recipe_joined}"; then
+if grep -qE 'nim js[[:space:]]+-d:nodejs' <<<"${lane_joined}"; then
 	ok "the recipe's nim js invocation carries -d:nodejs"
 else
 	fail "the recipe's nim js invocation carries -d:nodejs" \
@@ -149,8 +189,12 @@ else
 fi
 
 # 2. node's status must be captured in a form `set -e` cannot swallow.
-# shellcheck disable=SC2016 # this is a regex over the recipe text, not an expansion
-if grep -qE 'node "\$cache/\$name\.js" 2>&1\) \|\| exitcode=' <<<"${recipe_joined}"; then
+# The invariant is "node's status is captured by an || guard", not any one
+# spelling of it: the inline loop wrote `|| exitcode=$?`, the shared runner
+# writes `|| rc=$?` around a `timeout ... node "${artifact}"`. Pin the
+# invariant, and both the variable name and the binary's path may move.
+# shellcheck disable=SC2016 # this is a regex over the lane's text, not an expansion
+if grep -qE 'node "\$\{?(artifact|cache)[^"]*"( 2>&1)?\)?"?[[:space:]]*(&& rc=0[[:space:]]*)?\|\|[[:space:]]*(rc|exitcode)=' <<<"${lane_joined}"; then
 	ok "node's exit status is captured with an || guard"
 else
 	fail "node's exit status is captured with an || guard" \
@@ -163,8 +207,11 @@ fi
 #    now lives in ci/lib/test-lane-report.sh (and is proved against fixture
 #    processes by ci/test/test-lane-report-test.sh); what this contract pins is
 #    that THIS recipe still routes through it and still handles the verdict.
-if grep -q 'source ci/lib/test-lane-report.sh' <<<"${recipe_joined}" &&
-	grep -q 'no-results' <<<"${recipe_joined}"; then
+# Matched without a leading path so it holds whether the lane sources the
+# library relative to the repo root (the old inline loop) or through a
+# resolved-at-runtime prefix (the shared runner's `"${repo_root}/ci/lib/..."`).
+if grep -qE 'source "?\$?\{?[a-z_]*\}?/?ci/lib/test-lane-report\.sh"?' <<<"${lane_joined}" &&
+	grep -q 'no-results' <<<"${lane_joined}"; then
 	ok "a build that produces no test results is reported, not scored OK"
 else
 	fail "a build that produces no test results is reported, not scored OK" \
@@ -175,7 +222,7 @@ fi
 
 # 4. Compiler diagnostics must survive. The warning naming defect 1 was thrown
 #    away for as long as the compile was redirected to /dev/null.
-if grep -qE 'nim js .*>/dev/null' <<<"${recipe_joined}"; then
+if grep -qE 'nim js .*>/dev/null' <<<"${lane_joined}"; then
 	fail "the compile does not discard its diagnostics" \
 		"'nim js ... >/dev/null 2>&1' throws away the compiler warning that" \
 		"names this lane's own defect."
@@ -189,8 +236,11 @@ fi
 #    binary cannot be reported as an ordinary partial run; see
 #    ci/test/test-lane-report-test.sh, which proves that ordering against a
 #    fixture that prints [OK] lines and then SIGSEGVs.
-# shellcheck disable=SC2016 # this is a regex over the recipe text, not an expansion
-if grep -qE 'classify_test_run "\$exitcode"' <<<"${recipe_joined}"; then
+# Again the invariant, not the spelling: node's status must be argument 1 to
+# classify_test_run. The inline loop called it `$exitcode`; the runner calls it
+# `${rc}`.
+# shellcheck disable=SC2016 # this is a regex over the lane's text, not an expansion
+if grep -qE 'classify_test_run "\$\{?(exitcode|rc)\}?"' <<<"${lane_joined}"; then
 	ok "the recipe still fails a suite on a non-zero exit code"
 else
 	fail "the recipe still fails a suite on a non-zero exit code" \
