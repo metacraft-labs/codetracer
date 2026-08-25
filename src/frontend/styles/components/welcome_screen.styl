@@ -48,9 +48,11 @@
 
 .welcome-logo
   background-image: url('../../public/resources/shared/codetracer_welcome_logo.svg')
-  min-width: 3.875em
-  min-height: 3.875em
-  background-size: 3.875em 3.875em
+  // Sized in rem, not em: this sits inside `.welcome-text`, whose `font-size: 2em`
+  // makes 1em == 32px here.  5rem is 80px at the 16px root either way.
+  min-width: 5rem
+  min-height: 5rem
+  background-size: 5rem 5rem
   background-position: center
   margin-right: 0.75em
   background-repeat: no-repeat
