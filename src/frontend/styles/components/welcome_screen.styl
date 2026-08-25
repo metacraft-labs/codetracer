@@ -118,6 +118,11 @@
         font-weight: 400
         line-height: normal
         text-align: center
+        // Keep the version on one line. As a flex item it would otherwise be
+        // squeezed below its own text width by `.welcome-text`'s `width: 19em`,
+        // which scales with the title's font-size, and wrap onto a second row.
+        white-space: nowrap
+        flex-shrink: 0
 
     .welcome-content
       display: flex
