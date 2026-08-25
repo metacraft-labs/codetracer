@@ -571,7 +571,11 @@ proc monacoDecorations(doc: DiffDocument;
         className: lineClass,
         linesDecorationsClassName: gutterClass,
         # Colours the `+` / `-` the gutter LABEL carries since UD-1.
-        lineNumberClassName: lineNumberClass
+        lineNumberClassName: lineNumberClass,
+        # Paints the margin as well as the content, so the `@@` divider is a
+        # full-bleed separator sharing its left edge with a collapsed region's
+        # band. Empty on every other kind — see `diff_document.marginClassFor`.
+        marginClassName: cstring(decoration.marginClassName)
       }
     })
 
@@ -926,15 +930,22 @@ proc reviewValueBandDom(self: UnifiedDiffComponent;
                         annotation: ReviewValueAnnotation;
                         leftPx, columnWidthPx, maxWidthPx: float;
                         visibleColumns, chipCharBudget: int;
-                        morePassesMarker: bool): Node =
+                        morePassesMarker: bool;
+                        hostClasses: string): Node =
   ## One line's band, built out of the debugger's own elements.
+  ##
+  ## ``hostClasses`` says which placement this band is in and which wash its
+  ## line carries — see the note at the call site.
   let isLoop = annotation.loop > 0
   # A wrapper, because the node handed to `addContentWidget` is Monaco's to
   # position: it writes `position: absolute` and its own `left`/`top` onto it
   # every frame. The band's own offset therefore lives one level in, exactly as
   # the debugger's does inside `makeFlowLineContainer`'s widget div.
   result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring"review-flow-band-host")
+  result.setAttribute(
+    cstring"class",
+    cstring("review-flow-band-host" &
+      (if hostClasses.len > 0: " " & hostClasses else: "")))
   let band = flowValueBandDom(
     leftPx, isLoop, "review-flow-band", positioned = true,
     maxWidthPx = maxWidthPx)
@@ -1186,9 +1197,38 @@ proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
     let markerFits = reviewMorePassesMarkerFits(
       available, columnWidth, visible,
       float(ReviewValueMorePassesChars) * geometry.charWidthPx)
+    # A ROW-BELOW band takes the WASH of the line it describes.
+    #
+    # It is a view zone under the line, so the diff editor paints nothing
+    # behind it and it came out at the editor's own surface colour — a neutral
+    # strip through the middle of a coloured block. Measured on a capture of
+    # the surface before this: added line `#353F36`, band `#282828`, next added
+    # line `#353F36`. Two fresh reviewers reported the consequence without
+    # being asked about it — "the added-line green wash runs edge-to-edge
+    # behind the code but stops at the chip row below it, so chip and highlight
+    # disagree about where the line ends", and "its surface matches the editor
+    # rather than the added line, making it float on the green wash".
+    #
+    # This resolves a genuine CONFLICT of findings rather than an unfinished
+    # item: an earlier reviewer wanted the chips to stop fusing with the
+    # highlight, and these two want the block to stay one block. A tinted BAND
+    # under an untinted CHIP satisfies both — the wash says which line the row
+    # belongs to, and the chip keeps a surface of its own to sit on. The chip
+    # is already `#1B1B1B` against the band, so only the band moves.
+    #
+    # Not in the `beside` placement: that band is a content widget drawn ON the
+    # line, so the editor's own wash is already behind it and a second copy
+    # would double the tint. The PLACEMENT is written onto the host rather than
+    # the wash being withheld, so which branch ran is answerable from a
+    # selector — `flow.styl` scopes the wash to the row-below class, and a test
+    # can name the bands it means instead of assuming a placement that the pane
+    # width decides.
+    let hostClasses =
+      reviewValueBandWashClass(doc, annotation.modelLine) & " " &
+      (if beside: ReviewValueBandBesideClass else: ReviewValueBandRowBelowClass)
     let dom = self.reviewValueBandDom(
       annotation, lineLeft, columnWidth, available, visible, drawnColumnChars,
-      markerFits)
+      markerFits, hostClasses)
     # The same id in both placements, on the DOM node as well as on the
     # widget: a test that asks "does the line that shows source line N carry a
     # band" needs to name one, and `getId` is not reachable from a selector.
@@ -1620,15 +1660,38 @@ proc applyGutterOptions(self: UnifiedDiffComponent; pair: DiffPair) =
   ## The width is shared (``lineNumberColumnWidth``) so the two columns are the
   ## same size and read as one gutter rather than two.
   ##
-  ## ``lineDecorationsWidth: 0`` on both, with the `+` / `-` marker carried
-  ## inside the label instead (``diff_document.lineNumberLabels``).  Monaco
-  ## sizes the *original* editor of an inline diff from its
-  ## ``lineNumbersMinChars`` alone — measured: 3 characters produced a 29px
-  ## strip around a 65px margin — so a decorations lane beside the numbers
-  ## there is not clipped gracefully, it takes the numbers off screen with it,
-  ## and a reviewer reported the deleted lines as unnumbered.  The lane is
-  ## zeroed on the modified side too, so the two gutters are the same shape.
+  ## ``lineDecorationsWidth: 0`` on the ORIGINAL editor, with the `+` / `-`
+  ## marker carried inside the label instead
+  ## (``diff_document.lineNumberLabels``).  Monaco sizes the *original* editor
+  ## of an inline diff from its ``lineNumbersMinChars`` alone — measured: 3
+  ## characters produced a 29px strip around a 65px margin — so a decorations
+  ## lane beside the numbers there is not clipped gracefully, it takes the
+  ## numbers off screen with it, and a reviewer reported the deleted lines as
+  ## unnumbered.
+  ##
+  ## The MODIFIED editor keeps a lane, and it is half of the gap between the
+  ## last digit and the first glyph of the code.  Measured on the running
+  ## product with the lane at zero: the label's glyphs ran ``292..317.7`` and
+  ## the code started at ``321`` — 3.3px, under half a character, which every
+  ## reviewer of every round has read as a collision ("`+ 7fn scale(`",
+  ## "`10def format_row`").
+  ##
+  ## The OTHER half is the `padding-right` on `.line-numbers` in
+  ## `styles/components/unified_diff.styl`, and the two are deliberately the
+  ## same number.  The reason they need each other is written out there: a
+  ## global rule makes `.line-numbers` span the whole margin, so the padding is
+  ## what holds the digits off the code — but the padding only holds while the
+  ## label still fits the box it shrinks, and the label is exactly
+  ## ``lineNumbersMinChars`` characters.  This lane is what buys back the room
+  ## the padding spends.  Change one and the other has to move with it.
+  ##
+  ## The lane draws nothing — ``.ct-diff-gutter-*::before`` is an empty
+  ## `content` since UD-1 — so what it contributes is exactly its width.
   let width = lineNumberColumnWidth(pair)
+  # One character at the review's font size (the advance measures 8.57px):
+  # enough that the digits and the code read as two columns, small enough that
+  # the rail is not a third one.
+  const ModifiedLineDecorationsWidth = 8
   # A few pixels above line 1.  UD-2's collapsed-region boundary is drawn by
   # Monaco with `transform: translateY(-10px)`, so a region that begins at the
   # file's first line has its upper drag handle *above* the editor's clipping
@@ -1672,7 +1735,7 @@ proc applyGutterOptions(self: UnifiedDiffComponent; pair: DiffPair) =
   self.editor.udUpdateOptions(js{
     lineNumbers: udLineNumberFn(self.lineLabels),
     lineNumbersMinChars: width,
-    lineDecorationsWidth: 0,
+    lineDecorationsWidth: ModifiedLineDecorationsWidth,
     padding: padding,
     scrollbar: scrollbar
   })

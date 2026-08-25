@@ -835,6 +835,30 @@
 .review-flow-band-host
   pointer-events: none
 
+// A ROW-BELOW band takes the wash of the line it annotates, so a block of
+// added lines reads as one block instead of being sliced by a strip of editor
+// surface. `ui/unified_diff.applyFlowValueBands` puts the class on, and only
+// in that placement — a `beside` band is drawn over the line and already has
+// the editor's wash behind it.
+//
+// The colours are Monaco's own, read back out of the theme rather than
+// restated: a diff editor publishes every `diffEditor.*` key it was themed
+// with as a CSS custom property on its container, so this band and the line
+// above it are painted from ONE definition
+// (`monaco-themes/.../codetracerDark.json`). Restating the rgba here is how
+// the two silently drift apart the next time the palette is rebalanced —
+// which has already happened once in this surface's history.
+//
+// The chip on top keeps its own surface (`.ct-omni-value`, #1B1B1B), which is
+// the half of this that answers the opposite finding: a reviewer who wanted
+// the chips to stop fusing with the highlight, and two who wanted the block to
+// stay one block, are both satisfied by a tinted band under an untinted chip.
+.review-flow-band-host.review-flow-band-row-below.review-flow-band-added
+  background-color: var(--vscode-diffEditor-insertedLineBackground)
+
+.review-flow-band-host.review-flow-band-row-below.review-flow-band-removed
+  background-color: var(--vscode-diffEditor-removedLineBackground)
+
 .review-flow-band
   display: flex
   align-items: center
@@ -920,14 +944,22 @@
   // conclusion unprompted ("rendered in a fairly low-contrast dim gray … at
   // normal viewing size they risk being missed").
   //
-  // #9a9a9a on #282828 is 5.4:1 — comfortably AA, and still visibly quieter
-  // than the value beside it, which is the whole reason it was dimmed: an
-  // UNDIMMED marker was read as a chip with nothing in it. Stating the colour
-  // rather than an alpha also makes the contrast a number that can be checked
-  // instead of a composite that has to be decoded from a screenshot.
+  // The colour is measured against the WORST background the marker can land
+  // on, which is no longer the editor surface. Once the band took the line's
+  // add / remove wash (above), the marker went with it: the previous #9a9a9a
+  // is 5.24:1 on `#282828` but **4.35:1** on the addition wash and 4.28:1 on
+  // the removal wash — under AA for normal text, on a 0.85em marker that is
+  // not large text. #a2a2a2 is 4.80:1 and 4.72:1 on those two and 5.78:1 on
+  // the bare surface, and is still far quieter than the value beside it
+  // (11.0:1), which is the whole reason the marker is dimmed at all: an
+  // UNDIMMED marker was read as a chip with nothing in it.
+  //
+  // Stating the colour rather than an alpha is what made this checkable: the
+  // regression is one line of arithmetic against the new wash, where an
+  // `opacity` would have had to be decoded from a screenshot first.
   .review-flow-more,
   .review-flow-more-passes
-    color: #9a9a9a
+    color: #a2a2a2
     padding: 0 0.4em
     align-self: center
     flex: 0 0 auto

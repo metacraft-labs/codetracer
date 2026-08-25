@@ -1661,3 +1661,58 @@ its idiom rather than a shrink. Note also that the widget is drawn in BOTH
 editors, and the original one is a ~30px gutter strip — that slice of a
 full-width control is the "unexplained mark at the far left of the fold" three
 reviewers inventoried.
+
+## The diff gutter's gap takes TWO declarations, and neither works alone (UD-4 audit)
+
+`text_editor.styl`'s global `.line-numbers` rule is `width: 100% !important;
+box-sizing: border-box; text-align: right !important`, so in the diff editor
+that element is not the numbers COLUMN — it is the whole margin, and its right
+edge is where the code starts. Two consequences that cost a milestone each:
+
+  * a `padding-right` is the only thing that holds the digits off the code, and
+  * it only holds while the label still fits the box the padding shrinks.
+
+Monaco sizes the margin as `lineNumbersMinChars` x its own
+`typicalHalfwidthCharacterWidth`, and `diff_document.lineNumberLabels` emits a
+label of exactly that many characters, so the label always overflowed the padded
+box and spilled back to the right (an overflowing line box ignores `text-align`
+in `ltr`) — measured, glyphs `292..317.7` against code at `321`, a 3.3px gap
+that four reviewers called a collision while a `padding-right: 0.9em` sat in the
+stylesheet apparently answering them. The lane (`lineDecorationsWidth`, MODIFIED
+editor only — the original strip cannot afford it) buys back exactly what the
+padding spends. Keep the two numbers equal: if a font ever renders wider than
+Monaco's estimate the text overflows again and the gap degrades to the lane's
+width rather than to nothing.
+
+## Monaco's `.diff-hidden-lines .center` is a FLEX container (UD-4 audit)
+
+So a `::after` on it is a flex item: `vertical-align` does nothing at all, and
+`align-items: normal` means an item with no height STRETCHES to the flex line
+(the pseudo-element resolved to the band's own 24px) while an item with a height
+falls to the start of the line. The `expand` pill sat ~6px above the band's text
+for that reason, through two rounds in which `vertical-align: middle` looked
+like it was placing it. Use `align-self`, and give the pill a `height` equal to
+its `line-height` so its box is its line box.
+
+## `.margin-view-overlays div` is painted by `text_editor.styl` (UD-4 audit)
+
+Every child of a margin overlay gets the panel colour from a two-element
+selector, which outranks a bare decoration class — so a `marginClassName` whose
+CSS is a single class silently paints the panel colour instead. Scope the rule
+under `.monaco-diff-editor .modified-in-monaco-diff-editor` and it both wins and
+stays on the side you meant: both models carry the `@@` line, so an unscoped
+rule also paints the original editor's 29px strip.
+
+## Equal alpha is not equal weight, and neither is equal luminance (UD-4 audit)
+
+The add/remove washes were argued about by five reviewers across four
+milestones, because "heavier" was never defined and the three candidate measures
+disagree. Composited over `#282828`, `#7FC085` and `#E06C75` at the same alpha
+are equal in CIEDE2000 (10.59 / 10.49) and in chroma (7.5 / 8.2) and 1.54x apart
+in relative luminance. Equalising the luminance with alpha made two fresh
+reviewers report the opposite defect within one round, because at a fixed hue
+dE and dL grow together — their RATIO is a property of the hue (0.43 for that
+green, 0.66 for that red) and no alpha pair can match both. Changing the hue is
+the lever: `#408050 @0x30` matches `#E06C75 @0x26` on all three measures at
+once. Measure a wash as the COMPOSITE against the surface it lands on, on all
+three axes, before changing a number.

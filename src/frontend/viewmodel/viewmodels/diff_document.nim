@@ -164,10 +164,33 @@ type
     lineNumberClassName*: string
       ## ``IModelDecorationOptions.lineNumberClassName`` — colours THIS line's
       ## gutter label, which is where the marker now lives.
+    marginClassName*: string
+      ## ``IModelDecorationOptions.marginClassName`` — paints the whole MARGIN
+      ## of this line, numbers column included, rather than only the content
+      ## area ``className`` reaches.
+      ##
+      ## Only the `@@` divider asks for it, and it asks because of the band it
+      ## sits next to.  A collapsed region's band is a view zone and spans the
+      ## editor from its left edge; a whole-line decoration starts where the
+      ## code does.  Measured on the shipped build, the two adjacent bands
+      ## therefore began 29px apart — "the collapsed band's left edge (x≈30)
+      ## does not line up with the hunk divider's (x≈62)", and, from another
+      ## reviewer, "band left edge starts ~30px from the pane edge while the
+      ## gutter/code column starts ~60px … three different left edges in four
+      ## consecutive rows".  A divider that is a separator should be full
+      ## bleed, which is also what three reviewers asked for in their own
+      ## words ("unify the `@@` divider with the hidden-lines band: full-bleed,
+      ## ruled, same fill").
 
 const
   DiffLineBaseClass* = "ct-diff-line"
   DiffHunkHeaderClass* = "ct-diff-line ct-diff-line-hunk-header"
+  DiffHunkHeaderMarginClass* = "ct-diff-line-hunk-header"
+    ## The same paint, applied to the divider's MARGIN so the band is full
+    ## bleed and shares its left edge with a collapsed region's band.  Only
+    ## the kind class, without ``ct-diff-line``: that one is classification the
+    ## GUI suites read off the content decoration, and emitting it twice per
+    ## line would make "one decoration class per line" ambiguous.
   DiffAddedClass* = "ct-diff-line ct-diff-line-added"
   DiffRemovedClass* = "ct-diff-line ct-diff-line-removed"
   DiffContextClass* = "ct-diff-line ct-diff-line-context"
@@ -188,6 +211,17 @@ const
   ## otherwise read as an addition.
   DiffLineNumberAddedClass* = "ct-diff-linenum-added"
   DiffLineNumberRemovedClass* = "ct-diff-linenum-removed"
+
+  ## The wash a row-below value band takes from the line it annotates (UD-3's
+  ## placement; see ``ui/unified_diff.applyFlowValueBands``).  A band is a view
+  ## zone, so the diff editor paints nothing behind it and it would otherwise
+  ## cut a block of added lines in half with a strip of editor surface.
+  ReviewValueBandAddedClass* = "review-flow-band-added"
+  ReviewValueBandRemovedClass* = "review-flow-band-removed"
+  ReviewValueBandContextClass* = "review-flow-band-context"
+    ## An unchanged line's band carries no wash — there is no block for it to
+    ## belong to — but it still gets a class, so the three cases are one
+    ## vocabulary and the caller never has to decide whether to add nothing.
 
   DiffEmptyDocumentText* = "No changes to show."
     ## The model text of a diff tab whose target produced no hunks.  A Monaco
@@ -714,6 +748,30 @@ proc lineNumberClassFor*(kind: DiffLineKind): string {.noSideEffect.} =
   of dlkRemoved: DiffLineNumberRemovedClass
   of dlkContext, dlkHunkHeader: ""
 
+proc reviewValueBandWashClass*(doc: DiffDocument;
+                               modelLine: int): string {.noSideEffect.} =
+  ## The wash class for the value band annotating a 1-based model line.
+  ##
+  ## A line outside the document is context: a band with no line to belong to
+  ## is not a reason to throw, and an untinted band is the state the surface
+  ## was already in.
+  if modelLine < 1 or modelLine > doc.lines.len:
+    return ReviewValueBandContextClass
+  case doc.lines[modelLine - 1].kind
+  of dlkAdded: ReviewValueBandAddedClass
+  of dlkRemoved: ReviewValueBandRemovedClass
+  of dlkContext, dlkHunkHeader: ReviewValueBandContextClass
+
+proc marginClassFor*(kind: DiffLineKind): string {.noSideEffect.} =
+  ## The class that paints a line's whole margin.  Only the `@@` divider has
+  ## one — see ``DiffDecoration.marginClassName``.  A changed line must NOT:
+  ## its wash is the diff editor's own, painted over the content area, and
+  ## carrying it across the numbers column would make the gutter read as part
+  ## of the change rather than as the rail that indexes it.
+  case kind
+  of dlkHunkHeader: DiffHunkHeaderMarginClass
+  of dlkAdded, dlkRemoved, dlkContext: ""
+
 proc gutterClassFor*(kind: DiffLineKind): string {.noSideEffect.} =
   ## The class that draws the `+` / `-` gutter marker VCS-Panel.md requires.
   ## The `@@` divider gets none: it is chrome, not content.
@@ -829,7 +887,8 @@ proc decorationsFor*(doc: DiffDocument;
       line: i + 1,
       className: className,
       gutterClassName: gutterClassFor(line.kind),
-      lineNumberClassName: lineNumberClassFor(line.kind))
+      lineNumberClassName: lineNumberClassFor(line.kind),
+      marginClassName: marginClassFor(line.kind))
 
 proc hunkAtLine*(doc: DiffDocument; modelLine: int): (int, int) {.noSideEffect.} =
   ## The (fileIndex, hunkIndex) a 1-based model line belongs to, or (-1, -1).

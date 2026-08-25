@@ -199,10 +199,11 @@ nothing. Judge everything not listed here on its own merits.
    apart rather than in one rail. It is a consequence of the two-editor layout;
    the strip is where a deleted line's old number comes from, so it cannot
    simply be removed.
-3. **The chips are not the code's colour.** They take the editor's own surface
-   colour, so on a changed line the diff's add or remove wash lies behind them
-   and a chip can read as part of the highlight instead of as something over
-   it. Whether the annotation layer should have a colour of its own is
+3. **The chips carry their own dark surface.** A chip inside a value band is
+   the debugger's own element and keeps the debugger's fill, which is darker
+   than the editor's, so a row of chips reads as a row of dark plates rather
+   than as part of the line it annotates. Whether the annotation layer should
+   have a colour of its own — and which of the two layers should give — is
    undecided.
 4. **The diff tab is one pane of a layout, not a window.** At the `wide`
    viewport its content area is around 600px, so a line longer than that has to

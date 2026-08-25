@@ -190,6 +190,20 @@ suite "unified diff decoration builder (DR-R4)":
     check modifiedDecorations[2].gutterClassName == DiffGutterAddedClass
     check originalDecorations[2].gutterClassName == DiffGutterRemovedClass
 
+    # The divider is the ONE line kind whose paint crosses the gutter, so the
+    # band it draws starts where a collapsed region's band starts instead of
+    # where the code does — a design audit measured the two at 292 and 321 and
+    # a reviewer read it off a capture as "the collapsed band's left edge
+    # (x≈30) does not line up with the hunk divider's (x≈62)".
+    #
+    # A changed line must NOT have one: its wash belongs to the code, and
+    # carrying it across the numbers column makes the gutter read as part of
+    # the change rather than as the rail that indexes it.
+    check modifiedDecorations[0].marginClassName == DiffHunkHeaderMarginClass
+    check modifiedDecorations[1].marginClassName == ""
+    check modifiedDecorations[2].marginClassName == ""
+    check originalDecorations[2].marginClassName == ""
+
     # The models hold the code itself, so find / selection / copy operate on
     # the code rather than on decoration markup.
     check documentText(original).splitLines()[2] == "  match parse(input) {"
@@ -390,6 +404,37 @@ suite "unified diff decoration builder (DR-R4)":
     check modifiedDecorations[2].lineNumberClassName == DiffLineNumberAddedClass
     check decorationsFor(original)[2].lineNumberClassName ==
       DiffLineNumberRemovedClass
+
+  test "a value band's wash class is the kind of the line it annotates":
+    ## A row-below value band (UD-3's placement) is a Monaco VIEW ZONE, so the
+    ## diff editor paints nothing behind it: without a wash of its own it comes
+    ## out at the editor surface and cuts a block of added lines in half.
+    ## Measured off a capture before this existed: added line `#353F36`, band
+    ## `#282828`, next added line `#353F36`, which two fresh reviewers reported
+    ## as "chip and highlight disagree about where the line ends".
+    ##
+    ## The class is decided here rather than in the Monaco host so the mapping
+    ## is assertable without a browser; the host only puts it on the node.
+    let pair = buildDiffPair([mixedHunkFile()])
+    let modified = pair.modified
+
+    # 1 is the `@@` divider, 2 a context line, 3 the addition — the same
+    # indices the decoration cases above use, so the two stay in step.
+    check modified.lines[2].kind == dlkAdded
+    check reviewValueBandWashClass(modified, 3) == ReviewValueBandAddedClass
+    check reviewValueBandWashClass(modified, 2) == ReviewValueBandContextClass
+    # The divider is chrome; a band never annotates it, and if one ever did it
+    # must not invent a wash for a line that has no revision.
+    check reviewValueBandWashClass(modified, 1) == ReviewValueBandContextClass
+    check reviewValueBandWashClass(pair.original, 3) ==
+      ReviewValueBandRemovedClass
+
+    # Out of range is context rather than a defect: a band with no line to
+    # belong to is the state the surface was already in, and throwing here
+    # would take the whole annotation layer down with it.
+    check reviewValueBandWashClass(modified, 0) == ReviewValueBandContextClass
+    check reviewValueBandWashClass(modified, modified.lines.len + 1) ==
+      ReviewValueBandContextClass
 
   test "a click resolves to the hunk it landed in, and only on a header":
     ## The Monaco host translates a click position through these two procs and

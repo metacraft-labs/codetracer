@@ -1129,6 +1129,170 @@ test.describe("DeepReview GUI - main features", () => {
     expect(await deleted.count()).toBeGreaterThan(0);
   });
 
+  test("UD-4 audit: the gutter's numbers do not touch the code", async ({ ctPage }) => {
+    // Reported by every reviewer of every round in the same shape — "`10def
+    // format_row`", "`+ 7fn scale(`" — and answered once already with a
+    // `padding-right` that measured as no gap at all, because a global rule
+    // makes `.line-numbers` span the whole margin and the label is exactly as
+    // many characters as Monaco sized that margin for. Red before, measured on
+    // the running product: the label's glyphs ended at x=317.7 with the code
+    // starting at x=321.
+    //
+    // Asserted on the GLYPHS rather than on the elements: the element's right
+    // edge IS the code's left edge by construction, so an element-level
+    // assertion is true no matter how the digits are drawn inside it.
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect(tab.locator(`${DIFF_BODY_LINES} .view-line`).first()).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The MODIFIED editor only. A diff tab holds two, side by side: the
+    // original is a ~29px gutter strip whose own content area is off screen,
+    // so mixing the two answers "the code starts 29px LEFT of the numbers",
+    // which is a fact about the layout rather than about the gap.
+    const gap = await tab.locator(DIFF_BODY).first().evaluate((root) => {
+      const glyphRight = (el: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const rects = Array.from(range.getClientRects());
+        return rects.length === 0 ? null : Math.max(...rects.map((r) => r.right));
+      };
+      const numbers = Array.from(
+        root.querySelectorAll(".margin-view-overlays .line-numbers"),
+      ).filter((el) => (el.textContent ?? "").trim().length > 0);
+      const line = root.querySelector(".view-lines .view-line");
+      if (numbers.length === 0 || line === null) return null;
+      const codeLeft = line.getBoundingClientRect().left;
+      const rights = numbers
+        .map(glyphRight)
+        .filter((x): x is number => x !== null);
+      return rights.length === 0 ? null : codeLeft - Math.max(...rights);
+    });
+
+    expect(gap).not.toBeNull();
+    // Half a character at the review's font size is what reviewers read as a
+    // collision; a whole one is what they read as a gutter. The floor is set
+    // below the 8px the two declarations aim for, so a rounding difference on
+    // another device scale is not a failure.
+    expect(gap as number).toBeGreaterThanOrEqual(6);
+  });
+
+  test("UD-4 audit: the fold band and the @@ divider share one left edge", async ({ ctPage }) => {
+    // Two separators, one above the other, drawn by two mechanisms: the
+    // collapsed region's band is a view zone spanning the editor, and the
+    // divider is a whole-line decoration that used to start where the code
+    // does. Red before: 292 against 321, which a reviewer measured off a
+    // capture as "the collapsed band's left edge (x≈30) does not line up with
+    // the hunk divider's (x≈62)".
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    // Both editors draw the fold widget and the divider; the ORIGINAL editor's
+    // copy of the band is deliberately hidden (it is a ~29px slice of a
+    // full-width control, which three reviewers inventoried as an unexplained
+    // mark). Scoping to the modified editor is what makes the question
+    // meaningful — an unscoped `.first()` resolves to the hidden copy.
+    const body = tab.locator(DIFF_BODY).first();
+    const foldBand = body.locator(".diff-hidden-lines .center").first();
+    await expect(foldBand).toBeVisible({ timeout: 20_000 });
+    const marginDivider = body
+      .locator(".margin-view-overlays .ct-diff-line-hunk-header")
+      .first();
+    await expect(marginDivider).toBeVisible({ timeout: 20_000 });
+
+    const fold = await foldBand.boundingBox();
+    const divider = await marginDivider.boundingBox();
+    expect(fold).not.toBeNull();
+    expect(divider).not.toBeNull();
+    expect(Math.abs((fold as { x: number }).x - (divider as { x: number }).x)).toBeLessThanOrEqual(1);
+
+    // …and the same fill, which is the other half of "two treatments of the
+    // same object". The divider used to be `rgba(58,58,58,0.85)` — a different
+    // grey once composited — beside a band painted with the theme's opaque
+    // `diffEditor.unchangedRegionBackground`.
+    const fills = await body.evaluate((root) => {
+      const band = root.querySelector(".diff-hidden-lines .center");
+      const margin = root.querySelector(
+        ".margin-view-overlays .ct-diff-line-hunk-header",
+      );
+      return band === null || margin === null
+        ? null
+        : [getComputedStyle(band).backgroundColor, getComputedStyle(margin).backgroundColor];
+    });
+    expect(fills).not.toBeNull();
+    expect((fills as string[])[0]).toBe((fills as string[])[1]);
+  });
+
+  test("UD-4 audit: a row-below value band carries its line's diff wash", async ({ ctPage }) => {
+    // A band is a view zone, so the diff editor paints nothing behind it and
+    // it came out at the editor's own surface colour — a neutral strip through
+    // the middle of a coloured block. Red before, measured off a capture:
+    // added line `#353F36`, band `#282828`, next added line `#353F36`; two
+    // fresh reviewers reported it as "chip and highlight disagree about where
+    // the line ends".
+    const dr = new DeepReviewPage(ctPage);
+    await dr.waitForReady();
+    await wait(500);
+
+    const tab = await openReviewDiffTab(dr, 0, "src/main.rs");
+    await expect
+      .poll(async () => await DeepReviewPage.flowValueChips(tab).count(), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(0);
+
+    const bands = await tab.evaluate((root) => {
+      const hosts = Array.from(root.querySelectorAll(".review-flow-band-host"));
+      const editor = root.querySelector(".monaco-editor");
+      return {
+        insertedVar: editor
+          ? getComputedStyle(editor)
+              .getPropertyValue("--vscode-diffEditor-insertedLineBackground")
+              .trim()
+          : "",
+        hosts: hosts.map((el) => ({
+          classes: el.className,
+          background: getComputedStyle(el).backgroundColor,
+        })),
+      };
+    });
+
+    expect(bands.hosts.length).toBeGreaterThan(0);
+    // Monaco publishes every `diffEditor.*` key it was themed with as a CSS
+    // custom property, and the wash rule reads the line colour back out of it
+    // rather than restating the rgba. If the theme key is ever dropped this is
+    // what fails, instead of the band silently going transparent again.
+    expect(bands.insertedVar).toMatch(/^rgba?\(/);
+
+    for (const band of bands.hosts) {
+      // Every band says which placement it is in and which wash its line
+      // carries, in both placements — so a defect that drew every band in the
+      // wrong placement, or classified a line wrongly, fails here rather than
+      // being invisible to a suite whose fixture happens to take one branch.
+      expect(band.classes).toMatch(/review-flow-band-(beside|row-below)\b/);
+      expect(band.classes).toMatch(/review-flow-band-(added|removed|context)\b/);
+
+      const rowBelow = /review-flow-band-row-below\b/.test(band.classes);
+      const changed = /review-flow-band-(added|removed)\b/.test(band.classes);
+      if (rowBelow && changed) {
+        // The band a view zone draws under the line: it must carry the wash,
+        // or it cuts the block in two.
+        expect(band.background).not.toBe("rgba(0, 0, 0, 0)");
+      } else {
+        // A `beside` band is drawn ON the line, so the editor's own wash is
+        // already behind it — a second copy would double the tint. This is the
+        // half that would fail if the rule were scoped too loosely.
+        expect(band.background).toBe("rgba(0, 0, 0, 0)");
+      }
+    }
+  });
+
   test("Test 27: the invocation selector is an in-editor control above the function", async ({ ctPage }) => {
     const dr = new DeepReviewPage(ctPage);
     await dr.waitForReady();

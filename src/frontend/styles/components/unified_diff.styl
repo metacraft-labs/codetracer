@@ -45,14 +45,42 @@
   // (`diff_document.lineNumberLabels`).  `white-space: pre` keeps the padding
   // that aligns the digits under each other.
   //
-  // The `!important` is not decoration: the global `.line-numbers` rule in
-  // `styles/index.styl` sets `padding-right: 0 !important`, so without it the
-  // digits sit flush against the first character of the code — which is
-  // exactly what a design review reported ("10def format_row").
+  // THE GAP BETWEEN THE LAST DIGIT AND THE FIRST GLYPH OF THE CODE.
+  //
+  // It takes two declarations in two layers, and neither works alone — which
+  // is why the earlier attempt at this (a `padding-right` on its own) measured
+  // as no gap at all and reviewers kept reporting "`10def format_row`",
+  // "`+ 7fn scale(`".
+  //
+  //   1. `text_editor.styl`'s global `.line-numbers` rule is
+  //      `width: 100% !important; box-sizing: border-box; text-align: right`.
+  //      So this element is not the numbers COLUMN, it is the whole margin,
+  //      and its right edge IS where the code starts. Right-aligned text
+  //      therefore ends exactly on the code unless a `padding-right` holds it
+  //      off — that is what this declaration is, and the `!important` is to
+  //      beat the same global rule's `padding-right: 0 !important`.
+  //   2. A padding only holds the text off while the label still FITS the
+  //      padded content box. It did not: Monaco sizes the margin as
+  //      `lineNumbersMinChars` x its own `typicalHalfwidthCharacterWidth`, and
+  //      `diff_document.lineNumberLabels` emits a label of exactly that many
+  //      characters, so 25.7px of label went into a 16.4px content box, spilled
+  //      to the right the way an overflowing line box does in `ltr` whatever
+  //      `text-align` says, and ended 3.3px short of the code — under half a
+  //      character, which is what reviewers read as a collision.
+  //      `applyGutterOptions` therefore also gives the MODIFIED editor a
+  //      line-decorations lane of the same width, which widens the margin by
+  //      exactly what this padding takes out of it.
+  //
+  // Measured after both: label glyphs `293.3..319`, code at `327`.
+  //
+  // The two are the same number for a reason worth keeping: if a font ever
+  // renders the label wider than Monaco's estimate, the text overflows again
+  // and the gap falls back to the lane's own width — the same 8px, rather
+  // than to nothing.
   .line-numbers
     white-space pre
     text-align right
-    padding-right 0.9em !important
+    padding-right 8px !important
 
 // --- Whole-line decorations ---------------------------------------------
 
@@ -66,6 +94,43 @@
 // classification, they carry the hunk-selection modifier below, and the GUI
 // suites assert on them — but the paint belongs to whoever computed the diff,
 // and after this milestone that is the editor.
+//
+// WHERE THE TWO WASHES COME FROM, AND WHY THEY ARE THE COLOURS THEY ARE.
+// `diffEditor.{inserted,removed}{Line,Text}Background` in
+// `monaco-themes/themes/customThemes/json/codetracerDark.json`, which is JSON
+// and cannot carry the reason, so it is here.
+//
+// "The washes are unbalanced" has been raised by five reviewers across four
+// milestones and answered twice by moving alphas, each time producing the
+// opposite complaint. Measured properly, the reason is that ALPHA IS THE
+// WRONG LEVER, and the three numbers that matter disagree about which wash is
+// heavier. Composited over `#282828`, for the ORIGINAL pair at equal alpha:
+//
+//     #7FC085 @0x26 -> #353f36   dE2000 10.59   dL x1000 24.6   C* 7.5
+//     #E06C75 @0x26 -> #433233   dE2000 10.49   dL x1000 15.9   C* 8.2
+//
+// Equal in perceptual difference and in chroma, and 1.54x apart in relative
+// luminance — which is why one reviewer with a colour picker reported the
+// addition as heavier while others reported the removal as louder. Raising the
+// removal's alpha to equalise LUMINANCE was tried, measured and reviewed here:
+// it worked (20.9 against 21.9) and two fresh reviewers immediately reported
+// the opposite defect — "the removal maroon is markedly more saturated … so
+// deletions dominate every hunk", "removal carries ~22 points of chroma
+// against addition's ~9 at near-equal luminance". At a fixed hue dE and dL
+// grow together, so their RATIO is a property of the hue: 0.43 for `#7FC085`,
+// 0.66 for `#E06C75`. No pair of alphas can match both.
+//
+// So the HUE moved instead, on the addition side, to one whose ratio is the
+// removal's. `#408050` is the same green a step deeper and more saturated, and
+// the reader never sees it — only the composite:
+//
+//     #408050 @0x30 -> #2d3930   dE2000 10.17   dL x1000 15.8   C* 8.2
+//     #E06C75 @0x26 -> #433233   dE2000 10.49   dL x1000 15.9   C* 8.2
+//
+// Three measures, all within 3%. The removal side is untouched, because it is
+// the theme's own `error` colour; the intra-line pair (`…TextBackground`) is
+// matched the same way against its own line wash rather than against the
+// editor, because that is what it is drawn on.
 .ct-diff-line-added,
 .ct-diff-line-removed,
 .ct-diff-line-context
@@ -92,8 +157,35 @@
 // indigo/blue … all off #282828/#3a3a3a", "off-palette chrome … blue-slate
 // against a neutral editor". Nothing about a hunk boundary is blue, and the
 // theme's own step above the editor surface is #3a3a3a.
-.ct-diff-line-hunk-header
-  background-color rgba(58, 58, 58, 0.85)
+//
+// OPAQUE, and full bleed. Both are corrections a design audit measured, and
+// both come from the same place: a collapsed region's band sits directly
+// beside this one, and they are meant to read as the same kind of object.
+//
+//   * The fill was `rgba(58, 58, 58, 0.85)`, which composites to `#373737` on
+//     the editor surface while the fold band beside it paints the theme's
+//     `diffEditor.unchangedRegionBackground`, `#3a3a3a`, opaque. Two adjacent
+//     separators, three levels apart — "same object, two treatments".
+//   * The second selector paints the MARGIN copy of the decoration, which
+//     `diff_document.marginClassFor` now emits for this line kind alone. It is
+//     needed because `text_editor.styl`'s `.margin-view-overlays div` rule
+//     gives every margin child the panel colour and outranks a bare class, so
+//     without it the divider stopped at the code's left edge while the fold
+//     band ran to the editor's: "the collapsed band's left edge (x≈30) does
+//     not line up with the hunk divider's (x≈62)".
+//
+// `.modified-in-monaco-diff-editor` is load-bearing in that second selector,
+// for the same reason the gutter hairline below carries it. Both models hold
+// the `@@` line, so both editors draw the decoration, and unrestricted the
+// band also painted the ORIGINAL editor's 29px strip — which overshoots the
+// fold band by exactly as much as it used to undershoot it. The two bands are
+// aligned when the divider starts where the MODIFIED editor does.
+//
+// One declaration block, two selectors, because a second block is how the two
+// halves of one band drift into two colours.
+.ct-diff-line-hunk-header,
+.monaco-diff-editor .modified-in-monaco-diff-editor .margin-view-overlays div.ct-diff-line-hunk-header
+  background-color #3a3a3a
   box-shadow inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.14)
 
 // A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
@@ -340,6 +432,14 @@
   // editor". Nothing about a fold is blue; the band is a step up from the
   // editor surface, and #3a3a3a is the step the rest of this theme already
   // uses.
+  //
+  // A FALLBACK, and measured to be one: `diffEditor.unchangedRegionBackground`
+  // in `codetracerDark.json` sets the same colour opaque and outranks this
+  // declaration, so the band paints `#3A3A3A` and changing the alpha here does
+  // nothing. It is kept because a theme that does not set that key would
+  // otherwise leave the band unpainted — but change the THEME key, not this
+  // one, and do not spend a round on the alpha the way a previous reader
+  // nearly did.
   background-color rgba(58, 58, 58, 0.92)
   color rgba(232, 232, 232, 0.98)
   cursor pointer
@@ -410,16 +510,36 @@
     // reviewer reported as "the expand pill overhangs the band's top border and
     // both overlay the `@@` divider, partly occluding it".
     display inline-block
-    vertical-align middle
     margin-left 8px
     padding 0 4px
-    // 12px in a 16px band leaves 2px of the band above and below the pill, so
-    // its border is its own and not the band's. A reviewer of the version
-    // without that inset read the result exactly as the geometry predicts:
-    // "no fill, no padding above/below, and its border merged into the band
-    // rules … reads as a notch cut into a divider".
+    // ALIGNED WITH THE BAND'S OWN TEXT, and `vertical-align` is not how.
+    //
+    // Monaco's `.center` is `display: flex`, so this pseudo-element is a FLEX
+    // ITEM: `vertical-align` has no effect on it at all, and the earlier
+    // `vertical-align: middle` was doing nothing while looking like it was.
+    // What actually placed the pill was `align-items`, which is `normal` —
+    // stretch — so with no height the pill grew to the flex line's full 24px,
+    // and with a height it fell back to the start of the line. Measured off a
+    // capture of the shipped build: the band's text ran y 55..63 and the
+    // pill's y 48..60, which three reviewers reported in three ways — "the
+    // `expand` label sits ~6px above the band's text baseline", "it sits ~4px
+    // above the label's baseline", "a pale grey capsule that breaks the
+    // band's top rule, sitting half outside it".
+    //
+    // `align-self: center` is the property that governs here, and it lands on
+    // the baseline as a consequence rather than by tuning: Monaco centres the
+    // "N hidden lines" label in the same 24px line (measured 121.9..137.9 in
+    // 117.9..141.9), so two centred boxes with the same text centre share a
+    // baseline. Measured after: both baselines at 132.9.
+    //
+    // `height` and `line-height` are the same number so the pill's box IS its
+    // line box — a box taller than its text is what let the alignment drift
+    // unnoticed in the first place. 12px plus two 1px borders is 14px in a
+    // 16px band, so the pill keeps a pixel of band above and below it and its
+    // border stays its own rather than merging into the band's rules.
+    align-self center
     height 12px
-    line-height 11px
+    line-height 12px
     border 1px solid rgba(255, 255, 255, 0.30)
     // A fill, for the same reason. An outline-only pill on a band that already
     // has two rules is one more line among lines; a filled one is an object on

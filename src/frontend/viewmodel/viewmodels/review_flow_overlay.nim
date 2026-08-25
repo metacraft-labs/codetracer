@@ -383,6 +383,24 @@ func reviewValueBandLeftPx*(maxLineWidthPx, contentWidthPx,
     # the column even here takes the row-below placement instead.
     result = earliestAllowed
 
+const
+  ReviewValueBandBesideClass* = "review-flow-band-beside"
+  ReviewValueBandRowBelowClass* = "review-flow-band-row-below"
+    ## Which of the two placements a band was drawn in, written onto the band's
+    ## host so it is visible from a selector.
+    ##
+    ## It is not decoration: `reviewValueBandFitsBeside` below decides the
+    ## placement ONCE per tab from the pane's measured width, so which branch a
+    ## given corpus takes is a property of the data and the window rather than
+    ## something a test can assume. A test that needs to say "a row-below band
+    ## carries its line's wash" has to be able to ask which bands those are, and
+    ## a defect that silently drew every band in the wrong placement would
+    ## otherwise be invisible to every assertion in the suite.
+    ##
+    ## The wash rule in `flow.styl` is scoped to the row-below class for the
+    ## same reason it exists: a `beside` band is drawn ON the line, so the
+    ## editor's own wash is already behind it and a second copy would double it.
+
 func reviewValueBandFitsBeside*(contentWidthPx, bandLeftPx,
                                 columnWidthPx: float): bool =
   ## Whether the pane has room to draw the band beside the code at all.
