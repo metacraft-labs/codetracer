@@ -3,10 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="${1:-.}"
 OUT_DIR="${2:-$ROOT_DIR/stylus}"
+# Optional 3rd arg: a mode name (e.g. Light, Compact, Spacious). When given, each
+# token resolves to $extensions.modes[<mode>] if that mode is present, otherwise
+# it falls back to its default $value. With NO mode arg the output is identical
+# to the single-value export (so existing consumers are untouched). This is the
+# consumer half of the design-system "axes" campaign (color-mode + density).
+SELECT_MODE="${3:-}"
 
 mkdir -p "$OUT_DIR"
 
-python3 - "$ROOT_DIR" "$OUT_DIR" <<'PY'
+python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" <<'PY'
 import json
 import os
 import re
@@ -15,6 +21,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(sys.argv[1]).resolve()
 OUT_DIR = Path(sys.argv[2]).resolve()
+SELECT_MODE = sys.argv[3] if len(sys.argv) > 3 else ""
 
 EXPECTED_FOLDERS = ["brand", "alias", "mapped"]
 
@@ -111,9 +118,17 @@ def flatten_tokens(node, path=None, out=None):
 
     if isinstance(node, dict):
         if "$value" in node:
+            value = node.get("$value")
+            # Mode selection (additive): if a mode was requested and this token
+            # carries $extensions.modes[<mode>], use that per-mode value; else
+            # fall back to the default $value. No mode → always $value.
+            if SELECT_MODE:
+                modes = (node.get("$extensions") or {}).get("modes") or {}
+                if SELECT_MODE in modes:
+                    value = modes[SELECT_MODE]
             out[tuple(path)] = {
                 "type": node.get("$type"),
-                "value": node.get("$value"),
+                "value": value,
             }
             return out
 
@@ -135,6 +150,8 @@ def render_file(title, flat_map, known_vars):
     lines = []
     lines.append(f"// Auto-generated from {title}.json")
     lines.append(f"// Source layer: {title}")
+    if SELECT_MODE:
+        lines.append(f"// Mode: {SELECT_MODE} (tokens without this mode fall back to their default $value)")
     lines.append("")
 
     unresolved = []
