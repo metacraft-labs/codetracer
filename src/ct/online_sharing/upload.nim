@@ -26,6 +26,13 @@ proc uploadFile(
   ## is now the identity shipped to the sharing server.  ``trace`` is
   ## carried in so the recording id (``trace.recordingId``) can be sent
   ## in the upload-url request body.
+  ##
+  ## AS-1: the upload is now described as an **artifact of the recording
+  ## kind** before a byte leaves the machine (:proc:`recordingArtifact`), and
+  ## the description is validated.  Nothing about the wire changes — for a
+  ## recording the artifact id *is* the recording id — but the trace upload is
+  ## no longer a path of its own: it is one kind going through the one model,
+  ## which is what stops a second kind arriving as a second system.
   result = UploadedInfo(exitCode: 0)
   try:
     let remoteConf = initRemoteConfig()
@@ -45,9 +52,28 @@ proc uploadFile(
     # canonical identity of the uploaded trace.
     let fileSize = getFileSize(traceZipPath)
     let fileName = extractFilename(traceZipPath)
+
+    # AS-1: describe the upload as an artifact and refuse it locally if the
+    # description does not hold together.  A client-side refusal names the
+    # field that is wrong; a server-side one names a status code, and by then
+    # an upload slot has already been spent.
+    let artifact = recordingArtifact(
+      recordingId = $trace.recordingId,
+      tenantId = tenantId,
+      program = $trace.program,
+      langName = $trace.lang,
+      byteSize = fileSize,
+      layout = aplSingleFile,
+      partCount = 1)
+    let problem = validateArtifact(artifact)
+    if problem.isSome:
+      echo "error: refusing to upload: " & problem.get
+      result.exitCode = 1
+      return
+
     let uploadResp = client.requestTraceUploadUrl(
-      tenantId, trace.recordingId, fileName, "application/zip", fileSize,
-      bearerToken)
+      tenantId, artifact.artifactId, fileName, artifact.payload.contentType,
+      fileSize, bearerToken)
 
     # Upload the file to the presigned URL.
     let etag = putFile(uploadResp.uploadUrl, traceZipPath)

@@ -600,6 +600,25 @@ const
     # new suite in it would be one signal among eighteen, and the panel's
     # other rendering milestone already lives beside this one.
     "src/tests/gui/tests/agent-activity/agent_activity_evidence_view_test.nim",
+    # AS-1 (Sharing/Artifact-Store.milestones.org) — the artifact model, its
+    # closed kind registry, and the migration that keeps the trace upload and
+    # the review-dataset upload one system rather than two.
+    #
+    # Registered here rather than left to the directory glob because two of
+    # the three properties it pins are the kind that regress silently:
+    #
+    #   * the recording kind's URL space and identity are what already-issued
+    #     share links and already-uploaded traces depend on, and nothing else
+    #     in the ViewModel lane would notice them changing;
+    #   * "an unknown kind is refused rather than stored opaquely" is the rule
+    #     that stops the sharing service becoming a general file store, and a
+    #     rule that is only a comment is a rule that is gone at the next
+    #     convenient moment.
+    #
+    # Runs on BOTH backends — the model is deliberately free of filesystem,
+    # HTTP, `Trace` and `langstring` so it can — so it is in `test-vm-native`
+    # and `test-vm-js` alike.
+    "src/tests/gui/tests/sharing/artifact_model_vm_test.nim",
   ]
 
   CliRecordGateTests* = [

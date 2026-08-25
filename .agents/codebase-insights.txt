@@ -1772,3 +1772,96 @@ The IsoNim DSL nests *tags*. A bare call to another `render*` proc inside a
 renders empty with no error. Take a container with `ref = host` and
 `r.appendRenderedChild(host, renderChild(r, ...))` after the block, the way
 `isonim_agent_workspace_view` and `isonim_agent_activity_view` do.
+
+## The sharing path is now kind-parameterised, not trace-shaped (AS-1)
+
+`src/ct/online_sharing/artifact.nim` holds the artifact model: a closed
+`ArtifactKind` enum (`recording`, `review-dataset`), a `const
+array[ArtifactKind, ArtifactKindSpec]` registry indexed BY THE ENUM (so a new
+kind that skips its row does not compile), and the one URL grammar every path
+in `api_client.nim` is now derived from.
+
+Two things that surprise people reading it:
+
+* The recording kind's URL segment is `traces`, not `recordings`, and that is
+  permanent. Every share URL the service has issued and every path the shipped
+  client sends contains it. `artifact_model_vm_test.nim` pins the generated
+  strings against string *literals* for that reason — regenerating the
+  expectation from the registry would agree with any rename.
+* The user-facing share URL — `/{orgSlug}/{id}/download` — carries NO kind.
+  That is what made the generalisation cheap, and it is why
+  `parseArtifactShareUrl` must never infer a kind from the URL shape.
+
+The module is deliberately free of filesystem, HTTP, `Trace` and `langstring`
+so it compiles on `nim js` too; `common/recording_id.nim` was split for the
+same reason (`isCanonicalUuidV7` is backend-neutral, `newRecordingId` is
+behind `when not defined(js)` because it needs the OS CSPRNG).
+
+`ArtifactProtection` has exactly one value, `apNone`. There is NO encryption
+and NO password protection anywhere on this path — AS-3 adds them. A test
+asserts the enum's cardinality so widening it has to be deliberate.
+
+## Most Nim test lanes enumerate BY NAME, so they omit silently
+
+Only five lanes discover Nim tests by globbing: `src/tests/gui/tests` (twice,
+for the native and js ViewModel lanes), `src/tests/cli`, `src/ct/trace`, and
+`test_column_*_vm.nim` / `test_formatted_view_step_*_vm.nim` /
+`test_statement_step_*_vm.nim` under `src/frontend/viewmodel/tests/unit`.
+Everything else is a hand-maintained list of paths in the `justfile` or in
+`ci/test/*.sh`.
+
+Measured against the tree: 52 files containing real `suite`/`test` blocks are
+reached by NO lane — every `src/ct_test/incremental/test_*.nim`, every
+`src/frontend/viewmodel/tests/unit/test_collab_*.nim`, ALL FIVE
+`src/common/*_test.nim` (including `trace_index_test.nim`, the M-REC-8
+recording-id identity suite), six of the eight `src/frontend/tests/*_test.nim`,
+`src/ct/test_sourcemap.nim`, `src/ct/utilities/zip_test.nim`, the three
+`src/ct/launch/*_test.nim`, and the ten `docs/book-isonim/tests/*` (which do
+have a `test` recipe in their own `Justfile`, which nothing invokes).
+
+Before adding a test, check which lane will actually reach it. A file whose
+name is only in `release_gate.nim` runs nowhere; a file reached only by a glob
+has nothing asserting it still exists. Registering in both is the pattern the
+repo has converged on.
+
+Beware the false positives when counting: `src/ct_test/frameworks/go_test.nim`
+and `js_node_test.nim` are provider *implementations*,
+`src/frontend/viewmodel/viewmodels/test_explorer_vm.nim` and
+`test_run_summary_vm.nim` are ViewModels for the test explorer, and
+`src/ct_test/fixtures/nim_unittest_project/tests/*` are fixtures for the
+framework detector — none of them are tests of this repo.
+
+## Two suites in `src/ct/online_sharing/` ran in no lane (AS-1)
+
+`upload_wire_format_test.nim` — 35 assertions over 11 cases pinning the exact
+JSON keys and URL paths the sharing client sends — and
+`collab_invite_url_test.nim` were reachable by no justfile recipe and no CI
+script. Both are now named in `just test-mcr-enrichment-units`. That lane
+registers by name on purpose: globbing the directory would drag in
+`online_sharing_test.nim`, a live network round-trip that also no longer
+compiles. If you add a `*_test.nim` there, add it to the recipe — the list is
+the only thing that reaches it. Both need `-d:ssl -d:useOpenssl3` because
+`api_client.nim` pulls in `std/net`'s `newContext`; neither opens a TLS
+connection.
+
+## An unknown *kind* is refused, but an unknown *role* is not (open defect)
+
+`artifact.parseArtifact` reads `visibility`, `minimumWriteRole` and
+`protection` with the two-argument `parseEnum`, whose second argument is a
+silent fallback: `"public"` reads as `avTenant`, `"owner"` reads as
+`arMember`, `"aes-256-gcm"` reads as `apNone`. The `try`/`except ValueError`
+around those three calls is dead code — two-argument `parseEnum` does not
+raise. Nothing consumes the parser yet, but `minimumWriteRole` fails OPEN, and
+once AS-3 adds a second `ArtifactProtection` value an old client will read an
+encrypted record as unprotected.
+
+## `ct upload`'s success output is unreachable (open defect)
+
+`uploadTrace` ends every path in `quit(...)`, so everything after the call in
+`uploadCommand` — the "OK: uploaded, you can share the link" block AND the
+machine-readable JSON branch beside it — can never run. Related: `uploadFile`
+and `uploadSplitTrace` set only `fileId` on `UploadedInfo`, so `downloadKey`
+and `controlId` have no source on the modern path. Also `uploadSplitTrace`
+hard-codes the platform as `"linux-x86_64"` in both `requestUploadSession` and
+`finalizeUploadSession`, so a macOS or Windows recording is uploaded labelled
+Linux.

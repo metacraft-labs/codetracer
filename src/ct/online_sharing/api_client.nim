@@ -26,10 +26,22 @@
 ## (slice-upload / finalize) is a separate server-side identifier for
 ## the upload session itself and is unaffected by this rename.
 
-import std/[httpclient, json, net, strformat, strutils, uri]
+## AS-1 (``codetracer-specs/Sharing/Artifact-Store.milestones.org``): every
+## URL and request body below is now *derived* from the kind registry in
+## ``artifact.nim`` rather than spelled out here.  The recording kind's rows in
+## that registry reproduce these paths character for character — that is what
+## the migration means, and
+## ``src/tests/gui/tests/sharing/artifact_model_vm_test.nim`` pins it against
+## the literal pre-AS-1 strings.  The point of routing through the registry is
+## that a second kind cannot acquire a second transport by accident: there is
+## one grammar, parameterised by kind.
+
+import std/[httpclient, json, net, strformat, strutils]
 import collab_invite_url
+import artifact
 
 export collab_invite_url
+export artifact
 
 type
   TenantListItem* = object
@@ -145,28 +157,31 @@ proc buildUploadUrlPath*(baseApiUrl, tenantId: string): string =
   ## URL builder for ``POST /api/v1/tenants/{tenantId}/traces/upload-url``.
   ## Extracted as a pure helper so the M-REC-8 wire-format tests can
   ## assert the URL shape without going through the HTTP transport.
-  baseApiUrl & fmt"tenants/{tenantId}/traces/upload-url"
+  ##
+  ## AS-1: the ``traces`` segment is now the *recording kind's* registry entry
+  ## rather than a literal.  Identical output; one grammar.
+  artifactUploadUrlPath(baseApiUrl, tenantId, akRecording)
 
 proc buildUploadUrlBody*(recordingId, fileName, contentType: string,
     contentLength: int64): JsonNode =
   ## Request-body builder for ``POST .../traces/upload-url``.
   ## M-REC-8: the body carries the client-minted UUIDv7 ``recordingId``.
-  %*{
-    "recordingId": recordingId,
-    "fileName": fileName,
-    "contentType": contentType,
-    "contentLength": contentLength,
-  }
+  ##
+  ## AS-1: for the recording kind the artifact id *is* the recording id, so
+  ## the body keeps the ``recordingId`` key the deployed service reads.  See
+  ## ``artifact.buildArtifactUploadUrlBody`` for why the key is per kind.
+  buildArtifactUploadUrlBody(
+    recordingArtifactRef(recordingId), fileName, contentType, contentLength)
 
 proc buildConfirmUploadPath*(baseApiUrl, recordingId: string): string =
   ## URL builder for ``POST /api/v1/traces/{recordingId}/confirm-upload``.
   ## M-REC-8: the path segment is the UUIDv7 ``recordingId``.
-  baseApiUrl & fmt"traces/{recordingId}/confirm-upload"
+  artifactConfirmUploadPath(baseApiUrl, recordingArtifactRef(recordingId))
 
 proc buildDownloadUrlPath*(baseApiUrl, recordingId: string): string =
   ## URL builder for ``GET /api/v1/traces/{recordingId}/download-url``.
   ## M-REC-8: the path segment is the UUIDv7 ``recordingId``.
-  baseApiUrl & fmt"traces/{recordingId}/download-url"
+  artifactDownloadUrlPath(baseApiUrl, recordingArtifactRef(recordingId))
 
 proc parseDownloadShareUrl*(url: string):
     tuple[orgSlug: string, recordingId: string] =
@@ -182,18 +197,15 @@ proc parseDownloadShareUrl*(url: string):
   ## private to ``download.nim``) so the M-REC-8 wire-format tests can
   ## pin the URL grammar without dragging the full download stack into
   ## the test binary.
-  let parsed = parseUri(url)
-  let parts = parsed.path.strip(chars = {'/'}).split('/')
-  if parts.len >= 2:
-    let candidateId = parts[^1]
-    if candidateId.toLowerAscii() == "download" and parts.len >= 3:
-      result.orgSlug = parts[^3]
-      result.recordingId = parts[^2]
-    else:
-      result.orgSlug = parts[^2]
-      result.recordingId = parts[^1]
-    return
-  raise newException(ValueError, "Invalid download URL: " & url)
+  ##
+  ## AS-1: share URLs carry **no kind**, and that is what makes every link
+  ## already handed to a user survive the generalisation — the id is unique
+  ## across kinds, so the service resolves the kind from the id.  This wrapper
+  ## keeps the recording-shaped field name for the callers that only ever deal
+  ## in recordings; ``artifact.parseArtifactShareUrl`` is the kind-neutral form.
+  let resolved = parseArtifactShareUrl(url)
+  result.orgSlug = resolved.orgSlug
+  result.recordingId = resolved.artifactId
 
 proc exchangeCollabInvite*(client: ApiClient, inviteToken: string):
     CollabJoinBootstrapResponse =
@@ -336,7 +348,12 @@ proc requestUploadSession*(client: ApiClient, tenantId: string,
   ## ``POST /api/v1/tenants/{tenantId}/traces/upload-session``
   ## Creates a new upload session for per-slice streaming upload.
   ## Returns a session ID and S3 key prefix for the upload.
-  let url = client.baseApiUrl & fmt"tenants/{tenantId}/traces/upload-session"
+  ##
+  ## AS-1: slice-based transfer is a *transfer* concern, not a trace concern —
+  ## the session endpoint is therefore derived from the kind's collection
+  ## segment like every other path, so any large artifact can use it.
+  let url = artifactUploadSessionPath(
+    client.baseApiUrl, tenantId, akRecording)
   let body = $ %*{
     "platform": platform,
     "recordingMode": recordingMode,

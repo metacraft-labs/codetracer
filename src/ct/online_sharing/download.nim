@@ -1,4 +1,10 @@
-import streams, nimcrypto, std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json ]
+## Neither ``streams`` nor ``nimcrypto`` is imported here, and the absence of
+## the second one is deliberate rather than incidental: nothing on the sharing
+## path encrypts anything, and an unused ``nimcrypto`` import made this file
+## read as "there is crypto here" to anyone grepping for it.  If confidentiality
+## is ever added, it belongs behind the artifact model's ``ArtifactProtection``
+## seam (``artifact.nim``), not behind an import.
+import std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json ]
 import ../../common/[ config, trace_index, paths, lang, types ]
 import ../utilities/[ types, zip, language_detection ]
 import ../trace/storage_and_import, ../globals

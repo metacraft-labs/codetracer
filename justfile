@@ -2701,11 +2701,29 @@ test-ct-trace-units:
 # Compile + run the `ct upload` MCR-enrichment unit suites
 # (src/ct/online_sharing).
 #
-# Registered by NAME rather than by a directory glob on purpose: the two other
-# `*_test.nim` files in that directory are a wire-format suite and a live
-# upload/download/delete round-trip against the sharing service, and the latter
-# says so in its own header ("not part of any automated test runner").  Globbing
-# the directory would drag a network test into a unit lane.
+# Registered by NAME rather than by a directory glob on purpose: exactly one
+# `*_test.nim` file in that directory is deliberately excluded —
+# `online_sharing_test.nim`, a live upload/download/delete round-trip against
+# the sharing service, which says so in its own header ("not part of any
+# automated test runner").  Globbing the directory would drag a network test
+# into a unit lane.  Every OTHER `*_test.nim` there must be listed below; if
+# you add one, add it here, because a name list silently omits what it forgets.
+#
+# Two files were added after that rule was written, both of which had been
+# running NOWHERE — reachable by no recipe and no CI script, so their
+# assertions could not fail a build:
+#
+#   * `upload_wire_format_test.nim` — 35 assertions over 11 cases pinning the
+#     exact JSON keys and URL paths the sharing client sends (the M-REC-8
+#     upload-url/confirm-upload/download-url grammar, plus the M31 finalize
+#     body).  The path builders it pins are now derived from the artifact kind
+#     registry, so the suite that proves the wire did not move is precisely the
+#     one that has to run.
+#   * `collab_invite_url_test.nim` — the collab invite URL grammar and the
+#     native invite bootstrap.
+#
+# Both need `-d:ssl -d:useOpenssl3` because `api_client.nim` pulls in
+# `std/net`'s `newContext`; neither opens a TLS connection.
 #
 # Before this recipe existed, `src/ct/online_sharing/test_mcr_enrichment.nim`
 # was run by nothing at all — 34 assertions that could not fail a build.  The
@@ -2724,11 +2742,13 @@ test-mcr-enrichment-units:
   passed=0
   total_oks=0
   for f in src/ct/online_sharing/test_mcr_enrichment.nim \
-           src/ct/online_sharing/mcr_enrichment_member_check_test.nim; do
+           src/ct/online_sharing/mcr_enrichment_member_check_test.nim \
+           src/ct/online_sharing/upload_wire_format_test.nim \
+           src/ct/online_sharing/collab_invite_url_test.nim; do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/mcr-enrichment-$name"
     echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
+    output=$(nim c -r --hints:off -d:ssl -d:useOpenssl3 \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
       "$f" 2>&1) && rc=0 || rc=$?
