@@ -189,6 +189,8 @@ import viewmodel/viewmodels/origin_chain_types
 from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, openSidePanel, onCancelLoad
 from isonim/core/signals import val
 from isonim/core/computation import val
+from viewmodel/viewmodels/trace_open import
+  TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 var activeSessionVM: SessionViewModel
 # Backend-reported `supportsStepBack` capability from the DAP `initialize`
 # response. The response can arrive (synchronously, via the in-process DAP
@@ -1235,6 +1237,40 @@ proc configure(data: Data) =
   domwindow.onresize = proc(e: js) =
     if not data.isNil and not data.ui.isNil and not data.ui.layout.isNil:
       data.ui.layout.updateSize()
+
+  # AA-2 — drilling from a `ct test` result in the Agent Activity session feed
+  # into the recording of that test.
+  #
+  # DeepReview-GUI.md §2.1.2 requires "the existing trace-opening path and tab
+  # model, honouring the `--open-policy` distinction between replacing the
+  # current tab and opening a new one", so the service is assembled from the
+  # two pieces that already implement it and nothing else:
+  #
+  #   * `createNewSession(data)` — the same call `onOpenTraceInTabReady` makes
+  #     for the "tab" newTracePolicy, i.e. the new-tab half of the policy;
+  #   * `CODETRACER::load-trace-file` — the existing open-a-trace-by-path IPC
+  #     (`index/traces.onLoadTraceFile`), which also owns the "no trace
+  #     registered at that path" answer.  §2.1.2 would rather the panel say so
+  #     than open a broken tab, and that handler already replies
+  #     `CODETRACER::trace-load-error` instead of creating one.
+  #
+  # `TraceOpenRequest.tracePath` is the recording's output *directory*, which
+  # is what every `ct test` provider reports as `TraceMetadata.path`.
+  #
+  # Installed here rather than beside the other panel-VM wiring in
+  # `configureMiddleware`: that routine runs only from `onTraceLoaded` and
+  # `onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
+  # `CODETRACER::no-trace` — and a `ct review` dataset launch reaches neither
+  # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns),
+  # so a review —
+  # the one mode this feature exists for — got a panel with no trace-opening
+  # service at all.  `configure` runs once per renderer in every launch mode.
+  agent_activity.installAgentActivityTraceOpenService(
+    TraceOpenService(openProc: proc(request: TraceOpenRequest) =
+      if request.policy == topNewTab:
+        createNewSession(data)
+      data.ipc.send cstring"CODETRACER::load-trace-file",
+        js{tracePath: cstring(request.tracePath)}))
 
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config

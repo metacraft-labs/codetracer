@@ -526,6 +526,42 @@ const
     # entry (the hook really produces a loadable dataset), are
     # `src/tests/cli/agent_cli_test.nim`.
     "src/tests/gui/tests/deepreview/agent_evidence_vm_test.nim",
+    # AA-2 — a `ct test` run renders in the Agent Activity session feed as a
+    # summary that drills down to the recording of an individual test
+    # (DeepReview-GUI.md §2.1.2).
+    #
+    # The projection: the runner's own NDJSON folded into a run summary,
+    # asserted against bytes produced by `ct_test/contracts`' serializer plus
+    # one literal wire line, so the wire format cannot drift past it.  Two of
+    # its suites exist for rules that a rendering can quietly break and no
+    # user-visible symptom announces: a test with no recording must offer no
+    # drill-down *and* refuse to open one if asked anyway, and a recording
+    # that failed before producing a trace must offer nothing at all — "a
+    # broken trace tab is worse than none".
+    "src/tests/gui/tests/agent-activity/test_run_summary_vm_test.nim",
+    # AA-2 — the DOM the panel emits for that run.
+    #
+    # A separate file from `views/isonim_views_test.nim`, where the panel's
+    # other view suites live, because that file does not currently reach its
+    # own end: on the unmodified tree it dies with SIGSEGV at
+    # `isonim_views_test.nim(5388)`, downstream of the known-failing
+    # "search results" cases, so every suite after that point — AA-1's own
+    # roll-up deletion guard included — is dead today.  Registering AA-2's
+    # rendering assertions there would have made them unrunnable and silently
+    # green.  They move back when that crash is fixed.
+    "src/tests/gui/tests/agent-activity/agent_activity_test_run_view_test.nim",
+    # AA-2 — the Agent Workspace summary bar stops fabricating test results.
+    #
+    # AA-1 recorded this as a live violation of the rule it preserved when it
+    # deleted the Tests card: `syncWorkspace` derived seven counters from
+    # `vcs.deepReviewMode`, so the panel printed "1/1 passed" / "100.0%" with
+    # review mode on and "0/0 passed" with it off, for a suite that never ran.
+    # Listed here because the *positive* half — a real measurement still
+    # renders — is what stops the fix being "print nothing, ever", and because
+    # one of its cases asserts on the production source: a rendering test
+    # alone cannot tell "the producer stopped fabricating" from "the renderer
+    # now hides it", and both had to happen.
+    "src/tests/gui/tests/agent-workspace/agent_workspace_no_fabricated_results_test.nim",
   ]
 
   CliRecordGateTests* = [

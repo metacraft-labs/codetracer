@@ -213,6 +213,153 @@
   margin-bottom: 0.5em
   line-height: 1.4
 
+// AA-2 — a `ct test` execution in the session feed (DeepReview-GUI.md
+// §2.1.2), rendered as a summary of the run in place of raw runner output.
+//
+// It shares the message row's card chrome deliberately: it occupies a
+// conversation turn's position and is the agent's work, so it should read as
+// part of the feed rather than as a panel bolted into it.  What distinguishes
+// it is a left rule carrying the run's verdict — the only piece of colour, so
+// a reviewer scanning a long session finds the failed run without reading.
+.agent-test-run
+  border: 0.0625em solid colors-ui-surface-primary-secondary
+  border-left: 0.1875em solid colors-ui-border-information
+  border-radius: 0.25em
+  background: colors-ui-surface-input-default
+  margin-bottom: 0.5em
+
+.agent-test-run-passed
+  border-left-color: colors-ui-border-success
+
+.agent-test-run-failed
+  border-left-color: colors-ui-border-error
+
+.agent-test-run-running
+  border-left-color: colors-ui-border-warning
+
+.agent-test-run-header
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.5em 0.75em
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-canvas
+
+.agent-test-run-toggle
+  color: colors-ui-text-primary-caption
+  width: 1em
+  flex: 0 0 auto
+
+.agent-test-run-title
+  // The runner's own command line, which is frequently longer than the
+  // panel is wide.  It yields its width to the verdict rather than pushing
+  // it out of sight: "how many failed" is why the row is being read.
+  flex: 1 1 auto
+  min-width: 0
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  color: colors-ui-text-primary-body
+
+.agent-test-run-status
+  flex: 0 0 auto
+  color: colors-ui-text-primary-caption
+
+.agent-test-run-body
+  padding: 0 0.5em 0.25em 0.5em
+
+.agent-test-run-diagnostic
+  color: colors-ui-text-error-primary
+  padding: 0.25em 0.25em 0.25em 0.5em
+  line-height: 1.4
+
+.agent-test-run-output
+.agent-test-row-output
+  margin: 0.25em 0 0.5em 0
+  padding: 0.5em
+  border-radius: 0.125em
+  background: colors-ui-surface-canvas
+  color: colors-ui-text-primary-body
+  white-space: pre-wrap
+  overflow-x: auto
+  max-height: 16em
+
+.agent-test-row
+  border-top: 0.0625em solid colors-ui-surface-primary-secondary
+
+.agent-test-row-header
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.375em 0.25em
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-canvas
+
+.agent-test-row-status
+  flex: 0 0 auto
+  min-width: 5em
+  color: colors-ui-text-primary-caption
+
+.agent-test-row-passed > .agent-test-row-header > .agent-test-row-status
+  color: colors-ui-text-success-primary
+
+.agent-test-row-failed > .agent-test-row-header > .agent-test-row-status
+.agent-test-row-errored > .agent-test-row-header > .agent-test-row-status
+  color: colors-ui-text-error-primary
+
+.agent-test-row-skipped > .agent-test-row-header > .agent-test-row-status
+.agent-test-row-cancelled > .agent-test-row-header > .agent-test-row-status
+  color: colors-ui-text-warning-primary
+
+.agent-test-row-name
+  flex: 1 1 auto
+  min-width: 0
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  color: colors-ui-text-primary-body
+
+.agent-test-row-duration
+  flex: 0 0 auto
+  color: colors-ui-text-primary-caption
+
+// The drill-down into the recording of this test.  Present only where the
+// runner produced one — see `TestRunRow.hasRecording`; §2.1.2 is explicit
+// that a test without a recording gets no affordance rather than one that
+// fails when used, so there is intentionally no disabled state to style.
+.agent-test-row-actions
+  display: flex
+  gap: 0.375em
+  padding: 0 0.25em 0.375em 5.5em
+
+.agent-test-row-details
+  padding: 0 0.25em 0.5em 5.5em
+
+.agent-test-row-detail
+  color: colors-ui-text-primary-caption
+  padding-bottom: 0.25em
+
+.agent-test-row-diagnostic-error
+  color: colors-ui-text-error-primary
+  line-height: 1.4
+
+.agent-test-row-diagnostic-warning
+  color: colors-ui-text-warning-primary
+  line-height: 1.4
+
+// Recording failed before a trace existed.  The panel says so and offers
+// nothing to open: "a broken trace tab is worse than none" (§2.1.2).
+.agent-test-row-recording-failed
+  border-left: 0.1875em solid colors-ui-border-error
+  padding: 0.25em 0.5em
+  margin-bottom: 0.25em
+  color: colors-ui-text-primary-body
+  line-height: 1.4
+
 .user-wrapper
   background: transparent !important
 

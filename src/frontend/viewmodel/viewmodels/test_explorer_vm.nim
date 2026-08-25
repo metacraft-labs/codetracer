@@ -7,6 +7,13 @@
 import std/[json, options, strutils, tables]
 
 import ../../../ct_test/[contracts, run_store]
+import trace_open
+
+# `TraceOpenPolicy` / `TraceOpenRequest` / `TraceOpenService` moved to their
+# own module when AA-2 gave the Agent Activity session feed a second reason to
+# open a recording; re-exported so every existing importer of this module
+# keeps seeing them unchanged.
+export trace_open
 
 type
   TestExplorerActionKind* = enum
@@ -23,25 +30,11 @@ type
     tesErrored = "errored"
     tesCancelled = "cancelled"
 
-  TraceOpenPolicy* = enum
-    topCurrentTab = "current-tab"
-    topNewTab = "new-tab"
-
   CtTestCommand* = object
     argv*: seq[string]
 
   CtTestService* = ref object
     sendProc*: proc(command: CtTestCommand)
-
-  TraceOpenRequest* = object
-    tracePath*: string
-    traceId*: string
-    recordingId*: string
-    testId*: string
-    policy*: TraceOpenPolicy
-
-  TraceOpenService* = ref object
-    openProc*: proc(request: TraceOpenRequest)
 
   EditorTestAction* = object
     kind*: TestExplorerActionKind
@@ -106,10 +99,6 @@ proc buildRecordFileCommand*(file: string;
 proc send*(service: CtTestService; command: CtTestCommand) =
   if not service.isNil and not service.sendProc.isNil:
     service.sendProc(command)
-
-proc openTrace*(service: TraceOpenService; request: TraceOpenRequest) =
-  if not service.isNil and not service.openProc.isNil:
-    service.openProc(request)
 
 proc createTestExplorerViewModel*(
     workspaceRoot: string;

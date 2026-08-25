@@ -386,15 +386,24 @@ proc syncWorkspace(launcher: AgenticSessionLauncher) =
       if isAgent: session.workspacePath else: launcher.userWorkspacePath),
     agentSessionId: cstring session.sessionId)
   comp.progress = session.progressFromSession()
-  comp.drSummary = ActivityDeepReviewSummary(
-    totalLinesCovered: if launcher.vm.vcs.deepReviewMode.val: 1 else: 0,
-    totalLinesUncovered: if launcher.vm.vcs.deepReviewMode.val: 0 else: 1,
-    coveragePercent: if launcher.vm.vcs.deepReviewMode.val: 100.0 else: 0.0,
-    testsRun: if launcher.vm.vcs.deepReviewMode.val: 1 else: 0,
-    testsPassed: if launcher.vm.vcs.deepReviewMode.val: 1 else: 0,
-    testsFailed: 0,
-    functionsTraced: if launcher.vm.vcs.deepReviewMode.val: 1 else: 0,
-    lastUpdatedMs: 0)
+  # AA-2 — the Agent Workspace summary is **not** written here.
+  #
+  # It used to be, and it was fabricated: every counter was derived from
+  # `vcs.deepReviewMode`, so the panel printed "1/1 passed" and "100.0%"
+  # whenever review mode was on and "0/0 passed" whenever it was off, for a
+  # suite that never ran and coverage nothing measured
+  # (`Agent-Activity-Panel.milestones.org`, AA-1's "a live violation of it
+  # elsewhere", assigned to AA-2).  That is exactly the zero-that-reads-as-
+  # success AA-1 preserved the Tests card's rule against.
+  #
+  # The real producer is `agent_workspace.handleDeepReviewNotification`, which
+  # accumulates `CoverageUpdate` / `TestComplete` / `FlowTraceUpdate` into the
+  # same field.  Overwriting it from a flag on every workspace sync would also
+  # have discarded whatever those notifications had accumulated, so leaving it
+  # alone is both the honest answer and the correct one.  Until a notification
+  # arrives the summary stays at its zero default, and the renderer's rule
+  # (`isonim_agent_workspace_view.summaryCoverageText` / `testsText` /
+  # `functionsTracedText`) renders nothing rather than a zero.
   comp.fileEntries = launcher.vm.workspaceRows()
   comp.selectedFileIndex = launcher.vm.workspace.selectedFileIndex.val
   comp.coverageOverlayEnabled = launcher.vm.workspace.coverageOverlayEnabled.val

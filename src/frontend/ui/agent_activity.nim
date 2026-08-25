@@ -10,7 +10,9 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
-  setSessionKey
+  setSessionKey, traceOpen
+from ../viewmodel/viewmodels/trace_open import
+  TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 when defined(js):
@@ -48,6 +50,27 @@ var agentActivityComponentRefs: JsAssoc[int, AgentActivityComponent] =
   JsAssoc[int, AgentActivityComponent]{}
 var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
   JsAssoc[int, bool]{}
+
+var agentActivityTraceOpenService: TraceOpenService = nil
+  ## AA-2 — how this panel opens the recording of a `ct test` test.
+  ##
+  ## Latched at the host level for the same reason `reviewSessionForPanels`
+  ## is: `tryMountIsoNimAgentActivityPanel` retries asynchronously, so a
+  ## panel's VM can be created either side of the moment `ui_js` installs the
+  ## service, and both orders have to end up wired.
+  ##
+  ## The service itself is supplied by `ui_js`, because that is where the tab
+  ## model lives — the current-tab / new-tab distinction is `createNewSession`
+  ## plus the *existing* `CODETRACER::load-trace-file` IPC, not a second
+  ## trace-opening path (DeepReview-GUI.md §2.1.2).
+
+proc installAgentActivityTraceOpenService*(service: TraceOpenService) =
+  ## Install (or replace) the panel's trace-opening service, and back-fill
+  ## every VM that already exists.
+  agentActivityTraceOpenService = service
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      vm.traceOpen = service
 
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
 proc tryMountIsoNimAgentActivityPanel*(componentId: int)
@@ -236,6 +259,9 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
 
   result = createAgentActivityVM(agentActivityVMStore)
   agentActivityVMInstances[self.id] = result
+  # AA-2: a panel created after `ui_js` installed the service still opens
+  # recordings; one created before is back-filled by the installer.
+  result.traceOpen = agentActivityTraceOpenService
   # A panel that mounts into a review already in progress shows that review's
   # session, not an empty conversation.
   replayReviewSessionInto(result)

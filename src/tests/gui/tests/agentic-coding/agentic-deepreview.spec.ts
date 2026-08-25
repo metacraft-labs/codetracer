@@ -126,6 +126,29 @@ interface AgentSessionFixture {
 const agenticFeatureEnabled =
   process.env.CODETRACER_AGENTIC_E2E === "1";
 
+// AA-2 measured what flipping that variable actually does, because AA-1's
+// note left it as a hypothesis ("either set CODETRACER_AGENTIC_E2E=1 in CI or
+// delete the gate") and the `TODO(skipped)` comments below still repeat it.
+//
+// Run on 2026-08-25 with `CODETRACER_AGENTIC_E2E=1`: **23 passed, 8 skipped,
+// 1 failed**. The 23 are the fixture-arithmetic tests, which the gate never
+// covered. Of the ten `live IPC` tests the gate was hiding, eight still skip
+// themselves — each wraps its setup in `catch { test.skip() }`, and the setup
+// fails because `sendAgentProgress` dispatches a window event that no
+// production handler subscribes to, the same dead-IPC shape AA-1 measured for
+// `CODETRACER::acp-deepreview-notification`. The ninth
+// ("invalid notification kind does not crash the application") fails honestly
+// on `expect(body).toBeVisible()` — the edit-mode launch resolves a hidden
+// window — which is unrelated to anything it claims to test.
+//
+// So neither of AA-1's two options is correct as stated: setting the variable
+// in CI turns CI red on a pre-existing unrelated defect, and deleting the gate
+// does the same while still not making the eight self-skips run. The gate is
+// not what is keeping these unrun; their own `catch { test.skip() }` is.
+// Left in place deliberately, with the measurement recorded rather than the
+// hypothesis. Making these tests real needs the IPC injection they depend on
+// to reach a live handler, which is its own piece of work.
+
 // ---------------------------------------------------------------------------
 // Helper: send IPC message to the Electron renderer
 // ---------------------------------------------------------------------------

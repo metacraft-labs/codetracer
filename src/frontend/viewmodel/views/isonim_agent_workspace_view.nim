@@ -60,11 +60,73 @@ proc fileItemClass*(selected: bool): string =
   else:
     "agent-workspace-file-item"
 
+proc hasCoverageData*(summary: AgentWorkspaceSummary): bool {.noSideEffect.} =
+  ## Whether anything ever measured coverage for this workspace.
+  ##
+  ## Zero lines *known* is not zero lines covered.  The distinction is the
+  ## whole point: the counters are filled by `CoverageUpdate` notifications
+  ## from the agent runtime, and a workspace that has received none has no
+  ## coverage rather than no *covered* lines.
+  ##
+  ## A non-zero `coveragePercent` counts on its own, even with no line totals
+  ## beside it.  The rule this helper implements is about *absent* data, and a
+  ## percentage somebody measured is present data however incompletely it was
+  ## reported — suppressing it would be the mirror of the defect AA-2 removed,
+  ## a real measurement hidden rather than an invented one shown.  The
+  ## accumulating producer always writes all three together
+  ## (`ui/agent_workspace.handleDeepReviewNotification`), so this arm only ever
+  ## catches a partially-filled summary; it is deliberately generous there.
+  summary.totalLinesCovered + summary.totalLinesUncovered > 0 or
+    summary.coveragePercent > 0.0
+
+proc hasTestResults*(summary: AgentWorkspaceSummary): bool {.noSideEffect.} =
+  ## Whether any test result was ever reported for this workspace.
+  ##
+  ## The counters are only ever incremented by a `TestComplete` notification
+  ## (`ui/agent_workspace.handleDeepReviewNotification`), so all-zero means
+  ## "no suite reported", never "a suite ran and nothing passed".
+  summary.testsRun + summary.testsPassed + summary.testsFailed > 0
+
 proc summaryCoverageText*(summary: AgentWorkspaceSummary): string =
+  ## The coverage figure, or nothing at all.
+  ##
+  ## AA-2 / AA-1's preserved rule: absent data is stated, never rendered as a
+  ## zero that reads as a measurement.  This panel used to print "100.0%"
+  ## whenever review mode was on and "0.0%" whenever it was off — both derived
+  ## from a boolean, for a workspace nothing had measured
+  ## (`Agent-Activity-Panel.milestones.org`, "a live violation of it
+  ## elsewhere").  The fabrication is gone from the producer; this is the rule
+  ## executing in the renderer, so a future producer cannot reintroduce it
+  ## silently.
+  ##
+  ## The same decision as `review_entry.coverageText`, which returns an empty
+  ## badge rather than "0/0" for a file with no coverage, and the same one
+  ## `test_run_summary_vm.summaryText` makes for a run that reported no tests
+  ## — with one difference that is deliberate.  There, a run *happened*, so
+  ## the absence gets a sentence ("No tests reported").  Here nothing
+  ## happened, so there is nothing to make a sentence about and the item is
+  ## simply not rendered.
+  if not summary.hasCoverageData:
+    return ""
   fmt"{summary.coveragePercent:.1f}%"
 
 proc testsText*(summary: AgentWorkspaceSummary): string =
+  ## "<passed>/<run> passed", or nothing at all when no suite reported.
+  ## See `summaryCoverageText` for why the empty string rather than "0/0".
+  if not summary.hasTestResults:
+    return ""
   $summary.testsPassed & "/" & $summary.testsRun & " passed"
+
+proc functionsTracedText*(summary: AgentWorkspaceSummary): string
+    {.noSideEffect.} =
+  ## The traced-function count, or nothing.
+  ##
+  ## Included in the same rule for the same reason: it was fabricated from
+  ## `deepReviewMode` alongside the other two, and "Functions traced: 0" for a
+  ## workspace nothing traced is the same false measurement in a third place.
+  if summary.functionsTraced <= 0:
+    return ""
+  $summary.functionsTraced
 
 proc overlayToggleText*(enabled: bool): string =
   if enabled:
@@ -146,12 +208,19 @@ proc renderAgentWorkspacePanel*(r: MockRenderer; vm: AgentWorkspaceVM;
 
     let summaryNode = ui(r):
       tdiv(class = AgentWorkspaceSummaryClass):
-        span(class = "agent-workspace-summary-item"):
-          text "Coverage: " & summaryCoverageText(currentSummary)
-        span(class = "agent-workspace-summary-item"):
-          text "Tests: " & testsText(currentSummary)
-        span(class = "agent-workspace-summary-item"):
-          text "Functions traced: " & $currentSummary.functionsTraced
+        # Each item renders only when there is a measurement behind it.  A
+        # rendered "Coverage: 0.0%" / "Tests: 0/0 passed" for a workspace
+        # nothing measured is the zero-that-reads-as-a-measurement AA-1
+        # preserved its rule against and AA-2 owns; see `summaryCoverageText`.
+        if summaryCoverageText(currentSummary).len > 0:
+          span(class = "agent-workspace-summary-item"):
+            text "Coverage: " & summaryCoverageText(currentSummary)
+        if testsText(currentSummary).len > 0:
+          span(class = "agent-workspace-summary-item"):
+            text "Tests: " & testsText(currentSummary)
+        if functionsTracedText(currentSummary).len > 0:
+          span(class = "agent-workspace-summary-item"):
+            text "Functions traced: " & functionsTracedText(currentSummary)
         tdiv(class = "agent-workspace-overlay-toggle",
              onclick = proc() =
                vm.toggleCoverageOverlay()
@@ -251,12 +320,17 @@ when defined(js):
 
       let summaryNode = ui(r):
         tdiv(class = AgentWorkspaceSummaryClass):
-          span(class = "agent-workspace-summary-item"):
-            text "Coverage: " & summaryCoverageText(currentSummary)
-          span(class = "agent-workspace-summary-item"):
-            text "Tests: " & testsText(currentSummary)
-          span(class = "agent-workspace-summary-item"):
-            text "Functions traced: " & $currentSummary.functionsTraced
+          # See the MockRenderer branch above: an item without a measurement
+          # behind it is not rendered at all.
+          if summaryCoverageText(currentSummary).len > 0:
+            span(class = "agent-workspace-summary-item"):
+              text "Coverage: " & summaryCoverageText(currentSummary)
+          if testsText(currentSummary).len > 0:
+            span(class = "agent-workspace-summary-item"):
+              text "Tests: " & testsText(currentSummary)
+          if functionsTracedText(currentSummary).len > 0:
+            span(class = "agent-workspace-summary-item"):
+              text "Functions traced: " & functionsTracedText(currentSummary)
           tdiv(class = "agent-workspace-overlay-toggle",
                onclick = proc() =
                  vm.toggleCoverageOverlay()

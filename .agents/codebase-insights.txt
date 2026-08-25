@@ -1716,3 +1716,54 @@ green, 0.66 for that red) and no alpha pair can match both. Changing the hue is
 the lever: `#408050 @0x30` matches `#E06C75 @0x26` on all three measures at
 once. Measure a wash as the COMPOSITE against the surface it lands on, on all
 three axes, before changing a number.
+
+## `isonim_views_test.nim` stops running two-thirds of the way through (AA-2)
+
+On the native backend it dies with `SIGSEGV: Illegal storage access` at line
+5388 — a nil `findByClass(panel, "search-results-count")` dereferenced by
+`textContent`, downstream of the known-failing "search results" cases from the
+find-in-files work. `unittest`'s `check` does not abort the case, so the very
+next line dereferences the nil it just reported. It is a cascade: guarding
+5388 moves the crash to 5402, same shape.
+
+The numbers: the file declares 461 cases, `just test-vm-native` reports 216
+(212 OK + 4 FAILED), so **245 cases produce no result** — including AA-1's own
+`no DeepReview roll-up` guard, which passes when run in isolation. The runner
+does not notice because it tests `fails > 0` before it tests the exit code, so
+a SIGSEGV is printed as `PARTIAL (212 OK, 4 FAILED)`.
+
+`just test-vm-js` still runs the whole file (JS does not die on the nil
+dereference): 444 OK, 17 FAILED. So the two lanes disagree by 245 cases on the
+same file, and the JS lane is the one that will catch a regression in the
+downstream half. AA-2 shipped and reverted exactly such a regression.
+
+Consequences to remember: before adding a suite to that file, check it is
+reachable — put it in its own `*_test.nim` under `src/tests/gui/tests/` (the
+runners glob the whole directory) if it is not; and when something in the
+downstream half is at stake, read the JS lane, not the native one.
+
+To run one case past the crash: `./isonim_views_test "<exact test name>"`.
+The filter is an exact match on the test's own name, not a glob and not a
+substring, and it matches nothing against suite names.
+
+## `configureMiddleware` does not run in a `ct review` launch (AA-2)
+
+`ui_js.configureMiddleware` is called only from `onTraceLoaded` and
+`onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
+`CODETRACER::no-trace`. A `ct review` dataset launch reaches neither:
+`index/startup.nim` sends `CODETRACER::start-deepreview` and returns, so
+`onStartDeepReview` is the only one of the three that runs. Everything wired
+inside `configureMiddleware` — including the whole `initPanelVM`
+block that installs the shared ViewModel store into the legacy panels — is
+therefore absent in review mode. Anything a review needs must be installed from
+`ui_js.configure`, which runs once per renderer in every launch mode. Symptom
+to recognise: a panel that renders correctly in a review but whose actions are
+silent no-ops, because the host service it calls through was never installed.
+
+## Nested render procs inside an `ui(r):` block build nothing (AA-2)
+
+The IsoNim DSL nests *tags*. A bare call to another `render*` proc inside a
+`ui` block evaluates, builds a node, and attaches it to nothing — the parent
+renders empty with no error. Take a container with `ref = host` and
+`r.appendRenderedChild(host, renderChild(r, ...))` after the block, the way
+`isonim_agent_workspace_view` and `isonim_agent_activity_view` do.

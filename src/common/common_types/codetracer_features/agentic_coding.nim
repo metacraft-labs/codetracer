@@ -140,9 +140,21 @@ type
 
 type
   ActivityDeepReviewSummary* = object
-    ## Summary statistics displayed in the agent activity pane alongside
-    ## the conversation history. Gives the user a quick overview of
-    ## code quality metrics for the agent's recent changes.
+    ## Summary statistics displayed in the **Agent Workspace** panel's
+    ## summary bar.  (The name is historical: the Agent Activity pane carried
+    ## these until AA-1 deleted its DeepReview roll-up outright; the Agent
+    ## Workspace panel is the only surviving consumer.)
+    ##
+    ## Every counter is a **measurement**, accumulated from the agent
+    ## runtime's DeepReview notifications by
+    ## `ui/agent_workspace.handleDeepReviewNotification`.  Nothing may fill
+    ## them from a flag, a mode or a guess: all-zero is how this type says
+    ## "nothing measured", and the renderer relies on that to draw nothing
+    ## rather than a zero that reads as a measurement
+    ## (`isonim_agent_workspace_view.hasTestResults` / `hasCoverageData`).
+    ## AA-2 removed exactly such a fabrication from
+    ## `ui/agentic_session_launcher.syncWorkspace`, which derived all seven
+    ## counters from `vcs.deepReviewMode`.
     totalLinesCovered*: int
     totalLinesUncovered*: int
     coveragePercent*: float        ## 0.0 .. 100.0

@@ -34,6 +34,26 @@ const AgentActivityDiffEditorPrefix* = "diff-editor"
 const AgentActivityTerminalShellPrefix* = "shellComponent-"
 const AgentActivityPlaceholderText* = "Ask anything"
 
+const AgentActivityTestRunClass* = "agent-test-run"
+  ## AA-2 — a `ct test` execution, rendered as a summary of the run *in place
+  ## of* the raw runner output (DeepReview-GUI.md §2.1.2).
+  ##
+  ## The card takes the feed position of the message whose content carried the
+  ## runner's events, so a run stays where the agent produced it.  The message
+  ## itself is not deleted from the model — it is simply not painted as text,
+  ## which is what "in place of raw runner output" means.
+
+const AgentActivityTestRunPrefix* = "agent-test-run-"
+const AgentActivityTestRowClass* = "agent-test-row"
+const AgentActivityTestRowPrefix* = "agent-test-row-"
+const AgentActivityOpenRecordingClass* = "agent-test-row-open-recording"
+  ## The drill-down affordance.  §2.1.2: it exists **only** where a test has a
+  ## recording — "not an affordance that fails when used" — so this class is
+  ## emitted under `TestRunRow.hasRecording` and nowhere else.
+const AgentActivityRecordingFailedClass* = "agent-test-row-recording-failed"
+  ## The other half of the same rule: a recording that failed before a trace
+  ## existed says so, and still offers nothing to open.
+
 const AgentActivitySessionNoticeClass* = "agent-session-notice"
   ## RV-6 — the panel's explicit statement about a review's agent session.
   ##
@@ -53,6 +73,15 @@ type
     onAddFiles*: proc()
     onModelSelect*: proc()
     afterDynamicRender*: proc()
+    onOpenTestRecording*: proc(anchorId, testId: string;
+                               policy: TraceOpenPolicy)
+      ## AA-2 — the host's hook for "the reviewer clicked into a recording".
+      ##
+      ## The view does **not** decide whether a recording exists; the VM does
+      ## (`AgentActivityVM.openTestRecording`), and the view calls it.  This
+      ## callback exists only so a host can observe the drill-down, not so it
+      ## can implement a second one — §2.1.2 requires the *existing*
+      ## trace-opening path, which `trace_open.nim` already is.
 
 proc messageWrapperClass*(role: AgentActivityMessageRole): string =
   case role
@@ -195,6 +224,150 @@ proc renderMessage[R](r: R; componentId: int;
             tdiv(class = "agent-editor",
                  id = diffEditorId(componentId, diff.id))
 
+proc testRunId*(anchorId: string): string =
+  AgentActivityTestRunPrefix & anchorId
+
+proc testRowId*(anchorId, testId: string): string =
+  AgentActivityTestRowPrefix & anchorId & "-" & testId
+
+proc testRunStateClass*(summary: TestRunSummary): string =
+  ## The card's overall state, as a class a stylesheet and a test can both
+  ## read.  Deliberately three-valued rather than boolean: "running" is not a
+  ## kind of failure, and an empty run is not a kind of success.
+  if summary.inProgress:
+    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-running"
+  elif summary.failed > 0 or summary.errored > 0:
+    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-failed"
+  else:
+    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-passed"
+
+proc testRowClass*(row: TestRunRow): string =
+  AgentActivityTestRowClass & " " & AgentActivityTestRowPrefix & $row.outcome
+
+proc testRunTitle*(summary: TestRunSummary): string =
+  ## What the card calls itself.
+  ##
+  ## The runner's own reported command when there is one, because that is the
+  ## thing the reviewer actually asked for; otherwise the provider's id.  Never
+  ## a reconstructed command line — a command CodeTracer invented would read as
+  ## one that ran.
+  if summary.commandLine.len > 0:
+    summary.commandLine
+  elif summary.providerId.len > 0:
+    summary.providerId
+  else:
+    "ct test"
+
+proc testRowDetailText*(row: TestRunRow): string =
+  ## The line an expanded test shows: its status and how long it took.
+  ## §2.1.2: "an individual test can be expanded to its status, duration and
+  ## captured output."  A duration of zero is omitted rather than printed,
+  ## for the same reason a zero count is: it is not a measurement.
+  result = "Status: " & $row.outcome
+  if row.durationMs > 0:
+    result.add " · Duration: " & formatDurationMs(row.durationMs)
+
+proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
+                      rowValue: TestRunRow;
+                      callbacks: AgentActivityCallbacks): auto =
+  let row = rowValue
+  let expanded = vm.isTestExpanded(anchorId, row.testId)
+  let testId = row.testId
+  proc open(policy: TraceOpenPolicy) =
+    # The VM is the single gate: it refuses a row with no recording even if a
+    # stale rendering somehow offered one.  The host callback is notified only
+    # when something was actually opened.
+    if vm.openTestRecording(anchorId, testId, policy) and
+       callbacks.onOpenTestRecording != nil:
+      callbacks.onOpenTestRecording(anchorId, testId, policy)
+  ui(r):
+    tdiv(class = testRowClass(row), id = testRowId(anchorId, row.testId)):
+      tdiv(class = "agent-test-row-header",
+           onclick = proc() = vm.toggleTest(anchorId, testId)):
+        span(class = "agent-test-row-status"):
+          text $row.outcome
+        span(class = "agent-test-row-name"):
+          text row.name
+        if row.durationMs > 0:
+          span(class = "agent-test-row-duration"):
+            text formatDurationMs(row.durationMs)
+      # §2.1.2: the affordance exists only where the recording does.  A test
+      # that was never recorded, and a recording that failed before producing
+      # a trace, both fall through here and render no button at all.
+      if row.hasRecording:
+        tdiv(class = "agent-test-row-actions"):
+          button(class = "ct-button-sm-secondary " &
+                   AgentActivityOpenRecordingClass,
+                 `type` = "button",
+                 onclick = proc() = open(topCurrentTab)):
+            text "Open recording"
+          button(class = "ct-button-sm-secondary " &
+                   AgentActivityOpenRecordingClass & "-new-tab",
+                 `type` = "button",
+                 onclick = proc() = open(topNewTab)):
+            text "Open in new tab"
+      if expanded:
+        tdiv(class = "agent-test-row-details"):
+          tdiv(class = "agent-test-row-detail"):
+            text testRowDetailText(row)
+          if row.recordingFailed:
+            tdiv(class = AgentActivityRecordingFailedClass):
+              text "Recording failed before a trace was produced; " &
+                "there is no recording to open."
+          for diagnosticValue in row.diagnostics:
+            let diagnostic = diagnosticValue
+            tdiv(class = "agent-test-row-diagnostic " &
+                   AgentActivityTestRowPrefix & "diagnostic-" &
+                   diagnostic.severity):
+              text diagnostic.message
+          if row.output.len > 0:
+            pre(class = "agent-test-row-output"):
+              text row.output
+
+proc renderTestRunTail[R](r: R; summary: TestRunSummary): auto =
+  ## Run-level diagnostics and the non-event half of the runner's stdout.
+  ##
+  ## §2.1.2 requires both to be reachable when recording failed, and they are
+  ## the only place a failure with *no test row* — a missing recorder binary,
+  ## say — can be read at all.
+  ui(r):
+    tdiv(class = "agent-test-run-tail"):
+      for diagnosticValue in summary.diagnostics:
+        let diagnostic = diagnosticValue
+        tdiv(class = "agent-test-run-diagnostic"):
+          text diagnostic.message
+      if summary.frameworkOutput.len > 0:
+        pre(class = "agent-test-run-output"):
+          text summary.frameworkOutput
+
+proc renderTestRun[R](r: R; vm: AgentActivityVM; entry: AgentTestRunEntry;
+                      callbacks: AgentActivityCallbacks): auto =
+  let summary = entry.summary
+  let anchorId = entry.anchorId
+  let expanded = vm.isTestRunExpanded(anchorId)
+  var body: typeof(r.createElement("div"))
+  let card = ui(r):
+    tdiv(class = testRunStateClass(summary), id = testRunId(anchorId)):
+      tdiv(class = "agent-test-run-header",
+           onclick = proc() = vm.toggleTestRun(anchorId)):
+        span(class = "agent-test-run-toggle"):
+          text (if expanded: "▾" else: "▸")
+        span(class = "agent-test-run-title"):
+          text testRunTitle(summary)
+        span(class = "agent-test-run-status"):
+          text summaryText(summary)
+      tdiv(ref = body, class = "agent-test-run-body")
+  # The rows are appended rather than declared inline because the `ui` DSL
+  # nests *tags*, not calls to other render procs — a bare call inside a `ui`
+  # block builds a node nothing attaches.  Same reason the conversation host
+  # itself is filled with `appendRenderedChild`.
+  if expanded:
+    for rowValue in summary.rows:
+      r.appendRenderedChild(
+        body, renderTestRow(r, vm, anchorId, rowValue, callbacks))
+    r.appendRenderedChild(body, renderTestRunTail(r, summary))
+  card
+
 proc renderTerminal[R](r: R; terminal: AgentActivityTerminalEntry;
                        commandInputId: string): auto =
   ui(r):
@@ -323,7 +496,19 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       r.appendRenderedChild(
         conversation, renderSessionNotice(r, vm.sessionNotice.val))
     for message in vm.messages.val:
-      r.appendRenderedChild(conversation, renderMessage(r, componentId, message))
+      # AA-2: a message whose content carried the runner's event stream is
+      # painted as the run's summary card *instead of* as raw output
+      # (§2.1.2).  The lookup is by the message's own id, so the card lands in
+      # the feed position the run happened in and everything around it renders
+      # unchanged.
+      let runIndex = vm.testRunIndex(message.id)
+      if runIndex >= 0:
+        r.appendRenderedChild(
+          conversation,
+          renderTestRun(r, vm, vm.testRuns.val[runIndex], callbacks))
+      else:
+        r.appendRenderedChild(
+          conversation, renderMessage(r, componentId, message))
     for terminal in vm.terminals.val:
       r.appendRenderedChild(
         conversation,
