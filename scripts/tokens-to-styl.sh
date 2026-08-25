@@ -188,27 +188,25 @@ def render_file(title, flat_map, known_vars):
 
     return "\n".join(lines).rstrip() + "\n"
 
-brand_json = find_single_json(ROOT_DIR / "brand")
-alias_json = find_single_json(ROOT_DIR / "alias")
-mapped_json = find_single_json(ROOT_DIR / "mapped")
+# Required layers, in dependency order, plus any optional layers present.
+# `space` (the density collection) is optional so older design-system checkouts
+# without it still work. Add a new collection folder here (or make it optional)
+# and it flows through with no other change.
+REQUIRED_LAYERS = ["brand", "alias", "mapped"]
+OPTIONAL_LAYERS = ["space"]
 
-brand_data = load_json(brand_json)
-alias_data = load_json(alias_json)
-mapped_data = load_json(mapped_json)
+layers = list(REQUIRED_LAYERS)
+for name in OPTIONAL_LAYERS:
+    if (ROOT_DIR / name).is_dir():
+        layers.append(name)
 
-brand_flat = flatten_tokens(brand_data)
-alias_flat = flatten_tokens(alias_data)
-mapped_flat = flatten_tokens(mapped_data)
+flats = {name: flatten_tokens(load_json(find_single_json(ROOT_DIR / name))) for name in layers}
+known_vars = collect_all_vars(*flats.values())
 
-known_vars = collect_all_vars(brand_flat, alias_flat, mapped_flat)
+for name in layers:
+    (OUT_DIR / f"{name}.styl").write_text(render_file(name, flats[name], known_vars), encoding="utf-8")
 
-brand_out = render_file("brand", brand_flat, known_vars)
-alias_out = render_file("alias", alias_flat, known_vars)
-mapped_out = render_file("mapped", mapped_flat, known_vars)
-
-(OUT_DIR / "brand.styl").write_text(brand_out, encoding="utf-8")
-(OUT_DIR / "alias.styl").write_text(alias_out, encoding="utf-8")
-(OUT_DIR / "mapped.styl").write_text(mapped_out, encoding="utf-8")
+emitted_layers = layers
 
 # Font paths are relative to the compiled CSS output location
 # (src/build-debug/frontend/styles/), so ../../../../libs/codetracer-design-system/
@@ -273,19 +271,13 @@ index_out = "\n".join([
     "// Auto-generated import index",
     "// Note: fonts.styl is NOT included here to avoid duplicate @font-face rules.",
     "// Fonts are imported once via components/font_family.styl in codetracer.styl.",
-    '@import "brand.styl"',
-    '@import "alias.styl"',
-    '@import "mapped.styl"',
+    *[f'@import "{name}.styl"' for name in emitted_layers],
     "",
 ])
 (OUT_DIR / "index.styl").write_text(index_out, encoding="utf-8")
 
-print(f"[OK] brand json : {brand_json}")
-print(f"[OK] alias json : {alias_json}")
-print(f"[OK] mapped json: {mapped_json}")
-print(f"[OK] wrote      : {OUT_DIR / 'brand.styl'}")
-print(f"[OK] wrote      : {OUT_DIR / 'alias.styl'}")
-print(f"[OK] wrote      : {OUT_DIR / 'mapped.styl'}")
+for name in emitted_layers:
+    print(f"[OK] wrote      : {OUT_DIR / (name + '.styl')}")
 print(f"[OK] wrote      : {OUT_DIR / 'fonts.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'index.styl'}")
 PY
