@@ -104,11 +104,12 @@
         align-items: center
         font-weight: BOLD_WEIGHT
         width: 19em
-        font-size: 2em
+        font-size: 2.3em
         letter-spacing: -0.02em
-        // In rem, not em: this element's own `font-size: 2em` makes 1em == 32px
-        // here, so `1em` would read as 16px and mean 32px.  2rem is 32px, plainly.
-        line-height: 2rem
+        // Both ems here are deliberate and resolve against different bases:
+        // `font-size` against `.welcome-title`'s 16px (36.8px), `line-height`
+        // against this element's own resolved size (1.2 * 36.8 == 44.16px).
+        line-height: 1.2em
 
       .welcome-version
         color: colors-ui-text-primary-disabled
