@@ -196,7 +196,7 @@
   flex-direction: column
   flex-shrink: 0
   flex-grow: 0
-  background-color: colors-ui-surface-panel
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
   position: relative
   z-index: 5  // same as side docked panels — keeps panel children below backdrop (98)
@@ -295,7 +295,7 @@
     color: colors-ui-text-primary-label
     border-radius: 0.36em
     // Shadow bridges the gap between the strip top edge and the docked panel.
-    box-shadow: 0em -0.48em 0em 0em colors-ui-surface-panel
+    box-shadow: 0em -0.48em 0em 0em colors-ui-surface-base-panel
     overflow: visible
     z-index: 1
 
@@ -312,7 +312,7 @@
       z-index: 1
       border-radius: 0 0.625em 0 0
       opacity: 1
-      box-shadow: 0.625em -0.34em 0 -0.25em colors-ui-surface-panel
+      box-shadow: 0.625em -0.34em 0 -0.25em colors-ui-surface-base-panel
       transform: translate(0em, -0.25625em)
 
     // RIGHT curve — to the right of the active tab.
@@ -328,7 +328,7 @@
       z-index: 1
       border-radius: 0.625em 0 0 0
       opacity: 1
-      box-shadow: -0.625em -0.34em 0 -0.25em colors-ui-surface-panel
+      box-shadow: -0.625em -0.34em 0 -0.25em colors-ui-surface-base-panel
       transform: translate(0em, -0.25625em)
 
 // Label: no writing-mode rotation for horizontal tabs.
@@ -373,7 +373,7 @@
   // font-weight: 600
   letter-spacing: -0.14px
   color: colors-ui-text-primary-disabled
-  background-color: colors-ui-surface-panel
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
   cursor: pointer
   // No horizontal padding — the tab is only 2em wide and removing horizontal
@@ -409,7 +409,7 @@
     // the overlay area. The overlay (z-index: 101) renders above the strip (100)
     // and covers the overlap with its own panel-color background — seamless join,
     // no GL content exposed since the overlay covers ROOT at that position.
-    box-shadow: 0.48em 0em 0em 0em colors-ui-surface-panel
+    box-shadow: 0.48em 0em 0em 0em colors-ui-surface-base-panel
     overflow: visible
     z-index: 1
 
@@ -426,7 +426,7 @@
       z-index: 1
       border-radius: 0 0 0.625em 0
       opacity: 1
-      box-shadow: 0.34em 0.625em 0 -0.25em colors-ui-surface-panel
+      box-shadow: 0.34em 0.625em 0 -0.25em colors-ui-surface-base-panel
       transform: translate(0.25625em, 0em)
 
     // BOTTOM curve — below the active tab (same geometry as lm_tabs ::after rotated).
@@ -442,7 +442,7 @@
       z-index: 1
       border-radius: 0 0.625em 0 0
       opacity: 1
-      box-shadow: 0.34em -0.625em 0 -0.25em colors-ui-surface-panel
+      box-shadow: 0.34em -0.625em 0 -0.25em colors-ui-surface-base-panel
       transform: translate(0.25625em, 0em)
 
 // -------------------------------------------------------------------------
@@ -457,20 +457,20 @@
   border-bottom-right-radius: 0.36em
   // Shadow bridges the 0.25em gap to the strip left edge; overlay (z-index: 101)
   // renders above and covers the slight overlap with its panel-color background.
-  box-shadow: -0.48em 0em 0em 0em colors-ui-surface-panel
+  box-shadow: -0.48em 0em 0em 0em colors-ui-surface-base-panel
 
   &::before  // TOP curve — anchored to LEFT side of tab
     left: 0em
     right: auto
     border-radius: 0 0 0 0.625em  // BL rounded
-    box-shadow: -0.34em 0.625em 0 -0.25em colors-ui-surface-panel
+    box-shadow: -0.34em 0.625em 0 -0.25em colors-ui-surface-base-panel
     transform: translate(-0.25625em, 0em)
 
   &::after  // BOTTOM curve — anchored to LEFT side of tab
     left: 0em
     right: auto
     border-radius: 0.625em 0 0 0  // TL rounded
-    box-shadow: -0.34em -0.625em 0 -0.25em colors-ui-surface-panel
+    box-shadow: -0.34em -0.625em 0 -0.25em colors-ui-surface-base-panel
     transform: translate(-0.25625em, 0em)
 
 // First active tab has no top curve (nothing above it to connect to).
@@ -680,7 +680,7 @@
 // box-shadow provides a subtle 1px outline that makes the rounded edges visible
 // even when the panel and the content behind it share similar dark colours.
 #auto-hide-overlay-body
-  background-color: colors-ui-surface-panel
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
   overflow: hidden
   box-shadow: none
