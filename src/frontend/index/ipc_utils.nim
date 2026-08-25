@@ -37,6 +37,11 @@ proc onSearchProgram*(sender: js, response: cstring) {.async.} =
   let escapedQuery = query.replace("'", "'\\''")
 
   var searchRoot = ""
+  # When we search inside the materialized files/ tree, rg returns paths like
+  # <outputFolder>/files/home/user/project/foo.rb.  We strip this prefix so
+  # the renderer receives the original on-disk path and opens the real file
+  # rather than the trace-internal copy.
+  var materialisedFilesPrefix = ""
 
   if not data.trace.isNil:
     if data.trace.imported:
@@ -47,6 +52,7 @@ proc onSearchProgram*(sender: js, response: cstring) {.async.} =
       let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
       if fsExistsSync(cstring(filesRoot)):
         searchRoot = filesRoot
+        materialisedFilesPrefix = filesRoot
 
     if searchRoot.len == 0:
       # Live trace (or imported trace with no materialized files/):
@@ -85,7 +91,7 @@ proc onSearchProgram*(sender: js, response: cstring) {.async.} =
     let colonIdx2 = rawLine.find(':', colonIdx1 + 1)
     if colonIdx2 < 0:
       continue
-    let filePath = rawLine[0 ..< colonIdx1]
+    var filePath = rawLine[0 ..< colonIdx1]
     let lineStr  = rawLine[colonIdx1 + 1 ..< colonIdx2]
     let lineText = rawLine[colonIdx2 + 1 .. ^1]
     var lineNum = 0
@@ -93,6 +99,11 @@ proc onSearchProgram*(sender: js, response: cstring) {.async.} =
       lineNum = parseInt(lineStr)
     except:
       continue
+    # Strip the materialized files/ prefix so the renderer opens the real
+    # source file (/home/user/project/foo.rb) instead of the trace copy
+    # (<outputFolder>/files/home/user/project/foo.rb).
+    if materialisedFilesPrefix.len > 0 and filePath.startsWith(materialisedFilesPrefix):
+      filePath = filePath[materialisedFilesPrefix.len .. ^1]
     batch.add(js{text: cstring(lineText), path: cstring(filePath), line: lineNum, customFields: jsEmptyArray()})
     if batch.len >= 50:
       mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
