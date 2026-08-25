@@ -249,9 +249,29 @@ if [ -n "$ct_reprobuild_host" ]; then
 		fi
 
 		mkdir -p .repro/runquota
-		runquota_socket="${TMPDIR:-/tmp}/codetracer-reprobuild-$$.sock"
+		# THE SOCKET GOES IN A DIRECTORY OF ITS OWN, never straight into
+		# $TMPDIR. The socket's parent directory is the rendezvous point,
+		# and runquotad verifies it on every start -- and its client on
+		# every connect -- before it will bind: owned by this user, and
+		# never group- or world-writable. A shared /tmp is root-owned 1777
+		# and fails both halves, so a socket placed directly in it is
+		# refused with "refusing a path owned by uid 0 with mode 1777" and
+		# the daemon exits before it ever listens.
+		#
+		# That refusal is correct rather than something to work around: a
+		# rendezvous point any local user can write is a rendezvous point
+		# any local user can replace, and this daemon hands out the
+		# machine's whole build budget. The per-PID directory below does
+		# not exist yet, so runquotad CREATES it with the mode it requires
+		# (0700 here, 0750 on a host with a `runquota` group) -- it only
+		# refuses directories it found already there. The published stats
+		# table lands beside the socket for the same reason, so this also
+		# keeps it out of a shared /tmp where concurrent builds would
+		# collide on one file.
+		runquota_dir="${TMPDIR:-/tmp}/codetracer-reprobuild-$$"
+		runquota_socket="$runquota_dir/runquota.sock"
 		runquota_log=".repro/runquota/runquotad.log"
-		rm -f "$runquota_socket"
+		rm -rf "$runquota_dir"
 		"$runquotad_bin" \
 			--socket "$runquota_socket" \
 			--cpu-milli "${CODETRACER_RUNQUOTA_CPU_MILLI:-8000}" \
@@ -259,7 +279,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 			--pool console=1 \
 			>"$runquota_log" 2>&1 &
 		runquotad_pid="$!"
-		trap 'if [ -n "$runquotad_pid" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi' EXIT
+		trap 'if [ -n "$runquotad_pid" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi; rm -rf "$runquota_dir"' EXIT
 		for _ in {1..300}; do
 			if grep -q "runquotad listening" "$runquota_log" 2>/dev/null; then
 				export RUNQUOTA_SOCKET="$runquota_socket"
@@ -267,12 +287,17 @@ if [ -n "$ct_reprobuild_host" ]; then
 			fi
 			if ! kill -0 "$runquotad_pid" 2>/dev/null; then
 				echo "Error: runquotad exited before becoming ready. See $runquota_log" >&2
+				# Print it too. A build that dies here is usually a build on
+				# a machine nobody can log into afterwards, and a log the
+				# reader has to go and find is a log they never read.
+				sed 's/^/  runquotad: /' "$runquota_log" >&2 2>/dev/null || true
 				exit 1
 			fi
 			sleep 0.05
 		done
 		if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
 			echo "Error: runquotad did not become ready. See $runquota_log" >&2
+			sed 's/^/  runquotad: /' "$runquota_log" >&2 2>/dev/null || true
 			exit 1
 		fi
 	fi
