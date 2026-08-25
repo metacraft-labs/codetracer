@@ -343,7 +343,10 @@
       margin: 0em 0em !important
       padding: 0 0.75em
       border-radius: 0.5em
-      border: 0.03125em solid transparent
+      // Matches the 0.0625rem (1px) field border in input.styl. This rule wins
+      // over `.ct-input-small` on specificity, so leaving it at the old 0.03125em
+      // kept this one field a hairline while every other field went to 1px.
+      border: 0.0625rem solid transparent
       background: colors-editor-surface-select
       color: colors-ui-text-primary-body !important
       font-family: "SpaceMono"
