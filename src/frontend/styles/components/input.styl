@@ -94,13 +94,17 @@ input
     color: colors-ui-text-primary-body
 
 
+// The resting border is `rem`, matching the `:hover` rule above and every other
+// border in this file. It was `em`, which resolved against each field's own
+// font-size and gave 0.4375px at 14px and 0.375px at 12px — never the 0.5px
+// intended, and never the width hover then swapped in.
 .ct-input-small
   height: 1.5rem
   max-height: 1.75rem
-  border: 0.03125em solid transparent
+  border: 0.03125rem solid transparent
 
 .ct-input-panel
   width: -webkit-fill-available
   height: 1.75rem
   max-height: 1.75rem
-  border: 0.03125em solid transparent
+  border: 0.03125rem solid transparent
