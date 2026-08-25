@@ -1717,34 +1717,39 @@ the lever: `#408050 @0x30` matches `#E06C75 @0x26` on all three measures at
 once. Measure a wash as the COMPOSITE against the surface it lands on, on all
 three axes, before changing a number.
 
-## `isonim_views_test.nim` stops running two-thirds of the way through (AA-2)
+## A nil mock-DOM lookup used to kill the whole `isonim_views_test.nim` binary
 
-On the native backend it dies with `SIGSEGV: Illegal storage access` at line
-5388 — a nil `findByClass(panel, "search-results-count")` dereferenced by
-`textContent`, downstream of the known-failing "search results" cases from the
-find-in-files work. `unittest`'s `check` does not abort the case, so the very
-next line dereferences the nil it just reported. It is a cascade: guarding
-5388 moves the crash to 5402, same shape.
+FIXED — kept because the shape recurs in every file that hand-rolls
+`findByClass` over `isonim/testing/mock_dom` (about fifteen of them).
 
-The numbers: the file declares 461 cases, `just test-vm-native` reports 216
-(212 OK + 4 FAILED), so **245 cases produce no result** — including AA-1's own
-`no DeepReview roll-up` guard, which passes when run in isolation. The runner
-does not notice because it tests `fails > 0` before it tests the exit code, so
-a SIGSEGV is printed as `PARTIAL (212 OK, 4 FAILED)`.
+What it was: `findByClass` returned nil when nothing matched, and essentially
+every caller dereferences the result on the next line. `unittest`'s `check`
+does NOT abort a failing case, so `check n != nil` reported the failure and the
+line after it dereferenced the nil. A nil `MockNode` deref is a SIGSEGV, and a
+SIGSEGV kills the process: the file declares 461 cases, the native lane
+reported 216 (212 OK + 4 FAILED), and **245 cases — 53% — produced no result at
+all**, AA-1's `no DeepReview roll-up` guard among them. It was a cascade, not
+one line: guarding the first site moved the crash to the next, same shape.
 
-`just test-vm-js` still runs the whole file (JS does not die on the nil
-dereference): 444 OK, 17 FAILED. So the two lanes disagree by 245 cases on the
-same file, and the JS lane is the one that will catch a regression in the
-downstream half. AA-2 shipped and reverted exactly such a regression.
+The fix, and the reason it is NOT `require`: `std/unittest`'s own `require`
+sets `abortOnError`, so `fail()` ends in `quit(1)` — it kills the process just
+as the segfault did. `unittest`'s `test` template wraps each case body in
+`except Exception:`, so a raised CatchableError is the primitive that fails one
+case and lets the rest run. `findByClass` / `findById` / `findByTag` in
+`views/isonim_views_test.nim` therefore RAISE `MockNodeNotFoundError`, and the
+handful of assertions whose subject is absence use the `…OrNil` spellings. Both
+lanes now report the same 444 OK / 17 FAILED over the same 461 cases.
 
-Consequences to remember: before adding a suite to that file, check it is
-reachable — put it in its own `*_test.nim` under `src/tests/gui/tests/` (the
-runners glob the whole directory) if it is not; and when something in the
-downstream half is at stake, read the JS lane, not the native one.
+The runner half: `test-vm-native` tested `fails > 0` before it tested the exit
+code, so the SIGSEGV printed as `PARTIAL (212 OK, 4 FAILED)` — indistinguishable
+from an ordinary partial run. All six compile-and-run lanes now classify
+through `ci/lib/test-lane-report.sh`, which reads the exit status FIRST;
+`ci/test/test-lane-report-test.sh` proves it against fixture processes that
+print plausible `[OK]` lines and then die.
 
-To run one case past the crash: `./isonim_views_test "<exact test name>"`.
-The filter is an exact match on the test's own name, not a glob and not a
-substring, and it matches nothing against suite names.
+To run one case: `./isonim_views_test "<exact test name>"`. The filter is an
+exact match on the test's own name, not a glob and not a substring, and it
+matches nothing against suite names.
 
 ## `configureMiddleware` does not run in a `ct review` launch (AA-2)
 

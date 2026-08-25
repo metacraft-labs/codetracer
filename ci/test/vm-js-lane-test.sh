@@ -159,13 +159,18 @@ else
 		"before the assignment is read."
 fi
 
-# 3. The vacuous-pass guard the native lane has always had.
-if grep -q 'DID NOT RUN' <<<"${recipe_joined}"; then
+# 3. The vacuous-pass guard the native lane has always had. The verdict itself
+#    now lives in ci/lib/test-lane-report.sh (and is proved against fixture
+#    processes by ci/test/test-lane-report-test.sh); what this contract pins is
+#    that THIS recipe still routes through it and still handles the verdict.
+if grep -q 'source ci/lib/test-lane-report.sh' <<<"${recipe_joined}" &&
+	grep -q 'no-results' <<<"${recipe_joined}"; then
 	ok "a build that produces no test results is reported, not scored OK"
 else
 	fail "a build that produces no test results is reported, not scored OK" \
 		"Without this guard a suite that ran zero tests, or died before printing" \
-		"anything, is reported as 'OK (0 tests)'."
+		"anything, is reported as 'OK (0 tests)'. The recipe must source" \
+		"ci/lib/test-lane-report.sh and handle its 'no-results' verdict."
 fi
 
 # 4. Compiler diagnostics must survive. The warning naming defect 1 was thrown
@@ -178,12 +183,19 @@ else
 	ok "the compile does not discard its diagnostics"
 fi
 
-# 5. The exit code must still be consulted once it is meaningful.
-if grep -q 'exitcode" -ne 0' <<<"${recipe_joined}"; then
+# 5. The exit code must still be consulted once it is meaningful — and it must
+#    be the FIRST thing consulted. `classify_test_run` takes it as argument 1
+#    and reads it ahead of the [OK]/[FAILED] tally precisely so a crashed
+#    binary cannot be reported as an ordinary partial run; see
+#    ci/test/test-lane-report-test.sh, which proves that ordering against a
+#    fixture that prints [OK] lines and then SIGSEGVs.
+# shellcheck disable=SC2016 # this is a regex over the recipe text, not an expansion
+if grep -qE 'classify_test_run "\$exitcode"' <<<"${recipe_joined}"; then
 	ok "the recipe still fails a suite on a non-zero exit code"
 else
 	fail "the recipe still fails a suite on a non-zero exit code" \
-		"-d:nodejs makes the exit code meaningful; something must read it."
+		"-d:nodejs makes the exit code meaningful; something must read it," \
+		"and it must be node's status that reaches classify_test_run first."
 fi
 
 # --- dynamic: prove the -d:nodejs claim against the real toolchain --------

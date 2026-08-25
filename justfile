@@ -1257,6 +1257,8 @@ test-cli-record: vm-test-prereqs
   # Discover the sibling recorders the e2e test records with, the same way
   # test-vm-recorder-gated does.
   source scripts/detect-siblings.sh
+  # Shared classifier: exit status before the [OK]/[FAILED] tally.
+  source ci/lib/test-lane-report.sh
 
   failed=0
   passed=0
@@ -1270,35 +1272,35 @@ test-cli-record: vm-test-prereqs
       "$f" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR / no tests ran"
-      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      # `-B` is load-bearing, not decoration.  Nim's `unittest` prints the
-      # evidence -- `checkpoint` output, `Check failed: <expr>` and the
-      # `<name> was <value>` lines -- BEFORE the `[FAILED] <test name>`
-      # marker.  A window of `-A 12` alone therefore reports *that* a test
-      # failed while showing none of *why*, which is how a real defect in
-      # this repo's own trace_index migration cost a full extra
-      # reproduce-from-scratch cycle: the lane said
-      # `[FAILED] recording a real program produces a real container` and
-      # discarded the `[codetracer] FATAL:` line immediately above it that
-      # named the cause.
-      echo "$output" | grep -B 25 -A 12 '\[FAILED\]' | head -120 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$rc" -ne 0 ]; then
-      # Every case said [OK] and the process still failed.  See the note on
-      # `test-vm-native` for the two ways that happens; both are silent
-      # unless the exit code is read, and this lane used to discard it.
-      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
-      echo "$output" | tail -30 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
+    verdict=$(classify_test_run "$rc" "$oks" "$fails")
+    test_run_headline "$verdict" "$rc" "$oks" "$fails"
+    case "$verdict" in
+      ok)
+        passed=$((passed + 1))
+        ;;
+      no-results)
+        echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      partial)
+        # `-B` is load-bearing, not decoration.  Nim's `unittest` prints the
+        # evidence -- `checkpoint` output, `Check failed: <expr>` and the
+        # `<name> was <value>` lines -- BEFORE the `[FAILED] <test name>`
+        # marker.  A window of `-A 12` alone therefore reports *that* a test
+        # failed while showing none of *why*, which is how a real defect in
+        # this repo's own trace_index migration cost a full extra
+        # reproduce-from-scratch cycle: the lane said
+        # `[FAILED] recording a real program produces a real container` and
+        # discarded the `[codetracer] FATAL:` line immediately above it that
+        # named the cause.
+        echo "$output" | grep -B 25 -A 12 '\[FAILED\]' | head -120 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      *)
+        echo "$output" | tail -30 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+    esac
   done
   echo ""
   echo "CLI: $passed passed, $failed failed"
@@ -2395,6 +2397,10 @@ test-vm-native: vm-test-prereqs
   mkdir -p test-logs
   exec > >(tee test-logs/test-vm-native.log) 2>&1
   echo "=== ViewModel tests (native backend) ==="
+  # The shared classifier: it reads the exit status BEFORE the [OK]/[FAILED]
+  # tally, which is what stops a SEGV-ed binary from being reported as an
+  # ordinary PARTIAL. See ci/lib/test-lane-report.sh for the incident.
+  source ci/lib/test-lane-report.sh
   failed=0
   passed=0
   for f in $(find src/tests/gui/tests -name '*_test.nim' \
@@ -2442,40 +2448,38 @@ test-vm-native: vm-test-prereqs
       "$cache/$name" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      # It built, so this is not a compile error: the binary could not
-      # run, or ran and reported nothing. Either way show its whole
-      # output — the reason is in there, and filtering is what lost it
-      # last time.
-      echo "DID NOT RUN (compiled, but produced no test results)"
-      echo "$output" | head -20 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$rc" -ne 0 ]; then
-      # Every case reported [OK] and the process still exited non-zero.
-      # There are two ways that happens and both are silent otherwise:
-      #
-      #  1. `unittest`'s `check` only marks the enclosing `test` FAILED when
-      #     it expands INSIDE it (`fail` is `when declared(testStatusIMPL)`).
-      #     A `check` in a plain `proc` called from a test prints its failure
-      #     and sets the exit code while the case still prints [OK].  Assert
-      #     from a `template`, or read this line.
-      #  2. The binary died after its last case — a crash in teardown, or at
-      #     exit — which no [OK]/[FAILED] tally can show.
-      #
-      # `test-vm-js` has always read the exit code; the native lane discarded
-      # it, so a whole suite of assertions could be green over a red process.
-      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
-      echo "$output" | grep -E 'Check failed|Error|Exception|SIGSEGV' \
-        | head -20 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
+    verdict=$(classify_test_run "$rc" "$oks" "$fails")
+    test_run_headline "$verdict" "$rc" "$oks" "$fails"
+    case "$verdict" in
+      ok)
+        passed=$((passed + 1))
+        ;;
+      no-results)
+        # It built, so this is not a compile error: the binary could not
+        # run, or ran and reported nothing. Either way show its whole
+        # output — the reason is in there, and filtering is what lost it
+        # last time.
+        echo "$output" | head -20 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      crashed)
+        # Show what it managed to report AND how it died — the traceback is
+        # in the tail and names the line, which is the only thing that turns
+        # "it crashed" into "here is the case that crashed it".
+        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+        echo "$output" | tail -20 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      silent-failure)
+        echo "$output" | grep -E 'Check failed|Error|Exception|SIGSEGV' \
+          | head -20 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      *)
+        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+    esac
   done
   echo ""
   echo "Native: $passed passed, $failed failed"
@@ -2507,6 +2511,8 @@ test-vm-js: vm-test-prereqs
   mkdir -p test-logs
   exec > >(tee test-logs/test-vm-js.log) 2>&1
   echo "=== ViewModel tests (JS backend) ==="
+  # Same shared classifier the native lane uses: exit status before tally.
+  source ci/lib/test-lane-report.sh
   failed=0
   passed=0
   for f in $(find src/tests/gui/tests -name '*_test.nim' \
@@ -2566,22 +2572,29 @@ test-vm-js: vm-test-prereqs
     output=$(node "$cache/$name.js" 2>&1) || exitcode=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      # Built, so not a compile error: it could not run, or ran and reported
-      # nothing. The native lane has had this guard for a while; without it
-      # this lane scored a silent no-op as `OK (0 tests)`, which is the one
-      # result a test lane must never invent.
-      echo "DID NOT RUN (compiled, but produced no test results)"
-      echo "$output" | head -20 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ] || [ "$exitcode" -ne 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED, exit $exitcode)"
-      echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
+    verdict=$(classify_test_run "$exitcode" "$oks" "$fails")
+    test_run_headline "$verdict" "$exitcode" "$oks" "$fails"
+    case "$verdict" in
+      ok)
+        passed=$((passed + 1))
+        ;;
+      no-results)
+        # Built, so not a compile error: it could not run, or ran and reported
+        # nothing. Without this guard the lane scored a silent no-op as
+        # `OK (0 tests)`, which is the one result a test lane must never invent.
+        echo "$output" | head -20 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      crashed)
+        echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
+        echo "$output" | tail -20 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      *)
+        echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+    esac
   done
   echo ""
   echo "JS: $passed passed, $failed failed"
@@ -2639,6 +2652,8 @@ test-ct-trace-units:
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-trace-units.log) 2>&1
   echo "=== ct trace-layer unit tests ==="
+  # Shared classifier: exit status before the [OK]/[FAILED] tally.
+  source ci/lib/test-lane-report.sh
   failed=0
   passed=0
   total_oks=0
@@ -2653,25 +2668,25 @@ test-ct-trace-units:
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     total_oks=$((total_oks + oks))
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR"
-      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$rc" -ne 0 ]; then
-      # Green cases over a red process.  See the note on `test-vm-native`:
-      # a `check` inside a plain `proc` sets the exit code without ever
-      # printing [FAILED], and so does a crash after the last case.
-      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
-      echo "$output" | tail -30 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
+    verdict=$(classify_test_run "$rc" "$oks" "$fails")
+    test_run_headline "$verdict" "$rc" "$oks" "$fails"
+    case "$verdict" in
+      ok)
+        passed=$((passed + 1))
+        ;;
+      no-results)
+        echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      partial)
+        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      *)
+        echo "$output" | tail -30 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+    esac
   done
   echo ""
   echo "ct trace units: $passed file(s) passed, $failed failed, $total_oks case(s)"
@@ -2703,6 +2718,8 @@ test-mcr-enrichment-units:
   mkdir -p test-logs
   exec > >(tee test-logs/test-mcr-enrichment-units.log) 2>&1
   echo "=== ct upload MCR-enrichment unit tests ==="
+  # Shared classifier: exit status before the [OK]/[FAILED] tally.
+  source ci/lib/test-lane-report.sh
   failed=0
   passed=0
   total_oks=0
@@ -2718,25 +2735,25 @@ test-mcr-enrichment-units:
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     total_oks=$((total_oks + oks))
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR"
-      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$rc" -ne 0 ]; then
-      # Green cases over a red process.  See the note on `test-vm-native`:
-      # a `check` inside a plain `proc` sets the exit code without ever
-      # printing [FAILED], and so does a crash after the last case.
-      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
-      echo "$output" | tail -30 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks case(s))"
-      passed=$((passed + 1))
-    fi
+    verdict=$(classify_test_run "$rc" "$oks" "$fails")
+    test_run_headline "$verdict" "$rc" "$oks" "$fails"
+    case "$verdict" in
+      ok)
+        passed=$((passed + 1))
+        ;;
+      no-results)
+        echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      partial)
+        echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+      *)
+        echo "$output" | tail -30 | sed 's/^/    /'
+        failed=$((failed + 1))
+        ;;
+    esac
   done
   echo ""
   echo "mcr enrichment units: $passed file(s) passed, $failed failed, $total_oks case(s)"
@@ -2785,6 +2802,8 @@ test-vm-recorder-gated: vm-test-prereqs
 
   # Discover the sibling recorders / tools the tests look up by env var.
   source scripts/detect-siblings.sh
+  # Shared classifier: exit status before the [OK]/[FAILED] tally.
+  source ci/lib/test-lane-report.sh
 
   failed=0
   passed=0
@@ -2804,8 +2823,16 @@ test-vm-recorder-gated: vm-test-prereqs
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     skips=$(echo "$output" | grep -c 'MISSING-RECORDER SKIP:' || true)
-    if [ "$fails" -gt 0 ]; then
-      echo "FAILED ($oks OK, $fails FAILED)"
+    verdict=$(classify_test_run "$rc" "$oks" "$fails")
+    if [ "$verdict" = "crashed" ]; then
+      # First, ahead of every count and even ahead of the skip branch: a
+      # signalled death makes the counts a prefix of the run, and a missing
+      # recorder never kills a process with a signal.
+      test_run_headline "$verdict" "$rc" "$oks" "$fails"
+      echo "$output" | tail -30 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ]; then
+      echo "FAILED ($oks OK, $fails FAILED, exit $rc)"
       echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
       failed=$((failed + 1))
     elif [ "$skips" -gt 0 ]; then
@@ -2813,10 +2840,11 @@ test-vm-recorder-gated: vm-test-prereqs
       echo "$output" | grep 'MISSING-RECORDER SKIP:' | head -1 | sed 's/^/    /'
       skipped=$((skipped + 1))
     elif [ "$rc" -ne 0 ] && [ "$oks" -gt 0 ]; then
-      # Green cases over a red process.  See the note on `test-vm-native`:
-      # a `check` inside a plain `proc` sets the exit code without ever
-      # printing [FAILED], and so does a crash after the last case.
-      # Ordered after the skip branch so a recorder-gated skip is unaffected.
+      # Green cases over a red process.  See `classify_test_run` in
+      # ci/lib/test-lane-report.sh for the two ways that happens; both are
+      # silent unless the exit code is read.  Ordered after the skip branch so
+      # a recorder-gated skip is unaffected — the signalled-death case is
+      # handled ahead of everything, at the top of this chain.
       echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
       echo "$output" | tail -30 | sed 's/^/    /'
       failed=$((failed + 1))

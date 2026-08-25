@@ -100,9 +100,48 @@ proc makeStoreWithMock(autoRespond: bool = true):
   let store = createReplayDataStore(mock.toBackendService())
   (store, mock)
 
-proc findByClass*(node: MockNode; cls: string): MockNode =
+type
+  MockNodeNotFoundError* = object of CatchableError
+    ## Raised by the *non*-``OrNil`` lookup helpers below when the rendered
+    ## mock DOM has no matching node.
+    ##
+    ## Why raise rather than return `nil`
+    ## ---------------------------------
+    ## Every lookup in this file is followed by a dereference
+    ## (`.textContent`, `.attributes`, `.children`, `.fireEvent`, …).  A `nil`
+    ## `MockNode` dereference is a SIGSEGV, and a SIGSEGV takes down the whole
+    ## test *binary* — so a single view that stopped emitting one class silently
+    ## cancelled every case declared after it.  That is exactly what happened
+    ## here: the suite declares 461 cases and the process died partway through,
+    ## after which `[OK]`/`[FAILED]` lines simply stopped appearing.
+    ##
+    ## `std/unittest`'s own `require` is NOT the fix: it sets `abortOnError`,
+    ## so `fail()` ends in `quit(1)` — it kills the process just as the segfault
+    ## did.  `unittest`'s `test` template, by contrast, wraps each case body in
+    ## `except Exception:` and marks only *that* case FAILED.  So a raised
+    ## `CatchableError` is the primitive that fails the case honestly while
+    ## letting every later case still run.
+    ##
+    ## The raising variants are therefore the DEFAULT spelling: new lookups get
+    ## the safe behaviour without anyone having to remember a rule.  The
+    ## `…OrNil` variants exist for the handful of assertions whose *subject* is
+    ## the absence of a node (`check findByClassOrNil(panel, x) == nil`).
+
+proc requireFound(node: MockNode; what: string): MockNode =
+  ## Turn a missing-node lookup into a catchable failure of the enclosing
+  ## `test` case instead of a process-killing nil dereference one line later.
+  if node.isNil:
+    raise newException(MockNodeNotFoundError,
+      "the rendered mock DOM has no " & what)
+  node
+
+proc findByClassOrNil*(node: MockNode; cls: string): MockNode =
   ## Find the first descendant (or self) whose "class" attribute
   ## contains `cls` as a whole word. Returns nil if not found.
+  ##
+  ## Use this ONLY where the test asserts that the node is absent; anywhere
+  ## the result is inspected, use `findByClass` so a missing node fails the
+  ## case instead of segfaulting the binary.
   if node.kind == mnkElement:
     let nodeClass = node.attributes.getOrDefault("class", "")
     # Check if cls appears as a whole word in the class attribute.
@@ -110,22 +149,33 @@ proc findByClass*(node: MockNode; cls: string): MockNode =
       if part == cls:
         return node
   for child in node.children:
-    let found = findByClass(child, cls)
+    let found = findByClassOrNil(child, cls)
     if found != nil:
       return found
   return nil
 
+proc findByClass*(node: MockNode; cls: string): MockNode =
+  ## Like `findByClassOrNil`, but raises `MockNodeNotFoundError` when nothing
+  ## matches — see that type's documentation for why raising is what keeps the
+  ## remaining cases in this file running.
+  requireFound(findByClassOrNil(node, cls),
+               "element with class '" & cls & "'")
 
-
-proc findById*(node: MockNode; id: string): MockNode =
-  ## Find the first descendant (or self) with the given id.
+proc findByIdOrNil*(node: MockNode; id: string): MockNode =
+  ## Find the first descendant (or self) with the given id, or nil.
+  ## Absence assertions only — see `findByClassOrNil`.
   if node.kind == mnkElement and node.attributes.getOrDefault("id", "") == id:
     return node
   for child in node.children:
-    let found = findById(child, id)
+    let found = findByIdOrNil(child, id)
     if found != nil:
       return found
   return nil
+
+proc findById*(node: MockNode; id: string): MockNode =
+  ## Like `findByIdOrNil`, but raises `MockNodeNotFoundError` when nothing
+  ## matches.
+  requireFound(findByIdOrNil(node, id), "element with id '" & id & "'")
 
 suite "IsoNim Editor Panel - structure":
 
@@ -216,15 +266,21 @@ proc findAllByClass*(node: MockNode; cls: string): seq[MockNode] =
   for child in node.children:
     result.add(findAllByClass(child, cls))
 
-proc findByTag*(node: MockNode; tag: string): MockNode =
-  ## Find the first descendant (or self) with the given tag name.
+proc findByTagOrNil*(node: MockNode; tag: string): MockNode =
+  ## Find the first descendant (or self) with the given tag name, or nil.
+  ## Absence assertions only — see `findByClassOrNil`.
   if node.kind == mnkElement and node.tag == tag:
     return node
   for child in node.children:
-    let found = findByTag(child, tag)
+    let found = findByTagOrNil(child, tag)
     if found != nil:
       return found
   return nil
+
+proc findByTag*(node: MockNode; tag: string): MockNode =
+  ## Like `findByTagOrNil`, but raises `MockNodeNotFoundError` when nothing
+  ## matches.
+  requireFound(findByTagOrNil(node, tag), "<" & tag & "> element")
 
 suite "IsoNim Debug Shell — structure":
 
@@ -243,7 +299,7 @@ suite "IsoNim Debug Shell — structure":
     let panel = renderDebugChromePanel(r, commandPaletteComponentId = -1)
 
     check panel.attributes["id"] == DebugShellId
-    check findByClass(panel, DebugCommandPaletteHostClass).isNil
+    check findByClassOrNil(panel, DebugCommandPaletteHostClass).isNil
 
 suite "IsoNim Auto-hide Overlay Tabs — structure":
 
@@ -631,17 +687,17 @@ suite "IsoNim Menu Shell — structure":
         maximized: false))
 
     check panel.attributes["class"] == MenuShellRootClass
-    check findById(panel, NavigationMenuId) != nil
-    check findById(panel, MenuRootId) != nil
-    check findById(panel, "menu-logo-img") != nil
-    check findById(panel, DebugShellId) != nil
-    check findById(panel, "isonim-debug-controls") != nil
+    check findByIdOrNil(panel, NavigationMenuId) != nil
+    check findByIdOrNil(panel, MenuRootId) != nil
+    check findByIdOrNil(panel, "menu-logo-img") != nil
+    check findByIdOrNil(panel, DebugShellId) != nil
+    check findByIdOrNil(panel, "isonim-debug-controls") != nil
     check panel.children[0].attributes["id"] == NavigationMenuId
     check panel.children[1].attributes["id"] == "isonim-debug-controls"
     check panel.children[2].attributes["id"] == DebugShellId
-    check findByClass(panel, WindowMenuClass) != nil
-    check findByClass(panel, "maximize") != nil
-    check findByClass(panel, "restore").isNil
+    check findByClassOrNil(panel, WindowMenuClass) != nil
+    check findByClassOrNil(panel, "maximize") != nil
+    check findByClassOrNil(panel, "restore").isNil
     check findAllByClass(panel, "menu-node-container").len == 0
 
   test "caption bar host classes follow the window mode":
@@ -697,10 +753,10 @@ suite "IsoNim Menu Shell — structure":
         active: false,
         showWindowMenu: false))
 
-    check findById(panel, NavigationMenuId).isNil
-    check findById(panel, DebugShellId) != nil
-    check findById(panel, "isonim-debug-controls") != nil
-    check findByClass(panel, WindowMenuClass).isNil
+    check findByIdOrNil(panel, NavigationMenuId).isNil
+    check findByIdOrNil(panel, DebugShellId) != nil
+    check findByIdOrNil(panel, "isonim-debug-controls") != nil
+    check findByClassOrNil(panel, WindowMenuClass).isNil
 
   test "visible menu renders search host, root nodes, and window restore":
     let r = MockRenderer()
@@ -717,7 +773,7 @@ suite "IsoNim Menu Shell — structure":
         showWindowMenu: true,
         maximized: true))
 
-    check findByClass(panel, "menu-active-node") != nil
+    check findByClassOrNil(panel, "menu-active-node") != nil
     # One `.menu-node` per rendered menu row.  This is the selector the GUI
     # suite enumerates the open menu with — `#menu-elements .menu-node` and
     # `.menu-nested-elements .menu-node` in
@@ -731,10 +787,10 @@ suite "IsoNim Menu Shell — structure":
     # catalogue mean for a real menu.
     check findAllByClass(panel, "menu-folder").len == 1
     check findAllByClass(panel, "menu-element").len == 1
-    check findByClass(panel, "menu-folder-file") != nil
-    check findByClass(panel, "menu-element-run") != nil
+    check findByClassOrNil(panel, "menu-folder-file") != nil
+    check findByClassOrNil(panel, "menu-element-run") != nil
     check findById(panel, DebugShellId).attributes["class"] == DebugShellClass
-    check findById(panel, "isonim-debug-controls") != nil
+    check findByIdOrNil(panel, "isonim-debug-controls") != nil
     # The row must show its keyboard shortcut.  Spec:
     # `codetracer-specs/GUI/Keyboard-Shortcuts-System.md` — "Shortcut display
     # in menus uses a manual `loadShortcut()` function" (§ Known Issues) and
@@ -744,15 +800,19 @@ suite "IsoNim Menu Shell — structure":
     # `styles/components/menu_item.styl`: ".ct-menu-item-sublabel — secondary
     # / descriptive text (keyboard shortcut)".
     #
-    # The nil guards here are deliberate: a nil deref in a `check` aborts the
-    # whole test binary with a SIGSEGV, which is how the menu-shell suite once
-    # took every later suite in this file down with it.
+    # The hand-written nil guards below date from when `findByClass` returned
+    # nil: a nil deref in a `check` aborts the whole test binary with a
+    # SIGSEGV, which is how the menu-shell suite once took every later suite in
+    # this file down with it.  `findByClass` now raises instead (see
+    # `MockNodeNotFoundError`), so the guards are belt-and-braces — they are
+    # kept because they are also what makes each `check` below report on its
+    # own rather than the first miss masking the rest.
     let shortcut = findByClass(panel, "ct-menu-item-sublabel")
     check shortcut != nil
     if shortcut != nil:
       check shortcut.textContent == "CTRL+R"
-    check findByClass(panel, "restore") != nil
-    check findByClass(panel, "maximize").isNil
+    check findByClassOrNil(panel, "restore") != nil
+    check findByClassOrNil(panel, "maximize").isNil
 
   test "clicking menu items and search results invokes callbacks":
     let r = MockRenderer()
@@ -775,7 +835,7 @@ suite "IsoNim Menu Shell — structure":
     # click handler have to sit on the same element.
     let item = findByClass(menuPanel, "menu-element")
     check item != nil
-    # Guarded — see the note above: a nil deref here aborts the whole binary.
+    # Guarded — see the note above.
     if item != nil:
       item.fireEvent("click")
       check clickedPath == @[1]
@@ -813,9 +873,9 @@ suite "IsoNim Menu Shell — structure":
         rootNodes: @[menuNode("Shell", @[0], kind = MenuRecordFolder)],
         showWindowMenu: false))
 
-    check findByClass(panel, WindowMenuClass).isNil
-    check findById(panel, DebugShellId) != nil
-    check findById(panel, "isonim-debug-controls") != nil
+    check findByClassOrNil(panel, WindowMenuClass).isNil
+    check findByIdOrNil(panel, DebugShellId) != nil
+    check findByIdOrNil(panel, "isonim-debug-controls") != nil
     let folder = findByClass(panel, "menu-folder")
     check folder != nil
     if folder != nil:
@@ -825,7 +885,7 @@ suite "IsoNim Menu Shell — structure":
       # Tests — "Launch config items are clickable | Verifies `.menu-enabled`
       # class on launch config elements".
       check folder.attributes["class"].split(' ').contains("menu-enabled")
-      check findByClass(panel, "menu-folder-shell") != nil
+      check findByClassOrNil(panel, "menu-folder-shell") != nil
 
   test "submenu rows carry the same identity and enablement hooks":
     ## The launch-configuration flow the GUI suite drives lives entirely in
@@ -859,7 +919,7 @@ suite "IsoNim Menu Shell — structure":
     check nested != nil
     if nested != nil:
       check findAllByClass(nested, "menu-node").len == 3
-      check findByClass(nested, "menu-folder-launch-configurations") != nil
+      check findByClassOrNil(nested, "menu-folder-launch-configurations") != nil
       let entry = findByClass(nested, "menu-element-ruby-fibonacci")
       check entry != nil
       if entry != nil:
@@ -906,8 +966,8 @@ suite "IsoNim Menu Shell — structure":
     check debugHost != nil
     check debugHost.attributes["class"] == DebugShellClass
     check toolbarHost != nil
-    check findById(panel, SessionTabBarId) != nil
-    check findByClass(panel, WindowMenuClass) != nil
+    check findByIdOrNil(panel, SessionTabBarId) != nil
+    check findByClassOrNil(panel, WindowMenuClass) != nil
 
 suite "IsoNim Session Tabs — structure":
 
@@ -1598,14 +1658,19 @@ suite "IsoNim State Panel — code-state-line":
   proc findCodeStateLine(panel: MockNode): MockNode =
     ## Walk the rendered tree looking for the ``code-state-line``
     ## div regardless of whether it carries the ``no-code`` modifier.
-    let populated = findByClass(panel, "code-state-line")
+    let populated = findByClassOrNil(panel, "code-state-line")
     if populated != nil:
       return populated
     # Fall back: when the element only carries the ``no-code``
-    # modifier the ``findByClass`` whole-word match still succeeds
-    # because both classes are present, but be defensive in case
-    # someone tweaks the markup.
-    findByClass(panel, "no-code")
+    # modifier the whole-word class match still succeeds because both
+    # classes are present, but be defensive in case someone tweaks the
+    # markup.
+    #
+    # Both probes use the ``OrNil`` spelling because either one missing on its
+    # own is normal here.  It is only when BOTH miss that the callers'
+    # dereference would segfault, so that is where this raises.
+    requireFound(findByClassOrNil(panel, "no-code"),
+                 "element with class 'code-state-line' or 'no-code'")
 
   test "renders #code-state-line-0 element regardless of trace state":
     createRoot proc(dispose: proc()) =
@@ -2073,9 +2138,9 @@ suite "IsoNim Calltrace Panel — call lines":
       let rows = findAllByClass(container, "calltrace-call-line")
 
       check rows.len == 3
-      check findByClass(rows[0], "collapse-call-img") != nil
-      check findByClass(rows[1], "expand-call-img") != nil
-      check findByClass(rows[2], "dot-call-img") != nil
+      check findByClassOrNil(rows[0], "collapse-call-img") != nil
+      check findByClassOrNil(rows[1], "expand-call-img") != nil
+      check findByClassOrNil(rows[2], "dot-call-img") != nil
 
       dispose()
 
@@ -4597,11 +4662,11 @@ suite "IsoNim Build Panel — structure":
 
       let panel = renderBuildPanel(r, vm)
 
-      check findByClass(panel, "build-header") != nil
-      check findByClass(panel, "build-header-controls") != nil
-      check findByClass(panel, "build-stop-btn") != nil
-      check findByClass(panel, "build-clear-btn") != nil
-      check findByClass(panel, "build-scroll-btn") != nil
+      check findByClassOrNil(panel, "build-header") != nil
+      check findByClassOrNil(panel, "build-header-controls") != nil
+      check findByClassOrNil(panel, "build-stop-btn") != nil
+      check findByClassOrNil(panel, "build-clear-btn") != nil
+      check findByClassOrNil(panel, "build-scroll-btn") != nil
 
       let outputContainer = findByClass(panel, "build-output-container")
       check outputContainer != nil
@@ -4930,11 +4995,11 @@ suite "IsoNim Errors Panel — structure":
 
       let panel = renderErrorsPanel(r, vm)
 
-      check findByClass(panel, "problems-header") != nil
-      check findByClass(panel, "problems-counts") != nil
-      check findByClass(panel, "problems-controls") != nil
-      check findByClass(panel, "problems-count-error") != nil
-      check findByClass(panel, "problems-count-warning") != nil
+      check findByClassOrNil(panel, "problems-header") != nil
+      check findByClassOrNil(panel, "problems-counts") != nil
+      check findByClassOrNil(panel, "problems-controls") != nil
+      check findByClassOrNil(panel, "problems-count-error") != nil
+      check findByClassOrNil(panel, "problems-count-warning") != nil
 
       let listContainer = findByClass(panel, "problems-list")
       check listContainer != nil
@@ -5413,10 +5478,10 @@ suite "IsoNim Search Results Panel — structure":
 
       let panel = renderSearchResultsPanel(r, vm)
 
-      check findByClass(panel, "search-results-header") != nil
-      check findByClass(panel, "search-results-count") != nil
-      check findByClass(panel, "search-results-find-query") != nil
-      check findByClass(panel, "search-results-body") != nil
+      check findByClassOrNil(panel, "search-results-header") != nil
+      check findByClassOrNil(panel, "search-results-count") != nil
+      check findByClassOrNil(panel, "search-results-find-query") != nil
+      check findByClassOrNil(panel, "search-results-body") != nil
 
       dispose()
 
@@ -5674,7 +5739,7 @@ suite "IsoNim Search Results Panel — query highlighting":
       vm.setQuery("bar")
       vm.setResults(@[makeResult(text = "let foo = 1")])
 
-      check findByClass(panel, "search-results-highlight") == nil
+      check findByClassOrNil(panel, "search-results-highlight") == nil
 
       dispose()
 
@@ -5873,10 +5938,10 @@ suite "IsoNim No-Source Panel — structure":
       # Only the location border (no message border, no history blocks).
       check borders.len == 1
 
-      let messageNode = findByClass(panel, "unknown-location-message")
+      let messageNode = findByClassOrNil(panel, "unknown-location-message")
       check messageNode == nil
 
-      let buttonNode = findByClass(panel, "jump-back-button")
+      let buttonNode = findByClassOrNil(panel, "jump-back-button")
       check buttonNode == nil
 
       dispose()
@@ -6038,11 +6103,11 @@ suite "IsoNim No-Source Panel — history":
         previousPath: "src/main.nim",
         action: "step",
       ))
-      check findByClass(panel, "jump-back-button") != nil
+      check findByClassOrNil(panel, "jump-back-button") != nil
 
       # Then clear.
       vm.setHistory(NoSourceHistoryInfo())
-      check findByClass(panel, "jump-back-button") == nil
+      check findByClassOrNil(panel, "jump-back-button") == nil
       check "We were in" notin panel.textContent
 
       dispose()
@@ -6063,7 +6128,7 @@ suite "IsoNim No-Source Panel — history":
         action: "",
       ))
 
-      check findByClass(panel, "jump-back-button") == nil
+      check findByClassOrNil(panel, "jump-back-button") == nil
       check "We were in" notin panel.textContent
 
       dispose()
@@ -6197,8 +6262,8 @@ suite "IsoNim Step List Panel — structure":
 
       let panel = renderStepListPanel(r, vm)
 
-      check findByClass(panel, "step-list-lines-box") != nil
-      check findByClass(panel, "step-lines") != nil
+      check findByClassOrNil(panel, "step-list-lines-box") != nil
+      check findByClassOrNil(panel, "step-lines") != nil
 
       dispose()
 
@@ -6333,9 +6398,9 @@ suite "IsoNim Step List Panel — row rendering":
         )
       ])
 
-      check findByClass(panel, "step-line-delta") != nil
-      check findByClass(panel, "step-line-location") != nil
-      check findByClass(panel, "step-line-source-code") != nil
+      check findByClassOrNil(panel, "step-line-delta") != nil
+      check findByClassOrNil(panel, "step-line-location") != nil
+      check findByClassOrNil(panel, "step-line-source-code") != nil
       check "-2" in panel.textContent
       check "example.nim:42[main]" in panel.textContent
       check "echo 1" in panel.textContent
@@ -6432,8 +6497,8 @@ suite "IsoNim Step List Panel — row rendering":
 
       vm.setLineSteps(@[makeReturnStep(0, "return", @[])])
 
-      check findByClass(panel, "step-line-return") != nil
-      check findByClass(panel, "step-line-return-value") == nil
+      check findByClassOrNil(panel, "step-line-return") != nil
+      check findByClassOrNil(panel, "step-line-return-value") == nil
 
       dispose()
 
@@ -6855,8 +6920,8 @@ suite "IsoNim REPL Panel — structure":
         "The Repl Component is not supported for Db based traces 'noir'"
       # The form / history container belong to the enabled branch and
       # must not appear here.
-      check findByTag(panel, "form") == nil
-      check findByClass(panel, "repl-input-history") == nil
+      check findByTagOrNil(panel, "form") == nil
+      check findByClassOrNil(panel, "repl-input-history") == nil
 
   test "enabled flag (without materialised) renders prompt + history":
     createRoot proc(dispose: proc()) =
@@ -6868,7 +6933,7 @@ suite "IsoNim REPL Panel — structure":
       let panel = renderReplPanel(r, vm)
 
       check vm.displayMode.val == rdmReplEnabled
-      check findByClass(panel, "repl-disabled-msg") == nil
+      check findByClassOrNil(panel, "repl-disabled-msg") == nil
 
       # ``div#repl`` shell, ``form`` with ``input#repl-input`` child,
       # ``div#repl-history`` sibling — same shape as the legacy view.
@@ -6908,15 +6973,15 @@ suite "IsoNim REPL Panel — display mode reactivity":
       let panel = renderReplPanel(r, vm)
 
       # Initially disabled — no form, message visible.
-      check findByTag(panel, "form") == nil
-      check findByClass(panel, "repl-disabled-msg") != nil
+      check findByTagOrNil(panel, "form") == nil
+      check findByClassOrNil(panel, "repl-disabled-msg") != nil
 
       vm.setReplEnabled(true)
 
       # Effect must rebuild the body in-place.
-      check findByClass(panel, "repl-disabled-msg") == nil
-      check findByTag(panel, "form") != nil
-      check findByTag(panel, "input") != nil
+      check findByClassOrNil(panel, "repl-disabled-msg") == nil
+      check findByTagOrNil(panel, "form") != nil
+      check findByTagOrNil(panel, "input") != nil
 
       dispose()
 
@@ -6929,12 +6994,12 @@ suite "IsoNim REPL Panel — display mode reactivity":
 
       let panel = renderReplPanel(r, vm)
 
-      check findByTag(panel, "form") != nil
+      check findByTagOrNil(panel, "form") != nil
 
       vm.setMaterialized(true)
       vm.setLangName("ruby")
 
-      check findByTag(panel, "form") == nil
+      check findByTagOrNil(panel, "form") == nil
       let msg = findByClass(panel, "repl-disabled-msg")
       check msg != nil
       check msg.children[0].text ==
@@ -7437,7 +7502,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let secondRow = listContainer.children[1]
       check findByClass(firstRow, "low-level-code-instruction-source")
         .textContent == "src/main.nim:12"
-      check findByClass(secondRow, "low-level-code-instruction-source") == nil
+      check findByClassOrNil(secondRow, "low-level-code-instruction-source") == nil
 
       dispose()
 
@@ -7533,7 +7598,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let r = MockRenderer()
 
       let panel = renderLowLevelCodePanel(r, vm)
-      check findByClass(panel, "low-level-code-address") == nil
+      check findByClassOrNil(panel, "low-level-code-address") == nil
 
       vm.setAddress(0x1000)
       let addrDiv = findByClass(panel, "low-level-code-address")
@@ -7550,10 +7615,10 @@ suite "IsoNim Low Level Code Panel — overlays":
 
       let panel = renderLowLevelCodePanel(r, vm)
       vm.setAddress(0xABCD)
-      check findByClass(panel, "low-level-code-address") != nil
+      check findByClassOrNil(panel, "low-level-code-address") != nil
 
       vm.setAddress(0)
-      check findByClass(panel, "low-level-code-address") == nil
+      check findByClassOrNil(panel, "low-level-code-address") == nil
 
       dispose()
 
@@ -7564,7 +7629,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let r = MockRenderer()
 
       let panel = renderLowLevelCodePanel(r, vm)
-      check findByClass(panel, "low-level-code-error") == nil
+      check findByClassOrNil(panel, "low-level-code-error") == nil
 
       vm.setErrorMessage("function not found")
       let errDiv = findByClass(panel, "low-level-code-error")
@@ -7572,7 +7637,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       check errDiv.textContent == "function not found"
 
       vm.setErrorMessage("")
-      check findByClass(panel, "low-level-code-error") == nil
+      check findByClassOrNil(panel, "low-level-code-error") == nil
 
       dispose()
 
@@ -7771,8 +7836,8 @@ suite "IsoNim Request Panel — structure":
 
       let panel = renderRequestPanel(r, vm)
 
-      check findByClass(panel, "request-panel-filters") != nil
-      check findByClass(panel, "request-table-header") != nil
+      check findByClassOrNil(panel, "request-panel-filters") != nil
+      check findByClassOrNil(panel, "request-table-header") != nil
       let body = findByClass(panel, "request-table-body")
       check body != nil
       check body.children.len == 0
@@ -7853,10 +7918,10 @@ suite "IsoNim Request Panel — row rendering":
       vm.addRequest("GET", "/boom", 500, 0, 0, 0)
 
       let body = findByClass(panel, "request-table-body")
-      check findByClass(body.children[0], "request-status-success") != nil
-      check findByClass(body.children[1], "request-status-redirect") != nil
-      check findByClass(body.children[2], "request-status-client-error") != nil
-      check findByClass(body.children[3], "request-status-server-error") != nil
+      check findByClassOrNil(body.children[0], "request-status-success") != nil
+      check findByClassOrNil(body.children[1], "request-status-redirect") != nil
+      check findByClassOrNil(body.children[2], "request-status-client-error") != nil
+      check findByClassOrNil(body.children[3], "request-status-server-error") != nil
 
       dispose()
 
@@ -8217,7 +8282,7 @@ suite "IsoNim Request Panel — detail panel":
       vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
       vm.selectRequest(0)
 
-      check findByClass(panel, "request-detail") != nil
+      check findByClassOrNil(panel, "request-detail") != nil
 
       dispose()
 
@@ -8234,10 +8299,10 @@ suite "IsoNim Request Panel — detail panel":
       let header = findByClass(panel, "request-detail-header")
       check header != nil
       # Method badge uses the same class as table rows
-      check findByClass(header, "request-method-delete") != nil
+      check findByClassOrNil(header, "request-method-delete") != nil
       check findByClass(header, "request-method-delete").textContent == "DELETE"
       # URL
-      check findByClass(header, "request-detail-header-url") != nil
+      check findByClassOrNil(header, "request-detail-header-url") != nil
       check findByClass(header, "request-detail-header-url").textContent == "/api/users/42"
       # Status: "500 Internal Server Error" coloured red
       let statusEl = findByClass(header, "request-detail-header-status")
@@ -8323,10 +8388,10 @@ suite "IsoNim Request Panel — detail panel":
 
       vm.addRequest("GET", "/api/x", 200, 0, 0, 1)
       vm.selectRequest(0)
-      check findByClass(panel, "request-detail") != nil
+      check findByClassOrNil(panel, "request-detail") != nil
 
       vm.selectRequest(NO_SELECTED_INDEX)
-      check findByClass(panel, "request-detail") == nil
+      check findByClassOrNil(panel, "request-detail") == nil
 
       dispose()
 
@@ -8345,7 +8410,7 @@ suite "IsoNim Request Panel — detail panel":
 
       vm.selectRequest(1)
       check findByClass(panel, "request-detail-header-url").textContent == "/api/items/1"
-      check findByClass(panel, "request-method-delete") != nil
+      check findByClassOrNil(panel, "request-method-delete") != nil
 
       dispose()
 
@@ -8409,7 +8474,7 @@ suite "IsoNim Trace Log Panel — structure":
 
       let panel = renderTraceLogPanel(r, vm)
 
-      check findByClass(panel, "trace-log-table-header") != nil
+      check findByClassOrNil(panel, "trace-log-table-header") != nil
       let body = findByClass(panel, "trace-log-table-body")
       check body != nil
       check body.children.len == 0
@@ -8897,7 +8962,7 @@ suite "IsoNim Filesystem Panel — structure":
 
       # DR-R8: the panel has no deep-review list.  A review's changed files
       # are the VCS panel's Changed Files section (DeepReview-GUI.md §2).
-      check findByClass(panel, "deepreview-file-list") == nil
+      check findByClassOrNil(panel, "deepreview-file-list") == nil
 
       dispose()
 
@@ -9920,19 +9985,19 @@ suite "IsoNim Agent Activity Panel — no DeepReview roll-up (AA-1)":
 
       let panel = renderAgentActivityPanel(r, vm, componentId = 71)
 
-      check findByClass(panel, "agent-ha-deepreview-host") == nil
+      check findByClassOrNil(panel, "agent-ha-deepreview-host") == nil
       for cls in ["activity-dr-container", "activity-dr-header",
                   "activity-dr-summary", "activity-dr-files",
                   "activity-dr-files-row", "activity-dr-tests",
                   "activity-dr-test-item", "activity-dr-notifs",
                   "activity-dr-notif-item", "activity-dr-card",
                   "activity-dr-card-tests", "activity-dr-card-unavailable"]:
-        check findByClass(panel, cls) == nil
+        check findByClassOrNil(panel, cls) == nil
       # …and what §2.1 says the panel *is* for is untouched: the conversation
       # and the prompt are still there, and the conversation is now the whole
       # body above the prompt.
-      check findByClass(panel, AgentActivityConversationClass) != nil
-      check findByClass(panel, AgentActivityInteractionClass) != nil
+      check findByClassOrNil(panel, AgentActivityConversationClass) != nil
+      check findByClassOrNil(panel, AgentActivityInteractionClass) != nil
 
       dispose()
 
@@ -10017,7 +10082,7 @@ suite "IsoNim Welcome Screen — structure":
       let r = MockRenderer()
 
       let panel = renderWelcomeScreenPanel(r, vm)
-      check findByClass(panel, "welcome-screen-loading-overlay") == nil
+      check findByClassOrNil(panel, "welcome-screen-loading-overlay") == nil
 
       vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000007")
       let welcome = findByClass(panel, "welcome-screen")
@@ -10026,7 +10091,7 @@ suite "IsoNim Welcome Screen — structure":
       check overlay != nil
 
       vm.endLoading()
-      check findByClass(panel, "welcome-screen-loading-overlay") == nil
+      check findByClassOrNil(panel, "welcome-screen-loading-overlay") == nil
 
       dispose()
 
@@ -10037,18 +10102,18 @@ suite "IsoNim Welcome Screen — structure":
       let r = MockRenderer()
 
       let panel = renderWelcomeScreenPanel(r, vm)
-      check findByClass(panel, "welcome-screen") != nil
+      check findByClassOrNil(panel, "welcome-screen") != nil
 
       vm.showNewRecord()
-      check findByClass(panel, "new-record-screen") != nil
-      check findByClass(panel, "new-online-trace-form") == nil
+      check findByClassOrNil(panel, "new-record-screen") != nil
+      check findByClassOrNil(panel, "new-online-trace-form") == nil
 
       vm.showOnlineTrace()
-      check findByClass(panel, "new-online-trace-form") != nil
+      check findByClassOrNil(panel, "new-online-trace-form") != nil
 
       vm.enterEditMode()
-      check findByClass(panel, "welcome-screen") == nil
-      check findByClass(panel, "new-record-screen") == nil
+      check findByClassOrNil(panel, "welcome-screen") == nil
+      check findByClassOrNil(panel, "new-record-screen") == nil
 
       dispose()
 
@@ -10355,8 +10420,8 @@ suite "IsoNim Agent Activity Panel — structure":
 
       check panel.kind == mnkElement
       check panel.attributes["class"] == AgentActivityContainerClass
-      check findByClass(panel, AgentActivityConversationClass) != nil
-      check findByClass(panel, AgentActivityInteractionClass) != nil
+      check findByClassOrNil(panel, AgentActivityConversationClass) != nil
+      check findByClassOrNil(panel, AgentActivityInteractionClass) != nil
       let input = findByTag(panel, "textarea")
       check input != nil
       check input.attributes["id"] == inputId(7)
@@ -10380,7 +10445,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let wrappers = findAllByClass(panel, "agent-msg-wrapper")
       check wrappers.len == 3
       check "user-wrapper" in wrappers[0].attributes["class"]
-      check findByClass(wrappers[1], "ai-status") != nil
+      check findByClassOrNil(wrappers[1], "ai-status") != nil
       check "(canceled)" in wrappers[2].textContent
       check findByClass(wrappers[0], AgentActivityMessageContentClass).textContent ==
         "hello"
@@ -10434,7 +10499,7 @@ suite "IsoNim Agent Activity Panel — structure":
       findByClass(panel, "agent-start-button").fireEvent("click")
       check submitted == 1
       vm.setLoading(true)
-      check findByClass(panel, "agent-start-button") == nil
+      check findByClassOrNil(panel, "agent-start-button") == nil
       findByClass(panel, "agent-stop-button").fireEvent("click")
       check stopped == 1
 
@@ -10502,7 +10567,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let empty = findByClass(panel, AgentWorkspaceEmptyClass)
       check empty != nil
       check empty.textContent == AgentWorkspaceEmptyText
-      check findByClass(panel, AgentWorkspaceHeaderClass) == nil
+      check findByClassOrNil(panel, AgentWorkspaceHeaderClass) == nil
 
       dispose()
 
@@ -10826,13 +10891,13 @@ suite "IsoNim VCS Panel — structure":
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
 
-      check findByClass(panel, "deepreview-unified-diff") == nil
-      check findByClass(panel, "deepreview-unified-line") == nil
-      check findByClass(panel, "deepreview-unified-file-path") == nil
+      check findByClassOrNil(panel, "deepreview-unified-diff") == nil
+      check findByClassOrNil(panel, "deepreview-unified-line") == nil
+      check findByClassOrNil(panel, "deepreview-unified-file-path") == nil
       # ...and the panel is still the panel.
-      check findByClass(panel, "vcs-commit-history") != nil
-      check findByClass(panel, "vcs-branch-picker") != nil
-      check findByClass(panel, "vcs-diff-toggle") != nil
+      check findByClassOrNil(panel, "vcs-commit-history") != nil
+      check findByClassOrNil(panel, "vcs-branch-picker") != nil
+      check findByClassOrNil(panel, "vcs-diff-toggle") != nil
 
       dispose()
 
@@ -10873,15 +10938,15 @@ suite "IsoNim VCS Panel — structure":
         # Unified diff is the spec default, so the switch starts active.
         check button.attributes["class"] ==
           "vcs-toggle-button vcs-toggle-active"
-        check findByClass(panel, "vcs-commit-history") != nil
+        check findByClassOrNil(panel, "vcs-commit-history") != nil
 
         button.fireEvent("click")
 
         check toggled == 1
         check vm.viewMode.val == vmOpenFile
         # Still a commit list, still no diff: the toggle changed behaviour only.
-        check findByClass(panel, "vcs-commit-history") != nil
-        check findByClass(panel, "deepreview-unified-diff") == nil
+        check findByClassOrNil(panel, "vcs-commit-history") != nil
+        check findByClassOrNil(panel, "deepreview-unified-diff") == nil
         check findByClass(panel, "vcs-toggle-button").attributes["class"] ==
           "vcs-toggle-button"
 
@@ -11025,7 +11090,7 @@ suite "IsoNim VCS Panel — structure":
       check host != nil
       check host.attributes["id"] == "unifiedDiffEditor-7"
       # No selection yet, so no toolbar.
-      check findByClass(panel, "hunk-toolbar") == nil
+      check findByClassOrNil(panel, "hunk-toolbar") == nil
 
       # Selection made through the ViewModel's own entry point — the one the
       # Monaco tab calls — drives the toolbar.
@@ -11046,7 +11111,7 @@ suite "IsoNim VCS Panel — structure":
       vm.setDeepReviewMode(true)
       check "Stage hunks" notin panel.textContent
       # ...and the read-only affordances survive the mode.
-      check findByClass(panel, "hunk-toolbar-count") != nil
+      check findByClassOrNil(panel, "hunk-toolbar-count") != nil
       let buttons = findAllByClass(panel, "hunk-toolbar-button")
       buttons[^1].fireEvent("click")
       check cleared == 1
@@ -11093,8 +11158,8 @@ suite "IsoNim App Shell — structure":
       check spec.panelId != "editor"
       check spec.title != "Editor"
 
-    check findByClass(shell.root, "editor-component") == nil
-    check findByClass(shell.root, "monaco-editor") == nil
+    check findByClassOrNil(shell.root, "editor-component") == nil
+    check findByClassOrNil(shell.root, "monaco-editor") == nil
 
   test "test_drag_to_pin_interaction":
     # Mocking the drag-to-pin drop zones.

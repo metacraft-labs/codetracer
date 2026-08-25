@@ -1658,6 +1658,23 @@ jobs:
         # lane's report.
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/vm-js-lane-test.sh
 
+      - name: Assert a crashed test binary cannot be reported as a partial run
+        # ci/lib/test-lane-report.sh is the shared verdict all six
+        # compile-and-run lanes report through. Its contract suite feeds it
+        # fixture processes that print plausible `[OK]` lines and then die by
+        # signal, and fails if the exit status is ever scored behind the
+        # [OK]/[FAILED] tally again.
+        #
+        # That ordering is not hypothetical: `isonim_views_test` SEGV-ed at
+        # case 216 of 461 and the lane printed `PARTIAL (212 OK, 4 FAILED)`,
+        # which is indistinguishable from an ordinary partial run. 245 cases
+        # went unrun for as long as nobody read the exit code.
+        #
+        # Pure bash, no toolchain, sub-second -- so like the step above it runs
+        # BEFORE `test-vm`: if the lane cannot report a crash, that is worth
+        # knowing before reading the lane's report.
+        run: bash ci/test/test-lane-report-test.sh
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
@@ -4086,6 +4103,14 @@ jobs:
         # `viewmodel-tests` is what makes it true, and if it is ever removed
         # this comment is wrong again.
         run: bash ci/test/vm-js-lane-test.sh
+
+      - name: Assert a crashed test binary cannot be reported as a partial run
+        # Contract suite for ci/lib/test-lane-report.sh, the shared verdict the
+        # six compile-and-run lanes classify through. Unlike the lane suites
+        # above it needs no toolchain at all -- its fixtures are shell scripts
+        # that print `[OK]` lines and then SIGSEGV -- so every contract runs
+        # here, on this stock runner, on every push and PR.
+        run: bash ci/test/test-lane-report-test.sh
 
       - name: Self-test the DeepReview design-review harness
         # UD-0's visual-design-iteration harness is what every later milestone

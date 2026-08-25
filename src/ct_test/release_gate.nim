@@ -542,13 +542,20 @@ const
     # AA-2 — the DOM the panel emits for that run.
     #
     # A separate file from `views/isonim_views_test.nim`, where the panel's
-    # other view suites live, because that file does not currently reach its
-    # own end: on the unmodified tree it dies with SIGSEGV at
+    # other view suites live, because at the time it was written that file did
+    # not reach its own end: it died with SIGSEGV at
     # `isonim_views_test.nim(5388)`, downstream of the known-failing
     # "search results" cases, so every suite after that point — AA-1's own
-    # roll-up deletion guard included — is dead today.  Registering AA-2's
+    # roll-up deletion guard included — was dead.  Registering AA-2's
     # rendering assertions there would have made them unrunnable and silently
-    # green.  They move back when that crash is fixed.
+    # green.
+    #
+    # That crash is fixed: the mock-DOM lookups in that file now raise a
+    # catchable `MockNodeNotFoundError` instead of returning a nil node for the
+    # next line to dereference, so a missing element fails its own case and all
+    # 461 run.  Merging this file back into `isonim_views_test.nim` is
+    # therefore unblocked, and is a tidy-up rather than a correctness fix — it
+    # is left as a separate file until someone does it deliberately.
     "src/tests/gui/tests/agent-activity/agent_activity_test_run_view_test.nim",
     # AA-2 — the Agent Workspace summary bar stops fabricating test results.
     #
