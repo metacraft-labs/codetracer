@@ -219,6 +219,15 @@
   height: 0.6em !important
   position: static !important
   cursor: pointer
+  // `.lm_tab` is a flex row and `.lm_title` asks for `width: 100%`, so the row
+  // is always over-constrained and every shrinkable item gives up width. Without
+  // this the close box — the only child that could shrink, since `.lm_pin_tab`
+  // already opts out — collapsed with the tab: 9.6px nominal, but measured at
+  // 8.95px on a 421px tab and 2.01px on a 41.8px one. The mask keeps its fixed
+  // 0.6em size and stays centred, so the cross was cropped, not scaled, and read
+  // as an icon that shrinks with the tab. Opt out exactly as the pin does; the
+  // title absorbs the shortfall instead, which is what its ellipsis is for.
+  flex-shrink: 0
 
 .lm_header .lm_tab .lm_pin_tab
   tab-icon(LAYOUT_TAB_PIN_ICON_PATH, 0.85em 0.85em)
