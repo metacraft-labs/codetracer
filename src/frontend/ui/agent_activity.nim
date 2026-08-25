@@ -10,9 +10,12 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
-  setSessionKey, traceOpen
+  setSessionKey, traceOpen, reviewOpen, applyEvidenceDataset,
+  retryPendingEvidenceInspections
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
+from ../viewmodel/viewmodels/review_open import ReviewOpenService
+from ../viewmodel/viewmodels/evidence_call_vm import EvidenceDataset
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 when defined(js):
@@ -64,6 +67,13 @@ var agentActivityTraceOpenService: TraceOpenService = nil
   ## plus the *existing* `CODETRACER::load-trace-file` IPC, not a second
   ## trace-opening path (DeepReview-GUI.md §2.1.2).
 
+var agentActivityReviewOpenService: ReviewOpenService = nil
+  ## AA-3 — how this panel reads the review dataset an evidence tool call
+  ## produced.  Latched for exactly the reason above, and supplied by `ui_js`
+  ## for the matching reason: only the renderer's IPC can reach the process
+  ## that reads files, and that read is the one `ct review <PATH>` performs
+  ## (DeepReview-GUI.md §2.1.1).
+
 proc installAgentActivityTraceOpenService*(service: TraceOpenService) =
   ## Install (or replace) the panel's trace-opening service, and back-fill
   ## every VM that already exists.
@@ -71,6 +81,30 @@ proc installAgentActivityTraceOpenService*(service: TraceOpenService) =
   for _, vm in agentActivityVMInstances:
     if not vm.isNil:
       vm.traceOpen = service
+
+proc installAgentActivityReviewOpenService*(service: ReviewOpenService) =
+  ## Install (or replace) the panel's review-dataset service, and back-fill
+  ## every VM that already exists.
+  agentActivityReviewOpenService = service
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      vm.reviewOpen = service
+      # A panel built before this call recorded its dataset reads and could
+      # send none.  This is the only moment at which that can change, so it
+      # is the moment they are re-issued — otherwise those cards would sit at
+      # "Reading …" for the life of the window.
+      vm.retryPendingEvidenceInspections()
+
+proc applyAgentActivityEvidenceDataset*(datasetPath: string;
+                                        dataset: EvidenceDataset) =
+  ## Land the host's answer about one review dataset on every panel.
+  ##
+  ## Broadcast rather than routed to the panel that asked: the answer is a
+  ## fact about a file, and a layout with two Agent Activity panels showing
+  ## the same session must not disagree about whether that file exists.
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      vm.applyEvidenceDataset(datasetPath, dataset)
 
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
 proc tryMountIsoNimAgentActivityPanel*(componentId: int)
@@ -262,6 +296,8 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   # AA-2: a panel created after `ui_js` installed the service still opens
   # recordings; one created before is back-filled by the installer.
   result.traceOpen = agentActivityTraceOpenService
+  # AA-3: the same, for the evidence cards' review datasets.
+  result.reviewOpen = agentActivityReviewOpenService
   # A panel that mounts into a review already in progress shows that review's
   # session, not an empty conversation.
   replayReviewSessionInto(result)

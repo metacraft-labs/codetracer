@@ -11,7 +11,7 @@
 ## carries and filled the panel with a summary when what the reviewer came for
 ## is the session itself ("There is no 'DeepReview section' in this panel").
 
-import std/tables
+import std/[options, tables]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -54,6 +54,27 @@ const AgentActivityRecordingFailedClass* = "agent-test-row-recording-failed"
   ## The other half of the same rule: a recording that failed before a trace
   ## existed says so, and still offers nothing to open.
 
+const AgentActivityEvidenceClass* = "agent-evidence"
+  ## AA-3 — the agent's review handoff, rendered as a card *in place of* the
+  ## generic tool-call line (DeepReview-GUI.md §2.1.1).
+  ##
+  ## Like AA-2's run card it takes the feed position of the message it
+  ## replaces, so a session that iterated shows each handoff where it
+  ## happened; the message stays in the model and simply is not painted as
+  ## text.
+
+const AgentActivityEvidencePrefix* = "agent-evidence-"
+const AgentActivityEvidenceOpenClass* = "agent-evidence-open"
+  ## The affordance.  §2.1.1's "a dataset that no longer exists says so when
+  ## selected, rather than entering an empty review" is met one step earlier
+  ## than the wording requires: the class is emitted only under
+  ## `canOpenEvidence`, so a dataset already known to be unreadable offers no
+  ## button at all — AA-2's precedent, and the reason there is no disabled
+  ## state to style or to mis-handle.
+const AgentActivityEvidenceNoteClass* = "agent-evidence-note"
+  ## The sentence for a card that cannot be clicked.  Its counterpart:
+  ## wherever the affordance is absent, this says *why* in words.
+
 const AgentActivitySessionNoticeClass* = "agent-session-notice"
   ## RV-6 — the panel's explicit statement about a review's agent session.
   ##
@@ -82,6 +103,12 @@ type
       ## callback exists only so a host can observe the drill-down, not so it
       ## can implement a second one — §2.1.2 requires the *existing*
       ## trace-opening path, which `trace_open.nim` already is.
+    onOpenEvidence*: proc(anchorId, datasetPath: string)
+      ## AA-3 — the host's hook for "the reviewer selected an evidence call".
+      ##
+      ## Same contract as `onOpenTestRecording`: the view does not decide
+      ## whether the dataset can be opened, the VM does
+      ## (`AgentActivityVM.openEvidence`), and this fires only when it agreed.
 
 proc messageWrapperClass*(role: AgentActivityMessageRole): string =
   case role
@@ -368,6 +395,76 @@ proc renderTestRun[R](r: R; vm: AgentActivityVM; entry: AgentTestRunEntry;
     r.appendRenderedChild(body, renderTestRunTail(r, summary))
   card
 
+proc evidenceId*(anchorId: string): string =
+  AgentActivityEvidencePrefix & anchorId
+
+proc evidenceStateClass*(call: EvidenceCall): string =
+  ## The card's state, as a class a stylesheet and a test can both read.
+  ##
+  ## Four-valued and derived from the two facts that decide it — what the
+  ## command did, and whether its dataset can be read — because "no
+  ## affordance" has four different reasons and a reviewer looking at a
+  ## screenshot should be able to tell which.
+  let modifier =
+    case call.state
+    of ecsUnreported: "unreported"
+    of ecsFailed: "failed"
+    of ecsCompleted:
+      case call.dataset.state
+      of edsReady: "ready"
+      of edsUnknown: "reading"
+      of edsUnavailable: "unavailable"
+  AgentActivityEvidenceClass & " " & AgentActivityEvidenceClass & "-" & modifier
+
+proc renderEvidenceCall[R](r: R; vm: AgentActivityVM; callValue: EvidenceCall;
+                           callbacks: AgentActivityCallbacks): auto =
+  let call = callValue
+  let anchorId = call.anchorId
+  let datasetPath = call.datasetPath
+  let shape = evidenceDatasetShapeText(call)
+  let note = evidenceNoteText(call)
+  proc open() =
+    # The VM is the single gate, exactly as it is for AA-2's drill-down: it
+    # refuses a call whose dataset is not known to be readable even if a
+    # stale rendering somehow offered one.
+    if vm.openEvidence(anchorId) and callbacks.onOpenEvidence != nil:
+      callbacks.onOpenEvidence(anchorId, datasetPath)
+  ui(r):
+    tdiv(class = evidenceStateClass(call), id = evidenceId(anchorId)):
+      tdiv(class = "agent-evidence-header"):
+        span(class = "agent-evidence-kind"):
+          text evidenceCommandName(call.kind)
+        # The shape is emitted only when it is a measurement.  For every other
+        # dataset state `evidenceDatasetShapeText` returns "" and this element
+        # is not emitted at all, rather than emitted holding "0 files" — the
+        # rule `review_entry.coverageText` already executes for a file with no
+        # coverage.
+        if shape.len > 0:
+          span(class = "agent-evidence-shape"):
+            text shape
+      # The dataset the call names, always: it is what identifies *which*
+      # handoff this is in a session that produced several.
+      tdiv(class = "agent-evidence-dataset"):
+        text datasetPath
+      # The command the session reported, verbatim.  §2.1.1 wants the
+      # rendering to identify "what the evidence is"; the command is the part
+      # of that CodeTracer did not have to read a file to know.
+      tdiv(class = "agent-evidence-command"):
+        text call.command
+      if note.len > 0:
+        tdiv(class = AgentActivityEvidenceNoteClass):
+          text note
+      if call.canOpenEvidence():
+        tdiv(class = "agent-evidence-actions"):
+          button(class = "ct-button-sm-secondary " &
+                   AgentActivityEvidenceOpenClass,
+                 `type` = "button",
+                 onclick = proc() = open()):
+            text "Open review"
+      if call.failureText.len > 0:
+        pre(class = "agent-evidence-output"):
+          text call.failureText
+
 proc renderTerminal[R](r: R; terminal: AgentActivityTerminalEntry;
                        commandInputId: string): auto =
   ui(r):
@@ -502,10 +599,18 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       # the feed position the run happened in and everything around it renders
       # unchanged.
       let runIndex = vm.testRunIndex(message.id)
+      # AA-3: and a tool call that handed a review over is painted as an
+      # evidence card instead of as the generic tool-call line (§2.1.1).  Same
+      # anchoring rule, so a session that iterated shows one card per
+      # handoff, each independently selectable, in the order they happened.
+      let evidence = vm.evidenceCallFor(message.id)
       if runIndex >= 0:
         r.appendRenderedChild(
           conversation,
           renderTestRun(r, vm, vm.testRuns.val[runIndex], callbacks))
+      elif evidence.isSome:
+        r.appendRenderedChild(
+          conversation, renderEvidenceCall(r, vm, evidence.get, callbacks))
       else:
         r.appendRenderedChild(
           conversation, renderMessage(r, componentId, message))

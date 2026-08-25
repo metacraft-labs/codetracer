@@ -869,6 +869,50 @@ proc startDeepReviewNavigation*(data: Data) =
   cerror "vcs: startDeepReviewNavigation: no docked VCS panel in the layout; " &
     "the review starts with no file open"
 
+proc openReviewDataset*(data: Data; dataset: DeepReviewData) =
+  ## AA-3 — enter a review over a dataset that arrived while this window was
+  ## already open, because the reviewer selected an evidence tool call in the
+  ## Agent Activity session feed (DeepReview-GUI.md §2.1.1).
+  ##
+  ## It is deliberately *not* a fourth way to open a review.  It publishes the
+  ## dataset exactly where the other three launch paths publish theirs and
+  ## then calls the one host entry point, so from `startDeepReviewNavigation`
+  ## downwards — `enterReview`, the VCS panel, the diff tabs, the flow overlay
+  ## — nothing can tell which path it was.  The only thing this adds is the
+  ## re-arming, which is what makes a *second* dataset behave like a first.
+  ##
+  ## The new review **replaces** the one the window is showing rather than
+  ## opening beside it, which is what `ct review <PATH>` does: a review has no
+  ## workspace and no panel of its own (§2), so two concurrent reviews would
+  ## need two VCS panels, two changed-files selections and two answers to
+  ## "which review is this editor tab from".
+  ##
+  ## `startOptions.reviewSession` is deliberately left alone: the reviewer is
+  ## still reading the same agent session, and it is that session's own feed
+  ## they clicked in.  Only which of its datasets is under review changed.
+  if data.isNil or dataset.isNil:
+    return
+  data.deepReviewData = dataset
+  # Kept in step with the renderer's copy for the same reason
+  # `startReviewForTraceDiff` does it: `syncLegacyVCSIntoVM` re-reads the
+  # review from `data.deepReviewData` on every render, and other surfaces
+  # read `startOptions.deepReview`.
+  data.startOptions.deepReview = dataset
+  data.startOptions.withDeepReview = true
+  data.deepReviewActive = true
+  data.deepReviewSelectedFileIndex = 0
+  # Zero is the contract's "not chosen yet", which the VCS panel resolves to
+  # the new dataset's first declared context.  Carrying the previous review's
+  # id over would select a context this dataset may not declare.
+  data.deepReviewSelectedTraceContextId = 0
+  if not data.ui.isNil:
+    for _, component in data.ui.componentMapping[Content.VCS]:
+      let vcsComponent = cast[VCSComponent](component)
+      if vcsComponent.isNil:
+        continue
+      resetReviewEntry(vcsComponent.ensureVCSVM())
+  startDeepReviewNavigation(data)
+
 proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
                               traceLabel: string; recordingId: string) =
   ## Launch method 2 of DeepReview-GUI.md §1: the opened trace is associated

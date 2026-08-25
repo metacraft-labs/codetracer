@@ -514,6 +514,27 @@ proc applyReviewDataset*(vcs: VCSVM; dataset: ReviewDataset;
   vcs.setUnifiedDiff(false, @[])
   vcs.setHunkState(@[], false, false)
 
+proc resetReviewEntry*(vcs: VCSVM) =
+  ## Re-arm the review-entry one-shot for a **different** dataset (AA-3).
+  ##
+  ## `enterReview`'s idempotence guard exists to stop a *re-sync of the same
+  ## review* re-opening tabs and dragging the reviewer back to the first file
+  ## (Layout-System.md, "DeepReview and the Layout", obligation 3).  Selecting
+  ## an evidence call in the session feed is not that: it is a new review over
+  ## a different changeset, and §7 step 2 — "the first modified file opens in
+  ## the editor" — is owed to it exactly as it is owed to `ct review <PATH>`.
+  ##
+  ## The changed-files list is cleared alongside the flag, and that is not
+  ## tidiness: `applyReviewDataset` deliberately carries the selection across
+  ## *by path*, so a file present in both datasets would keep the previous
+  ## review's selection and the new review would open somebody else's second
+  ## file instead of its own first one.  With no previous selection to carry,
+  ## it falls back to row 0, which is what §7 asks for.
+  if vcs.isNil:
+    return
+  vcs.reviewEntered.val = false
+  vcs.setChangedFiles(@[])
+
 proc enterReview*(vcs: VCSVM;
                   dataset: ReviewDataset;
                   open: ReviewOpenProc;

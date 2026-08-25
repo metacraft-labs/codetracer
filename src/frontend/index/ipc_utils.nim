@@ -1,6 +1,7 @@
 import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
+  review_dataset,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -149,6 +150,10 @@ proc configureIpcMain* =
     "load-recent-transaction"
     "open-trace-dialog"
     "load-trace-file"
+    # AA-3 — read the review dataset an evidence tool call in the Agent
+    # Activity session feed names, and either report its shape or enter a
+    # review over it (`index/review_dataset.onOpenReviewDataset`).
+    "open-review-dataset"
     "record-from-launch"
     "record-with-launch-config"
     "init-edit-mode"

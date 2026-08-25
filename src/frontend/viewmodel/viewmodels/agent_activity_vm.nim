@@ -14,9 +14,9 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
-import test_run_summary_vm, trace_open
+import evidence_call_vm, review_open, test_run_summary_vm, trace_open
 
-export test_run_summary_vm, trace_open
+export evidence_call_vm, review_open, test_run_summary_vm, trace_open
 
 type
   AgentTestRunEntry* = object
@@ -32,6 +32,11 @@ type
     anchorId*: string
     summary*: TestRunSummary
 
+  EvidenceDatasetEntry* = object
+    ## AA-3 — one answer from the host about one dataset path.
+    datasetPath*: string
+    dataset*: EvidenceDataset
+
   AgentActivityVM* = ref object of ViewModel
     store*: ReplayDataStore
 
@@ -40,6 +45,14 @@ type
       ## trace-opening path (`trace_open.nim`), wired by the host to the same
       ## IPC the welcome screen and the tab model already use.  Nil in a
       ## headless test, and `openTestRecording` reports honestly when it is.
+
+    reviewOpen*: ReviewOpenService
+      ## AA-3 — how this panel reads the review dataset an evidence tool call
+      ## produced.  The *ordinary* review path (`review_open.nim`), wired by
+      ## the host to the same read `ct review <PATH>` performs.  Nil in a
+      ## headless test, in which case no dataset is ever inspected, every
+      ## evidence card stays at `edsUnknown`, and none offers an affordance —
+      ## the honest answer for a panel with no host that can read files.
 
     messages*: Signal[seq[AgentActivityMessageEntry]]
     testRuns*: Signal[seq[AgentTestRunEntry]]
@@ -53,6 +66,23 @@ type
       ## opened to fifty rows would bury the conversation it sits in.
     expandedTests*: Signal[seq[string]]
       ## `expansionKey(anchorId, testId)` for each expanded test row.
+    evidenceCalls*: Signal[seq[EvidenceCall]]
+      ## AA-3 — the session's evidence handoffs, re-derived from `messages` on
+      ## every `setMessages` for the same reason `testRuns` is: one projection,
+      ## no opt-in, and no third path for the legacy carrier to drift down.
+      ##
+      ## The `dataset` field of each entry is **not** filled in here — a
+      ## projection cannot read a file.  `evidenceCallFor` merges
+      ## `evidenceDatasets` in on the way out.
+    evidenceDatasets*: Signal[seq[EvidenceDatasetEntry]]
+      ## What the host found out about each dataset *path*.
+      ##
+      ## Keyed by path rather than by anchor because it is a fact about the
+      ## file: a session that collected once and handed over once names the
+      ## same dataset twice, and reading it twice to tell the reviewer the
+      ## same thing would be work done for no answer.  It survives
+      ## `setMessages` — a re-synced conversation must not throw away what has
+      ## already been read and start the cards blank again.
     terminals*: Signal[seq[AgentActivityTerminalEntry]]
     inputValue*: Signal[string]
     isLoading*: Signal[bool]
@@ -78,9 +108,13 @@ type
     hasMessages*: Memo[bool]
     hasSessionNotice*: Memo[bool]
     testRunCount*: Memo[int]
+    evidenceCallCount*: Memo[int]
 
 proc `==`*(a, b: AgentTestRunEntry): bool {.noSideEffect.} =
   a.anchorId == b.anchorId and a.summary == b.summary
+
+proc `==`*(a, b: EvidenceDatasetEntry): bool {.noSideEffect.} =
+  a.datasetPath == b.datasetPath and a.dataset == b.dataset
 
 proc projectTestRuns*(messages: openArray[AgentActivityMessageEntry]):
     seq[AgentTestRunEntry] =
@@ -110,6 +144,69 @@ proc expansionKey*(anchorId, testId: string): string {.noSideEffect.} =
   ## characters), so the pair cannot alias.
   anchorId & "\x1f" & testId
 
+proc datasetIndex(vm: AgentActivityVM; datasetPath: string): int =
+  for i, entry in vm.evidenceDatasets.val:
+    if entry.datasetPath == datasetPath:
+      return i
+  -1
+
+proc requestEvidenceInspections(vm: AgentActivityVM) =
+  ## Ask the host for the shape of every dataset an evidence call names and
+  ## nothing has looked at yet.
+  ##
+  ## §2.1.1 wants the card to name "enough of its shape (file count, the
+  ## reviewed commit) to be recognisable without opening it", which is a fact
+  ## that can only come from the file, so it is fetched as soon as a card
+  ## exists rather than on the click that needs it.
+  ##
+  ## Only a **completed** call is inspected: a collect that has not reported
+  ## may not have written its output yet, and reporting "missing" about a file
+  ## that is merely not finished would be a wrong statement rather than a
+  ## missing one.
+  ##
+  ## A placeholder entry is recorded *before* the request goes out, so a
+  ## conversation re-synced on every render (which the legacy carrier does)
+  ## asks once per path rather than once per render.
+  for call in vm.evidenceCalls.val:
+    if call.state != ecsCompleted or call.datasetPath.len == 0:
+      continue
+    if vm.datasetIndex(call.datasetPath) >= 0:
+      continue
+    var entries = vm.evidenceDatasets.val
+    entries.add EvidenceDatasetEntry(
+      datasetPath: call.datasetPath,
+      dataset: EvidenceDataset(state: edsUnknown))
+    vm.evidenceDatasets.val = entries
+    vm.reviewOpen.requestDataset ReviewDatasetRequest(
+      anchorId: call.anchorId,
+      datasetPath: call.datasetPath,
+      kind: rdrInspect)
+
+proc retryPendingEvidenceInspections*(vm: AgentActivityVM) =
+  ## Re-issue the requests that were recorded while there was no host to
+  ## answer them.
+  ##
+  ## `requestEvidenceInspections` is deliberately a one-shot per path, so a
+  ## conversation re-synced on every render asks once.  That leaves one hole:
+  ## a panel whose VM is built *before* the host installs the service records
+  ## its placeholders, sends nothing, and its cards would sit at "Reading …"
+  ## for the life of the window.  The installer calls this after back-filling,
+  ## which is the only moment at which the answer can change.
+  ##
+  ## Only entries still at `edsUnknown` are retried; a path already answered —
+  ## readable or not — is not read again.
+  for entry in vm.evidenceDatasets.val:
+    if entry.dataset.state != edsUnknown:
+      continue
+    for call in vm.evidenceCalls.val:
+      if call.datasetPath != entry.datasetPath or call.state != ecsCompleted:
+        continue
+      vm.reviewOpen.requestDataset ReviewDatasetRequest(
+        anchorId: call.anchorId,
+        datasetPath: call.datasetPath,
+        kind: rdrInspect)
+      break
+
 proc setMessages*(vm: AgentActivityVM;
                   messages: openArray[AgentActivityMessageEntry]) =
   vm.messages.val = @messages
@@ -118,6 +215,9 @@ proc setMessages*(vm: AgentActivityVM;
   # caller reading `testRuns` immediately after `setMessages` sees the run
   # (a Memo would be lazy).
   vm.testRuns.val = projectTestRuns(messages)
+  # AA-3, and for the same three reasons.
+  vm.evidenceCalls.val = projectEvidenceCalls(messages)
+  vm.requestEvidenceInspections()
 
 proc testRunIndex*(vm: AgentActivityVM; anchorId: string): int =
   ## The index of the run anchored at `anchorId`, or -1.
@@ -186,6 +286,89 @@ proc openTestRecording*(vm: AgentActivityVM; anchorId, testId: string;
     policy: policy)
   true
 
+# ---------------------------------------------------------------------------
+# AA-3 — the session's evidence handoffs
+# ---------------------------------------------------------------------------
+
+proc datasetFor*(vm: AgentActivityVM; datasetPath: string): EvidenceDataset =
+  ## What is known about `datasetPath`.  `edsUnknown` when nothing is, which
+  ## is a state the rendering distinguishes from "missing" rather than
+  ## collapsing into it.
+  let index = vm.datasetIndex(datasetPath)
+  if index < 0:
+    EvidenceDataset(state: edsUnknown)
+  else:
+    vm.evidenceDatasets.val[index].dataset
+
+proc evidenceIndex*(vm: AgentActivityVM; anchorId: string): int =
+  ## The index of the evidence call anchored at `anchorId`, or -1.  An index
+  ## rather than an `Option` for the reason `testRunIndex` is one: the view
+  ## uses it to decide *between* two renderings of the same feed position.
+  for i, call in vm.evidenceCalls.val:
+    if call.anchorId == anchorId:
+      return i
+  -1
+
+proc evidenceCallFor*(vm: AgentActivityVM; anchorId: string):
+    Option[EvidenceCall] =
+  ## The evidence call at `anchorId`, with what the host has learned about its
+  ## dataset merged in.
+  ##
+  ## The merge happens here rather than being written into `evidenceCalls`
+  ## because the projection is re-run on every `setMessages` and would
+  ## otherwise erase the host's answers each time.  Reading both signals also
+  ## makes the view re-render when either changes, which is how a card turns
+  ## from "Reading …" into a shape and an affordance.
+  let index = vm.evidenceIndex(anchorId)
+  if index < 0:
+    return none(EvidenceCall)
+  var call = vm.evidenceCalls.val[index]
+  call.dataset = vm.datasetFor(call.datasetPath)
+  some(call)
+
+proc applyEvidenceDataset*(vm: AgentActivityVM; datasetPath: string;
+                           dataset: EvidenceDataset) =
+  ## Record the host's answer about one dataset path.
+  ##
+  ## Idempotent, and safe for a path no card names any more: the entry is
+  ## simply kept, and the next conversation that names it starts with the
+  ## answer already in hand.
+  if datasetPath.len == 0:
+    return
+  var entries = vm.evidenceDatasets.val
+  let index = vm.datasetIndex(datasetPath)
+  if index < 0:
+    entries.add EvidenceDatasetEntry(
+      datasetPath: datasetPath, dataset: dataset)
+  else:
+    entries[index].dataset = dataset
+  vm.evidenceDatasets.val = entries
+
+proc openEvidence*(vm: AgentActivityVM; anchorId: string): bool =
+  ## Enter a review over the dataset the evidence call at `anchorId` names.
+  ##
+  ## Returns whether a request was issued, and **issues none** for a call with
+  ## nothing to open.  Both halves are §2.1.1's rule as AA-2 read it for the
+  ## test drill-down: the view gates the affordance on `canOpenEvidence`, and
+  ## this gates the action on the same fact, so a rendering that is a moment
+  ## stale cannot ask for a dataset that has just been reported missing.
+  ##
+  ## Opening **replaces** the review the window is showing, rather than adding
+  ## one beside it.  That is what `ct review <PATH>` does — one window, one
+  ## review, routed into the panels the layout already has (DeepReview-GUI.md
+  ## §2, "DeepReview has no workspace of its own and no panel of its own") —
+  ## and a second concurrent review would need a second VCS panel, a second
+  ## changed-files selection and a second answer to "which review is this
+  ## editor tab from".
+  let call = vm.evidenceCallFor(anchorId)
+  if call.isNone or not call.get.canOpenEvidence():
+    return false
+  vm.reviewOpen.requestDataset ReviewDatasetRequest(
+    anchorId: anchorId,
+    datasetPath: call.get.datasetPath,
+    kind: rdrOpen)
+  true
+
 proc setTerminals*(vm: AgentActivityVM;
                    terminals: openArray[AgentActivityTerminalEntry]) =
   vm.terminals.val = @terminals
@@ -218,6 +401,10 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.testRuns.val = @[]
   vm.expandedTestRuns.val = @[]
   vm.expandedTests.val = @[]
+  vm.evidenceCalls.val = @[]
+  # The dataset answers go too: they belong to the conversation that named
+  # them, and a file read for the previous session may since have changed.
+  vm.evidenceDatasets.val = @[]
   vm.terminals.val = @[]
   vm.inputValue.val = ""
   vm.isLoading.val = false
@@ -232,6 +419,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let testRuns = createSignal(newSeq[AgentTestRunEntry]())
     let expandedTestRuns = createSignal(newSeq[string]())
     let expandedTests = createSignal(newSeq[string]())
+    let evidenceCalls = createSignal(newSeq[EvidenceCall]())
+    let evidenceDatasets = createSignal(newSeq[EvidenceDatasetEntry]())
     let terminals = createSignal(newSeq[AgentActivityTerminalEntry]())
     let inputValue = createSignal("")
     let isLoading = createSignal(false)
@@ -251,6 +440,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       sessionNotice.val.len > 0
     let testRunCount = createMemo[int] proc(): int =
       testRuns.val.len
+    let evidenceCallCount = createMemo[int] proc(): int =
+      evidenceCalls.val.len
 
     AgentActivityVM(
       store: store,
@@ -258,6 +449,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       testRuns: testRuns,
       expandedTestRuns: expandedTestRuns,
       expandedTests: expandedTests,
+      evidenceCalls: evidenceCalls,
+      evidenceDatasets: evidenceDatasets,
       terminals: terminals,
       inputValue: inputValue,
       isLoading: isLoading,
@@ -271,5 +464,6 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       hasMessages: hasMessages,
       hasSessionNotice: hasSessionNotice,
       testRunCount: testRunCount,
+      evidenceCallCount: evidenceCallCount,
       disposeProc: dispose,
     )

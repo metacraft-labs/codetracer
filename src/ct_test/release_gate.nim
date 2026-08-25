@@ -569,6 +569,37 @@ const
     # alone cannot tell "the producer stopped fabricating" from "the renderer
     # now hides it", and both had to happen.
     "src/tests/gui/tests/agent-workspace/agent_workspace_no_fabricated_results_test.nim",
+    # AA-3 — an evidence tool call in the session feed is a clickable entry
+    # that loads the review dataset it produced (DeepReview-GUI.md §2.1.1).
+    #
+    # The projection: which tool calls count as evidence, and what became of
+    # each.  Two of its rules are ones a rendering can quietly break with no
+    # user-visible symptom announcing it, which is why they are pinned here
+    # rather than left to the view: *prose* naming `ct review collect` must
+    # never become a clickable review (an agent that says it will collect
+    # evidence has collected none), and a command whose dataset cannot be
+    # named must not be recognised at all rather than recognised with a
+    # guessed path.  The suite also fixes the recogniser against the exact
+    # command lines `docs/agent-prompt/deepreview-evidence.md` ships to
+    # agents, so a change to the shipped prompt that the recogniser cannot
+    # read breaks a test instead of silently emptying the panel.
+    "src/tests/gui/tests/agent-activity/evidence_call_vm_test.nim",
+    # AA-3 — the DOM the panel emits for that call.
+    #
+    # Registered separately from the projection because the two can fail
+    # apart: the rule that decides whether a reviewer is offered a review is
+    # applied twice, once by the view (whether to emit the affordance) and
+    # once by the ViewModel (whether to act on it), and a suite that only
+    # exercised one of them would let the other drift.  Its five
+    # nothing-to-open cases each pair "no affordance" with "and here is the
+    # sentence saying why" — AA-1's absence rule, which is only half kept by
+    # a card that merely lacks a button.
+    #
+    # A separate file from `views/isonim_views_test.nim` for the reasons its
+    # own header records: that file carries 17 pre-existing failures, so a
+    # new suite in it would be one signal among eighteen, and the panel's
+    # other rendering milestone already lives beside this one.
+    "src/tests/gui/tests/agent-activity/agent_activity_evidence_view_test.nim",
   ]
 
   CliRecordGateTests* = [

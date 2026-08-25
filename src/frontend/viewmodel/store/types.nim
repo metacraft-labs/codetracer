@@ -1070,6 +1070,33 @@ type
     canceled*: bool
     isLoading*: bool
     diffs*: seq[AgentActivityDiffEntry]
+    toolName*: string
+      ## AA-3 — the tool this row *is*, when it is a tool call rather than
+      ## prose.  Empty for everything else, which is what makes it usable as
+      ## the "is this a tool call at all" test.
+      ##
+      ## The agent protocols put the invocation here: ACP's `tool_call`
+      ## carries it as `title` (`nim-agents`' `acpUpdateToAgentEvent` maps
+      ## `update.title` → `AgentEvent.toolName`), and for a shell tool the
+      ## title *is* the command line.  Both projections into this type
+      ## previously collapsed it into `content` and dropped the fact that it
+      ## came from a tool at all (`review_session.eventContent`,
+      ## `agentic_session_vm.eventToActivityMessage`), which left the panel
+      ## unable to tell an agent *saying* "ct review collect …" from an agent
+      ## *running* it.  AA-3 needs that distinction: recognising an evidence
+      ## handoff in prose would invent a review that was never collected.
+    toolCallId*: string
+      ## AA-3 — the identity that ties a tool call to the update reporting its
+      ## outcome.  Empty when the producer has none.
+      ##
+      ## An outcome arrives as a *separate* row (ACP's `tool_call_update`), so
+      ## without this the only way to pair the two is positional adjacency,
+      ## which any interleaved row breaks.
+    status*: string
+      ## AA-3 — the backend's own word for how the call ended
+      ## (`"completed"` / `"failed"` / `"in_progress"` / …), never one
+      ## invented here.  Empty when the producer reported none, which is a
+      ## distinct fact from "it failed" and is rendered as such.
 
   AgentActivityTerminalEntry* = object
     id*: string
@@ -1142,6 +1169,11 @@ type
     text*: string
     status*: string
     toolName*: string
+    toolCallId*: string
+      ## AA-3 — `AgentEvent.toolCallId`, kept so a *live* session can pair a
+      ## tool call with the update that reports its outcome exactly as a
+      ## replayed one can (`ReviewSessionEvent.toolCallId`).  Without it the
+      ## two paths would answer "did this command succeed?" differently.
     filePath*: string
     diff*: string
     milestoneCompleted*: int
@@ -1260,7 +1292,10 @@ proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
     a.role == b.role and
     a.canceled == b.canceled and
     a.isLoading == b.isLoading and
-    a.diffs == b.diffs
+    a.diffs == b.diffs and
+    a.toolName == b.toolName and
+    a.toolCallId == b.toolCallId and
+    a.status == b.status
 
 proc `==`*(a, b: AgentActivityTerminalEntry): bool {.noSideEffect.} =
   a.id == b.id and a.shellId == b.shellId
@@ -1286,6 +1321,7 @@ proc `==`*(a, b: AgentServiceEventEntry): bool {.noSideEffect.} =
     a.text == b.text and
     a.status == b.status and
     a.toolName == b.toolName and
+    a.toolCallId == b.toolCallId and
     a.filePath == b.filePath and
     a.diff == b.diff and
     a.milestoneCompleted == b.milestoneCompleted and

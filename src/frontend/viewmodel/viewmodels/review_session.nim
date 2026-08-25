@@ -165,6 +165,13 @@ proc sessionMessages*(session: ReviewSession):
   ##
   ## Nothing is marked loading: this is a session that has *finished*.  A
   ## spinner on a replayed row would claim work is still happening.
+  ##
+  ## AA-3: the tool identity (`toolName`, `toolCallId`, `status`) is carried
+  ## through rather than being collapsed into `content` by `eventContent`.
+  ## Recognising an evidence handoff needs to know the row *was* a tool call
+  ## — an agent that merely writes `ct review collect …` in prose has
+  ## collected nothing — and needs the call/update pairing to say whether it
+  ## succeeded.
   result = @[]
   for i, event in session.events:
     result.add AgentActivityMessageEntry(
@@ -173,7 +180,10 @@ proc sessionMessages*(session: ReviewSession):
       role: aamrAgent,
       canceled: event.kind == "cancelled",
       isLoading: false,
-      diffs: @[])
+      diffs: @[],
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      status: event.status)
 
 proc sessionNoticeText*(session: ReviewSession): string {.noSideEffect.} =
   ## The sentence the panel shows about this session, or "".

@@ -360,6 +360,90 @@
   color: colors-ui-text-primary-body
   line-height: 1.4
 
+// AA-3 — the agent's review handoff (DeepReview-GUI.md §2.1.1).
+//
+// Built on the same chrome as the `ct test` card above, deliberately: both
+// are "a tool call the panel renders itself", and giving them two visual
+// languages would suggest they are two different kinds of thing.  The left
+// rule carries this card's own verdict — whether there is a review to open —
+// so a reviewer scanning a session that iterated finds the handoff that still
+// has a dataset without reading any of them.
+.agent-evidence
+  border: 0.0625em solid colors-ui-surface-primary-secondary
+  border-left: 0.1875em solid colors-ui-border-information
+  border-radius: 0.25em
+  background: colors-ui-surface-input-default
+  margin-bottom: 0.5em
+  padding: 0.5em 0.75em
+
+.agent-evidence-ready
+  border-left-color: colors-ui-border-success
+
+// Nothing to open, and the card says why in words rather than by showing a
+// dead button (`.agent-evidence-note`).  Warning rather than error for the
+// two states that are not failures: a command with no reported outcome, and
+// a dataset nobody has read yet.
+.agent-evidence-unreported
+.agent-evidence-reading
+  border-left-color: colors-ui-border-warning
+
+.agent-evidence-failed
+.agent-evidence-unavailable
+  border-left-color: colors-ui-border-error
+
+.agent-evidence-header
+  display: flex
+  align-items: baseline
+  gap: 0.5em
+
+.agent-evidence-kind
+  flex: 1 1 auto
+  min-width: 0
+  color: colors-ui-text-primary-body
+
+// File count and reviewed commit.  Emitted only when they were measured, so
+// this never renders an invented shape.
+.agent-evidence-shape
+  flex: 0 0 auto
+  color: colors-ui-text-primary-caption
+
+// The dataset path, and the command that produced it.  Both are frequently
+// wider than the panel; they wrap rather than truncate, because the tail of a
+// path is the part that identifies it.
+.agent-evidence-dataset
+  padding-top: 0.25em
+  color: colors-ui-text-primary-body
+  word-break: break-all
+
+.agent-evidence-command
+  padding-top: 0.125em
+  color: colors-ui-text-primary-caption
+  word-break: break-all
+
+.agent-evidence-note
+  padding-top: 0.375em
+  color: colors-ui-text-primary-caption
+  line-height: 1.4
+
+.agent-evidence-unavailable > .agent-evidence-note
+.agent-evidence-failed > .agent-evidence-note
+  color: colors-ui-text-error-primary
+
+.agent-evidence-actions
+  display: flex
+  gap: 0.375em
+  padding-top: 0.5em
+
+.agent-evidence-output
+  margin: 0.5em 0 0 0
+  padding: 0.5em
+  border-radius: 0.125em
+  background: colors-ui-surface-canvas
+  color: colors-ui-text-primary-body
+  white-space: pre-wrap
+  overflow-x: auto
+  max-height: 16em
+
 .user-wrapper
   background: transparent !important
 

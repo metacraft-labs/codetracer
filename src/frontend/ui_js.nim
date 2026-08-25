@@ -191,6 +191,10 @@ from isonim/core/signals import val
 from isonim/core/computation import val
 from viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
+from viewmodel/viewmodels/review_open import
+  ReviewOpenService, ReviewDatasetRequest, ReviewDatasetRequestKind
+from viewmodel/viewmodels/evidence_call_vm import
+  EvidenceDataset, EvidenceDatasetState, edsReady, edsUnavailable
 var activeSessionVM: SessionViewModel
 # Backend-reported `supportsStepBack` capability from the DAP `initialize`
 # response. The response can arrive (synchronously, via the in-process DAP
@@ -1271,6 +1275,36 @@ proc configure(data: Data) =
         createNewSession(data)
       data.ipc.send cstring"CODETRACER::load-trace-file",
         js{tracePath: cstring(request.tracePath)}))
+
+  # AA-3 — reading the review dataset an evidence tool call produced, so the
+  # session feed can name its shape and enter a review over it
+  # (DeepReview-GUI.md §2.1.1).
+  #
+  # The renderer cannot read files, so this is the request half of a round
+  # trip whose answer arrives as `CODETRACER::review-dataset-read` and is
+  # handled by `onReviewDatasetRead`.  The *read* on the other side is
+  # `index/review_dataset.readReviewDatasetFile` — the same one
+  # `index/args.nim`'s `--deepreview` branch performs for
+  # `ct review <PATH>` — and entering the review is
+  # `vcs.openReviewDataset`, which publishes the dataset where every launch
+  # path publishes it and calls the one host entry point.  Nothing here is a
+  # second way to open a review.
+  #
+  # Installed beside AA-2's service, in `configure`, and for the same
+  # measured reason: `configureMiddleware` runs only from `onTraceLoaded` and
+  # `onNoTrace`, and a `ct review` dataset launch reaches neither
+  # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns).
+  # A review is the one mode this feature exists for, so wiring placed there
+  # would be a silent no-op exactly where it is needed.  `configure` runs
+  # once per renderer in every launch mode.
+  agent_activity.installAgentActivityReviewOpenService(
+    ReviewOpenService(requestProc: proc(request: ReviewDatasetRequest) =
+      data.ipc.send cstring"CODETRACER::open-review-dataset",
+        js{
+          anchorId: cstring(request.anchorId),
+          datasetPath: cstring(request.datasetPath),
+          kind: cstring($request.kind)
+        }))
 
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config
@@ -3170,6 +3204,43 @@ proc onTraceLoadError*(sender: js, response: jsobject(error=cstring)) =
   cwarn "trace-load-error: " & errorMsg
   data.viewsApi.errorMessage(errorMsg)
 
+proc onReviewDatasetRead*(sender: js,
+    response: jsobject(anchorId=cstring, datasetPath=cstring, kind=cstring,
+                       ok=bool, message=cstring, fileCount=int,
+                       commit=cstring, dataset=DeepReviewData)) =
+  ## AA-3 — the main process answered a request from an evidence card
+  ## (`index/review_dataset.onOpenReviewDataset`).
+  ##
+  ## Two shapes, one channel, because both carry the same fact — what is at
+  ## that path — and the panel has to record it either way.  Even the *open*
+  ## request lands its shape first: if the dataset vanished between the
+  ## inspection and the click, the card must stop offering the affordance and
+  ## start saying why, which is §2.1.1's "a dataset that no longer exists says
+  ## so when selected, rather than entering an empty review".
+  let datasetPath = $response.datasetPath
+  if datasetPath.len == 0:
+    return
+  agent_activity.applyAgentActivityEvidenceDataset(
+    datasetPath,
+    if response.ok:
+      EvidenceDataset(
+        state: edsReady,
+        fileCount: response.fileCount,
+        commit: $response.commit)
+    else:
+      EvidenceDataset(state: edsUnavailable, message: $response.message))
+  if not response.ok or response.kind != cstring"open":
+    return
+  if response.dataset.isNil:
+    # `ok` with no payload would silently enter an empty review, which is the
+    # outcome §2.1.1 names as the thing to avoid.
+    cerror "review-dataset-read: open answered without a dataset for " &
+      datasetPath
+    return
+  # The ordinary review-entry path from here on: publish the dataset where
+  # every launch path publishes it, then the one host entry point.
+  vcs.openReviewDataset(data, response.dataset)
+
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
   let data = ident("data")
@@ -3350,6 +3421,11 @@ proc configureIPC(data: Data) =
 
     # Trace macro (M11): error loading a .ct file from the langserver
     "trace-load-error"
+
+    # AA-3: the answer to `open-review-dataset` — a review dataset an
+    # evidence tool call in the Agent Activity session feed names, either
+    # summarised or handed over whole.
+    "review-dataset-read"
 
   duration("configureIPCRun")
 

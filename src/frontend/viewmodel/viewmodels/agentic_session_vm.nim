@@ -119,7 +119,13 @@ proc eventToActivityMessage(event: AgentServiceEventEntry):
     content: content,
     role: aamrAgent,
     canceled: event.kind == aseCancelled,
-    isLoading: event.kind notin {aseCompleted, aseCancelled, aseError})
+    isLoading: event.kind notin {aseCompleted, aseCancelled, aseError},
+    # AA-3: the tool identity survives the projection instead of being
+    # collapsed into `content` above.  `content` still falls back to the tool
+    # name so nothing renders blank; these fields say *why* it reads that way.
+    toolName: event.toolName,
+    toolCallId: event.toolCallId,
+    status: event.status)
 
 proc projectActivity(vm: AgenticSessionVM; session: AgentServiceSessionEntry) =
   var messages: seq[AgentActivityMessageEntry] = @[]

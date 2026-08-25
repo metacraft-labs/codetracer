@@ -48,7 +48,14 @@
 //   CT_FAKE_ACP_TRACE_DIR   the trace directory the recorded test in that
 //                           run reports (default "/tmp/ct-aa2-trace")
 //
-// The last two are also settable per invocation, as `--test-run` and
+// AA-3 adds one more, argv-only:
+//
+//   --evidence               replay a session whose tool calls are the
+//                            `ct review collect` / `ct agent evidence` pair
+//   --evidence-dir=<path>    the directory those commands name their
+//                            datasets in
+//
+// The test-run pair are also settable per invocation, as `--test-run` and
 // `--trace-dir=<path>` in the dataset's own `agentArgs`.  That matters
 // because `--workers=1` puts every Playwright spec file in one process:
 // a spec that set the environment variable would set it for the *other*
@@ -186,8 +193,84 @@ const testRunTranscript = [
   { sessionUpdate: "status", status: "completed" },
 ];
 
+// AA-3 (DeepReview-GUI.md §2.1.1) — an agent that collected review evidence.
+//
+// RV-7 made the handoff "two ordinary commands", so what a session records is
+// a shell tool call whose title *is* the command line.  These are delivered
+// exactly as a real session delivers them: as ACP `tool_call` updates, whose
+// `title` `nim-agents` maps to `AgentEvent.toolName` (client.nim,
+// `sukToolCall`), followed — where there is an outcome — by a
+// `tool_call_update` carrying its status.  Nothing on the CodeTracer side is
+// simulated: the renderer recognises these bytes with the production
+// recogniser.
+//
+// Five calls, chosen to be the five states the panel distinguishes:
+//   * `iteration-1.json` — collected, dataset on disk, so the card offers the
+//     review;
+//   * `iteration-2.json` — handed over, dataset on disk, a *different* review,
+//     so the two are independently selectable;
+//   * `gone.json`        — collected, but the dataset is not there;
+//   * `failed.json`      — the command itself failed;
+//   * `pending.json`     — no outcome ever reported.
+const evidenceDir = argValue("--evidence-dir", "/tmp/ct-aa3-evidence");
+const isEvidence = argFlag("--evidence");
+
+function collectCommand(name) {
+  return (
+    "ct review collect --repo . --diff main..HEAD --recordings .ct/runs -o " +
+    evidenceDir +
+    "/" +
+    name
+  );
+}
+
+function toolCall(id, title) {
+  return { sessionUpdate: "tool_call", toolCallId: id, title: title };
+}
+
+function toolUpdate(id, status, rawOutput) {
+  return {
+    sessionUpdate: "tool_call_update",
+    toolCallId: id,
+    status: status,
+    rawOutput: rawOutput || "",
+  };
+}
+
+const evidenceTranscript = [
+  {
+    sessionUpdate: "agent_thought_chunk",
+    content: { type: "text", text: "Collecting the first review dataset" },
+  },
+  toolCall("tool-collect-1", collectCommand("iteration-1.json")),
+  toolUpdate("tool-collect-1", "completed", "wrote iteration-1.json"),
+  {
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "The tokenizer change is ready to read." },
+  },
+  toolCall(
+    "tool-evidence",
+    "ct agent evidence " + evidenceDir + "/iteration-2.json",
+  ),
+  toolUpdate("tool-evidence", "completed", "handed over iteration-2.json"),
+  toolCall("tool-collect-gone", collectCommand("gone.json")),
+  toolUpdate("tool-collect-gone", "completed", "wrote gone.json"),
+  toolCall("tool-collect-failed", collectCommand("failed.json")),
+  toolUpdate(
+    "tool-collect-failed",
+    "failed",
+    "error: `ct review collect` found no recordings under .ct/runs",
+  ),
+  // Deliberately never updated: what a panel watching a collect in flight
+  // holds, and equally what a session that ended mid-command leaves behind.
+  toolCall("tool-collect-pending", collectCommand("pending.json")),
+  { sessionUpdate: "status", status: "completed" },
+];
+
 const transcript = isEmpty
   ? []
+  : isEvidence
+  ? evidenceTranscript
   : isTestRun || isPartialTestRun
   ? testRunTranscript
   : [

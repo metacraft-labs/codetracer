@@ -305,6 +305,9 @@ proc toStoreEvent(event: AgentEvent; index: int): AgentServiceEventEntry =
     text: event.eventText(),
     status: event.status,
     toolName: event.toolName,
+    # AA-3: kept rather than dropped, so a live session can pair a tool call
+    # with the update that reports its outcome.
+    toolCallId: event.toolCallId,
     filePath: event.filePath,
     diff: event.diff,
     milestoneCompleted: event.milestoneCompleted,
