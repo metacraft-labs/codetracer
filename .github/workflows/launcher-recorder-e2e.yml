@@ -537,6 +537,26 @@ jobs:
         # PATH inside the shell used here; the check below turns a future
         # removal into a named failure instead of a bare "direnv: not found"
         # exit 127 deep inside the driver.
+        #
+        # THE TWO FAILURE MODES ARE SEPARATED ON PURPOSE, and the reason is a
+        # real misdiagnosis this step produced. `nix develop <shell> --command
+        # <probe>` exits non-zero for two unrelated reasons: the shell did not
+        # BUILD, or it built and the probe failed. A single `|| { echo direnv
+        # is not on PATH; }` reports the second for both.
+        #
+        # In run 33021054045 the `ci` shell failed to build — reprobuild would
+        # not compile against the runquota revision this repo pinned — and this
+        # step announced "direnv is not on PATH in the codetracer ci dev shell"
+        # while nix's own `Error: undeclared identifier: 'ExtensionCellWire'`
+        # scrolled past above it. The claim was not merely unhelpful, it was
+        # FALSE, and provably so from this file: the comment four lines up
+        # states direnv is declared in ci-base.nix, and it is. Anyone trusting
+        # the error would have gone looking for a missing package in a shell
+        # that never existed.
+        #
+        # So the shell is built first, on its own, and a failure there is
+        # reported as what it is. Only a shell that exists is then asked
+        # whether it has direnv.
         shell: bash
         env:
           CT_DIR: ${{ steps.plan.outputs.ct-dir }}
@@ -544,8 +564,12 @@ jobs:
         run: |
           set -euo pipefail
           cd "${CT_DIR}"
+          if ! nix develop '.?submodules=1#ci' --command true; then
+            echo "::error::the codetracer 'ci' dev shell FAILED TO BUILD (nix develop '.?submodules=1#ci'); nix's own diagnostic is above this line and names the derivation that failed. Nothing about direnv or the siblings has been established -- this step got no shell to look inside. Fix the shell first."
+            exit 1
+          fi
           nix develop '.?submodules=1#ci' --command bash -c 'command -v direnv' \
-            || { echo "::error::direnv is not on PATH in the codetracer ci dev shell; scripts/build-siblings.sh cannot build any sibling without it."; exit 1; }
+            || { echo "::error::the codetracer 'ci' dev shell builds, but direnv is not on PATH inside it; scripts/build-siblings.sh cannot build any sibling without it. direnv is declared in nix/shells/ci-base.nix -- check whether that declaration was removed."; exit 1; }
           for sib in "codetracer-launcher" "${RECORDER_REPO}" "codetracer-trace-format-nim"; do
             dir="$(cd .. && pwd)/${sib}"
             if [ -f "${dir}/.envrc" ]; then
