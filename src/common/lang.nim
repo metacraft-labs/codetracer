@@ -80,49 +80,10 @@ let SUPPORTED_LANGS* = @[
 ]
 
 proc getExtension*(lang: Lang): string =
-  let extensions: array[Lang, string] = [
-    "c",      # LangC
-    "cpp",    # LangCpp
-    "rs",     # LangRust
-    "nim",    # LangNim
-    "go",     # LangGo
-    "pas",    # LangPascal
-    "f90",    # LangFortran
-    "d",      # LangD
-    "cr",     # LangCrystal
-    "lean",   # LangLean
-    "jl",     # LangJulia
-    "adb",    # LangAda
-    "py",     # LangPython
-    "rb",     # LangRuby
-    "rb",     # LangRubyDb
-    "js",     # LangJavascript
-    "lua",    # LangLua
-    "asm",    # LangAsm
-    "nr",     # LangNoir
-    "rs",     # LangRustWasm
-    "cpp",    # LangCppWasm
-    "py",     # LangPythonDb
-    "",       # LangUnknown
-    "sh",     # LangBash
-    "zsh",    # LangZsh
-    "sol",    # LangSolidity
-    "masm",   # LangMasm
-    "sw",     # LangSway
-    "move",   # LangMove
-    "",       # LangPolkavm (folder-based)
-    "cairo",  # LangCairo
-    "circom", # LangCircom
-    "leo",    # LangLeo
-    "tolk",   # LangTolk
-    "ak",     # LangAiken
-    "cdc",    # LangCadence
-    "",       # LangSolana (folder-based)
-    "ex",     # LangElixir
-    "erl",    # LangErlang
-    "php"     # LangPhp
-  ]
-  result = extensions[lang]
+  ## The native-backend spelling.  The table itself is the exhaustive ``case``
+  ## ``getExtensionName`` in ``common_lang.nim``, shared with the JS front end
+  ## so the two cannot drift.
+  getExtensionName(lang)
 
 proc toLangFromFilename*(location: string): Lang =
   try:

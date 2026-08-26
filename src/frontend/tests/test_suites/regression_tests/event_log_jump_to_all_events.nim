@@ -34,47 +34,30 @@ proc getTestParamsFromEnvironment(): TestParameters =
   return testParameters
 
 # TODO: eventually implement a smarter way for the initial ReadFiles
-const AFTER_INITIAL_READS_EVENT_INDEX: array[Lang, int] = [
-  0, # C
-  0, # C++
-  0, # Rust
-  0, # Nim
-  0, # Go
-  0, # Pascal
-  0, # Fortran
-  0, # D
-  0, # Crystal
-  0, # Lean
-  0, # Julia
-  0, # Ada
-  0, # Python
-  0, # Ruby
-  0, # Ruby(db)
-  0, # JavaScript
-  0, # Lua
-  0, # Asm
-  0, # Noir
-  0, # Rust wasm
-  0, # C++ wasm
-  0, # Python(db)
-  0, # Unknown
-  0, # Bash
-  0, # Zsh
-  0, # Solidity
-  0, # MASM/Miden
-  0, # Sway
-  0, # Move
-  0, # PolkaVM
-  0, # Cairo
-  0, # Circom
-  0, # Leo
-  0, # Tolk
-  0, # Aiken
-  0, # Cadence
-  0, # Solana
-  0, # Elixir
-  0  # Erlang
-]
+func afterInitialReadsEventIndex(lang: Lang): int =
+  ## How many events to skip past the initial ``ReadFile`` burst, per language.
+  ##
+  ## This was a positional ``array[Lang, int]`` literal — and it carried
+  ## **39 entries for a 40-member enum**, having never been extended when
+  ## ``LangPhp`` was added.  Nim checks such a literal's length, so that is
+  ## normally a compile error; it survived because **nothing in the tree
+  ## references this module**, so it is never compiled.  (Verified: a
+  ## tree-wide search for ``event_log_jump_to_all_events`` finds only this file.)
+  ##
+  ## Rewritten as an exhaustive ``case`` so the shape is correct whenever the
+  ## module is next brought back into a build.  Note the honest limitation: an
+  ## exhaustive ``case`` is checked by the COMPILER, so while this module stays
+  ## unreachable it is no more verified than the array was.  What has changed is
+  ## that it is now correct and total rather than silently short by one.
+  case lang
+  of LangC, LangCpp, LangRust, LangNim, LangGo, LangPascal, LangFortran,
+     LangD, LangCrystal, LangLean, LangJulia, LangAda, LangPython, LangRuby,
+     LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir, LangRustWasm,
+     LangCppWasm, LangPythonDb, LangUnknown, LangBash, LangZsh, LangSolidity,
+     LangMasm, LangSway, LangMove, LangPolkavm, LangCairo, LangCircom,
+     LangLeo, LangTolk, LangAiken, LangCadence, LangSolana, LangElixir,
+     LangErlang, LangPhp:
+    0
 
 proc jumpToAllEventsOnce*(filePath: cstring, fileName: cstring, lang: Lang): Future[void] {.async.} =
   #TODO: optimize and remove the wait below
@@ -110,7 +93,7 @@ proc jumpToAllEventsOnce*(filePath: cstring, fileName: cstring, lang: Lang): Fut
   if not await pathExists(expectedFilePath):
     echo "creating new expected file"
     for i, event in events:
-      if i >= AFTER_INITIAL_READS_EVENT_INDEX[lang]: # skip binary ELF-file like reads
+      if i >= afterInitialReadsEventIndex(lang): # skip binary ELF-file like reads
         await event.jumpToEvent()
         await wait(4000)
 
@@ -124,7 +107,7 @@ proc jumpToAllEventsOnce*(filePath: cstring, fileName: cstring, lang: Lang): Fut
   else: #TODO investigate why test is flaky if test is executed immediately after the record
     discard await fsPromises.writeFile(actualFilePath, cstring "", js{})
     for i, event in events:
-      if i >= AFTER_INITIAL_READS_EVENT_INDEX[lang]: # skip binary ELF-file like reads
+      if i >= afterInitialReadsEventIndex(lang): # skip binary ELF-file like reads
         echo "  jumping to event with index ", i
         await event.jumpToEvent()
         echo "  wait a bit"

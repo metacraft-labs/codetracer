@@ -626,49 +626,22 @@ proc calculateMaxFlowLineWidth*(self: FlowComponent): int =
 type
   TokenState* = enum TAny, TExpression, TString
 
-var emptyKeywords = JsAssoc[cstring, bool]{}
-let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
-  emptyKeywords,  # LangC
-  emptyKeywords,  # LangCpp
-  emptyKeywords,  # LangRust
-  JsAssoc[cstring, bool]{cstring"func": true, cstring"proc": true, cstring"int": true, cstring"seq": true, cstring"for": true, cstring"in": true, cstring"var": true},  # LangNim
-  emptyKeywords,  # LangGo
-  emptyKeywords,  # LangPascal
-  emptyKeywords,  # LangFortran
-  emptyKeywords,  # LangD
-  emptyKeywords,  # LangCrystal
-  emptyKeywords,  # LangLean
-  emptyKeywords,  # LangJulia
-  emptyKeywords,  # LangAda
-  emptyKeywords,  # LangPython
-  emptyKeywords,  # LangRuby
-  emptyKeywords,  # LangRubyDb
-  emptyKeywords,  # LangJavascript
-  emptyKeywords,  # LangLua
-  emptyKeywords,  # LangAsm
-  emptyKeywords,  # LangNoir
-  emptyKeywords,  # LangRustWasm
-  emptyKeywords,  # LangCppWasm
-  emptyKeywords,  # LangPythonDb
-  emptyKeywords,  # LangUnknown
-  emptyKeywords,  # LangBash
-  emptyKeywords,  # LangZsh
-  emptyKeywords,  # LangSolidity
-  emptyKeywords,  # LangMasm
-  emptyKeywords,  # LangSway
-  emptyKeywords,  # LangMove
-  emptyKeywords,  # LangPolkavm
-  emptyKeywords,  # LangCairo
-  emptyKeywords,  # LangCircom
-  emptyKeywords,  # LangLeo
-  emptyKeywords,  # LangTolk
-  emptyKeywords,  # LangAiken
-  emptyKeywords,  # LangCadence
-  emptyKeywords,  # LangSolana
-  emptyKeywords,  # LangElixir
-  emptyKeywords,  # LangErlang
-  emptyKeywords   # LangPhp
-]
+let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = block:
+  ## Built at module init from `flowKeywords` in `common_lang.nim`, which is the
+  ## exhaustive `case` holding the data.  The container is assembled here
+  ## because `JsAssoc` is a JS-backend type.  Existing `KEYWORDS[lang]` call
+  ## sites are unaffected.
+  ##
+  ## Note what disappeared with the positional literal: 39 of its 40 rows were
+  ## the SAME shared `emptyKeywords` object, so every row that could have
+  ## revealed a positional shift looked identical to every other.
+  var table: array[Lang, JsAssoc[cstring, bool]]
+  for lang in Lang:
+    var entry = JsAssoc[cstring, bool]{}
+    for keyword in flowKeywords(lang):
+      entry[cstring(keyword)] = true
+    table[lang] = entry
+  table
 
 func isSymbol(c: char, lang: Lang): bool =
   if lang == LangNim:
