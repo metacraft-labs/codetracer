@@ -42,6 +42,17 @@ permissions:
 
 jobs:
   rr-backend-tests:
+    # DELIBERATELY NOT ROUTED to eph-linux-x64-g1/-g2 (H4), for the same
+    # measured reason as codetracer.yml's `test-ui-tests-rr`: both GPU hosts are
+    # i9-12900K (Alder Lake) hybrid parts. The guest's PMU is fully available
+    # (perf_event_paranoid = -1, perf_event_open succeeds unprivileged), and
+    # `rr record` + `rr replay` pass there when the tracee is pinned to a P-core
+    # (CPUs 0-15) -- but fail hard in PerfCounters::start() on an E-core
+    # (CPUs 16-23), because only the P-cores implement the retired-conditional-
+    # branch counter rr needs. Unpinned, as this job runs rr today, the outcome
+    # depends on which core type the scheduler hands out; a probe run passed on
+    # -g1 and failed on -g2 for the identical command. Moving it would buy load
+    # relief at the cost of flaky CI. Route it once rr is confined to CPUs 0-15.
     runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
 
     steps:
@@ -192,7 +203,7 @@ jobs:
           if-no-files-found: ignore
 
   shell-recorder-tests:
-    runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
 
     steps:
       - name: Mint installation token for cross-repo sibling access
