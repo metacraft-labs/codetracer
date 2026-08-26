@@ -269,7 +269,11 @@ jobs:
     # these repos uses (codetracer/.github/workflows/cross-repo-tests.yml,
     # codetracer-launcher/.github/workflows/cross-repo-recorder-packaging.yml,
     # codetracer-python-recorder/.github/workflows/launcher-integration.yml).
-    runs-on: eph-linux-x64 # CIP-5: nix job (setup-dev-env) -> eph-linux-x64
+    # H4: routed to gpu-server-002. Note this reusable workflow is called three
+    # times concurrently by launcher-recorder-e2e-desktop-edge.yml (python /
+    # ruby / js), so it lands 3 of -g2's 4 slots at once; -g2 carries the
+    # lighter share of codetracer.yml's build wave to leave room for it.
+    runs-on: eph-linux-x64-g2 # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     name: ${{ inputs.edge }}
     timeout-minutes: 180
 

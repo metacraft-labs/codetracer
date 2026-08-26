@@ -1123,7 +1123,7 @@ jobs:
             -E 'test(~dap) and not test(~bash_flow) and not test(~zsh_flow) and not test(~javascript_flow)'
 
   lint-bash:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1161,7 +1161,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh"
 
   lint-nim:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1199,7 +1199,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
 
   lint-nix:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1237,7 +1237,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
 
   lint-rust:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1366,7 +1366,7 @@ jobs:
         run: nix develop . --command just test-reprobuild-macos-smoke
 
   reprobuild-linux-smoke:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1525,7 +1525,7 @@ jobs:
   # envelope rejects missing prerequisites, ignored/skipped tests, count
   # drift, and any Playwright skip result.
   cross-process-linux:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     name: cross-process value-origin (Linux)
     steps:
       - name: Generate CI token
@@ -1584,7 +1584,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process
 
   viewmodel-tests:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -1764,7 +1764,7 @@ jobs:
           retention-days: 30
 
   push-gpg-public-key:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1808,7 +1808,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.pub.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc
 
   push-install-script:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1842,7 +1842,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp install-on-distributions.sh s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/install.sh
 
   dev-build:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     needs:
       - lint-bash
       - lint-nim
@@ -1890,7 +1890,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
 
   nix-build:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     needs:
       - lint-bash
       - lint-nim
@@ -1927,7 +1927,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh"
 
   appimage-build:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     needs:
       - lint-bash
       - lint-nim
@@ -2104,7 +2104,7 @@ jobs:
     # fusermount setuid wrapper / /dev/fuse, so we smoke-run the AppImage with
     # `APPIMAGE_EXTRACT_AND_RUN=1` (self-extract, no FUSE) — the same mode
     # nix/shells/ci-base.nix documents for AppImages on these runners.
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     needs:
       - appimage-build
     steps:
@@ -2187,7 +2187,7 @@ jobs:
       matrix:
         include:
           - platform: nixos
-            runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
+            runner: eph-linux-x64-g1  # CIP-5 nix leg; H4: routed to GPU host gpu-server-001
           # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
           # runner and drives the tests through codetracer's nix dev shell
           # (``nix develop . --command just test``), same as the nixos leg. The
@@ -2474,7 +2474,7 @@ jobs:
       matrix:
         include:
           - platform: nixos
-            runner: eph-linux-x64  # CIP-5: nix leg -> eph-linux-x64
+            runner: eph-linux-x64-g2  # CIP-5 nix leg; H4: routed to GPU host gpu-server-002
           # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
           # runner. The ct binary is built by codetracer's reprobuild recipe in
           # the nix dev shell (``nix develop . --command just build-once`` ->
@@ -2763,6 +2763,27 @@ jobs:
           CODETRACER_DB_TESTS_ONLY: "1"
 
   test-ui-tests-rr:
+    # DELIBERATELY NOT ROUTED to eph-linux-x64-g1/-g2 with the rest of this
+    # workflow (H4). This is the one job in the Linux set that drives `rr`, and
+    # the GPU hosts were measured, not assumed:
+    #
+    #   * Guest exposes kernel.perf_event_paranoid = -1 and a fully visible PMU;
+    #     perf_event_open(HW_BRANCH_INSTRUCTIONS) succeeds unprivileged. So the
+    #     container is NOT the obstacle.
+    #   * But both GPU hosts are i9-12900K (Alder Lake), a HYBRID part:
+    #     cpu_core (P) = CPUs 0-15, cpu_atom (E) = CPUs 16-23. rr needs the
+    #     retired-conditional-branch counter (`r5111c4`), which only the
+    #     P-cores implement.
+    #   * Measured on both hosts: `rr record` + `rr replay` PASS when the tracee
+    #     is pinned to a P-core (`taskset -c 0-15`), and FAIL hard in
+    #     PerfCounters::start() when pinned to an E-core.
+    #   * Unpinned -- which is how this job invokes rr today -- is a coin flip:
+    #     in one probe run the identical command passed on -g1 and failed on -g2.
+    #
+    # Routing this job as-is would therefore manufacture flaky CI rather than
+    # move load. It can move once the rr invocation confines the tracee to the
+    # P-cores; until then it stays on high-mem-server, whose Xeon E5-2650 is
+    # uniform (no E-cores) and so has no core-type lottery.
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     timeout-minutes: 120
     steps:
@@ -3134,7 +3155,7 @@ jobs:
   # recording assertions into no-ops.
   # ---------------------------------------------------------------------------
   ct-test-release-gate:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     name: ct-test release gate (M16 provider matrix)
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -3185,7 +3206,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-m16-release-gate
 
   ct-test-providers:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     name: ct-test cross-language provider gate
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -3305,7 +3326,7 @@ jobs:
           if-no-files-found: ignore
 
   push-to-attic:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     needs:
       - test-non-gui
       - test-ui-tests
@@ -3410,7 +3431,7 @@ jobs:
 
   build-and-deploy-docs:
     needs: [ docs-scope ]
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # The docs site is INDEPENDENT content: it is built by its own isonim-docs
     # SSG consumer (docs/book-isonim via ci/deploy/docs.sh) and consumes NO
     # artifact from the app build or the attic-cache push. It must therefore not
@@ -3615,7 +3636,7 @@ jobs:
             "$PR_NUMBER" "https://docs.codetracer.com/pr/${PR_NUMBER}/" "$HEAD_SHA"
 
   push-tag:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     needs: [ dev-build, nix-build, appimage-build, dmg-build ]
     permissions:
       contents: "write"
@@ -3703,7 +3724,7 @@ jobs:
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
   create-release:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     needs: [ push-tag ]
     if: ${{ ((startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || needs.push-tag.outputs.tag != '') && !github.event['codetracer-ci'] }}
     permissions:
