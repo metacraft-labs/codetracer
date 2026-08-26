@@ -2059,10 +2059,17 @@ strips the doors from the VIEW; `kindNeutralRenderedLines` strips them from
 `sharingViewJson`. As AS-4 first shipped, only the first existed — and a door
 added to the renderer, gated on one kind and one stage, left every suite green
 while the pre-AS-4 wording came back in the product. A guarantee about a value
-is not a guarantee about the output built from it. The normaliser is pinned too
-(every reconstructed door line must really appear, and removals must account
-for exactly that many lines), because widening it is the next hiding place, and
-it lives in the TEST rather than beside the renderer for the same reason.
+is not a guarantee about the output built from it. The normaliser is pinned too,
+because widening it is the next hiding place, and it lives in the TEST rather
+than beside the renderer for the same reason. Note WHICH pin does the work: an
+earlier version claimed "removals must account for exactly that many lines",
+which is a tautology for any reconstruction whose lines each appear once, so it
+could not detect widening at all. Two things actually hold it. The reconstruction
+is built from the view's OWN neutral fields, so it can only absorb a line whose
+rendered text equals the field-derived text -- the instant that line differs per
+kind, `line in rendered` fails. And `doors.len == expectedDoorLineCount(view)`
+counts from the view's DECLARED doors, independently of how the reconstruction
+builds them, so the two must agree from different sources.
 
 Related: assert every STAGE. The gated door survived because the CLI suite
 compared line-for-line only at `assOffered`; `assShared` was JSON-only and

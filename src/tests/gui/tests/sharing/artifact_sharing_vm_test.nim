@@ -426,6 +426,32 @@ suite "AS-4 — the sharing flow is identical across kinds":
         check a.facts != b.facts
         check a.openCommand != b.openCommand
 
+  test "the facts door admits only the kind's own facts, and the size":
+    # Independent verification found the seam this closes: the facts door is
+    # recognised by FIELD, not by provenance, so per-kind text appended inside
+    # `sharingView` itself — rather than returned by `artifactFacts` — is
+    # absorbed by both the reconstruction and the door count and disappears
+    # from the cross-kind equality.  It reaches only the `What it is:` section,
+    # which is per-kind by design, and never the access lines, the protection
+    # disclosure, the recovery answer, the notices, the link or the heading.
+    # But `sharingView` already legitimately appends one line that
+    # `artifactFacts` does not return (`Size`), and that is precisely the seam.
+    # Pinning the door to its two declared sources means a third has to be
+    # declared here before it can exist.
+    for kind in ArtifactKind:
+      checkpoint($kind)
+      let artifact = sampleArtifact(kind)
+      let view = sharingView(artifact, assShared, link = SampleLink)
+      let own = artifactFacts(artifact.metadata)
+      # Every fact is either one the kind declared, or the one line the view is
+      # allowed to add for itself.
+      for index, fact in view.facts:
+        if index < own.len:
+          check fact == own[index]
+        else:
+          check fact.label == "Size"
+      check view.facts.len <= own.len + 1
+
 suite "AS-4 — the surface never overstates what sharing gives you":
   ## Every string added by this milestone is subject to the reading AS-3's
   ## were.  The service sees metadata and can CHANGE it; only the payload is
