@@ -1148,11 +1148,24 @@ test-frontend-js:
   set -e
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test"' EXIT
+  target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
   node "$frontend_lang_test"
+  echo ""
+  # The JS half of the four-axis domain types' placement requirement.  The
+  # native half is `src/tests/cli/target_axes_test.nim`, in `test-cli-record`.
+  # Both are required: `src/common/target_axes.nim` and
+  # `src/common/target_assessment.nim` exist to be reachable from EVERY front
+  # end, so a build that only succeeds on one backend has not delivered the
+  # property.  Compiling is itself part of the assertion -- a stray `std/jsffi`
+  # or `os` dependency fails here and nowhere else.
+  echo "Running four-axis domain type tests (JS backend)..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$target_axes_js_test" js src/frontend/tests/target_axes_js_test.nim
+  node "$target_axes_js_test"
   echo ""
   echo "Running scratchpad add-to-scratchpad dispatch tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
