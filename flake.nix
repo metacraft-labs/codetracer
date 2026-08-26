@@ -128,7 +128,7 @@
       # against a different nixpkgs and against its own runquota /
       # native-recorder pins, producing a different `repro` binary than the one
       # this repo's shells are meant to ship.
-      url = "github:metacraft-labs/reprobuild/c81f0a07eb1938060e34740aed8d77d61600e1c2";
+      url = "github:metacraft-labs/reprobuild/b5b88139767d97e96ca646b6f83641d8bb2e69c5";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
