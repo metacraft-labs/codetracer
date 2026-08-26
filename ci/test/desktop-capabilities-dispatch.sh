@@ -109,6 +109,25 @@ FAILED=0
 SCENARIOS=0
 FAILURES=""
 
+# print_indented TEXT — TEXT with every line indented four spaces, for quoting
+# the checker's output under the scenario that produced it.
+#
+# This replaces `echo "$TEXT" | sed 's/^/    /'`, which shellcheck flags
+# (SC2001). The two are equivalent for this input, including the multi-line
+# case that makes the rewrite worth checking rather than assuming:
+#   * the expansion indents every embedded newline and the printf format
+#     supplies the first line's indent, so an N-line value comes out as N
+#     indented lines;
+#   * blank interior lines become "    " in both forms;
+#   * an empty value is one indented empty line in both forms;
+#   * command substitution has already stripped trailing newlines, so there is
+#     no trailing-blank-line difference to worry about.
+# It is also strictly safer: `echo` would swallow a value that began with `-n`
+# or `-e`, and printf does not.
+print_indented() {
+	printf '    %s\n' "${1//$'\n'/$'\n'    }"
+}
+
 ok() {
 	PASSED=$((PASSED + 1))
 	echo "  ok   $1"
@@ -211,7 +230,7 @@ SCENARIOS=$((SCENARIOS + 1))
 echo "scenario 1: the checked-in capability file matches the core's dispatch tables"
 
 run_checker "$CAPS_SRC"
-echo "$CHECK_OUT" | sed 's/^/    /'
+print_indented "$CHECK_OUT"
 assert_eq "checker exits 0 for resources/codetracer-desktop-capabilities" "0" "$CHECK_RC"
 assert_true "checker reported a PASS line with a non-zero assertion count" \
 	grep -qE '^PASS: [1-9][0-9]* capability/dispatch assertions' <<<"$CHECK_OUT"
@@ -240,7 +259,7 @@ mutate_and_expect_failure() {
 	fi
 	run_checker "$mutant"
 	if [[ $CHECK_RC -eq 0 ]]; then
-		echo "$CHECK_OUT" | sed 's/^/    /'
+		print_indented "$CHECK_OUT"
 		bad "$name: the checker PASSED a capability file it must reject"
 	else
 		ok "$name: the checker exits non-zero ($CHECK_RC)"
@@ -248,7 +267,7 @@ mutate_and_expect_failure() {
 	if grep -qF "$needle" <<<"$CHECK_OUT"; then
 		ok "$name: the failure names '$needle'"
 	else
-		echo "$CHECK_OUT" | sed 's/^/    /'
+		print_indented "$CHECK_OUT"
 		bad "$name: the failure does not name '$needle'"
 	fi
 }

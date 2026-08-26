@@ -2116,3 +2116,97 @@ is a catalogued red on the JS lane, and why
 `src/tests/cli/sharing_flow_cli_test.nim` writes its one trace-index fixture
 row with the `sqlite3` CLI (which is in the dev shell, `nix/shells/ci-base.nix`)
 rather than linking the driver into the test binary.
+
+## A `set -e` lint script only runs as far as its first red step
+
+`ci/lint/*.sh` used to be flat lists of commands under `set -e`. That shape has
+one failure mode and it is not small: the FIRST failing command decides how much
+of the job ever runs, and everything below it is documentation.
+
+Measured, not theorised:
+
+* `ci/lint/bash.sh` aborted at line 8 on a shellcheck SC2001 *style* finding in
+  `ci/test/desktop-capabilities-dispatch.sh`. Behind it sat
+  `scripts/resolve-sibling-rev-test.sh` (89 assertions) and
+  `tools/visual-review/deepreview-harness-test.sh` (65 contracts). Both pass
+  when run by hand — which is exactly why nobody noticed they had never run in
+  CI. 154 assertions, green in principle, unexecuted in practice.
+* `ci/lint/nim.sh` aborted at line 10 on a crashing `just test-nimsuggest`, so
+  the test-lane coverage guard below it had never executed either. The guard
+  built to catch "tests that do not run but look like they pass" was itself an
+  instance of the class.
+
+The fix, and where to look:
+
+* `ci/lib/lint-steps.sh` — `lint_step "<literal name>" cmd...` runs each check in
+  a subshell, records the verdict, and ALWAYS returns 0, so a red step cannot
+  abort a caller running under `set -e`. `lint_summary` prints one verdict line
+  per step and decides the exit status from all of them. A step exiting **78**
+  is QUARANTINED: reported and counted, but not fatal. The library uses shell
+  builtins only, on purpose — see the guard.
+
+  **Do not "simplify" that to `("$@") || rc=$?`.** Bash suppresses errexit
+  inside any command that is an operand of `||`, and A SUBSHELL INHERITS THE
+  SUPPRESSION — re-issuing `set -e` inside does not re-arm it:
+
+      $ bash -c 'rc=0; ( set -e; false; echo reached; true ) || rc=$?; echo $rc'
+      reached
+      0
+
+  So a step body that is a shell function running several commands under
+  `set -e` reports only its LAST command's status. Caught in review with two
+  failing `cargo check --release -D warnings` runs reporting OK and
+  `ci/lint/rust.sh` exiting 0 — strictly worse than the flat script the library
+  replaced, which at least aborted loudly on the first one. The fix is to turn
+  errexit off around a PLAIN call and restore it afterwards (`case $- in *e*)`),
+  which has no such inheritance. `ci/test/lint-step-isolation-test.sh` case
+  "a multi-command body under set -e" pins it; note that Part B cannot, because
+  making every command fail also makes the last one fail.
+* `ci/test/lint-step-isolation-test.sh` — the guard for the class. Part A is the
+  library's contract suite. Part B RUNS every `ci/lint/*.sh` with `PATH` pointing
+  at a directory containing nothing but `dirname`, so every step fails, and
+  asserts each script still exits non-zero, still prints its summary, and still
+  names every step it declared. Pass old scripts as arguments to see it go red:
+  the pre-fix `bash.sh` dies at its first command and never mentions the other
+  eight checks. It also runs the lint scripts against a throwaway copy of `ci/`
+  with cwd inside it, because `ci/lint/rust.sh` writes files.
+* Order still matters, for a different reason: put pure-bash/git guards ahead of
+  anything needing a compiler so their answer reaches the log sooner. They just
+  no longer HIDE what follows.
+
+## nimsuggest crashes on this repo's `config.nims`, not on its Nim code
+
+`just test-nimsuggest` has been red on the pinned toolchain (Nim 2.2.8). It is
+not a CodeTracer regression, and the recipe's old advice (chronicles log
+statements over distinct types) does not apply:
+
+* A one-line `echo "hi"` file placed in the REPO ROOT crashes nimsuggest exactly
+  as `src/lsp.nim` does. The same file outside the repo is fine.
+* `nim check` on that file, under the same config, is clean — the compiler front
+  end is fine and only the nimsuggest driver is affected. All of `--v1`/`--v2`/
+  `--v3`/`--v4` crash identically.
+* `--skipProjCfg` makes it disappear, and copying `config.nims` alone into an
+  empty directory reproduces it. It is the NimScript config, not the sources.
+* It is memory corruption, not a deterministic error: the same input yields
+  either SIGSEGV or `AssertionDefect: the length of the seq changed while
+  iterating over it`, and which one depends NON-MONOTONICALLY on how many
+  unrelated config lines precede it (truncated at 102 passes, at 110 asserts, at
+  129 segfaults; a shorter prefix plus the same trailing block passes again).
+  Deleting a config block "fixes" it only by moving the heap around.
+
+So it is quarantined rather than deleted, and the quarantine narrows itself:
+`ci/test/nimsuggest-check.sh` re-runs nimsuggest on a probe file it generates
+itself. Probe also crashes -> exit 78 (QUARANTINED). Probe clean but `src/lsp.nim`
+crashing -> exit 1, because that is the real regression the check has always
+existed to catch. Nothing has to remember to un-quarantine it.
+
+## `echo "$x" | sed 's/^/    /'` -> `printf '    %s\n' "${x//$'\n'/$'\n'    }"`
+
+shellcheck flags the sed form (SC2001) and the rewrite IS equivalent on
+multiline input, which is worth knowing because it is the case where you would
+expect it not to be: the parameter expansion indents every embedded newline and
+the format string supplies the first line's indent. Blank interior lines and an
+empty value match too, and command substitution has already stripped trailing
+newlines. The printf form is strictly safer — `echo "-n"` prints nothing.
+`print_indented` in `ci/test/desktop-capabilities-dispatch.sh` is the shared
+helper.

@@ -328,6 +328,11 @@ src/tup.config
 .tmp/
 .tools/
 committed_dap_types.rs
+
+# ci/test/nimsuggest-check.sh writes a one-line probe file into the repo root
+# (it has to live here to be compiled under this project's config.nims) and
+# removes it on exit. Ignored so a killed run cannot leave the tree dirty.
+ct_nimsuggest_probe_*.nim
 src/ct/online_sharing/test_mcr_enrichment
 
 # Nim JS compilation output in ViewModel layer
