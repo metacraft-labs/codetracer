@@ -220,44 +220,141 @@ if [ -n "$ct_reprobuild_host" ]; then
 		fi
 	fi
 
+	# Ask the daemon binary to identify itself. `runquotad --version` prints its
+	# version and exits, but only when it is the SOLE argument -- with anything
+	# else alongside it the process goes on to serve -- so pass nothing else.
+	# The call is run detached behind a bounded wait rather than through
+	# `timeout(1)`, which is not available on every host this script supports
+	# (notably stock macOS), so an unexpected binary that ignores the flag and
+	# keeps running cannot stall the failure report. Only ever called on a
+	# failure path.
+	ct_runquotad_version() {
+		local out_file="$runquota_log.version" version_pid waited=0
+		: >"$out_file" 2>/dev/null || true
+		"$runquotad_bin" --version >"$out_file" 2>&1 </dev/null &
+		version_pid="$!"
+		while [ "$waited" -lt 50 ] && kill -0 "$version_pid" 2>/dev/null; do
+			sleep 0.1
+			waited=$((waited + 1))
+		done
+		kill "$version_pid" 2>/dev/null || true
+		wait "$version_pid" 2>/dev/null || true
+		# Keep it to a couple of lines on one line: an old binary answers an
+		# unrecognised flag with its usage text, which is itself the answer.
+		#
+		# The trailing ``|| true`` is load-bearing under ``set -o pipefail``:
+		# when the probe file could not be created (an unwritable
+		# ``.repro/runquota``, a full disk) ``head`` exits non-zero, that
+		# status becomes the function's, and the caller's
+		# ``version_output="$(...)"`` assignment would abort the script under
+		# ``set -e`` -- suppressing the very report this function exists to
+		# decorate. A missing version string must degrade to "unknown", never
+		# to a silent exit.
+		head -n 3 "$out_file" 2>/dev/null | tr '\n' ' ' || true
+	}
+
+	# Report everything needed to diagnose a daemon that would not come up.
+	# Both failure paths below used to print just the *path* of the daemon log,
+	# which nobody ever gets to read: the script exits immediately and CI
+	# discards the workspace, so the one artefact naming the cause was thrown
+	# away exactly when it was needed. Print the resolved binary (a stale one on
+	# PATH rejecting a newer flag looks identical to a daemon crash from the
+	# outside), how it was found, its argv, the socket, and the log itself.
+	ct_report_runquotad_failure() {
+		local reason="$1" version_output arg
+		# Belt and braces alongside the guard inside ct_runquotad_version: a
+		# diagnostic helper must not be able to take the script down before it
+		# has printed anything, so nothing this reporter gathers is allowed to
+		# be fatal.
+		version_output="$(ct_runquotad_version)" || version_output=""
+		{
+			echo "Error: $reason"
+			echo "----- runquotad diagnostics -----"
+			echo "binary:      $runquotad_bin"
+			echo "resolved by: $runquotad_origin"
+			echo "version:     ${version_output:-(no output from --version)}"
+			# The byte count matters: the socket path is derived from TMPDIR,
+			# and a Unix-domain socket path is limited to ~108 bytes
+			# (`sun_path` in `man 7 unix`), so a long TMPDIR makes the daemon
+			# fail at bind time on a path that otherwise looks perfectly fine.
+			echo "socket:      $runquota_socket (${#runquota_socket} bytes)"
+			echo "argv:"
+			for arg in "${runquotad_argv[@]}"; do
+				printf '  %s\n' "$arg"
+			done
+			echo "----- begin $runquota_log -----"
+			if [ ! -f "$runquota_log" ]; then
+				echo "(no log file was created at $runquota_log)"
+			elif [ ! -s "$runquota_log" ]; then
+				echo "(log file $runquota_log exists but is empty)"
+			else
+				cat "$runquota_log"
+			fi
+			echo "----- end $runquota_log -----"
+		} >&2
+	}
+
 	runquotad_pid=""
 	if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
+		# Windows ships `runquotad.exe`; macOS / Linux ship a bare
+		# `runquotad`. Search both filenames.
+		runquotad_candidates=(
+			"../runquota/build/bin/runquotad.exe"
+			"../../runquota/build/bin/runquotad.exe"
+			"../runquota/build/bin/runquotad"
+			"../../runquota/build/bin/runquotad"
+		)
+		# Which of the three resolution routes won. Reported on failure: the
+		# same script can legitimately pick a sibling build, an explicitly
+		# pinned binary or whatever happens to be on PATH, and those can be
+		# different revisions of runquota.
+		runquotad_origin=""
 		runquotad_bin="${RUNQUOTAD_BIN:-}"
-		if [ -z "$runquotad_bin" ]; then
-			# Windows ships `runquotad.exe`; macOS / Linux ship a bare
-			# `runquotad`. Search both filenames.
-			runquotad_candidates=(
-				"../runquota/build/bin/runquotad.exe"
-				"../../runquota/build/bin/runquotad.exe"
-				"../runquota/build/bin/runquotad"
-				"../../runquota/build/bin/runquotad"
-			)
+		if [ -n "$runquotad_bin" ]; then
+			runquotad_origin="RUNQUOTAD_BIN"
+		else
 			for candidate in "${runquotad_candidates[@]}"; do
 				if [ -x "$candidate" ]; then
 					runquotad_bin="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+					runquotad_origin="sibling checkout candidate $candidate"
 					break
 				fi
 			done
 		fi
 		if [ -z "$runquotad_bin" ]; then
 			runquotad_bin="$(command -v runquotad || true)"
+			if [ -n "$runquotad_bin" ]; then
+				runquotad_origin="PATH lookup"
+			fi
 		fi
 		if [ -z "$runquotad_bin" ]; then
 			echo "Error: runquotad is required for Reprobuild builds with RunQuota." >&2
 			echo "Build ../runquota or set RUNQUOTAD_BIN/RUNQUOTA_SOCKET." >&2
+			echo "RUNQUOTAD_BIN: (unset or empty)" >&2
+			echo "Searched, relative to $PWD:" >&2
+			for candidate in "${runquotad_candidates[@]}"; do
+				echo "  $candidate (no executable file there)" >&2
+			done
+			echo "  runquotad on PATH: not found" >&2
+			echo "PATH: $PATH" >&2
 			exit 127
 		fi
 
 		mkdir -p .repro/runquota
 		runquota_socket="${TMPDIR:-/tmp}/codetracer-reprobuild-$$.sock"
 		runquota_log=".repro/runquota/runquotad.log"
+		# Kept in an array so the failure report can echo back the exact
+		# command line, argument for argument, instead of a prose summary that
+		# drifts from the code.
+		runquotad_argv=(
+			"$runquotad_bin"
+			--socket "$runquota_socket"
+			--cpu-milli "${CODETRACER_RUNQUOTA_CPU_MILLI:-8000}"
+			--memory-bytes "${CODETRACER_RUNQUOTA_MEMORY_BYTES:-17179869184}"
+			--pool console=1
+		)
 		rm -f "$runquota_socket"
-		"$runquotad_bin" \
-			--socket "$runquota_socket" \
-			--cpu-milli "${CODETRACER_RUNQUOTA_CPU_MILLI:-8000}" \
-			--memory-bytes "${CODETRACER_RUNQUOTA_MEMORY_BYTES:-17179869184}" \
-			--pool console=1 \
-			>"$runquota_log" 2>&1 &
+		"${runquotad_argv[@]}" >"$runquota_log" 2>&1 &
 		runquotad_pid="$!"
 		trap 'if [ -n "$runquotad_pid" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi' EXIT
 		for _ in {1..300}; do
@@ -266,13 +363,13 @@ if [ -n "$ct_reprobuild_host" ]; then
 				break
 			fi
 			if ! kill -0 "$runquotad_pid" 2>/dev/null; then
-				echo "Error: runquotad exited before becoming ready. See $runquota_log" >&2
+				ct_report_runquotad_failure "runquotad exited before becoming ready."
 				exit 1
 			fi
 			sleep 0.05
 		done
 		if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
-			echo "Error: runquotad did not become ready. See $runquota_log" >&2
+			ct_report_runquotad_failure "runquotad did not become ready within 15s."
 			exit 1
 		fi
 	fi
