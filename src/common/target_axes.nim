@@ -66,10 +66,20 @@ type
     ## value nobody assigned.
     ##
     ## Chains and VMs are **not** here.  `LangSolana` and `LangPolkavm` are the
-    ## two `Lang` members with an empty `getExtension` entry
-    ## (`src/common/lang.nim:113,120`) because they are not notations anyone
-    ## writes a file in — a Solana program is Rust or C, and PolkaVM is a
-    ## machine.  They live on `TargetIsa` below.
+    ## only two **non-sentinel** `Lang` members with an empty `getExtension`
+    ## entry, because they are not notations anyone writes a file in — a Solana
+    ## program is Rust or C, and PolkaVM is a machine.  They live on `TargetIsa`
+    ## below.
+    ##
+    ## The qualifier is load-bearing and was missing here: `getExtension` has
+    ## **three** empty answers, not two.  The third is `LangUnknown`, the
+    ## sentinel, which is empty for an unrelated reason — it names no language
+    ## at all rather than naming a substrate.  `target_axes_test.nim` asserts
+    ## that these two are the languageless pair and that each has an empty
+    ## extension; it never counts the empty extensions, which is why the
+    ## original "the two `Lang` members with an empty `getExtension`" survived
+    ## review.  The single source of those answers is now the exhaustive
+    ## `getExtensionName` in `src/common/common_lang.nim`.
     slUnknown           ## 0 — sentinel: not determined, or determined to be none
     slC
     slCpp
@@ -124,7 +134,25 @@ type
     tiNative            ## the recording host's own machine code (MCR / rr / TTD)
     tiInterpreted       ## executed by a language runtime CodeTracer does not
                         ## model as a separate ISA: Python, Ruby, JavaScript,
-                        ## Lua, PHP, Bash, Zsh
+                        ## Lua, PHP, Bash, Zsh.  The list is closed on purpose —
+                        ## it is the set of runtimes recorded by instrumenting
+                        ## the runtime itself, and a substrate that is not one
+                        ## of them gets its own value rather than being filed
+                        ## here.  `tiNimVm` immediately below is that case.
+    tiNimVm             ## the Nim compiler's compile-time VM, evaluating a
+                        ## `.nims` script under `nim e --trace:<…>/trace.ct`
+                        ## (`src/ct/db_backend_record.nim:119-141`).  The VM
+                        ## emits the trace itself, so the approach is
+                        ## `raInstrumentedRuntime` and the artefact IS a
+                        ## materialized trace.
+                        ##
+                        ## This is the second recorder `LangNim` hides, and it
+                        ## is the reason the ISA axis cannot be a function of
+                        ## the source language: `.nim` and `.nims` are BOTH
+                        ## `slNim`, and they run on different machines —
+                        ## `tiNative` via `nim c` + `ct-mcr`
+                        ## (`db_backend_record.nim:143-188`) versus `tiNimVm`
+                        ## here.  See `fallbackTargetIsaForLanguage` below.
     tiWasm              ## WebAssembly — `wazero`
                         ## (`src/ct/trace/recorder_dispatch.nim:300-308`)
     tiEvm               ## EVM bytecode — `codetracer-evm-recorder` (`:139`)
@@ -196,14 +224,17 @@ type
   RecordingApproach* = enum
     ## How CodeTracer observed the run.
     ##
-    ## This is the axis that `USES_MATERIALIZED_TRACES`
-    ## (`src/common/common_lang.nim:81-118`) is a one-bit projection of: a
-    ## 40-slot `array[Lang, bool]` carrying a *backend* property on a *language*
-    ## enum.
+    ## This is the axis that `usesMaterializedTraces`
+    ## (`src/common/common_lang.nim`) is a one-bit projection of: a *backend*
+    ## property answered from a *language* enum.  It was a mutable 40-slot
+    ## `array[Lang, bool]` named `USES_MATERIALIZED_TRACES` plus 29
+    ## statement-level assignments; LRS-3 made it an exhaustive `case`, which
+    ## makes it checkable but does not make it right — the question is still
+    ## being asked of the wrong axis, which is what this enum fixes.
     ##
     ## **`wasm` is not here.**  An earlier two-axis design put `rtWasm` on the
-    ## recording-mode axis because `USES_MATERIALIZED_TRACES[LangRustWasm]` is
-    ## `true` (`common_lang.nim:97`).  That was reading the flag backwards:
+    ## recording-mode axis because `usesMaterializedTraces(LangRustWasm)` is
+    ## `true`.  That was reading the flag backwards:
     ## WebAssembly is a *target ISA*, and the *approach* used to record it is
     ## `raVmEmulation` — the same approach every blockchain recorder uses.  The
     ## flag is true for wasm because emulation produces a materialized trace,
@@ -304,6 +335,7 @@ func token*(v: TargetIsa): string =
   of tiUnknown: UnknownToken
   of tiNative: "native"
   of tiInterpreted: "interpreted"
+  of tiNimVm: "nimvm"
   of tiWasm: "wasm"
   of tiEvm: "evm"
   of tiMidenVm: "midenvm"
@@ -423,14 +455,40 @@ func parseRecordingApproach*(s: string, value: var RecordingApproach): bool =
 # which is the ordinal defect with different letters.
 # ---------------------------------------------------------------------------
 
-func defaultTargetIsa*(lang: SourceLanguage): TargetIsa =
-  ## Where a source language ends up when nothing says otherwise.
+func fallbackTargetIsaForLanguage*(lang: SourceLanguage): TargetIsa =
+  ## **FALLBACK ONLY.**  The ISA to assume for a source language when no
+  ## assessment is available.  The primary path is
+  ## `targetIsaForAssessment` in `target_assessment.nim`, which derives the ISA
+  ## from the assessed target KIND; reach for this one only when there is no
+  ## assessment to derive from, and say so at the call site.
   ##
-  ## Rust and C/C++ default to `tiNative` and reach `tiWasm` only when the
-  ## assessment says so — which is exactly what `isWasmCargoProject`
-  ## (`src/ct/utilities/language_detection.nim:18-26`) reads `.cargo/config.toml`
-  ## for today, and exactly the pair `LangRustWasm` / `LangCppWasm` welded
-  ## together into single enum members.
+  ## ## Why this is a fallback and not the answer
+  ##
+  ## This function used to be called `defaultTargetIsa`, and the name hid a
+  ## category error: **the ISA is a property of the artefact, and the language
+  ## is a property of the file**, so no total function of `SourceLanguage` can
+  ## return it.  The counterexample is not hypothetical and not rare — it is
+  ## Nim:
+  ##
+  ## | target | language | ISA | toolchain | approach |
+  ## | --- | --- | --- | --- | --- |
+  ## | `a.nim` | `slNim` | `tiNative` | `tcNimC` | `raMcr` |
+  ## | `a.nims` | `slNim` | `tiNimVm` | `tcNimScriptVm` | `raInstrumentedRuntime` |
+  ##
+  ## One language, two ISAs, two toolchains, two recording approaches, decided
+  ## by which file was handed to `ct record` — that is, by the **assessment**.
+  ## `src/ct/db_backend_record.nim` has the two arms side by side (`:119-141`
+  ## for the script VM, `:143-188` for `nim c` + `ct-mcr`).
+  ##
+  ## Rust and C/C++ are the same shape one axis over: they answer `tiNative`
+  ## here and reach `tiWasm` only when the assessment says so, which is exactly
+  ## what `isWasmCargoProject` (`src/ct/utilities/language_detection.nim:18-26`)
+  ## reads `.cargo/config.toml` for today, and exactly the pair `LangRustWasm` /
+  ## `LangCppWasm` welded together into single enum members.
+  ##
+  ## So the answers below are the ISA a language reaches **when nothing else is
+  ## known**, which is a useful thing to have and a dangerous thing to mistake
+  ## for the truth.  The name now says which one it is.
   case lang
   of slUnknown: tiUnknown
   of slC, slCpp, slRust, slNim, slGo, slPascal, slFortran, slD, slCrystal,
@@ -455,20 +513,30 @@ func defaultRecordingApproach*(isa: TargetIsa): RecordingApproach =
   ## How CodeTracer records a given target ISA when nothing says otherwise.
   ##
   ## This is a function of the **ISA**, not of the language, and that is the
-  ## point: `USES_MATERIALIZED_TRACES` is a 40-entry hand-maintained
+  ## point: `USES_MATERIALIZED_TRACES` was a 40-entry hand-maintained
   ## `array[Lang, bool]` whose 24 `true` entries were kept in agreement with
   ## `recorderToolFor`'s 24 `supported: true` arms by hand.  Deriving the
   ## approach from the ISA replaces the hand-agreement with one table.
   ##
+  ## Both sides of this signature are **artefact** properties, so unlike
+  ## `fallbackTargetIsaForLanguage` it is a genuine total function and needs no
+  ## fallback caveat: once the assessment has established the ISA, the approach
+  ## follows from it with nothing left to guess.  That is why fixing the `.nims`
+  ## case needed only a new ISA value and no change here beyond its arm.
+  ##
   ## `LangNim` is the case that shows the improvement.  It is flagged
-  ## `usesMaterializedTraces = true` (`common_lang.nim:96`) while its recorder
-  ## is `ct-mcr` (`recorder_dispatch.nim:309-318`) — a contradiction under a
-  ## one-bit model.  Here Nim is `tiNative` and therefore `raMcr`, and the CTFS
-  ## container MCR produces is a property of MCR, not of Nim.
+  ## `usesMaterializedTraces = true` (`common_lang.nim`) while the recorder for
+  ## a compiled `.nim` is `ct-mcr` (`recorder_dispatch.nim:309-318`) — a
+  ## contradiction under a one-bit model.  Here a compiled `.nim` is `tiNative`
+  ## and therefore `raMcr` (the CTFS container MCR produces is a property of
+  ## MCR, not of Nim), while a `.nims` is `tiNimVm` and therefore
+  ## `raInstrumentedRuntime`.  The flag was answering for both at once, which is
+  ## why it could not be right for either.
   case isa
   of tiUnknown: raUnknown
   of tiNative: raMcr
   of tiInterpreted: raInstrumentedRuntime
+  of tiNimVm: raInstrumentedRuntime
   of tiBeam: raInstrumentedRuntime
   of tiWasm, tiEvm, tiMidenVm, tiMoveVm, tiFuelVm, tiPolkaVm, tiCairoVm,
      tiAleoVm, tiTonVm, tiPlutus, tiFlowVm, tiSolanaSbf, tiAcir,
@@ -476,7 +544,7 @@ func defaultRecordingApproach*(isa: TargetIsa): RecordingApproach =
     raVmEmulation
 
 func producesMaterializedTrace*(approach: RecordingApproach): bool =
-  ## The successor of `usesMaterializedTraces` (`common_lang.nim:120-123`), as a
+  ## The successor of `usesMaterializedTraces` (`common_lang.nim`), as a
   ## predicate over the axis that actually decides it rather than a flag stored
   ## per language.
   ##

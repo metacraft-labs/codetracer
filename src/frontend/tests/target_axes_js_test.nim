@@ -72,9 +72,9 @@ suite "the axis modules build and behave on the JS backend":
   test "the default relations are total":
     for v in SourceLanguage:
       if v == slUnknown:
-        check defaultTargetIsa(v) == tiUnknown
+        check fallbackTargetIsaForLanguage(v) == tiUnknown
       else:
-        check defaultTargetIsa(v) != tiUnknown
+        check fallbackTargetIsaForLanguage(v) != tiUnknown
     for v in TargetIsa:
       if v == tiUnknown:
         check defaultRecordingApproach(v) == raUnknown

@@ -83,8 +83,37 @@
 ## (`codetracer-native-backend/src/recognize.rs:74-81`) alongside `primary` and
 ## `components[]`, a per-file language census derived from a
 ## `HashMap<Lang, usize>`.  That document is **not** replaced.  Its `kind` is a
-## *shape*, which is exactly the family level of this model, and it maps onto
-## `TargetFamily` with no loss (`familyFromRecognitionKind` below).
+## *shape*, which is the family level of this model, and
+## `familyFromRecognitionKind` below maps it onto `TargetFamily`.
+##
+## That mapping is **lossy in both directions**, and an earlier version of this
+## comment claimed "with no loss".  The correction, with the evidence:
+##
+## * `recognize` returns `Directory` for **any** directory.  `recognize.rs:493`
+##   is a bare `if meta.is_dir()` that returns immediately with
+##   `primary: None, components: Vec::new()` — it explicitly does not read
+##   manifests.  `tfProjectDirectory`, which it maps to, is documented "A
+##   directory with a build manifest."  So the mapping *upgrades* an unqualified
+##   directory into a claim the recognizer never made.
+## * `Executable` (`recognize.rs:582`) is the unconditional endpoint for
+##   anything `object::File::parse` accepts — a `.so`, a `.o`, a core dump —
+##   and all of them become `tfPrebuiltArtefact` ("Record it directly").
+## * `TargetKind::Script` is **never constructed**.  The only occurrence in the
+##   file is the doc comment at `recognize.rs:71` saying so outright ("NTR-0
+##   never emits `TargetKind::Script`"); a file that does not parse as an object
+##   becomes `Unknown` (`:534`), not `Script`.  The `of "script"` arm below is
+##   therefore unreachable against today's producer.
+## * The reverse direction is **not a function at all**: `tfUnassessable`,
+##   `tfCommand` and `tfExistingRecording` have no recognition kind to map back
+##   to, which is expected — they are assessments `recognize` cannot make.
+## * The Rust enum derives `Serialize` only (`recognize.rs:74`), so nothing on
+##   that side parses this vocabulary back in.
+##
+## None of this makes the mapping wrong to have — a coarse shape is still the
+## right floor for a consumer that knows no specific kind. It makes it a
+## *coarsening*, and the arms are kept as they are on purpose: correcting the
+## documentation rather than the code, because changing what `Directory` maps to
+## would need the producer to start distinguishing the two cases first.
 ##
 ## This is a **sibling** document type rather than an extension of that one, for
 ## two reasons that are about ownership rather than taste:
@@ -351,7 +380,8 @@ func resolveKind*(k: TargetKind, understood: openArray[string]): KindResolution 
 
 func familyFromRecognitionKind*(recognitionKind: string,
                                value: var TargetFamily): bool =
-  ## Map `recognize`'s `kind` onto a family.  Total.
+  ## Map `recognize`'s `kind` onto a family.  Total, and **lossy** — see the
+  ## module header for the evidence; this is a coarsening, not an isomorphism.
   ##
   ## `codetracer-native-backend/src/recognize.rs:74-81` declares
   ## `enum TargetKind { Executable, Script, Directory, Unknown }` with
@@ -363,12 +393,26 @@ func familyFromRecognitionKind*(recognitionKind: string,
   ## recognizer having genuinely said "unknown".
   case recognitionKind.strip.toLowerAscii
   of "executable":
+    # Anything `object::File::parse` accepts, including a `.so`, a `.o` or a
+    # core dump.  "Record it directly" is right for the common case and
+    # over-confident for the rest; the recognizer draws no finer distinction
+    # for this to preserve.
     value = tfPrebuiltArtefact
     true
   of "script":
+    # UNREACHABLE against today's producer: `recognize.rs:71` states that NTR-0
+    # never emits `Script`, and a file that fails to parse as an object becomes
+    # `Unknown` (`:534`).  Kept because the variant is declared and the arm
+    # costs nothing — but it is not evidence that scripts are handled.
     value = tfSingleFile
     true
   of "directory":
+    # NOTE: `recognize.rs:493` returns `Directory` for ANY directory, without
+    # reading a manifest, whereas `tfProjectDirectory` is documented "A
+    # directory with a build manifest."  This arm therefore asserts slightly
+    # more than the producer knew.  Changing it would require the producer to
+    # distinguish the two cases first, so the claim is documented rather than
+    # silently relied upon.
     value = tfProjectDirectory
     true
   of UnknownToken:
@@ -420,6 +464,37 @@ const
     ## chain-specific manifests.  A crate that is also a Foundry project is a
     ## Foundry project.  Recorded in order so that a later implementation
     ## reproduces the existing precedence rather than reinventing one.
+    ##
+    ## ## OPEN QUESTION — chain versus set.  NEEDS A USER DECISION.
+    ##
+    ## `TargetKind.specific` is an ordered **specificity chain**: each element is
+    ## assumed to degrade into the next, and rule K2 takes the first element the
+    ## consumer understands.  That models "a cargo project is a rust project is
+    ## a project directory" correctly.
+    ##
+    ## It does **not** model two independent kinds at the same level.  A
+    ## directory can be simultaneously a Cargo workspace **and** a CMake
+    ## project; neither degrades into the other, and a chain forces an
+    ## arbitrary choice of which one to put first.  The array above inherits
+    ## exactly such an arbitrary order from `detectFolderLang`, where a crate
+    ## that also has a `foundry.toml` silently becomes a Foundry project and the
+    ## Cargo fact is discarded at the return statement.
+    ##
+    ## The two candidate shapes are:
+    ##
+    ## * **chain** (today) — `specific: seq[string]`, ordered, first-understood
+    ##   wins.  Cheap, already specified by K1..K4, cannot express co-equal
+    ##   kinds.
+    ## * **set** — `specific: seq[string]` unordered plus a separate degradation
+    ##   relation, or a `seq[seq[string]]` of alternatives.  Expresses co-equal
+    ##   kinds, and makes K2 ambiguous unless the consumer is given a tie-break
+    ##   rule, which is a new protocol requirement.
+    ##
+    ## This is recorded and NOT decided.  It only bites once a producer emits
+    ## more than one specific kind, and **this increment creates no producer**,
+    ## so nothing here depends on the answer.  Deciding it later is a schema
+    ## question (the family vocabulary is frozen within a major; the specific
+    ## vocabulary is open), so a set-shaped `specific` would be a `…v2` change.
 
 func projectKindForMarker*(marker: string, kind: var string): bool =
   ## Total lookup over `ProjectMarkerKinds`.
@@ -428,3 +503,66 @@ func projectKindForMarker*(marker: string, kind: var string): bool =
       kind = row.kind
       return true
   false
+
+# ---------------------------------------------------------------------------
+# Deriving the artefact axes from the assessment
+#
+# This is the PRIMARY path, and it lives here rather than in `target_axes.nim`
+# because it needs `TargetKind`, and `target_axes.nim` must not depend on this
+# module.  The layering is deliberate: the axes know nothing about assessments;
+# assessments know how to produce axes.
+# ---------------------------------------------------------------------------
+
+const
+  KindNimScript* = "nimscript"
+    ## A `.nims` evaluated by `nim e --trace:<…>/trace.ct`
+    ## (`src/ct/db_backend_record.nim:119-141`).  The Nim compiler's own VM runs
+    ## it and emits the trace.
+  KindNimSource* = "nim-source"
+    ## A `.nim` compiled with `nim c` and handed to `ct-mcr`
+    ## (`src/ct/db_backend_record.nim:143-188`).
+  KindWasmCargoProject* = "wasm-cargo-project"
+    ## A `Cargo.toml` project whose `.cargo/config.toml` mentions `wasm32`.
+    ## `isWasmCargoProject` (`src/ct/utilities/language_detection.nim:18-26`)
+    ## is the marker that decides it today, and `detectFolderLang` turns it
+    ## into `LangRustWasm` — the ISA welded onto the language.
+
+func targetIsaForAssessment*(kind: TargetKind,
+                             lang: SourceLanguage): TargetIsa =
+  ## **PRIMARY.**  The artefact's ISA, derived from the assessed KIND, with the
+  ## per-language fallback used only when the kind says nothing.
+  ##
+  ## This exists because the ISA is a property of the ARTEFACT and the language
+  ## is a property of the FILE, so `fallbackTargetIsaForLanguage` cannot be the
+  ## answer — see its doc comment for the `.nim` / `.nims` counterexample that
+  ## makes this concrete.  Every entry below is a case where the kind carries
+  ## information the language provably does not:
+  ##
+  ## | kind | language | ISA | why the language cannot say |
+  ## | --- | --- | --- | --- |
+  ## | `nimscript` | `slNim` | `tiNimVm` | `.nim` is also `slNim` and is `tiNative` |
+  ## | `nim-source` | `slNim` | `tiNative` | ditto, from the other side |
+  ## | `wasm-cargo-project` | `slRust` | `tiWasm` | a plain crate is also `slRust` and is `tiNative` |
+  ##
+  ## Rule K2 applies as everywhere else: the FIRST token this build understands
+  ## wins, so a producer's more specific token is preferred over its degradation
+  ## targets.  A kind this build does not know is not an error here — it simply
+  ## does not override, and the language fallback answers.
+  for specific in kind.specific:
+    if specific == KindNimScript: return tiNimVm
+    if specific == KindNimSource: return tiNative
+    if specific == KindWasmCargoProject: return tiWasm
+  fallbackTargetIsaForLanguage(lang)
+
+func recordingApproachForAssessment*(kind: TargetKind,
+                                     lang: SourceLanguage): RecordingApproach =
+  ## **PRIMARY.**  How CodeTracer will observe this artefact.
+  ##
+  ## A plain composition, and deliberately not a table of its own: once the
+  ## assessment has settled the ISA, the approach is a total function of the
+  ## ISA (`defaultRecordingApproach`) with nothing left to guess.  Writing it as
+  ## a composition rather than a second hand-maintained mapping is the whole
+  ## improvement over `USES_MATERIALIZED_TRACES`, whose 24 `true` entries had to
+  ## be kept in agreement with `recorderToolFor`'s 24 `supported: true` arms by
+  ## hand.
+  defaultRecordingApproach(targetIsaForAssessment(kind, lang))

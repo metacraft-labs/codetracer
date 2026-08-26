@@ -213,9 +213,9 @@ suite "the default relations are total and say something":
   test "only the sentinel language defaults to the unknown ISA":
     for v in SourceLanguage:
       if v == slUnknown:
-        check defaultTargetIsa(v) == tiUnknown
+        check fallbackTargetIsaForLanguage(v) == tiUnknown
       else:
-        check defaultTargetIsa(v) != tiUnknown
+        check fallbackTargetIsaForLanguage(v) != tiUnknown
 
   test "only the unknown ISA defaults to the unknown approach":
     for v in TargetIsa:
@@ -229,8 +229,8 @@ suite "the default relations are total and say something":
     # language is unchanged and the ISA moves.  `isWasmCargoProject`
     # (`src/ct/utilities/language_detection.nim:18-26`) is the assessment step
     # that decides it today, by reading `.cargo/config.toml` for `wasm32`.
-    check defaultTargetIsa(slRust) == tiNative
-    check defaultTargetIsa(slCpp) == tiNative
+    check fallbackTargetIsaForLanguage(slRust) == tiNative
+    check fallbackTargetIsaForLanguage(slCpp) == tiNative
     check defaultRecordingApproach(tiNative) == raMcr
     check defaultRecordingApproach(tiWasm) == raVmEmulation
 
@@ -633,7 +633,129 @@ suite "all 40 Lang values decompose onto the four axes":
     for lang in Lang:
       let d = decompose(lang)
       if lang notin NonDefaultIsaByDesign:
-        if defaultTargetIsa(d.language) != d.isa:
-          checkpoint($lang & ": default " & token(defaultTargetIsa(d.language)) &
+        if fallbackTargetIsaForLanguage(d.language) != d.isa:
+          checkpoint($lang & ": default " & token(fallbackTargetIsaForLanguage(d.language)) &
             " but decomposed " & token(d.isa))
-        check defaultTargetIsa(d.language) == d.isa
+        check fallbackTargetIsaForLanguage(d.language) == d.isa
+
+# ---------------------------------------------------------------------------
+# The `.nim` / `.nims` pair: the canonical proof that the axes are independent
+# ---------------------------------------------------------------------------
+
+suite "one source language, two artefacts: .nim versus .nims":
+  ## This pair is the reason the four axes exist, stated as an assertion.
+  ##
+  ## `Lang` cannot express it at all: BOTH files are recorded as `LangNim`
+  ## (`src/ct/db_backend_record.nim` calls `importTrace(..., LangNim, ...)` on
+  ## the `.nims` path at `:140` and reaches the MCR path at `:143-188` for
+  ## `.nim`), so the one value that is supposed to decide the recorder is the
+  ## same value for two different recorders.  `usesMaterializedTraces(LangNim)`
+  ## is a single bit that has to answer for both, which is why it cannot be
+  ## right for either.
+  ##
+  ## On the axes the pair separates cleanly, and it separates on THREE of the
+  ## four: same language, different ISA, different toolchain, different
+  ## recording approach.  That is the whole model in one example — a per-file
+  ## property (the notation) held constant while every per-artefact property
+  ## moves.
+  ##
+  ## The kinds are the assessment's answer, not a language: "this is a
+  ## nimscript" versus "this is a Nim source file".
+
+  let nimScript = TargetKind(specific: @[KindNimScript], family: tfSingleFile)
+  let nimSource = TargetKind(specific: @[KindNimSource], family: tfSingleFile)
+
+  test "the source language is the SAME for both":
+    # Per-file axis: `.nim` and `.nims` are both Nim.  Anything that made these
+    # differ would have re-created `LangRustWasm` with different letters.
+    check toLangFromFilename("a.nim") == LangNim
+    check toLangFromFilename("a.nims") == LangNim
+    # And on the new axis, both are `slNim` -- the language is not what
+    # distinguishes them.
+    const lang = slNim
+    check targetIsaForAssessment(nimScript, lang) != tiUnknown
+    check targetIsaForAssessment(nimSource, lang) != tiUnknown
+
+  test "the target ISA DIFFERS: a nimscript runs on the Nim VM":
+    check targetIsaForAssessment(nimScript, slNim) == tiNimVm
+    check targetIsaForAssessment(nimSource, slNim) == tiNative
+    check targetIsaForAssessment(nimScript, slNim) !=
+          targetIsaForAssessment(nimSource, slNim)
+
+  test "the recording approach DIFFERS: the Nim VM emits the trace itself":
+    # `nim e --trace:<...>/trace.ct` (`db_backend_record.nim:119-141`) -- the VM
+    # writes the container, so this is an instrumented runtime and it DOES
+    # produce a materialized trace.  The compiled path is `ct-mcr`, which is
+    # native replay and does not.
+    check recordingApproachForAssessment(nimScript, slNim) ==
+          raInstrumentedRuntime
+    check recordingApproachForAssessment(nimSource, slNim) == raMcr
+    check producesMaterializedTrace(recordingApproachForAssessment(nimScript, slNim))
+    check(not producesMaterializedTrace(
+      recordingApproachForAssessment(nimSource, slNim)))
+    check isNativeReplay(recordingApproachForAssessment(nimSource, slNim))
+    check(not isNativeReplay(recordingApproachForAssessment(nimScript, slNim)))
+
+  test "the toolchains are two distinct members, both already named":
+    # `tcNimScriptVm` was in the axis from the start; `tcNimC` is its pair.
+    # Nothing derives the toolchain yet -- this asserts only that the axis can
+    # say it, which is what `Lang` could not.
+    check tcNimScriptVm != tcNimC
+    check token(tcNimScriptVm) == "nimscriptvm"
+    check token(tcNimC) == "nimc"
+
+  test "no function of SourceLanguage alone could have answered this":
+    # The signature defect, as an assertion.  `fallbackTargetIsaForLanguage` is
+    # total over `SourceLanguage` and therefore returns ONE answer for `slNim`,
+    # while the two artefacts genuinely have two ISAs.  So the fallback is
+    # necessarily wrong for one of them -- which is why it is named a fallback
+    # and why the assessment-derived path is the primary one.
+    let fallback = fallbackTargetIsaForLanguage(slNim)
+    let scriptIsa = targetIsaForAssessment(nimScript, slNim)
+    let sourceIsa = targetIsaForAssessment(nimSource, slNim)
+    check scriptIsa != sourceIsa
+    check (fallback == scriptIsa) != (fallback == sourceIsa)
+
+  test "an assessment with no specific kind falls back to the language":
+    # The fallback is reachable and does what it says: a bare family with no
+    # specific token has nothing to override with.
+    let bare = TargetKind(specific: @[], family: tfSingleFile)
+    check targetIsaForAssessment(bare, slNim) ==
+          fallbackTargetIsaForLanguage(slNim)
+    check targetIsaForAssessment(bare, slRust) ==
+          fallbackTargetIsaForLanguage(slRust)
+
+  test "an unknown specific kind does not override, it defers":
+    # Forward compatibility: a kind this build has never heard of must not
+    # break the derivation, and must not silently become `tiUnknown`.
+    let future = TargetKind(specific: @["some-future-kind"],
+                            family: tfSingleFile)
+    check targetIsaForAssessment(future, slNim) ==
+          fallbackTargetIsaForLanguage(slNim)
+    check targetIsaForAssessment(future, slNim) != tiUnknown
+
+  test "the wasm pair decomposes the same way, on the same axis":
+    # `LangRustWasm` is the same defect as `.nims`, one axis over: one language,
+    # two ISAs, decided by the assessment rather than by the file's notation.
+    let wasmCrate = TargetKind(specific: @[KindWasmCargoProject],
+                               family: tfProjectDirectory)
+    let plainCrate = TargetKind(specific: @[KindCargoProject],
+                                family: tfProjectDirectory)
+    check targetIsaForAssessment(wasmCrate, slRust) == tiWasm
+    check targetIsaForAssessment(plainCrate, slRust) == tiNative
+    check recordingApproachForAssessment(wasmCrate, slRust) == raVmEmulation
+    check recordingApproachForAssessment(plainCrate, slRust) == raMcr
+
+  test "tiNimVm is a first-class ISA: token, parse, and both predicates":
+    # Knock-on checks for the new member, so it cannot be half-added.
+    check token(tiNimVm) == "nimvm"
+    var got: TargetIsa
+    check parseTargetIsa("nimvm", got)
+    check got == tiNimVm
+    check parseTargetIsa("  NimVM  ", got)   # the parser strips and lowercases
+    check got == tiNimVm
+    check defaultRecordingApproach(tiNimVm) == raInstrumentedRuntime
+    check defaultRecordingApproach(tiNimVm) != raUnknown
+    # It must not collide with a reserved source-language token.
+    for reserved in ReservedSourceLanguageTokens:
+      check token(tiNimVm) != reserved
