@@ -63,9 +63,18 @@
 ## `codetracer-native-backend/src/lang.rs` as its partner.  That was wrong:
 ## that enum has a `Small` variant at ordinal 21 and diverges from there.  The
 ## worker socket between the two Rust crates now carries language names, so no
-## ordinal crosses a repository boundary any more; this hop is the last one
-## that carries an ordinal at all outside the persisted
-## `trace_index.db.lang` column.)
+## ordinal crosses a repository boundary any more.)
+##
+## **Correction (trace_index schema version 1).**  This paragraph used to end
+## "…this hop is the last one that carries an ordinal at all outside the
+## persisted `trace_index.db.lang` column".  That parenthetical is no longer
+## true and the column is no longer an exception: `recordings.lang` is `TEXT`
+## and stores the enum *name*, migrated in one shot under a
+## `PRAGMA user_version` gate (see the "Schema versioning" section of
+## `src/common/trace_index.nim` and `trace_index_migration_test.nim`).  The
+## `ct/load-locals` DAP hop this property pins is now the **only** place an
+## ordinal survives, which is what makes this test the last line of defence
+## rather than one of two.
 ##
 ## The test below parses the `pub enum Lang { … }` block out of the Rust source
 ## and compares it to `Lang`, name by name and ordinal by ordinal.
@@ -77,8 +86,8 @@
 ## checking were the ones that had rotted:
 ##
 ## * `src/tui/src/lang.rs` had **37** variants.  It stopped at `Solana` and was
-##   missing `Elixir`, `Erlang` and `Php` — while still writing the ordinal into
-##   the shared `trace_index.db` `lang` column and sending it to the backend in
+##   missing `Elixir`, `Erlang` and `Php` — while decoding the shared
+##   `trace_index.db` `lang` column and sending the ordinal to the backend in
 ##   `ConfigureArg`.  The live database on a developer machine already holds
 ##   rows at `lang = 37` (`LangElixir`), past that copy's last ordinal of 36 —
 ##   an ordinal it decoded as `None`, which the TUI's
@@ -87,6 +96,18 @@
 ##   development and the number moves.  Three successive readings during this
 ##   work gave 24, 25 and 26.  The claim that matters is that the population is
 ##   non-empty, not its size.)
+##
+##   **Correction.**  This bullet used to say the TUI *wrote* that ordinal into
+##   `trace_index.db`.  It did not, and could not: `register_trace_in_db`
+##   (`src/tui/src/main.rs`) targets the pre-M-REC-2 `traces` / `trace_values`
+##   tables with camelCase columns, which `src/common/trace_index_test_helper.nim`
+##   asserts must *not* exist on a current database; its first `prepare(…)?`
+##   therefore fails, and its only call site is commented out
+##   (`src/tui/src/main.rs:363`).  The sibling read path
+##   `load_trace_from_program` panics on the same missing table before it ever
+##   reaches the `lang` column.  The *read* hazard described above was real; the
+##   *write* was not.  The Nim core is, and was, the column's only writer —
+##   which is what made the schema-version-1 migration a single-writer problem.
 ## * `libs/ct-dap-client/src/types/common.rs` had **21**, diverging from ordinal
 ##   6 (`Fortran` canonically, `Python` there), and its tracepoint requests
 ##   carry that ordinal over DAP to db-backend.
@@ -384,8 +405,10 @@ proc parseRustLangEnum(source: string, path: string): seq[string] =
       "could not find `" & startMarker & "` in " & path &
       ".  The enum moved or was renamed; this check must be updated to " &
       "follow it, not deleted — `ct/load-locals` still sends `lang` as an " &
-      "ordinal over that boundary, and the persisted " &
-      "`trace_index.db.recordings.lang` column stores it.")
+      "ordinal over that boundary, and since the persisted " &
+      "`trace_index.db.recordings.lang` column moved to enum names " &
+      "(trace_index schema version 1) that DAP hop is the last ordinal-" &
+      "carrying boundary left.")
 
   let bodyStart = startIdx + startMarker.len
   let endIdx = source.find("\n}", bodyStart)
@@ -634,7 +657,7 @@ suite "libs/ct-lang holds the only ordinal-carrying Rust `Lang`":
         "  This repository used to carry three hand-written Rust copies of " &
         "the language enum.  Two of them had silently fallen behind: " &
         "`src/tui/src/lang.rs` was missing Elixir/Erlang/Php while still " &
-        "writing the ordinal into the shared trace_index.db, and " &
+        "decoding the ordinal from the shared trace_index.db, and " &
         "`libs/ct-dap-client` diverged from ordinal 6 while sending the " &
         "ordinal over DAP.  Depend on `ct-lang` instead.  If the new enum " &
         "genuinely is not the language ordinal, add it to " &
@@ -723,8 +746,8 @@ suite "the deleted Lang copies stay deleted and their sites use ct-lang":
       checkpoint(
         TuiLangPath & " is back.  The TUI supports every language the GUI " &
         "supports by definition; it must not carry its own list.  The copy " &
-        "that used to live here had 37 of the 40 variants and wrote the " &
-        "ordinal into the same trace_index.db the Nim core reads.")
+        "that used to live here had 37 of the 40 variants and decoded the " &
+        "ordinal out of the same trace_index.db the Nim core writes.")
 
   test "src/db-backend/src/lang.rs re-exports rather than redeclares":
     check fileExists(DbBackendLangPath)
