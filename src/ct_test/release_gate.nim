@@ -643,6 +643,30 @@ const
     # artifact and the local file list, with no filesystem and no HTTP, which
     # is exactly why the planner and the executor are separate modules.
     "src/tests/gui/tests/sharing/artifact_transfer_vm_test.nim",
+    # AS-3 — client-side encryption and password protection, once, for every
+    # kind.
+    #
+    # Registered here because this file holds the *claims*.  Every sentence a
+    # user reads about what encryption protects them from, what it does not,
+    # what the service can still see, and what happens if they lose the
+    # password comes out of `artifact_protection.nim`'s registry, and this
+    # suite is what asserts those sentences say what they say — including that
+    # the recovery answer is literally "Nothing." rather than a euphemism, and
+    # that the payload-encrypting protection does NOT claim to encrypt the
+    # metadata.
+    #
+    # It also holds AS-3's "the flow is identical across kinds" item in the
+    # only form that can be checked exhaustively: the password prompt is a
+    # function of `(protection, noun)`, and the suite asserts that substituting
+    # the noun turns any kind's prompt into any other's, exactly.
+    #
+    # Runs on BOTH backends, and that is the point of splitting the pure claims
+    # away from the native cryptography: a promise whose test needs a socket
+    # and an OS CSPRNG is a promise that goes unchecked on most runs.  The
+    # cryptography itself is asserted natively in
+    # `src/ct/online_sharing/artifact_crypto_test.nim`, and end to end over a
+    # real socket in `artifact_store_roundtrip_test.nim`; all three are needed.
+    "src/tests/gui/tests/sharing/artifact_protection_vm_test.nim",
   ]
 
   CliRecordGateTests* = [

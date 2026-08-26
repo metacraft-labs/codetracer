@@ -34,12 +34,34 @@
 ## big today.  A large review dataset takes the identical path, and gets it by
 ## declaring the layout rather than by any code here naming its kind.
 ##
-## ## What this module deliberately does NOT do
+## ## Where encryption sits, and why it barely shows up here (AS-3)
 ##
-## No encryption, no password protection, no integrity check beyond the object
-## store's own ETag.  There is none anywhere on this path; AS-3 builds it, and
-## the seam it will extend is `ArtifactProtection` in `artifact.nim`, not
-## anything here.
+## A protected artifact takes the **identical** conversation: the same URLs,
+## the same bodies, the same order.  What changes is only the bytes inside each
+## `atsPutPart`, because AS-3's envelope wraps the *payload* rather than the
+## request (`artifact_protection.nim` for why — the recording kind's request
+## bodies are frozen, so an envelope carried in a body could not have been
+## expressed for that kind at all).
+##
+## So this module's whole share of encryption is two refusals and one field:
+## `ArtifactPart.protection` says what will be applied to a part's bytes on the
+## way out, and `planArtifactUpload` refuses a plan where the parts and the
+## artifact disagree about it — in **both** directions, because a part sealed
+## for an artifact that does not declare protection is as wrong as an
+## unprotected part on one that does, and only the second of those is the one
+## people think of.
+##
+## The other refusal is `partIndex` distinctness, which reads like tidiness and
+## is not: the AEAD nonce for a part is a pure function of its index
+## (`artifact_protection.partNonce`, and NIST SP 800-38D §8.2.1 for why
+## deterministic beats random here), so two parts sharing an index would be two
+## messages under one (key, nonce) pair — the one failure mode of GCM that
+## loses the key stream outright.  Nonce uniqueness is therefore enforced by
+## the planner rather than assumed by the sealer.
+##
+## No key, no password and no plaintext ever enters this module.  It is pure,
+## so it could not send one anywhere, but keeping the key out of the plan also
+## keeps it out of anything a diagnostic might print.
 
 import std/[json, options, strutils]
 
@@ -87,10 +109,32 @@ type
       ## Where the bytes are on this machine.
     index*: int
       ## 0-based position in the payload.  Always 0 for a single-file payload.
+      ##
+      ## Distinct across the payload, enforced by `planArtifactUpload`.  Two
+      ## reasons, and the second is the load-bearing one: a slice set is
+      ## reassembled by index, and the encryption nonce is derived from it
+      ## (`ArtifactPart.protection`).
     byteSize*: int64
+      ## The number of bytes that will cross the wire for this part — which for
+      ## a protected part is the **sealed** size, not the size of the file at
+      ## `localPath`.  It has to be, because it is what the service is told the
+      ## content length is; `artifact_crypto.sealedPartSize` computes it from
+      ## the same header the sealing will use, so the two cannot disagree.
     role*: ArtifactPartRole
       ## Defaults to `aprSlice`, the enum's zero value, so a caller that has no
       ## sidecars does not have to think about this at all.
+    protection*: ArtifactProtection
+      ## What will be applied to this part's bytes between reading them from
+      ## `localPath` and sending them.  `apNone` — the enum's zero value — for
+      ## every part of an unprotected artifact, so nothing that predates AS-3
+      ## has to mention it.
+      ##
+      ## It is a field on the part rather than a flag on the plan because the
+      ## executor acts part by part, and a rule that lived on the plan would be
+      ## a rule the loop had to remember to consult.  `planArtifactUpload`
+      ## checks that every part agrees with the artifact's declared protection,
+      ## which is the check that makes "the payload went up in the clear
+      ## because one loop forgot" unrepresentable rather than unlikely.
 
   ArtifactTransferStepKind* = enum
     ## The steps a transfer is made of.  Six, and every one of them exists for
@@ -195,6 +239,16 @@ proc planArtifactUpload*(artifact: Artifact, parts: seq[ArtifactPart],
     return ArtifactUploadPlanResult(error:
       "artifact payload declares " & $artifact.payload.byteSize &
       " bytes but its parts total " & $totalByteSize(parts))
+  # Indices must be exactly the set 0 ..< parts.len, each once.  Checked with
+  # a seen-list rather than by sorting so the error can name the offender.
+  #
+  # AS-3 made this security-bearing: `artifact_protection.partNonce` derives
+  # the AEAD nonce from the index, and a repeated index under one content key
+  # is the (key, nonce) reuse that NIST SP 800-38D §8.2 forbids outright — it
+  # leaks the XOR of the two plaintexts and, for GCM specifically, the
+  # authentication subkey.  Before AS-3 the check merely bounded the index, so
+  # `[0, 0, 2]` planned happily.
+  var seen = newSeq[bool](parts.len)
   for part in parts:
     if part.name.len == 0:
       return ArtifactUploadPlanResult(error:
@@ -206,6 +260,21 @@ proc planArtifactUpload*(artifact: Artifact, parts: seq[ArtifactPart],
       return ArtifactUploadPlanResult(error:
         "payload part '" & part.name & "' has index " & $part.index &
         ", outside 0 ..< " & $parts.len)
+    if seen[part.index]:
+      return ArtifactUploadPlanResult(error:
+        "payload part '" & part.name & "' repeats index " & $part.index &
+        "; a payload's part indices must be 0 ..< " & $parts.len &
+        ", each exactly once")
+    seen[part.index] = true
+    # Both directions.  An unprotected part on a protected artifact would send
+    # the payload in the clear under a record that claims it is encrypted; a
+    # protected part on an unprotected artifact would hand the reader bytes
+    # nothing told them to decrypt.
+    if part.protection != artifact.access.protection:
+      return ArtifactUploadPlanResult(error:
+        "payload part '" & part.name & "' is prepared as '" &
+        $part.protection & "' but the artifact declares protection '" &
+        $artifact.access.protection & "'")
 
   ArtifactUploadPlanResult(plan: ArtifactUploadPlan(
     artifact: artifact,
@@ -215,6 +284,23 @@ proc planArtifactUpload*(artifact: Artifact, parts: seq[ArtifactPart],
     recordingMode: recordingMode,
     omniscientDbMode: omniscientDbMode,
     totalEvents: totalEvents))
+
+proc addressedTo*(plan: ArtifactUploadPlan,
+    artifact: Artifact): ArtifactUploadPlan =
+  ## The same plan, about the artifact record the **service** acknowledged.
+  ##
+  ## The single-file conversation's last request names the artifact, and it has
+  ## to name the id the service just echoed rather than the one this machine
+  ## started with — if the two ever differ, confirming under the local id would
+  ## confirm an object the service has not heard of.  For the recording kind
+  ## they are the same value by the `aioSeededFromRecordingId` binding, so this
+  ## is a no-op there; it is the general rule that matters.
+  ##
+  ## No re-validation: `planArtifactUpload` has already accepted the payload
+  ## description, and the only thing that moves here is the identity the
+  ## service itself supplied.
+  result = plan
+  result.artifact = artifact
 
 proc uploadOpenStep*(plan: ArtifactUploadPlan): ArtifactTransferStep =
   ## The first request: the one that either asks for a presigned URL for the

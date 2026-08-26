@@ -5,14 +5,23 @@
 
 import std/[httpclient, net, os, strutils]
 
-proc putFile*(url: string, filePath: string): string =
-  ## Uploads ``filePath`` to the presigned ``url`` via HTTP PUT.
+proc putBytes*(url: string, fileData: string): string =
+  ## Uploads ``fileData`` to the presigned ``url`` via HTTP PUT.
   ## Returns the ETag header value from the response (needed for upload
   ## confirmation). Raises on HTTP error or missing ETag.
   ##
+  ## AS-3 replaced the previous path-taking ``putFile`` with this.  A protected
+  ## part's bytes are the *sealed* bytes, which exist only in memory: writing
+  ## them to a temporary file so that a path-taking PUT could read them back
+  ## would put ciphertext — and, for the moment it takes to write it, a file
+  ## whose deletion has to be got right — somewhere neither the caller nor the
+  ## reader asked for.  ``artifact_store.partBytesToSend`` reads the file, so a
+  ## second procedure that also read files would have been a caller-less
+  ## alternative spelling of the same request.
+  ##
   ## The C# implementation uses ``StreamContent`` with explicit Content-Length.
-  ## We read the file into memory — acceptable for trace archives (<500 MB).
-  let fileData = readFile(filePath)
+  ## We hold the body in memory; see ``Artifact-Store.md`` §8 defect 7 for why
+  ## streaming is still open and why the bound is one *part*.
   let fileSize = fileData.len
 
   let client = newHttpClient(

@@ -8,12 +8,17 @@
 ## to fetch and must not guess.  It asks the store, and the store answers; only
 ## then does anything kind-specific happen, in one `case` at the very end.
 ##
-## Neither ``streams`` nor ``nimcrypto`` is imported here, and the absence of
-## the second one is deliberate rather than incidental: nothing on the sharing
-## path encrypts anything, and an unused ``nimcrypto`` import made this file
-## read as "there is crypto here" to anyone grepping for it.  If confidentiality
-## is ever added, it belongs behind the artifact model's ``ArtifactProtection``
-## seam (``artifact.nim``), not behind an import.
+## AS-3 adds a second axis this command deliberately does **not** branch on:
+## whether the payload was encrypted.  ``artifact_store.fetchArtifact`` decides
+## that from the downloaded bytes' own magic — not from anything the service
+## said — and hands back plaintext either way, so everything below sees a
+## payload and not a decision.  That is why encryption did not have to be
+## written once per kind here.
+##
+## Neither ``streams`` nor ``nimcrypto`` is imported here, and the second
+## absence is still deliberate: the cryptography lives in
+## ``artifact_crypto.nim``, reached through the store, and an import here would
+## once again make this file read as the place where it happens.
 import std/[ terminal, options, strutils, strformat, os ]
 import ../../common/[ config, trace_index, paths, lang, types ]
 import ../utilities/[ types, zip, language_detection ]
@@ -42,11 +47,20 @@ type
       ## Whether the service carried the artifact record — and therefore the
       ## metadata — alongside the download URL.  A service deployed before AS-2
       ## does not, which is not an error.
+    protection*: ArtifactProtection
+      ## What the downloaded bytes actually carried, read from the bytes rather
+      ## than from the record (AS-3).
+    wasDecrypted*: bool
+      ## Whether `archivePath` had to be decrypted to get here.  `false` for
+      ## every artifact stored before AS-3, which is what "an old-format
+      ## artifact still downloads" means concretely: no envelope, no prompt,
+      ## nothing on this path runs at all.
     error*: string
 
 proc downloadArtifact*(url: string,
     token: Option[string] = none(string),
     baseUrl: Option[string] = none(string),
+    secret: string = "",
     onProgress: ArtifactProgressProc = nil): DownloadedArtifact =
   ## Fetch whatever artifact `url` names, by id, without knowing its kind.
   ##
@@ -76,7 +90,8 @@ proc downloadArtifact*(url: string,
   let archivePath = codetracerTmpPath /
     fmt"downloaded-artifact-{artifactId}.zip"
   let fetched = client.fetchArtifact(
-    artifactId, bearerToken, archivePath, onProgress = onProgress)
+    artifactId, bearerToken, archivePath,
+    secret = secret, onProgress = onProgress)
   if fetched.error.len > 0:
     return DownloadedArtifact(error: "error: " & fetched.error)
   if fetched.kind.isNone:
@@ -92,7 +107,9 @@ proc downloadArtifact*(url: string,
     artifactId: artifactId,
     archivePath: archivePath,
     record: fetched.record,
-    hasRecord: fetched.hasRecord)
+    hasRecord: fetched.hasRecord,
+    protection: fetched.protection,
+    wasDecrypted: fetched.wasDecrypted)
 
 proc importDownloadedRecording(downloaded: DownloadedArtifact,
     sourceUrl: string): string =
@@ -157,13 +174,14 @@ proc importDownloadedRecording(downloaded: DownloadedArtifact,
 
 proc downloadTrace*(url: string,
     token: Option[string] = none(string),
-    baseUrl: Option[string] = none(string)): string =
+    baseUrl: Option[string] = none(string),
+    secret: string = ""): string =
   ## Download a recording and import it, returning the local recording id.
   ##
   ## Kept as the recording-shaped entry point for callers that want a
   ## recording and nothing else; it refuses when the link names some other
   ## kind rather than unpacking it in the wrong place.
-  let downloaded = downloadArtifact(url, token, baseUrl)
+  let downloaded = downloadArtifact(url, token, baseUrl, secret)
   if downloaded.error.len > 0:
     echo downloaded.error
     quit(1)
@@ -183,7 +201,9 @@ proc unpackDownloadedReviewDataset(downloaded: DownloadedArtifact): string =
 
 proc downloadTraceCommand*(traceDownloadUrl: string,
     token: Option[string] = none(string),
-    baseUrl: Option[string] = none(string)) =
+    baseUrl: Option[string] = none(string),
+    passwordStdin: bool = false,
+    passwordFile: Option[string] = none(string)) =
   ## `ct download <LINK>`.
   ##
   ## Kind-neutral until the last step: fetch by id, then do the one thing the
@@ -221,7 +241,27 @@ proc downloadTraceCommand*(traceDownloadUrl: string,
         fmt"via {runtime.transport.kind}"
       return
 
-    let downloaded = downloadArtifact(traceDownloadUrl, token, baseUrl)
+    # AS-3.  The password is read up front when one was named, and NOT asked
+    # for otherwise: whether this artifact is encrypted is something only the
+    # downloaded bytes can say, so prompting before the fetch would ask every
+    # user for a password most artifacts do not have.  When it turns out one is
+    # needed and none was given, `fetchArtifact` says so by name and says that
+    # CodeTracer cannot recover it.
+    let source = secretSource(
+      passwordStdin, passwordFile.get(""), bareDashInArgv())
+    if source.error.len > 0:
+      echo "error: " & source.error
+      quit(1)
+    var secret = ""
+    if source.path.len > 0:
+      let supplied = readSecretFromFile(source.path)
+      if supplied.error.len > 0:
+        echo "error: " & supplied.error
+        quit(1)
+      secret = supplied.secret
+
+    let downloaded = downloadArtifact(
+      traceDownloadUrl, token, baseUrl, secret)
     if downloaded.error.len > 0:
       echo downloaded.error
       quit(1)

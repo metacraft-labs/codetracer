@@ -380,17 +380,26 @@ suite "AS-1 — the access model is kind-neutral and reuses what exists":
     check $avTenant == "tenant"
     check $avTenantOrInvite == "tenant-or-invite"
 
-  test "protection has exactly one value today, and it is 'none'":
-    # AS-3 builds encryption and password protection. AS-1 must not imply they
-    # exist: there is no encryption anywhere on this path, and a second value
-    # here would be the first place someone read one into it.
-    var protections = 0
-    for protection in ArtifactProtection:
-      inc protections
-    check protections == 1
+  test "protection defaults to 'none', and 'none' claims nothing":
+    # AS-1 asserted this enum had exactly ONE value, so that AS-3 would have to
+    # widen it deliberately rather than quietly. AS-3 widened it — deliberately,
+    # by editing this test — and the cardinality assertion moved to
+    # `artifact_protection_vm_test.nim`, where it now sits beside a stronger
+    # guard: the protection registry is indexed by the enum, so a value without
+    # a row stating what it protects against, what it does not, and what
+    # recovery exists does not compile.
+    #
+    # What stays HERE is the property this suite is about: an artifact is
+    # unprotected unless somebody asked for protection, and `apNone` must not
+    # be read as a claim.
     check $apNone == "none"
+    check not protectionSpec(apNone).encryptsPayload
+    check not protectionSpec(apNone).requiresSecretToRead
     for kind in ArtifactKind:
+      checkpoint($kind)
+      # The default construction, and the one every pre-AS-3 caller gets.
       check sampleArtifact(kind).access.protection == apNone
+      check initArtifactAccess(SampleTenantId).protection == apNone
 
   test "the access record round-trips for every kind":
     for kind in ArtifactKind:
@@ -402,6 +411,13 @@ suite "AS-1 — the access model is kind-neutral and reuses what exists":
       check restored.access.visibility == avTenantOrInvite
       check restored.access.minimumWriteRole == arAdmin
       check restored.access.protection == apNone
+      # AS-3: and the protection the caller asked for survives too, rather
+      # than the round trip only being exercised on the default.
+      var protected = sampleArtifact(kind)
+      protected.access = initArtifactAccess(SampleTenantId,
+        protection = apPasswordScryptAes256Gcm)
+      check parseArtifact(protected.toJson()).artifact.access.protection ==
+        apPasswordScryptAes256Gcm
 
 suite "AS-2 — unknown access-control tokens are refused, as unknown kinds are":
   ## `Artifact-Store.md` §8 defect 10.  Before AS-2, `parseArtifact` read

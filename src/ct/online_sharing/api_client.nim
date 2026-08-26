@@ -36,12 +36,20 @@
 ## that a second kind cannot acquire a second transport by accident: there is
 ## one grammar, parameterised by kind.
 
+## AS-3: the four upload requests below no longer *build* anything.  They take
+## an ``ArtifactTransferStep`` — a URL and a body that ``artifact_transfer.nim``
+## produced — and send it.  Before AS-3 they rebuilt the URL and the body from
+## the artifact, which made the planner a second, parallel description of the
+## same conversation that only the tests consumed; mutating the planner alone
+## left the round-trip suite green, which is how it was proved.  See
+## ``Artifact-Store.md`` §10.1.
+
 import std/[httpclient, json, net, options, strformat, strutils]
 import collab_invite_url
-import artifact
+import artifact_transfer
 
 export collab_invite_url
-export artifact
+export artifact_transfer
 
 type
   TenantListItem* = object
@@ -173,6 +181,43 @@ proc ensureSuccess(response: Response, context: string) =
     error.status = code
     raise error
 
+proc requireStep(step: ArtifactTransferStep,
+    expected: ArtifactTransferStepKind) =
+  ## Refuse when the executor hands a step to the wrong sender.
+  ##
+  ## A programming error rather than a service error, and it is checked rather
+  ## than assumed because the whole point of AS-3's first change is that the
+  ## executor now follows the plan: a sender that quietly accepted whichever
+  ## step it was given would let the two drift apart again, one call site at a
+  ## time.
+  if step.kind != expected:
+    raise newException(ValueError,
+      "artifact transfer: expected a '" & $expected & "' step, got '" &
+      $step.kind & "'")
+
+proc sendPlannedStep(client: ApiClient, step: ArtifactTransferStep,
+    httpMethod: HttpMethod, bearerToken, context: string): JsonNode =
+  ## Send one planned request, exactly as planned, and return its parsed body.
+  ##
+  ## **The URL and the body come from `step` and are not touched here.**  That
+  ## is the whole of AS-3's executor/planner unification: there is one
+  ## description of what an upload says to the service, it lives in
+  ## ``artifact_transfer.nim``, it is pure, and it is asserted headlessly
+  ## against the literal strings the pre-AS-1 client sent.  This procedure's
+  ## only job is the socket.
+  if step.urlPath.len == 0:
+    raise newException(ValueError,
+      "artifact transfer: the planned '" & $step.kind & "' step has no URL")
+  let body = if step.body.isNil: "" else: $step.body
+  let response = client.httpClient.request(
+    step.urlPath, httpMethod = httpMethod,
+    headers = bearerHeaders(bearerToken), body = body)
+  ensureSuccess(response, context)
+  try:
+    parseJson(response.body)
+  except CatchableError:
+    newJObject()
+
 # ---------------------------------------------------------------------------
 # Tenant endpoints
 # ---------------------------------------------------------------------------
@@ -282,29 +327,26 @@ proc exchangeCollabInvite*(client: ApiClient, inviteToken: string):
   for hint in body{"transportHints"}.getElems:
     result.transportHints.add hint.getStr()
 
-proc requestArtifactUploadUrl*(client: ApiClient, tenantId: string,
-    artifact: Artifact, fileName: string,
+proc requestArtifactUploadUrl*(client: ApiClient,
+    step: ArtifactTransferStep,
     bearerToken: string): ArtifactUploadUrlResponse =
-  ## ``POST /api/v1/tenants/{tenantId}/{segment}/upload-url`` — the kind-neutral
-  ## single-file entry point.
+  ## Send the plan's ``atsRequestUploadUrl`` step —
+  ## ``POST /api/v1/tenants/{tenantId}/{segment}/upload-url``.
   ##
-  ## AS-2: both the URL and the body come from the artifact, so the recording
-  ## kind reproduces the pre-AS-2 request exactly (its registry segment is
-  ## ``traces`` and its body is frozen to the four keys the deployed service
-  ## reads) and every other kind gets the same request shape with its metadata
-  ## carried alongside.  ``recordingId`` is echoed back by the service for the
-  ## recording kind and ``artifactId`` for every other kind; a service that
-  ## echoes neither leaves ``acknowledgedArtifactId`` empty rather than having
-  ## the local id substituted for it, so "the service named this back" stays a
-  ## fact the caller can test.
-  let url = artifactUploadUrlPath(client.baseApiUrl, tenantId, artifact.kind)
-  let body = $ buildArtifactUploadUrlBody(artifact, fileName)
-  let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken),
-    body = body)
-  ensureSuccess(response, "requestArtifactUploadUrl")
-
-  let jsonBody = parseJson(response.body)
+  ## AS-2 derived this URL and body from the artifact *here*; AS-3 takes them
+  ## from the step the planner produced, so there is one description of the
+  ## request rather than two that agree by convention.  For the recording kind
+  ## the planner's output is character-identical to the pre-AS-1 strings, and
+  ## `artifact_transfer_vm_test.nim` pins that against literals.
+  ##
+  ## ``recordingId`` is echoed back by the service for the recording kind and
+  ## ``artifactId`` for every other kind; a service that echoes neither leaves
+  ## ``acknowledgedArtifactId`` empty rather than having the local id
+  ## substituted for it, so "the service named this back" stays a fact the
+  ## caller can test.
+  requireStep(step, atsRequestUploadUrl)
+  let jsonBody = client.sendPlannedStep(
+    step, HttpPost, bearerToken, "requestArtifactUploadUrl")
   var echoed = jsonBody{"recordingId"}.getStr()
   if echoed.len == 0:
     echoed = jsonBody{"artifactId"}.getStr()
@@ -314,15 +356,18 @@ proc requestArtifactUploadUrl*(client: ApiClient, tenantId: string,
     expiresAt: jsonBody{"expiresAt"}.getStr(),
   )
 
-proc confirmArtifactUpload*(client: ApiClient, reference: ArtifactRef,
-    etag: string, bearerToken: string) =
-  ## ``POST /api/v1/{segment}/{artifactId}/confirm-upload`` — kind-neutral.
-  let url = artifactConfirmUploadPath(client.baseApiUrl, reference)
-  let body = $ buildArtifactConfirmUploadBody(etag)
-  let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken),
-    body = body)
-  ensureSuccess(response, "confirmArtifactUpload")
+proc confirmArtifactUpload*(client: ApiClient, step: ArtifactTransferStep,
+    bearerToken: string) =
+  ## Send the plan's ``atsConfirmUpload`` step —
+  ## ``POST /api/v1/{segment}/{artifactId}/confirm-upload``.
+  ##
+  ## The step's body carries the ETag, which is only known once the object
+  ## store has answered the PUT; `uploadCompletionStep` takes it as an argument
+  ## for exactly that reason, so the run-time value still enters through the
+  ## planner rather than around it.
+  requireStep(step, atsConfirmUpload)
+  discard client.sendPlannedStep(
+    step, HttpPost, bearerToken, "confirmArtifactUpload")
 
 proc requestArtifactDownloadUrl*(client: ApiClient, reference: ArtifactRef,
     bearerToken: string): ArtifactDownloadUrlResponse =
@@ -391,54 +436,46 @@ proc issueLicense*(client: ApiClient, bearerToken: string): string =
 # Upload-session endpoints (M18a per-slice upload)
 # ---------------------------------------------------------------------------
 
-proc openArtifactUploadSession*(client: ApiClient, tenantId: string,
-    artifact: Artifact, recordingMode: string,
+proc openArtifactUploadSession*(client: ApiClient,
+    step: ArtifactTransferStep, kind: ArtifactKind,
     bearerToken: string): UploadSessionResponse =
-  ## ``POST /api/v1/tenants/{tenantId}/{segment}/upload-session`` — the
-  ## kind-neutral entry point for a multi-part transfer.
+  ## Send the plan's ``atsOpenUploadSession`` step —
+  ## ``POST /api/v1/tenants/{tenantId}/{segment}/upload-session``.
   ##
-  ## AS-1 made this URL registry-derived; AS-2 closes the loop by returning the
-  ## session as an ``ArtifactUploadSession`` — the id **and** the collection it
-  ## was opened in — so the slice and finalize requests that follow address the
-  ## collection this session belongs to rather than a literal.  A session that
-  ## carried only its id is what allowed the last two trace-shaped paths in the
-  ## client to survive AS-1.
-  let url = artifactUploadSessionPath(
-    client.baseApiUrl, tenantId, artifact.kind)
-  let body = $ buildArtifactUploadSessionBody(artifact, recordingMode)
-  let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "openArtifactUploadSession")
-
-  let jsonBody = parseJson(response.body)
+  ## AS-1 made this URL registry-derived; AS-2 returned the session as an
+  ## ``ArtifactUploadSession`` — the id **and** the collection it was opened in
+  ## — so the slice and finalize requests that follow address the collection
+  ## this session belongs to rather than a literal.  ``kind`` is passed
+  ## alongside the step for that pairing only: the session's collection is not
+  ## recoverable from the server-issued id, and the step's URL is a string.
+  requireStep(step, atsOpenUploadSession)
+  let jsonBody = client.sendPlannedStep(
+    step, HttpPost, bearerToken, "openArtifactUploadSession")
   result = UploadSessionResponse(
     session: ArtifactUploadSession(
       sessionId: jsonBody["sessionId"].getStr(),
-      kind: artifact.kind),
+      kind: kind),
     s3KeyPrefix: jsonBody{"s3KeyPrefix"}.getStr(),
     acknowledgedArtifactId: jsonBody{"artifactId"}.getStr(),
   )
 
 proc requestArtifactPartUploadUrl*(client: ApiClient,
-    session: ArtifactUploadSession, sliceIndex: int, fileName: string,
-    contentLength: int64, bearerToken: string): SliceUploadUrlResponse =
-  ## ``POST /api/v1/{segment}/{sessionId}/slice-upload-url``
-  ## Requests a presigned URL for one part of a multi-part payload.
+    step: ArtifactTransferStep,
+    bearerToken: string): SliceUploadUrlResponse =
+  ## Send the plan's ``atsRequestPartUploadUrl`` step —
+  ## ``POST /api/v1/{segment}/{sessionId}/slice-upload-url``.
   ##
   ## AS-2: the segment comes from the session, not from a literal — see
   ## ``artifact.artifactSliceUploadUrlPath`` for the decision and why the
-  ## *session* rather than a re-supplied kind is what carries it.
-  let url = artifactSliceUploadUrlPath(client.baseApiUrl, session)
-  let body = $ buildArtifactSliceUploadUrlBody(
-    sliceIndex, fileName, contentLength)
-  let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "requestArtifactPartUploadUrl")
-
-  let jsonBody = parseJson(response.body)
+  ## *session* rather than a re-supplied kind is what carries it.  AS-3: the
+  ## whole URL and body come from the step, so this procedure can no longer
+  ## build a request the plan did not describe.
+  requireStep(step, atsRequestPartUploadUrl)
+  let jsonBody = client.sendPlannedStep(
+    step, HttpPost, bearerToken, "requestArtifactPartUploadUrl")
   result = SliceUploadUrlResponse(
     uploadUrl: jsonBody["uploadUrl"].getStr(),
-    sliceIndex: jsonBody{"sliceIndex"}.getInt(sliceIndex),
+    sliceIndex: jsonBody{"sliceIndex"}.getInt(step.part.index),
   )
 
 proc buildFinalizePath*(baseApiUrl, sessionId: string): string =
@@ -474,30 +511,21 @@ proc buildFinalizeBody*(totalSlices: int, totalEvents: int,
     totalSlices, totalEvents, platform, omniscientDbMode)
 
 proc finalizeArtifactUploadSession*(client: ApiClient,
-    session: ArtifactUploadSession, artifact: Artifact, totalSlices: int,
-    totalEvents: int, bearerToken: string,
-    omniscientDbMode: string = ""): string =
-  ## ``POST /api/v1/{segment}/{sessionId}/finalize`` — kind-neutral.
+    step: ArtifactTransferStep, bearerToken: string): string =
+  ## Send the plan's ``atsFinalizeSession`` step —
+  ## ``POST /api/v1/{segment}/{sessionId}/finalize``.
   ##
-  ## Marks the session complete once every part has been published.  Both the
-  ## URL and the body come from the session and the artifact, so the recording
-  ## kind's request is character-identical to the pre-AS-2 one and any other
-  ## kind finalizes in the collection its session was opened in.
-  ##
-  ## ``totalSlices`` counts the **pieces of the payload**, not the objects the
-  ## session uploaded — sidecars travel through the same session and are not
-  ## reassembled.  See ``artifact_transfer.ArtifactPartRole``.
+  ## Marks the session complete once every part has been published.  The
+  ## body's ``totalSlices`` counts the **pieces of the payload**, not the
+  ## objects the session uploaded — sidecars travel through the same session
+  ## and are not reassembled — and it is `uploadCompletionStep` that decides
+  ## that, once, rather than each caller.  See
+  ## ``artifact_transfer.ArtifactPartRole``.
   ##
   ## Returns the artifact id the service acknowledged, or ``""`` when it
   ## acknowledged none — see ``UploadSessionResponse.acknowledgedArtifactId``
   ## for why an empty answer is the normal one for the recording kind.
-  let url = artifactFinalizePath(client.baseApiUrl, session)
-  let body = $ buildArtifactFinalizeBody(
-    artifact, totalSlices, totalEvents, omniscientDbMode)
-  let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "finalizeArtifactUploadSession")
-  try:
-    parseJson(response.body){"artifactId"}.getStr()
-  except CatchableError:
-    ""
+  requireStep(step, atsFinalizeSession)
+  let jsonBody = client.sendPlannedStep(
+    step, HttpPost, bearerToken, "finalizeArtifactUploadSession")
+  jsonBody{"artifactId"}.getStr()

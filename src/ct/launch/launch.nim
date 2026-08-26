@@ -342,11 +342,17 @@ proc runInitial*(conf: CodetracerConf) =
         # AS-2 — the kind-neutral `--artifact <PATH>` selection, with
         # `--kind` for the cases the path cannot be classified on its own.
         conf.uploadArtifactPath,
-        conf.uploadArtifactKind)
+        conf.uploadArtifactKind,
+        # AS-3 — one encryption flag for every kind.
+        conf.uploadEncrypt,
+        conf.uploadPasswordStdin,
+        conf.uploadPasswordFile)
     of StartupCommand.download:
       downloadTraceCommand(conf.traceDownloadUrl,
         conf.downloadToken,
-        conf.downloadBaseUrl)
+        conf.downloadBaseUrl,
+        conf.downloadPasswordStdin,
+        conf.downloadPasswordFile)
     of StartupCommand.login:
       loginCommand(conf.loginDefaultOrg, conf.loginBaseUrl)
     of StartupCommand.`set-default-org`:

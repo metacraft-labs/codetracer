@@ -538,6 +538,109 @@ suite "AS-2 — the recording kind's conversation is character-identical":
       "https://web.codetracer.com/api/v1/review-datasets/" & SampleSessionId &
       "/finalize"
 
+suite "AS-3 — the plan refuses what would make encryption unsafe or a lie":
+  ## Two refusals, both added by AS-3, both in the *planner* so they are pure
+  ## and both observable before a byte moves.
+
+  test "a payload whose part indices repeat is refused":
+    # This reads like tidiness and is not. `artifact_protection.partNonce`
+    # derives the AEAD nonce from the part index, so two parts sharing an index
+    # would be two messages under one (key, nonce) pair — the one failure mode
+    # of GCM that loses the key stream outright (NIST SP 800-38D §8.2). Nonce
+    # uniqueness is enforced HERE rather than assumed by the sealer.
+    #
+    # Before AS-3 the check merely bounded the index, so this planned happily.
+    for kind in ArtifactKind:
+      checkpoint($kind)
+      var parts = sliceParts(3)
+      parts[2].index = 0
+      let planned = planArtifactUpload(
+        sampleArtifact(kind, aplSliceSet, parts), parts,
+        SampleBaseApiUrl, SampleTenantId)
+      check planned.error.len > 0
+      check "repeats index 0" in planned.error
+      check parts[2].name in planned.error
+
+  test "the indices that ARE 0 ..< len still plan, so the refusal is not blanket":
+    for kind in ArtifactKind:
+      checkpoint($kind)
+      let parts = sliceParts(4)
+      check planArtifactUpload(
+        sampleArtifact(kind, aplSliceSet, parts), parts,
+        SampleBaseApiUrl, SampleTenantId).error == ""
+
+  test "an unprotected part on a protected artifact is refused":
+    # The direction people think of: a payload that would go up in the clear
+    # under a record claiming it is encrypted.
+    for kind in ArtifactKind:
+      checkpoint($kind)
+      let parts = singleFileParts()
+      var artifact = sampleArtifact(kind, aplSingleFile, parts)
+      artifact.access.protection = apPasswordScryptAes256Gcm
+      let planned = planArtifactUpload(
+        artifact, parts, SampleBaseApiUrl, SampleTenantId)
+      check planned.error.len > 0
+      check "prepared as 'none'" in planned.error
+      check "password-scrypt-aes-256-gcm" in planned.error
+
+  test "a protected part on an unprotected artifact is ALSO refused":
+    # The direction people do not think of, and it matters just as much: bytes
+    # nothing told the reader to decrypt are bytes the reader cannot open.
+    for kind in ArtifactKind:
+      checkpoint($kind)
+      var parts = singleFileParts()
+      parts[0].protection = apPasswordScryptAes256Gcm
+      let planned = planArtifactUpload(
+        sampleArtifact(kind, aplSingleFile, parts), parts,
+        SampleBaseApiUrl, SampleTenantId)
+      check planned.error.len > 0
+      check "the artifact declares protection 'none'" in planned.error
+
+  test "a payload whose parts agree with the artifact plans, for every kind":
+    # The refusal must not be so eager that it rejects a correct protected
+    # upload — which is what `artifact_store.prepareProtectedPayload` builds.
+    for kind in ArtifactKind:
+      checkpoint($kind)
+      var parts = sliceParts(3)
+      for i in 0 ..< parts.len:
+        parts[i].protection = apPasswordScryptAes256Gcm
+      var artifact = sampleArtifact(kind, aplSliceSet, parts)
+      artifact.access.protection = apPasswordScryptAes256Gcm
+      let planned = planArtifactUpload(
+        artifact, parts, SampleBaseApiUrl, SampleTenantId)
+      check planned.error == ""
+      # …and the conversation is the same conversation: encryption wraps the
+      # payload, not the request, so the steps are step-for-step what an
+      # unprotected artifact of the same shape produces.
+      let session = ArtifactUploadSession(
+        sessionId: SampleSessionId, kind: kind)
+      let protectedSteps = uploadSteps(planned.plan, session)
+      let plainParts = sliceParts(3)
+      let plainSteps = uploadSteps(
+        planOf(sampleArtifact(kind, aplSliceSet, plainParts), plainParts),
+        session)
+      check protectedSteps.len == plainSteps.len
+      for i in 0 ..< protectedSteps.len:
+        check protectedSteps[i].kind == plainSteps[i].kind
+        check protectedSteps[i].urlPath == plainSteps[i].urlPath
+
+  test "the plan re-addressed to the service's id keeps everything else":
+    # `addressedTo` exists so the single-file confirmation names the id the
+    # SERVICE echoed rather than the local one. It must move that and nothing
+    # else, or it would be a second place a plan can be built.
+    let parts = singleFileParts()
+    let plan = planOf(reviewDatasetSample(aplSingleFile, parts), parts)
+    var renamed = plan.artifact
+    renamed.artifactId = "0194a000-1111-7abc-8def-000000000099"
+    let moved = plan.addressedTo(renamed)
+    check moved.artifact.artifactId == renamed.artifactId
+    check moved.parts == plan.parts
+    check moved.baseApiUrl == plan.baseApiUrl
+    check moved.tenantId == plan.tenantId
+    check uploadCompletionStep(moved, ArtifactUploadSession(), "e").urlPath ==
+      SampleBaseApiUrl & "review-datasets/" & renamed.artifactId &
+      "/confirm-upload"
+
 suite "AS-2 — a download resolves the kind, and refuses to guess it":
   ## A share link carries no kind. The client must therefore *ask*, and must
   ## refuse when the answer does not settle it — the same rule

@@ -37,4 +37,13 @@ type UploadedInfo* = ref object
     ## The server-issued handle for a *multi-part transfer*, empty unless one
     ## was opened.  Held apart from `artifactId` because it names the transfer
     ## rather than the artifact.
+  protection*: ArtifactProtection
+    ## What confidentiality the stored payload carries (AS-3).  `apNone` — the
+    ## enum's zero value — unless the upload encrypted it, so every existing
+    ## construction of this object keeps its meaning.
+    ##
+    ## Reported because whoever receives a share link has to be told whether a
+    ## password goes with it, and the *uploader* is the only party who can say:
+    ## the service was never told the key and, for the recording kind, whose
+    ## request bodies are frozen, was never even told there is one.
   exitCode*: int

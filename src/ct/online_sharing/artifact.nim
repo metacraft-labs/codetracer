@@ -45,14 +45,20 @@
 ## `sampleMetadata` is an exhaustive `case` too, so a kind with no sample does
 ## not compile either.
 ##
-## ## What this module deliberately does NOT do
+## ## Where confidentiality lives (AS-3)
 ##
-## There is **no encryption and no password protection** here, because there is
-## none anywhere on this path today: access control is a bearer token plus a
-## tenant, and nothing else.  `ArtifactProtection` has exactly one value for
-## that reason — it is the seam AS-3 extends, not a claim that confidentiality
-## already exists.  Reading `apNone` as "no protection beyond transport TLS and
-## the bearer token" is the accurate reading.
+## `ArtifactProtection` and everything that states what a protection *claims*
+## moved to `artifact_protection.nim`, which this module imports and re-exports
+## so every existing caller keeps working.  The seam AS-1 left here is now
+## occupied: `apNone` is still the default and still means "no confidentiality
+## from the service", and `apPasswordScryptAes256Gcm` means the payload was
+## encrypted on this machine under a key the service never receives.
+##
+## What this module owns of that is the **kind-facing** half: which of a kind's
+## metadata fields the service can still read when the payload is encrypted
+## (`serviceVisibleMetadataFields`, an exhaustive `case`, so a new kind must
+## answer the question AS-1 §3.1 says it owes), and the prompt wiring that
+## makes the password dialog identical for every kind.
 ##
 ## ## Portability
 ##
@@ -66,6 +72,8 @@
 import std/[json, options, strutils, tables, uri]
 
 import ../../common/recording_id
+import artifact_protection
+export artifact_protection
 
 # ---------------------------------------------------------------------------
 # The closed set of kinds
@@ -111,13 +119,11 @@ type
     aplSliceSet = "slice-set"
       ## Many blobs published under one upload session, in index order.
 
-  ArtifactProtection* = enum
-    ## Confidentiality applied to the payload *before* it reaches the service.
-    ##
-    ## Exactly one value today, and that is the honest state of the world:
-    ## nothing on this path encrypts anything.  AS-3 adds values here; callers
-    ## must not read `apNone` as "protected by the service".
-    apNone = "none"
+  # `ArtifactProtection` is declared in `artifact_protection.nim` and
+  # re-exported above.  It lives there rather than here because it is pure
+  # policy — what a protection claims, what it does not, and what recovery
+  # exists — and that policy has to be assertable on both Nim backends without
+  # dragging the kind registry, the URL grammar or `recording_id` along with it.
 
   ArtifactVisibility* = enum
     ## Who may read.  Both values are existing concepts — see `ArtifactAccess`.
@@ -357,7 +363,16 @@ type
     visibility*: ArtifactVisibility
     minimumWriteRole*: ArtifactRole
     protection*: ArtifactProtection
-      ## AS-3's seam.  `apNone` today, for every artifact, always.
+      ## What confidentiality the *payload* carries before it reaches the
+      ## service.  `apNone` unless the user asked for encryption; see
+      ## `artifact_protection.ArtifactProtectionRegistry` for what each value
+      ## claims, and `serviceVisibleMetadataFields` for what stays readable
+      ## even when it is not `apNone`.
+      ##
+      ## Note what this field is **not**: evidence.  It is what a record says,
+      ## and a record comes from the service.  The download path decides
+      ## whether bytes are encrypted by looking at the bytes
+      ## (`artifact_crypto.protectionOfPayload`), not by trusting this.
 
   Artifact* = object
     ## An artifact: an id, a kind, kind-specific metadata, and the bytes.
@@ -422,15 +437,20 @@ type
 
 proc initArtifactAccess*(tenantId: string,
     visibility: ArtifactVisibility = avTenant,
-    minimumWriteRole: ArtifactRole = arMember): ArtifactAccess =
-  ## The access record for a freshly stored artifact.  `apNone` is not a
-  ## parameter: nothing on this path can produce anything else, and offering
-  ## the choice would imply otherwise.
+    minimumWriteRole: ArtifactRole = arMember,
+    protection: ArtifactProtection = apNone): ArtifactAccess =
+  ## The access record for a freshly stored artifact.
+  ##
+  ## `protection` became a parameter in AS-3 and defaults to `apNone`, which is
+  ## the honest default: an artifact is unprotected unless somebody asked for
+  ## protection and supplied the secret it needs.  `artifact_store.storeArtifact`
+  ## refuses the two ways this can be got wrong — a protection with no secret,
+  ## and a secret with no protection — rather than resolving either silently.
   ArtifactAccess(
     tenantId: tenantId,
     visibility: visibility,
     minimumWriteRole: minimumWriteRole,
-    protection: apNone)
+    protection: protection)
 
 proc initArtifactPayload*(byteSize: int64,
     layout: ArtifactPayloadLayout, partCount: int,
@@ -465,7 +485,8 @@ proc recordingArtifact*(recordingId, tenantId, program, langName: string,
     platform: string = "",
     recordedAtUnixMs: int64 = 0,
     createdAtUnixMs: int64 = 0,
-    visibility: ArtifactVisibility = avTenant): Artifact =
+    visibility: ArtifactVisibility = avTenant,
+    protection: ArtifactProtection = apNone): Artifact =
   ## Describe a local recording as an artifact of the recording kind.
   ##
   ## This is the constructor the pre-AS-1 upload path now goes through, and it
@@ -491,7 +512,8 @@ proc recordingArtifact*(recordingId, tenantId, program, langName: string,
   Artifact(
     artifactId: recordingId,
     kind: akRecording,
-    access: initArtifactAccess(tenantId, visibility),
+    access: initArtifactAccess(tenantId, visibility,
+      protection = protection),
     createdAtUnixMs: createdAtUnixMs,
     payload: initArtifactPayload(byteSize, layout, partCount,
       kindSpec(akRecording).defaultContentType),
@@ -507,7 +529,8 @@ proc reviewDatasetArtifact*(artifactId, tenantId, commitSha,
     layout: ArtifactPayloadLayout = aplSingleFile,
     partCount: int = 1,
     createdAtUnixMs: int64 = 0,
-    visibility: ArtifactVisibility = avTenant): Artifact =
+    visibility: ArtifactVisibility = avTenant,
+    protection: ArtifactProtection = apNone): Artifact =
   ## Describe an exported review dataset (`ct review collect`'s output
   ## directory, packed for transfer) as an artifact of the review-dataset kind.
   ##
@@ -524,12 +547,80 @@ proc reviewDatasetArtifact*(artifactId, tenantId, commitSha,
   Artifact(
     artifactId: artifactId,
     kind: akReviewDataset,
-    access: initArtifactAccess(tenantId, visibility),
+    access: initArtifactAccess(tenantId, visibility,
+      protection = protection),
     createdAtUnixMs: createdAtUnixMs,
     payload: initArtifactPayload(byteSize, layout, partCount,
       kindSpec(akReviewDataset).defaultContentType),
     displayName: suggestedDisplayName(metadata),
     metadata: metadata)
+
+# ---------------------------------------------------------------------------
+# What the service can still read when the payload is encrypted (AS-3)
+# ---------------------------------------------------------------------------
+#
+# AS-1 §6 left this question open and named AS-3 as the milestone that owes an
+# answer: "a review dataset's metadata names a commit and a file count, and a
+# recording's names a program. If the payload is encrypted and the metadata is
+# not, that must be said."
+#
+# It is said here, as a list rather than as a caveat, because a list can be
+# compared against the bytes that actually cross the socket — and
+# `artifact_store_roundtrip_test.nim` does exactly that, so the documentation
+# and the wire cannot drift apart.
+
+proc serviceVisibleMetadataFields*(kind: ArtifactKind): seq[string] =
+  ## The metadata keys of `kind` that reach the service **in the clear**, even
+  ## when the payload is encrypted.
+  ##
+  ## Exhaustive `case`, so this is the ninth thing a new kind owes (§3.1): a
+  ## kind that cannot say which of its metadata is sensitive does not get to
+  ## claim the store's encryption.
+  ##
+  ## These are metadata keys only.  The *transfer* facts — the artifact id, the
+  ## kind, the tenant, each part's file name, each part's byte length and the
+  ## number of parts — are visible for every kind by construction, because they
+  ## are what addressing and transferring an object consist of.  They are
+  ## listed by `serviceVisibleTransferFacts` rather than repeated per kind.
+  case kind
+  of akRecording:
+    # The recording kind's request bodies are frozen (§9.3), and that turns out
+    # to be a confidentiality *advantage* here: they have room for two fields
+    # and no more.  The program name, the language and the record-start time do
+    # not travel at all.
+    @["recordingId", "platform"]
+  of akReviewDataset:
+    # And this is the case AS-3's third deliverable is really about.  A review
+    # dataset's metadata names the commit it describes, the commit it is
+    # diffed against and the agent session that produced it — any of which may
+    # be as sensitive as the diff itself, and none of which is encrypted.
+    @["commitSha", "baseCommitSha", "fileCount", "recordingCount",
+      "sessionTitle"]
+
+proc serviceVisibleTransferFacts*(): seq[string] =
+  ## The facts every artifact reveals to the service whatever its kind and
+  ## whatever its protection, because they are what a transfer is made of.
+  @["artifactId", "kind", "tenantId", "fileName", "contentLength", "partCount"]
+
+proc artifactSubjectNoun*(kind: ArtifactKind): string =
+  ## What to call an artifact of `kind` in a sentence addressed to a user:
+  ## "recording", "review dataset".
+  ##
+  ## Derived from the wire token rather than declared, so it cannot drift from
+  ## the registry, and so it is not a further per-kind obligation for something
+  ## a dialog only uses as a noun.
+  kindSpec(kind).wireToken.replace('-', ' ')
+
+proc artifactProtectionPrompt*(kind: ArtifactKind,
+    protection: ArtifactProtection): ArtifactProtectionPrompt =
+  ## The password dialog for storing an artifact of `kind` under `protection`.
+  ##
+  ## **This is the whole of "the dialog and the flow are identical whatever the
+  ## kind".**  There is one prompt builder, it takes the kind only to fill in a
+  ## noun, and `artifact_protection_vm_test.nim` asserts that replacing that
+  ## noun is the only difference between any two kinds' prompts.  A kind cannot
+  ## acquire its own password flow, because there is no place to put one.
+  protectionPrompt(protection, artifactSubjectNoun(kind))
 
 proc validateArtifact*(artifact: Artifact): Option[string] =
   ## Returns the first problem with `artifact`, or `none` if it is storable.
@@ -869,6 +960,12 @@ proc parseArtifact*(node: JsonNode): ArtifactParseResult =
   #   * `apNone` — a record with no `protection` key is one written before
   #     protection existed, and those payloads really are unprotected.  An
   #     unknown protection *token* is refused; see `readClosedEnumField`.
+  #     AS-3 note: this default is safe in the direction that matters because
+  #     the download path does not trust it either way — it decides whether it
+  #     is holding ciphertext by looking at the payload's own magic bytes
+  #     (`artifact_crypto.protectionOfPayload`).  A service that omitted the
+  #     key for an encrypted artifact therefore gets a decryption prompt, not
+  #     a corrupt unzip.
   var visibility = avTenant
   var minimumWriteRole = arMember
   var protection = apNone
