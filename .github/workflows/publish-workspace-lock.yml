@@ -1,0 +1,115 @@
+# Publish the workspace lock for a mainline commit GitHub created.
+#
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# Every commit that leaves a developer's workspace is locked by the local
+# pre-push gate, which publishes `locks/<project>/codetracer/<sha>.toml` to the
+# manifests repo. That gate is the reproducibility boundary and it stays the
+# boundary — this workflow creates no lock and resolves no sibling.
+#
+# It exists because this repo is PR-based, and there is exactly one class of
+# commit the pre-push gate structurally cannot reach: the one GitHub creates
+# server-side when a pull request lands. Merge, squash or rebase, the result is
+# a brand-new SHA that no hook ever saw. Measured on `dev`: of the last 30
+# first-parent commits, ZERO carry a lock, while every PR head that produced
+# them does.
+#
+# `clone-siblings` probes exactly those commits — `pull_request` ->
+# `base.sha`, `push` -> `github.sha` — with `--no-walk`, so until this workflow
+# ran, every job in this repo that needs a sibling revision died at
+# "No workspace lock for codetracer" before reaching a build. That is not a
+# theoretical loss: a five-site compile break sat on `dev` while every CI run
+# failed earlier, for this reason, and nothing ever reached the compiler that
+# would have reported it.
+#
+# WHAT IT PUBLISHES
+# -----------------
+# The PR HEAD's lock, re-anchored onto the mainline commit: every sibling pin
+# copied verbatim, and precisely one field changed — the record's own
+# coordinate. That is the sibling set the change was developed and pushed
+# against, and it is the one that carries a sibling bump the PR itself made.
+# Resolving the mainline commit against its ANCESTRY instead would answer with
+# pins that predate the merge, which is exactly wrong for such a PR.
+#
+# OPERATIONAL PREREQUISITE
+# ------------------------
+# The CI App token must have CONTENTS: WRITE on metacraft-labs/metacraft-manifests.
+# Everything else this workflow needs is read-only. Without it the action fails
+# at the push with git's own authentication error, which is loud but obscure —
+# so if this job starts failing on `git push` and nothing else changed, check
+# the App's repository permissions first.
+name: publish workspace lock
+
+on:
+  # `pull_request_target`, not `pull_request`: this repo is public, so a fork's
+  # pull request would otherwise run without the credential this job needs, and
+  # a merged fork PR is precisely a mainline commit that nothing locked. The
+  # usual objection to `pull_request_target` does not apply here — no PR
+  # content is checked out and none is executed. This workflow reads two SHAs
+  # from the event payload and calls a pinned action from the base branch; the
+  # workflow definition itself also comes from the base branch, so a fork
+  # cannot alter it.
+  pull_request_target:
+    types: [closed]
+    branches: [dev, stable]
+
+  # Backfill. Every mainline commit that landed before this workflow existed is
+  # still unlocked, and so is any commit whose publish failed transiently. This
+  # is how one is repaired, with both SHAs stated explicitly rather than
+  # guessed.
+  workflow_dispatch:
+    inputs:
+      source-sha:
+        description: "The PR head commit whose published lock supplies the sibling set (40-hex)."
+        required: true
+      target-sha:
+        description: "The mainline commit to publish the lock for (40-hex)."
+        required: true
+      base-ref:
+        description: "The mainline branch target-sha must be an ancestor of."
+        required: true
+        default: dev
+
+permissions:
+  contents: read
+
+# Serialise this repo's publishers. The action recovers from a lost push race
+# on its own — records are commit-addressed, so concurrent publishers write
+# disjoint paths — but a queue turns the common case into no race at all.
+# `cancel-in-progress` MUST stay false: two merges seconds apart must both end
+# up locked, and cancelling the first would leave its mainline commit unlocked
+# forever.
+concurrency:
+  group: publish-workspace-lock-codetracer
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # A pull request that was CLOSED without merging created no mainline
+    # commit, and `merge_commit_sha` on such a payload names nothing that
+    # landed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Publish the workspace lock
+        uses: metacraft-labs/metacraft-github-actions/publish-workspace-lock@main
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          repo: metacraft-labs/codetracer
+          source-sha: ${{ github.event.inputs.source-sha || github.event.pull_request.head.sha }}
+          target-sha: ${{ github.event.inputs.target-sha || github.event.pull_request.merge_commit_sha }}
+          base-ref: ${{ github.event.inputs.base-ref || github.event.pull_request.base.ref }}
+          provenance: >-
+            ${{ github.event_name == 'workflow_dispatch'
+                && 'a manual backfill'
+                || format('pull request #{0}', github.event.pull_request.number) }}
