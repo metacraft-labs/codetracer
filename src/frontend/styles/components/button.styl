@@ -167,10 +167,28 @@ button
   background-image: ct-images-layout-tab
   background-size: 1em auto !important
 
+  // States match `.vcs-branch-current` (vcs.styl), the reference for anything
+  // that opens a menu: a 1px border, transparent at rest, grey on hover and
+  // blue while the menu is open, with the surface left alone throughout.
+  //
+  // Two inherited behaviours have to be undone for that. `ct-button-no-border`
+  // sets `border: none !important`, so the width has to come back with
+  // `!important`; and `[class*="-secondary"]:hover` lightens the background,
+  // which would double up on the border as a second state cue.
+  //
+  // The width lives on the base rule and `box-sizing: border-box` is already
+  // set on `button`, so the control stays 28x28 in every state and the centred
+  // icon does not move.  This replaces an inset `box-shadow` that drew a fake
+  // border in `em` — 0.0625em against a 16px button, so a hair under 1px.
+  border: 0.0625rem solid transparent !important
+
+  &:hover
+    border-color: colors-ui-border-primary-hover !important
+    background-color: colors-ui-surface-primary-default
+
   &.open
-    // background-image: ct-images-layout-tab-active !important
-    background-color: colors-ui-surface-input-default
-    box-shadow: inset 0 0 0 0.0625em colors-ui-border-action !important
+    border-color: colors-ui-border-action !important
+    background-color: colors-ui-surface-primary-default
 
 #close-element
   background-image: ct-images-close-button
