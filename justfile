@@ -1263,7 +1263,17 @@ test-cli-record: vm-test-prereqs
       failed=$((failed + 1))
     elif [ "$fails" -gt 0 ]; then
       echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep -A 12 '\[FAILED\]' | head -60 | sed 's/^/    /'
+      # `-B` is load-bearing, not decoration.  Nim's `unittest` prints the
+      # evidence -- `checkpoint` output, `Check failed: <expr>` and the
+      # `<name> was <value>` lines -- BEFORE the `[FAILED] <test name>`
+      # marker.  A window of `-A 12` alone therefore reports *that* a test
+      # failed while showing none of *why*, which is how a real defect in
+      # this repo's own trace_index migration cost a full extra
+      # reproduce-from-scratch cycle: the lane said
+      # `[FAILED] recording a real program produces a real container` and
+      # discarded the `[codetracer] FATAL:` line immediately above it that
+      # named the cause.
+      echo "$output" | grep -B 25 -A 12 '\[FAILED\]' | head -120 | sed 's/^/    /'
       failed=$((failed + 1))
     elif [ "$rc" -ne 0 ]; then
       # Every case said [OK] and the process still failed.  See the note on
