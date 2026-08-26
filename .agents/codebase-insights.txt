@@ -1903,7 +1903,10 @@ compiler or a run could see, which is the argument for the guard:
   (`findTraceForArgs` matched no current signature). It performs a LIVE
   round-trip against the sharing service, so it must never run in CI — it is
   compile-checked instead, by `just test-online-sharing-compile`, because a
-  compile is the weakest check that would have caught the rot.
+  compile is the weakest check that would have caught the rot. AS-2 brought the
+  call sites up to date and the lane is GREEN now; the three signatures it had
+  rotted against were three recorded defects, which is the payoff of compiling
+  something nothing runs.
 
 ## Two suites in `src/ct/online_sharing/` ran in no lane (AS-1)
 
@@ -1926,24 +1929,102 @@ anything. The lane's `-d:ssl -d:useOpenssl3` (needed because `api_client.nim`
 pulls in `std/net`'s `newContext`; nothing opens a TLS connection) lives in
 `ci/lib/test-lane-files.sh` with the lane, not in the recipe.
 
-## An unknown *kind* is refused, but an unknown *role* is not (open defect)
+## Two-argument `parseEnum` is a FALLBACK, not a validator (fixed; do not reintroduce)
 
-`artifact.parseArtifact` reads `visibility`, `minimumWriteRole` and
-`protection` with the two-argument `parseEnum`, whose second argument is a
-silent fallback: `"public"` reads as `avTenant`, `"owner"` reads as
-`arMember`, `"aes-256-gcm"` reads as `apNone`. The `try`/`except ValueError`
-around those three calls is dead code — two-argument `parseEnum` does not
-raise. Nothing consumes the parser yet, but `minimumWriteRole` fails OPEN, and
-once AS-3 adds a second `ArtifactProtection` value an old client will read an
-encrypted record as unprotected.
+`parseEnum[E](token, default)` silently substitutes `default` for anything it
+does not recognise and never raises, so a `try`/`except ValueError` around it is
+dead code. `artifact.parseArtifact` used it for `visibility`, `minimumWriteRole`
+and `protection`: `"public"` read as `avTenant`, `"owner"` read as `arMember`
+(fail-OPEN), `"aes-256-gcm"` read as `apNone`. AS-2 replaced all of them with
+`parseClosedEnum` / `readClosedEnumField` in `artifact.nim` — exact matching, no
+fallback arm, a refusal naming the token and the closed set. Use those for any
+new closed set that comes off the wire.
 
-## `ct upload`'s success output is unreachable (open defect)
+Two adjacent holes of the same shape, also closed: `getStr()` on a NON-STRING
+JSON value returns `""`, which fed straight into the fallback (so
+`{"visibility": 7}` read as `tenant`), and the payload's `layout` had the same
+problem. And keep ABSENCE distinct from an unknown value: a record written
+before a field existed genuinely does not declare it, so an absent `protection`
+must still read as `apNone` or every wire-format addition becomes a breaking
+change.
 
-`uploadTrace` ends every path in `quit(...)`, so everything after the call in
-`uploadCommand` — the "OK: uploaded, you can share the link" block AND the
-machine-readable JSON branch beside it — can never run. Related: `uploadFile`
-and `uploadSplitTrace` set only `fileId` on `UploadedInfo`, so `downloadKey`
-and `controlId` have no source on the modern path. Also `uploadSplitTrace`
-hard-codes the platform as `"linux-x86_64"` in both `requestUploadSession` and
-`finalizeUploadSession`, so a macOS or Windows recording is uploaded labelled
-Linux.
+## `ct upload` / `UploadedInfo` — what the modern path can and cannot answer
+
+Fixed by AS-2; the shape is worth knowing because the reasons are wire facts,
+not code style.
+
+* `uploadTrace` RETURNS now; it used to end every path in `quit(...)`, which
+  made `uploadCommand`'s success output — and the machine-readable JSON line
+  `src/frontend/index/online_sharing.nim` parses — unreachable. If you add a
+  path here, return from it.
+* `UploadedInfo` carries `artifactId`, `kind`, `shareUrl`, `uploadSessionId`.
+  It used to carry `fileId` (the recording id after a single-file upload, the
+  SESSION id after a slice upload — one field, two namespaces) plus
+  `downloadKey` / `controlId` / `storedUntilEpochSeconds`, which are the
+  pre-M-REC-8 service's tokens that nothing on the modern path assigns.
+* **A sliced recording gets no share link, and that is correct.** The recording
+  kind's `…/upload-session` body is frozen to `{platform, recordingMode}` and
+  carries no artifact id, so the client never tells the service which recording
+  the session is for — the service names the result itself.
+  `ArtifactStoreOutcome.serviceAcknowledgedId` records whether it named it back,
+  and a link is printed only when it did.
+* The platform is `artifactPlatformToken(hostOS, hostCPU)`, not the literal
+  `"linux-x86_64"` it used to be on every machine. An untaught host pair yields
+  `""` — an absence, never a guess.
+
+## `totalSlices` counts PIECES, not uploaded objects (AS-2; a caught regression)
+
+The `/finalize` body's `totalSlices` is what the deployed CS-M7 service
+**reassembles the payload from**. A sliced recording uploads its `.smnf` /
+`.amnf` manifests through the same session, at indices after the slices, and
+the pre-AS-2 client deliberately did not count them. So `ArtifactPart` carries
+an `ArtifactPartRole` (`aprSlice` / `aprSidecar`) and the finalize body is
+built from `sliceCount(parts)`, never `parts.len` — on the normal
+`ct-mcr record --split` output those differ by two, and sending the larger tells
+the service to look for slices that do not exist.
+
+Two lessons worth more than the fix:
+
+* **A wire test must state what the PREVIOUS client sent, not what this one
+  computes.** The first draft of AS-2 shipped this regression with two suites
+  that both asserted `totalSlices == parts.len` — tautologies against the
+  implementation, green on the bug. They are now driven by a named directory
+  (`McrSplitDirectory`) and a literal `3`.
+* **Diff at the CALLER, not just the builder.** Every URL and every body
+  builder was byte-identical to `e356c20f`; the regression was in what the
+  caller passed the builder. `src/ct/online_sharing/` is verified by running
+  the real `uploadSplitTrace` against a recording HTTP server in both trees and
+  diffing the request log.
+
+## The sharing transport is ONE path, keyed on payload LAYOUT (AS-2)
+
+`src/ct/online_sharing/` splits into a pure planner and a native executor:
+`artifact_transfer.nim` produces the whole conversation (every URL, every body,
+every part, in order) as a function of the artifact and the local files;
+`artifact_store.nim` executes it and is the only place in the repo that moves an
+artifact's bytes. `storeArtifact` dispatches on `ArtifactPayloadLayout`
+(single-file vs slice set) and NEVER on `ArtifactKind`, which is what lets a
+review dataset use the slice transfer that was built for recordings.
+
+Two rules to keep:
+
+* The recording kind's request bodies and URLs are **frozen** — a deployed
+  service reads them, and `artifact_transfer_vm_test.nim` asserts their exact
+  key sets against literals. Adding a key there is a wire change.
+* `slice-upload-url` and `finalize` are keyed on a SERVER-issued session id, so
+  their collection segment comes from `ArtifactUploadSession` (the typed pair
+  `…/upload-session` returns), not from a literal and not from a kind supplied
+  again at the call. Revert that and a sliced review dataset publishes its parts
+  under `traces/`.
+
+## `ct download` probes a route that does not exist yet — be careful with 4xx
+
+`fetchArtifact` asks the kind-neutral `artifacts/{id}/download-url` BEFORE the
+kind's alias (AS-1 §5.4), and no deployed service routes it. So every existing
+user's download now begins with a request that fails, and what a service says
+about a path it has no rule for is not under our control — a gateway or WAF may
+answer 400, 403 or 501 as readily as 404. `downloadProbeMayContinue` therefore
+tolerates all of those ON THE NEUTRAL PROBE ONLY; a kind's own collection
+continues on 404/405 alone, because a 403 there is a real "you may not read
+this" and walking past it would report a permission problem as a missing
+artifact. 401 never continues, on either.

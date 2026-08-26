@@ -2458,7 +2458,7 @@ test-vm: test-vm-native test-vm-js
 # campaign's own mistake one level up, so it is written down here rather than
 # left to be discovered.
 #
-# WHY it is deferred: seven of these lanes are red for reasons that are not
+# WHY it is deferred: six of these lanes are red for reasons that are not
 # theirs to fix, and wiring a red lane into a required job breaks every build
 # for everybody:
 #
@@ -2475,10 +2475,18 @@ test-vm: test-vm-native test-vm-js
 #                                back "unrecognized format"; real_backend_test
 #                                needs the Python recorder installed
 #   test-ct-test-incremental-e2e needs a buildable Python recorder sibling
-#   test-online-sharing-compile  online_sharing_test.nim does not compile
 #
-# The five that are GREEN today and could be promoted as-is:
+# `test-online-sharing-compile` was the seventh until AS-2
+# (Sharing/Artifact-Store.milestones.org) brought `online_sharing_test.nim`'s
+# call sites up to date; it is green now, and the three signatures it had
+# rotted against were the same three defects AS-2 closed (a `uploadTrace` that
+# never returned, a `fileId` holding two namespaces, and a `downloadKey`
+# nothing assigned).  Its lane still never RUNS the file — a live round-trip
+# against the production sharing service must not — only compiles it.
+#
+# The six that are GREEN today and could be promoted as-is:
 #   test-common-units  test-ct-cli-units  test-vm-unit  test-book-isonim
+#   test-online-sharing-compile
 #   test-lane-coverage (already runs, via ci/lint/nim.sh)
 # (`test-lanes` is the thirteenth recipe; it prints lane contents and runs
 #  nothing, so it is neither red nor promotable.)
@@ -2606,9 +2614,14 @@ test-vm-gui-headless: vm-test-prereqs
 # upload/download/delete round-trip against the production sharing service, so
 # it must never RUN in CI.  It is still compiled, because "never run" is how it
 # rotted: at the time this lane was written it did not compile at all
-# (`findTraceForArgs` at line 21 matches no current signature, and
-# `extractInfoFromKey` no longer exists).  A compile is the weakest check that
-# would have caught that, and it costs seconds.
+# (`findTraceForArgs` matched no current signature, and `extractInfoFromKey` no
+# longer existed).  A compile is the weakest check that would have caught that,
+# and it costs seconds.
+#
+# The lane is GREEN as of AS-2, which brought the call sites up to date.  That
+# is the payoff of compiling something nothing runs: the three signatures it
+# had rotted against were three recorded defects, and updating the file was how
+# they were noticed as closed rather than merely different.
 test-online-sharing-compile:
   #!/usr/bin/env bash
   set -euo pipefail

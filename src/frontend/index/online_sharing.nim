@@ -1,11 +1,17 @@
 import
-  std / [ async, jsffi, json, strutils, sequtils ],
+  std / [ async, jsffi, json, options, strutils, sequtils ],
   results,
   traces,
   electron_vars,
   ../[ types ],
   ../lib/[ jslib, electron_lib ],
-  ../../common/[ paths ]
+  ../../common/[ paths ],
+  # `parseArtifactKind` — the ONE way a kind enters from untrusted input. Read
+  # from `ct upload`'s stdout, this is untrusted input like any other, and a
+  # `getStr("recording")` default here would be the same fallback-not-validator
+  # mistake `Artifact-Store.md` §8 defect 10 records. The module is pure and
+  # compiles on the JavaScript backend, which is why it can be imported here.
+  ../../ct/online_sharing/[ artifact ]
 
 when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
 
@@ -62,14 +68,35 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
         )),
     onDone = proc(success: bool, result: string) =
       if success:
-        let lines = result.splitLines()
-        let lastLine = lines[^2]
-        let parsed = parseJson(lastLine)
-        let uploadData = UploadedTraceData(
-          downloadKey: $parsed["downloadKey"].getStr(""),
-          controlId: $parsed["controlId"].getStr(""),
-          expireTime: $parsed["storedUntilEpochSeconds"].getInt()
-        )
+        # AS-2: `ct upload`'s machine-readable result is the LAST non-empty
+        # line, and it is reachable now — `uploadTrace` used to end every path
+        # in `quit(...)`, so this branch parsed whatever narration happened to
+        # be last (`Artifact-Store.md` §8 defect 2).  Scanning back for the
+        # last non-empty line rather than indexing `[^2]` is what keeps this
+        # working whether or not the command's final `echo` ends in a newline.
+        var lastLine = ""
+        for line in result.splitLines():
+          if line.strip().len > 0:
+            lastLine = line.strip()
+        var uploadData = UploadedTraceData()
+        try:
+          let parsed = parseJson(lastLine)
+          # No default kind. An absent or unrecognised token leaves `kind`
+          # empty, which reads as "the result did not say", rather than
+          # labelling somebody's review dataset a recording.
+          let declaredKind = parseArtifactKind($parsed{"kind"}.getStr(""))
+          uploadData = UploadedTraceData(
+            artifactId: $parsed{"artifactId"}.getStr(""),
+            kind: if declaredKind.isSome:
+                    kindSpec(declaredKind.get).wireToken
+                  else: "",
+            shareUrl: $parsed{"shareUrl"}.getStr("")
+          )
+        except CatchableError:
+          # The command succeeded but said nothing machine-readable. Reported
+          # as an empty result rather than crashing the IPC handler, which is
+          # what an unguarded `parseJson` here used to do.
+          discard
         mainWindow.webContents.send("CODETRACER::upload-trace-file-received", js{
           "argId": cstring(response.trace.program & ":" & $response.trace.recordingId),
           "value": uploadData
@@ -77,7 +104,7 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
       else:
         mainWindow.webContents.send("CODETRACER::uploaded-trace-file-received", js{
           "argId": cstring(response.trace.program & ":" & $response.trace.recordingId),
-          "value": UploadedTraceData(downloadKey: "Errored")
+          "value": UploadedTraceData(shareUrl: "Errored")
         })
   )
 

@@ -619,6 +619,30 @@ const
     # HTTP, `Trace` and `langstring` so it can — so it is in `test-vm-native`
     # and `test-vm-js` alike.
     "src/tests/gui/tests/sharing/artifact_model_vm_test.nim",
+    # AS-2 — store and retrieve any declared kind through ONE transfer.
+    #
+    # Registered for the same reason as the model suite above and one more:
+    # this file is the only thing that pins the recording kind's *conversation*
+    # with the service — which requests, with which bodies, in which order —
+    # against literal pre-AS-2 strings.  Already-uploaded recordings are real
+    # user data at real URLs, and the transfer is now generated from the kind
+    # registry rather than spelled out, so a registry edit that silently
+    # re-routed the recording kind would otherwise be caught by nothing until
+    # a user's link stopped working.
+    #
+    # It also carries AS-2's four verification items (a recording round-trips,
+    # a review dataset round-trips, large artifacts still transfer in slices,
+    # metadata survives the round trip for each kind) in their headless form.
+    # Their over-the-socket form is
+    # `src/ct/online_sharing/artifact_store_roundtrip_test.nim`, which runs the
+    # real HTTP client against a real server in `just test-mcr-enrichment-units`
+    # — both are needed, because a correct plan that the executor does not
+    # follow is a green suite and a broken upload.
+    #
+    # Runs on BOTH backends: the transfer *plan* is a pure function of the
+    # artifact and the local file list, with no filesystem and no HTTP, which
+    # is exactly why the planner and the executor are separate modules.
+    "src/tests/gui/tests/sharing/artifact_transfer_vm_test.nim",
   ]
 
   CliRecordGateTests* = [

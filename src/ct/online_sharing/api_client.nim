@@ -36,7 +36,7 @@
 ## that a second kind cannot acquire a second transport by accident: there is
 ## one grammar, parameterised by kind.
 
-import std/[httpclient, json, net, strformat, strutils]
+import std/[httpclient, json, net, options, strformat, strutils]
 import collab_invite_url
 import artifact
 
@@ -50,18 +50,20 @@ type
     slug*: string
     role*: string
 
-  TraceUploadUrlResponse* = object
-    ## M-REC-8: ``recordingId`` is the client-minted UUIDv7 the upload
-    ## flow echoes back from the server.  The server now stores this
-    ## value as the canonical identity of the uploaded trace; the
-    ## ``controlId`` / ``downloadKey`` pair (separate types) remain the
-    ## server-issued access tokens for the uploaded copy.
-    recordingId*: string
+  ArtifactUploadUrlResponse* = object
+    ## Response from ``POST /tenants/{tenantId}/{segment}/upload-url``.
+    ##
+    ## M-REC-8: for the recording kind the server echoes back the client-minted
+    ## UUIDv7 it was sent, and stores it as the canonical identity of the
+    ## uploaded trace.  AS-2 reads the same field for every kind — the
+    ## recording kind spells it ``recordingId`` on the wire and every other
+    ## kind spells it ``artifactId``, which is a wire spelling rather than two
+    ## concepts.
+    acknowledgedArtifactId*: string
+      ## Empty when the service echoed no id at all.  ``storeArtifact`` treats
+      ## that as "the service did not name the artifact back" rather than
+      ## substituting the local id — see ``ArtifactStoreOutcome``.
     uploadUrl*: string
-    expiresAt*: string
-
-  TraceDownloadUrlResponse* = object
-    downloadUrl*: string
     expiresAt*: string
 
   CollabJoinBootstrapResponse* = object
@@ -79,17 +81,59 @@ type
     licenseInfo*: string
 
   UploadSessionResponse* = object
-    ## Response from ``POST /tenants/{tenantId}/traces/upload-session``.
-    sessionId*: string
+    ## Response from ``POST /tenants/{tenantId}/{segment}/upload-session``.
+    ##
+    ## AS-2: ``session`` carries the collection the session was opened in
+    ## alongside the server-issued id, so the slice and finalize paths address
+    ## that same collection.  See ``artifact.ArtifactUploadSession``.
+    session*: ArtifactUploadSession
     s3KeyPrefix*: string
+    acknowledgedArtifactId*: string
+      ## The artifact id the service says this session will produce, when it
+      ## says one.
+      ##
+      ## Empty is the normal answer for the **recording** kind, and that is a
+      ## property of the wire rather than an oversight: the recording kind's
+      ## `…/upload-session` body is frozen to `platform` and `recordingMode`
+      ## and carries no id, so a sliced recording upload genuinely does not
+      ## tell the service which recording it is — the service names the result
+      ## itself.  That is the fact behind `UploadedInfo.fileId` holding a
+      ## session id after a slice upload (`Artifact-Store.md` §8 defect 11).
+      ## Kinds whose session body is not frozen send `artifactId` and get it
+      ## acknowledged here.
 
   SliceUploadUrlResponse* = object
-    ## Response from ``POST /traces/{sessionId}/slice-upload-url``.
+    ## Response from ``POST /{segment}/{sessionId}/slice-upload-url``.
     uploadUrl*: string
     sliceIndex*: int
 
+  ArtifactDownloadUrlResponse* = object
+    ## Response from ``GET /{segment}/{artifactId}/download-url``.
+    ##
+    ## There is deliberately **no pre-parsed ``kind`` or ``record`` field
+    ## here.**  An earlier draft had both, and the ``kind`` one read
+    ## ``parseArtifactKind(token)`` into an ``Option`` — which collapses
+    ## *unrecognised* into *absent*, the exact distinction §8 defect 10 exists
+    ## to preserve, in a field nothing consumed.  A parser nothing consumes is
+    ## how that defect came to exist in the first place, so the fields are gone
+    ## rather than fixed: the whole response is carried, and the single layer
+    ## that decides what an answer *means*
+    ## (``artifact_transfer.resolveDownloadedKind``) refuses an unrecognised
+    ## kind by name.
+    downloadUrl*: string
+    expiresAt*: string
+    body*: JsonNode
+      ## The whole response, exactly as the service sent it.
+
   ApiError* = object of CatchableError
     ## Raised when the server returns a non-success HTTP status.
+    status*: int
+      ## The HTTP status code, held as a number rather than only embedded in
+      ## the message.  A caller walking a list of candidate collections has to
+      ## distinguish "this collection does not hold it" (404) from "you may not
+      ## ask" (401/403) — continuing to the next collection on the second would
+      ## turn an authorization failure into a not-found, which is a worse
+      ## diagnostic and a slower one.
 
   ApiClient* = object
     baseApiUrl*: string   ## e.g. "https://web.codetracer.com/api/v1/"
@@ -122,10 +166,12 @@ proc ensureSuccess(response: Response, context: string) =
   let code = response.code.int
   if code < 200 or code >= 300:
     let body = response.body
-    raise newException(ApiError,
+    let error = newException(ApiError,
       fmt"Remote service returned error: {response.status}" &
       (if body.len > 0: " — " & body else: "") &
       " (during " & context & ")")
+    error.status = code
+    raise error
 
 # ---------------------------------------------------------------------------
 # Tenant endpoints
@@ -236,64 +282,67 @@ proc exchangeCollabInvite*(client: ApiClient, inviteToken: string):
   for hint in body{"transportHints"}.getElems:
     result.transportHints.add hint.getStr()
 
-proc requestTraceUploadUrl*(client: ApiClient, tenantId: string,
-    recordingId: string, fileName: string, contentType: string,
-    contentLength: int64, bearerToken: string): TraceUploadUrlResponse =
-  ## ``POST /api/v1/tenants/{tenantId}/traces/upload-url``
-  ## Returns a presigned S3 upload URL.
+proc requestArtifactUploadUrl*(client: ApiClient, tenantId: string,
+    artifact: Artifact, fileName: string,
+    bearerToken: string): ArtifactUploadUrlResponse =
+  ## ``POST /api/v1/tenants/{tenantId}/{segment}/upload-url`` — the kind-neutral
+  ## single-file entry point.
   ##
-  ## M-REC-8: the client-minted UUIDv7 ``recordingId`` is now sent in
-  ## the request body so the server can persist it as the trace's
-  ## canonical identity (rather than minting a fresh server-side
-  ## integer).  The response echoes back the same ``recordingId``.
-  let url = buildUploadUrlPath(client.baseApiUrl, tenantId)
-  let body = $ buildUploadUrlBody(
-    recordingId, fileName, contentType, contentLength)
+  ## AS-2: both the URL and the body come from the artifact, so the recording
+  ## kind reproduces the pre-AS-2 request exactly (its registry segment is
+  ## ``traces`` and its body is frozen to the four keys the deployed service
+  ## reads) and every other kind gets the same request shape with its metadata
+  ## carried alongside.  ``recordingId`` is echoed back by the service for the
+  ## recording kind and ``artifactId`` for every other kind; a service that
+  ## echoes neither leaves ``acknowledgedArtifactId`` empty rather than having
+  ## the local id substituted for it, so "the service named this back" stays a
+  ## fact the caller can test.
+  let url = artifactUploadUrlPath(client.baseApiUrl, tenantId, artifact.kind)
+  let body = $ buildArtifactUploadUrlBody(artifact, fileName)
   let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "requestTraceUploadUrl")
+    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken),
+    body = body)
+  ensureSuccess(response, "requestArtifactUploadUrl")
 
   let jsonBody = parseJson(response.body)
-  result = TraceUploadUrlResponse(
-    recordingId: jsonBody["recordingId"].getStr(),
+  var echoed = jsonBody{"recordingId"}.getStr()
+  if echoed.len == 0:
+    echoed = jsonBody{"artifactId"}.getStr()
+  result = ArtifactUploadUrlResponse(
+    acknowledgedArtifactId: echoed,
     uploadUrl: jsonBody["uploadUrl"].getStr(),
-    expiresAt: jsonBody["expiresAt"].getStr(),
+    expiresAt: jsonBody{"expiresAt"}.getStr(),
   )
 
-proc confirmTraceUpload*(client: ApiClient, recordingId: string, etag: string,
-    bearerToken: string) =
-  ## ``POST /api/v1/traces/{recordingId}/confirm-upload``
-  ## Confirms that the file was uploaded successfully with the given ETag.
-  ##
-  ## M-REC-8: the path parameter is the UUIDv7 ``recordingId`` returned
-  ## from ``requestTraceUploadUrl``.
-  let url = buildConfirmUploadPath(client.baseApiUrl, recordingId)
-  let body = $ %*{"etag": etag}
+proc confirmArtifactUpload*(client: ApiClient, reference: ArtifactRef,
+    etag: string, bearerToken: string) =
+  ## ``POST /api/v1/{segment}/{artifactId}/confirm-upload`` — kind-neutral.
+  let url = artifactConfirmUploadPath(client.baseApiUrl, reference)
+  let body = $ buildArtifactConfirmUploadBody(etag)
   let response = client.httpClient.request(
-    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "confirmTraceUpload")
+    url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken),
+    body = body)
+  ensureSuccess(response, "confirmArtifactUpload")
 
-# ---------------------------------------------------------------------------
-# Trace download endpoints
-# ---------------------------------------------------------------------------
-
-proc requestTraceDownloadUrl*(client: ApiClient, recordingId: string,
-    bearerToken: string): TraceDownloadUrlResponse =
-  ## ``GET /api/v1/traces/{recordingId}/download-url``
-  ## Returns a presigned S3 download URL.
+proc requestArtifactDownloadUrl*(client: ApiClient, reference: ArtifactRef,
+    bearerToken: string): ArtifactDownloadUrlResponse =
+  ## ``GET /api/v1/{segment}/{artifactId}/download-url`` — kind-neutral.
   ##
-  ## M-REC-8: the path parameter is the UUIDv7 ``recordingId`` (the
-  ## same identity the recorder minted at record-start and the client
-  ## sent during upload).
-  let url = buildDownloadUrlPath(client.baseApiUrl, recordingId)
+  ## Addresses the kind's own collection when the caller knows the kind, and
+  ## the kind-neutral ``artifacts/`` collection when it does not.  The response
+  ## is returned whole, including any artifact record it carried, because
+  ## deciding what an answer *means* — in particular what kind the bytes are —
+  ## is `artifact_transfer.resolveDownloadedKind`'s job, not this layer's.
+  let url = artifactDownloadUrlPath(client.baseApiUrl, reference)
   let response = client.httpClient.request(
     url, httpMethod = HttpGet, headers = bearerHeaders(bearerToken))
-  ensureSuccess(response, "requestTraceDownloadUrl")
+  ensureSuccess(response, "requestArtifactDownloadUrl")
 
   let jsonBody = parseJson(response.body)
-  result = TraceDownloadUrlResponse(
+  result = ArtifactDownloadUrlResponse(
     downloadUrl: jsonBody["downloadUrl"].getStr(),
-    expiresAt: jsonBody["expiresAt"].getStr(),
+    expiresAt: jsonBody{"expiresAt"}.getStr(),
+    body: jsonBody,
   )
 
 # ---------------------------------------------------------------------------
@@ -342,58 +391,65 @@ proc issueLicense*(client: ApiClient, bearerToken: string): string =
 # Upload-session endpoints (M18a per-slice upload)
 # ---------------------------------------------------------------------------
 
-proc requestUploadSession*(client: ApiClient, tenantId: string,
-    platform: string, recordingMode: string,
+proc openArtifactUploadSession*(client: ApiClient, tenantId: string,
+    artifact: Artifact, recordingMode: string,
     bearerToken: string): UploadSessionResponse =
-  ## ``POST /api/v1/tenants/{tenantId}/traces/upload-session``
-  ## Creates a new upload session for per-slice streaming upload.
-  ## Returns a session ID and S3 key prefix for the upload.
+  ## ``POST /api/v1/tenants/{tenantId}/{segment}/upload-session`` — the
+  ## kind-neutral entry point for a multi-part transfer.
   ##
-  ## AS-1: slice-based transfer is a *transfer* concern, not a trace concern —
-  ## the session endpoint is therefore derived from the kind's collection
-  ## segment like every other path, so any large artifact can use it.
+  ## AS-1 made this URL registry-derived; AS-2 closes the loop by returning the
+  ## session as an ``ArtifactUploadSession`` — the id **and** the collection it
+  ## was opened in — so the slice and finalize requests that follow address the
+  ## collection this session belongs to rather than a literal.  A session that
+  ## carried only its id is what allowed the last two trace-shaped paths in the
+  ## client to survive AS-1.
   let url = artifactUploadSessionPath(
-    client.baseApiUrl, tenantId, akRecording)
-  let body = $ %*{
-    "platform": platform,
-    "recordingMode": recordingMode,
-  }
+    client.baseApiUrl, tenantId, artifact.kind)
+  let body = $ buildArtifactUploadSessionBody(artifact, recordingMode)
   let response = client.httpClient.request(
     url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "requestUploadSession")
+  ensureSuccess(response, "openArtifactUploadSession")
 
   let jsonBody = parseJson(response.body)
   result = UploadSessionResponse(
-    sessionId: jsonBody["sessionId"].getStr(),
-    s3KeyPrefix: jsonBody["s3KeyPrefix"].getStr(),
+    session: ArtifactUploadSession(
+      sessionId: jsonBody["sessionId"].getStr(),
+      kind: artifact.kind),
+    s3KeyPrefix: jsonBody{"s3KeyPrefix"}.getStr(),
+    acknowledgedArtifactId: jsonBody{"artifactId"}.getStr(),
   )
 
-proc requestSliceUploadUrl*(client: ApiClient, sessionId: string,
-    sliceIndex: int, fileName: string, contentLength: int64,
-    bearerToken: string): SliceUploadUrlResponse =
-  ## ``POST /api/v1/traces/{sessionId}/slice-upload-url``
-  ## Requests a presigned S3 URL for uploading a single slice file.
-  let url = client.baseApiUrl & fmt"traces/{sessionId}/slice-upload-url"
-  let body = $ %*{
-    "sliceIndex": sliceIndex,
-    "fileName": fileName,
-    "contentLength": contentLength,
-  }
+proc requestArtifactPartUploadUrl*(client: ApiClient,
+    session: ArtifactUploadSession, sliceIndex: int, fileName: string,
+    contentLength: int64, bearerToken: string): SliceUploadUrlResponse =
+  ## ``POST /api/v1/{segment}/{sessionId}/slice-upload-url``
+  ## Requests a presigned URL for one part of a multi-part payload.
+  ##
+  ## AS-2: the segment comes from the session, not from a literal — see
+  ## ``artifact.artifactSliceUploadUrlPath`` for the decision and why the
+  ## *session* rather than a re-supplied kind is what carries it.
+  let url = artifactSliceUploadUrlPath(client.baseApiUrl, session)
+  let body = $ buildArtifactSliceUploadUrlBody(
+    sliceIndex, fileName, contentLength)
   let response = client.httpClient.request(
     url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "requestSliceUploadUrl")
+  ensureSuccess(response, "requestArtifactPartUploadUrl")
 
   let jsonBody = parseJson(response.body)
   result = SliceUploadUrlResponse(
     uploadUrl: jsonBody["uploadUrl"].getStr(),
-    sliceIndex: jsonBody["sliceIndex"].getInt(),
+    sliceIndex: jsonBody{"sliceIndex"}.getInt(sliceIndex),
   )
 
 proc buildFinalizePath*(baseApiUrl, sessionId: string): string =
   ## URL builder for ``POST /api/v1/traces/{sessionId}/finalize``.
   ## Extracted as a pure helper so unit tests can pin the URL shape
   ## without going through the HTTP transport.
-  baseApiUrl & fmt"traces/{sessionId}/finalize"
+  ##
+  ## AS-2: derived from the recording kind's registry segment rather than
+  ## spelled out.  Identical output; one grammar.
+  artifactFinalizePath(baseApiUrl,
+    ArtifactUploadSession(sessionId: sessionId, kind: akRecording))
 
 proc buildFinalizeBody*(totalSlices: int, totalEvents: int,
     platform: string, omniscientDbMode: string = ""): JsonNode =
@@ -410,28 +466,38 @@ proc buildFinalizeBody*(totalSlices: int, totalEvents: int,
   ## *omitted* so a default-mode client (or one that pre-dates M31)
   ## continues to round-trip the legacy CS-M7 body unchanged — the
   ## server treats a missing field as ``off`` per the spec.
-  result = %*{
-    "totalSlices": totalSlices,
-    "totalEvents": totalEvents,
-    "platform": platform,
-  }
-  if omniscientDbMode.len > 0:
-    result["omniscientDbMode"] = newJString(omniscientDbMode)
-
-proc finalizeUploadSession*(client: ApiClient, sessionId: string,
-    totalSlices: int, totalEvents: int, platform: string,
-    bearerToken: string, omniscientDbMode: string = "") =
-  ## ``POST /api/v1/traces/{sessionId}/finalize``
-  ## Marks the upload session as complete after all slices have been uploaded.
-  ## The server will process the uploaded slices and make the trace available.
   ##
-  ## ``omniscientDbMode`` (M31): the client-controlled omniscient-DB
-  ## upload mode forwarded on the camelCase finalize body.  Empty
-  ## string means "do not signal" — equivalent to ``off`` on the
-  ## server side per the CS-M7 default.
-  let url = buildFinalizePath(client.baseApiUrl, sessionId)
-  let body = $ buildFinalizeBody(
+  ## AS-2: the body itself now lives in ``artifact.nim`` beside the kind that
+  ## owns it, so the generic finalize and this recording-named wrapper cannot
+  ## become two spellings of one request.
+  buildRecordingFinalizeBody(
     totalSlices, totalEvents, platform, omniscientDbMode)
+
+proc finalizeArtifactUploadSession*(client: ApiClient,
+    session: ArtifactUploadSession, artifact: Artifact, totalSlices: int,
+    totalEvents: int, bearerToken: string,
+    omniscientDbMode: string = ""): string =
+  ## ``POST /api/v1/{segment}/{sessionId}/finalize`` — kind-neutral.
+  ##
+  ## Marks the session complete once every part has been published.  Both the
+  ## URL and the body come from the session and the artifact, so the recording
+  ## kind's request is character-identical to the pre-AS-2 one and any other
+  ## kind finalizes in the collection its session was opened in.
+  ##
+  ## ``totalSlices`` counts the **pieces of the payload**, not the objects the
+  ## session uploaded — sidecars travel through the same session and are not
+  ## reassembled.  See ``artifact_transfer.ArtifactPartRole``.
+  ##
+  ## Returns the artifact id the service acknowledged, or ``""`` when it
+  ## acknowledged none — see ``UploadSessionResponse.acknowledgedArtifactId``
+  ## for why an empty answer is the normal one for the recording kind.
+  let url = artifactFinalizePath(client.baseApiUrl, session)
+  let body = $ buildArtifactFinalizeBody(
+    artifact, totalSlices, totalEvents, omniscientDbMode)
   let response = client.httpClient.request(
     url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
-  ensureSuccess(response, "finalizeUploadSession")
+  ensureSuccess(response, "finalizeArtifactUploadSession")
+  try:
+    parseJson(response.body){"artifactId"}.getStr()
+  except CatchableError:
+    ""

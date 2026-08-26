@@ -215,6 +215,77 @@ proc parseArtifactKind*(wireToken: string): Option[ArtifactKind] =
   none(ArtifactKind)
 
 # ---------------------------------------------------------------------------
+# Reading any closed set from untrusted input
+# ---------------------------------------------------------------------------
+#
+# AS-2, `Artifact-Store.md` §8 defect 10.  `parseArtifactKind` above was the
+# only closed set that was actually *closed* on the way in.  The access-control
+# fields were read with the two-argument `parseEnum`, whose second argument is a
+# **fallback, not a validator** — so `"public"` read as `avTenant`, `"owner"`
+# read as `arMember` and `"aes-256-gcm"` read as `apNone`, none of them with an
+# error, and the `try`/`except ValueError` around those calls was unreachable
+# because two-argument `parseEnum` does not raise.
+#
+# Two of those three coercions failed closed; `minimumWriteRole` failed **open**.
+# The one with a future is `protection`: the moment AS-3 adds a second
+# `ArtifactProtection` value, a client built before it would read a record
+# declaring that value as *unprotected* — an encrypted payload presented as
+# plaintext-safe — rather than refusing a record it cannot interpret.  The
+# refusal therefore has to exist before the second value does.
+#
+# So every closed set now enters through the same door as the kind: exact
+# matching, no fallback arm, and a refusal that names the token and lists what
+# is understood.
+
+proc closedEnumTokens*[E: enum](): seq[string] =
+  ## Every declared wire token of a closed enum, in declaration order.  Exists
+  ## so a refusal can *show* the closed set rather than only assert one.
+  result = @[]
+  for value in E:
+    result.add $value
+
+proc parseClosedEnum*[E: enum](token: string): Option[E] =
+  ## Exact-match `token` against `E`'s declared string values.
+  ##
+  ## The generic form of `parseArtifactKind`, and deliberately not
+  ## `std/strutils.parseEnum`: the one-argument overload raises (which reads as
+  ## exceptional for input that is merely untrusted) and the two-argument
+  ## overload silently substitutes a default, which is the defect this replaces.
+  ## Matching is exact, so whitespace padding, case variants and homoglyphs are
+  ## all refused rather than normalised.
+  for value in E:
+    if $value == token:
+      return some(value)
+  none(E)
+
+proc readClosedEnumField*[E: enum](node: JsonNode, fieldName: string,
+    whenAbsent: E): tuple[value: E, error: string] =
+  ## Read one closed-set token out of `node[fieldName]`.
+  ##
+  ## Three outcomes, and the difference between the first two is the whole
+  ## point of this procedure:
+  ##
+  ## * **absent** (or JSON `null`) — `whenAbsent`, no error.  A record written
+  ##   before the field existed does not declare it, and refusing those would
+  ##   make every wire-format addition a breaking change.
+  ## * **present but unrecognised** — an error naming the token and listing the
+  ##   closed set.  This is the arm that used to silently substitute a default.
+  ## * **present but not a string** — also an error.  This was a second way into
+  ##   the same hole: `getStr()` on a number returns `""`, which the old code
+  ##   fed straight to the fallback, so `{"visibility": 7}` read as `tenant`.
+  let field = node{fieldName}
+  if field.isNil or field.kind == JNull:
+    return (whenAbsent, "")
+  if field.kind != JString:
+    return (whenAbsent, "artifact field '" & fieldName & "' is not a string")
+  let token = field.getStr()
+  let parsed = parseClosedEnum[E](token)
+  if parsed.isNone:
+    return (whenAbsent, "unknown artifact " & fieldName & " '" & token &
+      "'; CodeTracer understands only: " & closedEnumTokens[E]().join(", "))
+  (parsed.get, "")
+
+# ---------------------------------------------------------------------------
 # The artifact
 # ---------------------------------------------------------------------------
 
@@ -325,6 +396,25 @@ type
     ## kind — see `parseArtifactShareUrl`.
     artifactId*: string
     kind*: Option[ArtifactKind]
+
+  ArtifactUploadSession* = object
+    ## A server-issued multi-part upload session, **bound to the collection it
+    ## was opened in**.
+    ##
+    ## `sessionId` is not an identity and this type does not pretend otherwise:
+    ## it is a handle the service mints at `…/upload-session`, in its own
+    ## namespace, and it names a transfer in progress rather than the artifact
+    ## the transfer will produce (`Artifact-Store.md` §1, correction 2).  It is
+    ## carried in a typed pair rather than as a bare string precisely so it
+    ## cannot be mistaken for — or assigned to — an artifact id, which is
+    ## exactly what `UploadedInfo.fileId` used to do (§8 defect 11).
+    ##
+    ## `kind` records which collection the session was opened in, so
+    ## `artifactSliceUploadUrlPath` and `artifactFinalizePath` address the same
+    ## collection the session belongs to rather than a kind supplied again at
+    ## each call.  See those procedures for AS-2's decision on those two paths.
+    sessionId*: string
+    kind*: ArtifactKind
 
 # ---------------------------------------------------------------------------
 # Construction and validation
@@ -556,6 +646,40 @@ proc artifactUploadSessionPath*(baseApiUrl, tenantId: string,
   baseApiUrl & "tenants/" & tenantId & "/" &
     kindSpec(kind).urlSegment & "/upload-session"
 
+proc artifactSliceUploadUrlPath*(baseApiUrl: string,
+    session: ArtifactUploadSession): string =
+  ## `POST {base}{segment}/{sessionId}/slice-upload-url`.
+  ##
+  ## **AS-2's decision on the two endpoints AS-1 disclosed as unmigrated.**
+  ## `slice-upload-url` and `finalize` were the last literal `traces/…` strings
+  ## in the client, and AS-1 flagged them as the one place a second kind could
+  ## still acquire a second transport.  They are now derived from the registry
+  ## like everything else — but from the segment **the session was opened in**,
+  ## carried on `ArtifactUploadSession`, rather than from a kind re-supplied at
+  ## each call.
+  ##
+  ## That is what makes the derivation safe on an id namespace the client does
+  ## not own.  The path parameter here is the *session* id, minted server-side
+  ## by `…/upload-session`, and the collection was already chosen at that
+  ## moment; binding the segment to the session means a session cannot be
+  ## opened in one collection and have its slices posted to another.  Leaving
+  ## the literal in place would have meant exactly that: a review dataset
+  ## uploaded in slices would publish them under `traces/`, which is the
+  ## "second kind acquires the first kind's transport" failure in mirror image.
+  ##
+  ## For `akRecording` the segment is `traces`, so the generated string is
+  ## character-identical to the pre-AS-2 one.
+  baseApiUrl & kindSpec(session.kind).urlSegment & "/" &
+    session.sessionId & "/slice-upload-url"
+
+proc artifactFinalizePath*(baseApiUrl: string,
+    session: ArtifactUploadSession): string =
+  ## `POST {base}{segment}/{sessionId}/finalize` — the sibling of
+  ## `artifactSliceUploadUrlPath`, derived the same way and for the same
+  ## reason.  Character-identical to the pre-AS-2 string for `akRecording`.
+  baseApiUrl & kindSpec(session.kind).urlSegment & "/" &
+    session.sessionId & "/finalize"
+
 proc artifactConfirmUploadPath*(baseApiUrl: string,
     reference: ArtifactRef): string =
   ## `POST {base}{segment}/{artifactId}/confirm-upload`.
@@ -732,34 +856,53 @@ proc parseArtifact*(node: JsonNode): ArtifactParseResult =
   let accessNode = node{"access"}
   let payloadNode = node{"payload"}
 
+  # The defaults below apply **only when the key is absent**, which is not the
+  # same thing as an unrecognised value and must not be treated as one: a record
+  # written before a field existed genuinely does not declare it, whereas a
+  # record declaring a token this client cannot interpret is a record this
+  # client must not act on.  Each default is the safe reading of an absence:
+  #
+  #   * `avTenant` — the narrower of the two visibilities.
+  #   * `arMember` — the client does not enforce writes; the service does. This
+  #     value drives presentation, and the rung the tenant listing returns for
+  #     an ordinary member is the one to assume when nothing is said.
+  #   * `apNone` — a record with no `protection` key is one written before
+  #     protection existed, and those payloads really are unprotected.  An
+  #     unknown protection *token* is refused; see `readClosedEnumField`.
   var visibility = avTenant
   var minimumWriteRole = arMember
   var protection = apNone
   var tenantId = ""
   if not accessNode.isNil and accessNode.kind == JObject:
     tenantId = accessNode{"tenantId"}.getStr()
-    try:
-      visibility = parseEnum[ArtifactVisibility](
-        accessNode{"visibility"}.getStr(), avTenant)
-      minimumWriteRole = parseEnum[ArtifactRole](
-        accessNode{"minimumWriteRole"}.getStr(), arMember)
-      protection = parseEnum[ArtifactProtection](
-        accessNode{"protection"}.getStr(), apNone)
-    except ValueError:
-      return ArtifactParseResult(error: "artifact access record is malformed")
+    let readVisibility = readClosedEnumField[ArtifactVisibility](
+      accessNode, "visibility", avTenant)
+    if readVisibility.error.len > 0:
+      return ArtifactParseResult(error: readVisibility.error)
+    visibility = readVisibility.value
+
+    let readRole = readClosedEnumField[ArtifactRole](
+      accessNode, "minimumWriteRole", arMember)
+    if readRole.error.len > 0:
+      return ArtifactParseResult(error: readRole.error)
+    minimumWriteRole = readRole.value
+
+    let readProtection = readClosedEnumField[ArtifactProtection](
+      accessNode, "protection", apNone)
+    if readProtection.error.len > 0:
+      return ArtifactParseResult(error: readProtection.error)
+    protection = readProtection.value
 
   var layout = aplSingleFile
   var contentType = kindSpec(kind).defaultContentType
   var byteSize: int64 = -1
   var partCount = 1
   if not payloadNode.isNil and payloadNode.kind == JObject:
-    let layoutToken = payloadNode{"layout"}.getStr()
-    if layoutToken.len > 0:
-      try:
-        layout = parseEnum[ArtifactPayloadLayout](layoutToken)
-      except ValueError:
-        return ArtifactParseResult(error:
-          "unknown artifact payload layout '" & layoutToken & "'")
+    let readLayout = readClosedEnumField[ArtifactPayloadLayout](
+      payloadNode, "layout", aplSingleFile)
+    if readLayout.error.len > 0:
+      return ArtifactParseResult(error: readLayout.error)
+    layout = readLayout.value
     if payloadNode{"contentType"}.getStr().len > 0:
       contentType = payloadNode{"contentType"}.getStr()
     byteSize = payloadNode{"byteSize"}.getBiggestInt(-1)
@@ -802,3 +945,169 @@ proc kindRegistrySummary*(): OrderedTable[string, string] =
   for kind in ArtifactKind:
     let spec = ArtifactKindRegistry[kind]
     result[spec.wireToken] = spec.whatCodeTracerDoes
+
+# ---------------------------------------------------------------------------
+# The transfer wire bodies (AS-2)
+# ---------------------------------------------------------------------------
+#
+# "Metadata carried alongside" is AS-2's first deliverable, and this is where it
+# is discharged.  Every request body the transfer sends is built here, from the
+# artifact, so a kind cannot invent its own spelling of the same request.
+#
+# ## Where a recording's metadata actually goes, stated plainly
+#
+# The recording kind is bound to a collection a service already serves, and
+# AS-1's compatibility guarantee is that its bodies do not change.  So the
+# recording arms below are **frozen** to the pre-AS-2 key set, and what they
+# carry is what those keys have room for:
+#
+#   * `recordingId` on `…/upload-url` — the recording kind's identity, which for
+#     this kind IS the artifact id;
+#   * `platform` on `…/upload-session` and `…/finalize` — which AS-2 stops
+#     fabricating (§8 defect 4) and now reads from the artifact's metadata.
+#
+# A recording's `program`, `lang` and `recordedAtUnixMs` are **not** sent, and
+# this document does not claim they are: adding keys to a body a deployed
+# service already reads is the wire change AS-1 forbids, and a listing that
+# needs them can read them from the container.  Every kind that is *not* bound
+# to a legacy collection carries its metadata in full, as a `metadata` object
+# beside the artifact id and the kind — which is the shape a new kind gets, and
+# the shape the recording kind would have had if it were being designed today.
+
+proc artifactPlatformToken*(osName, cpuName: string): string =
+  ## The platform token for a `hostOS` / `hostCPU` pair, or `""` when the pair
+  ## is one this function has not been taught.
+  ##
+  ## `Artifact-Store.md` §8 defect 4: the upload session used to send the
+  ## literal `"linux-x86_64"` whatever machine it ran on, so a macOS or Windows
+  ## recording was uploaded labelled Linux.  That is worse than an absent
+  ## field — `platform` is what a listing uses to tell a user whether a
+  ## recording is replayable for them, and a fabricated one sends them to
+  ## download it and find out.  An unrecognised pair therefore yields the empty
+  ## string, which is an absence, rather than a guess.
+  ##
+  ## Pure in its arguments (rather than reading `hostOS` directly) so the
+  ## mapping is assertable on the JavaScript backend too, where `hostOS` is
+  ## `"js"` and describes nothing.
+  let normalisedOs =
+    case osName
+    of "linux": "linux"
+    of "macosx": "macos"
+    of "windows": "windows"
+    else: ""
+  let normalisedCpu =
+    case cpuName
+    of "amd64": "x86_64"
+    of "arm64": "aarch64"
+    else: ""
+  if normalisedOs.len == 0 or normalisedCpu.len == 0:
+    return ""
+  normalisedOs & "-" & normalisedCpu
+
+when not defined(js):
+  proc hostArtifactPlatformToken*(): string =
+    ## The platform token for the machine this build of `ct` runs on.
+    ##
+    ## On linux/amd64 — every machine that can run the rr-based recorder whose
+    ## pre-split slices reach the upload-session path today — this is
+    ## `"linux-x86_64"`, character-identical to the constant it replaces.
+    artifactPlatformToken(hostOS, hostCPU)
+
+proc buildArtifactUploadUrlBody*(artifact: Artifact,
+    fileName: string): JsonNode =
+  ## Request body for `…/upload-url`, built from the whole artifact.
+  ##
+  ## The recording arm is the frozen four-key body `buildArtifactUploadUrlBody`
+  ## already produced from an `ArtifactRef`; every other kind adds its metadata.
+  result = buildArtifactUploadUrlBody(artifactRef(artifact), fileName,
+    artifact.payload.contentType, artifact.payload.byteSize)
+  if artifact.kind != akRecording:
+    result["metadata"] = metadataToJson(artifact.metadata)
+
+proc buildArtifactConfirmUploadBody*(etag: string): JsonNode =
+  ## Request body for `…/confirm-upload`.  Kind-neutral already, and the ETag
+  ## is issued by the object store at PUT time rather than planned.
+  %*{"etag": etag}
+
+proc buildRecordingUploadSessionBody*(platform, recordingMode: string):
+    JsonNode =
+  ## The recording kind's **frozen** `…/upload-session` body: exactly the two
+  ## keys the deployed service reads, in the same spelling.  Held apart from
+  ## the kind-dispatching builder below so `api_client.nim`'s recording-named
+  ## wrapper and the generic path cannot drift into two spellings of one body.
+  %*{
+    "platform": platform,
+    "recordingMode": recordingMode,
+  }
+
+proc buildRecordingFinalizeBody*(totalSlices, totalEvents: int,
+    platform: string, omniscientDbMode: string = ""): JsonNode =
+  ## The recording kind's **frozen** `…/finalize` body (CS-M7, plus M31's
+  ## `omniscientDbMode`, which is omitted entirely when the client has no
+  ## preference so a default-mode client round-trips the legacy body
+  ## unchanged).  The single source for both callers, as above.
+  result = %*{
+    "totalSlices": totalSlices,
+    "totalEvents": totalEvents,
+    "platform": platform,
+  }
+  if omniscientDbMode.len > 0:
+    result["omniscientDbMode"] = newJString(omniscientDbMode)
+
+proc buildArtifactUploadSessionBody*(artifact: Artifact,
+    recordingMode: string): JsonNode =
+  ## Request body for `…/upload-session`.
+  ##
+  ## Exhaustive `case`: a new kind must say how it introduces a multi-part
+  ## transfer of itself, or this does not compile.  That is the seventh
+  ## obligation a kind owes (`Artifact-Store.md` §3.1) and it exists because
+  ## slice transfer is the path large artifacts take — the one a new kind is
+  ## most likely to reach for and least likely to have thought about.
+  case artifact.kind
+  of akRecording:
+    buildRecordingUploadSessionBody(
+      artifact.metadata.platform, recordingMode)
+  of akReviewDataset:
+    # No legacy binding, so the kind-neutral envelope: who this is, what kind
+    # it is, and its metadata in full.  `recordingMode` has no meaning here —
+    # a review dataset is not a run — so it is not sent rather than sent empty.
+    %*{
+      "artifactId": artifact.artifactId,
+      "kind": kindSpec(artifact.kind).wireToken,
+      "metadata": metadataToJson(artifact.metadata),
+    }
+
+proc buildArtifactSliceUploadUrlBody*(sliceIndex: int, fileName: string,
+    contentLength: int64): JsonNode =
+  ## Request body for `…/slice-upload-url`.  Kind-neutral in every kind's case:
+  ## it describes one part of a payload and nothing about what the payload is.
+  %*{
+    "sliceIndex": sliceIndex,
+    "fileName": fileName,
+    "contentLength": contentLength,
+  }
+
+proc buildArtifactFinalizeBody*(artifact: Artifact, totalSlices: int,
+    totalEvents: int, omniscientDbMode: string = ""): JsonNode =
+  ## Request body for `…/finalize`.
+  ##
+  ## `totalSlices` is the number of **pieces of the payload**, which is what
+  ## the deployed CS-M7 service reassembles from.  It is deliberately *not* the
+  ## number of objects the session uploaded: a sliced recording publishes its
+  ## `.smnf` / `.amnf` manifests through the same session, and the pre-AS-2
+  ## client did not count them.  See `artifact_transfer.ArtifactPartRole`.
+  ##
+  ## Exhaustive `case`, for the same reason as the session body above.
+  case artifact.kind
+  of akRecording:
+    result = buildRecordingFinalizeBody(totalSlices, totalEvents,
+      artifact.metadata.platform, omniscientDbMode)
+  of akReviewDataset:
+    # `totalEvents` and `omniscientDbMode` are recording concepts — an event
+    # count and an instruction about omniscient-DB artefacts — and a review
+    # dataset has neither, so neither is sent.
+    result = %*{
+      "artifactId": artifact.artifactId,
+      "kind": kindSpec(artifact.kind).wireToken,
+      "totalSlices": totalSlices,
+    }

@@ -916,6 +916,23 @@ type
           "(off | on | lazy | pre-prepared). " &
           "See spec §6.8.6 / M31."
       .}: OmniscientDbMode
+      # AS-2 — the kind-neutral half of `ct upload`.  `--artifact` names a
+      # local path to share whatever kind it holds; the kind is recognised
+      # from what is in it, and `--kind` is how you say so when it cannot be
+      # recognised unambiguously (or when you want to be explicit).
+      uploadArtifactPath* {.
+        name: "artifact",
+        desc: "path of a local artifact to share " &
+          "(a recording folder, or a review dataset " &
+          "directory produced by `ct review collect`)"
+      .}: Option[string]
+      uploadArtifactKind* {.
+        name: "kind",
+        desc: "what --artifact holds " &
+          "(recording | review-dataset); " &
+          "only needed when it cannot be " &
+          "recognised from the path itself"
+      .}: Option[string]
     of download:
       traceDownloadUrl* {.
         argument,

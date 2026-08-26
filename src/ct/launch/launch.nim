@@ -338,7 +338,11 @@ proc runInitial*(conf: CodetracerConf) =
         # M31 — forward the client-controlled omniscient-DB upload
         # mode (``--omniscient-db=off|on|lazy|pre-prepared``) into
         # the CS-M7 ``/finalize`` body.
-        conf.uploadOmniscientDbMode)
+        conf.uploadOmniscientDbMode,
+        # AS-2 — the kind-neutral `--artifact <PATH>` selection, with
+        # `--kind` for the cases the path cannot be classified on its own.
+        conf.uploadArtifactPath,
+        conf.uploadArtifactKind)
     of StartupCommand.download:
       downloadTraceCommand(conf.traceDownloadUrl,
         conf.downloadToken,

@@ -403,6 +403,137 @@ suite "AS-1 — the access model is kind-neutral and reuses what exists":
       check restored.access.minimumWriteRole == arAdmin
       check restored.access.protection == apNone
 
+suite "AS-2 — unknown access-control tokens are refused, as unknown kinds are":
+  ## `Artifact-Store.md` §8 defect 10.  Before AS-2, `parseArtifact` read
+  ## `visibility`, `minimumWriteRole` and `protection` with the **two-argument**
+  ## `parseEnum`, whose second argument is a *fallback* rather than a validator:
+  ## `"public"` read as `avTenant`, `"owner"` read as `arMember`, and
+  ## `"aes-256-gcm"` read as `apNone`, all silently.  Two of those coercions
+  ## fail closed; `minimumWriteRole` fails **open**.
+  ##
+  ## The one that matters most is `protection`, and it matters to AS-3 rather
+  ## than to today: once a second `ArtifactProtection` value exists, a client
+  ## built before it that meets a record declaring that value would read an
+  ## *encrypted* artifact as unprotected — plaintext-safe — instead of refusing
+  ## it.  So the refusal has to be in place BEFORE the second value is, which
+  ## is why it lands here and not in AS-3.
+  ##
+  ## The kind field was already exact-matched and refused with no coercion, so
+  ## these suites deliberately mirror the shape of the kind suites above: the
+  ## refusal happens, and the error names the offending token and the closed
+  ## set.
+
+  test "an unknown visibility is refused, naming the token and the closed set":
+    var record = sampleArtifact(akRecording).toJson()
+    record["access"]["visibility"] = %"public"
+    let parsed = parseArtifact(record)
+    check parsed.error.len > 0
+    check "public" in parsed.error
+    check "tenant" in parsed.error
+    check "tenant-or-invite" in parsed.error
+    # Nothing retained: the record is refused, not accepted with the field
+    # quietly narrowed to a value the sender did not send.
+    check parsed.artifact.artifactId.len == 0
+
+  test "an unknown write role is refused rather than read as 'member'":
+    # This is the fail-OPEN one: `"owner"` silently became `arMember`, the
+    # weaker of the two rungs, so a record asking for a stricter write scope
+    # was honoured as the looser one.
+    var record = sampleArtifact(akRecording).toJson()
+    record["access"]["minimumWriteRole"] = %"owner"
+    let parsed = parseArtifact(record)
+    check parsed.error.len > 0
+    check "owner" in parsed.error
+    check "member" in parsed.error
+    check "admin" in parsed.error
+    check parsed.artifact.artifactId.len == 0
+
+  test "an unknown protection is refused rather than read as 'none'":
+    # AS-3's seam, guarded before AS-3 widens it.  A record that declares a
+    # protection this client does not implement must be REFUSED — reading it as
+    # `none` would present an encrypted payload as plaintext-safe.
+    for token in ["aes-256-gcm", "password", "client-side", "None", "NONE",
+        "none ", " none"]:
+      checkpoint(token)
+      var record = sampleArtifact(akReviewDataset).toJson()
+      record["access"]["protection"] = %token
+      let parsed = parseArtifact(record)
+      check parsed.error.len > 0
+      check token in parsed.error
+      check "none" in parsed.error
+      check parsed.artifact.artifactId.len == 0
+
+  test "access-control matching is exact, the way kind matching is":
+    # The same adversarial shapes the kind suite refuses: whitespace padding,
+    # case variants, near misses and separators.  None may resolve, and none
+    # may fall back to a default.
+    for token in ["", " ", "Tenant", "TENANT", "tenant ", " tenant",
+        "tenant\n", "tenant\t", "tenant_or_invite", "tenantOrInvite",
+        "tenant–or–invite",  # en-dash homoglyphs
+        "invite", "public", "private", "everyone", "null", "undefined", ".."]:
+      checkpoint(token)
+      var record = sampleArtifact(akRecording).toJson()
+      record["access"]["visibility"] = %token
+      check parseArtifact(record).error.len > 0
+
+    for token in ["", " ", "Member", "MEMBER", "member ", "owner", "root",
+        "administrator", "Admin", "admin\n", "null", "undefined"]:
+      checkpoint(token)
+      var record = sampleArtifact(akRecording).toJson()
+      record["access"]["minimumWriteRole"] = %token
+      check parseArtifact(record).error.len > 0
+
+  test "an access field that is not a string is refused":
+    # The other half of the same hole: `getStr()` on a number returns "", which
+    # the old code fed straight into the fallback.  A record whose visibility
+    # is `7` is malformed, not "tenant".
+    for badValue in [%7, %true, %(%*{"a": 1}), %(newJArray())]:
+      checkpoint($badValue)
+      for field in ["visibility", "minimumWriteRole", "protection"]:
+        var record = sampleArtifact(akRecording).toJson()
+        record["access"][field] = badValue
+        let parsed = parseArtifact(record)
+        check parsed.error.len > 0
+        check field in parsed.error
+
+  test "a payload layout that is not a string is refused":
+    # Same shape, same cause, on the payload half: an empty `getStr()` fell
+    # through to `aplSingleFile` instead of being refused.
+    for badValue in [%7, %true, %(newJArray())]:
+      checkpoint($badValue)
+      var record = sampleArtifact(akRecording).toJson()
+      record["payload"]["layout"] = badValue
+      let parsed = parseArtifact(record)
+      check parsed.error.len > 0
+      check "layout" in parsed.error
+
+  test "the pre-AS-3 wire form — no protection key at all — still reads":
+    # Absence is not the same as an unknown value.  A record written before
+    # protection existed genuinely has none, so an absent key keeps its
+    # documented default; only a token this client cannot interpret is refused.
+    var record = sampleArtifact(akRecording).toJson()
+    record["access"].delete("protection")
+    let parsed = parseArtifact(record)
+    check parsed.error == ""
+    check parsed.artifact.access.protection == apNone
+
+  test "every declared access-control token still round-trips":
+    # The refusal must not be so eager that it rejects what the model itself
+    # writes.  Every value of every access enum, through the wire form.
+    for visibility in ArtifactVisibility:
+      for role in ArtifactRole:
+        for protection in ArtifactProtection:
+          checkpoint($visibility & "/" & $role & "/" & $protection)
+          var artifact = sampleArtifact(akReviewDataset)
+          artifact.access = ArtifactAccess(
+            tenantId: SampleTenantId, visibility: visibility,
+            minimumWriteRole: role, protection: protection)
+          let parsed = parseArtifact(artifact.toJson())
+          check parsed.error == ""
+          check parsed.artifact.access.visibility == visibility
+          check parsed.artifact.access.minimumWriteRole == role
+          check parsed.artifact.access.protection == protection
+
 suite "AS-1 — the artifact id is a kind-neutral UUIDv7":
 
   test "a non-UUIDv7 id is refused for every kind":
