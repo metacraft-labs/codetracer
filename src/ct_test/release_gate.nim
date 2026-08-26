@@ -801,6 +801,48 @@ const
     "src/tests/cli/agent_cli_test.nim",
   ]
 
+  CliLangContractGateTests* = [
+    # The `Lang` ordinal contract and the domain types that succeed it.  Same
+    # contract and the same runner as the three arrays above — `just
+    # test-cli-record` globs the whole of `src/tests/cli` — kept in its own
+    # array because its subject is neither the record dispatch lane nor a
+    # command group, and folding it into `CliRecordGateTests` would dilute that
+    # array's stated scope.  `CliReviewGateTests` set the precedent and says so
+    # outright: a different subject gets its own array.
+    #
+    # These three exist because `Lang`'s ordinal is a WIRE AND STORAGE contract
+    # held in three hand-maintained copies that no compiler compares:
+    #
+    #   * the Nim enum, `src/common/common_lang.nim`;
+    #   * the canonical Rust enum, `libs/ct-lang/src/lib.rs`, which carries the
+    #     ordinal across the `ct/load-locals` DAP hop via `serde_repr`;
+    #   * the hand-written JS ordinal map in `src/frontend/trace_metadata.nim`.
+    #
+    # A copy that falls behind does not fail loudly — it decodes an integer as a
+    # different language.  That has already happened here: `src/tui/src/lang.rs`
+    # stopped at `Solana` (37 of 40) and `libs/ct-dap-client` diverged from
+    # ordinal 6 onwards, both silently.  `lang_enum_contract_test` is what pins
+    # the three copies together, and it fails rather than silently comparing
+    # nothing if it cannot locate either list.
+    #
+    # `trace_index_migration_test` guards the other end of the same contract:
+    # the `lang` column of the persisted `trace_index.db` holds ordinals written
+    # by OLDER builds, decoded through the frozen `langV0OrdinalNames` snapshot
+    # in `src/common/trace_index.nim` — a table whose header says "Never
+    # regenerate this from `Lang`" precisely because regenerating it would make
+    # old rows decode as the wrong language.
+    #
+    # `target_axes_test` pins the successor types (`src/common/target_axes.nim`,
+    # `src/common/target_assessment.nim`), including the decomposition of all 40
+    # `Lang` values onto the four axes.  It is registered here rather than left
+    # to the glob because it is the safety net for the migration that removes
+    # `Lang` members, which is exactly when "the test quietly stopped running"
+    # would be most expensive.
+    "src/tests/cli/lang_enum_contract_test.nim",
+    "src/tests/cli/trace_index_migration_test.nim",
+    "src/tests/cli/target_axes_test.nim",
+  ]
+
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
     GuiActionGateEntry(
       action: "ct.test.run",

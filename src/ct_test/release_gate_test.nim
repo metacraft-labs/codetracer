@@ -194,6 +194,46 @@ suite "ct-test M16 release gate":
 
     checkCliLaneCovers(CliAgentGateTests)
 
+  test "cli_lang_contract_gate_tests_exist_and_are_registered":
+    # The `Lang` ordinal contract and its successor domain types, on the same
+    # runner as the three lanes above.
+    for cliPath in CliLangContractGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    checkCliLaneCovers(CliLangContractGateTests)
+
+    # The four-axis types have a SECOND required runner, on a DIFFERENT
+    # BACKEND.  `src/common/target_axes.nim` and `src/common/target_assessment.nim`
+    # exist to be reachable from every front end — that is the whole reason they
+    # are importable modules in `src/common/` rather than additions to the
+    # `include`-only `common_lang.nim` — so a build that only succeeds on the C
+    # backend has not delivered the property.  Compiling is itself part of the
+    # assertion: a stray `std/jsffi` or `os` dependency fails on one side and
+    # nowhere else.
+    #
+    # Asserted through the LANE, not through the justfile's text, for the reason
+    # `checkCliLaneCovers` gives: a literal match pins where a glob is written
+    # rather than that the file is covered.  This one was genuinely miscovered
+    # when written — `target_axes_js_test.nim` was reached by the C-backend
+    # `frontend-native-units` lane (which globs `src/frontend/tests/*_test.nim`)
+    # and by NO js lane, so the JS half ran only under `just test-frontend-js`
+    # and nothing asserted that it still did.
+    const JsAxesTest = "src/frontend/tests/target_axes_js_test.nim"
+    check fileExists(JsAxesTest)
+    checkNoHardSkips(JsAxesTest)
+    let jsLane = laneFilesFor("frontend-js")
+    check jsLane.len > 0
+    checkpoint(JsAxesTest & " must be in the frontend-js lane")
+    check jsLane.contains(JsAxesTest)
+    # ... and must NOT be double-claimed by the C-backend lane, which is how it
+    # was mis-filed: a JS-backend suite that also runs on C is not the property
+    # being asserted, and the reject list is where that is said.
+    let nativeLane = laneFilesFor("frontend-native-units")
+    checkpoint(JsAxesTest & " must NOT be in the frontend-native-units lane")
+    check(not nativeLane.contains(JsAxesTest))
+
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:
       checkpoint(entry.action)
