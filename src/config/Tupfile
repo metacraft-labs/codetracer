@@ -1,0 +1,67 @@
+# Publish the bundled default configuration and layout into the build
+# variant's `config/` directory.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# `ct` reads these two files from `<prefix>/config/` at runtime -- `configDir`
+# in `src/common/config.nim`, where `<prefix>` is `codetracerPrefix`, the
+# directory above `bin/ct`, i.e. the variant root.  `loadConfig` copies
+# `configDir/default_config.yaml` into the user's config directory the first
+# time CodeTracer runs on a machine, so on a pristine profile a missing file
+# there is not a degraded mode -- it is an uncaught `OSError` before anything
+# else happens:
+#
+#     Error: Unhandled exception
+#       src/ct/cli/build.nim build
+#       src/common/config.nim(159) loadConfig
+#       .../osfiles.nim(241) copyFile
+#     Unhandled No such file or directory
+#     Additional info: .../src/build-debug/config/default_config.yaml
+#
+# Until this rule existed, publishing them was nobody's job.  `../Tupfile`
+# asserted that they "already reach build-debug/config/ via the variant source
+# mirror"; they do not.  Tup's variant mirror reproduces the source DIRECTORY
+# tree into the variant and copies no files -- which is why `build-debug/lsp`,
+# `build-debug/tools` and `build-debug/bpf-monitor` all exist and are all
+# empty, and why `build-debug/config` existed as an empty directory that looked
+# right in an `ls` of the variant root.  Tup's own database agrees: before this
+# rule, `default_config.yaml` and `default_layout.json` appeared in it only as
+# type-0 (source) nodes under `src/config`, with no generated node anywhere.
+#
+# Everyone downstream had already worked around it by hand:
+#   * non-nix-build/windows/setup-codetracer-runtime-env.{ps1,sh} copy the two
+#     files into `<build-debug>/config/` themselves, with a comment saying the
+#     runtime expects them there;
+#   * scripts/docs/deep-review-capture-lib.sh refuses to start and tells you to
+#     `mkdir -p .../config && cp ...` yourself;
+#   * codetracer-specs/Planned-Features/Native-Target-Recognition.milestones.org
+#     records an agent having to do the same `cp` to get a suite to execute.
+# `repro.nim` does declare them (targets `config-default-layout-json` and
+# `config-default-config-yaml`), but reprobuild writes to
+# `src/build-<config>-repro`, not to tup's `src/build-debug`, so on the tup
+# branch -- which is what `just build-once` takes on Linux by default -- that
+# declaration never applied.
+#
+# WHY A TUPFILE OF ITS OWN, RATHER THAN A RULE IN ../Tupfile
+# ----------------------------------------------------------
+# `!tup_preserve` from the parent directory would need input and output
+# relative paths that differ (see the note in `../Tupfile`); a rule whose
+# Tupfile sits in the same directory as its inputs has no such clash.  This is
+# the same shape as `../public/resources/Tupfile` and `../public/third_party/
+# Tupfile`.
+#
+# `*.*` rather than an explicit two-file list on purpose: the failure mode
+# being fixed here is a runtime asset that silently is not published, so a new
+# file added to `src/config/` should be published by default rather than
+# forgotten.  (`scripts/require-tup-globs.sh` deliberately does not check a
+# bare `*.*` -- it globs the Tupfile's own directory, which exists by
+# construction.)
+#
+# THE GUARD
+# ---------
+# `scripts/require-runtime-assets.sh` runs at the end of
+# `scripts/build-once.sh` on BOTH build branches and fails by name if the
+# startup asset closure is ever incomplete again.  It derives the file names
+# from `src/common/config.nim` rather than repeating them, so a rename cannot
+# leave the guard checking the old names.
+: foreach *.* |> !tup_preserve |>

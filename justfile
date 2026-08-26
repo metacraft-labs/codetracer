@@ -26,6 +26,22 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that the built output tree carries the assets `ct` reads on startup
+# (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
+# build exits 0 when a runtime asset is simply never published -- there is no
+# rule to fail -- which is how `src/build-debug/config/` stayed empty across
+# every clean build while `ct` died on first run with an uncaught OSError.
+# `scripts/build-once.sh` runs this at the end of both build branches; the
+# recipe exists so it can be run against an existing tree on its own.
+# Defaults to the debug tup variant; pass another output root to override.
+require-runtime-assets OUT_ROOT="src/build-debug":
+  bash scripts/require-runtime-assets.sh {{OUT_ROOT}}
+
+# The contract suite for that guard -- synthetic trees, no toolchain, ~1s.
+# Also runs in the `lint-bash` job (ci/lint/bash.sh).
+test-runtime-assets-guard:
+  bash ci/test/require-runtime-assets-test.sh
+
 # Build all sibling-recorder binaries that the GUI tests reach for.
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just

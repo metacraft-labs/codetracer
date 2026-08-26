@@ -90,6 +90,7 @@ STUB_HELPER_SCRIPTS=(
 	require-fuse-mount-helper.sh
 	require-tup-globs.sh
 	post-build-setcap.sh
+	require-runtime-assets.sh
 )
 
 write_recording_stub() {
@@ -401,7 +402,11 @@ $(normalized "$build_trace" | sed 's/^/    /')"
 
 	# --- (E) the preflights and post-steps build.sh used to skip ------------
 	local step
-	local -a required_steps=(require-siblings build-tailwind)
+	# `require-runtime-assets` is in the base list, not the tup-only one: the
+	# assets `ct` reads on startup have to be in EVERY output tree, so both
+	# branches run it. (It was added when a clean tup build was found to leave
+	# `src/build-debug/config/` empty and `ct` unable to start.)
+	local -a required_steps=(require-siblings build-tailwind require-runtime-assets)
 	if [ "$expected_branch" = "tup" ]; then
 		required_steps+=(require-fuse-mount-helper require-tup-globs post-build-setcap)
 	fi

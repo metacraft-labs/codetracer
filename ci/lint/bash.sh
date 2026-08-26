@@ -62,7 +62,8 @@ lint_step "shellcheck: build prerequisites checked before tup runs" \
 	shellcheck \
 	scripts/require-fuse-mount-helper.sh \
 	scripts/require-siblings.sh \
-	scripts/require-tup-globs.sh
+	scripts/require-tup-globs.sh \
+	scripts/require-runtime-assets.sh
 
 # scripts/test-build-alignment.sh asserts that `just build` is `just build-once`
 # plus watchers. It executes both scripts under recording stubs, so a break in
@@ -111,5 +112,12 @@ lint_step "contract suite: flake pin alignment guard" \
 # external command fails, and asserts each still reports every step it declares.
 lint_step "contract suite: lint-step isolation (no step can hide another)" \
 	bash ci/test/lint-step-isolation-test.sh
+
+# scripts/require-runtime-assets.sh is the end-of-build guard that a produced
+# `ct` can actually start. It is exactly the shape of thing that can rot into a
+# vacuous pass -- read no contract, check nothing, print "ok" -- so its own
+# contract suite runs here. Pure bash, synthetic trees, about a second.
+lint_step "contract suite: runtime-asset guard (a built ct can start)" \
+	bash ci/test/require-runtime-assets-test.sh
 
 lint_summary

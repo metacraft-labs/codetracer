@@ -391,6 +391,9 @@ if [ -n "$ct_reprobuild_host" ]; then
 	if [ "$ct_reprobuild_host" = "linux" ] || [ "$ct_reprobuild_host" = "darwin" ]; then
 		scripts/post-build-setcap.sh "$ct_repro_out_root/bin/ct"
 	fi
+	# A build that exits 0 having produced a `ct` that cannot start is the
+	# defect this check ends. See scripts/require-runtime-assets.sh.
+	"${BASH:-bash}" "$SCRIPT_DIR/require-runtime-assets.sh" "$ct_repro_out_root"
 	exit 0
 fi
 
@@ -441,3 +444,12 @@ cd ..
 # sudo from running during the build, so we do this as a post-build step.
 # Silently skips if codetracer-setcap is not installed.
 scripts/post-build-setcap.sh "src/$ct_tup_variant/bin/ct"
+
+# Last: assert the variant tree actually carries the assets `ct` reads on
+# startup. tup exits 0 when a runtime asset is simply never published -- there
+# is no rule to fail -- which is how `src/build-debug/config/` stayed empty
+# across every clean build while `ct` died on first run with an uncaught
+# OSError naming `config/default_config.yaml`. `src/config/Tupfile` publishes
+# them now; this is what makes the next regression loud, here, rather than on a
+# user's machine. See scripts/require-runtime-assets.sh.
+"${BASH:-bash}" "$SCRIPT_DIR/require-runtime-assets.sh" "src/$ct_tup_variant"
