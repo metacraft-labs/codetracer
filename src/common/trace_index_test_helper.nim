@@ -73,7 +73,10 @@ proc scenarioSchema() =
     "recording_id:TEXT", "program:TEXT", "args:TEXT",
     "compile_command:TEXT", "env:TEXT", "workdir:TEXT", "output:TEXT",
     "source_folders:TEXT", "low_level_folder:TEXT", "output_folder:TEXT",
-    "lang:INTEGER", "imported:INTEGER", "shell_id:INTEGER",
+    # ``lang`` is TEXT since trace_index schema version 1: it stores the
+    # ``Lang`` enum name, not ``ord(Lang)``.  See the "Schema versioning"
+    # section of ``trace_index.nim``.
+    "lang:TEXT", "imported:INTEGER", "shell_id:INTEGER",
     "rr_pid:INTEGER", "exit_code:INTEGER", "calltrace:INTEGER",
     "calltrace_mode:TEXT", "recorded_at:TEXT",
     "remote_share_download_key:TEXT", "remote_share_control_id:TEXT",
@@ -305,6 +308,158 @@ proc scenarioShortPrefixNotFound() =
     fail("expected rieNotFound; got " & $res.error)
   echo "PASS"
 
+# ---------------------------------------------------------------------------
+# trace_index schema version 1 — recordings.lang stores the Lang enum NAME
+# ---------------------------------------------------------------------------
+
+const LEGACY_LANG_ORDINAL_DDL = """CREATE TABLE IF NOT EXISTS recordings (
+      recording_id TEXT PRIMARY KEY,
+      program TEXT NOT NULL,
+      args TEXT,
+      compile_command TEXT,
+      env TEXT,
+      workdir TEXT,
+      output TEXT,
+      source_folders TEXT,
+      low_level_folder TEXT,
+      output_folder TEXT,
+      lang INTEGER NOT NULL,
+      imported INTEGER DEFAULT 0,
+      shell_id INTEGER,
+      rr_pid INTEGER,
+      exit_code INTEGER,
+      calltrace INTEGER,
+      calltrace_mode TEXT,
+      recorded_at TEXT NOT NULL,
+      remote_share_download_key TEXT,
+      remote_share_control_id TEXT,
+      remote_share_expire_time INTEGER DEFAULT -1
+  );"""
+  ## A frozen copy of the schema-version-0 ``recordings`` DDL.  It is a
+  ## deliberate duplicate of what ``common_trace_index.nim`` used to say: a
+  ## migration test that derived the *old* shape from the *current* source
+  ## would stop testing the migration the moment the current source changed.
+
+proc scenarioLangNameRoundTrip() =
+  ## The production write path stores a name, the production read path reads
+  ## it back as the same ``Lang``, and the freshly-created database is
+  ## stamped at the current schema version.
+  ##
+  ## ``LangElixir`` is used on purpose: it is ordinal 37, a value the live
+  ## developer database actually holds, and one that any reordering of the
+  ## enum would re-point.
+  let id = trace_index.newID(test = false)
+  discard trace_index.recordTrace(
+    id,
+    program = "/tmp/lang-name-roundtrip",
+    args = @[],
+    compileCommand = "",
+    env = "",
+    workdir = "/tmp",
+    lang = LangElixir,
+    sourceFolders = "",
+    lowLevelFolder = "",
+    outputFolder = "/tmp/trace-" & id,
+    test = false,
+    imported = false,
+    shellID = -1,
+    rrPid = 0,
+    exitCode = 0,
+    calltrace = false,
+    calltraceMode = CalltraceMode.NoInstrumentation)
+
+  var db = open(traceIndexDbPath(), "", "", "")
+  defer: db.close()
+
+  let raw = db.getValue(
+    sql"SELECT lang FROM recordings WHERE recording_id = ?", id)
+  if raw != "LangElixir":
+    fail("recordings.lang should hold the enum name 'LangElixir'; got " &
+         raw.escape())
+  let version = db.getValue(sql"PRAGMA user_version")
+  if version != $TRACE_INDEX_SCHEMA_VERSION:
+    fail("fresh DB should be stamped at schema version " &
+         $TRACE_INDEX_SCHEMA_VERSION & "; PRAGMA user_version = " & version)
+  let declaredType = db.getValue(
+    sql"SELECT type FROM pragma_table_info('recordings') WHERE name = 'lang'")
+  if declaredType != "TEXT":
+    fail("recordings.lang should be declared TEXT; got " & declaredType)
+
+  let found = trace_index.find(id, test = false)
+  if found.isNil:
+    fail("find returned nil for " & id)
+  if found.lang != LangElixir:
+    fail("find decoded lang as " & $found.lang & ", expected LangElixir")
+
+  echo "PASS"
+
+proc scenarioMigrateLegacyDb() =
+  ## The end-to-end gate on ``ensureDB``: a hand-built schema-version-0
+  ## database sitting at the real path is migrated on the next open, without
+  ## the caller asking, and the rows survive with their language intact.
+  ##
+  ## This is the scenario the in-process tests cannot cover, because it is the
+  ## *wiring* — a migration that is correct but never called is worth nothing.
+  let dbPath = traceIndexDbPath()
+  createDir(dbPath.parentDir)
+  block:
+    var db = open(dbPath, "", "", "")
+    defer: db.close()
+    db.exec(sql"PRAGMA journal_mode=WAL;")
+    db.exec(sql(LEGACY_LANG_ORDINAL_DDL))
+    db.exec(sql"""CREATE TABLE IF NOT EXISTS record_pid_recording_map (
+        pid INTEGER,
+        recording_id TEXT NOT NULL,
+        FOREIGN KEY (recording_id) REFERENCES recordings(recording_id));""")
+    db.exec(sql"""CREATE TABLE IF NOT EXISTS recent_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT UNIQUE, name TEXT, last_opened TEXT);""")
+    # 37 = LangElixir, 0 = LangC, 22 = LangUnknown.  The last two are the pair
+    # the pending reorder swaps, so they are the pair a value-blind renumber
+    # would silently exchange.
+    for (id, ordinal) in [
+        ("01949fcc-7d92-7e9c-aaaa-00000000ex01", 37),
+        ("01949fcc-7d92-7e9c-aaaa-00000000c001", 0),
+        ("01949fcc-7d92-7e9c-aaaa-0000000unk22", 22)]:
+      db.exec(sql"""INSERT INTO recordings
+        (recording_id, program, args, compile_command, env, workdir, output,
+         source_folders, low_level_folder, output_folder, lang, imported,
+         shell_id, rr_pid, exit_code, calltrace, calltrace_mode, recorded_at)
+        VALUES (?, ?, '', '', '', '/tmp', '', '', '', ?, ?, 0,
+                -1, 0, 0, 0, 'NoInstrumentation', '2026/08/25')""",
+        id, "/tmp/legacy-" & id, "/tmp/trace-" & id, $ordinal)
+    if db.getValue(sql"PRAGMA user_version") != "0":
+      fail("hand-built legacy DB should be at user_version 0")
+
+  # Opening the index at all must migrate it.
+  discard trace_index.newID(test = false)
+
+  var db = open(dbPath, "", "", "")
+  defer: db.close()
+  if db.getValue(sql"PRAGMA user_version") != $TRACE_INDEX_SCHEMA_VERSION:
+    fail("legacy DB not stamped after ensureDB; PRAGMA user_version = " &
+         db.getValue(sql"PRAGMA user_version"))
+  for (id, expected) in [
+      ("01949fcc-7d92-7e9c-aaaa-00000000ex01", "LangElixir"),
+      ("01949fcc-7d92-7e9c-aaaa-00000000c001", "LangC"),
+      ("01949fcc-7d92-7e9c-aaaa-0000000unk22", "LangUnknown")]:
+    let raw = db.getValue(
+      sql"SELECT lang FROM recordings WHERE recording_id = ?", id)
+    if raw != expected:
+      fail("row " & id & ": expected lang " & expected & ", got " & raw.escape())
+
+  let found = trace_index.find("01949fcc-7d92-7e9c-aaaa-00000000ex01", test = false)
+  if found.isNil:
+    fail("find returned nil for the migrated Elixir row")
+  if found.lang != LangElixir:
+    fail("migrated row decoded as " & $found.lang & ", expected LangElixir")
+
+  if not fileExists(dbPath & langNameMigrationBakSuffix):
+    fail("expected a pre-migration snapshot at " &
+         dbPath & langNameMigrationBakSuffix)
+
+  echo "PASS"
+
 when isMainModule:
   if paramCount() < 1:
     fail("usage: trace_index_test_helper <scenario>")
@@ -317,5 +472,7 @@ when isMainModule:
   of "short-prefix-ambiguous": scenarioShortPrefixAmbiguous()
   of "short-prefix-too-short": scenarioShortPrefixTooShort()
   of "short-prefix-not-found": scenarioShortPrefixNotFound()
+  of "lang-name-roundtrip": scenarioLangNameRoundTrip()
+  of "migrate-legacy-db": scenarioMigrateLegacyDb()
   else:
     fail("unknown scenario: " & paramStr(1))
