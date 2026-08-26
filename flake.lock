@@ -3069,6 +3069,22 @@
         "type": "github"
       }
     },
+    "nim-shm-lease": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787532379,
+        "narHash": "sha256-iGn2tdtIYKuAMkHOH0XT8KtLx5Fe0eFBXFieJyFgzrk=",
+        "owner": "metacraft-labs",
+        "repo": "nim-shm-lease",
+        "rev": "2e8b66fdd260ed356dca440fe6394e1f56fe0018",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-shm-lease",
+        "type": "github"
+      }
+    },
     "nim-shm-queue-src": {
       "flake": false,
       "locked": {
@@ -5177,6 +5193,7 @@
         "git-hooks": [
           "git-hooks-nix"
         ],
+        "nim-shm-lease": "nim-shm-lease",
         "nixos-modules": [
           "nix-blockchain-development",
           "nixos-modules"
@@ -5186,17 +5203,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1783195639,
-        "narHash": "sha256-jB5wPpKIHWbWdLGDJJhjtcl2aecHe38DweyR1pKwJ0w=",
+        "lastModified": 1787618104,
+        "narHash": "sha256-93KLZF8xbw+MSF8Xxthe20IlZbCQcIpkdyJF/bSESEI=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "f3382f579c31085c8b6d7eece97c78ee4617f8c8",
+        "rev": "b71e8e9061b479334d9b78638cfb828af2db938d",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
         "repo": "runquota",
+        "rev": "b71e8e9061b479334d9b78638cfb828af2db938d",
         "type": "github"
       }
     },

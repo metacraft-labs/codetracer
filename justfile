@@ -14,6 +14,18 @@ build-once:
 test-build-alignment:
   bash scripts/test-build-alignment.sh
 
+# Assert this repo's `runquota` flake pin equals the `runquota-src` revision
+# its pinned `reprobuild` locks. `inputs.runquota-src.follows = "runquota"`
+# means reprobuild is COMPILED against whatever that input resolves to, so
+# drift in either direction breaks `nix develop` with an `undeclared
+# identifier` inside reprobuild's own sources, minutes in and attributed to
+# the wrong repo. Reads two flake.lock files; no toolchain, under a second.
+# Skips LOUDLY (never silently passes) when the sibling reprobuild checkout it
+# must read is absent; CT_FLAKE_PIN_ALIGNMENT_STRICT=1 makes that a failure.
+# See the header of scripts/test-flake-pin-alignment.sh.
+test-flake-pin-alignment:
+  bash scripts/test-flake-pin-alignment.sh
+
 # Build all sibling-recorder binaries that the GUI tests reach for.
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
@@ -648,6 +660,7 @@ test:
   #!/usr/bin/env bash
   set -e
   just test-build-alignment
+  just test-flake-pin-alignment
   just test-agent-api-contract
   just test-rust
   just test-nimsuggest
