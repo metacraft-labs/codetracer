@@ -29,10 +29,15 @@
 ## - ``rowCount`` — total entry count (used by tests).
 ##
 ## Actions:
-## - ``addValue``           — append a captured ``ScratchpadValueEntry``
+## - ``addValue``           — record a captured ``ScratchpadValueEntry``
 ##                            (mirrors the legacy ``registerValue``
 ##                            flow triggered by
-##                            ``InternalAddToScratchpad``).
+##                            ``InternalAddToScratchpad``).  One row per
+##                            expression: a repeat capture of an already
+##                            pinned expression appends a sample to that
+##                            row's comma-separated list instead of adding
+##                            a duplicate row (Scratchpad-Pane.md
+##                            §"Multi-iteration Values").
 ## - ``removeValue``        — drop the row at ``index`` (mirrors the
 ##                            legacy ``removeValue`` flow triggered by
 ##                            the per-row close button).  Out-of-range
@@ -56,6 +61,7 @@
 ## ``cstring`` / ``langstring`` conversion noise.
 
 import std/sets
+import std/strutils
 import std/tables
 
 import isonim/core/[signals, computation, owner]
@@ -88,13 +94,73 @@ type
 # Actions
 # ---------------------------------------------------------------------------
 
+const scratchpadSampleSeparator* = ", "
+  ## Separator between the per-iteration samples of one Scratchpad row.
+  ## `GUI/Core-Panes/Scratchpad-Pane.md` §"Multi-iteration Values" renders a
+  ## row as ``remaining_shield: 10000, 9150, 8300`` — one comma-separated
+  ## list per expression, not one row per capture.
+
+proc scratchpadSamples*(valueText: string): seq[string] =
+  ## Split a merged multi-iteration cell back into its samples.  Exposed for
+  ## the view layer and for tests; ``addValue`` itself never needs to split.
+  if valueText.len == 0:
+    return @[]
+  valueText.split(scratchpadSampleSeparator)
+
+proc canMergeSamples(existing, incoming: ScratchpadValueEntry): bool =
+  ## Only atoms of the same expression collapse into one multi-iteration
+  ## row.  Composite values (instances, tuples, containers …) render an
+  ## expandable child tree whose ``children`` belong to a single capture, so
+  ## concatenating their text would produce a row the view cannot expand;
+  ## errors stay on their own row for the same reason (the view paints the
+  ## whole row with the error modifier).
+  existing.expression == incoming.expression and
+    not existing.hasChildren and not incoming.hasChildren and
+    not existing.isError and not incoming.isError
+
+proc repeatsLastSample(existingText, incomingText: string): bool =
+  ## True when ``incomingText`` is already the last sample of ``existingText``.
+  ##
+  ## Re-pinning a value the row already ends with must not grow the list:
+  ## the same click can legitimately reach the sink more than once (several
+  ## entry points funnel into ``InternalAddToScratchpad``), and a value that
+  ## has not changed since the previous capture carries no new information.
+  ## Comparing against the tail only — rather than scanning every sample —
+  ## keeps a genuine ``1, 2, 1`` history intact.
+  existingText == incomingText or
+    (incomingText.len > 0 and
+     existingText.endsWith(scratchpadSampleSeparator & incomingText))
+
 proc addValue*(vm: ScratchpadVM; entry: ScratchpadValueEntry) =
-  ## Append a captured value entry to the scratchpad list.  Mirrors
-  ## the legacy ``ScratchpadComponent.registerValue`` flow triggered
-  ## by ``InternalAddToScratchpad``.  Insertion order is preserved
-  ## (the legacy DataTables-free panel rendered rows in the order they
-  ## arrived).
+  ## Record a captured value entry in the scratchpad list.  Mirrors the
+  ## legacy ``ScratchpadComponent.registerValue`` flow triggered by
+  ## ``InternalAddToScratchpad``.
+  ##
+  ## Per `GUI/Core-Panes/Scratchpad-Pane.md` §"Adding Values" /
+  ## §"Multi-iteration Values" an expression occupies exactly one row: adding
+  ## a value for an expression that is already pinned appends the new sample
+  ## to that row's comma-separated list instead of creating a duplicate row,
+  ## which is what makes it possible to compare how a value changes across
+  ## loop iterations.  A value identical to the row's most recent sample is
+  ## dropped, so the operation is idempotent.
+  ##
+  ## Rows that cannot be merged (a different expression, a composite value,
+  ## an error) are appended, preserving insertion order.
   var existing = vm.entries.val
+  for i in 0 ..< existing.len:
+    if not canMergeSamples(existing[i], entry):
+      continue
+    if repeatsLastSample(existing[i].valueText, entry.valueText):
+      return
+    var merged = existing[i]
+    merged.valueText =
+      if merged.valueText.len == 0:
+        entry.valueText
+      else:
+        merged.valueText & scratchpadSampleSeparator & entry.valueText
+    existing[i] = merged
+    vm.entries.val = existing
+    return
   existing.add(entry)
   vm.entries.val = existing
 

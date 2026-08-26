@@ -1,0 +1,5 @@
+Programs that CodeTracer RECORDS during tests, not tests themselves. The
+db-backend flow/omniscience integration tests (src/db-backend/tests/*.rs)
+record and replay these, and their source text is part of the fixture: adding
+a marker comment to a file would shift the very line numbers the flow
+assertions pin. `just test-rust` is the lane that exercises them.

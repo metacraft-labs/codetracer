@@ -5,7 +5,18 @@ import
   ../[ renderer, communication, dap, event_helpers],
   ../lib/isonim_styles,
   ../../common/ct_event,
-  origin_chain_runtime
+  origin_chain_runtime,
+  # Pure loop-iteration arithmetic, factored out so it is testable on the C
+  # backend — this module is JS-only. See flow_loop_math.nim.
+  flow_loop_math,
+  # noUiSlider's construction, its zero-width refusal and its idempotency
+  # marker, shared with the review's loop control (UD-3). See
+  # flow_loop_slider.nim.
+  flow_loop_slider,
+  # The Omniscience value chip and the parallel column band, factored out so
+  # the review's diff tab draws the same elements rather than a look-alike
+  # (UD-3, DeepReview-GUI.md §4.4). See flow_value_dom.nim.
+  flow_value_dom
 
 from trace import getConfiguration
 
@@ -57,6 +68,31 @@ when defined(js):
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
 
 proc tryMountIsoNimFlowPanel()
+
+proc flowIsLive*(self: FlowComponent): bool =
+  ## Whether this component is still the editor's current flow.
+  ##
+  ## `EditorViewComponent.loadFlow` builds a NEW `FlowComponent` for every move
+  ## and flags the outgoing one as `superseded`. Anything that repaints — the
+  ## deferred redraw and the loop-iteration value render passes, both of which
+  ## run on `setTimeout` and therefore outlive the assignment that replaced the
+  ## component — must check this first. A retired component that keeps
+  ## repainting re-creates Monaco view zones the live component does not know
+  ## about and paints the previous debugger position's iteration over the
+  ## current one; see the comment on `superseded` in `types.nim` and #593/#595.
+  ##
+  ## Reading (rather than painting) on a retired component is fine, and is what
+  ## keeps the loop arrows usable in the gap before the replacement renders.
+  not self.superseded
+
+proc validFlowStepCount*(self: FlowComponent, stepCount: int): bool =
+  ## Whether `stepCount` addresses a step of the CURRENT flow window.
+  ##
+  ## Step counts are window-relative indices into `flow.steps`, and the window
+  ## is replaced on every debugger move, so any step count that was stored
+  ## earlier (in `flowLines[..].loopStepCounts`, in a `FlowLoop.loopStep`, in a
+  ## DOM closure) has to be revalidated before it is used as an index.
+  not self.flow.isNil and stepCount >= 0 and stepCount < self.flow.steps.len
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -275,9 +311,9 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
     self.redraw()
   )
   api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
+    # `onUpdatedFlow` decides internally whether a full `redrawFlow()` is
+    # needed (key changed) or only an in-place value update (key unchanged).
     discard self.onUpdatedFlow(response)
-    self.redrawFlow()
-    self.redraw()
   )
 
 # FlowComponent.render() removed: IsoNim is the primary renderer.
@@ -1198,6 +1234,19 @@ proc synchronizeLinkedSliders(
   index: int,
   position: int
 ) =
+  ## Keep the slider of an inner loop's ORIGIN (outermost) loop in step with the
+  ## iteration just selected on the inner one.
+  ##
+  ## Historical note: this proc also contained two loops over
+  ## `self.sliderWidgets`, meant to move the sliders of the *sibling* lines
+  ## inside the same loop. `sliderWidgets` is only ever written by
+  ## `addContentWidget(..., isSliderWidget = true)`, which has no call site
+  ## anywhere in the codebase, so that map was permanently empty and both loops
+  ## were unconditional no-ops. They have been removed along with the map rather
+  ## than left in place looking functional. Reviving sibling-slider
+  ## synchronisation is a separate change: `flowLines` cannot simply be
+  ## substituted as the iteration source, because it also contains lines with no
+  ## slider at all and the sibling updates would need their own coverage.
   let loop = self.flow.loops[loopIndex]
   let originLoopId = self.getOriginLoopIndex(loopIndex)
 
@@ -1208,21 +1257,6 @@ proc synchronizeLinkedSliders(
       (loopIndex: originLoopId, iteration: originLoopIteration)
     if not self.flowLines[originLoop.first].sliderDom.isNil and not self.flowLines[originLoop.first].sliderDom.toJs.noUiSlider.isNil:
       self.flowLines[originLoop.first].sliderDom.toJs.noUiSlider.set(originLoopIteration)
-    let iterationRatio = index.float / loop.iteration.float
-
-    for line, slider in self.sliderWidgets:
-      if line > originLoop.first and line <= originLoop.last and line != position:
-        let sliderPositionsCount =
-          self.calculateSliderPosition(line, originLoopIteration, iterationRatio)
-        if not self.flowLines[line].sliderDom.isNil and not self.flowLines[line].sliderDom.toJs.noUiSlider.isNil:
-          self.flowLines[line].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
-  else:
-    for line, slider in self.sliderWidgets:
-      if line > loop.first and line <= loop.last and line != position:
-        let sliderPositionsCount =
-          self.calculateSliderPosition(line, index, 0)
-        if not self.flowLines[line].sliderDom.isNil and not self.flowLines[line].sliderDom.toJs.noUiSlider.isNil:
-          self.flowLines[line].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
 
 proc moveFlowDom(
   self: FlowComponent,
@@ -1242,7 +1276,18 @@ proc moveFlowDom(
     self.synchronizeLinkedSliders(loopIndex, iteration, position)
 
     # calculate translation value and move linked loops
-    if self.loopStates.hasKey(loopIndex):
+    #
+    # `loopStepCounts` is filled while rendering, and both its per-loop entry
+    # and the step count it yields are indices into the flow window that was
+    # current at that time. A move replaces the window, so neither index can be
+    # assumed to be in range here — an out-of-range one used to raise an
+    # `IndexDefect` that escaped `updateFlowOnMove` and abandoned the rest of
+    # the render pass (leaving the editor's cursor and decorations at the
+    # previous position, #593).
+    if self.loopStates.hasKey(loopIndex) and
+       flowLine.loopStepCounts.hasKey(loopIndex) and
+       iteration >= 0 and iteration < flowLine.loopStepCounts[loopIndex].len and
+       self.validFlowStepCount(flowLine.loopStepCounts[loopIndex][iteration]):
       let loopContainer = self.loopStates[loopIndex].containerDoms[position]
       let activeIterationStep =
         self.flow.steps[flowLine.loopStepCounts[loopIndex][iteration]]
@@ -1269,6 +1314,10 @@ proc moveStepValuesInVisibleArea(self: FlowComponent) = # TODO: needs refeactori
       .toLowerAscii()
 
   for stepKey, stepNode in self.stepNodes:
+    # `stepNodes` is keyed by step count, i.e. by an index into the flow window
+    # that was current when the node was created (see `validFlowStepCount`).
+    if not self.validFlowStepCount(stepKey):
+      continue
     let step = self.flow.steps[stepKey]
 
     if step.loop != 0 and self.loopStates.hasKey(step.loop) and self.loopStates[step.loop].viewState == LoopValues:
@@ -1406,9 +1455,6 @@ proc jumpToLocalStep*(self: FlowComponent, stepCount: int) =
       cast[int](DELAY)
   )
 
-proc validFlowStepCount(self: FlowComponent, stepCount: int): bool =
-  stepCount >= 0 and stepCount < self.flow.steps.len
-
 proc invalidFlowStep(): FlowStep =
   FlowStep(position: NO_LINE, loop: NO_STEP_COUNT, stepCount: NO_STEP_COUNT, rrTicks: NO_TICKS)
 
@@ -1485,18 +1531,53 @@ proc selectLoopIteration(
   iteration: int,
   registeredLine: int
 ) =
+  # Take ownership of the active iteration immediately.
+  #
+  # `loopStates[..].activeIteration` is the single source of truth the loop
+  # counter, the arrows and the slider all read. Until the debugger reports the
+  # completed move, `setLoopStatesActiveIteration` has not run yet; without this
+  # write there is a window in which the user has clicked but every reader still
+  # sees the old iteration, so a second click computes its target from a stale
+  # value and appears to skip (#595). The subsequent move recomputes it from the
+  # debugger's ticks and will agree.
+  if self.loopStates.hasKey(loopIndex):
+    self.loopStates[loopIndex].activeIteration = iteration
+
   let loopStep = self.loopIterationStepAt(loopIndex, iteration, registeredLine)
   if loopStep.stepCount != NO_STEP_COUNT:
     if self.flowLoops.hasKey(registeredLine):
       self.flowLoops[registeredLine].loopStep = loopStep
     self.activeStep = loopStep
     self.renderActiveLoopIterationValues()
-    self.scheduleActiveLoopIterationValueRender()
+    # Do not call scheduleActiveLoopIterationValueRender here: the slider's
+    # onUpdate handler already calls it after this returns, and a second
+    # schedule would queue redundant timers on every slider tick.
 
-  let jumpStep = self.firstLoopBodyStepForIteration(loopIndex, iteration)
-  if jumpStep.stepCount != NO_STEP_COUNT:
-    self.jumpToFlowStep(jumpStep)
+  # Jump to the FIRST STATEMENT of the selected iteration, not to the `for` /
+  # `while` header line.
+  #
+  # `codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md` lists
+  # `NoirSpaceShip.SimpleLoopIterationJump` — "Enter iteration number, verify
+  # cursor" — among its implemented tests: selecting an iteration is a
+  # navigation, and what the user must end up looking at is the iteration's
+  # code, not the loop condition they were already on.
+  #
+  # This is safe for the iteration arithmetic even though the backend counts an
+  # iteration only when the flow walker passes the loop header: `FlowMode.Call`
+  # returns the window of the whole enclosing call, so the header of every
+  # iteration — including the ones behind the cursor — is inside it, and
+  # `rrTicksForIterations` is identical no matter where in the call the cursor
+  # sits. `activeIterationForTicks` then maps a body tick onto the containing
+  # header interval, which is exactly the iteration we selected.
+  # `src/db-backend/tests/flow_loop_iteration_window_test.rs` pins that window
+  # invariance.
+  let bodyStep = self.firstLoopBodyStepForIteration(loopIndex, iteration)
+  if bodyStep.stepCount != NO_STEP_COUNT:
+    self.jumpToFlowStep(bodyStep)
   elif loopStep.stepCount != NO_STEP_COUNT:
+    # No body statement recorded for this iteration (an empty body, or a
+    # recorder that only emits the header) — the header is then the only place
+    # the iteration exists.
     self.jumpToFlowStep(loopStep)
 
 
@@ -1684,13 +1765,22 @@ proc flowSimpleValue*(
       showContextMenu(contextMenu, cast[int](e.toJs.clientX), cast[int](e.toJs.clientY))
 
   proc appendValueSpan(parent: Node, id: cstring, className: string, value: Value) =
-    let valueSpan = document.createElement(cstring"span")
-    valueSpan.setAttribute(cstring"id", id)
-    valueSpan.applyStyle(style)
-    if value.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-      valueSpan.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-    valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
-    valueSpan.setAttribute(cstring"class", cstring(className))
+    # The element itself comes from `ui/flow_value_dom.nim`, which the review's
+    # diff tab also builds from (UD-3) — so "the standard Omniscience
+    # appearance" is one implementation rather than two that agree today.
+    # Everything below it here is behaviour this host has and the review does
+    # not: the jump, the context menu and the tooltip.
+    let valueSpan = flowValueBoxDom(
+      id = id,
+      className = cstring(className),
+      text = value.textRepr(compact = true),
+      iteration = self.flow.steps[stepCount].iteration,
+      style = style,
+      maxWidth =
+        if value.textRepr(compact = true).len() > FLOW_VALUE_LIMIT:
+          cstring(FLOW_VALUE_MAX_WIDTH)
+        else:
+          cstring"")
     valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
       onMouseDown(e, value)
     )
@@ -1707,12 +1797,9 @@ proc flowSimpleValue*(
         let valueDom = self.renderModalValueDom(id)
         self.displayTooltip(id, valueDom)
     )
-    valueSpan.appendChild(document.createTextNode(value.textRepr(compact=true)))
     parent.appendChild(valueSpan)
 
-  result = document.createElement(cstring"span")
-  result.setAttribute(cstring"class", cstring"ct-omni-value")
-  result.applyStyle(style)
+  result = flowValueContainerDom(style)
 
   case flowValueMode:
   of BeforeValueMode:
@@ -1726,8 +1813,7 @@ proc flowSimpleValue*(
       result.appendChild(renderViewOption())
 
   if showName:
-    let nameSpan = document.createElement(cstring"span")
-    nameSpan.setAttribute(cstring"class", cstring"ct-omni-name")
+    let nameSpan = flowValueNameDom(name)
     nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
       self.jumpToLocalStep(stepCount)
     )
@@ -1740,7 +1826,6 @@ proc flowSimpleValue*(
       of BeforeAndAfterValueMode:
         discard
     )
-    nameSpan.appendChild(document.createTextNode(name))
     result.appendChild(nameSpan)
 
   if flowValueMode == BeforeValueMode:
@@ -1816,13 +1901,6 @@ proc flowSimpleValue*(
       if summary.isPlaceholder:
         observePlaceholderBadge(badge)
 
-proc clearSliders(self: FlowComponent) =
-  if not self.inExtension:
-    var tab = self.data.services.editor.open[self.editorUI.path]
-    for _, widget in self.sliderWidgets:
-      tab.monacoEditor.removeContentWidget(widget)
-  self.sliderWidgets = JsAssoc[int, js]{}
-
 proc clearInline(self: FlowComponent) =
   for _, line in self.flowLines:
     # Remove the class 'flow-inline-value' from each node
@@ -1896,7 +1974,11 @@ proc clearLoopViewZones(self: FlowComponent) =
   self.loopViewZones = JsAssoc[int, int]{}
 
 proc resetFlow*(self: FlowComponent) =
-  self.clearSliders()
+  # NOTE: `clearSliders` used to be called here. It removed Monaco content
+  # widgets from `sliderWidgets`, a map nothing ever wrote to (see
+  # `synchronizeLinkedSliders`), so it removed nothing. The loop sliders that do
+  # exist live inside the loop view zones and are torn down by
+  # `clearLoopViewZones` / `clearParallel` below.
   # Inline flow uses Monaco decorations that must be removed before any redraw,
   # otherwise unrelated UI redraws stack duplicate inline values in the editor.
   self.clearInline()
@@ -1946,8 +2028,7 @@ proc addContentWidget*(
   line: int,
   column: int,
   id: cstring,
-  isStatusWidget: bool = false,
-  isSliderWidget: bool = false
+  isStatusWidget: bool = false
 ): JsObject =
   dom.class = "flow-content-widget"
   var editor = self.editorUI.monacoEditor
@@ -1969,8 +2050,6 @@ proc addContentWidget*(
 
   if isStatusWidget:
     self.statusWidget = widget
-  elif isSliderWidget:
-    self.sliderWidgets[line] = widget
   else:
     self.flowLines[line].contentWidget = cast[Node](widget)
 
@@ -2619,20 +2698,45 @@ proc addLoopStep(self: FlowComponent, step: FlowStep, container: Node) =
 
 
 proc setFlowLineActiveIteration(self: FlowComponent, position: int) =
+  ## DORMANT: `FlowLine.loopIds` is initialised to `@[]` (`makeFlowLine` here and
+  ## the twin literal in `ui/editor.nim`) and **nothing anywhere appends to it**,
+  ## so this loop body never executes and `line.activeLoopIteration` keeps its
+  ## `(-1, -1)` initial value for the whole session. Everything in
+  ## `updateFlowOnMove` that keys off `activeLoopIteration` — the
+  ## `.active-flow-step` marker and the per-iteration value refresh — is
+  ## therefore dead too.
+  ##
+  ## It is left dormant rather than switched on here: populating `loopIds` also
+  ## activates several width/offset readers (`calclulateFlowLineTotalWidth`,
+  ## `prepareFlowLineContainerProps`, `resizeFlowLineContainers`) whose effect on
+  ## the rendered layout cannot be judged without running the editor. The loop
+  ## COUNTER and the slider handle do not depend on it: both read
+  ## `loopStates[..].activeIteration` directly, via `activeLoopIterationFor`
+  ## (`flowLoopValue`, `updateLoopControlDom`) and `ensureLoopSlider`.
   let debuggerLocation = self.location.rrTicks
   let line = self.flowLines[position]
 
   for loopIndex in line.loopIds:
+    if loopIndex < 0 or loopIndex >= self.flow.loops.len or
+       not self.loopStates.hasKey(loopIndex):
+      continue
     let loop = self.flow.loops[loopIndex]
     let loopActiveIteration = self.loopStates[loopIndex].activeIteration
+    if loopActiveIteration < 0 or
+       loopActiveIteration >= loop.rrTicksForIterations.len:
+      # `updateFlowOnMove` is not wrapped in a `try`, so an IndexDefect raised
+      # here would abandon the rest of the move handling, loop control refresh
+      # included.
+      continue
     let rrTicksOfLoopActiveIteration =
-      self.flow.loops[loopIndex].rrTicksForIterations[loopActiveIteration]
+      loop.rrTicksForIterations[loopActiveIteration]
 
     if debuggerLocation <= rrTicksOfLoopActiveIteration:
       if loop.base == -1:
         line.activeLoopIteration =
           (loopIndex: loopIndex, iteration: loopActiveIteration)
-      elif loop.baseIteration == self.loopStates[loop.base].activeIteration:
+      elif self.loopStates.hasKey(loop.base) and
+           loop.baseIteration == self.loopStates[loop.base].activeIteration:
         line.activeLoopIteration =
           (loopIndex: loopIndex, iteration: loopActiveIteration)
       else:
@@ -2760,8 +2864,11 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
   if step.position == self.flow.loops[step.loop].first:
     if not self.viewZones.hasKey(step.position - 1):
       self.createLoopViewZones(step.loop)
-    if not self.sliderWidgets.hasKey(step.position):
-      self.makeSlider(self.flow.loops[step.loop].first)
+    # This used to be guarded by `not self.sliderWidgets.hasKey(step.position)`,
+    # a condition that was always true because nothing ever wrote to that map.
+    # `makeSlider` / `ensureLoopSlider` are idempotent — an existing slider with
+    # the right range is only re-positioned — so the call needs no guard.
+    self.makeSlider(self.flow.loops[step.loop].first)
 
   # check if there is a register for loop step cells
   let stepLoopCells = self.flowLines[step.position].stepLoopCells
@@ -3065,6 +3172,11 @@ proc redrawLoopStepsAtPosition*(
         self.addLoopStep(loopStep, loopContainer)
 
 proc showOrHideSlider(self: FlowComponent, position: int) =
+  # A line can legitimately have no slider: single-iteration loops never get
+  # one (`makeSlider`), and `removeSliderWidget` clears it again when a loop
+  # collapses to one iteration in a new flow window.
+  if not self.flowLines.hasKey(position) or self.flowLines[position].sliderDom.isNil:
+    return
   if self.flowLines[position].totalLineWidth > self.flowViewWidth:
     self.flowLines[position].sliderDom.style.display = "inline-flex"
   else:
@@ -3137,8 +3249,12 @@ proc updateLoopContainerStyle(self: FLowComponent, loopIndex: int, position: int
   container.style.left = &"{leftValue}px"
 
 proc updateFlowDom*(self: FlowComponent) =
-  for line, slider in self.sliderWidgets:
-    self.showOrHideSlider(line)
+  # NOTE: this used to begin with `for line, slider in self.sliderWidgets:
+  # self.showOrHideSlider(line)`. `sliderWidgets` was never populated, so the
+  # loop never ran. It is not revived against `flowLines` here on purpose:
+  # `showOrHideSlider` hides any slider whose line is narrower than the flow
+  # view, which for the loop-control slider is the normal case — reviving it
+  # naively would hide exactly the slider #562 is about.
 
   for line, flowLine in self.flowLines:
     if flowLine.loopIds.len > 0:
@@ -3291,19 +3407,21 @@ proc redrawLinkedLoops*(self:FlowComponent) = # TODO: make it work on more than 
           self.recreateLoopContainerAndSteps(loopIndex, key)
 
 proc setLoopStatesActiveIteration(self: FlowComponent, debuggerLocationRRTicks: int) =
+  ## Recompute, for every loop in the current flow window, which iteration the
+  ## debugger is now inside.
+  ##
+  ## This is the ONLY writer of `activeIteration` that follows the debugger, so
+  ## the loop counter and the slider are only ever as correct as this call.
+  ## `activeIterationForTicks` does a containing-interval search rather than the
+  ## exact-equality match this used to do; see `flow_loop_math.nim` for why that
+  ## match could essentially never succeed (#593).
   for index, loopState in self.loopStates:
-    let rrTicksForIterations = self.flow.loops[index].rrTicksForIterations
-    let firstLoopIterationRRTicks = rrTicksForIterations[0]
-    let lastLoopIterationRRTicks = rrTicksForIterations[rrTicksForIterations.len - 1]
-
-    if debuggerLocationRRTicks <= firstLoopIterationRRTicks:
-      loopState.activeIteration = 0
-    elif debuggerLocationRRTicks >= lastLoopIterationRRTicks:
-      loopState.activeIteration = rrTicksForIterations.len - 1
-    else:
-      for index, iteration in rrTicksForIterations:
-        if iteration == debuggerLocationRRTicks:
-          loopState.activeIteration = index
+    if index < 0 or index >= self.flow.loops.len:
+      continue
+    loopState.activeIteration =
+      activeIterationForTicks(
+        self.flow.loops[index].rrTicksForIterations,
+        debuggerLocationRRTicks)
 
 proc calclulateFlowLineTotalWidth*(self: FlowComponent, position: int): int =
   var totalWidth = 0
@@ -3326,12 +3444,14 @@ proc positionRRTicksToStepCount*(self: FlowComponent, position: int, rrTicks: in
   var flow = self.flow
 
   try:
-    if not flow.positionStepCounts.hasKey(position):
-      console.log(flow.positionStepCounts[position])
-      cerror cstring(fmt"PROBLEM with flow.positionStepCounts: can't find position {position}")
-      return NO_STEP_COUNT
-    if flow.positionStepCounts[position].len < 1:
-      cerror cstring(fmt"PROBLEM with flow.positionStepCounts: no stepCount for position {position}")
+    # A line with no steps in the current window is ordinary, not an error: the
+    # flow window covers one call, and callers ask about lines that may be
+    # outside it, never executed, or blank. This used to log at ERROR level —
+    # 79 entries in a single GUI run — and dereferenced the missing key with
+    # `console.log` on the line before the check, which printed `undefined`.
+    if not flow.positionStepCounts.hasKey(position) or
+       flow.positionStepCounts[position].len < 1:
+      cdebug cstring(fmt"flow: no step recorded at line {position} in this flow window")
       return NO_STEP_COUNT
 
     let firstStepCount = flow.positionStepCounts[position][0]
@@ -3353,11 +3473,127 @@ proc positionRRTicksToStepCount*(self: FlowComponent, position: int, rrTicks: in
 
     return NO_STEP_COUNT
 
+proc debuggerRRTicks(self: FlowComponent): int =
+  ## The trace tick the debugger is currently stopped at, as this component
+  ## understands it. `NO_TICKS` when the component has no location yet.
+  if self.location.toJs.isNil:
+    NO_TICKS
+  else:
+    self.location.rrTicks
+
 proc createLoopStates(self: FlowComponent) =
+  ## Make sure every loop in the freshly loaded flow window has a `LoopState`.
+  ##
+  ## A NEW state is seeded with the iteration the debugger is actually inside,
+  ## never with 0 (#593/#595).
+  ##
+  ## Why this matters more than it looks: `EditorViewComponent.loadFlow`
+  ## (`ui/editor.nim`) constructs a **brand-new `FlowComponent`** — with an
+  ## empty `loopStates` — for every move whose `rrTicks` differ, which is every
+  ## move. So the states this proc creates are not "the states from before the
+  ## jump with one field stale"; they are the only states there are, and they
+  ## are created here, during `renderFlowLines`, i.e. *before* the loop control
+  ## DOM is built from them by `addLoopInfo` -> `makeFlowLoops` ->
+  ## `flowLoopValue`.
+  ##
+  ## `setLoopStatesActiveIteration` does run for the same window, but only
+  ## afterwards (`onUpdatedFlow` calls `redrawFlow()` and *then*
+  ## `updateFlowOnMove`), so before this seeding the control was always painted
+  ## from the default 0 and then never repainted: the counter read "iteration 0"
+  ## no matter where the debugger was, and the next arrow click computed its
+  ## target from that 0 and jumped back to iteration 1.
+  ##
+  ## An EXISTING state is deliberately left alone, so that a `createLoopStates`
+  ## that runs without an intervening teardown cannot undo the optimistic
+  ## iteration `selectLoopIteration` just wrote (at that moment `self.location`
+  ## still names the PRE-jump position, so re-deriving would step the user
+  ## backwards). Note that `redrawFlow` -> `clear` -> `resetFlow` ->
+  ## `clearLoopStates` wipes the table, so on that path every state is a new
+  ## one and is seeded from the location — which is why the arrow handlers and
+  ## the iteration textarea update the control through `updateLoopControlDom`
+  ## rather than through `redrawFlow`.
+  let locationTicks = self.debuggerRRTicks()
   for loopIndex, loop in self.flow.loops:
     if loopIndex > 0:
       if not self.loopStates.hasKey(loopIndex):
-        self.loopStates[loopIndex] = makeLoopState()
+        let loopState = makeLoopState()
+        if locationTicks != NO_TICKS:
+          loopState.activeIteration =
+            activeIterationForTicks(loop.rrTicksForIterations, locationTicks)
+        self.loopStates[loopIndex] = loopState
+
+proc maxLoopIteration*(self: FlowComponent, loopIndex: int): int =
+  ## Highest selectable iteration index for `loopIndex` in the CURRENT flow
+  ## window, or -1 when the loop has no recorded iterations.
+  ##
+  ## Single definition on purpose: the loop counter's "from N" label, the
+  ## forward arrow's clamp and its `disabled` state must all agree, and they
+  ## previously each recomputed this inline.
+  if loopIndex >= 0 and loopIndex < self.flow.loopIterationSteps.len:
+    self.flow.loopIterationSteps[loopIndex].len - 1
+  elif loopIndex >= 0 and loopIndex < self.flow.loops.len:
+    self.flow.loops[loopIndex].rrTicksForIterations.len - 1
+  else:
+    -1
+
+proc activeLoopIterationFor*(self: FlowComponent, step: FlowStep): int =
+  ## The iteration the loop controls should currently display for `step`.
+  ##
+  ## `loopStates[..].activeIteration` is the live value maintained by
+  ## `setLoopStatesActiveIteration` / `selectLoopIteration`; `step.iteration` is
+  ## only the fallback for a loop whose state has not been created yet.
+  if self.loopStates.hasKey(step.loop):
+    self.loopStates[step.loop].activeIteration
+  else:
+    step.iteration
+
+proc updateLoopControlDom*(self: FlowComponent, position: int) =
+  ## Refresh the already-rendered loop control at `position` in place.
+  ##
+  ## The loop control's textarea and arrow `disabled` flags are written once, at
+  ## DOM-construction time (`flowLoopValue` / `backLoopControlButton` /
+  ## `nextLoopControlButton`). Before this proc existed the only way to make a
+  ## new `activeIteration` visible was `redrawFlow()`, which tears down and
+  ## rebuilds every Monaco view zone in the editor — that full rebuild on each
+  ## arrow click is what the #562 reporter saw as blinking. The arrow handlers
+  ## had been changed to call `self.redraw()` instead, but `Component.redraw`
+  ## dispatches to `redrawForSinglePage`, whose base implementation is
+  ## `discard` and which `FlowComponent` does not override, so the click
+  ## produced no visible change at all.
+  ##
+  ## This writes exactly the two things that can change — the displayed
+  ## iteration number and whether each arrow is at its end stop — and touches
+  ## nothing else.
+  if not self.flowLoops.hasKey(position):
+    return
+
+  let flowLoop = self.flowLoops[position]
+  if flowLoop.isNil or flowLoop.flowDom.isNil:
+    return
+
+  let step = flowLoop.loopStep
+  let iteration = self.activeLoopIterationFor(step)
+  let maxIteration = self.maxLoopIteration(step.loop)
+  let root = flowLoop.flowDom
+
+  let textarea = root.querySelector(cstring".flow-loop-textarea")
+  if not textarea.isNil:
+    # Both the attribute and the live `value` property: the attribute is what
+    # a freshly parsed DOM shows, the property is what the browser renders for
+    # a textarea the user may already have focused.
+    textarea.setAttribute(cstring"value", cstring($iteration))
+    textarea.toJs.value = cstring($iteration)
+
+  proc setDisabled(node: Node, disabled: bool) =
+    if node.isNil:
+      return
+    if disabled:
+      node.setAttribute(cstring"disabled", cstring"disabled")
+    else:
+      node.removeAttribute(cstring"disabled")
+
+  setDisabled(root.querySelector(cstring".flow-loop-button.backward"), iteration <= FLOW_ITERATION_START)
+  setDisabled(root.querySelector(cstring".flow-loop-button.forward"), maxIteration <= iteration)
 
 proc flowLoopValue*(
   self: FlowComponent,
@@ -3365,11 +3601,7 @@ proc flowLoopValue*(
   allIterations: int,
   style: VStyle
 ): Node =
-  var iteration =
-    if self.loopStates.hasKey(step.loop):
-      self.loopStates[step.loop].activeIteration
-    else:
-      step.iteration
+  var iteration = self.activeLoopIterationFor(step)
   var width = len(intToStr(allIterations))
 
   proc onEnter(self: FlowComponent) =
@@ -3395,7 +3627,15 @@ proc flowLoopValue*(
   textarea.setAttribute(cstring"maxlength", cstring($width))
   textarea.addEventListener(cstring"blur", proc(e: Event) =
     self.onEnter()
-    self.redrawFlow()
+    # `redrawFlow()` used to be called here. It is `clear()` +
+    # `recalculateAndRedrawFlow()`, and `clear()` drops `loopStates` — so it
+    # discarded the iteration `onEnter` had just selected and re-derived it
+    # from `self.location`, which still holds the PRE-jump position until the
+    # move completes. The control therefore snapped back to the old iteration
+    # for the duration of the jump. `updateLoopControlDom` writes the two
+    # things that changed and leaves the view zones standing (see #562's
+    # "blinking").
+    self.updateLoopControlDom(step.position)
     self.scheduleActiveLoopIterationValueRender()
   )
   textarea.addEventListener(cstring"input", proc(ev: Event) =
@@ -3413,7 +3653,8 @@ proc flowLoopValue*(
     if key == "Enter" or cast[int](ev.toJs.keyCode) == ENTER_KEY_CODE:
       ev.preventDefault()
       self.onEnter()
-      self.redrawFlow()
+      # Same reasoning as the `blur` handler above.
+      self.updateLoopControlDom(step.position)
   )
   textarea.applyStyle(style(
     (StyleAttr.width, cstring($(width+1) & "ch")),
@@ -3428,47 +3669,49 @@ proc flowLoopValue*(
 
   result.appendChild(loopSpan)
 
+proc liveLoopIteration(self: FlowComponent, step: FlowStep): int =
+  ## The active iteration as of RIGHT NOW, read through `flowLoops` so a handler
+  ## installed on an earlier rebuild still sees the current value.
+  if self.flowLoops.hasKey(step.position):
+    let loopStep = self.flowLoops[step.position].loopStep
+    if loopStep.loop == step.loop:
+      return self.activeLoopIterationFor(loopStep)
+  self.activeLoopIterationFor(step)
+
 proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration =
-    if self.loopStates.hasKey(step.loop):
-      self.loopStates[step.loop].activeIteration
-    else:
-      step.iteration
-  let previousIteration = max(iteration - 1, 0)
+  let iteration = self.activeLoopIterationFor(step)
 
   result = document.createElement(cstring"button")
   result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border flow-loop-button backward")
   result.setAttribute(cstring"id", cstring"backward-loop")
   result.applyStyle(style)
-  if iteration - 1 < 0:
+  if iteration <= FLOW_ITERATION_START:
     result.setAttribute(cstring"disabled", cstring"disabled")
   result.addEventListener(cstring"click", proc(e: Event) =
-    self.selectLoopIteration(step.loop, previousIteration, step.position)
-    self.redraw()
+    # Resolve the target from the LIVE active iteration rather than from the
+    # value captured when this button was built: rebuilds can leave a stale
+    # control transiently clickable, and a captured index would then move the
+    # user by more than one iteration (#595).
+    let target = previousIteration(self.liveLoopIteration(step), self.maxLoopIteration(step.loop))
+    self.selectLoopIteration(step.loop, target, step.position)
+    # Targeted DOM update instead of `redrawFlow()`: see `updateLoopControlDom`.
+    self.updateLoopControlDom(step.position)
   )
 
 proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration =
-    if self.loopStates.hasKey(step.loop):
-      self.loopStates[step.loop].activeIteration
-    else:
-      step.iteration
-  let maxIterations =
-    if step.loop >= 0 and step.loop < self.flow.loopIterationSteps.len:
-      self.flow.loopIterationSteps[step.loop].len - 1
-    else:
-      iteration
-  let nextIteration = min(iteration + 1, maxIterations)
+  let iteration = self.activeLoopIterationFor(step)
+  let maxIterations = self.maxLoopIteration(step.loop)
 
   result = document.createElement(cstring"button")
   result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border flow-loop-button forward")
   result.setAttribute(cstring"id", cstring"forward-loop")
   result.applyStyle(style)
-  if maxIterations == iteration:
+  if maxIterations <= iteration:
     result.setAttribute(cstring"disabled", cstring"disabled")
   result.addEventListener(cstring"click", proc(e: Event) =
-    self.selectLoopIteration(step.loop, nextIteration, step.position)
-    self.redraw()
+    let target = nextIteration(self.liveLoopIteration(step), self.maxLoopIteration(step.loop))
+    self.selectLoopIteration(step.loop, target, step.position)
+    self.updateLoopControlDom(step.position)
   )
 
 proc makeLoopLine(
@@ -3587,18 +3830,22 @@ proc addLoopInfo(self: FlowComponent, step: FlowStep) =
   # create viewZone for this step if there is not any yet
   if not self.flowLoops.hasKey(step.position):
     self.flowLoops[step.position] = FlowLoop(loopStep: step)
-    let position = self.flow.loops[step.loop].first
+    # The zone is registered ABOVE the loop header line, so `createFlowViewZone`
+    # records its id under `zonePosition`, not under `step.position`.
+    # Reading it back under `step.position` (as this used to) always yielded
+    # `undefined`, leaving every loop zone with no usable `zoneId`.
+    let zonePosition = self.flow.loops[step.loop].first - 1
     let newZoneDom =
       createFlowViewZone(
         self,
-        position - 1,
+        zonePosition,
         self.lineHeight.float,
         true)
 
     self.flowLoops[step.position].flowZones =
       MultilineZone(
         dom: newZoneDom,
-        zoneId: self.loopViewZones[step.position],
+        zoneId: self.loopViewZones[zonePosition],
         variables: JsAssoc[cstring, bool]{})
 
     cast[Element](newZoneDom).classList.add("flow-content-widget")
@@ -3726,7 +3973,7 @@ type
     self: FlowComponent
 
 proc doRenderActiveLoopIterationValues(data: LoopIterationRenderData) {.cdecl.} =
-  if data.self.isNil or data.self.flow.isNil:
+  if data.self.isNil or data.self.flow.isNil or not data.self.flowIsLive:
     return
   data.self.renderActiveLoopIterationValues()
   if not data.self.inExtension and not data.self.editorUI.isNil:
@@ -3734,12 +3981,25 @@ proc doRenderActiveLoopIterationValues(data: LoopIterationRenderData) {.cdecl.} 
     data.self.resizeFlowSlider()
 
 proc scheduleActiveLoopIterationValueRender*(self: FlowComponent) =
+  # Cancel any render that was queued by an earlier call so that rapid slider
+  # moves don't pile up cascading re-renders.  We keep exactly two renders:
+  #   • an immediate deferred render (next event-loop tick, 0 ms) for
+  #     responsiveness,
+  #   • a 300 ms fallback that catches Monaco view-zone settle after the fast
+  #     sequence of slider events ends.
+  if self.pendingRenderTimerId != -1:
+    windowClearTimeout(self.pendingRenderTimerId)
+    self.pendingRenderTimerId = -1
   let renderData = LoopIterationRenderData(self: self)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 0, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 100, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 500, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 1000, renderData)
-  setTimeoutWithArg(doRenderActiveLoopIterationValues, 2000, renderData)
+  # Immediate deferred render.
+  self.pendingRenderTimerId = windowSetTimeout(proc() =
+    doRenderActiveLoopIterationValues(renderData)
+    # Single fallback render after Monaco has finished adjusting view zones.
+    renderData.self.pendingRenderTimerId = windowSetTimeout(proc() =
+      doRenderActiveLoopIterationValues(renderData)
+      renderData.self.pendingRenderTimerId = -1
+    , 300)
+  , 0)
 
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
@@ -3810,7 +4070,7 @@ type
     self: FlowComponent
 
 proc doFlowRedraw(data: FlowRedrawData) {.cdecl.} =
-  if data.self.isNil or data.self.flow.isNil:
+  if data.self.isNil or data.self.flow.isNil or not data.self.flowIsLive:
     return
   data.self.redrawFlow()
   data.self.redraw()
@@ -3878,6 +4138,9 @@ proc calculateLineHeight(self: FlowComponent) =
   self.fontSize = option.fontSize - 2
 
 proc recalculateAndRedrawFlow*(self: FlowComponent) =
+  # A retired component must not build view zones (see `redrawFlow`).
+  if not self.flowIsLive:
+    return
   if not self.flow.isNil:
     self.createFlowLines()
     if not self.inExtension:
@@ -3898,6 +4161,11 @@ proc adjustFlow(self: FlowComponent) =
 
 method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
   try:
+    # A component the editor has already replaced must not adopt a flow window
+    # and rebuild itself — the replacement owns the view now. See `flowIsLive`.
+    if not self.flowIsLive:
+      cdebug "flow: update delivered to a superseded component: stopping"
+      return
     if update.isNil:
       cdebug "flow: update is nil: stopping"
       return
@@ -3942,27 +4210,64 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       cerror "flow: editorView index out of bounds: " & $ord(editorView) & " updates len: " & $update.view_updates.len
       return
 
-    if update.location.key != self.key:
+    if not self.inExtension:
+      self.editorUI.flowUpdate = update
+
+    if update.location.key != self.key or self.flow.isNil:
+      # Full rebuild required when:
+      #   * the location key changed (different file/function/loop structure), OR
+      #   * this component has never received flow data yet (self.flow is nil).
+      #
+      # The `self.flow.isNil` guard is critical for components freshly created
+      # by `loadFlow()`: they start with key="" and flow=nil. If the server
+      # also sends key="" the string comparison alone would be false, landing
+      # in the in-place branch where no DOM is built and handoffFlow is never
+      # cleared — causing old zones to accumulate with each navigation.
       self.resetFlow()
       self.key = update.location.key
       if self.flow.isNil:
         self.flow = update.view_updates[editorView]
+      self.redrawFlow()
+      # Now that the new DOM is built, remove the entire chain of superseded
+      # components' Monaco view zones. Walking the chain (not just one level)
+      # is necessary for rapid navigations where multiple loadFlow() calls
+      # queued before any CtUpdatedFlow arrived: each intermediate component
+      # carries its own handoffFlow pointer, and without the loop their zones
+      # would accumulate as view-zone duplicates.
+      var prev = self.handoffFlow
+      while not prev.isNil:
+        let next = prev.handoffFlow
+        prev.resetFlow()
+        prev.handoffFlow = nil
+        prev = next
+      self.handoffFlow = nil
+      self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+      self.recalculate = true
+      # NOTE: a no-op in the app (`FlowComponent` overrides only
+      # `redrawForExtension`); kept because it rebinds the extension host.
+      self.redraw()
+      # One deferred rebuild to capture offsets Monaco has not yet laid out.
+      self.scheduleFlowRedraw(100)
+      self.scheduleActiveLoopIterationValueRender()
     else:
-      self.flow = update.view_updates[editorView]
-
-    if not self.inExtension:
-      self.editorUI.flowUpdate = update
-
-    self.recalculateAndRedrawFlow()
-
-    self.redrawFlow()
-    self.updateFlowOnMove(self.location.rrTicks, self.location.line)
-
-    self.recalculate = true
-    self.redraw()
-    self.scheduleFlowRedraw(0)
-    self.scheduleFlowRedraw(100)
-    self.scheduleActiveLoopIterationValueRender()
+      # Same location key and component already has DOM: the flow structure
+      # (loops, lines) is unchanged. Only step data and active iteration
+      # changed — update existing DOM nodes in-place without teardown.
+      # This is the hot path during noUiSlider drags and arrow-button clicks.
+      # handoffFlow should be nil here (new components always hit the branch
+      # above due to self.flow.isNil), but clear it defensively.
+      if not self.handoffFlow.isNil:
+        self.handoffFlow.resetFlow()
+        self.handoffFlow = nil
+      # NOTE: do NOT replace self.flow here. flowLines.loopStepCounts still holds
+      # indices into the existing self.flow.steps array. Replacing self.flow with
+      # new step data that may have a different step count would invalidate those
+      # indices and cause an IndexDefect in updateFlowOnMove. The canReuseFlow
+      # path in EditorViewComponent.onCompleteMove no longer emits CtLoadFlow for
+      # same-function navigation, so in-place updates are driven entirely by
+      # FlowComponent.onCompleteMove (which does NOT replace self.flow).
+      self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+      self.scheduleActiveLoopIterationValueRender()
   except:
     cerror "flow: " & getCurrentExceptionMsg()
 
@@ -4010,24 +4315,49 @@ proc makeLoopSliderContainerDom(self: FlowComponent, position: int): Node =
 proc makeSliderDom(self: FlowComponent, position: int): Node =
   var dom = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
   if dom.isNil:
+    # `makeLoopSliderContainerDom` already appends the inner `.flow-loop-slider`
+    # element; a fresh container therefore needs nothing more.
     dom = self.makeLoopSliderContainerDom(position)
-  let domCheck = cast[Node](jq(&"flow-loop-slider-{position}"))
-  if domCheck.isNil:
-    let childDom = self.makeLoopSliderChildDom(position, includeEmptyText = true)
 
-    dom.appendChild(childDom)
+  # Look for the inner slider element INSIDE the container we are returning,
+  # not with a document-wide id query.
+  #
+  # This used to be `jq(&"flow-loop-slider-{position}")` — a tag selector,
+  # missing the leading `#`, that could never match anything. The result was an
+  # extra `.flow-loop-slider` div (with a duplicate id) appended to the reused
+  # container on every rebuild, while `sliderDom` kept pointing at the first
+  # one, leaving a stack of dead empty divs behind (#562).
+  var sliderDom = cast[Node](dom.querySelector(cstring".flow-loop-slider"))
+  if sliderDom.isNil:
+    sliderDom = self.makeLoopSliderChildDom(position, includeEmptyText = true)
+    dom.appendChild(sliderDom)
 
-  self.flowLoops[position].sliderDom = dom.childNodes[0]
+  self.flowLoops[position].sliderDom = sliderDom
   if self.flowLines.hasKey(position):
-    self.flowLines[position].sliderDom = dom.childNodes[0]
+    self.flowLines[position].sliderDom = sliderDom
 
   return dom
 
 proc addSliderWidget(self: FlowComponent, position:int) =
-  let id = &"flow-slider-widget-{position}"
   let dom = makeSliderDom(self, position)
 
   self.flowLoops[position].flowDom.appendChild(dom)
+
+proc removeSliderWidget(self: FlowComponent, position: int) =
+  ## Drop the slider container for `position`, if one is present.
+  ##
+  ## Needed for loops that have only a single iteration in the current flow
+  ## window: noUiSlider cannot be created over a zero-width range, and the bare
+  ## container renders as an empty artefact next to the iteration counter — the
+  ## "a container with nothing in it" half of #562.
+  if self.flowLoops.hasKey(position):
+    self.flowLoops[position].sliderDom = nil
+  if self.flowLines.hasKey(position):
+    self.flowLines[position].sliderDom = nil
+
+  let container = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
+  if not container.isNil and not container.parentNode.isNil:
+    container.parentNode.removeChild(container)
 
 proc resizeEditorHandler(self:FlowComponent, position: int) =
   # get new monaco editor config
@@ -4111,63 +4441,125 @@ proc createLoopViewZones(self: FlowComponent, loopIndex: int) =
   if loop.base == -1:
     discard self.createFlowViewZone(loop.last - 1, lineHeight)
 
-proc makeSlider(self: FlowComponent, position: int) =
-  # create slider widget
-  self.addSliderWidget(position)
+proc loopControlWidth(self: FlowComponent, position: int): int =
+  ## Rendered width in px of the loop control the slider is laid out against.
+  ##
+  ## 0 means "not measurable yet": Monaco attaches and lays out a freshly
+  ## registered view zone on a later frame, so the control's DOM node has no
+  ## box during the tick in which we build it.
+  if self.flowLoops.hasKey(position) and not self.flowLoops[position].flowDom.isNil:
+    cast[Element](self.flowLoops[position].flowDom).clientWidth
+  else:
+    0
 
-  # slider setup
-  var element = self.flowLoops[position].sliderDom
-  let step = self.flowLoops[position].loopStep
-  let loop = self.flow.loops[step.loop]
+proc ensureLoopSlider*(self: FlowComponent, position: int) =
+  ## Create — or, if it already exists with the right range, just re-position —
+  ## the noUiSlider for the loop control at `position`.
+  ##
+  ## #562, primary cause: this used to run unconditionally and synchronously
+  ## from `makeFlowLoops`, in the same tick in which `addLoopInfo` registered a
+  ## brand-new Monaco view zone. At that moment `flowDom.clientWidth` is 0, so
+  ## the slider was created with `width: calc(0px - 6ch)` inside a container at
+  ## `left: calc(0px - 2ch)`: present in the DOM, 0 x 2 px, parked to the left of
+  ## the control, invisible on screen and reported as not visible by Playwright.
+  ## Whether it ever became visible depended entirely on a later
+  ## `resizeFlowSlider` from the 0/100/500/1000/2000 ms timer fan-out.
+  ##
+  ## The fix is to make creation conditional on being measurable rather than to
+  ## add more timers (the fan-out is itself part of the flicker in #562's second
+  ## half). `resizeFlowSlider` — already driven by that render pass and by the
+  ## editor resize observer — calls back in and creates the slider the first
+  ## time the zone has a real width.
+  if not self.flowLoops.hasKey(position):
+    return
 
-  # tooltip function
-  proc sliderEncoder(value: float): int =
-    return Math.floor(value)
-
+  let flowLoop = self.flowLoops[position]
+  let element = flowLoop.sliderDom
   if element.isNil:
     return
 
-  if not element.toJs.noUiSlider.isNil:
-    element.toJs.noUiSlider.destroy()
+  let step = flowLoop.loopStep
+  let maxIteration = self.maxLoopIteration(step.loop)
 
-  if loop.iteration <= FLOW_ITERATION_START:
-    # Single-iteration loop (min == max): noUiSlider cannot create a slider
-    # with zero range, so skip slider creation entirely.
+  # Defer until the hosting view zone has been laid out. `shouldRecalcFlow`
+  # records that a recalculation is still owed.
+  #
+  # ONLY outside the extension, and that has always been the rule: the
+  # extension has no `resizeFlowSlider` path to come back on
+  # (`doRenderActiveLoopIterationValues` schedules it behind
+  # `if not data.self.inExtension`, and `resizeEditorHandler` needs an
+  # `editorUI.monacoEditor` the extension does not have), so deferring there
+  # means never building the slider at all.  `requireMeasurable` below carries
+  # the same condition into `ensureFlowLoopSlider`, which would otherwise apply
+  # lesson 1 unconditionally and reintroduce exactly that.
+  let canDeferForWidth = not self.inExtension
+  if canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+     self.loopControlWidth(position) == 0:
+    self.shouldRecalcFlow = true
     return
 
-  noUiSlider.create(element, js{
-    "start": step.iteration,
-    "range": js{
-      "min": FLOW_ITERATION_START,
-      "max": loop.iteration
-    },
-    "behaviour": cstring"drag-tap",
-    "connect": [true, false],
-    "step": 1,
-  })
+  let iteration = self.activeLoopIterationFor(step)
 
-  var onUpdate = proc(values: seq[cstring], handle: int, unencoded: seq[float], tap: bool, positions: seq[float]) =
-    let newTimeInMs = now()
-    let loopIteration = Math.floor(unencoded[0])
-    let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
+  # The construction, the idempotency marker and the `slide` wiring all live in
+  # `flow_loop_slider.nim` now, shared with the review's own loop control
+  # (RV-10 / UD-3): a review can measure a slider after all, so the reason the
+  # two were different has gone and one implementation is what keeps them the
+  # same control.  Everything the DEBUGGER does with a new iteration — the
+  # active step, the jump, the counter DOM — stays here, because a review has
+  # no debugger position to move.
+  let slid = ensureFlowLoopSlider(element, maxIteration, iteration,
+    proc(loopIteration: int) =
+      let newTimeInMs = now()
+      let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
 
-    # if self.data.ui.activeFocus != self:
-    #   self.data.ui.activeFocus = self
+      if activeStep.stepCount != NO_STEP_COUNT:
+        self.flowLoops[position].loopStep = activeStep
+        self.activeStep = activeStep
+      self.lastSliderUpdateTimeInMs = newTimeInMs
+      self.selectLoopIteration(step.loop, loopIteration, step.position)
+      self.updateLoopControlDom(step.position)
+      # Affect the complete move to have a delay on the update
+      # Maybe later on add to all of the EventLog components?
+      cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
+    ,
+    requireMeasurable = canDeferForWidth
+  )
+  # The width gate above measures the CONTAINER; `ensureFlowLoopSlider`
+  # measures the slider element itself, and the two can disagree — the slider's
+  # own `width: calc(...)` is applied by `resizeFlowSlider`, so on the
+  # `makeSlider` path the container can have a box in the tick the slider
+  # inside it does not.
+  #
+  # That second refusal is kept, because "never construct at zero width" is
+  # #562's actual lesson and the container's width is not evidence for it. What
+  # is NOT kept is its silence: a refusal for width must always leave a
+  # recalculation owed, or the slider is lost until some unrelated resize
+  # happens to run. Benign today — `resizeFlowSlider` applies `loopSliderStyle`
+  # before calling back in — but "benign today" is how #562 was introduced, and
+  # this is one assignment.
+  if not slid and canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+     not flowLoopSliderIsMeasurable(element):
+    self.shouldRecalcFlow = true
+  if not slid and maxIteration <= FLOW_ITERATION_START:
+    # The zero-range refusal used to remove the container here as well as
+    # destroy the widget; `ensureFlowLoopSlider` destroys, and the container is
+    # this host's to drop.
+    self.removeSliderWidget(position)
 
-    if activeStep.stepCount != NO_STEP_COUNT:
-      self.flowLoops[position].loopStep = activeStep
-      self.activeStep = activeStep
-    # self.updateFlowOnMove(newStepCount + 1, activeStep.position)
-    # TODO?
-    # if self.lastSliderUpdateTimeInMs <= 0 or newTimeInMs - self.lastSliderUpdateTimeInMs >= 100:
-    self.lastSliderUpdateTimeInMs = newTimeInMs
-    self.selectLoopIteration(step.loop, loopIteration, step.position)
-    # Affect the complete move to have a delay on the update
-    # Maybe later on add to all of the EventLog components?
-    cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
+proc makeSlider(self: FlowComponent, position: int) =
+  if not self.flowLoops.hasKey(position):
+    return
 
-  let elementSlider = cast[JsObject](element).noUiSlider
-  elementSlider.on(cstring"slide", onUpdate)
+  # Suppress the container entirely for loops with a single iteration — see
+  # `ensureLoopSlider`. Doing this BEFORE `addSliderWidget` is what keeps an
+  # empty `.flow-loop-slider-container` from being inserted at all.
+  if self.maxLoopIteration(self.flowLoops[position].loopStep.loop) <= FLOW_ITERATION_START:
+    self.removeSliderWidget(position)
+    return
+
+  self.addSliderWidget(position)
+  self.ensureLoopSlider(position)
+
   if not self.inExtension:
     setEditorResizeObserver(self, position)
 
@@ -4397,8 +4789,10 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
   var step = self.flow.steps[stepCount]
 
   if step.loop == -1:
-    result = document.createElement(cstring"div")
-    result.setAttribute(cstring"class", cstring"flow-parallel flow-parallel-value-single")
+    # Built through `flow_value_dom`, shared with the review's diff tab (UD-3).
+    # `flowLeftStyle`'s own `left` is applied on top, because this host's offset
+    # is a `calc()` in `ch` rather than a pixel count.
+    result = flowValueBandDom(0.0, isLoop = false)
     result.applyStyle(self.flowLeftStyle())
 
     var style = style()
@@ -4461,8 +4855,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
     if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
       lineClass = "flow-loop-first-line"
 
-    var res = document.createElement(cstring"div")
-    res.setAttribute(cstring"class", cstring(&"flow-parallel flow-parallel-loop {lineClass}"))
+    var res = flowValueBandDom(0.0, isLoop = true, extraClass = lineClass)
     res.applyStyle(flowLeftStyle(self))
 
     if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
@@ -4486,14 +4879,14 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
         index += 1
 
       var hasLoop = false
-      var html = document.createElement(cstring"div")
-      html.setAttribute(cstring"class", cstring(&"flow-parallel-loop-values loop-{loopID.int}"))
+      # The band's elements come from `flow_value_dom`, shared with the
+      # review's diff tab (UD-3) so both draw one implementation's columns.
+      var html = flowValueLoopValuesDom(loopID.int)
       html.addEventListener(cstring"scroll", proc(ev: Event) =
         discard
       )
 
-      let parallelGroup = document.createElement(cstring"div")
-      parallelGroup.setAttribute(cstring"class", cstring"flow-parallel-group")
+      let parallelGroup = flowValueGroupDom()
       html.appendChild(parallelGroup)
 
       for i in 0 ..< loop.iteration:
@@ -4509,16 +4902,10 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
             group.loopWidths[loopID][i] * group.baseWidth * 2 + 21
           else:
             group.loopWidths[loopID][i] * group.baseWidth
-        let columnStyle = style(
-          (StyleAttr.width, cstring($width & "px")))
-
-        # change class on width change to make sure it's re-rendered
-        let flowWidthClass = fmt"flow-parallel-values-width-{width}"
-
-        let valuesColumn = document.createElement(cstring"div")
-        valuesColumn.setAttribute(cstring"id", cstring(&"flow-values-{position}-{loopID.int}-{index}"))
-        valuesColumn.setAttribute(cstring"class", cstring(&"flow-parallel-values {flowWidthClass}"))
-        valuesColumn.applyStyle(columnStyle)
+        # `flowValueColumnDom` carries the "change the class on a width change
+        # so Monaco cannot skip the re-render" rule with it.
+        let valuesColumn = flowValueColumnDom(
+          cstring(&"flow-values-{position}-{loopID.int}-{index}"), width)
         parallelGroup.appendChild(valuesColumn)
 
         if not self.flow.positionStepCounts.hasKey(position):
@@ -4540,11 +4927,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
 
         for name in values:
           if not currentStep.beforeValues.hasKey(name) or not currentStep.afterValues.hasKey(name):
-            let noValue = document.createElement(cstring"span")
-            noValue.setAttribute(cstring"class", cstring"flow-parallel-value")
-            noValue.applyStyle(style)
-            noValue.appendChild(document.createTextNode(cstring"no value"))
-            valuesColumn.appendChild(noValue)
+            valuesColumn.appendChild(flowValueEmptyDom(style))
           else:
             valuesColumn.appendChild(flowSimpleValue(
               self,
@@ -4572,7 +4955,24 @@ proc resizeFlowSlider*(self: FlowComponent) =
         if leftValue != 0:
           container.style.left = cstring(fmt"calc({leftValue}px - 2ch)")
 
+    # This is also the deferred-creation path for sliders whose Monaco view
+    # zone had not been laid out yet when the loop control was built — see
+    # `ensureLoopSlider`. It is a no-op once the slider exists at the right
+    # range, so it is safe to run on every resize/render pass.
+    self.ensureLoopSlider(position)
+
 proc redrawFlow*(self: FlowComponent) =
+  # Single choke point for "tear the flow view down and build it again".
+  #
+  # Several callers reach here from a `setTimeout` (`doFlowRedraw`,
+  # `afterJump`) and therefore can run after the editor has already replaced
+  # this component. Rebuilding then registers Monaco view zones that only the
+  # retired component knows about — the live one cannot clear them — and paints
+  # the previous debugger position's loop iteration over the current one
+  # (#593/#595). See `flowIsLive`.
+  if not self.flowIsLive:
+    return
+
   self.clear()
   self.recalculateAndRedrawFlow()
 
@@ -4584,7 +4984,24 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
   let debuggerLocationRRTicks = rrTicks
   let debuggerLocationLine = line
 
+  # `EditorViewComponent.onCompleteMove` creates the replacement FlowComponent
+  # and then forwards the move to it, so this runs once with no flow data yet:
+  # every reader below dereferences `self.flow`. The real render happens when
+  # `ct/updated-flow` arrives.
+  if self.flow.isNil:
+    return
+
   self.setLoopStatesActiveIteration(debuggerLocationRRTicks)
+
+  # Push the recomputed iteration into the loop controls that are already on
+  # screen. `setLoopStatesActiveIteration` only touches model state; the
+  # counter's textarea and the arrows' `disabled` flags are written at
+  # DOM-construction time, so without this the number the user reads keeps
+  # whatever value it was built with (#593). This also covers the path in
+  # `EditorViewComponent.onCompleteMove` that reuses the existing flow and only
+  # calls `redrawFlow()`.
+  for position, _ in self.flowLoops:
+    self.updateLoopControlDom(position)
 
   for position, line in self.flowLines:
     self.setFlowLineActiveIteration(position)
@@ -4604,6 +5021,10 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
       if flowLine.loopStepCounts.hasKey(activeLoop) and
          activeIteration >= 0 and
          activeIteration < flowLine.loopStepCounts[activeLoop].len and
+         # The recorded step count is an index into the flow window that was
+         # current when this line was rendered; the window may since have been
+         # replaced by a shorter one (see `validFlowStepCount`).
+         self.validFlowStepCount(flowLine.loopStepCounts[activeLoop][activeIteration]) and
          flowLine.stepLoopCells.hasKey(activeLoop) and
          flowLine.stepLoopCells[activeLoop].hasKey(activeIteration):
         let activeIterationStep = self.flow.steps[flowLine.loopStepCounts[activeLoop][activeIteration]]
@@ -4648,7 +5069,6 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
             it.iteration == activeIteration)
           if steps.len > 0:
             let step = steps[0]
-            node.innerHTML = ""
             let valueNode = flowSimpleValue(
               self,
               expression,
@@ -4657,7 +5077,12 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
               step.stepCount,
               false,
               style())
-            node.appendChild(valueNode)
+            # Replace the existing child in a single DOM mutation to avoid the
+            # two-repaint flash that innerHTML="" + appendChild produces.
+            if node.firstChild.isNil:
+              node.appendChild(valueNode)
+            else:
+              replaceChild(node, valueNode, node.firstChild)
 
     else:
       discard

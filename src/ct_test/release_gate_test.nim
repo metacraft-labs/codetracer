@@ -1,4 +1,4 @@
-import std/[algorithm, os, sequtils, strutils, tables, unittest]
+import std/[algorithm, os, osproc, sequtils, strutils, tables, unittest]
 
 import contracts
 import ct_test
@@ -28,6 +28,63 @@ proc fixtureJsonFiles(root: string): seq[string] =
   for path in walkDirRec(root):
     if path.endsWith(".json"):
       result.add path
+
+proc laneFilesFor(lane: string): seq[string] =
+  ## Ask `ci/lib/test-lane-files.sh` what a lane ACTUALLY runs, rather than
+  ## pattern-matching the shell that computes it.
+  ##
+  ## A plain `proc` is correct here because it only COMPUTES. Nothing in it
+  ## calls `check`: `std/unittest`'s `check` needs `testStatusIMPL` in scope to
+  ## mark a case failed, and inside a `proc` there is none, so a failing
+  ## `check` prints its message, sets `programResult` and lets the case report
+  ## `[OK]`. That is the first defect variant this campaign found; the
+  ## assertions live in the `template` below for exactly that reason.
+  let (output, exitCode) = execCmdEx(
+    "bash -c 'source ci/lib/test-lane-files.sh && test_lane_files " & lane & "'")
+  if exitCode != 0:
+    raise newException(IOError,
+      "could not resolve lane '" & lane & "': " & output)
+  for line in output.splitLines:
+    let trimmed = line.strip()
+    if trimmed.len > 0:
+      result.add trimmed
+
+template checkCliLaneCovers(gateTests: untyped) =
+  ## Assert that `src/tests/cli` is actually REACHED by a lane, end to end.
+  ##
+  ## A `template`, not a `proc`, and that distinction is load-bearing: `check`
+  ## only marks a case failed where `testStatusIMPL` is in scope, which is
+  ## inside a `test` body. A template is inlined into that body; a proc is not,
+  ## and every `check` in it would print-but-not-fail. Measured on this very
+  ## helper with the recipe/runner link severed: as a proc, 5 OK / 0 FAILED; as
+  ## a template, 2 OK / 3 FAILED.
+  ##
+  ## What it replaced: `justfile.contains("find src/tests/cli -name '*_test.nim'")`
+  ## — a literal match on the glob's text, which pinned WHERE the glob was
+  ## written rather than THAT the directory is covered. The glob now lives in
+  ## `ci/lib/test-lane-files.sh`, so that string moved and three gate cases went
+  ## red without a single test losing coverage.
+  ##
+  ## The replacement pins two links and then ASKS for the third rather than
+  ## grepping for it:
+  ##   1. the recipe exists and delegates to the shared runner (justfile text —
+  ##      there is nothing else to interrogate there);
+  ##   2. the lane, actually executed, lists every gate file by path. This is
+  ##      immune to how the lane spells its glob (quoting style, `find` vs a
+  ##      helper, one pattern or three), which a third pinned literal was not.
+  check fileExists("justfile")
+  let justfileText = readExisting("justfile")
+  check justfileText.contains("test-cli-record:")
+  check justfileText.contains("run-nim-test-lane.sh cli-record")
+
+  let laneSet = laneFilesFor("cli-record")
+  # A lane that resolves to nothing would make every membership check below
+  # vacuously... false, actually — but say it out loud anyway, because an empty
+  # lane is a different bug from a missing file and deserves its own message.
+  check laneSet.len > 0
+  for gatePath in gateTests:
+    checkpoint(gatePath)
+    check laneSet.contains(gatePath)
 
 proc checkNoHardSkips(path: string) =
   let text = readExisting(path)
@@ -111,15 +168,31 @@ suite "ct-test M16 release gate":
       check fileExists(cliPath)
       checkNoHardSkips(cliPath)
 
-    # ... and, unlike the ViewModel lane (which `just test-vm-native` reaches
-    # by globbing a directory), these have a NAMED runner.  A gate entry with
-    # no runner is the "registered in only one place runs nowhere" failure
-    # this repo has hit repeatedly, so the recipe's existence is asserted
-    # here rather than assumed.
-    check fileExists("justfile")
-    let justfile = readExisting("justfile")
-    check justfile.contains("test-cli-record:")
-    check justfile.contains("find src/tests/cli -name '*_test.nim'")
+    # ... and a gate entry with no runner is the "registered in only one place
+    # runs nowhere" failure this repo has hit repeatedly, so the lane that
+    # reaches these files is asserted here rather than assumed.
+    checkCliLaneCovers(CliRecordGateTests)
+
+  test "cli_review_gate_tests_exist_and_are_registered":
+    # RV-1: the `ct review` CLI lane.  Same contract as the record lane, and
+    # deliberately the same runner — `test-cli-record`'s glob covers the whole
+    # of `src/tests/cli` — so the "registered in only one place runs nowhere"
+    # failure cannot recur here either.
+    for cliPath in CliReviewGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    checkCliLaneCovers(CliReviewGateTests)
+
+  test "cli_agent_gate_tests_exist_and_are_registered":
+    # RV-7: the `ct agent` CLI lane, on the same runner as the two above.
+    for cliPath in CliAgentGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    checkCliLaneCovers(CliAgentGateTests)
 
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:

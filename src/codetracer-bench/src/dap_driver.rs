@@ -111,11 +111,11 @@ impl DapSession {
     ///
     /// Launch a DAP session through the user-facing `ct start_backend`
     /// CLI surface (preferred) or fall back to `replay-server
-    /// dap-server` / `ct-rr-support` directly.  `backend_kind` is the
+    /// dap-server` / `ct-native-replay` directly.  `backend_kind` is the
     /// argument `ct start_backend` accepts: `"db"` for materialized +
     /// MCR-via-replay-worker traces; `"rr"` for RR traces.
     ///
-    /// The replay-worker (`ct-native-replay` / `ct-rr-support`) is
+    /// The replay-worker (`ct-native-replay`) is
     /// resolved by the dap-server itself: it looks at the DAP launch
     /// `ctRRWorkerExe` field, then `CODETRACER_*_EXE` environment
     /// variables, then searches PATH.  The bench's
@@ -139,7 +139,7 @@ impl DapSession {
         // Pick the right argv shape based on the binary name.  The
         // user-facing `ct` invokes `ct start_backend <kind> --stdio`;
         // the `replay-server` direct path uses `dap-server --stdio`;
-        // `ct-rr-support` uses just `--stdio`.  We sniff the binary
+        // `ct-native-replay` uses just `--stdio`.  We sniff the binary
         // name rather than threading another flag through callers.
         let exe_name = dap_binary
             .file_name()
@@ -158,7 +158,7 @@ impl DapSession {
             }
             _ => {
                 // Fall back to single-arg `--stdio` (matches the
-                // `ct-rr-support` / older direct invocation).
+                // `ct-native-replay` / older direct invocation).
                 command.arg("--stdio");
             }
         }
@@ -214,8 +214,8 @@ impl DapSession {
             "traceFolder": trace_folder_str,
             "trace_file": trace_file,
         });
-        // The replay-worker binary (`ct-native-replay` for MCR,
-        // `ct-rr-support` for RR) is resolved by the dap-server's own
+        // The replay-worker binary (`ct-native-replay`, for both MCR
+        // and RR) is resolved by the dap-server's own
         // 3-tier discovery: DAP launch `ctRRWorkerExe` arg → env vars
         // (`CODETRACER_*_EXE`) → PATH search (see
         // db-backend/src/dap_server.rs::resolve_recreator_exe).  The

@@ -1,0 +1,64 @@
+# Jobs that MUST execute on every push / pull_request run of
+# .github/workflows/codetracer.yml.
+#
+# "Execute" means the job reached a conclusion of `success` or `failure`.
+# A job that is `skipped` or `cancelled`, or that is missing from the
+# workflow entirely, means this commit lost the coverage that job provides —
+# ci/verdict/required-jobs.sh reports that as "CI DID NOT RUN THE TESTS"
+# rather than letting it hide inside an ordinary red run.
+#
+# ONLY list jobs that are expected to run unconditionally. Jobs carrying an
+# `if:` that legitimately suppresses them (nightly schedules, tag-only
+# publishes, branch-scoped deploys) must NOT appear here, or this gate would
+# cry wolf on every normal run:
+#   origin-dap-windows-nightly, origin-dap-macos-nightly  (schedule/dispatch)
+#   create-release                                        (tag-only)
+#   push-to-attic, build-and-deploy-docs                  (main-only)
+#
+# Pure publication side-effects (push-gpg-public-key, push-install-script,
+# push-tag) are also omitted: they ship artifacts, they do not provide test
+# coverage, and their failures are already visible as ordinary job failures.
+#
+# Every name here must match a job *id* in .github/workflows/codetracer.yml
+# (the key under `jobs:`), not its display name. Matrix jobs collapse to a
+# single result under their job id in the `needs` context.
+
+# --- static analysis -------------------------------------------------
+lint-bash
+lint-nim
+lint-nix
+lint-rust
+
+# --- builds ----------------------------------------------------------
+dev-build
+nix-build
+appimage-build
+dmg-build
+appimage-lib-check
+appimage-cross-distro
+dmg-lib-check
+
+# --- test suites -----------------------------------------------------
+test-non-gui
+test-ui-tests
+test-ui-tests-rr
+cross-process-linux
+viewmodel-tests
+visual-replay-regression-gate
+# ct-test's two gate scripts (ci/test/m16-release-gate.sh and
+# ci/test/ct-providers.sh) were maintained for months while no pipeline ran
+# either one, so "this suite is in the gate" was true while "the gate runs" was
+# false. Listing them here is what makes the second half true: a run in which
+# they are skipped or missing is reported as lost coverage, not as a pass.
+ct-test-release-gate
+ct-test-providers
+
+# --- platform lanes --------------------------------------------------
+windows-bootstrap-smoke
+windows-named-pipe-tests
+windows-rust-components
+windows-headless-test
+origin-dap-windows
+origin-dap-macos
+reprobuild-linux-smoke
+reprobuild-macos-smoke

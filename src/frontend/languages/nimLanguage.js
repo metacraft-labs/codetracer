@@ -444,9 +444,18 @@ export const nimLanguage = {
     // Numbers
     // ============================================================
     numbers: [
-      // unary minus heuristic: boundary + '-' then number will match next
+      // unary minus heuristic: boundary + '-' then number will match next.
+      //
+      // The `-` is a capture group of its own because Monarch requires the
+      // number of groups to equal the number of actions, and throws
+      // "matched number of groups does not match the number of actions in
+      // rule" otherwise — which aborts tokenization of the whole model from
+      // that line on, so the rest of the file renders unhighlighted.  The rule
+      // shipped with two actions and one group; UD-2 surfaced it, because a
+      // diff tab's model is the whole file now and any `-1` past the first
+      // hunk reaches this rule.
       [
-        /(^|[ \t\r\n,;\(\[\{])-(?=(?:0[xX][0-9A-Fa-f]|0[oO][0-7]|0[bB][01]|[0-9]))/,
+        /(^|[ \t\r\n,;\(\[\{])(-)(?=(?:0[xX][0-9A-Fa-f]|0[oO][0-7]|0[bB][01]|[0-9]))/,
         ['', 'operator']
       ],
 

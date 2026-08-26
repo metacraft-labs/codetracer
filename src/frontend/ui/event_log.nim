@@ -463,14 +463,14 @@ var arg: js
 const
   CLICK_DELAY_TIMER = 5
   EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
-    "std streams:",
-    "read events:",
-    "write events:",
-    "network:",
-    "trace:",
-    "file:",
-    "errors:",
-    "evm events:"
+    "std streams",
+    "read events",
+    "write events",
+    "network",
+    "trace",
+    "file",
+    "errors",
+    "evm events"
   ]
 
   EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
@@ -671,6 +671,12 @@ proc onlyRecordedEvent(self: EventLogComponent) =
   for tag in eventTags:
     self.switchEventTagSelection(tag, true)
 
+const FilterDropdownTriggerGap = 6.0
+  ## Pixels between the filter button and the menu it opens.  Mirrors
+  ## `DROPDOWN_TRIGGER_GAP` in styles/components/shared_widgets.styl, which
+  ## every menu positioned by CSS uses; this menu is positioned from JavaScript,
+  ## so it cannot read that value.
+
 proc setupFilterDropdown(self: EventLogComponent) =
   ## Wire up the #category-image filter button to show/hide the event-kind
   ## filter dropdown.  Called once from eventLogAfterRedraws after the IsoNim
@@ -764,7 +770,12 @@ proc setupFilterDropdown(self: EventLogComponent) =
     let filterButton = document.getElementById(dropDownId)
     let rect = filterButton.getBoundingClientRect()
     containerKdom.style.position = "absolute"
-    containerKdom.style.top = &"{rect.bottom}px"
+    # The gap every menu leaves below its trigger.  It lives in CSS for the
+    # menus a stylesheet can position (`DROPDOWN_TRIGGER_GAP`,
+    # styles/components/shared_widgets.styl); this one is placed from a
+    # measured rect because it is appended to `document.body`, so the same
+    # 6px has to be added here.
+    containerKdom.style.top = &"{rect.bottom + FilterDropdownTriggerGap}px"
     containerKdom.style.left = &"{rect.left}px"
     containerKdom.style.zIndex = "1000".cstring
     containerKdom.style.display = "block"
@@ -801,6 +812,31 @@ proc setupFilterDropdown(self: EventLogComponent) =
         self.dropDowns[categoryType] = not self.dropDowns[Filter]
     if not self.dropDowns[Filter] and self.focusedDropDowns[Filter]:
       cast[Element](e.target).blur())
+
+  filterBtn.addEventListener(cstring"keydown", proc(e: Event) =
+    ## Escape closes the menu, as it does for every other dropdown (see
+    ## `setupDropdownDismissListeners` in ui/layout.nim, which handles the ones
+    ## it can reach).  This menu is not in that registry: dismissal there works
+    ## by re-clicking the trigger, and this trigger's open state is carried by
+    ## focus rather than by a class — clicking it while open only toggles
+    ## `dropDowns[Filter]` back on and leaves the menu up.
+    ##
+    ## The listener sits on the button because the button is what holds focus
+    ## the whole time the menu is open: `showDropdown` focuses it, and the
+    ## container swallows mousedown so clicking a checkbox never takes focus
+    ## away.
+    if cast[KeyboardEvent](e).keyCode == ESC_KEY_CODE:
+      e.preventDefault()
+      # Escape is a global shortcut too; without this the same press would
+      # also reach the document-level handlers.
+      e.stopPropagation()
+      # Both flags first, so the `blur` below finds nothing left to close and
+      # the next click on the button opens the menu rather than toggling a
+      # state that says it is already open.
+      self.focusedDropDowns[Filter] = false
+      self.dropDowns[Filter] = false
+      hideDropdown()
+      filterBtn.blur())
 
 proc findElement(self: EventLogComponent): Element =
   var denseTable = self.denseTable
@@ -1252,7 +1288,7 @@ proc events(self: EventLogComponent) =
             emptyTable: proc: cstring =
               # TODO if self.receivedUpdates:
               """The current record appears to not have any system events like std read/write,
-              network or disc operations.</br>You can add trace point events to your code by selecting any
+              network or disc operations. You can add trace point events to your code by selecting any
               line of code and pressing "Enter"""".cstring
               # else:
               #   "Loading record events...".cstring
@@ -1382,10 +1418,25 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
       if row.base64Encoded:
         mutData.data[i].content = cstring(decode($mutData.data[i].content))
 
+    # Capture before loadEvents because loadEvents sets receivedUpdates = true
+    # when data arrives; we use this to fire resizeEventLogHandler only once.
+    let isFirstDataLoad = not self.receivedUpdates
+
     self.loadEvents(mutData)
 
     self.tableCallback(mutData.toJs)
     self.redraw()
+
+    # Re-sync scroll-area dimensions after the first batch of real data lands.
+    # On startup the virtual scroll area is 0-height (no rows yet), so mouse-
+    # wheel scroll is locked until the Scroller learns the real recordsTotal.
+    # The Scroller's own draw.dt→measure(false) may also reset the scroll body
+    # height to a stale value; re-applying after a setTimeout(0) lets it finish
+    # first, then we restore the panel height and re-measure.
+    # We only do this once (isFirstDataLoad) — calling it on every update would
+    # trigger scroller.measure() mid-scroll and snap the table back to the top.
+    if isFirstDataLoad and mutData.recordsTotal > 0:
+      discard setTimeout(proc = resizeEventLogHandler(self), 0)
 
     # The IsoNim event-log shell renders the footer once with a static
     # class string (`data-tables-footer 0to0`) and child counters fixed
@@ -1420,7 +1471,7 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
        self.pendingReloadRetries < eventLogMaxReloadRetries:
       self.pendingReloadRetries += 1
       let delay = 250 * self.pendingReloadRetries  # 250, 500, 750, ... ms
-      # Legitimate, hence DEBUG (M51).  The comment above says it: an empty
+      # Legitimate, hence DEBUG.  The comment above says it: an empty
       # first page means `ct/event-load` is still in flight, which is the
       # normal ordering on every trace open.  The retry below is the
       # designed response, and it is bounded, so the condition is expected
@@ -1581,6 +1632,39 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
 
   self.denseTable.footerDom =
     cast[Element](componentTab.findNodeInElement(".data-tables-footer"))
+
+  # Attach scroll → footer-row-range sync listeners.
+  # These were previously in the dead else-branch of events() which was never
+  # reached because events() is only called once (with self.init = false).
+  let denseScrollBody = cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
+  if not denseScrollBody.isNil:
+    denseScrollBody.addEventListener(
+      cstring"scroll",
+      proc () =
+        self.denseTable.updateTableRows(redraw = false)
+        if not self.denseTable.footerDom.isNil:
+          self.denseTable.updateTableFooter()
+    )
+  let detailedScrollBody = cast[Node](jq(detailedWrapper)).findNodeInElement(".dt-scroll-body")
+  if not detailedScrollBody.isNil:
+    detailedScrollBody.addEventListener(
+      cstring"scroll",
+      proc () =
+        self.detailedTable.updateTableRows(redraw = false)
+        if not self.detailedTable.footerDom.isNil:
+          self.detailedTable.updateTableFooter()
+    )
+
+  # Set up ResizeObserver so the DataTable is re-fitted whenever the event log
+  # panel changes size. Previously in the dead else-branch of events() where it
+  # was never reached; moved here so it fires correctly after mount.
+  if self.resizeObserver.isNil:
+    let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
+      for entry in entries:
+        discard setTimeout(proc =
+          resizeEventLogHandler(self), 100))
+    resizeObserver.observe(componentTab)
+    self.resizeObserver = resizeObserver
 
   if not self.inExtension:
     if not self.isDetailed:

@@ -25,24 +25,11 @@
 ##                             tree when the recording carries a diff
 ##                             (the legacy ``diff-files-list``).  Empty
 ##                             seq disables the section.
-## - ``deepReviewActive``    — true while the deep-review surface is
-##                             active.  Mirrors the legacy
-##                             ``data.deepReviewActive`` flag — when
-##                             set, the IsoNim view renders the
-##                             compact one-line-per-file list instead
-##                             of the standard tree.
-## - ``deepReviewFiles``     — flat list of files surfaced by the
-##                             deep-review surface (mirrors
-##                             ``data.deepReviewData.files``).  The
-##                             view renders one ``deepreview-file-item-
-##                             compact`` row per entry with status,
-##                             basename, line counts, and coverage.
 ##
 ## Derived:
 ## - ``isEmpty``             — convenience for the empty-state
 ##                             placeholder (true when ``rootEntry``
-##                             carries no children AND no diff entries
-##                             AND no deep-review entries).
+##                             carries no children AND no diff entries).
 ## - ``hasDiff``             — true when ``diffEntries`` is non-empty.
 ## - ``totalEntryCount``     — total entry count across the tree (used
 ##                             by tests).
@@ -63,10 +50,6 @@
 ## - ``setDiffEntries``      — bulk-replace the diff list (mirrors the
 ##                             legacy ``data.startOptions.diff.files``
 ##                             read inside the Karax method).
-## - ``setDeepReview``       — toggle the deep-review surface on /
-##                             off + push the file list (mirrors the
-##                             legacy ``deepReviewActive`` /
-##                             ``deepReviewData`` pair).
 ##
 ## ``string`` / ``bool`` / ``seq`` are used everywhere so the same
 ## value works on both native (``test-vm-native``) and JS
@@ -76,37 +59,15 @@
 import std/[sets, sequtils]
 
 import isonim/core/[signals, computation, owner]
+# Selective import: ``isonim/core/batch`` re-exports a ``HashSet`` that
+# would otherwise collide with ``std/sets``' one in this module.
+from isonim/core/batch import untrack
 import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
+import ../../../common/trace_source_paths
 
 type
-  FilesystemDeepReviewFile* = object
-    ## Compact row the deep-review surface renders.  Mirrors the
-    ## fields the legacy ``deepReviewData.files`` walk consumed
-    ## (status badge, basename, line counts, coverage).  Carrying the
-    ## already-derived ``baseName`` keeps the view free of path-parsing
-    ## logic so the same shape works on both native and JS backends.
-    ##
-    ## ``path``        — full source path the row links to.  Click
-    ##                   opens it via the bridge.
-    ## ``baseName``    — display name (legacy view used
-    ##                   ``rfind('/')`` to derive it).
-    ## ``status``      — single-letter diff status (``"A"`` / ``"M"`` /
-    ##                   ``"D"`` / ``""``).
-    ## ``linesAdded`` /
-    ## ``linesRemoved`` — diff-line counts.  Both zero hides the badge.
-    ## ``coverageExecuted`` /
-    ## ``coverageTotal`` — coverage summary.  ``coverageTotal == 0``
-    ##                    hides the summary span.
-    path*: string
-    baseName*: string
-    status*: string
-    linesAdded*: int
-    linesRemoved*: int
-    coverageExecuted*: int
-    coverageTotal*: int
-
   FilesystemVM* = ref object of ViewModel
     ## Reactive state for the Filesystem panel.
     store*: ReplayDataStore
@@ -116,8 +77,6 @@ type
     loadingState*: Signal[LoadingState]
     expandedPaths*: Signal[HashSet[string]]
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
-    deepReviewActive*: Signal[bool]
-    deepReviewFiles*: Signal[seq[FilesystemDeepReviewFile]]
     onOpenFile*: proc(path: string)
       ## Called by file-row click handlers. The legacy component wires this to
       ## ``data.openTab(path, ViewSource)`` so CTFS-imported traces resolve
@@ -130,20 +89,6 @@ type
     isEmpty*: Memo[bool]
     hasDiff*: Memo[bool]
     totalEntryCount*: Memo[int]
-
-proc `==`*(a, b: FilesystemDeepReviewFile): bool {.noSideEffect.} =
-  ## Explicit equality so ``Signal[seq[FilesystemDeepReviewFile]]``
-  ## compiles under Nim's side-effect inference.  Mirrors the
-  ## ``FilesystemEntryNode`` / ``FilesystemDiffEntry`` overrides in
-  ## ``store/types.nim`` (same root cause: the default structural
-  ## ``==`` is inferred as side-effecting because the value type
-  ## carries ``string`` fields whose ``==`` triggers the same
-  ## inference walk).
-  a.path == b.path and a.baseName == b.baseName and
-    a.status == b.status and a.linesAdded == b.linesAdded and
-    a.linesRemoved == b.linesRemoved and
-    a.coverageExecuted == b.coverageExecuted and
-    a.coverageTotal == b.coverageTotal
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -183,6 +128,43 @@ proc collectSmartExpansionPaths(node: FilesystemEntryNode; paths: var HashSet[st
       paths.incl(node.path)
     for child in node.children:
       collectSmartExpansionPaths(child, paths)
+
+proc collectActiveFileAncestors*(node: FilesystemEntryNode;
+                                 target: string;
+                                 acc: var seq[string]) =
+  ## Collect, **root-first**, the paths of every tree node in ``node``'s
+  ## subtree that is an ancestor directory of ``target``.
+  ##
+  ## The walk is over the REAL tree rather than over a textual split of
+  ## ``target`` because the tree's shape is not derivable from the path
+  ## alone:
+  ## - the top-level node is the synthetic "source folders" container,
+  ##   whose ``path`` is empty; it must be descended through but is not
+  ##   itself expandable,
+  ## - a self-contained trace's tree is rooted at the recorded source
+  ##   folder, not at the filesystem root,
+  ## - folders that are still lazy "Loading..." stubs carry no children
+  ##   yet, and the walk must simply stop there (the caller re-runs once
+  ##   the stub is filled).
+  ##
+  ## Root-first order matters: expanding an ancestor is what triggers
+  ## the lazy load of its children, so parents must be expanded before
+  ## the deeper nodes they reveal.
+  if target.len == 0:
+    return
+
+  let isRealAncestor = node.path.len > 0 and isAncestorPathOf(node.path, target)
+  # A node with an empty path is the synthetic container root — descend
+  # into it unconditionally, since its children carry the real paths.
+  let isSyntheticContainer = node.path.len == 0
+  if not isRealAncestor and not isSyntheticContainer:
+    return
+
+  if isRealAncestor:
+    acc.add(node.path)
+
+  for child in node.children:
+    collectActiveFileAncestors(child, target, acc)
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -260,16 +242,27 @@ proc setDiffEntries*(vm: FilesystemVM;
   ## hide the section.
   vm.diffEntries.val = @entries
 
-proc setDeepReview*(vm: FilesystemVM; active: bool;
-                    files: openArray[FilesystemDeepReviewFile] = @[]) =
-  ## Toggle the deep-review surface.  When ``active`` is false the
-  ## file list is wiped regardless of ``files`` so a stale list can't
-  ## leak through.
-  vm.deepReviewActive.val = active
-  if active:
-    vm.deepReviewFiles.val = @files
-  else:
-    vm.deepReviewFiles.val = @[]
+proc expandToFile*(vm: FilesystemVM; filePath: string) =
+  ## Reveal ``filePath`` by expanding every folder between the tree root
+  ## and it.
+  ##
+  ## Deliberately routed through ``expandPath`` per ancestor instead of a
+  ## single bulk ``expandedPaths`` write: ``expandPath`` fires the
+  ## ``onFolderExpanded`` bridge, which is what asks the index process
+  ## for a lazily-loaded folder's children.  A bulk write would mark the
+  ## folders expanded while leaving their subtrees as "Loading..." stubs,
+  ## so the file would still not be visible.
+  ##
+  ## Only the ancestors that exist in the tree *right now* are expanded.
+  ## Deeper ancestors that are still behind a stub become reachable when
+  ## the requested content arrives and ``setRoot`` re-runs the effect in
+  ## ``createFilesystemVM``.
+  if filePath.len == 0:
+    return
+  var ancestors: seq[string] = @[]
+  collectActiveFileAncestors(vm.rootEntry.val, filePath, ancestors)
+  for path in ancestors:
+    vm.expandPath(path)
 
 proc openFile*(vm: FilesystemVM; path: string) =
   ## Open a file entry through the installed editor bridge.
@@ -287,23 +280,19 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
   ## ``vm.dispose()``.  Sets every signal to its empty/inert default
   ## so the view renders the empty-state placeholder on first paint.
   withViewModel proc(dispose: proc()): FilesystemVM =
-    # The recursive ``FilesystemEntryNode`` plus the diff / deep-review
-    # value types carry explicit ``{.noSideEffect.}`` ``==`` overrides
-    # (see ``store/types.nim`` and the ``FilesystemDeepReviewFile``
-    # override above).  Without those, the signal write path would not
+    # The recursive ``FilesystemEntryNode`` and the diff value type carry
+    # explicit ``{.noSideEffect.}`` ``==`` overrides (see
+    # ``store/types.nim``).  Without those, the signal write path would not
     # compile under Nim's side-effect inference for compound types.
     let rootEntry = createSignal(emptyEntry())
     let loadingState = createSignal(lsLoading)
     let expandedPaths = createSignal(initHashSet[string]())
     let diffEntries = createSignal(newSeq[FilesystemDiffEntry]())
-    let deepReviewActive = createSignal(false)
-    let deepReviewFiles = createSignal(newSeq[FilesystemDeepReviewFile]())
 
     let isEmpty = createMemo[bool] proc(): bool =
       let r = rootEntry.val
       let rootEmpty = r.text.len == 0 and r.children.len == 0
-      rootEmpty and diffEntries.val.len == 0 and
-        deepReviewFiles.val.len == 0
+      rootEmpty and diffEntries.val.len == 0
 
     let hasDiff = createMemo[bool] proc(): bool =
       diffEntries.val.len > 0
@@ -311,16 +300,67 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     let totalEntryCount = createMemo[int] proc(): int =
       countNodes(rootEntry.val)
 
-    FilesystemVM(
+    let vm = FilesystemVM(
       store: store,
       rootEntry: rootEntry,
       loadingState: loadingState,
       expandedPaths: expandedPaths,
       diffEntries: diffEntries,
-      deepReviewActive: deepReviewActive,
-      deepReviewFiles: deepReviewFiles,
       isEmpty: isEmpty,
       hasDiff: hasDiff,
       totalEntryCount: totalEntryCount,
       disposeProc: dispose,
     )
+
+    # Reveal the file the debugger is stopped in.
+    #
+    # This has to be reactive rather than a one-shot at ``setRoot``,
+    # because the two inputs arrive in either order and both can arrive
+    # more than once:
+    # - the index process sends ``filesystem-loaded`` BEFORE
+    #   ``trace-loaded``, so on a fresh trace the tree exists before
+    #   there is any active file;
+    # - the active file only appears after the first DAP stop, and then
+    #   changes on every step into another file;
+    # - the tree itself is re-published each time a lazily-loaded
+    #   subtree is filled in, which is how ancestors deeper than the
+    #   initial depth limit become expandable at all.
+    #
+    # ``expandedPaths`` is deliberately NOT an input (and the expansion
+    # write is ``untrack``ed so it cannot become one): a manual collapse
+    # must survive for as long as the user stays on the same file in the
+    # same tree, and a self-triggering effect would immediately undo it.
+    #
+    # Deciding whether to re-expand needs to know WHICH input woke the
+    # effect.  Signals dedupe on ``==`` before notifying, so the effect
+    # only ever runs because the debugger state or the tree genuinely
+    # changed — and the debugger state is cheap to compare, whereas
+    # comparing two trees is a full recursive walk.  So compare the
+    # debugger state, and infer "the tree changed" from its absence.
+    # That keeps the per-step cost at one small object comparison no
+    # matter how large the project is.
+    var lastActiveFile = ""
+    var lastDebugger: DebuggerState
+    createEffect proc() =
+      let debuggerState = store.debugger.val
+      # Read the tree so it is tracked as a dependency; a lazily filled
+      # subtree must re-run this effect.
+      discard rootEntry.val
+      let treeChanged = debuggerState == lastDebugger
+      lastDebugger = debuggerState
+
+      let activeFile = debuggerState.location.file
+      if activeFile.len == 0:
+        # No debugger position yet, or a synthetic frame with no source.
+        # Reset so the next real file counts as a change.
+        lastActiveFile = ""
+        return
+      if activeFile == lastActiveFile and not treeChanged:
+        # Same file, same tree — the user only stepped within the file.
+        # Do not fight a manual collapse.
+        return
+      lastActiveFile = activeFile
+      untrack proc() =
+        vm.expandToFile(activeFile)
+
+    vm

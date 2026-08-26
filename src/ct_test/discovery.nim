@@ -1,6 +1,9 @@
 import std/[algorithm, json, options, os, sha1, strutils, tables]
 
 import contracts
+import workspace_scope
+
+export workspace_scope
 
 type
   DiscoverScopeKind* = enum
@@ -12,6 +15,11 @@ type
     workspaceRoot*: string
     file*: string
     jsonOutput*: bool
+    scopeMode*: WorkspaceScopeMode
+      ## Which files discovery is allowed to look at. Defaults to ``wsmAuto``
+      ## (honour the workspace's VCS inventory, else a pruning walk); see
+      ## ``workspace_scope``. ``wsmUnscoped`` reproduces the pre-scoping
+      ## behaviour and must be asked for explicitly.
 
   DiscoverResponse* = object
     schemaVersion*: int
@@ -183,6 +191,26 @@ proc parseDiscoverArgs*(args: seq[string]): ProviderResult[DiscoverRequest] =
         inc i
     of "--json":
       request.jsonOutput = true
+    of "--scope":
+      # ``--scope <auto|vcs|walk|unscoped>``: opt OUT of the default scoping.
+      # There is deliberately no flag to opt *in* — a discovery surface whose
+      # default enumerates vendored upstream trees is a footgun, not a
+      # feature.
+      if i + 1 >= args.len:
+        diagnostics.add diagnostic(dsError, "missing value for --scope")
+      else:
+        let raw = args[i + 1]
+        if raw.strip.toLowerAscii notin
+            ["auto", "vcs", "walk", "unscoped", "off", "none"]:
+          diagnostics.add diagnostic(
+            dsError,
+            "invalid --scope value: " & raw &
+            " (expected auto, vcs, walk or unscoped)")
+        else:
+          request.scopeMode = parseWorkspaceScopeMode(raw)
+        inc i
+    of "--unscoped":
+      request.scopeMode = wsmUnscoped
     else:
       diagnostics.add diagnostic(
         dsError, "unknown discover argument: " & args[i])
@@ -239,6 +267,26 @@ proc discover*(
   if validationDiagnostics.len > 0:
     result.diagnostics = validationDiagnostics
     return
+
+  # Scoping is resolved ONCE per invocation and shared by every provider.
+  #
+  # ``wsmAuto`` means "no explicit request", so leave the thread-local mode
+  # cleared and let ``CT_TEST_SCOPE`` (if set) decide; anything else is an
+  # explicit caller decision that must win over the environment.
+  if request.scopeMode == wsmAuto:
+    clearWorkspaceScopeMode()
+  else:
+    setWorkspaceScopeMode(request.scopeMode)
+  invalidateWorkspaceScopes()
+
+  if request.scope == dskWorkspace:
+    # Report the scope before the providers run. A caller comparing this
+    # catalog against another runner's case list needs to see what discovery
+    # was allowed to look at, not just what it found.
+    let scope = workspaceScope(request.workspaceRoot)
+    result.diagnostics.add diagnostic(dsInfo, scope.scopeSummary)
+    for note in scope.notes:
+      result.diagnostics.add diagnostic(dsWarning, note)
 
   var supportedProviders = 0
   for provider in registry.providers:
@@ -372,7 +420,7 @@ proc fakeFileCatalog(providerInfo: TestProviderInfo; workspaceRoot,
 
 proc fakeProjectFiles(workspaceRoot: string): seq[string] =
   result = @[]
-  for path in walkDirRec(workspaceRoot):
+  for path in walkWorkspaceFiles(workspaceRoot):
     if fileExists(path) and path.endsWith(".fake") and
         splitFile(path).name != "ct-test":
       result.add path

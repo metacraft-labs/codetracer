@@ -832,7 +832,7 @@ proc valueLanguage(self: ValueComponent): Lang =
 
 proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, active: string): Node =
   result = newElement(cstring"button")
-  result.setAttribute(cstring"class", cstring(&"value-history-button {active} ct-button-image-sm-secondary ct-custom-button-size ct-ml-2"))
+  result.setAttribute(cstring"class", cstring(&"value-history-button {active} ct-button-image-xs-secondary ct-ml-2"))
   result.addEventListener(cstring"mousedown", proc(ev: Event) =
     if cast[MouseEvent](ev).button == 0:
       discard self.showHistory(expression)

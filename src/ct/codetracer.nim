@@ -2,10 +2,12 @@
 
 import
   launch/[launch, help_delegate],
-  ../frontend/viewmodel/agent_evidence,
+  agent_cli,
   cli/e2e_tests,
   ../ct_test/incremental_cli,
+  ../ct_test/ct_test,
   codetracerconf, confutils,
+  review_cli,
   version
 
 # M4: Inline library path setup (replaces ct_wrapper.nim + ct_paths.json).
@@ -65,6 +67,20 @@ try:
       let testArgs = args[1 .. ^1]
       if testArgs.len > 0 and testArgs[0] == "--incremental":
         quit(runIncremental(testArgs[1 .. ^1]))
+      # M2 / Amendment A-2: `ct test discover` and `ct test run` are the
+      # cross-language ct_test surface (TestCatalog v1 discovery over the
+      # provider registry, plus the partitioned parallel runner). The engine
+      # already lived under src/ct_test but was reachable only through the
+      # standalone `ct-test` binary's `isMainModule` block; route the two
+      # implemented verbs here so `ct test …` exposes them too.
+      #
+      # Ordering matters: this dispatch sits AFTER the `--incremental`
+      # interception and BEFORE the `runE2eTestCli` fallback, and it triggers
+      # only on the two literal verbs, so `ct test --incremental …` and
+      # `ct test e2e …` keep their existing behaviour byte for byte.
+      # `runCtTestCli` wants the full vector including the leading "test".
+      if testArgs.len > 0 and testArgs[0] in ["discover", "run"]:
+        quit(runCtTestCli(args))
       quit(runE2eTestCli(testArgs))
 
     # M7 / M8: the help-delegate ``ct-complete`` / ``ct-completions``
@@ -75,12 +91,41 @@ try:
     # for ``ct`` itself and reject them with "Unrecognized option".
     # We intercept the dispatch *before* confutils sees argv so the
     # raw argument list reaches the help-delegate intact.
+    # RV-1: `ct --deepreview <PATH>` is RETIRED, not renamed.  The option is
+    # gone from `CodetracerConf`, so confutils would reject it with a bare
+    # "Unrecognized option 'deepreview'" that names no replacement; the
+    # milestone requires the diagnostic to be produced deliberately and to
+    # name `ct review`.  Checked here, ahead of every other dispatch, so the
+    # answer is the same whatever else the line contains.
+    block:
+      let retired = retiredDeepReviewArgIndex(args)
+      if retired >= 0:
+        stderr.writeLine(retiredDeepReviewMessage())
+        quit(QuitFailure)
+
     if args.len > 0:
       case args[0]
+      of "review":
+        # `ct review collect …` / `ct review inspect …` carry flags that are
+        # not ct's own (--repo, --diff-file, --preset, …), so they are
+        # dispatched before confutils sees argv, exactly as `ct-complete` and
+        # `ct record --` are.  The plain `ct review <PATH>` launch form is
+        # left to confutils on purpose — see `review_cli`'s module header.
+        if reviewNeedsRawDispatch(args):
+          quit(runReviewCli(args))
       of "agent":
+        # RV-7: the whole `ct agent` group is intercepted here, for the same
+        # confutils limitation `review` is intercepted for — every verb of it
+        # carries options ct itself does not declare, and confutils rejects
+        # any dash-prefixed token it does not recognise.  `runAgentCli` puts
+        # the notification on stdout and diagnostics on stderr, because a hook
+        # pipes the former into `jq`.
         let dispatch = dispatchAgentEvidenceCli(args)
         if dispatch.handled:
-          echo dispatch.output
+          if dispatch.errorOutput.len > 0:
+            stderr.writeLine(dispatch.errorOutput)
+          if dispatch.output.len > 0:
+            echo dispatch.output
           quit(dispatch.exitCode)
       of "ct-complete":
         runCtComplete(args[1 .. ^1])

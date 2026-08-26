@@ -38,7 +38,7 @@ use test_harness::{Language, TestRecording};
 #[test]
 fn e2e_mcr_streaming_flow_via_unified_reader() {
     // ── pre-flight: the MCR recorder sibling must be available ──
-    let ct_rr_support = match test_harness::find_ct_rr_support() {
+    let ct_native_replay = match test_harness::find_ct_native_replay() {
         Some(p) => p,
         None => {
             eprintln!("SKIPPED: ct-native-replay not found");
@@ -59,7 +59,7 @@ fn e2e_mcr_streaming_flow_via_unified_reader() {
     );
 
     let recording =
-        TestRecording::create_mcr(&source_path, Language::C, "mcr", &ct_rr_support).expect("MCR recording failed");
+        TestRecording::create_mcr(&source_path, Language::C, "mcr", &ct_native_replay).expect("MCR recording failed");
     let ct_path = &recording.trace_dir; // create_mcr stores the `.ct` path here.
 
     // ── drive the recorded `.ct` through the UNIFIED follow reader ──

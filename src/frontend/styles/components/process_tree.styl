@@ -1,3 +1,9 @@
+// Code surface: keep a monospace face.  This used to be inherited from the
+// app-wide `body` rule, which is now Space Grotesk (the interface face), so
+// it has to be stated here — process names and commands read as code.
+.ct-process-tree
+  font-family: "SpaceMono", monospace
+
 // Multi-process session sidebar (spec
 // GUI/Debugging-Features/Value-Origin-Tracking.md §14.8: "A process tree
 // in the side bar listing each trace's role + thread count").

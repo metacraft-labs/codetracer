@@ -138,15 +138,30 @@ function Install-TtdViaMsixBundle {
       $ProgressPreference = $progressPreference
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($BundleSha256)) {
-      $actual = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash
-      if ($actual -ne $BundleSha256.ToUpper()) {
-        throw "Downloaded windbg.msixbundle SHA256 mismatch. Expected: $BundleSha256, got: $actual"
-      }
-      Write-Host "msixbundle SHA256 verified."
-    } else {
-      Write-Host "WARNING: TTD_BUNDLE_SHA256 not pinned for $BundleVersion - skipping integrity check."
+    # An unpinned digest is a HARD FAILURE, not a warning.
+    #
+    # This used to warn and carry on. The result shipped: TTD_BUNDLE_SHA256
+    # sat empty in toolchain-versions.env, and every Windows CI job that
+    # reached this path downloaded ~767 MB over the network and then executed
+    # code out of it with no integrity check at all, announcing the fact in a
+    # line nobody reads. A warning that does not stop the build is
+    # indistinguishable from no check.
+    #
+    # Verification happens HERE -- before the archive is expanded and long
+    # before TTD.exe is copied into the cache and run. Ordering is the whole
+    # point: a digest checked after extraction protects nothing.
+    if ([string]::IsNullOrWhiteSpace($BundleSha256)) {
+      throw ("TTD_BUNDLE_SHA256 is not pinned for $BundleVersion. Refusing to execute an " +
+             "unverified $BundleUrl download. Pin the digest in " +
+             "non-nix-build/windows/toolchain-versions.env -- and establish its provenance " +
+             "the way the comment there describes (verify the package's Authenticode " +
+             "signature); do not paste the sha256sum of your own unverified download.")
     }
+    $actual = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash
+    if ($actual -ne $BundleSha256.ToUpper()) {
+      throw "Downloaded windbg.msixbundle SHA256 mismatch. Expected: $BundleSha256, got: $actual"
+    }
+    Write-Host "msixbundle SHA256 verified."
 
     # Layer 1: msixbundle (a zip of per-architecture .msix files).
     $bundleExtractDir = Join-Path $workDir "bundle"

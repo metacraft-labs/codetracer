@@ -6,21 +6,52 @@
 ## future cleanup). Branding here is CodeTracer's: the site title, the
 ## `docs.codetracer.com` canonical origin the sitemap/robots are built
 ## against, and the vendored CodeTracer logo + footer chrome.
+##
+## The site is published on TWO channels off the same content (see
+## `ci/deploy/docs.sh`): the released book at `https://docs.codetracer.com/`
+## (built from `stable`) and the nightly book at
+## `https://docs.codetracer.com/nightly` (built from `dev`). The nightly build
+## is the same site hosted under a URL PREFIX, so it must be built with
+## `basePath = "/nightly"`: the framework then prefixes every root-relative URL
+## it emits (page `href`/`src`, stylesheet `url(...)`, search-index route paths)
+## with it, and `baseUrl` carries the same prefix so the canonical/sitemap URLs
+## stay correct. Left at its default the config is byte-identical to before, so
+## the root channel, the dev server and the SSR entry are unaffected.
 
 import core/config
+import core/base_path
 
-proc bookDocsConfig*(): DocsConfig =
+const docsSiteOrigin* = "https://docs.codetracer.com"
+  ## The canonical origin both channels are served from; the channel's
+  ## `basePath` is appended to it to form `baseUrl`.
+
+proc bookDocsConfig*(basePath = ""): DocsConfig =
+  ## This book's `DocsConfig`. `basePath` is the URL prefix the build is hosted
+  ## under (`""` = the root channel, `"/nightly"` = the nightly channel); it is
+  ## normalized by the framework's `normalizeBasePath`, so `"nightly"`,
+  ## `"/nightly"` and `"/nightly/"` are all accepted.
+  let base = normalizeBasePath(basePath)
   DocsConfig(
     siteTitle: "CodeTracer",
     siteDescription: "Documentation for CodeTracer -- the time-travelling debugger.",
     defaultRoute: "/",
     stylesheetHref: "/assets/style.css",
-    baseUrl: "https://docs.codetracer.com",
-    # Match the WebFlow docs organization: the sidebar's three top-level
-    # sections in this order (the framework otherwise sorts sections
-    # alphabetically). Content was folded to these three -- building_and_packaging
-    # + misc into reference, installation into getting_started.
-    sectionOrder: @["getting_started", "usage_guide", "reference"],
+    # Absolute canonical/og/sitemap URLs must carry the channel prefix too --
+    # `basePath` only rewrites the root-relative URLs (see `core/base_path`).
+    baseUrl: docsSiteOrigin & base,
+    basePath: base,
+    # The sidebar's top-level sections, in this order (the framework otherwise
+    # sorts sections ALPHABETICALLY -- which would file `deep_review` ahead of
+    # Getting Started). The first three are the WebFlow docs organization;
+    # content was folded to them in M1 -- building_and_packaging + misc into
+    # reference, installation into getting_started.
+    #
+    # DS-1 added the fourth. DeepReview outgrew being one page inside the usage
+    # guide -- it has a CLI, three panels and a browser extension -- and it sits
+    # AFTER `usage_guide` because it is a feature a reader reaches for once they
+    # know how to record and replay, and BEFORE `reference` because it is still
+    # prose to read rather than tables to look things up in.
+    sectionOrder: @["getting_started", "usage_guide", "deep_review", "reference"],
     # The CodeTracer look is delivered by the token layer + `assets/style.css`
     # (prepended via `buildSite(docsTokensCss = ...)`), not by pointing
     # `stylesheetHref` elsewhere, so the SSG hash/purge/non-dangling

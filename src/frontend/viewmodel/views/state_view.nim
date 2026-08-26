@@ -22,12 +22,14 @@ import isonim/core/[signals, computation]
 
 import ../store/types as store_types
 import ../viewmodels/state_vm
-import ../../../common/types
 
 type
-  VariableHistoryRowView* = object
-    locationTicks*: BiggestInt
-    valueText*: string
+  VariableHistoryRowView* = state_vm.ValueHistoryRow
+    ## One value-history row as the renderer sees it. Alias of the VM's
+    ## already-normalised `ValueHistoryRow` — the view layer performs no
+    ## further reduction, so keeping a second structurally identical
+    ## object here would only invite the two to drift apart.
+
   VariableViewState* = object
     ## Renderer-agnostic snapshot of a single variable row.
     ##
@@ -77,7 +79,7 @@ proc flattenVariables(
     variables: seq[store_types.Variable];
     expandedPaths: HashSet[string];
     expandedHistories: HashSet[string];
-    valueHistory: Table[string, seq[HistoryResult]];
+    valueHistory: Table[string, seq[ValueHistoryRow]];
     depth: int;
     parentPath: string;
     result: var seq[VariableViewState]) =
@@ -92,11 +94,13 @@ proc flattenVariables(
                else: parentPath & "." & v.name
     let expanded = path in expandedPaths
     let histExpanded = path in expandedHistories
+    # The history rows are only carried when the row is expanded, so a
+    # collapsed row renders an empty container (and the view's
+    # ``indexEach`` truncates any rows left over from a previous
+    # expansion).
     var historyRows: seq[VariableHistoryRowView] = @[]
     if histExpanded and valueHistory.hasKey(path):
-      for r in valueHistory[path]:
-        let txt = if r.value != nil: r.value.textRepr else: ""
-        historyRows.add VariableHistoryRowView(locationTicks: r.location.rrTicks, valueText: txt)
+      historyRows = valueHistory[path]
 
     result.add VariableViewState(
       name: v.name,

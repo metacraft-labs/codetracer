@@ -1,0 +1,99 @@
+name: "Docs preview cleanup"
+
+# Remove a pull request's documentation preview (`docs.codetracer.com/pr/<N>`)
+# when the pull request closes, and correct the preview comment that linked to
+# it. Previews are published by the `build-and-deploy-docs` job in
+# codetracer.yml; without this, every pull request that ever touched the docs
+# would leave a full copy of the site on `gh-pages` forever.
+#
+# WHY A SEPARATE WORKFLOW. Cleanup has to run on `pull_request: closed`, and
+# codetracer.yml's `pull_request:` trigger drives the entire CI matrix --
+# Linux, macOS and Windows builds and tests. Adding `closed` there would run
+# all of it every time somebody closes a pull request, to do a directory
+# removal. Here the job is a checkout, a git push and an API call.
+#
+# WHY IT NEEDS NO NIX. `ci/deploy/docs.sh`'s `preview-cleanup` channel builds
+# nothing -- it fetches gh-pages, deletes one subtree and pushes. That is git,
+# bash and coreutils, so this runs on the free hosted class instead of one of
+# the six self-hosted `eph-linux-x64` slots. It is also what makes the cleanup
+# survive the pull request's branch being deleted on merge: there is no source
+# tree it needs.
+
+on:
+  pull_request:
+    types: [ closed ]
+  # Manual recovery. If a cleanup run is ever lost -- cancelled, or failing
+  # while gh-pages is unreachable -- the preview simply stays published, and
+  # this is how it is removed afterwards without a local checkout. Requires
+  # write access to the repository to invoke.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull-request number whose preview should be removed"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  remove-preview:
+    runs-on: ubuntu-latest
+    # SAME-REPO ONLY, for the same reason the publish side is: a `pull_request`
+    # run from a fork gets a read-only token, so it could not push this removal
+    # even if it wanted to -- and a fork pull request never had a preview to
+    # remove, because it was never allowed to publish one. See the long note on
+    # `build-and-deploy-docs` in codetracer.yml.
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      # `contents: write` pushes the removal to gh-pages; `pull-requests: write`
+      # edits the preview comment to say the preview is gone, so a closed pull
+      # request does not keep advertising a URL that now 404s.
+      contents: "write"
+      pull-requests: "write"
+    # The SAME group the publish side uses for this pull request
+    # (`docs-gh-pages-pr-<N>` in codetracer.yml). A cleanup that ran alongside
+    # the pull request's last preview publish could be overtaken by it, and the
+    # directory this job just deleted would come straight back.
+    concurrency:
+      group: docs-gh-pages-pr-${{ github.event.pull_request.number || inputs.pr }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout the deploy script
+        uses: actions/checkout@v5
+        with:
+          # The BASE branch, never the pull request's merge ref. Two reasons,
+          # both load-bearing: a pull request closed without merging may have
+          # no usable merge ref left, and this job holds a write token, so it
+          # must run the deploy script as the base branch defines it rather
+          # than as the pull request last edited it.
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          submodules: false
+          persist-credentials: false
+
+      - name: Remove the preview from gh-pages
+        env:
+          # docs.sh reads and pushes gh-pages with this; `contents: write`
+          # above is what makes it able to.
+          DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCS_DEPLOY_CHANNEL: preview-cleanup
+          DOCS_DEPLOY_PR: ${{ github.event.pull_request.number || inputs.pr }}
+          # docs.sh would otherwise derive the branch from GITHUB_REF, which on
+          # a pull-request event is `<N>/merge` -- meaningless in the commit
+          # message this run writes.
+          DOCS_DEPLOY_BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config init.defaultBranch main
+          ./ci/deploy/docs.sh
+
+      - name: Say so on the pull request
+        # Edits the ONE existing preview comment; posts nothing if there never
+        # was one (a pull request that closed without ever publishing docs
+        # should not suddenly acquire a bot comment).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+        run: ./ci/deploy/docs-preview-comment.sh removed "$PR_NUMBER"

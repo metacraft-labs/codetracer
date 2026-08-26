@@ -796,7 +796,9 @@ impl ReplaySession for RecreatorReplaySession {
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
         self.ensure_active_stable()?;
         let res = serde_json::from_str::<Vec<VariableWithRecord>>(
-            &self.stable.dispatch_replay_query(ReplayQuery::LoadLocals { arg })?,
+            &self
+                .stable
+                .dispatch_replay_query(ReplayQuery::LoadLocals { arg: arg.into() })?,
         )?;
         Ok(res)
     }

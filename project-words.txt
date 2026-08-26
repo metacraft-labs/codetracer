@@ -243,3 +243,14 @@ contentless
 debuginfo
 summarised
 TEMPFAIL
+colour
+colouring
+recolour
+recognisable
+travelling
+intraline
+serialised
+unrecognised
+recognise
+RPATHs
+rpath

@@ -1,3 +1,10 @@
+## NOT-A-TEST-LANE-FILE: this is the implementation of the `ct test e2e`
+## subcommand, not a test. It matches the `*_tests.nim` naming rule only
+## because the subcommand it implements is named `e2e`; it declares no
+## `suite`/`test` blocks and asserts nothing. It is compiled as part of the
+## `ct` binary by the tup build, and it is that binary's own lanes which
+## exercise it.
+
 import std/[json, os, osproc, strutils, times]
 
 type

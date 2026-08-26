@@ -11,7 +11,7 @@ use crate::types::launch::LaunchRequestArguments;
 // For stdio-based stepping tests we use dap_step() with standard DAP command
 // names instead.
 
-use super::{find_ct_rr_support, prepare_trace_folder};
+use super::{find_ct_native_replay, prepare_trace_folder};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -292,7 +292,7 @@ impl FlowTestRunner {
             })
             .filter(|path| path.is_file())
             .map(Ok)
-            .unwrap_or_else(find_ct_rr_support)?;
+            .unwrap_or_else(find_ct_native_replay)?;
 
         let pid_str = target_pid.map(|p| p.to_string());
         let mut envs = extra_envs.to_vec();
@@ -336,7 +336,7 @@ impl FlowTestRunner {
 
     /// Spawn db-backend, run DAP init sequence with a DB trace folder.
     ///
-    /// Unlike `new()` (for RR traces), this does NOT need ct-rr-support or
+    /// Unlike `new()` (for RR traces), this does NOT need ct-native-replay or
     /// prepare_trace_folder. DB traces (Python, Ruby, JavaScript, Noir, WASM)
     /// are self-contained: the trace folder contains a single `<program>.ct`
     /// CTFS container that db-backend opens directly. Legacy

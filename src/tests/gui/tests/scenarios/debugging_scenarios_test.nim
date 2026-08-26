@@ -760,13 +760,26 @@ suite "Scenario 7: Debug controls state machine":
 
       dispose()
 
-  test "backward step requires position past timeline start":
-    ## Verifies that canStepBackward is only true when the debugger
-    ## is past the minimum rrTicks in the timeline.
+  test "backward step requires position past timeline start when replaying live history":
+    ## Verifies that the timeline-position rule still gates
+    ## `canStepBackward` — in the mode where it is the deciding factor.
+    ##
+    ## It no longer is on a `completedReplay`: a finished recording is
+    ## time-travellable whatever its rr ticks say (DB traces never report
+    ## them at all), so the position rule would permanently disable the
+    ## reverse-step buttons there. `historicalFromLive` is the non-live
+    ## mode that is not inherently time-travellable, and it is where
+    ## being parked at minRRTicks genuinely means there is nothing behind
+    ## the cursor.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let session = app.session
+
+      var sessionState = session.store.session.val
+      sessionState.debugSessionMode = historicalFromLive
+      sessionState.supportsStepBack = false
+      session.store.session.val = sessionState
 
       # Set timeline range.
       var tl = session.store.timeline.val
@@ -787,6 +800,35 @@ suite "Scenario 7: Debug controls state machine":
       session.store.debugger.val = dbg
 
       check session.debugControlsVM.canStepBackward.val == true
+
+      dispose()
+
+  test "backward step needs no position on a completed replay":
+    ## The counterpart of the rule above: on a finished recording the
+    ## position rule must not be what decides, or every DB/materialized
+    ## trace — which reports no rr ticks — loses its reverse controls.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
+
+      var sessionState = session.store.session.val
+      sessionState.debugSessionMode = completedReplay
+      sessionState.supportsStepBack = false
+      session.store.session.val = sessionState
+
+      var tl = session.store.timeline.val
+      tl.minRRTicks = 100'u64
+      tl.maxRRTicks = 1000'u64
+      session.store.timeline.val = tl
+
+      var dbg = session.store.debugger.val
+      dbg.status = dsIdle
+      dbg.rrTicks = 100'u64
+      session.store.debugger.val = dbg
+
+      check session.debugControlsVM.canStepBackward.val == true
+      check session.debugControlsVM.canReverseContinue.val == true
 
       dispose()
 

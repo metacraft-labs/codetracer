@@ -211,6 +211,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-lang"
+version = "0.1.0"
+dependencies = [
+ "num-derive",
+ "num-traits",
+ "serde",
+ "serde_repr",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1088,6 +1098,7 @@ name = "tui"
 version = "0.1.0"
 dependencies = [
  "crossterm 0.27.0",
+ "ct-lang",
  "env_logger",
  "futures",
  "futures-timer",

@@ -145,18 +145,33 @@
   flex-direction: column
   width: unquote("min(40em, calc(100vw - 2em))")
   max-width: unquote("calc(100vw - 2em)")
-  border-radius: 1em
+  // The shared menu radius (components/shared_widgets.styl).  This was `1em`,
+  // which against this menu's own 0.875rem font size drew a 14px curve — more
+  // than twice every other dropdown, and a value that would have moved again
+  // the next time the font size did.
+  border-radius: DROPDOWN_RADIUS
   border: 0.0625em solid colors-ui-border-tertiary
-  background: colors-ui-surface-canvas
+  background: colors-ui-surface-base-canvas
   color: colors-ui-text-primary-body
   z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
   user-select: none
   transform-origin: top left
   overflow: hidden
   box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
+  // `top` is overwritten inline: the container is appended to `document.body`
+  // and positioned from the filter button's measured rect, gap included — see
+  // `setupFilterDropdown` in src/frontend/ui/event_log.nim.  This is the
+  // fallback for the brief moment before that runs.
   top: 100%
   font-size: 0.875rem
   font-family: "SpaceGrotesk"
+
+  // The menu scrollbar, matching every dropdown that calls
+  // `dropdown-surface()`.  This menu still paints its own surface — it is a
+  // panel-sized filter grid rather than a list of rows, so it carries a shadow
+  // and its own background — and therefore has to take the scrollbar, and the
+  // radius above, on its own.
+  dropdown-scrollbar()
 
 .dropdown-list
   display: flex
@@ -245,7 +260,7 @@
   justify-content: start
   gap: 0.25em
   padding: 0 0.5rem
-  background: colors-ui-surface-canvas
+  background: colors-ui-surface-base-canvas
   align-items: center
   min-height: 2.4em
   border-bottom: 0.0625em solid colors-ui-border-tertiary
@@ -264,7 +279,7 @@
     padding: 0.4em 0.25em 0.375em
     border-radius: 0
     border-bottom: none
-    background: colors-ui-surface-canvas
+    background: colors-ui-surface-base-canvas
     color: colors-ui-text-primary-body-subtle
     font-size: 1.05em
     font-weight: 500

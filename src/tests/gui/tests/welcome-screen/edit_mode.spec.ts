@@ -19,6 +19,18 @@ const gitEditFixture = fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-edit-mo
 fs.mkdirSync(path.join(gitEditFixture, "src"), { recursive: true });
 fs.writeFileSync(path.join(gitEditFixture, "README.md"), "# Edit mode fixture\n");
 fs.writeFileSync(path.join(gitEditFixture, "src", "main.nim"), "proc main() =\n  echo \"edit mode\"\n");
+// `src/db` sits at depth 2, which is exactly the depth at which the
+// index process stops recursing for a plain folder open
+// (`editFilesystemDepthLimit(selfContained = false) == 2`).  It is
+// therefore delivered as a single "Loading..." stub child, and only a
+// successful `CODETRACER::load-path-content` round-trip can replace it.
+// Without a folder at this depth the tree never exercises the lazy
+// fill at all — which is why #574 survived the earlier edit-mode specs.
+fs.mkdirSync(path.join(gitEditFixture, "src", "db"), { recursive: true });
+fs.writeFileSync(
+  path.join(gitEditFixture, "src", "db", "store.nim"),
+  "proc store() =\n  echo \"lazy child\"\n",
+);
 childProcess.execFileSync("git", ["init"], { cwd: gitEditFixture, stdio: "ignore" });
 childProcess.execFileSync("git", ["add", "."], { cwd: gitEditFixture, stdio: "ignore" });
 childProcess.execFileSync(
@@ -242,6 +254,76 @@ test.describe("Welcome Open Folder through main-process dialog handler", () => {
 
     await assertWorkspacePanelsPopulated(ctPage, /src|README|main\.nim/i);
     await expect(ctPage.locator(".welcome-screen")).toBeHidden({ timeout: 10_000 });
+  });
+
+  // Regression cover for #574 — "the file tree stays on Loading... after
+  // Open Folder".
+  //
+  // A plain folder open loads the tree only two levels deep; anything
+  // deeper arrives as a `Loading...` stub that is filled in on demand by
+  // `CODETRACER::load-path-content`.  The main-process handler for that
+  // message used to build its payload root from `data.trace.outputFolder`
+  // unconditionally — and in folder mode there IS no trace, so the
+  // handler threw before it could answer.  Nothing retries, so the stub
+  // was permanent.
+  //
+  // The assertions are therefore: the stub is REPLACED (not merely
+  // present), the real child appears, and the main process logged no
+  // null dereference / unhandled rejection while doing it.
+  test("expanding a depth-limited folder replaces the Loading stub with real children", async ({
+    ctPage,
+    electronApp,
+  }) => {
+    // Capture main-process stderr ourselves.  The launcher already
+    // attaches its own diagnostic listener; Node streams fan out to every
+    // listener, so a second one is additive and does not steal data.
+    const mainProcessOutput: string[] = [];
+    const mainProcess = electronApp?.process();
+    for (const stream of [mainProcess?.stderr, mainProcess?.stdout]) {
+      stream?.on("data", (chunk: Buffer) => {
+        for (const line of chunk.toString().split("\n")) {
+          if (line.trim().length > 0) mainProcessOutput.push(line);
+        }
+      });
+    }
+
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15000 });
+    await ctPage.locator(".start-option.open-folder").click();
+    await assertWorkspacePanelsPopulated(ctPage, /src|README|main\.nim/i);
+
+    const label = (name: string) =>
+      ctPage.locator(".filesystem-entry-label").filter({
+        hasText: new RegExp(`^${name.replace(/\./g, "\\.")}$`),
+      });
+
+    // `src` is inside the depth limit, so its children are already there.
+    await expect(label("db").first()).toBeVisible({ timeout: 30_000 });
+
+    // `src/db` is at the depth limit: expanding it is what asks the main
+    // process for its children.
+    await label("db").first().click();
+
+    // The lazily loaded child must actually appear …
+    await expect(label("store.nim").first()).toBeVisible({ timeout: 30_000 });
+    // … and no stub may be left anywhere in the tree.
+    await expect(
+      ctPage.locator(".filesystem-entry-label").filter({ hasText: /^Loading\.\.\.$/ }),
+    ).toHaveCount(0, { timeout: 30_000 });
+
+    const mainProcessFailures = mainProcessOutput.filter(
+      (line) =>
+        line.includes("Cannot read properties of null") ||
+        line.includes("Cannot read properties of undefined") ||
+        line.includes("UnhandledPromiseRejection") ||
+        line.includes("unhandledRejection"),
+    );
+    expect(
+      mainProcessFailures,
+      "the load-path-content handler must not dereference a nil trace in " +
+        "folder mode — see #574; the rejected promise meant the renderer " +
+        "never received CODETRACER::update-path-content and the folder " +
+        "stayed on 'Loading...' forever",
+    ).toEqual([]);
   });
 });
 

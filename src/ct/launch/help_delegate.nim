@@ -81,6 +81,36 @@ const
 # surface bridge from M6 does the heavy lifting).
 # ---------------------------------------------------------------------------
 
+const
+  recordFileTypes* = [
+      ".py", ".rb", ".js", ".mjs", ".ts", ".php", ".ex", ".exs", ".erl",
+      ".hrl", ".sh", ".bash", ".zsh", ".nim", ".nims", ".nr", ".wasm",
+      ".sol", ".masm", ".sw", ".move", ".cairo", ".circom", ".leo",
+      ".tolk", ".ak", ".cdc"
+    ]
+    ## The extensions `ct record` (and `ct run`, which records first --
+    ## src/ct/trace/run.nim `runWithRestart`) actually dispatches to a
+    ## recorder for.  This is the *same* list as the `record` / `run`
+    ## lines of `resources/codetracer-desktop-capabilities`, and both are
+    ## checked against the core's own tables
+    ## (`src/ct/utilities/language_detection.nim`'s `LANGS` +
+    ## `src/ct/trace/recorder_dispatch.nim`) by
+    ## `just test-desktop-capabilities`.  Keeping the two in sync matters
+    ## because the capability file drives the launcher's *routing* while
+    ## this list drives the launcher's *help screen and completion*
+    ## (spec §2.6 `ct-describe-commands` / `ct-complete`): a file type
+    ## that routes but never completes is just as wrong as one that
+    ## completes but never routes.
+
+  recordTestFileTypes* = [".py"]
+    ## `ct record-test` is narrower than `ct record`: for a
+    ## materialized-trace language only the Python arm exists
+    ## (src/ct/trace/record.nim, `recordTest`), every other one falls
+    ## through to "currently `ct record-test` not supported for this
+    ## db-based language" and exits 1.  Non-materialized languages are
+    ## handled by the separate commercial rr-backend component, which
+    ## declares its own `record-test` file types.
+
 func augmentSelfCommand(cmd: var RuntimeCommand) =
   ## Add file-type and description metadata to commands of the
   ## self-surface that are not captured by the {.command.} discriminator
@@ -93,17 +123,17 @@ func augmentSelfCommand(cmd: var RuntimeCommand) =
     if cmd.description.len == 0:
       cmd.description = "Record a program execution"
     if cmd.fileTypes.len == 0:
-      cmd.fileTypes = @[".py", ".rb", ".nr", ".styl", ".wasm"]
+      cmd.fileTypes = @recordFileTypes
   of "record-test":
     if cmd.description.len == 0:
       cmd.description = "Record a test execution"
     if cmd.fileTypes.len == 0:
-      cmd.fileTypes = @[".py", ".rb", ".nr"]
+      cmd.fileTypes = @recordTestFileTypes
   of "run":
     if cmd.description.len == 0:
       cmd.description = "Record and immediately replay"
     if cmd.fileTypes.len == 0:
-      cmd.fileTypes = @[".py", ".rb", ".nr", ".styl", ".wasm"]
+      cmd.fileTypes = @recordFileTypes
   of "replay":
     if cmd.description.len == 0:
       cmd.description = "Replay a recorded trace"
@@ -131,6 +161,15 @@ func augmentSelfCommand(cmd: var RuntimeCommand) =
   of "edit":
     if cmd.description.len == 0:
       cmd.description = "Open a file or folder in CodeTracer"
+  # RV-1: DeepReview's whole command-line surface.  Without a description
+  # here the launcher's help screen would show a bare `review` next to the
+  # commands that do carry one.
+  of "review":
+    if cmd.description.len == 0:
+      cmd.description =
+        "Review a diff with its recorded executions (collect, inspect, open)"
+    if cmd.fileTypes.len == 0:
+      cmd.fileTypes = @[".json"]
   of "import":
     if cmd.description.len == 0:
       cmd.description = "Import a previously exported trace archive"
@@ -309,7 +348,7 @@ func splitComponentDirName(dirName: string):
 
 const reservedCapabilityKeywords* = [
     "name", "version", "bin", "description", "help-delegate",
-    "licensed", "project"
+    "licensed", "project", "known-extensions"
   ]
   ## Capability-file line keywords that are *not* command
   ## declarations. Every other first-token is treated as a command

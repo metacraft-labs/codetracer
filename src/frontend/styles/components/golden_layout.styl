@@ -42,7 +42,7 @@
   font-weight: 600 !important
   letter-spacing: -0.14px !important
   //height: 25px !important
-  background-color: colors-ui-surface-panel !important
+  background-color: colors-ui-surface-base-panel !important
   color: colors-ui-text-default-tab !important
   margin: 0 !important
   border: 0 !important
@@ -80,13 +80,13 @@
   border-radius: 0.36em
 
 .lm_content
-  background-color: colors-ui-surface-panel !important
+  background-color: colors-ui-surface-base-panel !important
   // box-shadow: inset 2px 0px 0px 0px colors-ui-border-primary
   border: 0 !important
   // padding-top: 8px
   border-radius: 0.36em
   font-size: inherit
-  padding: 0.5em 0em 0em 0em
+  padding: 0.25em 0em 0em 0em
   // padding-right: 2px
   // margin-left: 2px
   // padding-right: 10px
@@ -125,14 +125,14 @@
 // direction: rtl
 
 .lm_active
-  background-color: colors-ui-surface-panel !important
+  background-color: colors-ui-surface-base-panel !important
   color: colors-ui-text-primary-label !important
   //border-radius: 2px
   border-top-left-radius: 0.36em
   border-top-right-radius: 0.36em
   border-bottom-right-radius: 0em
   border-bottom-left-radius: 0em
-  box-shadow: 0em 0.48em 0em 0em colors-ui-surface-panel !important
+  box-shadow: 0em 0.48em 0em 0em colors-ui-surface-base-panel !important
   overflow: visible !important
 
   &::before
@@ -147,7 +147,7 @@
     left: -1.625em
     border-radius: 0 0 0.625em 0
     opacity: 1
-    box-shadow: 0.625em 0.34em 0 -0.25em colors-ui-surface-panel
+    box-shadow: 0.625em 0.34em 0 -0.25em colors-ui-surface-base-panel
     transform: translate(0em, 0.25625em)
 
   &::after
@@ -162,7 +162,7 @@
     right: -1.625em
     border-radius: 0 0 0 0.625em
     opacity: 1
-    box-shadow: -0.625em 0.34em 0 -0.25em colors-ui-surface-panel
+    box-shadow: -0.625em 0.34em 0 -0.25em colors-ui-surface-base-panel
     transform: translate(0em, 0.25625em)
 
 .lm_header .lm_active .lm_title
@@ -214,28 +214,77 @@
 //   filter: MENU_BUTTON_SVG_FILTER
 
 .lm_header .lm_tab .lm_close_tab
-  background-image: LAYOUT_TAB_CLOSE_ICON_PATH !important
+  tab-icon(LAYOUT_TAB_CLOSE_ICON_PATH, 0.6em 0.6em)
   width: 0.6em !important
   height: 0.6em !important
-  background-size: 0.6em 0.6em
   position: static !important
-  opacity: 1 !important
+  cursor: pointer
 
 .lm_header .lm_tab .lm_pin_tab
-  background-image: LAYOUT_TAB_PIN_ICON_PATH !important
-  background-repeat: no-repeat
-  background-position: center
-  background-size: 0.85em 0.85em
+  tab-icon(LAYOUT_TAB_PIN_ICON_PATH, 0.85em 0.85em)
   width: 0.85em !important
   height: 0.85em !important
   position: static !important
   cursor: pointer
   margin-right: 0.3em
-  opacity: 0.7
   flex-shrink: 0
-
-  &:hover
-    opacity: 1
 
 .lm_header .lm_tab
   height: 1.01em !important
+
+// ---------------------------------------------------------------------------
+// Selected panel
+//
+// Selection is shown by the outline alone — one stroked path around the tab,
+// both curved connectors and the panel body.  The surface is deliberately left
+// at its resting colour: the line carries the state on its own.
+//
+// The geometry is generated in `ui/layout.nim` (`setupSelectedPanelOutline`),
+// because the tab's width and position are only known at runtime; the colour
+// and weight live here, on tokens.
+// ---------------------------------------------------------------------------
+// 1px, not a hairline.  The outline is now the *only* selection cue — the panel
+// surface no longer changes — and a sub-pixel stroke is antialiased down to
+// roughly half strength, which read as no indicator at all against the panel.
+SELECTED_PANEL_BORDER = 0.0625rem
+SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
+
+// A first tab sits flush with its panel's left edge, so the tab runs straight
+// down into the body and there is no corner to round and nothing for the left
+// connector to reach.  Leaving both in place puts a curve where the two meet —
+// the panel bending away from a tab that does not bend with it.
+//
+// Applies to every stack, not only the selected one: the seam is there whether
+// or not the panel is highlighted.
+.lm_stack:has(> .lm_header .lm_tabs > .lm_tab.lm_active:first-child)
+  // Both elements: `.lm_items` clips the panel, `.lm_content` paints it.  Only
+  // this one corner is squared — the other three keep their radius.
+  > .lm_items,
+  > .lm_items .lm_content
+    border-top-left-radius: 0
+
+  > .lm_header .lm_tabs > .lm_tab.lm_active:first-child::before
+    display: none
+
+// The selected panel's outline — one stroked path covering the tab, both curved
+// connectors and the panel body as a single shape.  The geometry is generated in
+// `ui/layout.nim` (`setupSelectedPanelOutline`) because the tab's width and
+// position are only known at runtime; colour and weight stay here, on tokens.
+//
+// The path is inset by half the stroke width, so the line falls inside the shape
+// rather than straddling its edge.  Unlike a CSS border, an SVG stroke is not
+// clamped to a minimum width.
+.ct-selected-outline
+  position: absolute
+  top: 0
+  left: 0
+  pointer-events: none
+  z-index: 6
+  overflow: visible
+
+  path
+    fill: none
+    stroke: SELECTED_PANEL_BORDER_COLOR
+    stroke-width: SELECTED_PANEL_BORDER
+    // Rounded joins keep the corners continuous where the arcs meet the lines.
+    stroke-linejoin: round

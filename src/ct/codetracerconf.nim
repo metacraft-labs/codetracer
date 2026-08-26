@@ -96,6 +96,15 @@ type
     `index-diff`,
     edit,
 
+    # RV-1 (`codetracer-specs/DeepReview/Review-Command.milestones.org`):
+    # DeepReview's entire command-line surface.  `ct review <PATH>` is
+    # declared here — as an ordinary command with one argument — so it keeps
+    # ct's global options and appears in `ct --help` and shell completion.
+    # `ct review collect …` and `ct review inspect …` never reach confutils:
+    # they carry flags that are not ct's own, so `codetracer.nim` intercepts
+    # them ahead of the parser (`review_cli.reviewNeedsRawDispatch`).
+    review,
+
     # `g++`,
     # gcc,
     # rustc,
@@ -216,16 +225,17 @@ type
       defaultValue: false
     .} : bool
 
-    # Frontend flag forwarded to Electron as an
-    # app argument. Parsed by the frontend's
-    # src/frontend/index/args.nim.
-    deepreview* {.
-      name: "deepreview"
-      desc: "Path to a DeepReview JSON " &
-        "export file (forwarded to " &
-        "Electron frontend)"
-      defaultValue: ""
-    .} : string
+    # RV-1: the global `--deepreview <PATH>` option that used to live here is
+    # RETIRED, not renamed.  DeepReview's whole command-line surface is the
+    # `ct review` command group (`StartupCommand.review` below), per
+    # `codetracer-specs/DeepReview/DeepReview-GUI.md` §1.1.  The retired
+    # spelling is diagnosed deliberately in `codetracer.nim` — see
+    # `review_cli.retiredDeepReviewMessage` — because confutils' default
+    # "Unrecognized option" names no replacement.
+    #
+    # The frontend-side `--deepreview <PATH>` argument is a DIFFERENT thing
+    # and stays: it is the internal ct -> Electron wire that
+    # `src/frontend/index/args.nim` parses, not a user-facing option.
 
     # Tab-vs-window policy overrides.
     # These apply to replay, run, and any command that opens a trace.
@@ -608,10 +618,23 @@ type
           "the recording"
       .} : string
 
+      # The MCR default and the per-host value set are stated HERE, not only
+      # in codetracer-specs: `ct record --help` is where a user looks, and
+      # "Record backend" told them nothing about either.  A value this host
+      # cannot honour is refused with a message naming the host and the valid
+      # values (see src/ct/trace/native_backend_selection.nim).
       recordBackend* {.
         name: "backend"
         defaultValue: ""
-        desc: "Record backend"
+        desc: "Native recording backend. " &
+          "MCR is the default on every " &
+          "host, and `mcr` also pins it. " &
+          "Linux additionally accepts " &
+          "`rr`; Windows accepts `ttd`. " &
+          "A value this host cannot " &
+          "honour is refused, never " &
+          "silently downgraded. Not a " &
+          "language selector: see --lang."
       .} : string
 
       recordExportFile* {.
@@ -893,6 +916,69 @@ type
           "(off | on | lazy | pre-prepared). " &
           "See spec §6.8.6 / M31."
       .}: OmniscientDbMode
+      # AS-2 — the kind-neutral half of `ct upload`.  `--artifact` names a
+      # local path to share whatever kind it holds; the kind is recognised
+      # from what is in it, and `--kind` is how you say so when it cannot be
+      # recognised unambiguously (or when you want to be explicit).
+      uploadArtifactPath* {.
+        name: "artifact",
+        desc: "path of a local artifact to share " &
+          "(a recording folder, or a review dataset " &
+          "directory produced by `ct review collect`)"
+      .}: Option[string]
+      uploadArtifactKind* {.
+        name: "kind",
+        desc: "what --artifact holds " &
+          "(recording | review-dataset); " &
+          "only needed when it cannot be " &
+          "recognised from the path itself"
+      .}: Option[string]
+      # AS-3 — client-side encryption.  One flag, for every kind, because the
+      # encryption is a property of the *store* and not of what is being
+      # stored: `ct upload --encrypt` means the same thing whether the artifact
+      # is a recording or a review dataset, and there is one code path behind
+      # it.  The password itself is never a command-line argument — see
+      # `--password-file` and `readUploadPassword` in `upload.nim` for why.
+      uploadEncrypt* {.
+        name: "encrypt",
+        desc: "encrypt the payload on this computer before uploading. " &
+          "The password is never sent to the service, and a lost password " &
+          "cannot be recovered — not by you and not by CodeTracer"
+      .}: bool
+      uploadPasswordFile* {.
+        name: "password-file",
+        desc: "read the encryption password from this file instead of " &
+          "prompting. Passing a password as a command-line argument is not " &
+          "supported: it would be visible to every process on the machine"
+      .}: Option[string]
+      # A BOOLEAN flag rather than `--password-file -`, and that is a
+      # correction rather than a preference.  With a value-taking option, a
+      # bare `-` is parsed as the start of another option, so
+      # `--password-file -` silently yielded no password at all: with
+      # `--encrypt` it then reported "there is no terminal to ask on", and
+      # without it the "you gave a password but not --encrypt" refusal never
+      # fired.  A flag that takes no value cannot be swallowed that way.
+      uploadPasswordStdin* {.
+        name: "password-stdin",
+        desc: "read the encryption password from standard input " &
+          "(for scripts and CI). Mutually exclusive with --password-file"
+      .}: bool
+      # AS-4 — access control, on the same one surface and by the same rule as
+      # `--encrypt`: who may read is a property of the *store* and not of what
+      # is being stored, so this flag means the same thing for every kind.  An
+      # unrecognised value is refused against the closed set by name rather
+      # than read as the default.
+      #
+      # Left as an `Option[string]` and parsed in `uploadCommand` rather than
+      # typed as the enum here, because `confutils`' enum parsing is a
+      # different door from `parseClosedEnumArgument` and the point of the
+      # closed-set rule is that there is only one door.
+      uploadVisibility* {.
+        name: "visibility",
+        desc: "who may read the stored artifact: 'tenant' (members of the " &
+          "owning organisation, the default) or 'tenant-or-invite' (those, " &
+          "plus anyone holding an invite link)"
+      .}: Option[string]
     of download:
       traceDownloadUrl* {.
         argument,
@@ -908,6 +994,19 @@ type
         desc: "override the " &
           "remote server URL"
       .}: Option[string]
+      # AS-3 — the reading half.  A download does not have to be told whether
+      # the artifact is encrypted: the payload says so itself, and `ct download`
+      # only needs to be told the password when it is.
+      downloadPasswordFile* {.
+        name: "password-file",
+        desc: "read the decryption password from this file, " &
+          "when the artifact turns out to be encrypted"
+      .}: Option[string]
+      downloadPasswordStdin* {.
+        name: "password-stdin",
+        desc: "read the decryption password from standard input " &
+          "(for scripts and CI). Mutually exclusive with --password-file"
+      .}: bool
       # for now not needed: we directly import it
       # and delete the zip as a temp artifact
       # traceDownloadOutput* {.
@@ -1156,6 +1255,16 @@ type
         argument
         desc: "Path to a directory or " &
           "file to open for editing"
+      .}: string
+
+    of review:
+      reviewPath* {.
+        argument
+        defaultValue: ""
+        desc: "Path to a review dataset: " &
+          "a review.json file, or a " &
+          "directory produced by " &
+          "`ct review collect`"
       .}: string
 
     # of `import`:

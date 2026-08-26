@@ -192,7 +192,7 @@ fn should_skip_ttd_tests() -> Option<String> {
     if !cfg!(windows) {
         return Some("only supported on Windows".to_string());
     }
-    if resolve_ct_rr_support().is_err() {
+    if resolve_ct_native_replay().is_err() {
         return Some("ct-native-replay binary not found".to_string());
     }
     None
@@ -353,8 +353,8 @@ fn is_access_denied_output(stderr: &str) -> bool {
 // stderr lines and break the skip contract.  A slower user-facing
 // variant that drives this through `ct record` is tracked as the P7.4
 // slow-but-true-to-end-user smoke variant follow-up.
-fn record_ttd_trace(ct_rr_support: &Path, exe: &Path, output_trace: &Path) -> Result<Option<PathBuf>, String> {
-    let output = Command::new(ct_rr_support)
+fn record_ttd_trace(ct_native_replay: &Path, exe: &Path, output_trace: &Path) -> Result<Option<PathBuf>, String> {
+    let output = Command::new(ct_native_replay)
         .args([
             "record",
             "-o",
@@ -403,11 +403,11 @@ fn auto_record_tracepoint_fixture() -> Result<Option<TtdFixture>, String> {
         return Ok(None);
     };
 
-    let ct_rr_support = resolve_ct_rr_support()?;
+    let ct_native_replay = resolve_ct_native_replay()?;
     let out_dir = std::env::temp_dir().join("ct-dap-ttd-tracepoint");
     fs::create_dir_all(&out_dir).map_err(|e| format!("create temp dir: {e}"))?;
     let trace_path = out_dir.join("ttd-tracepoint-c.run");
-    let Some(trace) = record_ttd_trace(&ct_rr_support, &exe, &trace_path)? else {
+    let Some(trace) = record_ttd_trace(&ct_native_replay, &exe, &trace_path)? else {
         return Ok(None);
     };
 
@@ -474,15 +474,15 @@ fn parse_ttd_fixture_by_program_suffix(
     Ok(None)
 }
 
-fn resolve_ct_rr_support() -> Result<PathBuf, String> {
-    test_harness::find_ct_rr_support().ok_or_else(|| {
+fn resolve_ct_native_replay() -> Result<PathBuf, String> {
+    test_harness::find_ct_native_replay().ok_or_else(|| {
         "ct-native-replay binary not found. Set CT_NATIVE_REPLAY_PATH or build codetracer-native-backend first"
             .to_string()
     })
 }
 
 fn launch_ttd_session_with_fixture(session: &mut DapStdioSession, fixture: &TtdFixture) -> Result<(), String> {
-    let ct_rr_support = resolve_ct_rr_support()?;
+    let ct_native_replay = resolve_ct_native_replay()?;
 
     let trace_folder = fixture
         .trace_path
@@ -532,7 +532,7 @@ fn launch_ttd_session_with_fixture(session: &mut DapStdioSession, fixture: &TtdF
             typ: None,
             args: None,
             session_id: None,
-            recreator_exe: Some(ct_rr_support),
+            recreator_exe: Some(ct_native_replay),
             restore_location: None,
             live_recording: None,
             live_recording_dir: None,

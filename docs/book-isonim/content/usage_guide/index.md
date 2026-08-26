@@ -23,5 +23,9 @@ This guide is structured to help you get started quickly and then dive deeper in
     *   [**Command-Line Interface (CLI)**](./cli.md): Discover how to record traces and manage trace files from your terminal.
 *   **To learn about specific features**, see these sections:
     *   [**Tracepoints**](./tracepoints.md): A deep dive into using tracepoints for advanced debugging scenarios.
+*   **To review a change with its recordings attached**, see the
+    [**DeepReview**](/deep_review) section: what each changed line did — which
+    lines ran, with which values — shown on the diff itself, plus the agent
+    handoff.
 *   **For advanced use cases**, explore these topics:
     *   [**CodeTracer Shell**](./codetracer_shell.md): For integrating CodeTracer with complex or custom build systems.

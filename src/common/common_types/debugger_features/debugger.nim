@@ -21,9 +21,16 @@ type
     programName*: langstring
 
   UploadedTraceData* = object
-    downloadKey*: langstring
-    controlId*: langstring
-    expireTime*: langstring
+    ## AS-2 (`codetracer-specs/Sharing/Artifact-Store.md` §8, defect 3): this
+    ## used to carry `downloadKey`, `controlId` and `expireTime` — the
+    ## pre-M-REC-8 sharing service's tokens, none of which the modern upload
+    ## path assigns.  It now carries what `ct upload` can actually answer, and
+    ## says the kind rather than leaving it to be inferred.
+    artifactId*: langstring
+    kind*: langstring
+    shareUrl*: langstring
+      ## The link to hand to somebody else, and the argument `ct download`
+      ## takes.
 
   UploadProgress* = object
     # M-REC-2: UUIDv7 recording-id string (wire-format DAP/MCP rename

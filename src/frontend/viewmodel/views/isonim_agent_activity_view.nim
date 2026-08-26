@@ -1,8 +1,17 @@
 ## views/isonim_agent_activity_view.nim
 ##
 ## IsoNim DOM-rendering view for the Agent Activity panel.
+##
+## The panel is DeepReview's third pillar, and what it shows in a review is
+## **the agent session that produced it** —
+## `codetracer-specs/DeepReview/DeepReview-GUI.md` §2.1.  It used to render a
+## static DeepReview roll-up (a coverage summary, a test-results row, a
+## per-file coverage table and a notification feed) beneath the conversation;
+## AA-1 removed that outright, because it restated facts the VCS panel already
+## carries and filled the panel with a summary when what the reviewer came for
+## is the session itself ("There is no 'DeepReview section' in this panel").
 
-import std/tables
+import std/[options, tables]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -25,6 +34,56 @@ const AgentActivityDiffEditorPrefix* = "diff-editor"
 const AgentActivityTerminalShellPrefix* = "shellComponent-"
 const AgentActivityPlaceholderText* = "Ask anything"
 
+const AgentActivityTestRunClass* = "agent-test-run"
+  ## AA-2 — a `ct test` execution, rendered as a summary of the run *in place
+  ## of* the raw runner output (DeepReview-GUI.md §2.1.2).
+  ##
+  ## The card takes the feed position of the message whose content carried the
+  ## runner's events, so a run stays where the agent produced it.  The message
+  ## itself is not deleted from the model — it is simply not painted as text,
+  ## which is what "in place of raw runner output" means.
+
+const AgentActivityTestRunPrefix* = "agent-test-run-"
+const AgentActivityTestRowClass* = "agent-test-row"
+const AgentActivityTestRowPrefix* = "agent-test-row-"
+const AgentActivityOpenRecordingClass* = "agent-test-row-open-recording"
+  ## The drill-down affordance.  §2.1.2: it exists **only** where a test has a
+  ## recording — "not an affordance that fails when used" — so this class is
+  ## emitted under `TestRunRow.hasRecording` and nowhere else.
+const AgentActivityRecordingFailedClass* = "agent-test-row-recording-failed"
+  ## The other half of the same rule: a recording that failed before a trace
+  ## existed says so, and still offers nothing to open.
+
+const AgentActivityEvidenceClass* = "agent-evidence"
+  ## AA-3 — the agent's review handoff, rendered as a card *in place of* the
+  ## generic tool-call line (DeepReview-GUI.md §2.1.1).
+  ##
+  ## Like AA-2's run card it takes the feed position of the message it
+  ## replaces, so a session that iterated shows each handoff where it
+  ## happened; the message stays in the model and simply is not painted as
+  ## text.
+
+const AgentActivityEvidencePrefix* = "agent-evidence-"
+const AgentActivityEvidenceOpenClass* = "agent-evidence-open"
+  ## The affordance.  §2.1.1's "a dataset that no longer exists says so when
+  ## selected, rather than entering an empty review" is met one step earlier
+  ## than the wording requires: the class is emitted only under
+  ## `canOpenEvidence`, so a dataset already known to be unreadable offers no
+  ## button at all — AA-2's precedent, and the reason there is no disabled
+  ## state to style or to mis-handle.
+const AgentActivityEvidenceNoteClass* = "agent-evidence-note"
+  ## The sentence for a card that cannot be clicked.  Its counterpart:
+  ## wherever the affordance is absent, this says *why* in words.
+
+const AgentActivitySessionNoticeClass* = "agent-session-notice"
+  ## RV-6 — the panel's explicit statement about a review's agent session.
+  ##
+  ## It paints only when `AgentActivityVM.sessionNotice` is non-empty, which
+  ## is every case except "here is the conversation" and "this review has no
+  ## session".  DeepReview-GUI.md §2.1: when the backend cannot resolve the
+  ## referenced session, "the panel says so explicitly.  It must not silently
+  ## render an empty session, which reads as 'the agent did nothing'."
+
 type
   AgentActivityCallbacks* = object
     onFocusInput*: proc()
@@ -35,6 +94,21 @@ type
     onAddFiles*: proc()
     onModelSelect*: proc()
     afterDynamicRender*: proc()
+    onOpenTestRecording*: proc(anchorId, testId: string;
+                               policy: TraceOpenPolicy)
+      ## AA-2 — the host's hook for "the reviewer clicked into a recording".
+      ##
+      ## The view does **not** decide whether a recording exists; the VM does
+      ## (`AgentActivityVM.openTestRecording`), and the view calls it.  This
+      ## callback exists only so a host can observe the drill-down, not so it
+      ## can implement a second one — §2.1.2 requires the *existing*
+      ## trace-opening path, which `trace_open.nim` already is.
+    onOpenEvidence*: proc(anchorId, datasetPath: string)
+      ## AA-3 — the host's hook for "the reviewer selected an evidence call".
+      ##
+      ## Same contract as `onOpenTestRecording`: the view does not decide
+      ## whether the dataset can be opened, the VM does
+      ## (`AgentActivityVM.openEvidence`), and this fires only when it agreed.
 
 proc messageWrapperClass*(role: AgentActivityMessageRole): string =
   case role
@@ -177,6 +251,220 @@ proc renderMessage[R](r: R; componentId: int;
             tdiv(class = "agent-editor",
                  id = diffEditorId(componentId, diff.id))
 
+proc testRunId*(anchorId: string): string =
+  AgentActivityTestRunPrefix & anchorId
+
+proc testRowId*(anchorId, testId: string): string =
+  AgentActivityTestRowPrefix & anchorId & "-" & testId
+
+proc testRunStateClass*(summary: TestRunSummary): string =
+  ## The card's overall state, as a class a stylesheet and a test can both
+  ## read.  Deliberately three-valued rather than boolean: "running" is not a
+  ## kind of failure, and an empty run is not a kind of success.
+  if summary.inProgress:
+    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-running"
+  elif summary.failed > 0 or summary.errored > 0:
+    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-failed"
+  else:
+    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-passed"
+
+proc testRowClass*(row: TestRunRow): string =
+  AgentActivityTestRowClass & " " & AgentActivityTestRowPrefix & $row.outcome
+
+proc testRunTitle*(summary: TestRunSummary): string =
+  ## What the card calls itself.
+  ##
+  ## The runner's own reported command when there is one, because that is the
+  ## thing the reviewer actually asked for; otherwise the provider's id.  Never
+  ## a reconstructed command line — a command CodeTracer invented would read as
+  ## one that ran.
+  if summary.commandLine.len > 0:
+    summary.commandLine
+  elif summary.providerId.len > 0:
+    summary.providerId
+  else:
+    "ct test"
+
+proc testRowDetailText*(row: TestRunRow): string =
+  ## The line an expanded test shows: its status and how long it took.
+  ## §2.1.2: "an individual test can be expanded to its status, duration and
+  ## captured output."  A duration of zero is omitted rather than printed,
+  ## for the same reason a zero count is: it is not a measurement.
+  result = "Status: " & $row.outcome
+  if row.durationMs > 0:
+    result.add " · Duration: " & formatDurationMs(row.durationMs)
+
+proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
+                      rowValue: TestRunRow;
+                      callbacks: AgentActivityCallbacks): auto =
+  let row = rowValue
+  let expanded = vm.isTestExpanded(anchorId, row.testId)
+  let testId = row.testId
+  proc open(policy: TraceOpenPolicy) =
+    # The VM is the single gate: it refuses a row with no recording even if a
+    # stale rendering somehow offered one.  The host callback is notified only
+    # when something was actually opened.
+    if vm.openTestRecording(anchorId, testId, policy) and
+       callbacks.onOpenTestRecording != nil:
+      callbacks.onOpenTestRecording(anchorId, testId, policy)
+  ui(r):
+    tdiv(class = testRowClass(row), id = testRowId(anchorId, row.testId)):
+      tdiv(class = "agent-test-row-header",
+           onclick = proc() = vm.toggleTest(anchorId, testId)):
+        span(class = "agent-test-row-status"):
+          text $row.outcome
+        span(class = "agent-test-row-name"):
+          text row.name
+        if row.durationMs > 0:
+          span(class = "agent-test-row-duration"):
+            text formatDurationMs(row.durationMs)
+      # §2.1.2: the affordance exists only where the recording does.  A test
+      # that was never recorded, and a recording that failed before producing
+      # a trace, both fall through here and render no button at all.
+      if row.hasRecording:
+        tdiv(class = "agent-test-row-actions"):
+          button(class = "ct-button-sm-secondary " &
+                   AgentActivityOpenRecordingClass,
+                 `type` = "button",
+                 onclick = proc() = open(topCurrentTab)):
+            text "Open recording"
+          button(class = "ct-button-sm-secondary " &
+                   AgentActivityOpenRecordingClass & "-new-tab",
+                 `type` = "button",
+                 onclick = proc() = open(topNewTab)):
+            text "Open in new tab"
+      if expanded:
+        tdiv(class = "agent-test-row-details"):
+          tdiv(class = "agent-test-row-detail"):
+            text testRowDetailText(row)
+          if row.recordingFailed:
+            tdiv(class = AgentActivityRecordingFailedClass):
+              text "Recording failed before a trace was produced; " &
+                "there is no recording to open."
+          for diagnosticValue in row.diagnostics:
+            let diagnostic = diagnosticValue
+            tdiv(class = "agent-test-row-diagnostic " &
+                   AgentActivityTestRowPrefix & "diagnostic-" &
+                   diagnostic.severity):
+              text diagnostic.message
+          if row.output.len > 0:
+            pre(class = "agent-test-row-output"):
+              text row.output
+
+proc renderTestRunTail[R](r: R; summary: TestRunSummary): auto =
+  ## Run-level diagnostics and the non-event half of the runner's stdout.
+  ##
+  ## §2.1.2 requires both to be reachable when recording failed, and they are
+  ## the only place a failure with *no test row* — a missing recorder binary,
+  ## say — can be read at all.
+  ui(r):
+    tdiv(class = "agent-test-run-tail"):
+      for diagnosticValue in summary.diagnostics:
+        let diagnostic = diagnosticValue
+        tdiv(class = "agent-test-run-diagnostic"):
+          text diagnostic.message
+      if summary.frameworkOutput.len > 0:
+        pre(class = "agent-test-run-output"):
+          text summary.frameworkOutput
+
+proc renderTestRun[R](r: R; vm: AgentActivityVM; entry: AgentTestRunEntry;
+                      callbacks: AgentActivityCallbacks): auto =
+  let summary = entry.summary
+  let anchorId = entry.anchorId
+  let expanded = vm.isTestRunExpanded(anchorId)
+  var body: typeof(r.createElement("div"))
+  let card = ui(r):
+    tdiv(class = testRunStateClass(summary), id = testRunId(anchorId)):
+      tdiv(class = "agent-test-run-header",
+           onclick = proc() = vm.toggleTestRun(anchorId)):
+        span(class = "agent-test-run-toggle"):
+          text (if expanded: "▾" else: "▸")
+        span(class = "agent-test-run-title"):
+          text testRunTitle(summary)
+        span(class = "agent-test-run-status"):
+          text summaryText(summary)
+      tdiv(ref = body, class = "agent-test-run-body")
+  # The rows are appended rather than declared inline because the `ui` DSL
+  # nests *tags*, not calls to other render procs — a bare call inside a `ui`
+  # block builds a node nothing attaches.  Same reason the conversation host
+  # itself is filled with `appendRenderedChild`.
+  if expanded:
+    for rowValue in summary.rows:
+      r.appendRenderedChild(
+        body, renderTestRow(r, vm, anchorId, rowValue, callbacks))
+    r.appendRenderedChild(body, renderTestRunTail(r, summary))
+  card
+
+proc evidenceId*(anchorId: string): string =
+  AgentActivityEvidencePrefix & anchorId
+
+proc evidenceStateClass*(call: EvidenceCall): string =
+  ## The card's state, as a class a stylesheet and a test can both read.
+  ##
+  ## Four-valued and derived from the two facts that decide it — what the
+  ## command did, and whether its dataset can be read — because "no
+  ## affordance" has four different reasons and a reviewer looking at a
+  ## screenshot should be able to tell which.
+  let modifier =
+    case call.state
+    of ecsUnreported: "unreported"
+    of ecsFailed: "failed"
+    of ecsCompleted:
+      case call.dataset.state
+      of edsReady: "ready"
+      of edsUnknown: "reading"
+      of edsUnavailable: "unavailable"
+  AgentActivityEvidenceClass & " " & AgentActivityEvidenceClass & "-" & modifier
+
+proc renderEvidenceCall[R](r: R; vm: AgentActivityVM; callValue: EvidenceCall;
+                           callbacks: AgentActivityCallbacks): auto =
+  let call = callValue
+  let anchorId = call.anchorId
+  let datasetPath = call.datasetPath
+  let shape = evidenceDatasetShapeText(call)
+  let note = evidenceNoteText(call)
+  proc open() =
+    # The VM is the single gate, exactly as it is for AA-2's drill-down: it
+    # refuses a call whose dataset is not known to be readable even if a
+    # stale rendering somehow offered one.
+    if vm.openEvidence(anchorId) and callbacks.onOpenEvidence != nil:
+      callbacks.onOpenEvidence(anchorId, datasetPath)
+  ui(r):
+    tdiv(class = evidenceStateClass(call), id = evidenceId(anchorId)):
+      tdiv(class = "agent-evidence-header"):
+        span(class = "agent-evidence-kind"):
+          text evidenceCommandName(call.kind)
+        # The shape is emitted only when it is a measurement.  For every other
+        # dataset state `evidenceDatasetShapeText` returns "" and this element
+        # is not emitted at all, rather than emitted holding "0 files" — the
+        # rule `review_entry.coverageText` already executes for a file with no
+        # coverage.
+        if shape.len > 0:
+          span(class = "agent-evidence-shape"):
+            text shape
+      # The dataset the call names, always: it is what identifies *which*
+      # handoff this is in a session that produced several.
+      tdiv(class = "agent-evidence-dataset"):
+        text datasetPath
+      # The command the session reported, verbatim.  §2.1.1 wants the
+      # rendering to identify "what the evidence is"; the command is the part
+      # of that CodeTracer did not have to read a file to know.
+      tdiv(class = "agent-evidence-command"):
+        text call.command
+      if note.len > 0:
+        tdiv(class = AgentActivityEvidenceNoteClass):
+          text note
+      if call.canOpenEvidence():
+        tdiv(class = "agent-evidence-actions"):
+          button(class = "ct-button-sm-secondary " &
+                   AgentActivityEvidenceOpenClass,
+                 `type` = "button",
+                 onclick = proc() = open()):
+            text "Open review"
+      if call.failureText.len > 0:
+        pre(class = "agent-evidence-output"):
+          text call.failureText
+
 proc renderTerminal[R](r: R; terminal: AgentActivityTerminalEntry;
                        commandInputId: string): auto =
   ui(r):
@@ -243,6 +531,16 @@ proc renderModelButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
         text "GPT 5"
       tdiv(class = "agent-model-img")
 
+proc renderSessionNotice[R](r: R; notice: string): auto =
+  ## One line explaining the state of the review's agent session.
+  ##
+  ## Deliberately a plain block rather than a message row: it is CodeTracer
+  ## speaking, not the agent, and styling it as a conversation turn would
+  ## attribute the sentence to the agent.
+  ui(r):
+    tdiv(class = AgentActivitySessionNoticeClass):
+      text notice
+
 proc renderSubmitButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-primary agent-submit-button agent-start-button",
@@ -265,6 +563,9 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   let panel = ui(r):
     tdiv(class = AgentActivityContainerClass):
+      # §2.1: the session is what this panel shows in a review, so the
+      # conversation is the panel's whole body above the prompt.  Nothing sits
+      # between them any more — the roll-up that used to went with AA-1.
       tdiv(ref = conversation, class = AgentActivityConversationClass)
       tdiv(class = AgentActivityInteractionClass):
         textarea(ref = input,
@@ -284,8 +585,35 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   createRenderEffect proc() =
     r.clearChildren(conversation)
+    # First, and outside the message list: why this conversation looks the way
+    # it does.  A loaded-but-empty session, a pruned one and an agent that
+    # cannot replay sessions all render an identical empty list, so the
+    # sentence is the only thing that tells them apart (§2.1).
+    if vm.sessionNotice.val.len > 0:
+      r.appendRenderedChild(
+        conversation, renderSessionNotice(r, vm.sessionNotice.val))
     for message in vm.messages.val:
-      r.appendRenderedChild(conversation, renderMessage(r, componentId, message))
+      # AA-2: a message whose content carried the runner's event stream is
+      # painted as the run's summary card *instead of* as raw output
+      # (§2.1.2).  The lookup is by the message's own id, so the card lands in
+      # the feed position the run happened in and everything around it renders
+      # unchanged.
+      let runIndex = vm.testRunIndex(message.id)
+      # AA-3: and a tool call that handed a review over is painted as an
+      # evidence card instead of as the generic tool-call line (§2.1.1).  Same
+      # anchoring rule, so a session that iterated shows one card per
+      # handoff, each independently selectable, in the order they happened.
+      let evidence = vm.evidenceCallFor(message.id)
+      if runIndex >= 0:
+        r.appendRenderedChild(
+          conversation,
+          renderTestRun(r, vm, vm.testRuns.val[runIndex], callbacks))
+      elif evidence.isSome:
+        r.appendRenderedChild(
+          conversation, renderEvidenceCall(r, vm, evidence.get, callbacks))
+      else:
+        r.appendRenderedChild(
+          conversation, renderMessage(r, componentId, message))
     for terminal in vm.terminals.val:
       r.appendRenderedChild(
         conversation,

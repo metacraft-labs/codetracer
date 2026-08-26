@@ -232,6 +232,32 @@ fn test_classifier_javascript_per_language_overrides() {
     // FieldAccess (spec §7.1 universal field-access row applies).
     let c = classify_full("const a = obj?.prop", "a", Lang::JavaScript, &patterns);
     assert_eq!(c.kind, OriginKind::FieldAccess);
+
+    // 6. Object literal RHS: `const obj = { a: 11, b: 22 }` →
+    // Computational. tree-sitter-javascript names this node `object`,
+    // the JS/TS analogue of Python's `dictionary`. This is the RHS the
+    // `object_destructuring` / `optional_chaining` origin fixtures
+    // terminate at; before it was recognised the whole chain died at
+    // an `Unknown` (confidence 0) terminator one hop short of the
+    // computational origin.
+    let c = classify_full(
+        "const obj = { a: 11, b: 22 }",
+        "obj",
+        Lang::JavaScript,
+        &patterns,
+    );
+    assert_eq!(c.kind, OriginKind::Computational);
+    assert!(
+        c.confidence >= 0.7,
+        "object literal RHS must classify with confidence >= 0.7, got {}",
+        c.confidence
+    );
+
+    // 7. Array literal RHS: the sibling of case 6, asserted here so a
+    // future refactor cannot re-introduce the asymmetry that made
+    // `[11, 22]` classify while `{ a: 11, b: 22 }` did not.
+    let c = classify_full("const arr = [11, 22]", "arr", Lang::JavaScript, &patterns);
+    assert_eq!(c.kind, OriginKind::Computational);
 }
 
 // ===========================================================================

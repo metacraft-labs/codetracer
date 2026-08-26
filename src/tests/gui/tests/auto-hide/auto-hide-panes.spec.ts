@@ -41,7 +41,11 @@
  * `recordChromeTraceFixture`.
  */
 
-import { test, expect } from "../../lib/fixtures";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
 import {
@@ -484,7 +488,14 @@ test.describe("Auto-hide panes", () => {
 
     await layoutUpdatedPromisePin2;
 
-    // Force a strip redraw in case the onChanged callback didn't fire.
+    // Historical note: this used to be described as "force a strip redraw in
+    // case the onChanged callback didn't fire".  It cannot do that.
+    // `__ctRedrawAll` -> `renderer.redrawAll` -> `sharedDirectRedraw` refreshes
+    // the menu, the status bar and the fixed search box only; the auto-hide
+    // strips are rendered exclusively from `autoHideState.onChanged`.  The call
+    // is kept because the status-bar refresh it triggers is what re-creates the
+    // `#auto-hide-bottom-strip` host, which the bottom-tab assertions below
+    // read — it does nothing for the left strip.
     await ctPage.evaluate(() => {
       if ((window as any).__ctRedrawAll) (window as any).__ctRedrawAll();
     });
@@ -516,6 +527,33 @@ test.describe("Auto-hide panes", () => {
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
   });
 
+  // Spec grounding for this test (issue #567 / milestone M18):
+  //
+  //  * `Planned-Features/Auto-Hide-Panes.md` §1.2.1 gives *every* Golden Layout
+  //    stack a pin control, so an editor is a legitimate thing to pin.  §6.1's
+  //    "Editor — Auto-Hide Candidate: No" is advice about which panes a default
+  //    layout should auto-hide, not a restriction on the feature.
+  //  * §3.2 "Right-click: opens the tab context menu (re-pin to another edge,
+  //    Unpin).  This is the only unpin/close affordance a strip tab has."
+  //  * §3.3 "Unpin, which restores the panel to GL" — unpinning must put the
+  //    panel BACK IN THE LAYOUT, which is exactly what #567 reported it did not
+  //    do ("closes instead of moving to layout").
+  //  * §1.3 "Window not maximized: The strip must be wider (e.g., 28px) and use
+  //    its standard text-label rendering" — the mode this test asks for below
+  //    via `__ctForceCollapsedMode(false)`, so that the tab it hovers exists.
+  //    Under Xvfb the window fills the virtual screen and
+  //    `updateCollapsedMode`'s heuristic answers "maximized", which renders the
+  //    strip as the 1px `collapsed-strip-line` with no tabs at all.  That
+  //    override used to be silently reverted by the next `resize`, and both
+  //    recorded failures of this test show the strip back in `collapsed-mode`
+  //    at the moment `hover()` gave up.  The override is sticky now.
+  //  * `GUI/Core-Panes/Editor-Pane.md`, "Tab Management": "Multiple files can be
+  //    open simultaneously as tabs" — a second, independent defect on this path:
+  //    `openLayoutTab` matched a pinned panel on its Content kind alone, so once
+  //    ANY editor was pinned every later request to open a file resolved to that
+  //    one panel, and each request became a `showOverlay` *toggle* that rebuilt
+  //    the edge strip.  Covered headlessly by
+  //    `auto-hide/auto_hide_routing_test.nim`.
   test("editor unpin behavior", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
@@ -559,10 +597,12 @@ test.describe("Auto-hide panes", () => {
 
     await layoutUpdatedPromisePin;
 
-    // Force a strip redraw in case.
-    await ctPage.evaluate(() => {
-      if ((window as any).__ctRedrawAll) (window as any).__ctRedrawAll();
-    });
+    // NOTE: there is deliberately no `__ctRedrawAll()` call here.  It does not
+    // render the strips at all — `renderer.redrawAll` only calls
+    // `sharedDirectRedraw`, which `layout.nim` installs to refresh the menu, the
+    // status bar and the fixed search box.  `#auto-hide-strip-left` is rendered
+    // solely from `autoHideState.onChanged`, which `pinPanel` invokes.  A forced
+    // redraw here would hide a missing render trigger rather than reveal one.
 
     const remainingEditor = ctPage.locator(".lm_tab .lm_title", {
       hasText: editorTitle,
@@ -577,6 +617,26 @@ test.describe("Auto-hide panes", () => {
       // The Left edge strip should have exactly one tab with the editor title.
       await expect(leftTabs).toHaveCount(1, { timeout: 1000 });
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
+
+    // The strip tab must be a STABLE DOM node that survives while nothing is
+    // interacting with it.  `Auto-Hide-Panes.md` §3.2 makes the tab the panel's
+    // only hover/click/right-click surface and §3.3 makes its right-click menu
+    // the only unpin affordance — none of which a user (or the `hover()` below)
+    // can reach if the node keeps being replaced.  Both known ways it was being
+    // replaced fail here: collapsed mode re-asserting itself (which swaps the
+    // tabs for a 1px line), and a spurious `autoHideState.onChanged` (which
+    // rebuilds the whole strip).  Asserting node identity names the defect; the
+    // hover that follows only fails by timeout, which reads like a slow app.
+    const tabHandle = await leftTabs.first().elementHandle();
+    expect(tabHandle).not.toBeNull();
+    await ctPage.waitForTimeout(1500);
+    const stillAttached = await tabHandle!.evaluate((el) => el.isConnected);
+    expect(
+      stillAttached,
+      "the auto-hide strip tab was re-created while nothing interacted with " +
+        "it — the edge strip is being rebuilt in a loop",
+    ).toBe(true);
+    await tabHandle!.dispose();
 
     // Hover the left strip tab to open the overlay (a click would dock the
     // editor inline instead — see page-objects/auto-hide-strip.ts).
@@ -611,5 +671,244 @@ test.describe("Auto-hide panes", () => {
       // The editor tab should be restored in the GL layout.
       await expect(remainingEditor.first()).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: WAIT_TIMEOUT_MS });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #608 (M41) — the pinned set must survive a restart, and pinning FILES must
+// not destroy the saved layout.
+//
+// Before the fix, `ui/layout.nim` posted the serialised auto-hide state to
+// `CODETRACER::save-auto-hide-state` and NOTHING listened on that channel —
+// the string occurred at exactly one site in the whole repository, the send —
+// while `restoreAutoHideState` had zero call sites.  So a pinned panel was
+// simply gone on the next launch, and because pinning removes the component
+// from the GoldenLayout tree, pinning FILES additionally made
+// `isValidLayoutConfig` reject the saved layout, at which point
+// `resetLayoutToDefault` DELETED it.  That is the "customisations lost with
+// no visible error" half of the report.
+//
+// The headless guard for the same invariants (the serialised shape, and the
+// validator consulting the auto-hide state) is
+// `src/tests/gui/tests/layout/layout_config_roundtrip_test.nim`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The isolated config directory the GUI fixtures point the app at.
+ * `lib/fixtures.ts` assigns `process.env.XDG_CONFIG_HOME` at import time, so
+ * this is already the per-run directory by the time the spec body runs.
+ */
+const userConfigDir = path.join(
+  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
+  "codetracer",
+);
+const autoHideStatePath = path.join(userConfigDir, "auto_hide_state.json");
+const editLayoutPath = path.join(userConfigDir, "default_edit_layout.json");
+const editTestFolder = path.join(codetracerInstallDir, "test-programs");
+
+/** Content ordinals from `common_types/codetracer_features/frontend.nim`. */
+const CONTENT_FILESYSTEM = 9;
+const CONTENT_EVENT_LOG = 8;
+/** `AutoHideEdge` ordinals from `ui/auto_hide.nim`: Left = 0, Right = 1, Bottom = 2. */
+const EDGE_LEFT = 0;
+
+function removeIfPresent(target: string): void {
+  if (fs.existsSync(target)) fs.unlinkSync(target);
+}
+
+function writeAutoHideState(panels: unknown[]): void {
+  if (!fs.existsSync(userConfigDir)) {
+    fs.mkdirSync(userConfigDir, { recursive: true });
+  }
+  fs.writeFileSync(autoHideStatePath, JSON.stringify({ panels }), "utf8");
+}
+
+function pinnedFilesystemPanel() {
+  return {
+    edge: EDGE_LEFT,
+    title: "FILES",
+    content: CONTENT_FILESYSTEM,
+    componentId: 0,
+    overlayWidth: 320,
+    overlayHeight: 0,
+    config: {
+      type: "component",
+      componentType: "genericUiComponent",
+      componentState: {
+        id: 0,
+        label: "filesystemComponent-0",
+        content: CONTENT_FILESYSTEM,
+        isEditor: false,
+      },
+      title: "FILES",
+    },
+  };
+}
+
+test.describe("Auto-hide state survives a restart", () => {
+  test.setTimeout(120_000);
+  test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
+
+  test.afterEach(() => {
+    // Never leak a pinned panel into a later test in this worker: the config
+    // directory is shared and the fixture only resets `default_layout.json`.
+    removeIfPresent(autoHideStatePath);
+  });
+
+  test("pinning a panel writes the auto-hide state to disk", async ({ ctPage }) => {
+    removeIfPresent(autoHideStatePath);
+
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForBaseComponentsLoaded();
+    await layout.waitForTraceLoaded();
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+
+    const pinnedTitle = await pinToEdge(ctPage, "Left", 0);
+
+    // The write is an async IPC round trip through the index process, so poll
+    // rather than assert once.
+    await expect(() => {
+      expect(fs.existsSync(autoHideStatePath)).toBe(true);
+      const saved = JSON.parse(fs.readFileSync(autoHideStatePath, "utf8"));
+      expect(Array.isArray(saved.panels)).toBe(true);
+      const titles = saved.panels.map((panel: { title: string }) => panel.title);
+      expect(titles).toContain(pinnedTitle);
+    }).toPass({ timeout: WAIT_TIMEOUT_MS });
+
+    // The persisted entry must carry everything a restore needs and nothing
+    // that cannot survive a process boundary.
+    const saved = JSON.parse(fs.readFileSync(autoHideStatePath, "utf8"));
+    const entry = saved.panels.find(
+      (panel: { title: string }) => panel.title === pinnedTitle,
+    );
+    expect(entry).toBeTruthy();
+    expect(entry.config).toBeTruthy();
+    expect(entry.config.componentState).toBeTruthy();
+    expect(entry).toHaveProperty("edge");
+    expect(entry).toHaveProperty("overlayWidth");
+    expect(entry).toHaveProperty("overlayHeight");
+    for (const transient of ["liveElement", "domTab", "containerElement", "isUnpinning"]) {
+      expect(entry).not.toHaveProperty(transient);
+    }
+  });
+});
+
+test.describe("A persisted pinned panel is restored on the next launch", () => {
+  test.setTimeout(120_000);
+  // `preserveAutoHideState` keeps the launch fixture's config reset from
+  // deleting the state this suite seeds below — the whole point here is that
+  // a file written before launch survives into the app.
+  test.use({
+    sourcePath: fixture.traceDir,
+    launchMode: "trace-folder",
+    preserveAutoHideState: true,
+  });
+
+  // Written BEFORE the `ctPage` fixture launches the app — a hook that
+  // requests no fixture runs first, which is what makes this a real restart
+  // rather than a same-process reload.
+  test.beforeEach(() => {
+    writeAutoHideState([pinnedFilesystemPanel()]);
+  });
+
+  test.afterEach(() => {
+    removeIfPresent(autoHideStatePath);
+  });
+
+  test("the pinned FILES panel comes back as a left strip tab", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForBaseComponentsLoaded();
+    await layout.waitForTraceLoaded();
+
+    const leftTabs = ctPage.locator("#auto-hide-strip-left .auto-hide-strip-tab");
+    await expect(leftTabs).toHaveCount(1, { timeout: WAIT_TIMEOUT_MS });
+    await expect(leftTabs.first()).toHaveText(/FILES/i);
+
+    // The standalone bottom panes must still register exactly once — the
+    // restore runs before that 500 ms loop precisely so its
+    // `findPanelByContent` skip can see restored entries.
+    await expect(bottomStripTabs(ctPage)).toHaveCount(DEFAULT_BOTTOM_TAB_COUNT, {
+      timeout: WAIT_TIMEOUT_MS,
+    });
+  });
+});
+
+test.describe("Pinning FILES does not reset the layout", () => {
+  test.setTimeout(120_000);
+  test.use({
+    launchMode: "edit",
+    editFolderPath: editTestFolder,
+    preserveAutoHideState: true,
+    preserveEditLayout: true,
+  });
+
+  // Edit mode is used because the `ctPage` fixture copies the bundled default
+  // over `default_layout.json` on every setup (`lib/layout-reset.ts`), which
+  // would erase the scenario before the app saw it.  `preserveEditLayout`
+  // makes it leave `default_edit_layout.json` alone: the fixture resets that
+  // file too now (a `ct review` launch reads it since RV-2), and this
+  // `beforeEach` runs before the fixture, so without the opt-out the seeded
+  // scenario would be deleted before the app ever saw it.
+  test.beforeEach(() => {
+    removeIfPresent(editLayoutPath + ".broken");
+    // A saved layout with NO Filesystem component in the GoldenLayout tree —
+    // exactly what the app writes once the user pins FILES to an edge …
+    fs.mkdirSync(userConfigDir, { recursive: true });
+    fs.writeFileSync(
+      editLayoutPath,
+      JSON.stringify(
+        {
+          settings: { constrainDragToContainer: true, reorderEnabled: true },
+          dimensions: { borderWidth: 4, headerHeight: 32 },
+          root: {
+            type: "row",
+            content: [
+              {
+                type: "stack",
+                size: "100%",
+                activeItemIndex: 0,
+                content: [
+                  {
+                    type: "component",
+                    componentType: "genericUiComponent",
+                    componentState: {
+                      id: 0,
+                      label: "eventLogComponent-0",
+                      content: CONTENT_EVENT_LOG,
+                    },
+                    title: "EVENTS",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    // … together with the auto-hide state that says where FILES actually is.
+    writeAutoHideState([pinnedFilesystemPanel()]);
+  });
+
+  test.afterEach(() => {
+    removeIfPresent(autoHideStatePath);
+    removeIfPresent(editLayoutPath);
+    removeIfPresent(editLayoutPath + ".broken");
+  });
+
+  test("a layout whose Filesystem panel is pinned is not treated as corrupt", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+
+    // `resetLayoutToDefault` moves the file it rejects aside to `.broken`
+    // before replacing it.  Its absence is the assertion that the validator
+    // accepted the layout instead of destroying the user's arrangement.
+    expect(fs.existsSync(editLayoutPath + ".broken")).toBe(false);
+
+    // And FILES is present as a pinned strip tab rather than lost entirely.
+    const leftTabs = ctPage.locator("#auto-hide-strip-left .auto-hide-strip-tab");
+    await expect(leftTabs).toHaveCount(1, { timeout: WAIT_TIMEOUT_MS });
+    await expect(leftTabs.first()).toHaveText(/FILES/i);
   });
 });

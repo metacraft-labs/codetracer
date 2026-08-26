@@ -707,24 +707,15 @@ test.describe("Visual Audit v2 — DeepReview", () => {
   );
   test.use({ launchMode: "deepreview", deepreviewJsonPath: reviewPath });
 
-  // Was marked FAILING (2026-05-01) against the older selector pair
-  // (`.deepreview-file-item, div[id^="filesystemComponent"]`).  The selector
-  // below — `.deepreview-container`, the same ready signal the 113-test
-  // deepreview-gui.spec.ts suite uses — passes; the note is retired.
+  // Retargeted in DR-R8.  The ready signal was `.deepreview-container`, the
+  // standalone review panel's root; that panel is deleted (DeepReview has no
+  // panel of its own — DeepReview-GUI.md §7).  The signal is now the VCS
+  // panel's Changed Files section, which is what
+  // `DeepReviewPage.waitForReady` polls: a review populates it as step 1 of
+  // §7's "Transition into a Review", and it is the reviewer's primary
+  // navigation surface.
   test("Screen 8: DeepReview layout", async ({ ctPage }) => {
-    // The standard DeepReview ready signal is the `.deepreview-container`
-    // element — that's what `DeepReviewPage.waitForReady` (used by the
-    // 113-test deepreview-gui.spec.ts suite) polls.  The previous
-    // selector here (`.deepreview-file-item, div[id^='filesystemComponent']`)
-    // tried to wait for the file list which is rendered AFTER the
-    // container materialises and on a longer pipeline (file diffing,
-    // etc.); under headless harness that pipeline could miss the 30 s
-    // budget while the container itself was already visible — see the
-    // matching 113/113 pass rate of `tests/deepreview/deepreview-gui.spec.ts`.
-    //
-    // Wait for the container first (matching the working suite's
-    // contract), then take the screenshot.
-    await ctPage.waitForSelector(".deepreview-container", {
+    await ctPage.waitForSelector(".vcs-container .vcs-changed-files", {
       timeout: 30_000,
     });
     await wait(3000);

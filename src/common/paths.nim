@@ -375,6 +375,20 @@ when not defined(ctRenderer):
       "mint a UUIDv7 via trace_index.newID / newRecordingId first)"
     baseDir / recordingId
 
+  proc reviewDatasetFolder*(baseDir: string, artifactId: string): string =
+    ## Where a downloaded review dataset lands, under ``baseDir``.
+    ##
+    ## AS-2: the sibling of ``recordingFolder`` for the second artifact kind.
+    ## It sits under its own ``review-datasets/`` subdirectory rather than
+    ## beside the recordings, because ``codetracer_trace_dir`` is enumerated as
+    ## "one directory per recording" in several places and a dataset dropped
+    ## among them would be read as a recording with no container.  The leaf is
+    ## the bare artifact id, for the same reasons M-REC-7 gives for recordings:
+    ## portable across machines, and lex-sorting by creation time.
+    doAssert artifactId.len > 0,
+      "reviewDatasetFolder: artifact id must be non-empty"
+    baseDir / "review-datasets" / artifactId
+
   let DB_FOLDERS* = @[codetracerTraceDir, codetracerTestDir]
   when not defined(serverCI):
     let DB_PATHS* = DB_FOLDERS.mapIt(it / "trace_index.db")

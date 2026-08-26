@@ -24,137 +24,171 @@ suite "ct host idle timeout integration":
   let node = nodeExe
   let available = fileExists(serverIndex) and fileExists(node)
 
-  test "skips if server_index missing":
-    if not available:
-      echo "skip: server_index.js or node not found"
-    check available or true
+  # No "skips if server_index missing" case here any more. It asserted
+  # `check available or true` -- a tautology, true for every possible value of
+  # `available`, counted as a passing case forever. A test that cannot fail is
+  # not coverage; it is a line in the tally.
+  #
+  # What the environment actually is gets REPORTED once, loudly, instead:
+  if not available:
+    echo "MISSING-HOST SKIP: ", serverIndex, " or ", node, " not found."
+    echo "  Every case below is skipped. `just test-frontend-units` exports"
+    echo "  CODETRACER_PREFIX so they run against the built tree."
 
   test "exits with code 0 when no connection and short timeout":
     if not available:
+      # The `else` is load-bearing. `std/unittest`'s `skip()` MARKS this case
+      # skipped; it does NOT leave the body. Without the arm below, every one
+      # of these tests fell through into `startProcess` on a `node` that is not
+      # there and reported a FAILURE where it meant to report a skip -- six of
+      # them, measured. `return` is not an option: unittest rejects it inside a
+      # test body ("'return' not allowed here").
       skip()
-    var p: Process
-    try:
-      let args = @[
-        serverIndex,
-        "-1",
-        "--welcome-screen",
-        "--port", "12345",
-        "--frontend-socket-port", "5000",
-        "--frontend-socket-parameters", "",
-        "--backend-socket-port", "5000",
-        "--caller-pid", "0",
-        "--idle-timeout-ms", "1000"
-      ]
-      p = startProcess(
-        node,
-        workingDir = codetracerInstallDir,
-        args = args,
-        options = {poStdErrToStdOut})
-      # allow up to 4 seconds for timeout exit
-      let (exited, code) = waitForExitWithin(p, 4_000)
-      check exited
-      check code == 0
-    finally:
-      ensureProcessStopped(p)
+    else:
+      var p: Process
+      try:
+        let args = @[
+          serverIndex,
+          "-1",
+          "--welcome-screen",
+          "--port", "12345",
+          "--frontend-socket-port", "5000",
+          "--frontend-socket-parameters", "",
+          "--backend-socket-port", "5000",
+          "--caller-pid", "0",
+          "--idle-timeout-ms", "1000"
+        ]
+        p = startProcess(
+          node,
+          workingDir = codetracerInstallDir,
+          args = args,
+          options = {poStdErrToStdOut})
+        # allow up to 4 seconds for timeout exit
+        let (exited, code) = waitForExitWithin(p, 4_000)
+        check exited
+        check code == 0
+      finally:
+        ensureProcessStopped(p)
 
   test "disabled timeout keeps host alive beyond window":
     if not available:
+      # The `else` is load-bearing. `std/unittest`'s `skip()` MARKS this case
+      # skipped; it does NOT leave the body. Without the arm below, every one
+      # of these tests fell through into `startProcess` on a `node` that is not
+      # there and reported a FAILURE where it meant to report a skip -- six of
+      # them, measured. `return` is not an option: unittest rejects it inside a
+      # test body ("'return' not allowed here").
       skip()
-    var p: Process
-    try:
-      let args = @[
-        serverIndex,
-        "-1",
-        "--welcome-screen",
-        "--port", "12346",
-        "--frontend-socket-port", "5001",
-        "--frontend-socket-parameters", "",
-        "--backend-socket-port", "5001",
-        "--caller-pid", "0",
-        "--idle-timeout-ms", "-1"
-      ]
-      p = startProcess(
-        node,
-        workingDir = codetracerInstallDir,
-        args = args,
-        options = {poStdErrToStdOut})
-      # wait slightly longer than the previous timeout window; should still be running
-      let (exitedEarly, _) = waitForExitWithin(p, 2_000)
-      check exitedEarly == false
-    finally:
-      ensureProcessStopped(p)
+    else:
+      var p: Process
+      try:
+        let args = @[
+          serverIndex,
+          "-1",
+          "--welcome-screen",
+          "--port", "12346",
+          "--frontend-socket-port", "5001",
+          "--frontend-socket-parameters", "",
+          "--backend-socket-port", "5001",
+          "--caller-pid", "0",
+          "--idle-timeout-ms", "-1"
+        ]
+        p = startProcess(
+          node,
+          workingDir = codetracerInstallDir,
+          args = args,
+          options = {poStdErrToStdOut})
+        # wait slightly longer than the previous timeout window; should still be running
+        let (exitedEarly, _) = waitForExitWithin(p, 2_000)
+        check exitedEarly == false
+      finally:
+        ensureProcessStopped(p)
 
   test "silent connection exits after inactivity window":
     if not available:
+      # The `else` is load-bearing. `std/unittest`'s `skip()` MARKS this case
+      # skipped; it does NOT leave the body. Without the arm below, every one
+      # of these tests fell through into `startProcess` on a `node` that is not
+      # there and reported a FAILURE where it meant to report a skip -- six of
+      # them, measured. `return` is not an option: unittest rejects it inside a
+      # test body ("'return' not allowed here").
       skip()
-    var host: Process
-    var client: Process
-    try:
-      let hostArgs = @[
-        serverIndex,
-        "-1",
-        "--welcome-screen",
-        "--port", "12347",
-        "--frontend-socket-port", "5002",
-        "--frontend-socket-parameters", "",
-        "--backend-socket-port", "5002",
-        "--caller-pid", "0",
-        "--idle-timeout-ms", "1200"
-      ]
-      host = startProcess(
-        node,
-        workingDir = codetracerInstallDir,
-        args = hostArgs,
-        options = {poStdErrToStdOut})
+    else:
+      var host: Process
+      var client: Process
+      try:
+        let hostArgs = @[
+          serverIndex,
+          "-1",
+          "--welcome-screen",
+          "--port", "12347",
+          "--frontend-socket-port", "5002",
+          "--frontend-socket-parameters", "",
+          "--backend-socket-port", "5002",
+          "--caller-pid", "0",
+          "--idle-timeout-ms", "1200"
+        ]
+        host = startProcess(
+          node,
+          workingDir = codetracerInstallDir,
+          args = hostArgs,
+          options = {poStdErrToStdOut})
 
-      # allow the host to start before connecting
-      sleep(300)
+        # allow the host to start before connecting
+        sleep(300)
 
-      let clientScript = """
+        let clientScript = """
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true});
 setTimeout(() => process.exit(0), 4000);
 """
-      client = startProcess(
-        node,
-        args = @["-e", clientScript],
-        options = {poStdErrToStdOut})
+        client = startProcess(
+          node,
+          args = @["-e", clientScript],
+          options = {poStdErrToStdOut})
 
-      # Host should exit due to inactivity despite the connected socket.
-      let (exited, code) = waitForExitWithin(host, 4_000)
-      check exited
-      check code == 0
-    finally:
-      ensureProcessStopped(client)
-      ensureProcessStopped(host)
+        # Host should exit due to inactivity despite the connected socket.
+        let (exited, code) = waitForExitWithin(host, 4_000)
+        check exited
+        check code == 0
+      finally:
+        ensureProcessStopped(client)
+        ensureProcessStopped(host)
 
   test "active connection activity prevents timeout":
     if not available:
+      # The `else` is load-bearing. `std/unittest`'s `skip()` MARKS this case
+      # skipped; it does NOT leave the body. Without the arm below, every one
+      # of these tests fell through into `startProcess` on a `node` that is not
+      # there and reported a FAILURE where it meant to report a skip -- six of
+      # them, measured. `return` is not an option: unittest rejects it inside a
+      # test body ("'return' not allowed here").
       skip()
-    var host: Process
-    var client: Process
-    try:
-      let hostArgs = @[
-        serverIndex,
-        "-1",
-        "--welcome-screen",
-        "--port", "12349",
-        "--frontend-socket-port", "5004",
-        "--frontend-socket-parameters", "",
-        "--backend-socket-port", "5004",
-        "--caller-pid", "0",
-        "--idle-timeout-ms", "3000"
-      ]
-      host = startProcess(
-        node,
-        workingDir = codetracerInstallDir,
-        args = hostArgs,
-        options = {poStdErrToStdOut})
+    else:
+      var host: Process
+      var client: Process
+      try:
+        let hostArgs = @[
+          serverIndex,
+          "-1",
+          "--welcome-screen",
+          "--port", "12349",
+          "--frontend-socket-port", "5004",
+          "--frontend-socket-parameters", "",
+          "--backend-socket-port", "5004",
+          "--caller-pid", "0",
+          "--idle-timeout-ms", "3000"
+        ]
+        host = startProcess(
+          node,
+          workingDir = codetracerInstallDir,
+          args = hostArgs,
+          options = {poStdErrToStdOut})
 
-      # give the host a moment to bind ports
-      sleep(400)
+        # give the host a moment to bind ports
+        sleep(400)
 
-      let clientScript = """
+        let clientScript = """
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
@@ -168,47 +202,54 @@ socket.on('connect', () => {
   }, 150);
 });
 """
-      client = startProcess(
-        node,
-        args = @["-e", clientScript],
-        options = {poStdErrToStdOut})
+        client = startProcess(
+          node,
+          args = @["-e", clientScript],
+          options = {poStdErrToStdOut})
 
-      let (clientExited, _) = waitForExitWithin(client, 2_000)
-      check clientExited
+        let (clientExited, _) = waitForExitWithin(client, 2_000)
+        check clientExited
 
-      # Host should still be alive because activity kept resetting idle timer.
-      let (hostExited, _) = waitForExitWithin(host, 2_500)
-      check hostExited == false
-    finally:
-      ensureProcessStopped(client)
-      ensureProcessStopped(host)
+        # Host should still be alive because activity kept resetting idle timer.
+        let (hostExited, _) = waitForExitWithin(host, 2_500)
+        check hostExited == false
+      finally:
+        ensureProcessStopped(client)
+        ensureProcessStopped(host)
 
   test "reconnect resets idle timer":
     if not available:
+      # The `else` is load-bearing. `std/unittest`'s `skip()` MARKS this case
+      # skipped; it does NOT leave the body. Without the arm below, every one
+      # of these tests fell through into `startProcess` on a `node` that is not
+      # there and reported a FAILURE where it meant to report a skip -- six of
+      # them, measured. `return` is not an option: unittest rejects it inside a
+      # test body ("'return' not allowed here").
       skip()
-    var host: Process
-    var client1: Process
-    var client2: Process
-    try:
-      let hostArgs = @[
-        serverIndex,
-        "-1",
-        "--welcome-screen",
-        "--port", "12348",
-        "--frontend-socket-port", "5003",
-        "--frontend-socket-parameters", "",
-        "--backend-socket-port", "5003",
-        "--caller-pid", "0",
-        "--idle-timeout-ms", "1500"
-      ]
-      host = startProcess(
-        node,
-        workingDir = codetracerInstallDir,
-        args = hostArgs,
-        options = {poStdErrToStdOut})
+    else:
+      var host: Process
+      var client1: Process
+      var client2: Process
+      try:
+        let hostArgs = @[
+          serverIndex,
+          "-1",
+          "--welcome-screen",
+          "--port", "12348",
+          "--frontend-socket-port", "5003",
+          "--frontend-socket-parameters", "",
+          "--backend-socket-port", "5003",
+          "--caller-pid", "0",
+          "--idle-timeout-ms", "1500"
+        ]
+        host = startProcess(
+          node,
+          workingDir = codetracerInstallDir,
+          args = hostArgs,
+          options = {poStdErrToStdOut})
 
-      # connect first socket and send one activity ping, then exit
-      let clientScript1 = """
+        # connect first socket and send one activity ping, then exit
+        let clientScript1 = """
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
@@ -216,17 +257,17 @@ socket.on('connect', () => {
   setTimeout(() => process.exit(0), 200);
 });
 """
-      client1 = startProcess(
-        node,
-        args = @["-e", clientScript1],
-        options = {poStdErrToStdOut})
+        client1 = startProcess(
+          node,
+          args = @["-e", clientScript1],
+          options = {poStdErrToStdOut})
 
-      discard waitForExitWithin(client1, 2_000)
+        discard waitForExitWithin(client1, 2_000)
 
-      # wait near the timeout but reconnect before it fires
-      sleep(900)
+        # wait near the timeout but reconnect before it fires
+        sleep(900)
 
-      let clientScript2 = """
+        let clientScript2 = """
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
@@ -234,48 +275,55 @@ socket.on('connect', () => {
   setTimeout(() => process.exit(0), 200);
 });
 """
-      client2 = startProcess(
-        node,
-        args = @["-e", clientScript2],
-        options = {poStdErrToStdOut})
+        client2 = startProcess(
+          node,
+          args = @["-e", clientScript2],
+          options = {poStdErrToStdOut})
 
-      discard waitForExitWithin(client2, 2_000)
+        discard waitForExitWithin(client2, 2_000)
 
-      # Host should survive past the original 1.5s window because reconnect reset the timer.
-      let (hostExited, _) = waitForExitWithin(host, 1_200)
-      check hostExited == false
-    finally:
-      ensureProcessStopped(client1)
-      ensureProcessStopped(client2)
-      ensureProcessStopped(host)
+        # Host should survive past the original 1.5s window because reconnect reset the timer.
+        let (hostExited, _) = waitForExitWithin(host, 1_200)
+        check hostExited == false
+      finally:
+        ensureProcessStopped(client1)
+        ensureProcessStopped(client2)
+        ensureProcessStopped(host)
 
   test "disconnect starts no-connection timer (no early exit)":
     if not available:
+      # The `else` is load-bearing. `std/unittest`'s `skip()` MARKS this case
+      # skipped; it does NOT leave the body. Without the arm below, every one
+      # of these tests fell through into `startProcess` on a `node` that is not
+      # there and reported a FAILURE where it meant to report a skip -- six of
+      # them, measured. `return` is not an option: unittest rejects it inside a
+      # test body ("'return' not allowed here").
       skip()
-    var host: Process
-    var client: Process
-    try:
-      let hostArgs = @[
-        serverIndex,
-        "-1",
-        "--welcome-screen",
-        "--port", "12350",
-        "--frontend-socket-port", "5005",
-        "--frontend-socket-parameters", "",
-        "--backend-socket-port", "5005",
-        "--caller-pid", "0",
-        "--idle-timeout-ms", "1500"
-      ]
-      host = startProcess(
-        node,
-        workingDir = codetracerInstallDir,
-        args = hostArgs,
-        options = {poStdErrToStdOut})
+    else:
+      var host: Process
+      var client: Process
+      try:
+        let hostArgs = @[
+          serverIndex,
+          "-1",
+          "--welcome-screen",
+          "--port", "12350",
+          "--frontend-socket-port", "5005",
+          "--frontend-socket-parameters", "",
+          "--backend-socket-port", "5005",
+          "--caller-pid", "0",
+          "--idle-timeout-ms", "1500"
+        ]
+        host = startProcess(
+          node,
+          workingDir = codetracerInstallDir,
+          args = hostArgs,
+          options = {poStdErrToStdOut})
 
-      # wait for the host to start listening
-      sleep(400)
+        # wait for the host to start listening
+        sleep(400)
 
-      let clientScript = """
+        let clientScript = """
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
@@ -287,21 +335,21 @@ socket.on('connect', () => {
   }, 2000);
 });
 """
-      client = startProcess(
-        node,
-        args = @["-e", clientScript],
-        options = {poStdErrToStdOut})
+        client = startProcess(
+          node,
+          args = @["-e", clientScript],
+          options = {poStdErrToStdOut})
 
-      discard waitForExitWithin(client, 3_000)
+        discard waitForExitWithin(client, 3_000)
 
-      # Host should not exit immediately after the long-lived connection closes.
-      let (exitedEarly, _) = waitForExitWithin(host, 900)
-      check exitedEarly == false
+        # Host should not exit immediately after the long-lived connection closes.
+        let (exitedEarly, _) = waitForExitWithin(host, 900)
+        check exitedEarly == false
 
-      # It should exit cleanly once the no-connection window elapses.
-      let (exited, code) = waitForExitWithin(host, 3_000)
-      check exited
-      check code == 0
-    finally:
-      ensureProcessStopped(client)
-      ensureProcessStopped(host)
+        # It should exit cleanly once the no-connection window elapses.
+        let (exited, code) = waitForExitWithin(host, 3_000)
+        check exited
+        check code == 0
+      finally:
+        ensureProcessStopped(client)
+        ensureProcessStopped(host)

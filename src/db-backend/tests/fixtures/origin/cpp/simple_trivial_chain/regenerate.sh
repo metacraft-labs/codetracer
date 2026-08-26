@@ -3,9 +3,8 @@
 # Regenerate the cpp/simple_trivial_chain Value Origin fixture (M11).
 #
 # Compiles main.cpp with -O0 -g and drives ct-native-replay to produce
-# an RR-backed recording. The recorder's `record` subcommand still uses
-# the legacy `ct-rr-support` name on some installs; the
-# ${RECORDER} env var lets CI override.
+# an RR-backed recording. The ${RECORDER} env var lets CI override which
+# binary is used.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"

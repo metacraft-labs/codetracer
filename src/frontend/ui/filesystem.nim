@@ -49,9 +49,9 @@ from ../viewmodel/store/types as vmtypes import
   FilesystemEntryNode, FilesystemDiffEntry, FilesystemDiffClass,
   fdcNone, fdcAdded, fdcChanged, fdcDeleted
 from ../viewmodel/viewmodels/filesystem_vm import
-  FilesystemVM, createFilesystemVM, FilesystemDeepReviewFile,
+  FilesystemVM, createFilesystemVM,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
-  setExpandedPaths, isExpanded, setDiffEntries, setDeepReview, emptyEntry
+  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_filesystem_view import

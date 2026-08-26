@@ -2,7 +2,16 @@ import type { Locator, Page } from "@playwright/test";
 
 const DEFAULT_CONTAINER_SELECTOR = "#context-menu-container";
 const DEFAULT_ITEM_SELECTOR = ".context-menu-item";
-const DEFAULT_HINT_SELECTOR = ".context-menu-hint";
+// The CodeTracer context menu is built by
+// `src/frontend/viewmodel/views/context_menu_bridge.nim`, which wraps the
+// action name in `.ct-menu-item-label` and the keyboard-shortcut hint in
+// `.ct-menu-item-sublabel`.  The previous defaults (`.context-menu-hint`)
+// matched nothing in that markup, so `getEntries()` silently folded the hint
+// into the action text — e.g. "Add value to scratchpad\nCTRL+<click on
+// value>" for the flow-value menu, which is the only CodeTracer menu that
+// declares hints (`ui/flow.nim:1535,1544`, `ui/editor.nim:1418`).
+const DEFAULT_LABEL_SELECTOR = ".ct-menu-item-label";
+const DEFAULT_HINT_SELECTOR = ".ct-menu-item-sublabel";
 
 export interface ContextMenuEntry {
   text: string;
@@ -12,6 +21,8 @@ export interface ContextMenuEntry {
 export interface ContextMenuSelectors {
   container?: string;
   item?: string;
+  /** Element holding just the action name, when the markup provides one. */
+  label?: string;
   hint?: string;
 }
 
@@ -24,12 +35,14 @@ export class ContextMenu {
   private readonly page: Page;
   private readonly containerSelector: string;
   private readonly itemSelector: string;
+  private readonly labelSelector: string;
   private readonly hintSelector: string;
 
   constructor(page: Page, selectors?: ContextMenuSelectors) {
     this.page = page;
     this.containerSelector = selectors?.container ?? DEFAULT_CONTAINER_SELECTOR;
     this.itemSelector = selectors?.item ?? DEFAULT_ITEM_SELECTOR;
+    this.labelSelector = selectors?.label ?? DEFAULT_LABEL_SELECTOR;
     this.hintSelector = selectors?.hint ?? DEFAULT_HINT_SELECTOR;
   }
 
@@ -49,8 +62,10 @@ export class ContextMenu {
    * Retrieves the menu entries currently displayed.
    *
    * Context menu items may contain a hint element (e.g., keyboard shortcut)
-   * nested inside the item. Since innerText() returns the combined text of all
-   * child elements, we subtract the hint text to get just the action name.
+   * nested inside the item. `innerText()` returns the combined text of all
+   * child elements, so the action name is read from the dedicated label
+   * element when the markup has one, and otherwise recovered by subtracting
+   * the hint text.
    */
   async getEntries(): Promise<ContextMenuEntry[]> {
     const items = await this.container.locator(this.itemSelector).all();
@@ -68,11 +83,17 @@ export class ContextMenu {
         ? (await hintLocator.first().innerText()).trim()
         : "";
 
-      let actionText = fullText;
-      if (hint.length > 0) {
-        const hintIndex = actionText.indexOf(hint);
-        if (hintIndex >= 0) {
-          actionText = actionText.substring(0, hintIndex).trim();
+      const labelLocator = item.locator(this.labelSelector);
+      let actionText: string;
+      if ((await labelLocator.count()) > 0) {
+        actionText = (await labelLocator.first().innerText()).trim();
+      } else {
+        actionText = fullText;
+        if (hint.length > 0) {
+          const hintIndex = actionText.indexOf(hint);
+          if (hintIndex >= 0) {
+            actionText = actionText.substring(0, hintIndex).trim();
+          }
         }
       }
 

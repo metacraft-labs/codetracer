@@ -522,10 +522,10 @@ $upstream = ((Invoke-WebRequest -Uri $sidecarUrl -UseBasicParsing).Content -spli
 if ($calculated -ne $upstream) { throw "Nim hash mismatch" }
 ```
 
-## Windows note: ct-rr-support and UI tests
+## Windows note: ct-native-replay and UI tests
 
-- `ct-rr-support` (from sibling repo
-  `../codetracer-rr-backend`) can now be compiled on Windows
+- `ct-native-replay` (from sibling repo
+  `../codetracer-native-backend`) can now be compiled on Windows
   in a compile-only mode.
 - Runtime RR replay/record behavior is still Linux-only, so
   Windows flows that require active RR replay are expected to
@@ -544,7 +544,7 @@ if ($calculated -ne $upstream) { throw "Nim hash mismatch" }
   folder (for example `src/tui/trace`) while investigating
   the Noir hang.
 - Windows-native time-travel backend is now implemented
-  behind `DebuggerBackend` via `ct-rr-support` using
+  behind `DebuggerBackend` via `ct-native-replay` using
   Microsoft TTD + dbgeng.
   - Enable native dbgeng control with
     `CT_TTD_CONTROL_MODE=dbgeng` (optional: enforce
@@ -553,9 +553,9 @@ if ($calculated -ne $upstream) { throw "Nim hash mismatch" }
   - The Windows env scripts already export
     `WINDOWS_DIY_TTD_*`, `WINDOWS_DIY_CDB_EXE`, and
     `WINDOWS_DIY_DBGENG_DLL`; ensure those are available in
-    the shell that launches `ct-rr-support`.
+    the shell that launches `ct-native-replay`.
   - API surface reference lives in
-    `codetracer-rr-backend/docs/dbgeng-api-surface.md`
+    `codetracer-native-backend/docs/dbgeng-api-surface.md`
     alongside the implementation.
 
 ### ct-remote hash bump helper

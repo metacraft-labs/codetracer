@@ -12,6 +12,29 @@ const
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
   SVG_NAMESPACE            = cstring"http://www.w3.org/2000/svg"
 
+const CODE_FONT_FAMILY* = cstring"SpaceMono, monospace"
+  ## The face for every code surface in the app: the editors, the trace and
+  ## agent editors, and the unified diff.
+  ##
+  ## Stated once because Monaco does not inherit it.  Each editor's font is an
+  ## option, not CSS — Monaco measures the face to lay out its own gutter and
+  ## then writes `font-family` inline onto its layers, so a stylesheet rule on
+  ## the host cannot reach it and any editor that omits the option silently
+  ## falls back to Monaco's own default (Menlo/Courier New), which is how the
+  ## unified diff came to be rendered in a different face from the editor
+  ## beside it.
+
+proc codeFontFamily*(ui: Components): cstring =
+  ## The code face to hand Monaco: whatever the user picked, else the default.
+  ##
+  ## Every editor goes through here rather than naming a face itself, so a font
+  ## chosen from the menus only has to be written to `ui.codeFontFamily` to take
+  ## effect everywhere.
+  if ui.isNil or ui.codeFontFamily.isNil or ui.codeFontFamily == cstring"":
+    CODE_FONT_FAMILY
+  else:
+    ui.codeFontFamily
+
 proc monacoLineNumbersMinChars*(lineCount: int): int =
   ## Reserve enough width for the largest line number currently visible in the
   ## editor model. We keep one extra character because the custom HTML gutter
@@ -300,6 +323,17 @@ proc sourceRevisionHasIdentity*(location: types.Location): bool =
     (not location.sourceDigest.isNil and location.sourceDigest.len > 0) or
     (not location.path.isNil and location.path.len > 0 and location.line > 0)
 
+proc isAbsolutePath*(path: string): bool =
+  ## POSIX absolute, UNC, or a Windows drive-letter path (``C:\`` / ``C:/``).
+  ##
+  ## Used wherever a path of unknown provenance reaches the editor: git, for
+  ## instance, reports repository-relative paths, and those must be resolved
+  ## against the work-tree root before a tab can be opened for them.
+  path.len > 0 and
+    (path[0] == '/' or path[0] == '\\' or
+     (path.len >= 3 and path[1] == ':' and
+      (path[2] == '\\' or path[2] == '/')))
+
 proc editorTabPath*(path: cstring; editorView: EditorView): cstring =
   if editorView in {ViewSource, ViewTargetSource}:
     canonicalSourceRevisionPath(path)
@@ -558,10 +592,22 @@ proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
     forceRedraw: true,)
   data.registerComponent(result, Content.Filesystem)
 
+proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
+  ## One unified-diff editor tab.  ``diffTarget`` is filled in by
+  ## ``openLayoutTab`` from the layout path the request carried, which is also
+  ## the tab's reuse key.
+  result = UnifiedDiffComponent(
+    id: id,
+    diffTarget: cstring"",
+    reviewBacked: false,
+    initialized: false,
+    editorInitialized: false,
+    lineLabels: @[])
+  data.registerComponent(result, Content.UnifiedDiff)
+
 proc makeVCSComponent*(data: Data, id: int): VCSComponent =
   result = VCSComponent(
     id: id,
-    diffTarget: cstring"",
     currentBranch: cstring"",
     branches: @[],
     commits: @[],
@@ -647,7 +693,9 @@ proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): F
     lineGroups: JsAssoc[int, Group]{},
     status: FlowUpdateState(kind: FlowWaitingForStart),
     statusWidget: nil,
-    sliderWidgets: JsAssoc[int, js]{},
+    # `sliderWidgets` used to be initialised here too.  Nothing ever wrote to
+    # it, so every reader was an unconditional no-op; removed with the #562
+    # fix — see the note at the sibling construction site in `ui/editor.nim`.
     lineWidgets: JsAssoc[int, js]{},
     multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
     stepNodes: JsAssoc[int, kdom.Node]{},
@@ -664,7 +712,8 @@ proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): F
     maxWidth: 0,
     modalValueComponent: JsAssoc[cstring, ValueComponent]{},
     valueMode: BeforeValueMode,
-    position: position
+    position: position,
+    pendingRenderTimerId: -1
   )
 
 proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: cstring = "", line: int = 0, inExtension: bool = false, traceId: int = 0): TraceComponent = # editorUI: EditorViewComponent, name: cstring,
@@ -832,29 +881,6 @@ proc makeStepListComponent*(data: Data, id: int): StepListComponent =
     service: data.services.flow)
   data.registerComponent(result, Content.StepList)
 
-proc makeDeepReviewComponent*(data: Data, id: int): DeepReviewComponent =
-  ## Create a new DeepReviewComponent.
-  ## The component is populated from ``data.startOptions.deepReview``.
-  ## When ``data.deepReviewActive`` is set (i.e. the standard GL layout
-  ## is used with separate filesystem/calltrace panels), the component
-  ## is marked as ``glEmbedded`` and defaults to Unified diff view so
-  ## it renders only the unified diff without duplicate sidebars.
-  let embedded = data.deepReviewActive
-  result = DeepReviewComponent(
-    id: id,
-    drData: data.startOptions.deepReview,
-    selectedFileIndex: 0,
-    selectedExecutionIndex: 0,
-    selectedIteration: 0,
-    editorInitialized: false,
-    currentDecorationIds: jsNull,
-    decorationCollection: jsNull,
-    fileContentCache: JsAssoc[cstring, cstring]{},
-    glEmbedded: embedded,
-    viewMode: if embedded: Unified else: FullFiles
-  )
-  data.registerComponent(result, Content.DeepReview)
-
 proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent =
   ## Create a new AgentWorkspaceComponent.
   ## The component starts with an empty file list and waits for DeepReview
@@ -937,27 +963,14 @@ proc makeVideoPlayerComponent*(data: Data, id: int): VideoPlayerComponent =
   data.registerComponent(result, Content.VideoPlayer)
 
 proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
-  ## Create a new AgentActivityDeepReviewComponent.
-  ## Starts with empty DeepReview data and waits for notifications from
-  ## the agent runtime to populate coverage, test results, and flow data.
-  result = AgentActivityDeepReviewComponent(
-    id: id,
-    sessionId: cstring"",
-    drSummary: ActivityDeepReviewSummary(
-      totalLinesCovered: 0,
-      totalLinesUncovered: 0,
-      coveragePercent: 0.0,
-      testsRun: 0,
-      testsPassed: 0,
-      testsFailed: 0,
-      functionsTraced: 0,
-      lastUpdatedMs: 0
-    ),
-    fileEntries: @[],
-    recentNotifications: @[],
-    testResults: @[],
-    expanded: false
-  )
+  ## Create the review's Agent Activity pillar pane.
+  ##
+  ## It has no state of its own since AA-1 deleted the DeepReview roll-up;
+  ## the factory survives so a layout persisted by an older build — the only
+  ## thing that hosts this content id, since no shipped layout declares it —
+  ## still constructs and renders an empty pane instead of raising out of
+  ## ``makeComponent``.
+  result = AgentActivityDeepReviewComponent(id: id)
   data.registerComponent(result, Content.AgentActivityDeepReview)
 
 data.ui = Components(
@@ -1008,7 +1021,6 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.StepList:        data.makeStepListComponent(id)
   of Content.LowLevelCode:    data.makeLowLevelCodeComponent(id)
   of Content.AgentActivity:   data.makeAgentActivityComponent(id)
-  of Content.DeepReview:      data.makeDeepReviewComponent(id)
   of Content.AgentWorkspace:  data.makeAgentWorkspaceComponent(id)
   of Content.CaptionBarProgress: data.makeCaptionBarProgressComponent(id)
   # Content.FrameViewer dispatch removed in M3 — see the comment above
@@ -1022,6 +1034,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.AgentActivityDeepReview: data.makeAgentActivityDeepReviewComponent(id)
   of Content.RequestPanel:    data.makeRequestPanelComponent(id)
   of Content.VCS:             data.makeVCSComponent(id)
+  of Content.UnifiedDiff:     data.makeUnifiedDiffComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")
@@ -1197,17 +1210,48 @@ proc openLayoutTab*(
   # If this panel lives in the auto-hide state (e.g. BUILD, PROBLEMS,
   # SEARCH RESULTS), show it via the auto-hide overlay instead of
   # trying to activate or create a GL tab.
+  #
+  # The match must be on the *document* the request names, not on the content
+  # kind: `Content.EditorView` has one instance per open file and a VCS diff tab
+  # one per target.  Matching on the kind alone meant that pinning a single
+  # editor made every later "open a file" request resolve to that one panel, so
+  # no other file could be opened again, and each request turned into a
+  # `showOverlay` toggle that rebuilt the auto-hide edge strip.  See
+  # `findPanelToRevealOnOpen` / `revealsPinnedPanel`.
   if not autoHideState.isNil:
-    let autoHidePanel = autoHideState.findPanelByContent(content)
+    let autoHidePanel = autoHideState.findPanelToRevealOnOpen(
+      content, isEditor, layoutPath)
     if not autoHidePanel.isNil:
-      showOverlay(autoHidePanel)
+      # `revealOverlay`, not `showOverlay`: an open request must never toggle a
+      # panel closed, and this path fires repeatedly (every debugger step
+      # re-opens the current source file).
+      revealOverlay(autoHidePanel)
       return
 
   var parent: GoldenContentItem
   let similarComponents = data.ui.componentMapping[content]
   let openSimilarComponentsTabs = data.ui.openComponentIds[content]
 
-  if content != Content.EditorView and
+  # Reuse rules, in two flavours.
+  #
+  # A panel asked for with `isEditor` is an editor-area *document* keyed by the
+  # thing it displays (the VCS panel's per-target diff tabs), so it is reused
+  # only when a tab for the SAME target is already open; anything else gets a
+  # new tab.  Every other panel kind is a singleton: asking for it while it is
+  # on screen just focuses it.
+  #
+  # Before this distinction existed the singleton rule was applied to VCS diff
+  # tabs too.  The docked VCS panel is component 0 and is always attached, so
+  # every `View Diff` click re-activated the already-active VCS panel and
+  # returned — silently, with no tab and no error (issues #561, #611).
+  if opensAsIndependentTab(content, isEditor):
+    for _, comp in data.ui.componentMapping[content]:
+      if not comp.isNil and not comp.layoutItem.isNil and
+        comp.independentTabPath == layoutPath and
+        isAttachedToLayout(comp.layoutItem, data.ui.layout):
+          comp.layoutItem.parent.setActiveContentItem(comp.layoutItem)
+          return
+  elif content != Content.EditorView and
     content != Content.AgentActivity and
     data.ui.componentMapping[content].len() > 0 and
     not data.ui.componentMapping[content][0].layoutItem.isNil and
@@ -1218,6 +1262,13 @@ proc openLayoutTab*(
           data.ui.componentMapping[content][0].layoutItem)
       return
 
+  # Group a new panel with an already-open panel of the same kind.
+  #
+  # An independent editor-area tab may only join another *independent* tab.
+  # Grouping it with the docked singleton would drop it into the sidebar stack
+  # the singleton lives in, which is precisely the placement `isEditor` asks us
+  # to avoid.
+  let wantsIndependentTab = opensAsIndependentTab(content, isEditor)
   var similarParent: GoldenContentItem = nil
   if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
     for i in countdown(openSimilarComponentsTabs.len - 1, 0):
@@ -1225,6 +1276,8 @@ proc openLayoutTab*(
       if similarComponents.hasKey(similarId):
         let comp = similarComponents[similarId]
         if not comp.isNil and not comp.layoutItem.isNil and isAttachedToLayout(comp.layoutItem, data.ui.layout):
+          if wantsIndependentTab and comp.independentTabPath.len == 0:
+            continue
           similarParent = cast[GoldenContentItem](comp.layoutItem.parent)
           break
 
@@ -1232,7 +1285,7 @@ proc openLayoutTab*(
     parent = similarParent
   else:
     let hasOpenEditors = data.hasActiveOpenEditors()
-    if (content == Content.EditorView or content == Content.NoInfo or (content == Content.VCS and isEditor)) and
+    if (content == Content.EditorView or content == Content.NoInfo or wantsIndependentTab) and
       not data.ui.editorPanels[EditorView.ViewSource].isNil and
       hasOpenEditors:
       let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
@@ -1256,9 +1309,10 @@ proc openLayoutTab*(
           data.generateId(content)
 
       let comp = data.makeComponent(content, newId, layoutPath)
-      if content == Content.VCS:
-        let vcsComp = cast[VCSComponent](comp)
-        vcsComp.diffTarget = layoutPath
+      if content == Content.UnifiedDiff:
+        # The tab's identity: `independentTabPath` reads it back so a second
+        # request for the same diff focuses this tab (#611).
+        cast[UnifiedDiffComponent](comp).diffTarget = layoutPath
       comp
     else:
       data.ui.editors[layoutPath]
@@ -1548,9 +1602,10 @@ proc openTab*(
   if editorView in {EditorView.ViewSource, EditorView.ViewTargetSource} and
       not data.services.editor.open.hasKey(tabName):
     let nameText = $name
-    if nameText.len > 0 and not nameText.startsWith("/") and
-        not (nameText.len >= 3 and nameText[1] == ':' and
-             (nameText[2] == '\\' or nameText[2] == '/')):
+    if nameText.len > 0 and not isAbsolutePath(nameText):
+      # Last-resort rescue for a relative path: match it against the tail of an
+      # already-open tab.  Callers should resolve the path themselves — this
+      # cannot find a file that is not open yet.
       let suffix = "/" & nameText
       for openName, info in data.services.editor.open:
         let openText = $openName

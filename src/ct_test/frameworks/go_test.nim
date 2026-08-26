@@ -1,3 +1,9 @@
+## NOT-A-TEST-LANE-FILE: this is the ct-test PROVIDER IMPLEMENTATION for the
+## `go test` framework — the module is named after the framework it drives, so
+## it collides with the `*_test.nim` naming rule while declaring no
+## `suite`/`test` blocks of its own. Its behaviour is asserted by
+## `src/ct_test/m11_native_languages_test.nim` (the `ct-providers` lane).
+
 import std/[algorithm, options, os, sequtils, strutils, tables]
 
 import ../contracts
@@ -42,7 +48,7 @@ proc hasGoProject*(projectRoot: string): bool =
 proc goFiles*(projectRoot: string): seq[string] =
   if not dirExists(projectRoot):
     return @[]
-  for path in walkDirRec(projectRoot):
+  for path in walkWorkspaceFiles(projectRoot):
     let rel = normalizedRelative(projectRoot, path)
     if rel.startsWith("vendor/") or rel.startsWith(".git/"):
       continue

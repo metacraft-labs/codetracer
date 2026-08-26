@@ -1,4 +1,13 @@
-## test_real_backend.nim
+## real_backend_test.nim
+##
+## HISTORY, because this file had a twin for three months: `4e5c20c8`
+## ("move all GUI tests to src/tests/gui/") left BOTH `real_backend.nim` and
+## `real_backend_test.nim` in this directory. Only the `_test` name is globbed
+## by a lane, so the twin drifted unrun -- it received `31812021`'s
+## `trace-`-prefix fix while this copy kept the stale filter, and this copy
+## received `e3bb3de7`'s dual-backend work that the twin never saw. Both edits
+## are merged here and the twin is deleted; `ci/test/test-lane-coverage.sh`'s
+## content-based arm is what stops the next unrun twin from lasting that long.
 ##
 ## Integration tests for the HeadlessDebugSession — exercises the full
 ## ViewModel layer against a real replay-server backend over DAP stdio.
@@ -33,7 +42,8 @@
 ## - For Python/Noir tests: ``ct`` binary must be built and recorders installed
 ##
 ## Compile and run:
-##   nim c -r src/frontend/viewmodel/tests/test_real_backend.nim
+##   just test-vm-gui-headless   (or: nim c -r --path:src/frontend/viewmodel \
+##                                src/tests/gui/tests/integration/real_backend_test.nim)
 
 import std/[json, os, unittest, strutils]
 import isonim/core/[signals, computation]
@@ -53,7 +63,14 @@ proc findReplayServer(): string =
 
   # Walk up from the test file to the repo root and look in build-debug.
   let thisFile = currentSourcePath()
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir
+  # SIX `parentDir`s, not five: this file lives at
+  # src/tests/gui/tests/integration/, so five levels up lands on
+  # `<repo>/src` and every path built from it gained a doubled `src/`
+  # (`.../src/src/build-debug/...`). The file's own header still names
+  # its old home under src/frontend/viewmodel/tests/ — it was moved one
+  # level deeper and the arithmetic was never updated, which no one saw
+  # because no lane compiled or ran this file.
+  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
   let candidate = repoRoot / "src" / "build-debug" / "bin" / "replay-server"
   if fileExists(candidate):
     return candidate
@@ -71,7 +88,14 @@ proc findTestTrace(): string =
     return envTrace
 
   let thisFile = currentSourcePath()
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir
+  # SIX `parentDir`s, not five: this file lives at
+  # src/tests/gui/tests/integration/, so five levels up lands on
+  # `<repo>/src` and every path built from it gained a doubled `src/`
+  # (`.../src/src/build-debug/...`). The file's own header still names
+  # its old home under src/frontend/viewmodel/tests/ — it was moved one
+  # level deeper and the arithmetic was never updated, which no one saw
+  # because no lane compiled or ran this file.
+  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
   let candidate = repoRoot / "src" / "db-backend" / "trace"
   if dirExists(candidate):
     return candidate
@@ -602,15 +626,21 @@ proc findExistingTrace(programPattern: string): string =
   for kind, path in walkDir(baseDir):
     if kind != pcDir:
       continue
-    let dirname = path.extractFilename()
-    if not dirname.startsWith("trace-"):
-      continue
+    # No `trace-` prefix filter here.  Commit 31812021 removed one from this
+    # file's twin because recordings stopped being named `trace-*` when M-REC-8
+    # moved them to UUIDv7 recording ids -- with the filter in place this proc
+    # matched nothing at all.  The fix never reached this copy, because this
+    # copy was the one no lane ran.
     if not isUsableTraceDir(path):
       continue
     # M-REC-1.5: trace metadata lives in the CTFS `meta.dat` inside
     # `trace.ct`.  This helper used to read it from sidecar JSONs;
-    # those are retired.  Fall back to the folder name for the
-    # pattern-match heuristic.
+    # those are retired.  As a lightweight fallback, derive the
+    # program name from the trace folder name (recorders name the
+    # directory after the program), which is sufficient for the
+    # pattern-match-only logic below.  A full meta.dat reader would
+    # be more robust but pulls in heavier dependencies than the test
+    # helper warrants today.
     let folderName = path.extractFilename()
     let program = folderName
     if programPattern in program:
@@ -649,7 +679,14 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
 
   # 3. Record a fresh trace.
   let thisFile = currentSourcePath()
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir
+  # SIX `parentDir`s, not five: this file lives at
+  # src/tests/gui/tests/integration/, so five levels up lands on
+  # `<repo>/src` and every path built from it gained a doubled `src/`
+  # (`.../src/src/build-debug/...`). The file's own header still names
+  # its old home under src/frontend/viewmodel/tests/ — it was moved one
+  # level deeper and the arithmetic was never updated, which no one saw
+  # because no lane compiled or ran this file.
+  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
   let programDir = repoRoot / "test-programs" / testProgram
   let programPath = if entryFile.len > 0: programDir / entryFile
                     else: programDir

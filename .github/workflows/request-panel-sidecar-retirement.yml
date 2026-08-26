@@ -46,6 +46,19 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# Collapse superseded pull-request runs only.
+#
+# `github.head_ref` is set on `pull_request` and empty everywhere else, so PR
+# runs group per source branch and a new push cancels the run it superseded.
+# Pushes to `main`/`dev`/`stable`, the nightly cron and manual dispatches fall
+# through to `github.run_id`, which is unique per run: each gets its own group
+# and is never cancelled. That matters here -- this workflow is the standing
+# proof that no recorder writes a sidecar manifest, so a nightly result is a
+# data point that must not be discarded because a PR happened to be busy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
@@ -56,10 +69,10 @@ jobs:
     name: No recorder writes sidecar manifests (6 recorders, 6 live servers)
     steps:
       - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: ci_token
+        uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -67,21 +80,21 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup isonim siblings
         # `test-no-sidecar-manifests` depends on `vm-test-prereqs`, which runs
         # scripts/build-tailwind.sh against isonim's style extractor.
         uses: ./.github/actions/setup-isonim-siblings
         with:
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # The six recorder siblings, cloned into the workspace-sibling layout
       # `workspaceRoot() / lang.recorderRepo` resolves (see
@@ -96,7 +109,7 @@ jobs:
           repo: metacraft-labs/codetracer-python-recorder
           ref: stable
           path: ${{ github.workspace }}/../codetracer-python-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-ruby-recorder sibling
@@ -105,7 +118,7 @@ jobs:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-php-recorder sibling
@@ -114,7 +127,7 @@ jobs:
           repo: metacraft-labs/codetracer-php-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-php-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-beam-recorder sibling
@@ -123,7 +136,7 @@ jobs:
           repo: metacraft-labs/codetracer-beam-recorder
           ref: main
           path: ${{ github.workspace }}/../codetracer-beam-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-js-recorder sibling
@@ -132,7 +145,7 @@ jobs:
           repo: metacraft-labs/codetracer-js-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-native-recorder sibling
@@ -141,7 +154,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Allow direnv in the cloned recorder siblings

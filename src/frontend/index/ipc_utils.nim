@@ -1,6 +1,7 @@
 import
-  std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
+  std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
+  review_dataset,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -8,6 +9,110 @@ import
   ../../common/[ ct_logging, paths ]
 
 var Object {.importc, nodecl.}: JsObject
+
+proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
+
+proc jsEmptyArray: JsObject {.importjs: "([])".}
+  ## Return a fresh empty JS array.  Used to satisfy ``nimCopy``'s
+  ## ``.length`` read when the renderer deserializes ``seq[SearchResult]``
+  ## — without this, the ``customFields`` field arrives as ``undefined``
+  ## and the copy crashes with "Cannot read properties of undefined
+  ## (reading 'length')``.
+
+proc onSearchProgram*(sender: js, response: cstring) {.async.} =
+  ## Handle ``CODETRACER::search-program`` from the renderer.
+  ##
+  ## Searches exactly the source folders shown in the Files panel.
+  ## ``sourceFoldersFromTracePaths`` returns the same roots the Files panel
+  ## filesystem tree uses, so the search scope matches what the user sees —
+  ## e.g. only ``ruby_space_ship/`` for a Ruby trace rather than the wider
+  ## ``examples/`` parent directory.
+  ##
+  ## Only folders that actually exist on disk are searched; trace-internal
+  ## paths that map into a materialized ``files/`` tree are resolved to that
+  ## tree as a fallback.
+  let query = $response
+  if query.len == 0:
+    return
+
+  let escapedQuery = query.replace("'", "'\\''")
+
+  var searchRoot = ""
+  # When we search inside the materialized files/ tree, rg returns paths like
+  # <outputFolder>/files/home/user/project/foo.rb.  We strip this prefix so
+  # the renderer receives the original on-disk path and opens the real file
+  # rather than the trace-internal copy.
+  var materialisedFilesPrefix = ""
+
+  if not data.trace.isNil:
+    if data.trace.imported:
+      # Imported (recorder) traces materialize source files into the trace
+      # output's files/ subdirectory.  This is exactly what the Files panel
+      # shows, so searching it gives the right scope without touching the
+      # wider project tree or the codetracer repo root.
+      let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
+      if fsExistsSync(cstring(filesRoot)):
+        searchRoot = filesRoot
+        materialisedFilesPrefix = filesRoot
+
+    if searchRoot.len == 0:
+      # Live trace (or imported trace with no materialized files/):
+      # use sourceFoldersFromTracePaths, which returns the same roots the
+      # Files panel filesystem tree uses.
+      let sourceFolders = await sourceFoldersFromTracePaths(data.trace)
+      for f in sourceFolders:
+        let s = $f
+        if s.len > 0 and fsExistsSync(cstring(s)):
+          searchRoot = s
+          break
+
+  if searchRoot.len == 0:
+    infoPrint "onSearchProgram: no search root for query: ", query
+    var emptyBatch: seq[JsObject] = @[]
+    mainWindow.webContents.send "CODETRACER::search-results-updated", emptyBatch.toJs
+    return
+
+  let escapedRoot = searchRoot.replace("'", "'\\''")
+  let rgCmd = cstring(&"rg -n -F -i -H --no-heading -- '{escapedQuery}' '{escapedRoot}'")
+  infoPrint "onSearchProgram: rg query=", query, " root=", searchRoot
+
+  # rg exits with code 1 for no matches — that is not an error.
+  let (stdoutData, _, _) = await childProcessExec(rgCmd)
+
+  let lines = ($stdoutData).splitLines()
+  var batch: seq[JsObject] = @[]
+  for rawLine in lines:
+    if rawLine.len == 0:
+      continue
+    # rg -H --no-heading output:  path:linenum:text
+    # Paths on Linux do not contain colons, so the first two colons delimit.
+    let colonIdx1 = rawLine.find(':')
+    if colonIdx1 < 0:
+      continue
+    let colonIdx2 = rawLine.find(':', colonIdx1 + 1)
+    if colonIdx2 < 0:
+      continue
+    var filePath = rawLine[0 ..< colonIdx1]
+    let lineStr  = rawLine[colonIdx1 + 1 ..< colonIdx2]
+    let lineText = rawLine[colonIdx2 + 1 .. ^1]
+    var lineNum = 0
+    try:
+      lineNum = parseInt(lineStr)
+    except:
+      continue
+    # Strip the materialized files/ prefix so the renderer opens the real
+    # source file (/home/user/project/foo.rb) instead of the trace copy
+    # (<outputFolder>/files/home/user/project/foo.rb).
+    if materialisedFilesPrefix.len > 0 and filePath.startsWith(materialisedFilesPrefix):
+      filePath = filePath[materialisedFilesPrefix.len .. ^1]
+    batch.add(js{text: cstring(lineText), path: cstring(filePath), line: lineNum, customFields: jsEmptyArray()})
+    if batch.len >= 50:
+      mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
+      batch = @[]
+
+  # Always send the final batch, even when empty, so the renderer can
+  # clear the loading shimmer when ripgrep finds no matches.
+  mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>
@@ -45,6 +150,10 @@ proc configureIpcMain* =
     "load-recent-transaction"
     "open-trace-dialog"
     "load-trace-file"
+    # AA-3 — read the review dataset an evidence tool call in the Agent
+    # Activity session feed names, and either report its shape or enter a
+    # review over it (`index/review_dataset.onOpenReviewDataset`).
+    "open-review-dataset"
     "record-from-launch"
     "record-with-launch-config"
     "init-edit-mode"
@@ -65,6 +174,13 @@ proc configureIpcMain* =
     "acp-cancel-prompt"
 
     "save-config"
+    # Auto-hide (pinned panel) state.  It is persisted separately from the
+    # GoldenLayout config because pinning a panel REMOVES it from the
+    # GoldenLayout tree — see `onSaveAutoHideState` in `index/window.nim`.
+    # `request-auto-hide-state` answers an `ipcRenderer.sendSync` from
+    # `ui/layout.nim`'s `initLayout`.
+    "save-auto-hide-state"
+    "request-auto-hide-state"
     "exit-error"
     "started"
     "open-tab"
@@ -101,6 +217,7 @@ proc configureIpcMain* =
     # update filesystem component
     "load-path-content"
     "open-devtools"
+    "search-program"
 
 
 proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =

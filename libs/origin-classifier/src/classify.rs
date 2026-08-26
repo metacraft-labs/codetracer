@@ -526,9 +526,20 @@ fn classify_universal(
         // `Unknown` for `pair = (11, 22)`, `xs = [a, b]`, etc., and
         // the chain would terminate with a confidence-0 hop even
         // though the source line clearly produced the value.
+        //
+        // `object` is tree-sitter-javascript's (and, by inheritance,
+        // tree-sitter-typescript's) node kind for an object literal —
+        // `const obj = { a: 11, b: 22 }`. It is the JS/TS analogue of
+        // Python's `dictionary`, and the destructuring fixtures under
+        // `src/db-backend/tests/fixtures/origin/javascript/` require
+        // it: their ANSWERS.md terminates the chain at
+        // `Computational({ a: 11, b: 22 })`. Omitting it made every JS
+        // object-literal chain terminate at `UnknownSource` with
+        // confidence 0 while the array-literal sibling classified fine.
         "tuple"
         | "list"
         | "array"
+        | "object"
         | "dictionary"
         | "set"
         | "list_expression"

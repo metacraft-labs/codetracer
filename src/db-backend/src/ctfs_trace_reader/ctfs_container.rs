@@ -900,11 +900,11 @@ impl CtfsReader {
     /// leaves, or the block a live producer has not finished, and a data block
     /// resolved there must be an error rather than content. The other two
     /// readers of this format in the workspace enforce exactly that (the Go
-    /// reader's `resolveDataBlock`, the Nim `readInternalFile`), and before
-    /// M58 this reader did not: on a truncated container it read a stream's
-    /// last, short data block straight out of the partial region and reported
-    /// success, so the three implementations gave different answers about the
-    /// same bytes.
+    /// reader's `resolveDataBlock`, the Nim `readInternalFile`), and this
+    /// reader did not until `whole_blocks_only` was added: on a truncated
+    /// container it read a stream's last, short data block straight out of the
+    /// partial region and reported success, so the three implementations gave
+    /// different answers about the same bytes.
     ///
     /// But bounding is only right for the reader that is claiming the range is
     /// *intact*. The tolerant reader exists precisely to serve the longest
@@ -1041,9 +1041,9 @@ impl CtfsReader {
     /// pointers as data blocks, because that would silently corrupt reads
     /// of properly-written containers.
     ///
-    /// # The §5d bound on the MAPPING blocks (M59)
+    /// # The §5d bound on the MAPPING blocks
     ///
-    /// M58 gave the strict path its bound on the **data** block and stopped
+    /// The strict path first gained its bound on the **data** block and stopped
     /// there, so §5d recorded this reader as "the same bound applied in two of
     /// three places": a mapping block sitting in the partial region was still
     /// readable here, because `read_mapping_entry` only checks that the 8 bytes
@@ -1858,7 +1858,7 @@ mod tests {
             );
         }
     }
-    /// M58: `CTFS-Binary-Format.md` §5d's bound on the DATA-block path.
+    /// `CTFS-Binary-Format.md` §5d's bound on the DATA-block path.
     ///
     /// A container is cut so one stream's last, short data block becomes the
     /// first *partial* block, with exactly its own bytes present — so the read
@@ -1866,7 +1866,7 @@ mod tests {
     /// container does not own. Before the bound, `read_file` returned all
     /// 12 388 bytes and reported success, while the workspace's other two
     /// readers of this format refused the same stream by name. Measured on the
-    /// same file, produced by the Nim writer, during M58.
+    /// same file, produced by the Nim writer.
     ///
     /// Delete the `whole_blocks_only` check in `read_range_inner` and this goes
     /// red.
@@ -1929,7 +1929,8 @@ mod tests {
         );
     }
 
-    /// M59: §5d's bound on the MAPPING-block paths, which M58 left out.
+    /// §5d's bound on the MAPPING-block paths, which the data-block bound
+    /// left out.
     ///
     /// §5d recorded this reader as applying "the same bound in two of three
     /// places": the data block was bounded, the mapping root and the mapping

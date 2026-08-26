@@ -7,7 +7,7 @@
 //! toolchain is installed:
 //!
 //! - `rr` binary on PATH (the RR record/replay engine).
-//! - `ct-native-replay` (formerly `ct-rr-support`) on PATH or
+//! - `ct-native-replay` on PATH or
 //!   discoverable via the standard test harness lookup.
 //! - A native compiler (`gcc`) so we can build a tiny C program to
 //!   record.
@@ -35,12 +35,12 @@ fn require_rr() -> Option<String> {
 }
 
 /// Narrow probe: does the native-backend's `ct-native-replay` binary
-/// resolve via the standard `find_ct_rr_support()` search order?
+/// resolve via the standard `find_ct_native_replay()` search order?
 fn require_ct_native_replay() -> Option<std::path::PathBuf> {
-    match test_harness::find_ct_rr_support() {
+    match test_harness::find_ct_native_replay() {
         Some(path) => Some(path),
         None => {
-            eprintln!("SKIPPED: ct-native-replay (formerly ct-rr-support) not on PATH or in standard dev locations");
+            eprintln!("SKIPPED: ct-native-replay not on PATH or in standard dev locations");
             None
         }
     }

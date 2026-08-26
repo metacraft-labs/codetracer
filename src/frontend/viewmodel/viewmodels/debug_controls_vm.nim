@@ -171,8 +171,10 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       let dbg = store.debugger.val
       dbg.status in {dsIdle}
 
-    # Derived: the debugger can step backward when it is idle and backward
-    # navigation is available. Backward stepping is available when:
+    # Derived: whether this session can navigate backward at all. The
+    # debugger must be idle, the session must not be tracking a live
+    # recording head, and backward navigation must be available — which
+    # it is when:
     #   * the backend explicitly advertised it (`supportsStepBack`, from the DAP
     #     initialize capabilities), or
     #   * the current position is past the start of the timeline
@@ -185,7 +187,24 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
     #     tracked for this backend (DB traces do not populate rr ticks). This
     #     keeps the reverse-step buttons enabled on completed Noir/DB replays,
     #     where they were wrongly disabled.
-    let canStepBackward = createMemo[bool] proc(): bool =
+    #
+    # ONE predicate, used by every backward control.
+    #
+    # It was two. `canStepBackward` grew the `completedReplay` clause
+    # above; `canReverseContinue` was left asking for `supportsStepBack`
+    # and nothing else, even though the change that introduced the clause
+    # names "reverse step-over / step-in / step-out / continue" as the
+    # buttons it was fixing. The result was the reported bug surviving in
+    # exactly one of the four: on a completed replay whose DAP
+    # `initialize` response lost the race with session-VM creation —
+    # the race that motivated the clause — reverse-step became enabled
+    # and reverse-continue stayed greyed out.
+    #
+    # Keeping the rule in one memo is what stops the two from drifting
+    # apart again; they are not independently tunable policies, they are
+    # the same question ("can this session go backwards at all?") asked
+    # by different buttons.
+    let backwardNavigationAvailable = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       let tl = store.timeline.val
       let session = store.session.val
@@ -195,17 +214,16 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
           session.debugSessionMode == completedReplay or
           dbg.rrTicks > tl.minRRTicks)
 
+    let canStepBackward = createMemo[bool] proc(): bool =
+      backwardNavigationAvailable.val
+
     # Derived: continue is possible when the debugger is idle.
     let canContinue = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       dbg.status == dsIdle
 
     let canReverseContinue = createMemo[bool] proc(): bool =
-      let dbg = store.debugger.val
-      let session = store.session.val
-      session.debugSessionMode notin {liveMcr, liveMaterialized} and
-        dbg.status == dsIdle and
-        session.supportsStepBack
+      backwardNavigationAvailable.val
 
     # Derived: the debugger is running if it is stepping or running.
     let isRunning = createMemo[bool] proc(): bool =

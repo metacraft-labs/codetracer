@@ -7,3 +7,10 @@ node_modules/
 /test-stats/
 /playwright/.cache/
 *.js
+
+# RV-6: the stdio ACP agent the agent-activity-session suite loads a session
+# from is a checked-in *fixture*, not build output.  The blanket `*.js` above
+# exists to keep compiled TypeScript out of the tree; this file is hand-written
+# and the suite silently skips without it (`fixturesExist`), so an ignored
+# fixture would read as "the tests pass" while nothing ran.
+!tests/**/fixtures/*.js

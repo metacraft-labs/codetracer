@@ -134,8 +134,32 @@ const
     ("runquota", "RUNQUOTA_SRC"),
     ("reprobuild", "CODETRACER_REPROBUILD_REPO_PATH")
   ]
-  WindowsZlibRoot = "D:/metacraft-dev-deps/zlib/1.3.1"
-  WindowsZstdRoot = "D:/metacraft-dev-deps/zstd/1.5.6/zstd-v1.5.6-win64"
+  # Relative to the Windows DIY install root. `non-nix-build/windows/
+  # ensure-zlib.ps1` and `ensure-zstd.ps1` install into `$Root/zlib/<ver>` and
+  # `$Root/zstd/<ver>` where `$Root` is whatever `Get-DefaultInstallRoot`
+  # resolved — so these READERS have to follow that root rather than pin one.
+  # They used to hard-code `D:/metacraft-dev-deps/...`, which was already
+  # wrong on any machine whose root is not D: and only stayed invisible
+  # because the bootstrap died earlier, at Ensure-Ttd.
+  WindowsZlibRelative = "zlib/1.3.1"
+  WindowsZstdRelative = "zstd/1.5.6/zstd-v1.5.6-win64"
+  # The historical default, kept verbatim so a developer box with a real D:
+  # dev drive resolves exactly as before.
+  WindowsDefaultInstallRoot = "D:/metacraft-dev-deps"
+
+# NOTE: `getEnv` here is a RUNTIME read and therefore not a tracked solver
+# input — see the buildType note at the top of this file. That is acceptable
+# for this one value because it names a per-MACHINE toolchain location rather
+# than anything that changes what is built, and because no CI lane exercises
+# it (the Windows jobs do not run tup or this Nim build; `just build-once`
+# runs only on the Linux and macOS legs).
+let
+  WindowsInstallRoot = block:
+    let fromEnv = getEnv("WINDOWS_DIY_INSTALL_ROOT").strip()
+    if fromEnv.len > 0: fromEnv.replace('\\', '/').strip(leading = false, chars = {'/'})
+    else: WindowsDefaultInstallRoot
+  WindowsZlibRoot = WindowsInstallRoot & "/" & WindowsZlibRelative
+  WindowsZstdRoot = WindowsInstallRoot & "/" & WindowsZstdRelative
   WindowsExtraPassC = @[
     "-I" & WindowsZlibRoot & "/include",
     "-I" & WindowsZstdRoot & "/include",
@@ -992,14 +1016,23 @@ package codeTracer:
       target("replay-server", replayServer)
       codetracerActions.add(replayServer)
 
-    # Nim cache dirs. ``/tmp`` is POSIX-only; on Windows we resolve to
-    # ``%TEMP%/ct-nim-cache`` via getEnv. The nimcache path is consumed
-    # raw by nim.exe (not via bash), so backslash mixing is OK.
+    # Nim cache dirs. Both platforms derive the root from the ambient
+    # temporary directory (``%TEMP%`` on Windows, ``$TMPDIR`` on POSIX,
+    # falling back to ``/tmp`` when unset or empty) rather than hardcoding
+    # one host-global path. Hardcoding ``/tmp/ct-nim-cache`` made every
+    # checkout, worktree and sandboxed build on the machine share a single
+    # object directory keyed only by target name, so two builds of the same
+    # target from different source roots overwrote each other's ``.o`` files
+    # and produced undefined-reference link failures. Honouring ``$TMPDIR``
+    # lets a caller that already scopes its temp directory (test harnesses,
+    # CI runners, sandboxes) scope the nimcache with it. The nimcache path is
+    # consumed raw by nim.exe (not via bash), so backslash mixing is OK.
     let ctNimCacheRoot =
       when defined(windows):
         (getEnv("TEMP") / "ct-nim-cache").replace('\\', '/')
       else:
-        "/tmp/ct-nim-cache"
+        (if getEnv("TMPDIR").len > 0: getEnv("TMPDIR") else: "/tmp") /
+          "ct-nim-cache"
 
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(
@@ -1016,6 +1049,84 @@ package codeTracer:
         sourcePath = "src/ct/codetracer.nim")
       target("ct", ct)
       codetracerActions.add(ct)
+
+    var auxiliaryActionIds: seq[string] = @[]
+
+    if fileExists("src/ct_test/ct_test.nim"):
+      # The standalone cross-language test driver (`ct-test test discover` /
+      # `ct-test test run`). The same engine is reachable as `ct test …`, but
+      # `ct` links the whole CodeTracer product (Electron-facing frontend
+      # plumbing, db-backend bridges, the recorder stack); consumers that only
+      # want discovery/run — CI, sibling repos, reprobuild's dev shell — should
+      # not have to build and ship that closure. Hence a separate, small
+      # binary from the same sources.
+      #
+      # NOTE: this target is deliberately NOT added to `codetracerActions`.
+      # That list feeds the `codetracer` aggregate (the default build action),
+      # and `ct-test` is an auxiliary tool, not part of the shipped product;
+      # adding it would put a second full Nim compile on every default build.
+      # Build it explicitly with `repro build ct-test`.
+      #
+      # The `target()` call below is not what makes that selector resolve —
+      # the output's basename already contributes the same implicit name, and
+      # `repro build ct-test` keeps working with the call renamed. It is here
+      # so the name this binary is built by is stated at its declaration
+      # rather than inferred from a path, and so renaming the output cannot
+      # silently rename the target.
+      #
+      # It does NOT go through `ctNative`, and both departures are load-bearing:
+      #
+      #   * `--mm:orc`, not `ctNative`'s `--mm:refc`. `test run` executes the
+      #     discovered tests on a worker pool (`run_orchestration.runUnits`),
+      #     and the workers share the `RunUnit`/`TestItem` sequences with the
+      #     spawning thread. Under refc every thread owns a private heap, so
+      #     that sharing is undefined behaviour — a refc build of this exact
+      #     source SIGSEGVs inside the worker loop on the first `test run`,
+      #     before a single result exists, while `test discover`
+      #     (single-threaded) survives. ORC shares one heap, so the workers run
+      #     and a summary comes out. (This is also why `ct test run` is not
+      #     usable from the `ct` binary, which is refc for the rest of
+      #     CodeTracer's sake — use this binary for runs.)
+      #
+      #     ORC used to be only the precondition and not the whole of it: with
+      #     21 or more workers the process also aborted in the allocator while
+      #     `runUnits` tore down, after the summary had been written. That was
+      #     a lifetime bug, not a collector choice — worker-allocated results
+      #     were freed after their threads had exited — and it is fixed at the
+      #     source by `run_orchestration.runUnits`' `ResultHandoff`. No
+      #     `--threads` cap is needed or wanted: `test run` is expected to exit
+      #     0 at any thread count on this ORC build.
+      #
+      #   * no `NativeDefines`, no `NativePassL`, no `NativeDynlibOverrides`.
+      #     Those carry `-lssl -lcrypto -lsqlite3 -lpcre -lzip` and the
+      #     chronicles/tup/ssl define set that the CodeTracer product needs;
+      #     `ct-test` links none of them (its whole non-stdlib dependency set
+      #     is `src/ct_test/**` plus runquota's process/host libraries). Pulling
+      #     them in only made this target unbuildable anywhere CodeTracer's full
+      #     native library set is absent — e.g. reprobuild's dev shell, which is
+      #     exactly where this tool is meant to run.
+      let ctTest = nim.c(
+        mm = "orc",
+        threadsOn = true,
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        boundChecksOn = true,
+        nimcache = ctNimCacheRoot & "/ct_test_codetracer_binary",
+        paths = CodeTracerNimPaths,
+        output = buildDebugPath("bin/ct-test" & (when defined(windows): ".exe" else: "")),
+        extraOutputs = when defined(macosx):
+          @[buildDebugPath("bin/ct-test.dSYM")]
+        else:
+          @[],
+        source = "src/ct_test/ct_test.nim")
+      target("ct-test", ctTest)
+      auxiliaryActionIds.add(ctTest.id)
 
     if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
       let codetracer = aggregate("codetracer",
@@ -1409,3 +1520,16 @@ package codeTracer:
           @["scripts/docs/capture-visual-recording-screenshots.sh"],
         cacheableValue = false)
       target("docs-book-assets", bookAssets)
+
+    if not (hasFrontendInputs and hasDbBackendRecordInput and hasCtInput):
+      # A source-subset checkout intentionally exposes every action whose
+      # inputs were materialised. Preserve that legacy no-target graph while
+      # keeping auxiliary tools opt-in: without an explicit default,
+      # reprobuild's compatibility fallback would also schedule `ct-test`.
+      var sourceSubsetActions: seq[BuildActionDef] = @[]
+      for action in registeredBuildActions():
+        if action.id notin auxiliaryActionIds:
+          sourceSubsetActions.add(action)
+      let codetracer = aggregate("codetracer",
+        actions = sourceSubsetActions)
+      defaultBuildAction(codetracer)

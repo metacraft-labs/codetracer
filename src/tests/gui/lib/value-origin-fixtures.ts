@@ -230,7 +230,7 @@ export function javascriptSpecSkipReason(): string | null {
  * M11 — RR-backed origin specs (Rust + C + C++ + Nim + Go).
  *
  * The native-backend pipeline drives `rr` for record/replay and
- * `ct-native-replay` (formerly `ct-rr-support`) as the worker that
+ * `ct-native-replay` as the worker that
  * bridges to db-backend. The GUI launches a recorded RR trace via
  * `launchMode: "trace"`, so the spec needs the full toolchain present
  * when it asks the harness to record on demand.
@@ -249,7 +249,7 @@ export function rrToolchainUnavailableReason(): string | null {
   if (findOnPath("rr") === null) {
     return "rr binary not on PATH (install rr to run RR-backed origin tests)";
   }
-  if (findOnPath("ct-native-replay") === null && findOnPath("ct-rr-support") === null) {
+  if (findOnPath("ct-native-replay") === null) {
     return "ct-native-replay not on PATH (M11 RR specs need the native-backend replay worker)";
   }
   return null;

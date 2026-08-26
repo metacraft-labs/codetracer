@@ -44,12 +44,22 @@ proc run*(self: SearchService, query: cstring, includePattern: cstring, excludeP
 
 proc searchProgram*(self: SearchService, query: cstring) =
   clog "searchProgram in service " & $query
+  # Set query mode to SearchFixed so ``onSearchResultsUpdated`` routes
+  # results to the Find in Files VM (the check ``self.query.searchMode ==
+  # SearchFixed`` was always false before this was set, causing endless
+  # loading because the batch hook was never called).
+  self.query = SearchQuery(query: query, searchMode: SearchFixed)
+  self.results[SearchFixed] = @[]
+  self.active[SearchFixed] = false
   self.data.ipc.send("CODETRACER::search-program", query)
 
 data.services.search.onSearchResultsUpdated = proc(self: SearchService, results: seq[SearchResult]) {.async.} =
+  if self.query.isNil:
+    return
   self.results[self.query.searchMode] = self.results[self.query.searchMode].concat(results)
   self.active[self.query.searchMode] = true
-  self.data.ui.status.searchResults.active = true
+  if not self.data.ui.status.searchResults.isNil:
+    self.data.ui.status.searchResults.active = true
   # Mirror the streamed batch into the IsoNim ``SearchResultsVM`` so
   # the IsoNim view's reactive body rebuilds in lock-step with the
   # legacy record.  Done as a single bulk-append so the body re-renders
@@ -61,16 +71,20 @@ data.services.search.onSearchResultsUpdated = proc(self: SearchService, results:
         text: (if r.text.isNil: "" else: $r.text),
         path: (if r.path.isNil: "" else: $r.path),
         line: r.line))
+    # Always invoke the hook even for an empty batch so the VM can clear
+    # the loading shimmer when ripgrep produces no matches.
     if not syncSearchResultsAppendBatchHook.isNil:
       syncSearchResultsAppendBatchHook(rows)
-    if not self.query.isNil and not self.query.query.isNil and
+    if not self.query.query.isNil and
        not syncSearchResultsSetQueryHook.isNil:
       syncSearchResultsSetQueryHook($self.query.query)
   # Auto-reveal the search results panel if it is pinned to an auto-hide edge.
   if not autoHideState.isNil:
     let panel = autoHideState.findPanelByContent(Content.SearchResults)
     if not panel.isNil:
-      showOverlay(panel)
+      # Idempotent reveal: this runs once per appended result batch, and
+      # `showOverlay` would toggle the panel shut on every second batch.
+      revealOverlay(panel)
   self.data.redraw()
 
 proc restart*(service: SearchService) =

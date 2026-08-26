@@ -126,7 +126,7 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
   let container = dom_api.getElementById(dom_api.document, data.key)
   if dom_api.isNodeNil(dom_api.Node(container)):
     if data.retryCount mod 10 == 0:
-      # Legitimate, hence DEBUG (M51).  `tryMountIsoNimStatePanel` is
+      # Legitimate, hence DEBUG.  `tryMountIsoNimStatePanel` is
       # called before GoldenLayout has necessarily created the panel's
       # container, so polling for it is the design, not a fault.  Only
       # exhausting the retry budget below is a failure.
@@ -700,6 +700,23 @@ proc loadLocals*(self: StateComponent) =
 method onMove(self: StateComponent) {.async.} =
   self.loadLocals()
 
+proc toValueHistoryRows(results: seq[HistoryResult]): seq[ValueHistoryRow] =
+  ## Normalise the ``ct/updated-history`` wire rows into the
+  ## backend-neutral shape ``StateVM`` stores.
+  ##
+  ## This is the single boundary at which the renderer-side
+  ## ``HistoryResult`` (from the ``frontend/types.nim`` instantiation of
+  ## the included ``common_types``, where ``langstring = cstring``) is
+  ## converted. Keeping the conversion here — rather than letting the
+  ## ViewModel name a type that exists in two incompatible copies — is
+  ## what lets ``StateVM``/``state_view`` compile natively for the
+  ## headless tests and removes the previous ``cast[seq[HistoryResult]]``.
+  result = newSeq[ValueHistoryRow](results.len)
+  for i, r in results:
+    result[i] = ValueHistoryRow(
+      locationTicks: BiggestInt(r.location.rrTicks),
+      valueText: if r.value.isNil: "" else: r.value.textRepr)
+
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
 
@@ -724,7 +741,8 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   )
   api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
     if not stateVMInstance.isNil:
-      stateVMInstance.updateHistory($response.expression, response.results)
+      stateVMInstance.updateHistory($response.expression,
+                                    toValueHistoryRows(response.results))
   )
   api.emit(InternalLastCompleteMove, EmptyArg())
 

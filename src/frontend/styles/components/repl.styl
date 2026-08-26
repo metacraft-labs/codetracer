@@ -1,3 +1,9 @@
+// Code surface: keep a monospace face.  This used to be inherited from the
+// app-wide `body` rule, which is now Space Grotesk (the interface face), so
+// it has to be stated here — REPL input and results are code.
+#replComponent, .repl
+  font-family: "SpaceMono", monospace
+
 .repl-component
   height: 100%
   width: 100%

@@ -458,8 +458,24 @@ test.describe("Agentic worktree GUI E2E", () => {
     artifacts.writeJson("deepreview-snapshot", deepReviewSnapshot);
     assertSameAgentSession(startSnapshot, deepReviewSnapshot);
     assertDeepReview(deepReviewSnapshot);
-    await expect(deepReview.traceContextSelector()).toBeVisible();
-    await expect(ctPage.locator(".deepreview-unified-diff")).toBeVisible();
+    // DR-R7: the agentic handoff no longer opens a standalone DeepReview
+    // panel — it enters the review through the same routine `ct review`
+    // uses, so the review is the VCS panel plus an editor diff tab plus the
+    // Agent Activity panel (DeepReview-GUI.md §7, "There is no separate
+    // 'DeepReview mode' that replaces the UI").  These two assertions
+    // therefore move from the panel's own header and diff to the surfaces
+    // that own them now; nothing they asserted is dropped.
+    //
+    // AA-1: the third pillar is the panel itself, not a roll-up inside it.
+    // The handoff arrives from a live session, so the panel has a
+    // conversation to show — which is exactly what §2.1 says it is for.
+    await expect(deepReview.vcsPanel()).toBeVisible();
+    await expect(deepReview.vcsReviewTitle()).toContainText("DeepReview:");
+    await expect(deepReview.diffTabFor(changedFile)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(deepReview.agentActivityPanel()).toBeVisible();
+    await expect(deepReview.reviewActivityRollUpArtefacts()).toHaveCount(0);
     await expect(
       ctPage.locator(".agent-workspace-file-item", { hasText: "feature.nim" }),
     ).toBeVisible();

@@ -71,7 +71,7 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
   for key, option in self.options:
     let action = self.actions[key]
     let optionDom = kdom.document.createElement("div")
-    optionDom.class = cstring"context-menu-option"
+    optionDom.class = cstring"context-menu-option ct-menu-item"
     optionDom.addEventListener(cstring"click", proc(e: Event) =
       action()
       self.dom.toJs.classList.remove("visible"))
@@ -91,13 +91,101 @@ proc loadShellTheme*(data: Data, name: cstring) =
   let shellComponent = data.shellComponent(0)
   shellComponent.shell.options.theme = shellComponent.themes[name]
 
+# ---------------------------------------------------------------------------
+# CodeTracer's Monaco colour themes
+# ---------------------------------------------------------------------------
+#
+# `monaco.editor.create({theme: "codetracerDark"})` names a theme; it does not
+# define one.  Monaco resolves an UNKNOWN theme name to its built-in `vs`
+# light theme silently — no exception, no console warning — so a surface that
+# creates an editor before anything has registered `codetracerDark` comes up
+# light-themed inside a dark application.  Nothing in the DOM says so except
+# the class Monaco stamps on the editor root (`vs` instead of `vs-dark`) and
+# the canvases it paints from the theme rather than from CSS: the minimap and
+# the overview ruler, which render as a white slab down the side of the
+# editor.
+#
+# That is exactly what a `ct review` window used to look like.  The
+# definitions lived inside `ui/editor.nim`'s source-editor bootstrap, so they
+# ran only once a *source* tab had been created; a review whose visible tab is
+# the unified diff (`ui/unified_diff.nim`) never created one, and its Monaco
+# instance therefore rendered under `vs`.
+#
+# The registration lives here, next to `loadMonacoTheme`, because
+# `ui/ui_imports` re-exports this module — so every Monaco host in the
+# frontend can reach it — and because `monacoThemeName` below makes it
+# impossible to *pick* one of these theme names without also registering it.
+#
+# `monaco.editor.setTheme` has the same silent fallback, and it is worse:
+# switching an already-correct `vs-dark` editor to an unregistered name
+# downgrades it to `vs` in place. `loadMonacoTheme` below therefore registers
+# too, so neither of the two ways to name a theme can outrun its definition.
+
+var monacoThemesDefined = false
+  ## Registration is idempotent and cheap after the first call; Monaco keeps
+  ## the definitions in a process-global registry, so redefining them on every
+  ## editor creation would be wasted work rather than a correctness problem.
+
+proc ensureMonacoThemesDefined*() =
+  ## Register `codetracerWhite` and `codetracerDark` with Monaco, once.
+  ##
+  ## Must be called before any `monaco.editor.create` /
+  ## `monaco.editor.createDiffEditor` that names one of them —
+  ## `monacoThemeName` does it for every caller that asks for a theme by
+  ## configuration, which is all of them.
+  ##
+  ## The theme documents are the checked-in Monaco theme JSONs under
+  ## `src/public/third_party/monaco-themes/themes/customThemes/json/`, read at
+  ## Nim compile time and emitted as object literals so no runtime fetch (and
+  ## no ordering against the asset pipeline) is involved.
+  if monacoThemesDefined:
+    return
+  const whiteThemeDef =
+    staticRead("../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
+  const darkThemeDef =
+    staticRead("../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
+  try:
+    {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
+    {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
+    monacoThemesDefined = true
+  except:
+    # Leave the flag down so a later caller (one running after Monaco has
+    # finished loading) retries rather than inheriting a half-registered
+    # registry.
+    cerror "renderer: defining monaco themes: " & getCurrentExceptionMsg()
+
+proc monacoThemeName*(configTheme: cstring): cstring =
+  ## The Monaco theme that matches CodeTracer's configured theme, with the
+  ## definitions guaranteed to be registered by the time it returns.
+  ##
+  ## Every Monaco host picks its theme through this one proc so that naming a
+  ## theme and defining it cannot come apart again — the failure mode is
+  ## invisible (see the note above), so the two steps are deliberately not
+  ## separable.
+  ##
+  ## `default_white` is the only light theme CodeTracer ships; `default_dark`,
+  ## `default_black` and `mac_classic` all map to `codetracerDark`, matching
+  ## `monacoThemeNames` below.
+  ensureMonacoThemesDefined()
+  if configTheme == cstring"default_white":
+    cstring"codetracerWhite"
+  else:
+    cstring"codetracerDark"
+
 proc loadMonacoTheme*(themeName: cstring) =
+  ## Switch every live Monaco instance to `themeName`.
+  ##
+  ## The definitions are registered first: `setTheme` with a name Monaco does
+  ## not know silently resolves to the built-in light `vs`, so a theme switch
+  ## in a window that had never registered them would turn a correctly dark
+  ## editor light.
+  ensureMonacoThemesDefined()
   monaco.editor.toJs.setTheme(themeName)
 
 proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.exportc.}
 proc lowAsm*(data: Data): bool
 proc highlightLine*(path: cstring, line: int)
-proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false)
+proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false): int {.discardable.}
 proc step*(data: Data, action: CtEventKind, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
 proc openLocation*(data: Data, path: cstring, line: int) {.async.}
 
@@ -146,14 +234,30 @@ proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, edi
   discard panel.addChild(contentItem)
 
 
+func isReviewDatasetSession*(data: Data): bool =
+  ## Is this window a review opened from an exported dataset?
+  ##
+  ## True for `ct review <PATH>` and for the agent handoff — the launches that
+  ## carry `StartOptions.withDeepReview`, where the index process was handed
+  ## the dataset and serves every review file's text out of
+  ## `DeepReviewFileData.sourceContent` (`index/config.reviewSourceLookup`).
+  ##
+  ## Deliberately NARROWER than `deepReviewActive`, which is also set by
+  ## `ui/vcs.startReviewForTraceDiff` — DeepReview-GUI.md §1's launch method 2,
+  ## where a *recorded trace* carries its diff.  That window has the real
+  ## working tree in front of it and its tabs are read from disk as usual, so
+  ## nothing about it should change.
+  not data.isNil and data.startOptions.withDeepReview
+
 proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # kout layoutConfig.toJs
-  # DeepReview is a transient standalone mode whose layout contains only
-  # the VCS / DeepReview / calltrace panels.  Persisting it would clobber
-  # the user's real debug `default_layout.json`, so the next ordinary
-  # `ct` trace launch would come up missing the filesystem / editor /
-  # event-log / state / terminal / scratchpad panels.  Never persist the
-  # DeepReview layout.
+  # A review runs on a layout that is not the debugging one: since RV-2 the
+  # dataset launch opens the EDITOR layout, which deliberately omits EVENT
+  # LOG, CALLTRACE, TIMELINE, TERMINAL OUTPUT, STATE and SCRATCHPAD
+  # (DeepReview-GUI.md §1.1).  This proc always saves under the name
+  # `default_layout`, so persisting it would clobber the user's real debug
+  # layout and the next ordinary `ct` trace launch would come up missing
+  # those panels.  Never persist a review's layout.
   if data.deepReviewActive:
     return
   let isEditMode = data.ui.mode == EditMode
@@ -274,6 +378,27 @@ proc destroyLayoutInstance(layout: GoldenLayout) {.importjs: "#.destroy()".}
 
 proc resetLayoutState*(data: Data) =
   ## Tear down the current GoldenLayout instance so createUIComponents/tryInitLayout can rebuild from scratch.
+  ##
+  ## Every component in the old `componentMapping` is unregistered first.
+  ## `data.viewsApi` survives the reset (it lives on the session, not on
+  ## `data.ui`), so components that are merely dropped from the mapping keep
+  ## their handlers subscribed on it; `createUIComponents` then registers a
+  ## fresh generation on top.  That is how a re-record or a trace reload used
+  ## to double every event handler in the app — most visibly as "Add to
+  ## Scratchpad" appending one row per accumulated generation (#612).
+  for content, mapping in data.ui.componentMapping:
+    # `componentMapping` is only populated per-Content once a layout has been
+    # built, so the entries are still nil on the very first reset.
+    if mapping.isNil:
+      continue
+    for id, component in mapping:
+      if component.isNil:
+        continue
+      try:
+        component.unregister()
+      except:
+        cwarn fmt"layout: unregister failed for {content}#{id}: {getCurrentExceptionMsg()}"
+
   if not data.ui.layout.isNil:
     try:
       destroyLayoutInstance(data.ui.layout)
@@ -769,11 +894,18 @@ proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.expor
     tab.viewLine = line
     if not tab.monacoEditor.isNil:
       # echo "revealLine", line
-      tab.monacoEditor.revealLineInCenterIfOutsideViewport(parseJSInt(cast[cstring](line)), Immediate)
+      if highlight:
+        # Always center when navigating to a specific line (e.g. from Find in
+        # Files).  revealLineInCenter unconditionally scrolls the line to the
+        # middle of the viewport so the user immediately sees the result.
+        # revealLineInCenterIfOutsideViewport is used for debugger stepping
+        # where constantly re-centering would be jarring.
+        tab.monacoEditor.revealLineInCenter(parseJSInt(cast[cstring](line)), Immediate)
+        highlightLine(active, line)
+      else:
+        tab.monacoEditor.revealLineInCenterIfOutsideViewport(parseJSInt(cast[cstring](line)), Immediate)
       if change:
         data.services.editor.changeLine = false
-      if highlight:
-        highlightLine(active, line)
 
 proc focusComponent*(data: Data, component: Component) =
   cast[kdom.Element](dom.window.document.activeElement).blur()
@@ -840,11 +972,27 @@ proc switchTabHistory*(data: Data) {.exportc, locks: 0.} =
     data.openTab(newTab.name, newTab.editorView)
 
 proc openLocation*(data: Data, path: cstring, line: int) {.async.} =
-  utils.openTab(data, path, ViewSource) # , fromPath(path))
-  # TODO add a handler like `onTabReady` and check if it's already ready first
-  discard windowSetTimeout(proc =
-    gotoLine(line, highlight=true),
-    1_000)
+  # Pass line to openTab so the built-in mechanisms handle scroll reliably:
+  #   - already-open tab  → showTab calls editor.focusLine(line) immediately
+  #   - new tab           → openNewEditorView polls every 10ms until Monaco
+  #                         is mounted, then calls focusLine
+  utils.openTab(data, path, ViewSource, line=line)
+  # Additionally apply the orange flash highlight via a poll that targets the
+  # specific tab key.  focusLine (above) only scrolls; this adds the visual
+  # indicator so the user knows exactly which line was matched.
+  let tabKey = editorTabPath(path, ViewSource)
+  proc applyHighlight() =
+    if not data.ui.editors.hasKey(tabKey):
+      discard windowSetTimeout(applyHighlight, 50)
+      return
+    let editorComp = data.ui.editors[tabKey]
+    if editorComp.isNil or isNull(editorComp.monacoEditor):
+      discard windowSetTimeout(applyHighlight, 50)
+      return
+    editorComp.monacoEditor.revealLineInCenter(
+      parseJSInt(cast[cstring](line)), Immediate)
+    highlightLine(tabKey, line)
+  discard windowSetTimeout(applyHighlight, 50)
 
 proc openFile* =
   ipc.send "CODETRACER::open-tab", js{}
@@ -1148,8 +1296,12 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     let itemContainer = kdom.document.createElement("div")
     itemContainer.classList.add("context-menu-item-container")
     newElement.classList.add("context-menu-item")
+    newElement.classList.add("ct-menu-item")
     newElement.id = cstring(fmt"menu-item-{i}")
-    newElement.innerHTML = option.name
+    let labelEl = kdom.document.createElement("span")
+    labelEl.classList.add("ct-menu-item-label")
+    labelEl.innerHTML = option.name
+    cast[dom.Element](newElement).append(cast[dom.Element](labelEl))
     newElement.onclick = proc(ev: Event) {.nimcall.} =
       let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
       if targetId.startsWith("menu-item-"):
@@ -1158,8 +1310,8 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
           contextMenuHandlers[itemIndex](ev)
       cast[kdom.Element](dom.document.getElementById("context-menu-container")).style.display = "none"
     if option.hint != "":
-      let hint = kdom.document.createElement("div")
-      hint.classList.add("context-menu-hint")
+      let hint = kdom.document.createElement("span")
+      hint.classList.add("ct-menu-item-sublabel")
       hint.id = cstring(fmt"menu-hint-{i}")
       hint.innerHTML = option.hint
       cast[dom.Element](newElement).append(cast[dom.Element](hint))
@@ -1329,6 +1481,8 @@ proc reloadOpenFileFromDisk(data: Data, targetPath: cstring) {.async.} =
 
 proc checkPendingReRecord*(data: Data)
 proc reRecordCurrent*(data: Data, projectOnly: bool)
+proc resolveFileConflict*(data: Data, action: FileConflictAction, path: cstring)
+proc abandonPendingReRecord*(data: Data, reason: string)
 
 proc updateDialog(data: Data, path: cstring) {.async.} =
   let tab =
@@ -1368,16 +1522,23 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
 
   proc handleAction(action: cstring) =
     closeDialog()
+    # Map the button to the model's vocabulary so a queued re-record request
+    # can be resolved by `resolveFileConflict` rather than by four ad-hoc
+    # branches.  Two of those branches used to clear `pendingReRecord`
+    # silently, which is one of the ways issue #603 left the UI idle.
+    let resolved =
+      if action == cstring"discard": fcaDiscardMemory
+      elif action == cstring"save": fcaSaveMemory
+      elif action == cstring"merge": fcaOpenMerge
+      else: fcaKeepEditing
     try:
-      if action == cstring"discard":
+      case resolved
+      of fcaDiscardMemory:
+        # Clear `changed` synchronously: the gate below reads it, and the
+        # reload itself completes asynchronously.
         tab.changed = false
         discard data.reloadOpenFileFromDisk(path)
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-        data.checkPendingReRecord()
-      elif action == cstring"save":
-        data.saveFiles(path)
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-      elif action == cstring"merge":
+      of fcaOpenMerge:
         let ours =
           if not tab.monacoEditor.isNil:
             tab.monacoEditor.getValue()
@@ -1389,14 +1550,18 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
           else:
             tab.source
         data.openThreeWayMergeTab(path, base, ours, diskSource)
-        data.pendingReRecord = nil
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-      else:
-        data.pendingReRecord = nil
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
+      of fcaSaveMemory, fcaKeepEditing:
+        # `fcaSaveMemory`'s saves are dispatched by `resolveFileConflict`,
+        # which saves *every* dirty buffer — the gate needs all of them.
+        discard
+      data.resolveFileConflict(resolved, path)
     except:
       cerror fmt"external-change: failed to handle {action} for {path}: {getCurrentExceptionMsg()}"
-      ipc.send "CODETRACER::no-reload-file", js{path: path}
+      # A throw here must never leave a re-record request armed with nothing
+      # left to drain it.
+      data.abandonPendingReRecord(
+        "Re-recording aborted: could not resolve the conflict for " & $path)
+    ipc.send "CODETRACER::no-reload-file", js{path: path}
 
   for action in [cstring"discard", cstring"save", cstring"merge", cstring"keep"]:
     let button = overlay.toJs.querySelector(cstring("[data-action='" & $action & "']"))
@@ -1426,14 +1591,54 @@ proc openNormalEditor* =
   # TODO
   discard
 
-proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false) =
+proc saveTargets*(data: Data): seq[SaveTarget] =
+  ## Snapshot `services.editor.open` for the pure model in `file_conflicts`.
+  ##
+  ## `open` is not a list of visible source tabs: `tabLoad` also inserts
+  ## calltrace and instruction tabs (keyed `path:functionName-key`) and it
+  ## inserts every tab straight from the IPC payload, long before the Monaco
+  ## editor component mounts.  `editorReady` records that distinction so the
+  ## save path can skip entries it cannot read a buffer from.
   for name, tab in data.services.editor.open:
-    if path.len == 0 or name == path:
-      tab.source = tab.monacoEditor.toJs.getValue().to(cstring)
-      if tab.untitled:
-        ipc.send "CODETRACER::save-untitled", js{name: name, raw: tab.source, saveAs: true}
-      else: #elif tab.changed or saveAs:
-        ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
+    if tab.isNil:
+      continue
+    result.add SaveTarget(
+      name: $name,
+      changed: tab.changed,
+      untitled: tab.untitled,
+      editorReady: not tab.monacoEditor.isNil)
+
+proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
+                        saveAs: bool): bool =
+  ## Send one save message.  Returns whether it actually went out — callers
+  ## use the count to decide whether anything can ever answer them.
+  let name = effect.target.cstring
+  if not data.services.editor.open.hasKey(name):
+    return false
+  let tab = data.services.editor.open[name]
+  if tab.isNil or tab.monacoEditor.isNil:
+    return false
+  try:
+    tab.source = tab.monacoEditor.toJs.getValue().to(cstring)
+    if effect.kind == rreSaveUntitled:
+      ipc.send "CODETRACER::save-untitled", js{name: name, raw: tab.source, saveAs: true}
+    else:
+      ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
+    result = true
+  except:
+    # A single unreadable buffer must not stop the other saves, and must not
+    # be silently counted as dispatched — see issue #603, where the very first
+    # such throw escaped `saveFiles` after the re-record queue had been armed
+    # and before anything was sent.
+    cerror fmt"saveFiles: could not save {name}: {getCurrentExceptionMsg()}"
+    result = false
+
+proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false): int {.discardable.} =
+  ## Write the modified buffers back to disk via the main process.
+  ## Returns the number of save messages dispatched.
+  for effect in saveEffects(data.saveTargets(), $path, saveAs):
+    if data.dispatchSaveEffect(effect, saveAs):
+      inc result
 
 proc buildRecordEnv(envDump: cstring): JsObject =
   ## Convert the serialized environment captured in trace metadata back into
@@ -1470,43 +1675,41 @@ proc runTests*(data: Data, options: RunTestOptions) =
     data.resetBeforeRestart()
   data.ipc.send("CODETRACER::run-test", options)
 
-proc checkPendingReRecord*(data: Data) =
-  if not data.pendingReRecord.isNil:
-    var hasDirty = false
-    for name, tab in data.services.editor.open:
-      if tab.changed:
-        hasDirty = true
-        break
-    if not hasDirty:
-      let projectOnly = data.pendingReRecord["projectOnly"].to(bool)
-      data.pendingReRecord = nil
-      data.reRecordCurrent(projectOnly)
+const reRecordWatchdogMs = 15_000
+  ## How long a queued re-record request may wait for its saves before it is
+  ## abandoned with a visible error.  The queue is only drained by
+  ## `CODETRACER::saved-file` / `CODETRACER::save-file-error`; if the main
+  ## process never answers at all — the one failure mode the gate cannot
+  ## observe — this is what keeps the UI from waiting forever in silence.
 
-proc reRecordCurrent*(data: Data, projectOnly: bool) =
-  ## Save edits and restart the recorder for the current file or project
-  ##   base args on current trace for now, but we might start a different target
-  ##   TODO: maybe rethink this more?
-  data.lastRestartKind = RestartNewTrace
+var reRecordWatchdog = -1  # app-global `setTimeout` handle, -1 when disarmed
+
+proc cancelReRecordWatchdog() =
+  if reRecordWatchdog >= 0:
+    windowClearTimeout(reRecordWatchdog)
+    reRecordWatchdog = -1
+
+proc pendingReRecordQueue(data: Data): ReRecordQueueRef =
+  ## The in-flight request, or a fresh inactive one.
+  ##
+  ## The queue lives in `Data.pendingReRecord` so its lifetime still matches
+  ## the session, and clearing that field on completion keeps the previous
+  ## "nil means nothing pending" observable intact.
+  if data.pendingReRecord.isNil:
+    ReRecordQueueRef()
+  else:
+    cast[ReRecordQueueRef](data.pendingReRecord)
+
+proc launchReRecord(data: Data, projectOnly: bool) =
+  ## Build/record a new trace for the current target.  Only reached once every
+  ## modified buffer is on disk.
+  ##
+  ## The trace can disappear while the saves are in flight (session switch,
+  ## trace teardown), so it is re-checked here rather than only at request
+  ## time.
   if data.trace.isNil:
     data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
     return
-
-  # maybe it's ok to also rebuild/re-record directly
-  # if data.ui.mode != EditMode:
-  #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
-  #   return
-
-  var hasDirty = false
-  for name, tab in data.services.editor.open:
-    if tab.changed:
-      hasDirty = true
-      break
-
-  if hasDirty:
-    data.pendingReRecord = js{projectOnly: projectOnly}
-    data.saveFiles()
-    return
-
   if data.trace.program.len == 0:
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
     return
@@ -1552,6 +1755,96 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
       projectOnly: projectOnly,
     }
   )
+
+proc applyReRecordEffects(data: Data, queue: ReRecordQueueRef,
+                          effects: seq[ReRecordEffect]) =
+  ## Perform what the pure model decided, then publish the queue state.
+  ##
+  ## Every path through the model ends in exactly one of: saves dispatched and
+  ## the queue armed, a recording launched, or a visible error/warning with the
+  ## queue cleared.  "Nothing happened and nothing was said" is not reachable
+  ## from here — that was issue #603.
+  var launch = false
+  for effect in effects:
+    case effect.kind
+    of rreSaveFile, rreSaveUntitled:
+      if not data.dispatchSaveEffect(effect, saveAs = false):
+        # The model already accounted for the buffers it knew it could not
+        # save; a failure here is a late one (the editor went away between
+        # the snapshot and the send) and must not inflate `savesInFlight`.
+        if queue.savesInFlight > 0:
+          queue.savesInFlight -= 1
+    of rreDispatchRecord:
+      launch = true
+    of rreError:
+      data.viewsApi.errorMessage(effect.message.cstring)
+    of rreWarn:
+      data.viewsApi.warnMessage(effect.message.cstring)
+
+  if queue.active:
+    data.pendingReRecord = cast[JsObject](queue)
+    # A queue that is still waiting but has nothing in flight can never be
+    # answered; fail it now rather than let the watchdog take 15 seconds.
+    if queue.savesInFlight == 0:
+      data.abandonPendingReRecord(reRecordStalledMessage)
+      return
+    cancelReRecordWatchdog()
+    reRecordWatchdog = windowSetTimeout(
+      proc = data.abandonPendingReRecord(reRecordTimedOutMessage),
+      reRecordWatchdogMs)
+  else:
+    data.pendingReRecord = nil
+    cancelReRecordWatchdog()
+
+  if launch:
+    data.launchReRecord(queue.projectOnly)
+
+proc abandonPendingReRecord*(data: Data, reason: string) =
+  ## Give up on a queued re-record request, loudly.
+  if data.pendingReRecord.isNil:
+    return
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(queue, abandonReRecord(queue[], reason))
+
+proc reRecordCurrent*(data: Data, projectOnly: bool) =
+  ## Save edits and restart the recorder for the current file or project
+  ##   base args on current trace for now, but we might start a different target
+  ##   TODO: maybe rethink this more?
+  data.lastRestartKind = RestartNewTrace
+  if data.trace.isNil:
+    data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
+    return
+
+  # maybe it's ok to also rebuild/re-record directly
+  # if data.ui.mode != EditMode:
+  #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
+  #   return
+
+  # Supersede any earlier request rather than stacking two queues.
+  cancelReRecordWatchdog()
+  let queue = ReRecordQueueRef()
+  data.applyReRecordEffects(
+    queue, requestReRecord(queue[], data.saveTargets(), projectOnly))
+
+proc noteReRecordSaveOutcome*(data: Data, failed: bool) =
+  ## Feed one `saved-file` / `save-file-error` reply into the queued request.
+  if data.pendingReRecord.isNil:
+    return
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(
+    queue, noteSaveOutcome(queue[], data.saveTargets(), failed))
+
+proc checkPendingReRecord*(data: Data) =
+  ## Called when a file finished saving successfully.
+  data.noteReRecordSaveOutcome(failed = false)
+
+proc resolveFileConflict*(data: Data, action: FileConflictAction,
+                          path: cstring) =
+  ## Apply the user's answer to the "File changed on disk" dialog, including
+  ## its effect on a queued re-record request.
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(
+    queue, applyConflictAction(queue[], action, data.saveTargets(), $path))
 
 proc restartSubsystem*(data: Data, name: cstring) =
   data.lastRestartKind = RestartSubsystem

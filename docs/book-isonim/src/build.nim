@@ -18,8 +18,8 @@ when defined(js):
   {.error: "build.nim is a C-target (SSG) entry; not for the JS target".}
 
 import std/os
-import build_site
-import core/docs_tokens
+import docs_scaffold
+import core/base_path
 import ./docs_config
 import ./theme_tokens
 import ./redirects
@@ -28,21 +28,36 @@ const legacySummaryPath = "../book/src/SUMMARY.md"
   ## The old mdBook's SUMMARY (relative to this consumer's build CWD): the
   ## authoritative list of legacy published pages the redirects preserve.
 
+const basePathEnvVar* = "CT_DOCS_BASE_PATH"
+  ## The URL prefix this build is published under, set by `ci/deploy/docs.sh`
+  ## per publish channel: unset/empty for the released book at
+  ## `docs.codetracer.com/` (built from `stable`), `"/nightly"` for the nightly
+  ## book at `docs.codetracer.com/nightly` (built from `dev`). An env var rather
+  ## than a CLI flag because the build runs through `just build` -> `nim c -r`,
+  ## which would otherwise have to forward arguments through two layers.
+
 when isMainModule:
-  let tokensCss = emitTokensCss(metacraftDocsTokenLayer(), designSystemTokens())
-  let n = buildSite(contentDir = "content", cfg = bookDocsConfig(),
-                    docsTokensCss = tokensCss,
-                    # M1: compile this book's own JS mount entry (embeds THIS
-                    # site's content) into the hashed `assets/app.js` the pages
-                    # reference via `bookDocsConfig().appScriptHref`.
-                    clientEntry = "src/main.nim")
-  if dirExists("static"):
-    copyDir("static", "public" / "assets")
-  # Post-build: emit legacy-URL redirect artifacts (meta-refresh *.html
-  # stubs + a _redirects manifest) so every old mdBook deep link still
-  # resolves. Runs AFTER buildSite (which wipes+rebuilds public/) so the
-  # stubs survive, and after the static copy so the collision guard sees
-  # every real page already in place.
-  let stubs = generateRedirects("public", legacySummaryPath)
-  echo "SSG: rendered ", n, " static pages into ./public/"
-  echo "SSG: emitted ", stubs, " legacy-URL redirect stubs + _redirects into ./public/"
+  # Channel prefix (see `basePathEnvVar`). Normalized here so the value that
+  # reaches the config, the redirect stubs and the log line is the same one.
+  let channelBase = normalizeBasePath(getEnv(basePathEnvVar))
+  # The framework's `buildDocsSite` scaffold does the SSG build, prepends the
+  # design-system token CSS onto the composed stylesheet (framework default +
+  # this site ships no `style.css` of its own), compiles this book's JS mount
+  # entry into the hashed `assets/app.js`, and copies `static/` verbatim.
+  let n = buildDocsSite(bookDocsConfig(channelBase),
+                        docsTokensCss = metacraftDocsTokensCss(),
+                        clientEntry = "src/main.nim")
+  # Post-build: emit the redirect artifacts (meta-refresh stubs + a _redirects
+  # manifest) so no published URL breaks -- the legacy mdBook `*.html` deep
+  # links, and the clean routes this book has since moved between sections.
+  # Runs AFTER buildSite (which wipes+rebuilds public/) so the stubs survive,
+  # and after the static copy so the overwrite guard sees every real page
+  # already in place -- which is what lets a moved route's stub live at
+  # `<route>/index.html` without any risk of replacing a real page. The stubs
+  # are plain HTML the framework never sees, so they carry the channel prefix
+  # explicitly.
+  let stubs = generateRedirects("public", legacySummaryPath, channelBase)
+  echo "SSG: rendered ", n, " static pages into ./public/",
+    (if channelBase.len > 0: " (hosted under " & channelBase & ")" else: "")
+  echo "SSG: emitted ", stubs.legacy, " legacy-URL + ", stubs.moved,
+    " moved-route redirect stubs + _redirects into ./public/"

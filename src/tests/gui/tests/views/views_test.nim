@@ -145,11 +145,18 @@ suite "DebugControlsViewState":
 
       dispose()
 
-  test "stepBackward disabled when at minRRTicks":
+  test "stepBackward disabled at the start of a historical-from-live timeline":
+    # The position rule stopped gating completed replays: a recorded
+    # trace is time-travellable regardless of rr ticks, and DB traces
+    # never report them. `historicalFromLive` is the mode where being at
+    # minRRTicks really does mean there is nothing behind the cursor, so
+    # that is where the disabled state is observable.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
 
+      store.setSessionMode(historicalFromLive)
+      store.setSupportsStepBack(false)
       store.setTimelineRange(0'u64, 1000'u64)
       store.setDebuggerPosition(0'u64)
       store.setDebuggerStatus(dsIdle)
@@ -157,6 +164,22 @@ suite "DebugControlsViewState":
       let vs = getViewState(vm)
       check vs.stepForwardEnabled == true
       check vs.stepBackwardEnabled == false
+
+      dispose()
+
+  test "stepBackward enabled on a completed replay at minRRTicks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+
+      store.setSessionMode(completedReplay)
+      store.setSupportsStepBack(false)
+      store.setTimelineRange(0'u64, 1000'u64)
+      store.setDebuggerPosition(0'u64)
+      store.setDebuggerStatus(dsIdle)
+
+      let vs = getViewState(vm)
+      check vs.stepBackwardEnabled == true
 
       dispose()
 

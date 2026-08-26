@@ -228,6 +228,19 @@
     "info": "#6FB6D9",
     "hint": "#B38BC8",
     "focusBorder": "#2c2c2c",
-    "editorCursor.foreground": "#F2F6FA"
+    "editorCursor.foreground": "#F2F6FA",
+    "diffEditor.removedLineBackground": "#E06C7526",
+    "diffEditor.insertedLineBackground": "#40805030",
+    "diffEditor.removedTextBackground": "#E06C754D",
+    "diffEditor.insertedTextBackground": "#4080506E",
+    "diffEditorOverview.removedForeground": "#E06C7599",
+    "diffEditorOverview.insertedForeground": "#40805099",
+    "diffEditor.diagonalFill": "#4A4A4A66",
+    "diffEditor.unchangedRegionBackground": "#3A3A3A",
+    "diffEditor.unchangedRegionForeground": "#E8E8E8",
+    "diffEditor.unchangedCodeBackground": "#28282800",
+    "minimapSlider.background": "#A6AEFF40",
+    "minimapSlider.hoverBackground": "#A6AEFF59",
+    "minimapSlider.activeBackground": "#A6AEFF73"
   }
 }

@@ -1,0 +1,1201 @@
+{
+  "commitSha": "70db55c239b1ba65be836c62f8c7491a05016310",
+  "baseCommitSha": "28999144334c87ba6756037007a0be2a578492e0",
+  "collectionTimeMs": 76,
+  "recordingCount": 2,
+  "sessionTitle": "",
+  "traceContexts": [
+    {
+      "id": 0,
+      "label": "run-1",
+      "recordingId": ""
+    },
+    {
+      "id": 1,
+      "label": "run-2",
+      "recordingId": ""
+    }
+  ],
+  "files": [
+    {
+      "path": "src/main.nr",
+      "contentHash": "d6de588455050b1bc0f9a32c512cb46b41e095e5f4ce5832f7906e2b6dee1c4b",
+      "sourceContent": "fn scale(i: Field, x: Field) -> Field {\n    let scaled = i * x;\n    scaled\n}\n\nfn main(x: Field) {\n    let mut sum: Field = 0;\n    for i in 0..4 {\n        let contribution = scale(i as Field, x);\n        sum = sum + contribution;\n    }\n    assert(sum == 30);\n}\n",
+      "diff": {
+        "status": "M",
+        "linesAdded": 3,
+        "linesRemoved": 2,
+        "hunks": [
+          {
+            "oldStart": 6,
+            "oldCount": 7,
+            "newStart": 6,
+            "newCount": 8,
+            "lines": [
+              {
+                "type": "context",
+                "content": "fn main(x: Field) {",
+                "oldLine": 6,
+                "newLine": 6
+              },
+              {
+                "type": "context",
+                "content": "    let mut sum: Field = 0;",
+                "oldLine": 7,
+                "newLine": 7
+              },
+              {
+                "type": "context",
+                "content": "    for i in 0..4 {",
+                "oldLine": 8,
+                "newLine": 8
+              },
+              {
+                "type": "removed",
+                "content": "-        sum = sum + x;",
+                "oldLine": 9,
+                "newLine": 0
+              },
+              {
+                "type": "added",
+                "content": "+        let contribution = scale(i as Field, x);",
+                "oldLine": 0,
+                "newLine": 9
+              },
+              {
+                "type": "added",
+                "content": "+        sum = sum + contribution;",
+                "oldLine": 0,
+                "newLine": 10
+              },
+              {
+                "type": "context",
+                "content": "    }",
+                "oldLine": 10,
+                "newLine": 11
+              },
+              {
+                "type": "removed",
+                "content": "-    assert(sum == 20);",
+                "oldLine": 11,
+                "newLine": 0
+              },
+              {
+                "type": "added",
+                "content": "+    assert(sum == 30);",
+                "oldLine": 0,
+                "newLine": 12
+              },
+              {
+                "type": "context",
+                "content": "}",
+                "oldLine": 12,
+                "newLine": 13
+              }
+            ]
+          }
+        ]
+      },
+      "symbols": [
+        {
+          "name": "main",
+          "typeDesc": "",
+          "kind": "function",
+          "visibility": "",
+          "startLine": 6,
+          "endLine": 13
+        },
+        {
+          "name": "scale",
+          "typeDesc": "",
+          "kind": "function",
+          "visibility": "",
+          "startLine": 1,
+          "endLine": 4
+        }
+      ],
+      "coverage": [
+        {
+          "line": 1,
+          "executionCount": 8,
+          "sampleCount": 8,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 2,
+          "executionCount": 8,
+          "sampleCount": 8,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 4,
+          "executionCount": 8,
+          "sampleCount": 8,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 7,
+          "executionCount": 2,
+          "sampleCount": 2,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 8,
+          "executionCount": 10,
+          "sampleCount": 10,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 9,
+          "executionCount": 24,
+          "sampleCount": 24,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 10,
+          "executionCount": 8,
+          "sampleCount": 8,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 11,
+          "executionCount": 8,
+          "sampleCount": 8,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 12,
+          "executionCount": 2,
+          "sampleCount": 2,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        },
+        {
+          "line": 13,
+          "executionCount": 2,
+          "sampleCount": 2,
+          "executed": true,
+          "unreachable": false,
+          "partial": false
+        }
+      ],
+      "functions": [
+        {
+          "name": "main",
+          "startLine": 6,
+          "endLine": 13,
+          "callCount": 2,
+          "executionCount": 2
+        },
+        {
+          "name": "scale",
+          "startLine": 1,
+          "endLine": 4,
+          "callCount": 8,
+          "executionCount": 0
+        }
+      ],
+      "loops": [
+        {
+          "loopId": 1,
+          "headerLine": 8,
+          "startLine": 8,
+          "endLine": 11,
+          "totalIterations": 8
+        }
+      ],
+      "flow": [
+        {
+          "functionKey": "main",
+          "executionIndex": 0,
+          "steps": [
+            {
+              "line": 7,
+              "stepCount": 0,
+              "rrTicks": 0,
+              "loopId": 0,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "return",
+                  "value": "nil",
+                  "kind": "None",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 1,
+              "rrTicks": 1,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "0",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 2,
+              "rrTicks": 2,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "0",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 3,
+              "rrTicks": 8,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 4,
+              "rrTicks": 9,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "0",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 5,
+              "rrTicks": 10,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "1",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 6,
+              "rrTicks": 11,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "1",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 7,
+              "rrTicks": 17,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 8,
+              "rrTicks": 18,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "1",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 9,
+              "rrTicks": 19,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "2",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 10,
+              "rrTicks": 20,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "10",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "2",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 11,
+              "rrTicks": 26,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "10",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 12,
+              "rrTicks": 27,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "10",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "2",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 13,
+              "rrTicks": 28,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "3",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 14,
+              "rrTicks": 29,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "3",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 15,
+              "rrTicks": 35,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 16,
+              "rrTicks": 36,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "3",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 17,
+              "rrTicks": 37,
+              "loopId": 1,
+              "iteration": 4,
+              "values": []
+            },
+            {
+              "line": 12,
+              "stepCount": 18,
+              "rrTicks": 38,
+              "loopId": 0,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 13,
+              "stepCount": 19,
+              "rrTicks": 39,
+              "loopId": 0,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "return",
+                  "value": "nil",
+                  "kind": "None",
+                  "truncated": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "functionKey": "main",
+          "executionIndex": 1,
+          "steps": [
+            {
+              "line": 7,
+              "stepCount": 0,
+              "rrTicks": 0,
+              "loopId": 0,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "return",
+                  "value": "nil",
+                  "kind": "None",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 1,
+              "rrTicks": 1,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "0",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 2,
+              "rrTicks": 2,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "0",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 3,
+              "rrTicks": 8,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 4,
+              "rrTicks": 9,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "0",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "0",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 5,
+              "rrTicks": 10,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "1",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 6,
+              "rrTicks": 11,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "1",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 7,
+              "rrTicks": 17,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 8,
+              "rrTicks": 18,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "1",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 9,
+              "rrTicks": 19,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "2",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 10,
+              "rrTicks": 20,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "10",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "2",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 11,
+              "rrTicks": 26,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "10",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 12,
+              "rrTicks": 27,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "10",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "2",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 13,
+              "rrTicks": 28,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "i",
+                  "value": "3",
+                  "kind": "u32",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 9,
+              "stepCount": 14,
+              "rrTicks": 29,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "3",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 15,
+              "rrTicks": 35,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "contribution",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 11,
+              "stepCount": 16,
+              "rrTicks": 36,
+              "loopId": 1,
+              "iteration": 3,
+              "values": [
+                {
+                  "name": "contribution",
+                  "value": "15",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "i",
+                  "value": "3",
+                  "kind": "u32",
+                  "truncated": false
+                },
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 8,
+              "stepCount": 17,
+              "rrTicks": 37,
+              "loopId": 1,
+              "iteration": 4,
+              "values": []
+            },
+            {
+              "line": 12,
+              "stepCount": 18,
+              "rrTicks": 38,
+              "loopId": 0,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "line": 13,
+              "stepCount": 19,
+              "rrTicks": 39,
+              "loopId": 0,
+              "iteration": 0,
+              "values": [
+                {
+                  "name": "sum",
+                  "value": "30",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "x",
+                  "value": "5",
+                  "kind": "Field",
+                  "truncated": false
+                },
+                {
+                  "name": "return",
+                  "value": "nil",
+                  "kind": "None",
+                  "truncated": false
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "flags": {
+        "hasSymbols": true,
+        "hasCoverage": true,
+        "hasFlow": true,
+        "isUnreachable": false,
+        "isPartial": false
+      }
+    }
+  ],
+  "callTrace": {
+    "nodes": [
+      {
+        "name": "main",
+        "executionCount": 1,
+        "children": [
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "main",
+        "executionCount": 1,
+        "children": [
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "scale",
+            "executionCount": 1,
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

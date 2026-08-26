@@ -11,6 +11,34 @@
 type
   DeepReviewData* = ref object
     ## Top-level container for a complete DeepReview export.
+    ##
+    ## MISSING DATA — test results.  This type carries no test-name, pass/fail
+    ## or duration field anywhere, and neither does the exporter that produces
+    ## it (``codetracer-native-backend/src/deepreview/json_export.rs``,
+    ## ``DeepReviewData``).  A review launched from ``ct review`` over an
+    ## exported dataset therefore knows nothing about test runs.
+    ##
+    ## No surface reports that today: AA-1 deleted the Agent Activity roll-up
+    ## whose Tests card used to say "not available for this dataset".  The
+    ## *rule* it encoded outlives it and binds whatever renders test results
+    ## next (AA-2): absent data is stated, never rendered as a zero — a "0/0,
+    ## all passing" row asserts that a suite ran and was green, which is a
+    ## fabricated fact rather than a missing one.
+    ##
+    ## Closing the gap needs, in ``codetracer-native-backend``:
+    ##   * a ``TestResultData { testName, passed, durationMs, traceContextId }``
+    ##     record — the same four fields
+    ##     ``Agentic-Coding-Integration.md`` §5.1's
+    ##     ``DeepReviewUpdate::TestCompleted`` already streams during a live
+    ##     agent session, so a dataset-backed review and a session-backed one
+    ##     describe test runs identically;
+    ##   * a ``testResults: Vec<TestResultData>`` field on the exported
+    ##     ``DeepReviewData``, written by ``ct-native-replay deepreview collect``
+    ##     from the runs it recorded;
+    ##   * the mirrored ``testResults*: seq[DeepReviewTestResult]`` here.
+    ## Adjacent to M42b (``Pxor-Bugs.milestones.org``) — same repo, same
+    ## neighbourhood — but a separate change: M42b is about loading the
+    ## recordings, this is about carrying a fact the recordings already know.
     commitSha*: langstring
     baseCommitSha*: langstring
     collectionTimeMs*: int
@@ -24,6 +52,97 @@ type
       ## is selected by default.
     files*: seq[DeepReviewFileData]
     callTrace*: DeepReviewCallTrace
+    session*: DeepReviewSessionRef
+      ## RV-6 — the agent session that produced this dataset, or nil.
+      ##
+      ## **Optional.**  A dataset collected by a human, or by an agent
+      ## whose backend cannot replay sessions, is a complete review; nil
+      ## here is normal and is not an error (DeepReview-GUI.md §2.1).
+      ##
+      ## **A reference, never a transcript.**  See
+      ## `DeepReviewSessionRef`'s own documentation for why.
+
+  DeepReviewSessionRef* = ref object
+    ## A pointer at the agent session a review dataset came from.
+    ##
+    ## DeepReview-GUI.md §2.1: "Loading is **by reference, never by
+    ## copy**.  The dataset stores an identifier and enough context to
+    ## resolve it; it does not embed a transcript."  Two consequences the
+    ## shape of this type exists to guarantee:
+    ##
+    ##   * a dataset cannot go **stale** against the session it names — a
+    ##     session that gained ten more turns after the dataset was
+    ##     written reads back with all of them;
+    ##   * no **conversation content** is duplicated into a file that may
+    ##     be attached to a ticket, mailed around or committed, while the
+    ##     session itself is behind whatever access control the agent
+    ##     backend applies.
+    ##
+    ## Resolution happens through `nim-agents`
+    ## (`AgentClient.loadSession`), which is why the fields below are
+    ## exactly what that call needs and nothing more: the backend to
+    ## speak, the id to ask for, and the workspace context an agent
+    ## resolves a session against.  CodeTracer stores no session history
+    ## of its own and must not start.
+    sessionId*: langstring
+      ## The backend's own id for the session.  Empty means "no
+      ## reference", the same as a nil `DeepReviewSessionRef`.
+    backend*: langstring
+      ## `"acp"` or `"harbor"`.  Anything else is treated as `"acp"`,
+      ## which is the backend that needs the most context and therefore
+      ## fails loudest rather than silently reading the wrong thing.
+    workspacePath*: langstring
+      ## The directory the session ran in.  ACP agents resolve a session
+      ## against a working directory, so this is what stops a session
+      ## being replayed against a different tree — the "workspace is
+      ## elsewhere" case §2.1 asks to be reported explicitly.
+    taskId*: langstring
+      ## Agent Harbor's task id, when the session belongs to one.  Empty
+      ## for ACP.
+    agentCommand*: langstring
+      ## For `"acp"`: the stdio ACP binary to re-spawn in order to ask
+      ## the agent for the session.  Empty means "the environment must
+      ## supply it", and an unresolvable reference is reported rather
+      ## than guessed at.
+    agentArgs*: seq[langstring]
+      ## Arguments for `agentCommand`.
+    endpoint*: langstring
+      ## For `"harbor"`: the base URL of the Agent Harbor instance that
+      ## holds the session.
+
+  DeepReviewSessionEvent* = ref object
+    ## One entry of a **resolved** session's conversation.
+    ##
+    ## This type does *not* live in a review dataset — it is the shape
+    ## `ct` hands the renderer after it has fetched the session from the
+    ## backend, and it is a strict subset of `nim-agents`'
+    ## `AgentEvent.toJson` so the two cannot drift.  It exists separately
+    ## from `DeepReviewSessionRef` precisely to keep the "reference in
+    ## the file, transcript only in memory" split visible in the types.
+    kind*: langstring
+    text*: langstring
+    status*: langstring
+    toolName*: langstring
+    toolCallId*: langstring
+    filePath*: langstring
+
+  DeepReviewSessionTranscript* = ref object
+    ## The outcome of resolving a `DeepReviewSessionRef`, as handed from
+    ## `ct` to the renderer.
+    ##
+    ## `state` is the load result from `nim-agents`
+    ## (`AgentSessionLoadState`): `"loaded"`, `"unsupported"` (the agent
+    ## cannot replay sessions at all) or `"unavailable"` (this session
+    ## could not be fetched — pruned, unknown, workspace elsewhere).  It
+    ## travels *with* the events on purpose: without it, an empty
+    ## `events` cannot be told from a failed fetch, and the panel would
+    ## render "the agent did nothing" for both — the defect §2.1 names.
+    state*: langstring
+    sessionId*: langstring
+    backend*: langstring
+    message*: langstring
+      ## The backend's own diagnostic for a non-`"loaded"` state.
+    events*: seq[DeepReviewSessionEvent]
 
   DeepReviewFileData* = ref object
     ## Per-file data including symbols, coverage, flow, loops, and diff info.
@@ -136,10 +255,29 @@ type
 
   DeepReviewVariableValue* = ref object
     ## A captured variable value at a specific execution step.
+    ##
+    ## ``value`` is the collector's *rendering* and ``structured`` is the value
+    ## itself. Both are carried, and which one a reader gets depends on which
+    ## collector wrote the dataset (UD-3):
+    ##
+    ## * the **materialized** collector holds a real ``Value`` — the same type
+    ##   the replay backend ships to the frontend for an ordinary debugging
+    ##   session — and now writes it (``db-backend/src/deepreview/json.rs``,
+    ##   ``VariableValueData.structured``);
+    ## * the **native** ``.dr`` exporter holds only string-table offsets
+    ##   (``json_export.rs::convert_flow_chunk``: ``value_ref``, ``type_ref``),
+    ##   so it writes ``structured`` as nil and the rendering is all there is.
+    ##
+    ## A reader must therefore treat ``structured`` as optional rather than as
+    ## the new spelling of ``value``. ``ui/review_flow_adapter.fillFlowValue``
+    ## is the one place that decides: structure when it is there, the typed
+    ## synthesis from the rendering when it is not.
     name*: langstring
     value*: langstring
     kind*: langstring
     truncated*: bool
+    structured*: Value
+      ## The value as the debugger holds it, or nil. See above.
 
   DeepReviewCallTrace* = ref object
     ## Root of the call-trace tree.

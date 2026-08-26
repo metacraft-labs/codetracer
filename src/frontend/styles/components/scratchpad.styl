@@ -1,6 +1,20 @@
+// Code surface: keep a monospace face.  This used to be inherited from the
+// app-wide `body` rule, which is now Space Grotesk (the interface face), so
+// it has to be stated here — collected values are code.
+#scratchpad, [id^='scratchpadComponent-']
+  font-family: "SpaceMono", monospace
+
 
 [id^="scratchpadComponent-"]
   height: 100%
+  position: relative
+
+  .empty-overlay
+    position: absolute
+    top: 0
+    left: 0
+    right: 0
+    bottom: 0
 
 #scratchpad
   background-color: colors-ui-surface-base-panel

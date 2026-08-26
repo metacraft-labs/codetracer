@@ -16,76 +16,32 @@
 ##   {8,9,a,b} at position 19, all hex digits lowercase
 ##
 ## If you change one, change the other.  M-REC-3 may unify them.
-
-import std/[sysrand, times]
-import results
+##
+## ## AS-1: why the minter and the validator are split
+##
+## Minting a UUIDv7 needs the OS CSPRNG (``std/sysrand``), which has no
+## ``nim js`` equivalent and for which there is no safe fallback — an
+## identifier drawn from a weak source is worse than no identifier.  So the
+## minter lives inside ``when not defined(js)``.
+##
+## Validation is pure string work, and the artifact model
+## (``src/ct/online_sharing/artifact.nim``) needs it on *both* Nim backends so
+## that a kind-neutral artifact id can be checked in the headless ViewModel
+## lane.  Keeping ``isCanonicalUuidV7`` outside the guard is what lets the one
+## set of rules serve both, instead of a second copy drifting away from this
+## one — which is the exact hazard the note above already warns about for the
+## trace-format implementation.
 
 const
   UuidV7TextLen* = 36
     ## Length of the canonical hyphenated text form (8-4-4-4-12).
 
-type
-  UuidV7 = object
-    bytes: array[16, byte]
-
-const HexLower = "0123456789abcdef"
-
-proc unixMs(): uint64 =
-  ## Current Unix epoch in whole milliseconds — matches ``date +%s%3N``.
-  uint64(epochTime() * 1000.0)
-
-proc renderCanonical(u: UuidV7): string =
-  ## Render the canonical lowercase hyphenated form
-  ## ``xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx``.
-  result = newString(UuidV7TextLen)
-  var dest = 0
-  for i in 0 ..< 16:
-    if i == 4 or i == 6 or i == 8 or i == 10:
-      result[dest] = '-'
-      inc dest
-    let b = u.bytes[i]
-    result[dest] = HexLower[int(b shr 4)]
-    inc dest
-    result[dest] = HexLower[int(b and 0x0F'u8)]
-    inc dest
-
-proc newRecordingId*(): Result[string, string] =
-  ## Generate a fresh UUIDv7 in canonical text form.  Returns ``err``
-  ## only if the OS CSPRNG refuses to yield 10 bytes — a condition that
-  ## practically never occurs on a healthy host.  See RFC 9562 §5.7.
-  var randomBytes: array[10, byte]
-  if not urandom(randomBytes):
-    return err("uuidv7: OS CSPRNG returned no entropy")
-
-  let ms = unixMs()
-  var u = UuidV7()
-
-  # Bytes 0..5 — 48-bit unix_ts_ms, big-endian.
-  u.bytes[0] = byte((ms shr 40) and 0xFF'u64)
-  u.bytes[1] = byte((ms shr 32) and 0xFF'u64)
-  u.bytes[2] = byte((ms shr 24) and 0xFF'u64)
-  u.bytes[3] = byte((ms shr 16) and 0xFF'u64)
-  u.bytes[4] = byte((ms shr 8) and 0xFF'u64)
-  u.bytes[5] = byte(ms and 0xFF'u64)
-
-  # Bytes 6..7 — version (4 bits = 0b0111) + rand_a (12 bits).
-  u.bytes[6] = byte((0x70'u8) or (randomBytes[0] and 0x0F'u8))
-  u.bytes[7] = randomBytes[1]
-
-  # Bytes 8..15 — variant (2 bits = 0b10) + rand_b (62 bits).
-  u.bytes[8] = byte((randomBytes[2] and 0x3F'u8) or 0x80'u8)
-  u.bytes[9] = randomBytes[3]
-  for i in 0 ..< 6:
-    u.bytes[10 + i] = randomBytes[4 + i]
-
-  ok(renderCanonical(u))
-
 proc isCanonicalUuidV7*(s: string): bool =
   ## Lightweight validator: returns true iff ``s`` matches the canonical
   ## lowercase hyphenated 36-char form of a UUIDv7 (version nibble 7,
-  ## variant bits 10).  Used by tests; callers in this module accept
-  ## whatever the writer produced and let downstream readers reject
-  ## malformed values.
+  ## variant bits 10).  Used by tests and by the artifact model; callers in
+  ## this module accept whatever the writer produced and let downstream
+  ## readers reject malformed values.
   if s.len != UuidV7TextLen:
     return false
   for hyphenPos in [8, 13, 18, 23]:
@@ -107,3 +63,63 @@ proc isCanonicalUuidV7*(s: string): bool =
   else:
     return false
   return true
+
+when not defined(js):
+  import std/[sysrand, times]
+  import results
+
+  type
+    UuidV7 = object
+      bytes: array[16, byte]
+
+  const HexLower = "0123456789abcdef"
+
+  proc unixMs(): uint64 =
+    ## Current Unix epoch in whole milliseconds — matches ``date +%s%3N``.
+    uint64(epochTime() * 1000.0)
+
+  proc renderCanonical(u: UuidV7): string =
+    ## Render the canonical lowercase hyphenated form
+    ## ``xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx``.
+    result = newString(UuidV7TextLen)
+    var dest = 0
+    for i in 0 ..< 16:
+      if i == 4 or i == 6 or i == 8 or i == 10:
+        result[dest] = '-'
+        inc dest
+      let b = u.bytes[i]
+      result[dest] = HexLower[int(b shr 4)]
+      inc dest
+      result[dest] = HexLower[int(b and 0x0F'u8)]
+      inc dest
+
+  proc newRecordingId*(): Result[string, string] =
+    ## Generate a fresh UUIDv7 in canonical text form.  Returns ``err``
+    ## only if the OS CSPRNG refuses to yield 10 bytes — a condition that
+    ## practically never occurs on a healthy host.  See RFC 9562 §5.7.
+    var randomBytes: array[10, byte]
+    if not urandom(randomBytes):
+      return err("uuidv7: OS CSPRNG returned no entropy")
+
+    let ms = unixMs()
+    var u = UuidV7()
+
+    # Bytes 0..5 — 48-bit unix_ts_ms, big-endian.
+    u.bytes[0] = byte((ms shr 40) and 0xFF'u64)
+    u.bytes[1] = byte((ms shr 32) and 0xFF'u64)
+    u.bytes[2] = byte((ms shr 24) and 0xFF'u64)
+    u.bytes[3] = byte((ms shr 16) and 0xFF'u64)
+    u.bytes[4] = byte((ms shr 8) and 0xFF'u64)
+    u.bytes[5] = byte(ms and 0xFF'u64)
+
+    # Bytes 6..7 — version (4 bits = 0b0111) + rand_a (12 bits).
+    u.bytes[6] = byte((0x70'u8) or (randomBytes[0] and 0x0F'u8))
+    u.bytes[7] = randomBytes[1]
+
+    # Bytes 8..15 — variant (2 bits = 0b10) + rand_b (62 bits).
+    u.bytes[8] = byte((randomBytes[2] and 0x3F'u8) or 0x80'u8)
+    u.bytes[9] = randomBytes[3]
+    for i in 0 ..< 6:
+      u.bytes[10 + i] = randomBytes[4 + i]
+
+    ok(renderCanonical(u))

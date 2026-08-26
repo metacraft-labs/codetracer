@@ -17,7 +17,7 @@
 mod test_harness;
 
 use std::path::PathBuf;
-use test_harness::{Language, TestRecording, find_ct_rr_support, is_replay_backend_available};
+use test_harness::{Language, TestRecording, find_ct_native_replay, is_replay_backend_available};
 
 fn get_lean_source_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -35,7 +35,7 @@ fn is_lake_available() -> bool {
 #[test]
 fn test_lean_build_and_record() {
     // Check prerequisites
-    let ct_rr_support = match find_ct_rr_support() {
+    let ct_native_replay = match find_ct_native_replay() {
         Some(p) => p,
         None => {
             eprintln!("SKIPPED: ct-native-replay not found");
@@ -77,7 +77,7 @@ fn test_lean_build_and_record() {
     println!("Testing Lean build+record pipeline (version: {})", version_label);
 
     // Build and record
-    let recording = TestRecording::create(&source_path, Language::Lean, &version_label, &ct_rr_support);
+    let recording = TestRecording::create(&source_path, Language::Lean, &version_label, &ct_native_replay);
     match recording {
         Ok(rec) => {
             println!("Lean build+record succeeded:");
@@ -95,7 +95,7 @@ fn test_lean_build_and_record() {
 #[test]
 fn test_lean_dap_replay_connects() {
     // Check prerequisites
-    let ct_rr_support = match find_ct_rr_support() {
+    let ct_native_replay = match find_ct_native_replay() {
         Some(p) => p,
         None => {
             eprintln!("SKIPPED: ct-native-replay not found");
@@ -117,7 +117,7 @@ fn test_lean_dap_replay_connects() {
     assert!(source_path.exists());
 
     let version_label = "test";
-    let recording = TestRecording::create(&source_path, Language::Lean, version_label, &ct_rr_support)
+    let recording = TestRecording::create(&source_path, Language::Lean, version_label, &ct_native_replay)
         .expect("build+record should succeed");
 
     // Start DAP client and verify we can connect
@@ -126,11 +126,11 @@ fn test_lean_dap_replay_connects() {
     {
         use test_harness::DapTestClient;
         println!("Starting DAP client for Lean replay (Unix sockets)...");
-        let mut client = DapTestClient::start(&recording.temp_dir, &ct_rr_support).expect("DAP client should start");
+        let mut client = DapTestClient::start(&recording.temp_dir, &ct_native_replay).expect("DAP client should start");
 
         println!("Initializing DAP session...");
         client
-            .initialize_and_launch(&recording, &ct_rr_support)
+            .initialize_and_launch(&recording, &ct_native_replay)
             .expect("DAP initialize+launch should succeed");
     }
 
@@ -142,7 +142,7 @@ fn test_lean_dap_replay_connects() {
 
         println!("Initializing DAP session...");
         client
-            .initialize_and_launch_rr(&recording, &ct_rr_support)
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("DAP initialize+launch should succeed");
     }
 

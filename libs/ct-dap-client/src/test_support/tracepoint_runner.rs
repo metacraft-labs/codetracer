@@ -9,7 +9,7 @@ use crate::types::tracepoint::{RunTracepointsArg, TraceSession, Tracepoint, Trac
 use super::comparison::{
     assert_tracepoint_results_match, terminal_events_to_string, ExpectedTrace,
 };
-use super::{find_ct_rr_support, prepare_trace_folder};
+use super::{find_ct_native_replay, prepare_trace_folder};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -41,8 +41,8 @@ impl TracepointTestRunner {
         // wrapper directory with an `rr` symlink to bridge the gap.
         let (launch_folder, wrapper) = prepare_trace_folder(rr_trace_dir)?;
 
-        // db-backend needs ct-rr-support as replay-worker. Find it automatically.
-        let ct_rr_worker_exe = find_ct_rr_support()?;
+        // db-backend needs ct-native-replay as replay-worker. Find it automatically.
+        let ct_rr_worker_exe = find_ct_native_replay()?;
 
         let mut client = DapStdioClient::spawn(db_backend_bin)?;
 

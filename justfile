@@ -4,12 +4,37 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Assert that `just build` is `just build-once` plus watchers, and nothing
+# else. Executes BOTH scripts under a PATH of recording stubs (tup, webpack,
+# livereload, repro, runquotad, nix, uname) and compares the resulting command
+# traces: same host branch, same tup variant, same steps in the same order,
+# and — the assertion that catches issue #599 — no webpack invocation ordered
+# before the first tup/repro invocation. Builds nothing, needs no toolchain,
+# runs in seconds. See the header of scripts/test-build-alignment.sh.
+test-build-alignment:
+  bash scripts/test-build-alignment.sh
+
 # Build all sibling-recorder binaries that the GUI tests reach for.
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
 # report status without building.  See scripts/build-siblings.sh.
 build-siblings *args:
   bash scripts/build-siblings.sh {{args}}
+
+# Assemble the `codetracer-desktop` component bundle the `ct` launcher fronts:
+#   <out-root>/codetracer-desktop@<ver>/{capabilities, bin/codetracer}
+# `capabilities` is copied byte-for-byte from
+# `resources/codetracer-desktop-capabilities`, and both the directory name and
+# the binary filename are derived from that file's `name` / `bin` lines so they
+# can never drift apart.  Requires an already-built core (`just build-once`);
+# a missing core is a loud failure, not a no-op.  Output defaults to the
+# gitignored `build-desktop-component/`, which is exactly the path to hand the
+# launcher as CODETRACER_COMPONENTS_ROOT.  Pass `--out-root DIR`, `--copy`
+# (real file instead of a symlink to the build tree) or `--help`.
+# See scripts/build-desktop-component.sh and
+# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md §5.1.
+build-desktop-component *args:
+  bash scripts/build-desktop-component.sh {{args}}
 
 # Smoke-test the built AppImage on multiple Linux distros via Docker.
 # Catches glibc/libgcc/libstdc++ symbol-version regressions and missing
@@ -49,6 +74,39 @@ capture-book-assets:
   set -euo pipefail
   CODETRACER_BOOK_SCREENSHOT_DIR="$(pwd)/docs/book-isonim/static/img/visual_recordings" \
     bash scripts/docs/capture-visual-recording-screenshots.sh
+
+# Regenerate the DeepReview screenshots the book serves from
+# `/assets/img/deep_review/`. Same discipline as `capture-book-assets`: it
+# records a real Noir program, collects a real review dataset and photographs
+# the real `ct review` window, and fails with a named remedy rather than
+# leaving stale images in place. Needs nargo, Xvfb, xdotool and ImageMagick.
+capture-deep-review-assets:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  CODETRACER_BOOK_SCREENSHOT_DIR="$(pwd)/docs/book-isonim/static/img/deep_review" \
+    bash scripts/docs/capture-deep-review-screenshots.sh
+
+# Capture the DeepReview design-review matrix (UD-0): every named view, at
+# every named viewport size, in both themes.
+#
+# NOT the same thing as `capture-deep-review-assets` above, which produces two
+# frozen images for the book from a fixture the book's prose quotes line for
+# line. This produces a re-capturable matrix over a much richer corpus, for the
+# visual-design-iteration loop. They share their machinery -- preflight, the
+# stale-build refusal, recording, dataset collection, Xvfb -- in
+# `scripts/docs/deep-review-capture-lib.sh`, and nothing else.
+#
+# Targeted re-capture is the common case and needs no recipe:
+#   bash tools/visual-review/capture-deepreview-views.sh --view diff-flow-values --size wide --theme dark
+capture-deepreview-design-views:
+  bash tools/visual-review/capture-deepreview-views.sh
+
+# The contract suite for that harness: the matrix covers what the campaign
+# changes, the brief has an expected-elements block per view, and targeting
+# neither re-records nor deletes the other views' captures. Never launches
+# Electron; `ci/lint/bash.sh` runs it too.
+test-deepreview-design-harness:
+  bash tools/visual-review/deepreview-harness-test.sh
 
 capture-docs-visual-page:
   #!/usr/bin/env bash
@@ -552,7 +610,7 @@ test-rust:
       exit "$?"; \
     fi
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
+  # Flow tests that need ct-native-replay/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
   # and are run separately in cross-repo CI jobs.
   cargo nextest run --release --test '*' \
@@ -589,6 +647,8 @@ test-ct-print:
 test:
   #!/usr/bin/env bash
   set -e
+  just test-build-alignment
+  just test-agent-api-contract
   just test-rust
   just test-nimsuggest
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
@@ -663,6 +723,8 @@ test-visual-replay-gate:
   bash ci/test/visual-replay-gate.sh
 
 # Run the M16 ct-test provider matrix and release-gate checks.
+# CI runs this script in the required `ct-test-release-gate` job
+# (.github/workflows/codetracer.yml); it needs no recorder siblings.
 test-m16-release-gate:
   bash ci/test/m16-release-gate.sh
 
@@ -675,8 +737,74 @@ test-m16-release-gate:
 # already-built recorders. Run from inside the dev shell (it provides nim plus
 # the gtest/catch2/cmake/ninja toolchain and CMAKE_PREFIX_PATH / CT_TEST_C{C,XX}
 # the C/C++ providers need). See ci/test/ct-providers.sh.
+# CI runs this script in the required `ct-test-providers` job
+# (.github/workflows/codetracer.yml), which checks the recorder siblings out
+# via setup-dev-env first.
 test-ct-providers:
   bash ci/test/ct-providers.sh
+
+# Verify the `codetracer-desktop` component-bundle producer
+# (`just build-desktop-component`) against the launcher's real contract:
+# the bundle layout the launcher discovers, a byte-identical `capabilities`
+# copy, agreement between the capability file's `bin` line and the produced
+# filename, an executable core whose reported version matches the bundle's
+# `@<ver>`, and a parse of the capability file through the launcher's OWN
+# parser (`codetracer-launcher/src/caps.nim`, compiled from the sibling
+# checkout).  Needs a built core (`just build-once`), the codetracer-launcher
+# sibling, and `nim` on PATH — each missing prerequisite fails loudly rather
+# than skipping.  See ci/test/desktop-component-bundle.sh.
+test-desktop-component:
+  bash ci/test/desktop-component-bundle.sh
+
+# Verify that `resources/codetracer-desktop-capabilities` declares exactly the
+# file extensions the core can actually record.  The expected set is recomputed
+# from the production tables themselves
+# (`src/ct/utilities/language_detection.nim`'s LANGS +
+# `src/ct/trace/recorder_dispatch.nim`) by a checker compiled against them, so
+# it cannot drift; both directions are enforced (nothing declared that the core
+# cannot record, nothing recordable left undeclared — the `.js` routing bug).
+# Five mutation scenarios prove the check has teeth, and the built core's
+# `ct-describe-commands` file-types are compared against the same lists.  Needs
+# `nim` on PATH and a built core (`just build-once`); a missing -- or stale --
+# prerequisite fails loudly with a named remedy rather than skipping.
+# See ci/test/desktop-capabilities-dispatch.sh.
+test-desktop-capabilities:
+  bash ci/test/desktop-capabilities-dispatch.sh
+
+# End-to-end launcher <-> recorder compatibility gate: `ct record sample.py`
+# driven through the REAL `ct` launcher binary, which routes from the
+# codetracer-desktop capability file into the real desktop core, which
+# dispatches the real recorder, whose CTFS trace is decoded and asserted with
+# `ct-print` from codetracer-trace-format-nim.  This is the only gate that
+# covers hop 1 (the launcher's router); `just test-ct-providers` drives the
+# core directly and never sees it.  Scenarios, samples and expected trace
+# shape all come from the recorder repo's own contract fixture
+# (<recorder>/cross-repo/launcher-compat.yml), so a recorder that changes its
+# CLI or handled extensions has to update that file in the same change.
+# Needs the codetracer-launcher and recorder siblings, a built core
+# (`just build-once`) and `ct-print`; every missing prerequisite fails loudly
+# rather than skipping.  See ci/test/launcher-recorder-e2e.sh.
+test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
+  bash ci/test/launcher-recorder-e2e.sh {{recorder}} {{lang}}
+
+# Verify the CI WIRING of the gate above, which no linter covers: `actionlint`
+# does not check a caller's `with:`/`secrets:` against a reusable workflow's
+# declared `inputs:`, so a misspelled key that also leaves a required input
+# unpassed lints clean and fails at run time.  This EXTRACTS the reusable
+# workflow's "Plan the workspace layout" script from the YAML and RUNS it under
+# each caller's `github.repository`, proving the triggering repo is never
+# listed as its own sibling (`clone-siblings` would `rm -rf` the primary
+# checkout), that every sibling entry is bare so its revision comes from the
+# per-commit workspace lock, and that `.github/sibling-repos` declares every
+# name the workflow can emit, and that the primary `actions/checkout` still
+# pins the repo under test to the caller's `github.sha` expression -- since
+# LRC-6 dropped the `*-ref` inputs, that one line IS the repo-under-test
+# guarantee.  Thirteen mutations of real wiring, each of which must be
+# rejected, plus a positive control, keep the checker itself honest.
+# Stock bash: no Nix, no dev shell, no network.
+# See ci/test/launcher-recorder-e2e-workflow-test.sh.
+test-launcher-recorder-e2e-wiring:
+  bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
@@ -744,7 +872,7 @@ log-file pid_or_current_or_last kind process="default" instance_index="0":
   fi;
 
 # expected `run_name_or_last` as `run-<run-pid>` or `last`
-log name="ct-rr-support" worker_kind="stable" index="0" codetracer_tmp_dir="" run_name_or_last="last":
+log name="ct-native-replay" worker_kind="stable" index="0" codetracer_tmp_dir="" run_name_or_last="last":
   #!/usr/bin/env bash
   if [ "{{codetracer_tmp_dir}}" == "" ]; then
     tmpdir=$(just findtmp)
@@ -845,17 +973,38 @@ stop:
   killall -9 virtualization-layers db-backend node .electron-wrapped || true
   killall -9 electron || true
   killall -9 backend-manager || true
-  killall -9 ct-rr-support || true
+  killall -9 ct-native-replay || true
 
 reset-config:
   rm --force  ~/.config/codetracer/.config.yaml && \
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_config.yaml ~/.config/codetracer/.config.yaml
 
+# Clear every persisted layout artifact and reseed the bundled default.
+#
+# The auto-hide strip is a SECOND persisted file (#608 gave it a real handler
+# and a restore path), and `default_layout.json.broken` is the quarantined copy
+# a failed repair leaves behind.  Both must be cleared here — a `reset-layout`
+# that leaves a stale auto-hide state behind would restore panels the reseeded
+# layout knows nothing about, which is the class of inconsistency #608 was
+# reported for in the first place.
 reset-layout:
-  rm --force  ~/.config/codetracer/default_layout.json && \
+  rm --force  ~/.config/codetracer/default_layout.json \
+              ~/.config/codetracer/default_edit_layout.json \
+              ~/.config/codetracer/default_layout.json.broken \
+              ~/.config/codetracer/default_edit_layout.json.broken \
+              ~/.config/codetracer/auto_hide_state.json && \
     mkdir -p ~/.config/codetracer/ && \
     cp -r src/config/default_layout.json ~/.config/codetracer/default_layout.json
+
+# Cross-repo API contract: the `nim-agents` / `nim-acp` surface `ct` is built
+# against. Compiles the exact calls `src/ct/review_session.nim` makes, so a
+# sibling checkout at a revision that predates them fails in seconds with a
+# named remedy, instead of as a type mismatch fifteen minutes into a full `ct`
+# build that blames the caller. See the module header for why it asserts
+# signatures rather than behaviour.
+test-agent-api-contract:
+  nim c -r --hints:off src/ct/agent_session_api_contract_test.nim
 
 # originally by Pavel/Dimo in ci.sh
 test-nimsuggest:
@@ -998,11 +1147,43 @@ test-frontend-js:
   #!/usr/bin/env bash
   set -e
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test"' EXIT
+  scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
+  target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
+  ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
   node "$frontend_lang_test"
+  echo ""
+  # The JS half of the four-axis domain types' placement requirement.  The
+  # native half is `src/tests/cli/target_axes_test.nim`, in `test-cli-record`.
+  # Both are required: `src/common/target_axes.nim` and
+  # `src/common/target_assessment.nim` exist to be reachable from EVERY front
+  # end, so a build that only succeeds on one backend has not delivered the
+  # property.  Compiling is itself part of the assertion -- a stray `std/jsffi`
+  # or `os` dependency fails here and nowhere else.
+  echo "Running four-axis domain type tests (JS backend)..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$target_axes_js_test" js src/frontend/tests/target_axes_js_test.nim
+  node "$target_axes_js_test"
+  echo ""
+  echo "Running scratchpad add-to-scratchpad dispatch tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$scratchpad_dispatch_test" js src/frontend/tests/scratchpad_add_dispatch_test.nim
+  # `types.nim` installs a `window.data` debugging hook at import time; node
+  # has no `window`, so alias it to the global object before loading the
+  # bundle.  Nothing else in this test needs a DOM.
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$scratchpad_dispatch_test"
+  echo ""
+  # `src/frontend/tests/ipc_registry_test.nim` imports `std/jsffi`, so the C
+  # backend refuses it outright ("Module jsFFI is designed to be used with the
+  # JavaScript backend").  It ran in no lane at all until this line existed —
+  # two real cases over the socket-rebinding path that could not fail a build.
+  echo "Running IPC registry rebind tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$ipc_registry_test" js src/frontend/tests/ipc_registry_test.nim
+  node "$ipc_registry_test"
   echo ""
   echo "Running Nim language definition tests..."
   node src/frontend/tests/nimLanguage.test.mjs
@@ -1081,40 +1262,13 @@ test-cli-record: vm-test-prereqs
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-cli-record.log) 2>&1
-  echo "=== ct record CLI dispatch tests ==="
-
   # Discover the sibling recorders the e2e test records with, the same way
-  # test-vm-recorder-gated does.
+  # test-vm-recorder-gated does.  Everything after this — which files, which
+  # flags, how a run is classified — is ci/lib/run-nim-test-lane.sh, so this
+  # recipe cannot drift away from the other lanes' reporting the way six
+  # hand-copied loops did.
   source scripts/detect-siblings.sh
-
-  failed=0
-  passed=0
-  for f in $(find src/tests/cli -name '*_test.nim' | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/cli-$name"
-    echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1) || true
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR / no tests ran"
-      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep -A 12 '\[FAILED\]' | head -60 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
-  done
-  echo ""
-  echo "CLI: $passed passed, $failed failed"
-  [ "$failed" -eq 0 ]
+  bash ci/lib/run-nim-test-lane.sh cli-record
 
 # Run CLI record smoke tests for all supported languages.
 # Exercises the full `ct record` code path (language detection → recorder
@@ -1281,7 +1435,7 @@ test-origin-dap:
 # tree and replay it.
 #
 # These three fixtures — the imported-memory calldata demo (spec §3.3/§3.4),
-# the M52 NaN-payload demo, and the M45 four-module parity corpus — each
+# the NaN-payload demo, and the four-module parity corpus — each
 # ship a `verify.sh` that was reachable only by knowing it existed. Nothing
 # ran them, which is how one of them came to pass vacuously: its negative
 # control edited the host state in the `boundary_state.json` sidecar only,
@@ -2117,8 +2271,8 @@ test-flow-all:
   echo "╚════════════════════════════════════════════════════════════╝"
 
 # ====
-# Cross-repo integration tests (requires codetracer-rr-backend)
-# These tests build/find ct-rr-support from the rr-backend repo and run
+# Cross-repo integration tests (requires codetracer-native-backend)
+# These tests build/find ct-native-replay from the native-backend repo and run
 # the flow integration tests against it.
 
 cross-test:
@@ -2203,46 +2357,29 @@ vm-test-prereqs:
 # Compile and run all ViewModel headless tests with the native (C) backend.
 test-vm-native: vm-test-prereqs
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-vm-native.log) 2>&1
-  echo "=== ViewModel tests (native backend) ==="
-  failed=0
-  passed=0
-  for f in $(find src/tests/gui/tests -name '*_test.nim' \
-    ! -name 'vm_test_helpers.nim' \
-    ! -path '*/integration/real_backend_test.nim' \
-    ! -path '*/integration/language_smoke_test.nim' \
-    ! -path '*/multi-replay/*' \
-    ! -path '*/noir-space-ship/*' \
-    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
-    | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/vm-native-$name"
-    echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
-      --path:src/frontend/viewmodel \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1) || true
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR"
-      echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
-  done
-  echo ""
-  echo "Native: $passed passed, $failed failed"
-  [ "$failed" -eq 0 ]
+  # Which files this lane runs, and which flags they need, is
+  # ci/lib/test-lane-files.sh; how a run is compiled, executed and classified
+  # is ci/lib/run-nim-test-lane.sh.  Both details used to live inline here, in
+  # a loop that five other recipes had each copied and then drifted from.
+  #
+  # Two behaviours that were hard-won and now live in the runner, so every lane
+  # gets them:
+  #
+  #   * Compile and run are SEPARATE steps.  As one `nim c -r` they were not:
+  #     `welcome_screen_vm_test` compiles perfectly and then dies at process
+  #     start with `could not load: libsqlite3.so(|.0)` because it dlopen's
+  #     sqlite through db_connector.  The old reporting called that a "COMPILE
+  #     ERROR" and printed only lines matching `Error:` — which that diagnostic
+  #     does not match, so the one line naming the missing library was thrown
+  #     away and all anybody saw was `execution of an external program failed`.
+  #
+  #   * The RUN inherits CT_LD_LIBRARY_PATH (the dev shell's
+  #     sqlite/pcre/glib/openssl/zstd set); the COMPILE does not, so those
+  #     libraries never get in front of the Nim compiler's own loader path.
+  bash ci/lib/run-nim-test-lane.sh vm-native
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
@@ -2266,66 +2403,280 @@ test-vm-native: vm-test-prereqs
 # CoreViewModelGateTests.
 test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-vm-js.log) 2>&1
-  echo "=== ViewModel tests (JS backend) ==="
-  failed=0
-  passed=0
-  for f in $(find src/tests/gui/tests -name '*_test.nim' \
-    ! -name 'vm_test_helpers.nim' \
-    ! -path '*/integration/real_backend_test.nim' \
-    ! -path '*/integration/language_smoke_test.nim' \
-    ! -path '*/multi-replay/*' \
-    ! -path '*/noir-space-ship/*' \
-    ! -path '*/agentic-coding/*' \
-    ! -path '*/request-panel/demo_recipe_vm_test.nim' \
-    ! -path '*/request-panel/python_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/ruby_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/php_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/elixir_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/js_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/native_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/remote_request_panel_vm_test.nim' \
-    ! -path '*/request-panel/request_span_conformance_test.nim' \
-    ! -path '*/request-panel/no_sidecar_manifests_test.nim' \
-    | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/vm-js-$name"
-    echo -n "  $f ... "
-    if ! nim js --hints:off \
-      --path:src/frontend/viewmodel \
-      --nimcache:"$cache" \
-      -o:"$cache/$name.js" \
-      "$f" >/dev/null 2>&1; then
-      echo "COMPILE ERROR"
-      nim js --hints:off \
-        --path:src/frontend/viewmodel \
-        --nimcache:"$cache" \
-        -o:"$cache/$name.js" \
-        "$f" 2>&1 | grep 'Error:' | head -2 | sed 's/^/    /'
-      failed=$((failed + 1))
-      continue
-    fi
-    output=$(node "$cache/$name.js" 2>&1)
-    exitcode=$?
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    if [ "$fails" -gt 0 ] || [ "$exitcode" -ne 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
-  done
-  echo ""
-  echo "JS: $passed passed, $failed failed"
-  [ "$failed" -eq 0 ]
+  # Same runner as the native lane; ci/lib/test-lane-files.sh derives this
+  # lane's file set FROM the native lane's, minus what cannot compile or run
+  # under `nim js`, so the two can no longer disagree about the shared part.
+  #
+  # `-d:nodejs` is applied by the runner and is load-bearing, not decoration.
+  # Nim auto-defines `nodejs` only for `nim js -r`; this lane compiles and runs
+  # as separate steps, so without the explicit define
+  # `std/exitprocs.setProgramResult` is undeclared, `std/unittest` substitutes
+  # a no-op, and node exits 0 even when a test fails.  The compiler says so:
+  #
+  #     unittest.nim: Warning: setProgramResult not available on platform,
+  #       unittest will not give failing exit code on test failure
+  #
+  # and the old `>/dev/null 2>&1` on the compile threw that warning away.
+  bash ci/lib/run-nim-test-lane.sh vm-js
 
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
+
+# ====
+# Lanes converted from hand-maintained path lists to DISCOVERY.
+#
+# Everything below shares one runner (ci/lib/run-nim-test-lane.sh) and one file
+# selector (ci/lib/test-lane-files.sh).  That split is the point: a lane is now
+# DATA — "this directory, this pattern, these flags" — so a new test file in a
+# covered directory is picked up by its lane with nobody editing anything, and
+# `just test-lane-coverage` fails BY NAME on any test-shaped file that still
+# matches no lane.
+#
+# Before this existed, 61 test-shaped `.nim` files carrying real `suite`/`test`
+# blocks ran in no lane at all, including all five `src/common/*_test.nim` —
+# among them `trace_index_test.nim`, the M-REC-8 recording-id identity suite
+# the artifact store's id decision rests on — and every
+# `src/ct_test/incremental/test_*.nim`.  `src/ct/utilities/zip_test.nim` had
+# rotted into a file that did not even parse, which is what happens to code
+# nothing compiles.
+#
+# ---------------------------------------------------------------------------
+# DEFERRED, AND SAY SO: NONE OF THE 13 RECIPES BELOW IS IN A PIPELINE YET.
+# ---------------------------------------------------------------------------
+# "Picked up by its lane" is NOT the same as "runs in CI", and for these
+# thirteen the second is currently false.  No workflow, no entry in
+# ci/verdict/required-jobs.txt, and no aggregate recipe invokes any of them —
+# 76 of the 220 files the lane library resolves are in lanes no pipeline runs
+# (`test_lane_all_files | wc -l` for the 220; the reachable 144 are the lanes
+# behind `just test-vm`, `test-cli-record`, `test-ct-trace-units`,
+# `test-mcr-enrichment-units`, `test-m16-release-gate`, `test-ct-providers`,
+# `test-visual-replay-gate`, `test-vm-recorder-gated` and
+# `test-no-sidecar-manifests`).  A reader who assumed otherwise would be repeating this
+# campaign's own mistake one level up, so it is written down here rather than
+# left to be discovered.
+#
+# WHY it is deferred: six of these lanes are red for reasons that are not
+# theirs to fix, and wiring a red lane into a required job breaks every build
+# for everybody:
+#
+#   test-frontend-units          cross_process_origin_vm_test needs an
+#                                uncommitted rr/MCR cross-process recording
+#   test-vm-collab-units         the collab signal registry has drifted from
+#                                the ViewModels (30 unclassified, 1 stale) —
+#                                a real, pre-existing red
+#   test-vm-collab-integration   test_collab_m8_cross_frontend needs
+#                                libgpui_nim_shim.so
+#   test-ct-test-incremental     test_io_mon_readfiles_materialized asserts an
+#                                insertion order the impl returns sorted
+#   test-vm-gui-headless         noir_space_ship_test: recorded traces come
+#                                back "unrecognized format"; real_backend_test
+#                                needs the Python recorder installed
+#   test-ct-test-incremental-e2e needs a buildable Python recorder sibling
+#
+# `test-online-sharing-compile` was the seventh until AS-2
+# (Sharing/Artifact-Store.milestones.org) brought `online_sharing_test.nim`'s
+# call sites up to date; it is green now, and the three signatures it had
+# rotted against were the same three defects AS-2 closed (a `uploadTrace` that
+# never returned, a `fileId` holding two namespaces, and a `downloadKey`
+# nothing assigned).  Its lane still never RUNS the file — a live round-trip
+# against the production sharing service must not — only compiles it.
+#
+# The six that are GREEN today and could be promoted as-is:
+#   test-common-units  test-ct-cli-units  test-vm-unit  test-book-isonim
+#   test-online-sharing-compile
+#   test-lane-coverage (already runs, via ci/lint/nim.sh)
+# (`test-lanes` is the thirteenth recipe; it prints lane contents and runs
+#  nothing, so it is neither red nor promotable.)
+#
+# What IS closed regardless of the above: the guard.  `test-lane-coverage`
+# runs in the `lint-nim` job, so a NEW dark file is caught on every push even
+# while these lanes wait for a pipeline.  The deferral is about running the
+# 61 rescued files in CI, not about the class staying closed.
+
+# The guard that closes the class: every test-shaped Nim file must be run by a
+# lane or declare, in itself, that it is not a test of this repo.  Pure bash +
+# git, no toolchain, runs in about a second — it is wired into `ci/lint/nim.sh`
+# so the answer arrives in the lint stage rather than after a build.
+test-lane-coverage:
+  bash ci/test/test-lane-coverage.sh
+
+# Print what each lane runs, without running anything.  Useful when deciding
+# where a new test file belongs.
+test-lanes:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source ci/lib/test-lane-files.sh
+  while read -r lane; do
+    printf '%s — %s\n' "$lane" "$(test_lane_description "$lane")"
+    test_lane_files "$lane" | sed 's/^/    /'
+  done < <(test_lane_ids)
+
+# src/common unit suites.  ALL FIVE ran in no lane until this recipe existed,
+# `trace_index_test.nim` — the M-REC-8 recording-id identity suite — among them.
+test-common-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-common-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh common-units
+
+# The `ct` CLI's unit suites outside src/ct/trace: the three
+# src/ct/launch/*_test.nim, src/ct/test_sourcemap.nim and
+# src/ct/utilities/zip_test.nim.  Needs `--mm:refc` because src/ct/sourcemap.nim
+# calls `GC_disable`, which does not exist under ORC.
+test-ct-cli-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-cli-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-cli-units
+
+# src/frontend/tests suites that compile with the C backend.  Six of the eight
+# files in that directory ran nowhere; the other two are `just test-frontend-js`.
+test-frontend-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-frontend-units.log) 2>&1
+  # `idle_timeout_integration_test.nim` launches the real `ct host` (node +
+  # server_index.js) and finds it through `codetracerExeDir`, which resolves
+  # from CODETRACER_PREFIX outside the `ct` entrypoint.  Without this the
+  # lookup lands in the nimcache directory the test binary happens to sit in,
+  # server_index.js is not there, and the suite reports six failures rather
+  # than the skip it intends -- `std/unittest`'s `skip()` MARKS a case but does
+  # not leave its body, so each guarded test ran on anyway.  Pointing at the
+  # build tree makes all seven cases run for real.
+  export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$PWD/src/build-debug}"
+  bash ci/lib/run-nim-test-lane.sh frontend-native-units
+
+# ViewModel unit suites under src/frontend/viewmodel/tests/unit that are
+# neither recorder-gated nor collab.  Discovery: anything added to that
+# directory lands here without an edit.
+test-vm-unit: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-unit.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-unit
+
+# The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
+# half is pure Nim and cheap; the integration/soak half opens real localhost
+# sockets and links the GPUI shim, so it is a separate recipe rather than a
+# subset of a lane that is supposed to stay fast.
+test-vm-collab-units: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-collab-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-collab-units
+
+test-vm-collab-integration: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-collab-integration.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-collab-integration
+
+# ct-test's incremental engine: fourteen suites under src/ct_test/incremental,
+# none of which was reachable by any recipe or CI script.
+test-ct-test-incremental:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-test-incremental.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-test-incremental
+
+# The live-recorder counterpart of the lane above: records with a real Python
+# recorder sibling, so it is gated behind having one built.
+test-ct-test-incremental-e2e:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-test-incremental-e2e.log) 2>&1
+  source scripts/detect-siblings.sh
+  bash ci/lib/run-nim-test-lane.sh ct-test-incremental-e2e
+
+# GUI ViewModel suites that spawn a real backend process (`headless_session` /
+# `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until
+# this recipe existed those exclusions pointed at nothing, so three of the four
+# files ran nowhere at all.
+test-vm-gui-headless: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-gui-headless.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-gui-headless
+
+# `src/ct/online_sharing/online_sharing_test.nim` performs a live
+# upload/download/delete round-trip against the production sharing service, so
+# it must never RUN in CI.  It is still compiled, because "never run" is how it
+# rotted: at the time this lane was written it did not compile at all
+# (`findTraceForArgs` matched no current signature, and `extractInfoFromKey` no
+# longer existed).  A compile is the weakest check that would have caught that,
+# and it costs seconds.
+#
+# The lane is GREEN as of AS-2, which brought the call sites up to date.  That
+# is the payoff of compiling something nothing runs: the three signatures it
+# had rotted against were three recorded defects, and updating the file was how
+# they were noticed as closed rather than merely different.
+test-online-sharing-compile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-online-sharing-compile.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh online-sharing-live --compile-only
+
+# The docs/book-isonim SSG suites.
+#
+# THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when
+# the isonim-docs sibling is present — and a LOUD SKIP when it is not.  They
+# were neither before: `docs/book-isonim/Justfile` has a `test` recipe that
+# nothing in this repo, and nothing in any workflow, ever invoked, so ten
+# suites with 63 cases sat in a state where "hand-run gate" and "never run"
+# were indistinguishable.  The book cannot build without ../../../isonim-docs
+# (its nimble requires it), which is why this cannot be an unconditional lane;
+# saying so out loud, and failing rather than silently passing when the sibling
+# is missing but CT_BOOK_ISONIM_REQUIRED=1, is what makes the answer explicit.
+test-book-isonim:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-book-isonim.log) 2>&1
+  echo "=== docs/book-isonim SSG suites ==="
+  if [ ! -d "../isonim-docs" ]; then
+    echo "MISSING-SIBLING SKIP: ../isonim-docs is not checked out."
+    echo "  docs/book-isonim is built on the isonim-docs SSG framework and its"
+    echo "  nimble requires ../../../isonim-docs, so neither the book nor its"
+    echo "  tests can compile without it."
+    if [ "${CT_BOOK_ISONIM_REQUIRED:-0}" = "1" ]; then
+      echo "ERROR: CT_BOOK_ISONIM_REQUIRED=1 but the sibling is absent." >&2
+      exit 1
+    fi
+    exit 0
+  fi
+  # The book's own Justfile stays the source of truth for HOW to build and run
+  # the suites (`build` first, then the ten files, in that order because four
+  # of them read the built public/ tree). This recipe exists to make sure
+  # SOMETHING invokes it.
+  #
+  # The codetracer dev shell already provides a `nim` that compiles the book,
+  # so the plain invocation is tried first. The `nix develop` fallback is for
+  # a bare shell; it is second, not first, because the framework flake resolves
+  # sibling inputs by hash and a workspace whose siblings are ahead of that pin
+  # fails to evaluate at all — which would turn a green suite into an
+  # infrastructure error.
+  if just --justfile docs/book-isonim/Justfile \
+       --working-directory docs/book-isonim test; then
+    exit 0
+  fi
+  echo "ambient toolchain could not run the book suites; retrying in the framework dev shell" >&2
+  nix develop path:../isonim-docs -c just \
+    --justfile docs/book-isonim/Justfile \
+    --working-directory docs/book-isonim test
+
 
 # RS-M12: assert no recorder writes a sidecar manifest any more.
 #
@@ -2372,46 +2723,39 @@ test-no-sidecar-manifests: vm-test-prereqs
 # their own cheap lane rather than gated behind either of those.
 test-ct-trace-units:
   #!/usr/bin/env bash
-  set -e
+  set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-trace-units.log) 2>&1
-  echo "=== ct trace-layer unit tests ==="
-  failed=0
-  passed=0
-  total_oks=0
-  for f in $(find src/ct/trace -name '*_test.nim' | sort); do
-    name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/ct-trace-$name"
-    echo -n "  $f ... "
-    output=$(nim c -r --hints:off \
-      --nimcache:"$cache" \
-      -o:"$cache/$name" \
-      "$f" 2>&1) || true
-    oks=$(echo "$output" | grep -c '\[OK\]' || true)
-    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
-    total_oks=$((total_oks + oks))
-    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
-      echo "COMPILE ERROR"
-      echo "$output" | grep 'Error:' | head -3 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$fails" -gt 0 ]; then
-      echo "PARTIAL ($oks OK, $fails FAILED)"
-      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      echo "OK ($oks tests)"
-      passed=$((passed + 1))
-    fi
-  done
-  echo ""
-  echo "ct trace units: $passed file(s) passed, $failed failed, $total_oks case(s)"
-  # Guard against a vacuous pass: a glob that silently matches nothing,
-  # or suites that compile but assert nothing, must not read as green.
-  if [ "$passed" -eq 0 ] || [ "$total_oks" -eq 0 ]; then
-    echo "ERROR: no ct trace-layer test cases ran"
-    exit 1
-  fi
-  [ "$failed" -eq 0 ]
+  bash ci/lib/run-nim-test-lane.sh ct-trace-units
+
+# Compile + run the `ct upload` MCR-enrichment unit suites
+# (src/ct/online_sharing).
+#
+# DISCOVERED, not enumerated.  This recipe used to carry a four-name list and a
+# comment explaining that the list was deliberate ("Every OTHER `*_test.nim`
+# there must be listed below; if you add one, add it here, because a name list
+# silently omits what it forgets").  The comment was right about the mechanism
+# and wrong about the remedy: the milestone that wrote it added
+# `upload_wire_format_test.nim` by name and missed `collab_invite_url_test.nim`
+# sitting in the same directory — while asserting there was "one other
+# `*_test.nim` file in that directory" when there were two.
+#
+# So the rule is inverted now.  ci/lib/test-lane-files.sh globs the directory
+# and rejects exactly one file by name: `online_sharing_test.nim`, a live
+# upload/download/delete round-trip against the sharing service, which has its
+# own compile-only lane (`just test-online-sharing-compile`).  A new suite in
+# this directory runs on the next CI run without anyone editing anything, and
+# ci/test/test-lane-coverage.sh fails by name if one ever slips out again.
+#
+# The lane's files need `-d:ssl -d:useOpenssl3` because `api_client.nim` pulls
+# in `std/net`'s `newContext`; none of them opens a TLS connection.  Those
+# flags live with the lane definition, not here.
+test-mcr-enrichment-units:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-mcr-enrichment-units.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh mcr-enrichment-units
 
 # Compile + run the recorder-gated ViewModel headless tests that live under
 # src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /
@@ -2451,6 +2795,8 @@ test-vm-recorder-gated: vm-test-prereqs
 
   # Discover the sibling recorders / tools the tests look up by env var.
   source scripts/detect-siblings.sh
+  # Shared classifier: exit status before the [OK]/[FAILED] tally.
+  source ci/lib/test-lane-report.sh
 
   failed=0
   passed=0
@@ -2466,18 +2812,35 @@ test-vm-recorder-gated: vm-test-prereqs
       --path:src/frontend/viewmodel \
       --nimcache:"$cache" \
       -o:"$cache/$name" \
-      "$f" 2>&1) || true
+      "$f" 2>&1) && rc=0 || rc=$?
     oks=$(echo "$output" | grep -c '\[OK\]' || true)
     fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
     skips=$(echo "$output" | grep -c 'MISSING-RECORDER SKIP:' || true)
-    if [ "$fails" -gt 0 ]; then
-      echo "FAILED ($oks OK, $fails FAILED)"
+    verdict=$(classify_test_run "$rc" "$oks" "$fails")
+    if [ "$verdict" = "crashed" ]; then
+      # First, ahead of every count and even ahead of the skip branch: a
+      # signalled death makes the counts a prefix of the run, and a missing
+      # recorder never kills a process with a signal.
+      test_run_headline "$verdict" "$rc" "$oks" "$fails"
+      echo "$output" | tail -30 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ]; then
+      echo "FAILED ($oks OK, $fails FAILED, exit $rc)"
       echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
       failed=$((failed + 1))
     elif [ "$skips" -gt 0 ]; then
       echo "SKIPPED (missing recorder)"
       echo "$output" | grep 'MISSING-RECORDER SKIP:' | head -1 | sed 's/^/    /'
       skipped=$((skipped + 1))
+    elif [ "$rc" -ne 0 ] && [ "$oks" -gt 0 ]; then
+      # Green cases over a red process.  See `classify_test_run` in
+      # ci/lib/test-lane-report.sh for the two ways that happens; both are
+      # silent unless the exit code is read.  Ordered after the skip branch so
+      # a recorder-gated skip is unaffected — the signalled-death case is
+      # handled ahead of everything, at the top of this chain.
+      echo "FAILED WITHOUT A [FAILED] LINE (exit $rc, $oks OK)"
+      echo "$output" | tail -30 | sed 's/^/    /'
+      failed=$((failed + 1))
     elif [ "$oks" -eq 0 ]; then
       echo "COMPILE ERROR / no tests ran"
       echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'
@@ -2714,7 +3077,7 @@ ensure-ct-native-replay:
 #   * ``test_harness::is_mcr_available()`` requires ``ct-mcr`` ON PATH
 #     (it ignores CODETRACER_CT_MCR_CMD), so we symlink the recorder's
 #     ct_cli as ``ct-mcr`` into a scratch dir prepended to PATH.
-#   * ``test_harness::find_ct_rr_support()`` honours CT_NATIVE_REPLAY_PATH
+#   * ``test_harness::find_ct_native_replay()`` honours CT_NATIVE_REPLAY_PATH
 #     first, then PATH, then ``../../codetracer-native-backend/target/
 #     debug``; we export the explicit path so the right binary is used.
 # Tests whose language compiler is absent honest-SKIP (``SKIPPED:`` line)

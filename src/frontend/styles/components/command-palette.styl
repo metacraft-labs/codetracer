@@ -1,3 +1,11 @@
+// Command field geometry.  The results menu is absolutely positioned and has to
+// start where the field ends, so its height and its half-pixel optical nudge are
+// named here rather than repeated as literals — that is exactly how the menu's
+// offset came to be stale when the field was resized.
+COMMAND_INPUT_HEIGHT = 1.625rem
+COMMAND_INPUT_NUDGE = 0.03125rem
+COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUDGE)
+
 #command-data
   height: 28px
 
@@ -45,9 +53,13 @@
 
   .command-input-placeholder
     position: absolute
-    left: 4.6em
+    left: 1.875em
     right: 1em
+    top: 0
+    line-height: 2.875em
     pointer-events: none
+    font-size: 0.875rem
+    font-family: "SpaceGrotesk", sans-serif
     color: colors-ui-text-primary-body
     opacity: 0.45
     white-space: nowrap
@@ -55,25 +67,44 @@
     text-overflow: ellipsis
 
   .command-results
+    // Same surface as the layout menu beside the panel tabs — one definition,
+    // in shared_widgets.styl, so the two cannot drift apart.  The rows are
+    // already `ct-menu-item`s in both menus, so only the container differed:
+    // this one used a panel background, a lighter literal border, a shadow and
+    // bottom-only corners.
+    dropdown-surface()
     width: 100%
     max-height: 24em
     overflow-y: auto
-    background-color: colors-ui-surface-base-panel
-    border: 0.0625em solid #4f4f4f
-    border-top: 0
-    box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
-    border-bottom-left-radius: 0.75em
-    border-bottom-right-radius: 0.75em
+    // The gap below the command field.  0.25em resolved against this element's
+    // 0.75rem font size, so it was 3px here and 4px in a 16px menu — the same
+    // declaration, two different gaps.  DROPDOWN_TRIGGER_GAP is rem for that
+    // reason.
+    margin-top: DROPDOWN_TRIGGER_GAP
 
     &.hidden
       display: none
 
+    .command-result
+      dropdown-surface-row()
+
   .command-empty-overlay
-    padding: 0.75em 1em
-    color: colors-ui-text-primary-body
-    background: colors-ui-surface-base-panel
+    display: flex
+    align-items: center
+    width: 100%
+    box-sizing: border-box
+    height: 2.25em
+    padding: 0 0.75em
+    color: colors-ui-text-primary-body-subtle
+    background: colors-ui-surface-base-raised
+    font-family: "SpaceGrotesk"
     border: 0.0625em solid #4f4f4f
     border-top: 0
+    // Bottom corners of the results stack, so the shared menu radius.  `0.5em`
+    // resolved to 6px in the caption bar and 8px in the full-screen palette —
+    // the same strip, two curves.
+    border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
+    box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
 
     &.hidden
       display: none
@@ -104,7 +135,7 @@
     max-height: 18em
     overflow-y: auto
     overflow-x: hidden
-    background-color: colors-ui-surface-raised
+    background-color: colors-ui-surface-base-raised
     border: 0.0625em solid colors-ui-border-tertiary
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
     margin-top: 0.25rem
@@ -122,7 +153,6 @@
 
   .command-result
     gap: 0.75em
-    font-size: 0.875em
     position: relative
     overflow: hidden
 
@@ -151,13 +181,7 @@
   display: none
 
 #fixed-search
-  font-size: 20px
-  position: fixed
-  left: 40vw
-  width: 20vw
-  right: 40vw
-  top: 20px
-  z-index: 5
+  display: none !important
 
 .fixed-search-non-active
   display: none
@@ -255,14 +279,42 @@
 
   .command-view
     width: 100%
-    max-width: 48em
+    // No inner cap: the caption bar already sizes the prompt (see
+    // COMMAND_PROMPT_WIDTH in menu_bar.styl, which clamps it against the
+    // viewport).  A second ceiling here was 48em at this element's 0.75rem font
+    // — 576px — so the field stopped short of its own container, leaving dead
+    // space that read as a gap beside the new-tab button, and quietly capped the
+    // responsive width on large displays.
+    max-width: 100%
     font-size: 0.75rem
     z-index: 25
+    position: relative  // anchor the absolutely-positioned dropdown to this element
 
     .command-input-row
-      height: 1.75rem
+      // 1.625rem = 26px at the 16px root.  With the 2.125em (34px) caption bar
+      // that leaves exactly 4px above and below — whole pixels on both sides, so
+      // neither gap rounds away.
+      height: COMMAND_INPUT_HEIGHT
+      // Optical nudge: half a pixel down, making the gaps 4.5px above and 3.5px
+      // below.  They were already 4px each, but the two are bounded by different
+      // things — nothing above, the tab strip below — so equal measurements read
+      // as unequal.  A half pixel is a real step on this display: at 2x it is one
+      // device pixel.  `top` rather than a margin so the shift is painted only
+      // and the flex centring above is left alone.
+      top: COMMAND_INPUT_NUDGE
       border-radius: 0.375rem
-      background: colors-ui-surface-primary-default
+      // The field needs edges of its own.  Painted as the caption bar's own
+      // colour it had none, so the eye took its top edge from nothing and its
+      // bottom edge from the tabs below — which made two equal 4px gaps read as
+      // unequal, the lower one looking larger.
+      //
+      // Fill alone cannot fix that here: the palette's near-black steps are only
+      // a few levels apart, and `surface-input-default` lands within 4 levels of
+      // the tab surface, so the field simply traded one neighbour for another.
+      // The border is the strong signal — around 50 levels above the bar — so it
+      // carries the definition, at a full pixel rather than a hairline.
+      background: colors-ui-surface-input-default
+      border: 1px solid colors-ui-border-primary
       box-shadow: none
 
     .command-input-field
@@ -270,8 +322,14 @@
       padding: 0 0.75rem
 
     .command-input-placeholder
-      left: 0.75rem
+      // Must match .ct-input-search-image padding-left (1.875em !important) so
+      // the ghost-text starts at the same x-position as the real input text.
+      // line-height matches .command-input-row height in this context (1.75rem)
+      // so text centers exactly as the native <input> element does.
+      left: 1.875em
       right: 0.75rem
+      top: 0
+      line-height: 1.75rem
 
     .command-results,
     .command-empty-overlay
@@ -281,7 +339,11 @@
     .command-results
       display: block
       position: absolute
-      top: 1.75rem
+      // Where the field actually ends.  This was a literal 1.75rem — the field's
+      // height before the caption bar was resized to 2.125em and the field to
+      // 1.625rem — so the menu kept opening 2px lower than the gap below said it
+      // would, and `margin-top` then added its 6px on top of that.
+      top: COMMAND_INPUT_BOTTOM
 
     .command-empty-overlay:not(.hidden)
       display: block

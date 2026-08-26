@@ -161,7 +161,6 @@
 .flow-parallel-value-name
   // font-size: 15px
   background: colors-editor-surface-primary
-  color: colors-ui-text-primary-body
   padding-left: 10px
   padding-right: 10px
   padding-top: 0
@@ -209,6 +208,46 @@
 .flow-parallel-value-after
   background-color: colors-editor-surface-primary
   color: colors-ui-text-primary-body
+
+// --- A value chip's internal hierarchy -----------------------------------
+//
+// One block, and only the four declarations that decide which half of a chip
+// a reader sees first. Everything else about either half — background,
+// padding, radius, font — is left where it already lives, because those
+// declarations are duplicated across `flow.styl` and two blocks of
+// `text_editor.styl` and re-stating them here would silently change the
+// debugger's own chips.
+//
+// The hierarchy was inverted. The name carried
+// `colors-ui-text-primary-body` (#f3f3f3) and the value inherited the editor's
+// body colour, so the LABEL was the brightest thing in the chip and the number
+// it labels was the dimmest. Three reviewers said so from two directions: "the
+// value half is smaller and dimmer than the name half — hierarchy inverted";
+// "same fill, same weight, distinguished only by a wide space, so
+// `<contribution> 0` reads as one token"; and, measured off a capture, "name
+// #E2E2E2, value #B5BDC5 … the *name* reads as the more important half". A
+// reviewer of the result, shown nothing about what had changed, answered the
+// same question with "the value reads as more important: brighter, bold, in
+// its own inset box. The split is clearly visible as a tone step between
+// halves."
+//
+// Both hosts get it, because both had the inversion, and because
+// DeepReview-GUI.md §5.3 forbids a review-specific inline style. The
+// `.code-editor` variants are listed because `text_editor.styl` carries a copy
+// of the name rule at that scope which a bare selector loses to;
+// `codetracer.styl` imports `text_editor` before `flow`, so at equal
+// specificity these are the declarations that land.
+.flow-parallel-value-name,
+.code-editor .flow-parallel-value-name
+  color: colors-ui-text-primary-body-subtle
+  // The split between the two halves. Without it the pair reads as one token.
+  // A hairline is enough: a full border would make each chip read as two.
+  border-right: 1px solid colors-ui-border-secondary
+
+.flow-parallel-value-box,
+.code-editor .flow-parallel-value-box
+  color: colors-ui-text-primary-body
+  font-weight: 600
 
 // .flow-parallel-value-box
 //   width: fit-content
@@ -372,7 +411,7 @@
 
   .noUi-handle
     border-radius: 1em
-    // border: 0.012em solid colors-ui-surface-panel
+    // border: 0.012em solid colors-ui-surface-base-panel
     background: colors-editor-action-tertiary
     width: 0.23em !important
     height: 0.9em !important
@@ -596,7 +635,7 @@
       top: -0.375em
 
       &:after
-        border-color: transparent transparent transparent colors-ui-surface-canvas
+        border-color: transparent transparent transparent colors-ui-surface-base-canvas
         left: 98%
         bottom: 0%
         border-width: 0.75em
@@ -630,6 +669,379 @@
 .line-flow-unknown
   font-weight: normal
   opacity: 0.5
+
+// The review's two in-editor controls (RV-5, DeepReview-GUI.md §7 and §4.4):
+// `.review-invocation-selector`, which picks which *call* is drawn, and
+// `.review-loop-selector`, which picks which *pass through a loop* is drawn.
+//
+// Neither is a new kind of control: each is a Monaco view zone anchored
+// immediately above the lines it governs, carrying a counter between two step
+// buttons — the shape of the loop iteration slider they are modelled on. They
+// borrow the flow panel's iteration slider palette so a reader fluent in one
+// recognises the others.
+.review-flow-selector
+  display: flex
+  // Bottom-aligned inside a zone that is deliberately taller than the control
+  // — see `unified_diff.rebuildInvocationZones` for what the clearance is for.
+  align-items: flex-end
+  height: 100%
+  box-sizing: border-box
+  gap: 6px
+  padding: 0 8px 2px
+  font-size: 0.85em
+  color: colors-ui-text-primary-body
+  opacity: 0.85
+  // Monaco paints `.view-lines` over the `.view-zones` container, so a zone's
+  // own controls are unreachable without being lifted out of that stack — the
+  // buttons are visible but every click lands on the text layer.
+  position: relative
+  z-index: 12
+  pointer-events: auto
+
+  .review-flow-label
+    white-space: nowrap
+
+  .review-flow-step
+    background: transparent
+    border: 1px solid colors-ui-border-secondary
+    border-radius: 3px
+    color: inherit
+    cursor: pointer
+    font: inherit
+    line-height: 1
+    padding: 0 5px
+
+    &:hover
+      background: colors-ui-surface-input-default
+
+    &[disabled]
+      cursor: default
+      opacity: 0.35
+
+// The loop iteration control sits directly under the invocation selector for
+// the same function, so it is dimmed slightly to read as the narrower choice.
+.review-loop-selector
+  opacity: 0.7
+
+// The review's dragged loop slider (UD-3, closing RV-10).
+//
+// The widget itself is the debugger's — `ui/flow_loop_slider.nim` constructs
+// the same noUiSlider with the same options — and `.flow-loop-slider`'s own
+// rules above still style its track and handle.  What is overridden is only
+// the LAYOUT: the debugger's container is absolutely positioned at a computed
+// `left` with a fixed 100px width, because it hangs off a flow band whose
+// geometry is known.  A review's sits in the flex row of its own view zone, so
+// it takes the space left over — which is also what removed RV-10's blocker,
+// since the layout answers "how wide" and no `FlowComponent` measurement has
+// to.
+.review-loop-slider
+  position: relative !important
+  flex: 1 1 auto
+  min-width: 60px
+  max-width: 280px
+  width: auto !important
+  margin-left: 8px
+  margin-right: 8px
+  pointer-events: auto
+  // Above Monaco's own unchanged-region boundary, which is drawn across the
+  // full width of the fold it belongs to and lands on top of this control when
+  // the loop's first visible line is the one just past a fold.  Measured with
+  // `document.elementFromPoint` over the handle: without this the boundary is
+  // what the pointer hits, so the slider is visible and undraggable — the
+  // worst of the two states.
+  z-index: 40
+
+  .flow-loop-slider
+    position: relative !important
+    width: 100% !important
+    margin-left: 0
+
+    // A slider nobody can see is not a control, whatever it can do.
+    //
+    // Measured off a capture by a reviewer asked only to describe the frame:
+    // "slider track y=568-569 is #2F2F2F on #282828 (≈1.05:1), no thumb, no
+    // fill — no position feedback". A 2px rule at 1.05:1 is invisible in
+    // practice, and an earlier reviewer had reported the same thing in the same
+    // words — "a near-invisible hairline with no thumb". Both are describing
+    // the debugger's own track colour, which works in the flow panel because it
+    // sits in an empty band and does not work in a 20px row shared with two
+    // buttons and a label.
+    //
+    // Track, fill and thumb are all raised, and the fill is what says WHERE in
+    // the loop the reader is without their having to find the thumb.
+    // The track ends where the CONTROL ends.
+    //
+    // `flow.styl`'s own `.noUi-target` is `width: 500px; margin-right: 64px`,
+    // sized for the debugger's band, and it was winning here — so the review's
+    // track ran from the pane's left edge to an arbitrary x, under the row
+    // rather than beside the control: "the only track is a 3px bar running from
+    // the pane's left edge to x=281 — *below*, not beside the control".
+    .noUi-base,
+    .noUi-target
+      background-color: colors-ui-border-primary !important
+      height: 3px !important
+      width: 100% !important
+      margin-right: 0 !important
+      margin-left: 0 !important
+
+    .noUi-connect
+      background: colors-editor-action-primary !important
+
+    // A 3px-wide, 12px-tall handle is what `flow.styl` gives the debugger's
+    // slider, which lives in an empty band.  This one shares a row with two
+    // buttons and a label, so the grab target is widened — the affordance is
+    // the point of RV-10 and a target a reader cannot hit is not one.
+    .noUi-handle
+      width: 0.7em !important
+      right: -0.35em !important
+      height: 1.1em !important
+      top: -0.5em !important
+      border-radius: 0.35em !important
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55) !important
+
+// The review's Omniscience values (RV-5, UD-3; §4.4 / §7).
+//
+// TWO surfaces draw them and they need different things:
+//
+//   * The **diff tab** (UD-3) draws the debugger's own parallel band — real
+//     `.ct-omni-value` chips inside `.flow-parallel-values` columns, inside a
+//     Monaco content widget.  Those chips need NO styling of their own: they
+//     are the debugger's elements and take the debugger's appearance.  The
+//     rules under `.review-flow-band` below place the band and nothing else.
+//   * The **full file** (§5.3, `ui/editor.nim`) still draws Monaco *injected
+//     text*, because a full-file tab's values annotate the line rather than a
+//     band beside it.  An injected span cannot be a flex child of
+//     `.ct-omni-value`, and `.flow-parallel-value-box` has no rule of its own
+//     (its block is commented out above), so `.review-flow-value*` restates
+//     that container's appearance on the element that is actually rendered.
+//     That is the whole of what those two rules are for; they are not a
+//     DeepReview style, which §5.3 forbids.
+.review-inline-value
+  white-space: pre
+  border-radius: 0.25em
+  padding: 0 0.4em
+
+.review-flow-value-box.review-inline-value
+  font-family: "SpaceMono"
+  background: colors-ui-surface-input-default
+  color: colors-ui-text-primary-body
+  margin-right: 0.5em
+
+// The diff tab's band.  Inside a Monaco content widget, so the two rules that
+// matter are "do not be as tall as the widget thinks" and "do not take the
+// pointer": a band that swallowed a click would break hunk selection and text
+// selection on the code it sits beside, and the review's chips carry no
+// interaction of their own to lose.
+.review-flow-band-host
+  pointer-events: none
+
+// A ROW-BELOW band takes the wash of the line it annotates, so a block of
+// added lines reads as one block instead of being sliced by a strip of editor
+// surface. `ui/unified_diff.applyFlowValueBands` puts the class on, and only
+// in that placement — a `beside` band is drawn over the line and already has
+// the editor's wash behind it.
+//
+// The colours are Monaco's own, read back out of the theme rather than
+// restated: a diff editor publishes every `diffEditor.*` key it was themed
+// with as a CSS custom property on its container, so this band and the line
+// above it are painted from ONE definition
+// (`monaco-themes/.../codetracerDark.json`). Restating the rgba here is how
+// the two silently drift apart the next time the palette is rebalanced —
+// which has already happened once in this surface's history.
+//
+// The chip on top keeps its own surface (`.ct-omni-value`, #1B1B1B), which is
+// the half of this that answers the opposite finding: a reviewer who wanted
+// the chips to stop fusing with the highlight, and two who wanted the block to
+// stay one block, are both satisfied by a tinted band under an untinted chip.
+.review-flow-band-host.review-flow-band-row-below.review-flow-band-added
+  background-color: var(--vscode-diffEditor-insertedLineBackground)
+
+.review-flow-band-host.review-flow-band-row-below.review-flow-band-removed
+  background-color: var(--vscode-diffEditor-removedLineBackground)
+
+.review-flow-band
+  display: flex
+  align-items: center
+  white-space: nowrap
+  pointer-events: none
+  // Centred in the zone's own height rather than sitting at its top, so the
+  // clearance the zone reserves is shared between the line above and the line
+  // below instead of all falling on one of them.
+  height: 100%
+  // The band is capped at the room it has — `ui/unified_diff.nim` sets the
+  // `max-width` from the measured pane. Nothing inside it is squeezed to make
+  // that true; `reviewChipsThatFit` decides how many WHOLE chips are drawn, so
+  // the cap is a statement about the box rather than a constraint the content
+  // has to bend to.
+
+  // The source line a row-below band describes.  Styled off the editor's own
+  // `.line-numbers`, so it reads as the gutter continuing rather than as a
+  // number the annotation invented.
+  .review-flow-band-line
+    flex: 0 0 auto
+    text-align: right
+    opacity: 0.55
+    margin-right: 1em
+    min-width: 3ch
+    font-family: inherit
+    line-height: 1
+    white-space: nowrap
+
+  // A chip is never squeezed. Letting the flex algorithm shrink them was
+  // tried and measured, and three fresh reviewers rated the result 3/10 for
+  // the same reason: a shrunk chip clips its own value, so the row reads as
+  // "a name with no value" — the brief's own disqualifying failure. What
+  // gives instead is the NUMBER of chips: see `reviewChipsThatFit`.
+  // A chip is never squeezed HORIZONTALLY (see above) — but it does have to
+  // fit the row it is drawn in.
+  //
+  // `ui/unified_diff.applyFlowValueBands` sizes a row-below band at exactly one
+  // code row, so the annotations keep the code's vertical rhythm instead of
+  // adding half a row each. The debugger's chip is taller than a line of text —
+  // `.ct-omni-value` carries `padding: 0.25em 0.5em` and the name half another
+  // 3px below it — so inside this band the vertical padding is spent and the
+  // line box does the spacing instead. The horizontal padding, which is what
+  // makes a chip read as a pill, is untouched.
+  //
+  // This is the half that has to stay honest: a chip taller than its zone
+  // spills onto the code rows either side, and that was a real defect twice
+  // ("pill tops clip the `{` of `for i in 0..4 {`", "pills overlap the lines
+  // above and below by 2-4px").
+  .ct-omni-value
+    flex: 0 0 auto
+    padding-top: 0
+    padding-bottom: 0
+    line-height: 1.25
+
+  .flow-parallel-value-name
+    padding-top: 0
+    padding-bottom: 0
+
+  // The two "there is more than fits" markers.  Dimmed and set apart, so they
+  // read as a note about the band rather than as a chip with nothing in it —
+  // which is how two reviewers read the first one when it was unstyled: "a
+  // bare unstyled …", "floats outside the pill background".
+  //
+  //   * `.review-flow-more` — `…+N`, N more VALUES than this column can hold.
+  //   * `.review-flow-more-passes` — `…+N`, N more PASSES through the loop than
+  //     the band can hold; the loop control beside the band reaches them.
+  //
+  // An ellipsis AND a count, and both halves were paid for. Two fresh
+  // reviewers of the design corpus rejected the bare `…` independently and in
+  // the same terms — "rows 1 and 3 end in `…`; row 2, identical content, does
+  // not", "reads as inconsistent/possibly broken" — because two rows hiding a
+  // different NUMBER of values look identical when the marker does not say the
+  // number. Two later reviewers then rejected a bare `+N`, because inside a
+  // DIFF a leading `+` reads as "one added line". `…` says truncated, `+N`
+  // says how much.
+  // Dimmed by COLOUR, not by opacity, and only as far as AA allows.
+  //
+  // `opacity: 0.45` composited the marker's glyphs down to rgb(110-123) on the
+  // editor's #282828. Decoded from a capture's own pixels that is **3.0-3.7:1**
+  // — it clears AA-Large (3:1) and fails AA for normal text (4.5:1), and a
+  // 0.85em marker is not large text. The value text beside it measures 10.0:1,
+  // so the gap was the dimming and not the palette; a reviewer reached the same
+  // conclusion unprompted ("rendered in a fairly low-contrast dim gray … at
+  // normal viewing size they risk being missed").
+  //
+  // The colour is measured against the WORST background the marker can land
+  // on, which is no longer the editor surface. Once the band took the line's
+  // add / remove wash (above), the marker went with it: the previous #9a9a9a
+  // is 5.24:1 on `#282828` but **4.35:1** on the addition wash and 4.28:1 on
+  // the removal wash — under AA for normal text, on a 0.85em marker that is
+  // not large text. #a2a2a2 is 4.80:1 and 4.72:1 on those two and 5.78:1 on
+  // the bare surface, and is still far quieter than the value beside it
+  // (11.0:1), which is the whole reason the marker is dimmed at all: an
+  // UNDIMMED marker was read as a chip with nothing in it.
+  //
+  // Stating the colour rather than an alpha is what made this checkable: the
+  // regression is one line of arithmetic against the new wash, where an
+  // `opacity` would have had to be decoded from a screenshot first.
+  .review-flow-more,
+  .review-flow-more-passes
+    color: #a2a2a2
+    padding: 0 0.4em
+    align-self: center
+    flex: 0 0 auto
+    // Pushed to the right edge of whatever holds it, so the markers of
+    // successive rows line up instead of landing wherever that row's last chip
+    // happened to end. Measured by a reviewer as "~17px after the last chip at
+    // y=40, ~64px at y=750" — the same marker on two rows, off by 47px, which
+    // reads as carelessness rather than as a column.
+    margin-left: auto
+
+  // Nothing here restyles a chip.  A chip inside the band IS the debugger's
+  // element — `ui/flow_value_dom.nim` builds it and `.ct-omni-value` /
+  // `.flow-parallel-value-name` style it — and the `review-flow-value*`
+  // markers it also carries are locators for the Playwright and harness
+  // selectors, not a style hook.  That is why the injected-text rules above
+  // hang off `review-inline-value` and not off them.
+
+  // `float: left` (which `.flow-parallel-loop-values` and
+  // `.flow-parallel-values` carry for the debugger's own band) takes an
+  // element out of the flex flow, so without this the band's own layout does
+  // not apply to its columns at all. Overridden here and nowhere else, so the
+  // flow panel keeps the layout it has.
+  .flow-parallel-loop-values,
+  .flow-parallel-group
+    display: flex
+    float: none
+
+  // The SELECTED column carries `flow-loop-step-container active-flow-step`,
+  // because that is how `ui/flow.renderFlow` marks the pass the reader is on
+  // and the review marks it the same way rather than inventing a highlight.
+  // The class brings more than a highlight with it: `text_editor.styl` gives
+  // `.code-editor .flow-loop-step-container` `position: absolute`,
+  // `width: 3.125em` and a right margin, because in the debugger's own band
+  // the columns are placed by computed offsets. In this band they are flex
+  // children whose width `applyFlowValueBands` has already decided against the
+  // pane, so an absolute 50px column is both the wrong width and out of the
+  // flow — which is what put a loop band's chips on a different left edge from
+  // every other row ("single-group rows all start at x=22 … the multi-group
+  // loop rows start ~16px further left, x=6. So two rails, not one").
+  //
+  // Only the layout is neutralised; `active-flow-step`'s own highlight rules
+  // are untouched, so the selected pass still reads as selected.
+  .flow-loop-step-container
+    position: static
+    width: auto
+    margin-right: 0
+
+  // The columns of one line's band, side by side.  `.flow-parallel-values`
+  // carries the rule that separates two passes.
+  //
+  // `flex: 0 0 auto` and NOT the default `0 1 auto`: the column's width is
+  // computed in `ui/unified_diff.applyFlowValueBands` and already capped at
+  // the room the band has (`reviewDrawnColumnChars`), so letting flex shrink
+  // it as well would make the drawn width disagree with the character budget
+  // its chips were chosen against. That disagreement is measurable and it was
+  // the reviewer finding "rows 1 and 3 end in `…`; row 2, identical content,
+  // does not": a plain band's column shrank to the cap and a loop band's — one
+  // wrapper further in, so `min-width: auto` held it — did not, and the same
+  // content truncated two different ways.
+  .flow-parallel-values
+    display: flex
+    align-items: center
+    float: none
+    flex: 0 0 auto
+
+    // The rule BETWEEN two columns is what separates two passes; the same rule
+    // after the last one is a dangling stroke, and two reviewers read it as
+    // one — "a thin vertical bar … it looks like a stray caret, not a
+    // terminator", "a trailing cursor-like `|` mark".
+    //
+    // `:last-of-type` and not `:last-child`, because the "more passes than
+    // fit" marker is a `span` that follows the last column: with `:last-child`
+    // the marker's presence would put the dangling stroke back.
+    &:last-of-type
+      border-right: 0
+
+  // NO `overflow` on the chip container itself. Clipping there shaved the
+  // chip's own right padding off — a reviewer read the result as a sheared
+  // glyph: "the `<multiplier>` chip's `5` is cut at the chip's own right
+  // boundary … zero trailing padding vs 2-4px on every other chip". The
+  // clipping that IS wanted is one level in, on the value text, where an
+  // ellipsis can say what happened.
 
 .flow-taken
   width: 100px

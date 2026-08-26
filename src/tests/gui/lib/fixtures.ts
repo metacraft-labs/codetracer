@@ -32,7 +32,14 @@ import { _electron, chromium } from "playwright";
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
 import { requiresRR } from "./lang-support";
-import { ensureDefaultConfig, ensureDefaultLayout, restoreUserLayout } from "./layout-reset";
+import {
+  ensureDefaultConfig,
+  ensureDefaultLayout,
+  resetAutoHideState,
+  resetEditLayout,
+  restoreUserLayout,
+  seedEditLayout,
+} from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
   LIMIT_SMALL_RECORDING_MS,
@@ -281,6 +288,42 @@ interface CodetracerOptions {
   visualReplayTrace: boolean;
   /** Existing .ct or trace folder to import via ct host --trace-path. */
   visualReplayTracePath: string;
+  /**
+   * Keep whatever `auto_hide_state.json` the spec wrote before launching.
+   *
+   * The launch fixture normally deletes it alongside the layout reset, so a
+   * panel one test pinned cannot come back in the next one.  Specs that exist
+   * to prove a pinned panel IS restored across a restart seed the file in a
+   * fixture-free `beforeEach` (which runs first) and set this so the reset
+   * does not undo them.
+   */
+  preserveAutoHideState: boolean;
+  /**
+   * A JSON layout file to install as `default_edit_layout.json` before
+   * launching.
+   *
+   * This is how a spec launches over a **pre-existing** saved layout instead
+   * of the bundled default. It matters because `default_edit_layout.json` is
+   * shared by two modes with different panel requirements: edit mode WRITES
+   * it through a sanitiser that deletes `Content.AgentActivity`, and — since
+   * RV-2 — `ct review <PATH>` READS it. A review launched on a fresh config
+   * directory therefore exercises the fallback path (the bundled debugging
+   * layout, sanitised), never the file a real user's review opens.
+   *
+   * Setting this implies `preserveEditLayout`: the file is installed after
+   * the reset, not erased by it.
+   */
+  editLayoutPath: string;
+  /**
+   * Keep whatever `default_edit_layout.json` is already on disk.
+   *
+   * The launch fixture normally deletes it alongside the layout reset, so an
+   * edit-mode session in an earlier test of the same worker cannot change
+   * which layout a later launch opens. Specs that write the file themselves
+   * in a fixture-free `beforeEach` (which runs BEFORE `ctPage`) set this so
+   * the reset does not undo them.
+   */
+  preserveEditLayout: boolean;
 }
 
 /**
@@ -638,7 +681,7 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
-  // M51: turn HMR off for ordinary GUI tests.
+  // Turn HMR off for ordinary GUI tests.
   //
   // `just build-once` compiles the renderer with `-d:ctHmr`, and
   // `hmr_runtime.isHmrRequested()` defaults to ON when CT_HMR is unset.  So
@@ -1052,7 +1095,7 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
     try {
       ctPrefix = (window as any).require("process").env.CODETRACER_PREFIX ?? "(undefined)";
     } catch { /* renderer may not have Node integration */ }
-    // `console.info`, not `console.error` (M51).  These three lines are the
+    // `console.info`, not `console.error`.  These three lines are the
     // harness describing a healthy page, not the page reporting a fault —
     // and emitting them at ERROR put the collector's own output into the
     // very bucket `verify_clean_console_on_trace_open` asserts is empty.
@@ -1654,10 +1697,15 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   clearElectronSingletonLocks();
   console.log(`# launching deepreview mode for ${jsonPath}`);
 
+  // RV-1: the user-facing spelling is `ct review <PATH>`; the retired
+  // `ct --deepreview <PATH>` option now fails with a pointer to it.  The
+  // Windows branch launches ELECTRON directly rather than `ct`, so it passes
+  // the internal ct -> Electron argument that `src/frontend/index/args.nim`
+  // parses, which is unchanged and is not the retired option.
   const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
   const drArgs = (isWindows && electronExePath)
     ? [codetracerPrefix, "--deepreview", jsonPath]
-    : [`--deepreview=${jsonPath}`];
+    : ["review", jsonPath];
 
   const app = await _electron.launch({
     executablePath: drExe,
@@ -1710,6 +1758,9 @@ export const test = base.extend<
   deepreviewJsonPath: ["", { option: true }],
   visualReplayTrace: [false, { option: true }],
   visualReplayTracePath: ["", { option: true }],
+  preserveAutoHideState: [false, { option: true }],
+  editLayoutPath: ["", { option: true }],
+  preserveEditLayout: [false, { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -1782,6 +1833,9 @@ export const test = base.extend<
         visualReplayTracePath,
         newTracePolicy,
         testOpenFolderDialogPath,
+        preserveAutoHideState,
+        editLayoutPath: seedEditLayoutFrom,
+        preserveEditLayout,
       },
       use,
       testInfo,
@@ -1798,6 +1852,28 @@ export const test = base.extend<
       try {
         ensureDefaultConfig(codetracerInstallDir);
         ensureDefaultLayout(codetracerInstallDir);
+        // The saved auto-hide state is the other half of the saved
+        // arrangement — see `resetAutoHideState`. Without this a test that
+        // pins a panel leaves it pinned for every later test in the worker.
+        if (!preserveAutoHideState) {
+          resetAutoHideState();
+        }
+        // ...and the saved EDIT layout is the third piece. Since RV-2 a
+        // `ct review` launch reads `default_edit_layout.json`, so an
+        // edit-mode test earlier in this worker would otherwise decide which
+        // layout a later review opens — an ordering dependence, and the one
+        // that hid a missing AGENT ACTIVITY panel from the whole suite.
+        const seedsEditLayout = seedEditLayoutFrom.length > 0;
+        if (!preserveEditLayout && !seedsEditLayout) {
+          resetEditLayout();
+        }
+        if (seedsEditLayout) {
+          // Launch over a layout a PREVIOUS session left behind. Reset first
+          // so a stale `.broken` sibling from an earlier test cannot confuse
+          // the recovery assertions.
+          resetEditLayout();
+          seedEditLayout(seedEditLayoutFrom);
+        }
       } catch (ex) {
         // Non-fatal: a missing bundled layout file would surface as a
         // launch-time error anyway.  Log and continue so the test still
@@ -1995,8 +2071,8 @@ export const READY_ON_ENTRY_BUDGET_MS = 30_000;
  * `toBeAttached()` would report readiness for a status bar that never
  * renders.
  *
- * Is the hidden `.location-path` intended?  No — asked and answered while
- * fixing M43 (`codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`).
+ * Is the hidden `.location-path` intended?  No — asked and answered when the
+ * regression that hid it was tracked down.
  * Commit b27da3947 ("feat: Redesign of the status bar") added
  * `#status #status-base > *:not(#auto-hide-bottom-strip) { display: none !important }`
  * to `src/frontend/styles/components/status_bar.styl`, which hid this
@@ -2008,6 +2084,17 @@ export const READY_ON_ENTRY_BUDGET_MS = 30_000;
  * same bar.  The blanket rule was removed rather than worked around here;
  * the styl file carries the full rationale.  Keep this wait as a visibility
  * wait so a repeat of that regression fails loudly instead of silently.
+ *
+ * It did repeat.  `51a3e820e "fix: UI regressions"` wrote the same rule back
+ * one nesting level down and this wait failed loudly exactly as intended,
+ * with the diagnosis below naming the cause.  What that round
+ * added is a guard that does not depend on this wait, because this wait
+ * cannot see every way of hiding the footer: Playwright's visibility
+ * predicate is box-and-`visibility`, so an `opacity: 0` status bar would
+ * pass here while being just as invisible to the user.
+ * `tests/status-bar/footer-visibility-css-guard.spec.ts` measures the built
+ * stylesheet directly and folds in effective opacity.  That guard is not
+ * licence to relax this one — they catch different things.
  */
 export async function readyOnEntryTest(p: Page): Promise<void> {
   // One wait, with a budget taken from the measured launch time.

@@ -107,6 +107,12 @@ type
     # -- Derived state --
     filteredRequests*: Memo[seq[RequestRecord]]
 
+    # -- Detail panel state --
+    detailTab*: Signal[string]
+      ## Which tab is active in the request detail panel.
+      ## One of "headers" / "request" / "response" / "timing" /
+      ## "calltrace" / "asyncflow".  Defaults to "headers".
+
     # -- Injected side-effect hook --
     openExternalTrace*: proc(tracePath: string; startGeid: int64)
       ## RS-M3 — installed by the frontend shell.  Invoked instead of the
@@ -270,6 +276,10 @@ proc setFilterStatus*(vm: RequestPanelVM; statusFilter: string) =
   vm.filterStatus.val = statusFilter
   vm.selectedIndex.val = NO_SELECTED_INDEX
 
+proc setDetailTab*(vm: RequestPanelVM; tab: string) =
+  ## Switch the active tab in the request detail panel.
+  vm.detailTab.val = tab
+
 proc setSearchText*(vm: RequestPanelVM; searchText: string) =
   ## Update the URL search text; same selection-reset reasoning as
   ## ``setFilterMethod``.
@@ -327,6 +337,7 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
     let filterStatus = createSignal("")
     let searchText = createSignal("")
     let selectedIndex = createSignal(NO_SELECTED_INDEX)
+    let detailTab = createSignal("headers")
 
     let filteredRequests = createMemo[seq[RequestRecord]] proc(): seq[RequestRecord] =
       let all = requests.val
@@ -365,6 +376,7 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
       searchText: searchText,
       selectedIndex: selectedIndex,
       filteredRequests: filteredRequests,
+      detailTab: detailTab,
       openExternalTrace: nil,
       disposeProc: dispose,
     )

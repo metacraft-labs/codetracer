@@ -43,16 +43,22 @@ import {
   RETIRED_BOTTOM_TABS_SELECTOR,
   bottomStripTabs,
 } from "../../page-objects/auto-hide-strip";
+import {
+  BLANKET_HIDE_SPELLINGS,
+  footerVisibilityFailures,
+  probeFooterRegions,
+} from "../../page-objects/status-footer-contract";
 
 const repoRoot = path.resolve(__dirname, "../../../../..");
 
 /**
- * The rule that broke the footer, kept verbatim so the negative controls
- * below assert against the exact selector that regressed rather than an
- * approximation of it.
+ * The rule that broke the footer — twice, `b27da3947` and `51a3e820e` — kept
+ * verbatim as the first entry of `BLANKET_HIDE_SPELLINGS` so the historical
+ * case stays covered by name.  The negative controls below run the whole
+ * list, because a control that only recognises the spelling that shipped is
+ * a control the next spelling walks past.
  */
-const TABS_ONLY_RULE =
-  "#status #status-base > *:not(#auto-hide-bottom-strip) { display: none !important; }";
+const TABS_ONLY_RULE = BLANKET_HIDE_SPELLINGS[0].css;
 
 /**
  * `minWidth` passed to `BrowserWindow` in `src/frontend/index/window.nim`.
@@ -261,5 +267,52 @@ test.describe("status bar footer contract (Auto-Hide-Panes §3.1 / §10.3)", () 
 
     // ... and the readiness wait itself rejects rather than silently passing.
     await expect(readyOnEntryTest(ctPage)).rejects.toThrow(/Timeout|timeout/);
+  });
+
+  test("every_spelling_of_the_blanket_hide_is_caught_in_the_running_app", async ({
+    ctPage,
+  }) => {
+    test.setTimeout(180_000);
+    // The second negative control, and the one that generalises.  The test
+    // above pins the historical rule and the suite-wide symptom it produced;
+    // this one applies every entry of `BLANKET_HIDE_SPELLINGS` — five of
+    // which have never been written in this repo — and requires the shared
+    // visibility check to reject each of them in the real renderer.
+    //
+    // Note what the two controls measure differently.  `readyOnEntryTest`
+    // rejects on `display`/`visibility` hides because Playwright's
+    // visibility predicate is box-and-`visibility`; an `opacity: 0` footer
+    // would sail past it while being just as invisible to the user.  That
+    // gap is why `footerVisibilityFailures` also folds in effective opacity,
+    // and why this control asserts through it rather than through the
+    // readiness wait.
+    await readyOnEntryTest(ctPage);
+
+    const survived: string[] = [];
+    for (const spelling of BLANKET_HIDE_SPELLINGS) {
+      const injected = await ctPage.addStyleTag({ content: spelling.css });
+      const failures = footerVisibilityFailures(
+        await probeFooterRegions(ctPage),
+      );
+      // `addStyleTag` hands back an `ElementHandle<Node>`; the injected node
+      // is always the `<style>` element it just appended.
+      await injected.evaluate((el) => (el as Element).remove());
+      if (failures.length === 0) {
+        survived.push(`${spelling.name}: ${spelling.css}`);
+      }
+    }
+    expect(
+      survived,
+      "these ways of hiding the footer left the contract check green in the " +
+        "running app, which means it is recognising a spelling rather than " +
+        "an effect",
+    ).toEqual([]);
+
+    // With every injected rule removed the footer must be intact again —
+    // otherwise the loop above proves nothing.
+    expect(
+      footerVisibilityFailures(await probeFooterRegions(ctPage)),
+      "the footer must be visible again once the injected rules are removed",
+    ).toEqual([]);
   });
 });

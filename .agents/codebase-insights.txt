@@ -217,7 +217,7 @@
 - 2026-02-11: On Windows, Tup command failures like `'stylus' is not recognized` can come from a stale Tup server started with an older PATH; after sourcing env scripts, restart Tup-related processes before rebuilding. `env.ps1` also now sets PowerShell aliases (`tup`, `node`, `npm`, `npx`, etc.) to `.exe` paths so extensionless Bash shims on PATH do not get opened as text files in PowerShell.
 - 2026-02-11: Web UI tests in non-Nix Windows rely on additional runtime assets under `src/build-debug` beyond binaries: `ct host` serves static files from `src/build-debug/public` and `ct record` expects `src/build-debug/config/default_config.yaml`; `setup-codetracer-runtime-env.{ps1,sh}` should ensure both `public` and `config` are linked/copied from `src/`.
 - 2026-02-11: `src/frontend/index.html` can request `frontend/styles/default_dark_theme.css` in web/server mode; if only `default_dark_theme_extension.css` is generated, add a build artifact alias/copy so the unsuffixed path resolves.
-- 2026-02-11: `ct-rr-support` now compiles on Windows in `../codetracer-rr-backend` via Windows stubs (compile-only mode), but runtime replay/record integration remains unsupported on Windows because RR is Linux-only; `ct record test-programs/noir_space_ship` can still fail when it requires a functional `ct-rr-support` runtime backend.
+- 2026-02-11: `ct-native-replay` (named `ct-rr-support` when this note was written) compiles on Windows in `../codetracer-native-backend` via Windows stubs (compile-only mode), but runtime replay/record integration remains unsupported on Windows because RR is Linux-only; `ct record test-programs/noir_space_ship` can still fail when it requires a functional `ct-native-replay` runtime backend.
 - 2026-02-11: On this Windows non-Nix setup, Noir recording currently hangs in `nargo trace` (often with git dependency cache lock behavior), so `ct record test-programs/noir_space_ship` can leave `trace-*` folders with only `symbols.json`.
 - 2026-02-12: `ct host` treats its final trace argument as either a numeric trace id or an already indexed/imported trace path; passing an arbitrary fixture folder (for example `src/tui/trace`) can fail with `trace not found: maybe you should import it first`. `ui-tests/Infrastructure/CtHostLauncher.cs` now translates `.../trace-<id>` paths to `<id>` before launching `ct host`.
 - 2026-02-11: Installing `Microsoft.WinDbg` alone may expose TTD binaries under `C:\Program Files\WindowsApps\...` with ACL restrictions for direct execution; installing `Microsoft.TimeTravelDebugging` provides a usable `ttd.exe` alias in `%LOCALAPPDATA%\Microsoft\WindowsApps`, and non-Nix Windows env scripts now auto-detect/export it as `WINDOWS_DIY_TTD_EXE` plus a bash shim.
@@ -502,6 +502,68 @@ and a correlation marker's counterpart is by definition in another process.
 - 2026-07-31 (WASM host state now rides in the event stream — M44b): `browser_stream_host.rs` writes the spec §3.3/§3.4 records TWICE — into `boundary_state.json` as before, and as `Event` records under `boundary_id: "wasm-host-state"` inside `trace.json`. The second is the only carrier a *streaming* consumer can use: `--boundary-stream` reads its metadata once at startup, §3.3 is only known at the module's first exported call, and — the deciding detail — `write_host_state` calls `open_stream`, which is what SPAWNS the `--snapshot-consumer` process, so a "re-read the sidecar" protocol races the sidecar's first write rather than merely arriving late. Consequence for anyone touching that translate arm: emit the `Event` through `self.emit(...)` (so the batch mirror stays byte-identical) and emit it only when the state actually CHANGED — a duplicate `HostInitialState` is ignored, and emitting for it would make the stream and the sidecar disagree, which `LoadRecording` now refuses outright rather than resolving. The test that used to assert host-state events changed `trace.json` by not one byte was replaced by one that proves the safe part of that claim directly: remove the host-state records from the produced document, as ORIGINAL byte ranges (not values round-tripped through `serde_json::Value`, which sorts keys), and what remains must equal a recording made without host state.
 - 2026-07-31 (rustc cannot emit a multi-value wasm export): measured — `extern "C" fn(u32) -> (u32, u32)` compiles to `(i32,i32,i32) -> ()` on wasm32-unknown-unknown (hidden sret pointer), and `-C target-feature=+multivalue` does not change it. `src/db-backend/tests/fixtures/wasm-parity-corpus/modules/pair_stats/` gets one by assembling a nine-instruction wrapper from LLVM wasm assembly (`wrap.s`, `clang --target=wasm32-unknown-unknown -mmultivalue`) that calls the Rust half. Two traps: (1) `rustc --print link-args` shows a bare two-token `"--export" "<sym>"` for EVERY `#[no_mangle]` item and there is no flag to stop it — not dropping `pub`, not `.hidden` in the assembly, not `--no-export-dynamic` (all measured) — which matters because `ct-instrument` instruments an exported function's *body*, so an exported helper called from another export is recorded as a nested export crossing and refused by spec §8; the fixture links through `lld-explicit-exports`, which drops those pairs. (2) C is not an alternative: the recorder's DWARF stepping filter (`isUserRustSourcePath`) requires a `.rs` suffix, so a C module would carry DWARF and emit no steps.
 - 2026-07-31 (the status bar patches, it no longer rebuilds — M46): `renderStatusInto` (`viewmodel/views/isonim_status_view.nim`) is now conditional. It stamps `statusStructureSignature(model)` on the `#status` host as `data-status-structure`; if the next model produces the same signature it PATCHES text/titles/classes in place and returns `false`, and only a structural change (location appears/disappears, FINISHED, disconnected, notification set, bug report) tears the subtree down and returns `true`. Two consequences to respect when adding a field to `StatusShellModel`: a field that only changes a node's text/class must stay OUT of the signature and gain a line in `patchStatusValues`, or it will render once and then never update; a field that adds or removes an element must go INTO the signature, or it will never appear. `requestStatusRender` also coalesces to one pass per task turn (six independent callers redraw the bar 60+ times per trace open, enumerated in the comment there), and the strip / icon-zone remount now runs only when the shell was actually rebuilt. `window.__ctStatusRenderStats()` exposes requests/passes/rebuilds; a clean open is ~66/11/2.
+- 2026-08-10 (the tabs-only footer rule came back, and a guard nobody runs is
+  not a guard — M66): `51a3e820e "fix: UI regressions"` re-added the exact rule
+  M43 removed from `src/frontend/styles/components/status_bar.styl`, written
+  one nesting level in so the `.styl` source reads differently while compiling
+  to the same `#status #status-base > *:not(#auto-hide-bottom-strip)
+  { display: none !important }`, and the whole Electron suite went red at
+  `readyOnEntryTest` again. Three things to carry forward. (a) BEFORE hiding
+  anything in `#status-base`, know that it renders exactly five children and
+  four of them are required by `Auto-Hide-Panes.md` §3.1/§10.3 — the fifth,
+  `.test-movement`, is gated on `data.startOptions.inTest` and never renders in
+  production. There is no legacy residue to hide; a quieter footer means
+  restyling or amending the design doc. (b) The reason M43's contract spec did
+  not catch it is that it never ran: every GUI job in `Codetracer CI`
+  (`test-ui-tests` nixos/macos and `test-ui-tests-rr`) aborts in `Setup dev env`
+  with `No repo-workspaces workspace lock for codetracer` and every later step
+  is `skipped`. Measured over 160 `dev` runs back to 2026-06-17: the Playwright
+  step has NEVER had conclusion `success` in that window, and last executed at
+  all (failing) on 2026-07-22 — 130 commits, 17 merges and 28 frontend-touching
+  commits have landed since with no GUI lane able to look at them. Before
+  concluding a regression "passed CI", check that the lane got as far as running
+  a test. The missing locks are REPO-side, not an action regression: the
+  lock-creating repo-workspaces `pre-push` hook was overwritten by pre-commit.com
+  on 2026-07-29 (it survives as `.git/hooks/pre-push.legacy`), and there is no
+  `.repo/` workspace above this checkout at all, so ordinary pushes create no
+  lock either — `git push --no-verify` skips the hook too, and adds to the
+  problem, but is not its cause. (c) The effect-based guard is
+  `src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts` +
+  `src/tests/gui/page-objects/status-footer-contract.ts`: it applies the BUILT
+  theme CSS to the footer's markup in a plain Chromium page and asks whether
+  each region has a box. It costs ~7 s, needs no `ct`/trace/recorder, and —
+  measured — runs under both `CODETRACER_DB_TESTS_ONLY=1` and
+  `CODETRACER_RR_TESTS_ONLY=1`, whereas `status-bar-footer-contract.spec.ts` and
+  `status-bar-render-stability.spec.ts` are skipped outright by the RR lane.
+  KNOW ITS EDGE — it does not trip on "any spelling", and an early draft of this
+  note said so wrongly. Measured over 28 spellings: it catches everything that
+  removes the BOX (`display`, `visibility`, `opacity`, `transform: scale(0)`,
+  `content-visibility`, `font-size: 0`, zero width/height, flex collapse, and
+  all of those on an ancestor, under any selector syntax including `@media` and
+  `:has()`), and misses everything that keeps the box and only changes the
+  PAINTING — off-screen (`position: absolute; left: -9999px`,
+  `translateX(-9999px)`, legacy `clip`), `clip-path`, `filter: opacity(0)` (yes,
+  while bare `opacity: 0` is caught), opacity `0.001`, `color: transparent`, and
+  occlusion by an overlay. `readyOnEntryTest` and Playwright's `toBeVisible` are
+  box+`visibility` predicates and miss that family too — Playwright calls an
+  off-screen `.location-path` "visible, enabled and stable" — so nothing guards
+  it today. Also: the guard reads whatever is in `src/build-debug`, so editing
+  `status_bar.styl` and running `just test-gui-prebuilt` WITHOUT `just
+  build-once` reports green against the old build; a MISSING build fails loudly,
+  a STALE one does not. Add new hiding spellings to `BLANKET_HIDE_SPELLINGS`
+  rather than rewriting it.
+- 2026-08-10 (a `resize` handler that re-renders the menu is a render storm —
+  M66 review): `ui/menu.nim::requestMenuRender` is NOT coalesced — it clears and
+  rebuilds `#menu` wholesale (61 elements) and cascades into the session tab
+  bar, debug shell, command palette and debug controls, and rebuilding `#menu`
+  destroys the command-palette input's DOM focus and caret. `51a3e820e` called it
+  straight from `window.resize`; the handler in `ui/layout.nim` now throttles to
+  one render per 50 ms with the flag at MODULE level, because `initLayout` runs
+  once per session and its `resize` listener is never removed, so N sessions mean
+  N listeners. The two patterns to copy for anything else on `resize` are
+  `ui/session_tabs.nim::installResizeRender` (50 ms throttle) and
+  `ui/status.nim::requestStatusRender` (one pass per task turn). Related and
+  still true: `.agents` note of 2026-08-06 on M51's debug-controls rebuild loop.
 - 2026-08-06 (a readyOnEntry timeout means a SLOW LAUNCH, and the old 'stalled locator' note here was wrong — M46): `lib/fixtures.ts::readyOnEntryTest` is ONE strict visibility wait on `.location-path` with `READY_ON_ENTRY_BUDGET_MS = 30_000`, and it prints `# timing: ready on entry ...: Xms / 30000ms (N%)` on EVERY launch, passing or not — that line is the measurement, use it before touching the budget. `.location-path` is rendered only when `locationText` is non-empty, so its appearance IS the end of the launch: median ~8-11s, observed max ~14.7s on a 32-core host at load average 33-82, and 17.4s for a three-recording session launch. THE PREVIOUS NOTE HERE IS WITHDRAWN. It claimed two fresh-locator attempts defeated a Playwright poll that 'stops making progress'. A `Locator` stores only `_frame` and `_selector` and `waitFor` is a plain `frame._channel.waitForSelector(...)`, so a fresh locator is a byte-identical call; and the missing `locator resolved to ...` line it rested on is just what Playwright logs for a selector matching ZERO elements (the injected predicate in `server/frames.js` sets `log` only on a match, and the caller guards with `if (log)`) — verified directly: a page with no `.location-path` logs only the `waiting for` line for 30s, while a page with a `display:none` one logs `62 x locator resolved to hidden ...`. Still true and still worth keeping: removing the status bar's per-redraw DOM churn did not change the flake rate (2/22 before, 4/54 after, same host), so do not expect a frontend churn fix to cure a readiness timeout. What IS unexplained: in the pre-churn-fix artefacts (`test-diagnostics/2026-07-30T01-*`) the status bar logged a non-empty location 57-66 times INSIDE the failing 15s window, which no 'element was absent' story covers; see the M46 completion note.
 - 2026-08-01 (test recordings are PRODUCED, never committed — M53): no `.ct` is
   committed anywhere in this repo any more. `scripts/materialize-recording.sh
@@ -561,3 +623,1496 @@ and a correlation marker's counterpart is by definition in another process.
   `.../nan-payloads/legacy-encoding.ct`, made by a pre-M52 `ct-instrument` that
   cannot be rebuilt — it is excluded from that check and must never be
   regenerated.
+- 2026-08-11 (Nim ORC's allocator is per-thread, and the region dies with the
+  thread — `ct-test test run` SIGSEGV'd at 21+ workers): Nim ARC/ORC gives every
+  thread its own `MemRegion`, and that region lives in the thread's TLS
+  (`lib/system/mmdisp.nim`: `var allocator {.rtlThreadVar.}: MemRegion`). Every
+  string/seq payload is stamped with the allocating thread's region as its
+  owner. Cross-thread `dealloc` IS supported — `rawDealloc` sees
+  `c.owner != addr(a)` and hands the cell over via `addToSharedFreeList` — but
+  ONLY while the owning thread is still alive; that helper dereferences
+  `c.owner`. So "protected by a Lock" is NOT sufficient for sharing GC-managed
+  data with worker threads: you must also not let worker-allocated memory
+  outlive its worker. `run_orchestration.runUnits` returned worker-built
+  `RunUnitOutcome`s to its caller *after* `joinThreads`, and the caller's free
+  then walked a dangling `c.owner`. It looked fine below 21 workers purely
+  because glibc caches retired thread stacks (`stack_cache_maxsize`, 40 MiB
+  default) so the dead TLS stayed mapped — silent corruption, not safety. The
+  boundary is exact arithmetic, not folklore: Nim gives every thread a 2 MiB
+  stack of its own (`ThreadStackSize` in `std/typedthreads` is
+  `1024*256*sizeof(int) - 4096`; `ulimit -s` is irrelevant), so 40 MiB holds
+  exactly 20 retired stacks and worker 21 is the first whose region is
+  unmapped. Then the free segfaults, *after* the run has already printed a
+  correct summary (stdout says success, `$?` says 139).
+  Two things worth keeping:
+  * `GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0` unmaps every worker's TLS
+    at join, so this whole bug class becomes deterministic at ONE worker instead
+    of probabilistic at 21. Measured on the pre-fix build: exit 139 at
+    `--threads 1`, and conversely a 1 GiB stack cache makes the pre-fix build
+    survive 64 workers — proof that thread count never made it safe, only quiet.
+    Reach for this tunable when stress-testing any threaded Nim code here; a
+    clean run without it is close to no evidence at all.
+  * `-d:useMalloc` is the independent cross-check: it removes the per-thread
+    regions, and the pre-fix build then passes at 64 workers even with the
+    cache disabled. If a crash survives `-d:useMalloc`, it is NOT this bug.
+  * The fix pattern is in `runUnits`' `ResultHandoff`: workers park on a
+    condvar after draining the queue, the spawning thread copies the results
+    into its own region and frees the worker-owned originals while the workers
+    are still alive, and only then releases and joins them. Any new worker pool
+    that returns GC-managed data needs the same hand-off (or `-d:useMalloc`,
+    which sidesteps per-thread regions entirely but only protects the binaries
+    that are built with it, not library consumers).
+
+- 2026-08-13 (ct-test discovery scoping + cost): `ct test discover --workspace`
+  fans out to ~38 providers, and EVERY provider used to answer "which files are
+  in this workspace?" with its own `walkDirRec(projectRoot)` plus an ad-hoc
+  reject list (`js_common` skipped `node_modules/`, `go_test` skipped `vendor/`,
+  `python_common` and `nim_unittest` skipped nothing). That produced ~16 full
+  recursive walks during `detect` alone, several of which READ every matching
+  file, and ~21 more during `discoverProject`.
+  Measured against the reprobuild workspace on the pre-fix build: 53,349 items
+  in 10m40s and 59 MB of JSON, of which 45,256 (84.8%) came from
+  `references/{llvm-project,buildxl,nix,spack,mold,wild,…}` — vendored upstream
+  source trees reported as that project's tests. After scoping: 8,093 items in
+  2.1s and 9.8 MB. Same binary, same workspace; a ~300x wall-clock difference
+  that is almost entirely "stop walking other people's repositories".
+  The rule now lives in ONE place, `src/ct_test/workspace_scope.nim`:
+  * `walkWorkspaceFiles(root)` is the drop-in for `walkDirRec` — new providers
+    MUST use it, otherwise they re-open the hole for their own language.
+  * The scope honours the workspace's OWN declaration rather than a ct_test
+    ignore file: `git ls-files --cached --others --exclude-standard`, run with
+    cwd = root (so `--workspace <subdir>` scopes itself). That gets the whole
+    `.gitignore` chain, stops at nested checkouts (a vendored tree is reported
+    as ONE directory entry, never descended into), and — the part that is easy
+    to break — keeps untracked-but-not-ignored files, so a test written seconds
+    ago is still discovered. Fallback for non-checkouts is a PRUNING walk
+    (prunes the descent, not the results) plus `VendorDirNames`.
+  * The resolved set is memoized in a `{.threadvar.}` because `TestProvider`'s
+    callbacks only receive `projectRoot: string`; `discovery.discover` calls
+    `invalidateWorkspaceScopes()` once per invocation, so one traversal is
+    shared by all 38 providers within a discovery and no state survives it.
+  * Escape hatch is opt-OUT, not opt-in: `--scope unscoped` / `CT_TEST_SCOPE`.
+    An `info` diagnostic (`discovery scope: N file(s) … excluded …`) reports
+    what was dropped, so the exclusion is never silent.
+  Regression guard: the last two cases in `src/ct_test/discovery_test.nim`.
+  Mutation-verified against 7 mutations (drop the nested-VCS prune, the
+  `VendorDirNames` prune in either mode, `--exclude-standard`, `--others`, the
+  `--scope unscoped` branch, and the summary diagnostic).
+
+- 2026-08-13 (ct-test Nim discovery: one shared lexical scanner): the
+  nim-unittest provider had TWO hand-rolled character loops (a declaration
+  scanner and a per-line comment stripper) and both treated every `'` as the
+  opening quote of a character literal. Nim gives the apostrophe three other
+  jobs — numeric type suffix (`0'u8`, `1.0'f32`, `0x1F'i64`), custom numeric
+  literal (`12'MyType`), and accent-quoted operator names (`` `'u8` ``) — so
+  ONE `sizeBytes = 10485760'i64` desynchronised the scan and everything up to
+  the next apostrophe (typically the rest of the file) was skipped as string
+  content. Symptom: `std/unittest import detected but no literal suite/test
+  declarations were found` on files with ordinary `suite "…":` at column 0.
+  Both scans now run over one token stream: `src/ct_test/nim_lexer.nim`.
+  Things to know before touching it:
+  * It is written against the Nim distribution's own `compiler/lexer.nim`,
+    which IS on disk — `$(dirname $(readlink -f $(which nim)))/../nim/compiler/`
+    — and is the ground truth for every rule. It is NOT usable as a dependency
+    (nix store path that moves with the toolchain, compiler-internal API,
+    `lexMessage` aborts the process on a malformed literal).
+  * The load-bearing rule: lex numbers and identifiers FIRST. Once `lexNumber`
+    has eaten the type suffix, a remaining `'` really is a character literal.
+  * Fail-safe: anything Nim requires to close on its own line (single-quoted
+    string, character literal) ends at the newline, and an apostrophe with no
+    closer within `MaxCharLiteralBody` degrades to one punct token. A malformed
+    file costs one token, never the rest of the file. Both properties are
+    load-bearing and separately mutation-pinned.
+  * `NimToken` is position-first ON PURPOSE: no per-token copy of the source
+    slice. Use `sliceOf`, `identIs` and `.ch`. An earlier revision carried a
+    `text: string` on every token and doubled workspace discovery wall time
+    (5.6s -> 10.5s on the reprobuild workspace). If you add a field that
+    allocates per token, re-measure with
+    `time ct-test test discover --workspace <repo> --json`.
+  * `nimUnittestFileCatalog` scans each file ONCE and hands the same tokens to
+    `detectFrameworksInTokens` and `parseNimUnittestDeclarations`.
+  Measured effect over 16 Nim repos in this workspace: 10,305 -> 10,901
+  discovered cases and 2,468 -> 2,602 suites across 115 files; the "no literal
+  suite/test declarations" warning went 24 files -> 1 (the survivor is a helper
+  module that imports unittest and declares nothing — a true positive).
+  MIRROR DEFECT, also fixed: `suite`/`test` inside a `when false:` block were
+  being counted. The compiler never instantiates them, so no runner can produce
+  them; they are now skipped with an `info` diagnostic naming the count. That
+  is the only *semantic* rule in an otherwise purely lexical scan.
+  Regression guards: `src/ct_test/nim_lexer_test.nim`, the `ct-test Nim
+  unittest lexical regressions` suite in `nim_unittest_provider_test.nim`, and
+  the fixture `fixtures/nim_unittest_project/tests/test_lexical_edge_cases.nim`
+  — which is COMPILABLE, so `nim c -r` on it is an independent ground truth for
+  what discovery must report (1 suite + 5 cases).
+
+- 2026-08-13 (ct-test silent output truncation): `execCaptured` bounds captured
+  child output at `DefaultCaptureLimit` (16 MiB) and used to drop the fact that
+  it had cut anything. `CapturedRun` now carries `outputBytes` (the true
+  pre-bound count, from runquota_process's `stdoutBytes`/`stderrBytes`) and
+  `truncated`. ANY consumer that parses a LIST-shaped output must check it: a
+  prefix of a list is indistinguishable from a short complete list, so the loss
+  is invisible where a truncated JSON/XML document would at least fail to
+  parse. `workspace_scope.vcsInventory` refuses a truncated `git ls-files -z`
+  outright — git emits paths sorted, so truncation drops a contiguous tail of
+  the alphabet — and `auto` falls back to the pruning walk while `vcs` errors.
+  Test seam: `setVcsInventoryCaptureLimit` / `clearVcsInventoryCaptureLimit`
+  (lower the bound; do not try to materialise ~280,000 files).
+- 2026-08-14 (#558): A `for` or an `if` inside an IsoNim `ui()` block is a ONE-SHOT STRUCTURAL construct. `processForStmt` / `processIfStmt` in `isonim/src/isonim/dsl/ui.nim:167-178, :249-250` emit a bare `nnkForStmt` / `nnkIfStmt` with NO `createRenderEffect` wrapper — unlike dynamic attributes (:366-379) and dynamic text (:278-292), which ARE wrapped. So the construct runs exactly once, when the node is built, and never again. `indexEach` does not save you: it calls `body(...)` once per index and thereafter only assigns `itemSignals[i].val`, which fires the row's attribute/text effects but not its structural loops. Any list whose length can change after mount, and any subtree behind a condition that can flip after mount, must use `indexEach` / `forEachKeyed` on a `ref =`-captured container, attached AFTER the `ui()` block. Diagnostic signature: a container whose `display` (a dynamic attribute, therefore reactive) updates correctly while its children stay frozen at their construction-time value — i.e. "the panel opens but is empty". This was #558's root cause in `views/isonim_state_view.nim`, and the adjacent origin-chain block had BOTH failure modes at once (a `for` over hops plus an `if chain.isSome` guarding the terminator). Note that when one `indexEach` covers heterogeneous rows, per-row class names must become reactive expressions too, because `indexEach` reuses a node positionally and a position can change role as the list grows.
+- 2026-08-14 (#558): `common/common_types/*` is INCLUDEd, not imported, and `common/types.nim` binds `langstring = string` while `frontend/types.nim` binds `langstring = cstring`. Every type spelled in terms of `langstring` therefore EXISTS TWICE with incompatible layouts (`HistoryResult` is one). A `cast[seq[T]]` between the two compiles and is only ever sound because the JS backend erases the difference — it is a landmine on any native/headless path. When a ViewModel needs such a payload, give the VM its own backend-neutral row type and normalise at the single host boundary where the wire message is received, rather than casting. Removing that cast from `state_vm.nim` also dropped a heavy include-monolith from a headless VM.
+- 2026-08-14 (test hygiene, from the pxor audit): several tests in this repo pass while the bug they name is present, and the pattern is always the same — they observe a FRESHLY CONSTRUCTED object instead of the long-lived one the app actually mounts. `test_state_value_history_toggle` called `renderStatePanel(...)` again after `updateHistory`, so the one-shot `for` ran after the data landed and the rows existed. Assert against the already-mounted panel. Related smells found in the same audit: a test whose only assertion is `check "flow-taken" == "flow-taken"`; two tests driving a `Signal` that nothing in production writes; and `retry()` in `src/tests/gui/lib/retry-helpers.ts:65-110` returning `void` and never throwing on exhaustion, so a `retry(...)` with no following assertion always passes.
+- 2026-08-14 (#612): The frontend event bus (`frontend/communication.nim`) had
+  NO teardown path until this fix: `subscribe` appended to `handlers[kind]`,
+  `registerSubscriber` appended to `subscribers[kind]`, and nothing ever
+  removed either. Every UI component gets a private mediator
+  (`types.setupLocalViewToMiddlewareApi`) that registers itself as a subscriber
+  of `data.viewsApi`, so a destroyed panel kept reacting to events forever.
+  Panels are destroyed and re-created routinely — `layout.closeLayoutTab`,
+  `renderer.resetLayoutState` (runs on every re-record / trace reload) and
+  `session_switch.closeSession` all dropped components from
+  `ui.componentMapping` without unsubscribing — so one emit was delivered once
+  per accumulated generation. That is the real "Add to Scratchpad adds the
+  value 4 times" mechanism; it is NOT a DOM listener leak (the `+` button is a
+  fresh element every time the tippy popup is rebuilt). `Component.unregister`
+  (`types.nim`) is now the counterpart of `register` and MUST be called at any
+  new component-destruction site; it clears `api` so the component can be
+  registered again. Diagnostic signature of this class of bug: a multiplier
+  that is CONSTANT for a whole session (one per generation) rather than growing
+  as the user steps.
+- 2026-08-14: `utils.generateId` hands out the LOWEST FREE id, not a
+  monotonically increasing one, so a re-opened panel normally gets the id its
+  predecessor had. Module-global "already mounted" maps keyed by component id
+  (`isoNimScratchpadMountedIds` and its siblings in trace_log / request_panel /
+  filesystem) must therefore be cleared on teardown, or the next panel with the
+  same id silently never mounts its IsoNim view. Likewise, a module-global
+  `<panel>ComponentRef` must be re-pointed at the NEWEST registration —
+  latching onto the first one (as `scratchpad.nim` did) leaves the ref aimed at
+  a DOM container that no longer exists.
+- 2026-08-14: `utils.openLayoutTab` has TWO reuse rules, and picking the wrong
+  one makes a panel silently do nothing. Panels are singletons by default:
+  asking for one that is already attached just re-focuses component 0 and
+  RETURNS — no tab, no log, no exception. A panel asked for with
+  `isEditor = true` is instead an editor-area *document* keyed by
+  `Component.independentTabPath` (`opensAsIndependentTab` in
+  `common_types/codetracer_features/frontend.nim`, shared by the JS and C type
+  trees so the rule is unit-testable). The VCS panel's "View Diff" was routed
+  through the singleton rule for months: the docked VCS panel is always
+  component 0 and always attached, so every click re-activated it and returned,
+  and the ENTIRE downstream path (tab titles in `layout.nim`, the `diff:`
+  branch of `ensureVCSDataLoaded`, `VCSComponent.diffTarget`) was dead code
+  that had never executed once — including a missing `isGitRepo = true` that
+  would have rendered "Not a git repository" instead of the diff. Symptom to
+  recognise: a button whose whole feature never ran, with nothing in the
+  console. Note also that the `similarParent` grouping loop further down must
+  skip singleton siblings, or an `isEditor` tab lands in the sidebar stack the
+  singleton lives in.
+- 2026-08-14: `VCSVM.unifiedDiffActive` means "this panel instance IS a diff"
+  (a View Diff tab, or an agentic-session review diff), NOT "the Unified Diff
+  view mode is selected". The view-mode toggle is `VCSVM.viewMode`; wiring the
+  toggle to `unifiedDiffActive` replaces the commit history with a diff, which
+  is what issue #561 originally reported.
+- 2026-08-14 (#562/#593/#595/#606): `FlowMode::Call` must start the flow window at the ENCLOSING CALL ENTRY, for both trace kinds. `move_to_first_step` in `src/db-backend/src/flow_preloader.rs` is the SINGLE place that decides the window start — do not add a second widening at the `load_flow` pre-pass gate (:267-283), because `jump_to_call` + `StepIn` there followed by another `jump_to_call` in `move_to_first_step` rewinds twice and undoes the `StepIn`. From 2026-04-28 (`3d722b15`) to 2026-08-14 the materialized branch did NOT widen, so the window restarted at the current statement on every step and `load_view_update`'s forward-only walk produced a shrinking window. One regression, four reported bugs: the sliding-window flow scope (#606), a loop counter stuck at 0 (#593), a total that counted down as you stepped, and an apparent 2-iteration skip per arrow click (#595). The revert was pinned in place by a unit test asserting the truncated contract whose RR sibling asserted the opposite — when two tests of the same function assert opposite things for different backends, that asymmetry is the bug, not the design.
+- 2026-08-14: `Db::jump_to_call` (`src/db-backend/src/db.rs:2722-2737`) resolves `step_id -> step.call_key -> calls[call_key].step_id`, i.e. the entry step of the EXACT enclosing call INSTANCE — not the function's first call. Rewinding for flow is also safe with respect to the user's position: `Handler::load_flow` (`dap_handler.rs:1122-1131`) builds a SEPARATE replay session.
+- 2026-08-14 / superseded 2026-08-16: `FlowVM` (`src/frontend/viewmodel/viewmodels/flow_vm.nim`) used to send `ct/load-flow` and drop the response, so `iterationCount`, `steps` and `loadingState` were never written by production code (only by tests and `storybook_components.nim`); two "FlowVM loop iteration" tests that wrote `iterationCount` themselves and then asserted a setter certified #593/#595 as fixed while both were broken. It now CONSUMES the reply (`applyFlowUpdate`): it stores the window's loops and `location.rrTicks` and re-derives `selectedIteration` with `flow_loop_math.activeIterationForTicks`. Before writing a ViewModel test, still check that production code actually writes the signal you are asserting on.
+- 2026-08-16 (#593/#595, the GUI half): the Omniscience loop counter reads `loopStates[loop].activeIteration` via `activeLoopIterationFor`, and THAT TABLE IS THROWN AWAY AND REBUILT ON EVERY DEBUGGER MOVE, twice over: `EditorViewComponent.loadFlow` (`ui/editor.nim`) constructs a brand-new `FlowComponent` with an empty `loopStates` whenever `rrTicks` differ (i.e. always), and `redrawFlow` -> `clear` -> `resetFlow` -> `clearLoopStates` empties it again on every redraw. So `createLoopStates` (`ui/flow.nim`) is not a top-up, it is the ONLY writer that runs before the control's DOM is built, and if it seeds `activeIteration` with the default 0 the counter reads 0 forever no matter where the debugger is — and the next arrow click computes `0 + 1` and jumps the user back to iteration 1. It now seeds from `self.location.rrTicks` through `activeIterationForTicks`. Corollary: never repaint a loop control with `redrawFlow()` after an optimistic `selectLoopIteration` — the clear discards the selection and re-derives it from the still-stale pre-jump location. Use `updateLoopControlDom(position)`.
+- 2026-08-16 (#593/#595, the lifecycle half): because `loadFlow` builds a NEW
+  `FlowComponent` per move (see the entry above), the OUTGOING one is not torn
+  down — it is still referenced by its own pending `setTimeout` closures
+  (`scheduleFlowRedraw`, the 0/100/500/1000/2000 ms
+  `scheduleActiveLoopIterationValueRender` fan-out, `afterJump`'s 50 ms
+  `redrawFlow`). Those fired ~100 ms into the NEW load and ran a full
+  `redrawFlow()` against the PREVIOUS debugger position: they re-registered
+  Monaco view zones that only the retired component's `loopViewZones` knows
+  about (so the live component's `clear()` can never remove them — two loop
+  controls in the editor) and repainted the loop counter with the old
+  iteration. Concretely: click forward, the debugger DID move, the zombie
+  repainted the old number, the next click read that number, recomputed the
+  same target it had already jumped to, `needsFlowReload` was then false and
+  the counter froze — "expected 3, received 2" forever. `loadFlow` now sets
+  `FlowComponent.superseded`; `flowIsLive` gates `redrawFlow`,
+  `recalculateAndRedrawFlow`, `onUpdatedFlow` and the two timer callbacks.
+  It is deliberately "stop painting", not "tear down": until the replacement
+  renders, the retired component owns the DOM the user clicks and holds the
+  optimistic `activeIteration`. Any NEW deferred work in `ui/flow.nim` must
+  check `flowIsLive` first.
+- 2026-08-16: `selectLoopIteration` jumps to the iteration's FIRST BODY
+  STATEMENT (`firstLoopBodyStepForIteration`), not to the `for`/`while` header.
+  Both land on the right iteration — `FlowMode.Call` returns the whole call, so
+  `rrTicksForIterations` is identical wherever the cursor sits and
+  `activeIterationForTicks` maps a body tick onto its containing header
+  interval — but the header target leaves the cursor on the loop condition,
+  which is what `NoirSpaceShip.SimpleLoopIterationJump` / `LoopIterationSlider`
+  detect (they assert the editor's active line is `shield.nr:5`, the first body
+  line, after entering an iteration number).
+- 2026-08-16: `FlowLine.loopIds` (`src/frontend/types.nim`) is initialised to `@[]` in `makeFlowLine` (`ui/flow.nim`) and in the twin literal in `ui/editor.nim`, and NOTHING ANYWHERE APPENDS TO IT. Every reader is therefore dead: `setFlowLineActiveIteration` never runs its body, so `FlowLine.activeLoopIteration` stays `(-1, -1)` and the `.active-flow-step` marker plus the per-iteration value refresh at the end of `updateFlowOnMove` never fire; `calclulateFlowLineTotalWidth` always returns 0. The loop counter and the slider handle do NOT depend on it (both read `loopStates[..].activeIteration`, via `activeLoopIterationFor` and `ensureLoopSlider`), which is why the panel works at all. Populating `loopIds` would switch several width/offset paths on at once and needs GUI verification.
+- 2026-08-14: a Python `for` loop of N iterations reports N+1 iteration entries, because CPython executes the loop header one extra time (the visit that exhausts the iterator) and `process_loops` counts header visits. This is a real off-by-one in the DISPLAYED total, separate from the window-start bug, and is language/recorder-shaped rather than window-shaped.
+- 2026-08-14 (#594): `EditorViewComponent.decorations` used to be a flat
+  `seq[(DeltaDecoration, bool)]` in which the bool was ALWAYS `true`, so
+  `styleLines`'s `filterIt(not it[1])` kept nothing and every call replaced the
+  whole Monaco decoration set. That is fatal for any layer whose input is
+  temporarily unavailable: `onCompleteMove` reloads the flow on every step,
+  `loadFlow` installs a new `FlowComponent` with `flow == nil`, and
+  `editorAfterRedraw` runs SYNCHRONOUSLY right there — so `flow-taken` /
+  `flow-not-taken` computed empty and Monaco removed them. The bool is now a
+  layer tag (`ui/editor_decoration_layers.nim`): the flow layer is RETAINED
+  while `self.flow.flow` is nil and replaced only when real data arrives.
+  Repaint sites that did not exist before: `EditorViewComponent.onUpdatedFlow`
+  (data arrival) and `refreshFlowAfterActivation` (tab activation) — note that
+  neither `redrawFlow` overload touches line styles, the EditorViewComponent
+  one only computes `maxFlowLineWidth`.
+- 2026-08-14 (#566): a Monaco view zone whose `innerHTML` you wipe takes any
+  jQuery-DataTables instance built against a table inside it with it. The
+  instance survives in `TraceComponent.dataTable.context`, `renderTableResults`
+  only builds a table when that field is nil, and `traceChartTableDom` creates
+  the container as `chart-table hidden` with `refreshTrace` the only code that
+  un-hides it — so the grid VANISHES rather than going blank. `editorAfterRedraw`
+  now dispatches on `ui/trace_redraw_policy.nim` (skip / refresh-in-place /
+  rebuild) instead of rebuilding every expanded tracepoint on every move, and
+  `refreshTraceViewZoneDom` releases the DataTable first and calls `refreshTrace`
+  last. Rule of thumb: before wiping a subtree, ask which JS library still holds
+  a reference into it.
+- 2026-08-14 (#602): `Db::load_locals` (`src/db-backend/src/db.rs`) is
+  POINT-IN-TIME for every language: it reports what the recorder wrote for the
+  current step, nothing else. The JavaScript special case that unioned the whole
+  frame's history (prefix-scan from `call.step_id`, last-write-wins `HashMap`) is
+  gone; `is_javascript_frame` went with it (`is_javascript_module_frame` stays,
+  it has a separate caller). Completeness is the RECORDER's job: since M37 the JS
+  recorder emits the full in-scope local set on every step. Note the two
+  recorders disagree on WHEN a step's snapshot is taken — the JS recorder's step
+  for `const base = a + b;` already carries `base` (post-line), while the Ruby
+  recorder's step for the same line carries the state before it ran (pre-line).
+  Verify against a live dump before asserting a value on an assignment line.
+- 2026-08-14: `TestRecording::create_db_trace` names its temp dir from
+  `(language, format, version_label, pid, source-path hash)`. Two tests in the
+  SAME test binary recording the SAME source therefore collide and race —
+  symptom: "failed to rename trace dir" from whichever one loses. Fold the test
+  name into `version_label` (see `tests/javascript_flow_dap_test.rs::trace_label`).
+- 2026-08-14 (#608): `activeItemIndex` is a first-class GoldenLayout *stack*
+  config field that round-trips verbatim through `StackItemConfig.fromResolved`
+  (`node_modules/golden-layout/src/ts/config/config.ts:358`) and is RANGE-CHECKED
+  with a `throw` in `Stack.init` (`items/stack.ts:169-171`). Any code that
+  removes children from a stack config must remap it — the save-side sanitiser
+  did not, so an ordinary replay session (editor tabs sharing their stack with
+  "NO SOURCE" / "CALLS") wrote a layout file that could only be recovered with
+  `just reset-layout`. The sanitise/repair logic now lives in the
+  dependency-free `src/frontend/index/layout_config_repair.nim` (only
+  `std/jsffi`) so it can be exercised under plain `nim js` + node.
+  Related traps in the same area:
+  * GoldenLayout signals a rejected config with a NATIVE JS `Error`, which a Nim
+    `try/except` does not catch. Every `loadLayout` / `initLayout` call site
+    needs a raw-JS `{.emit.}` try/catch — see `loadLayoutSafely` in
+    `ui/layout.nim` and `callInitLayoutSafe` in `ui/session_switch.nim`.
+  * Saved `size` strings are FRACTIONAL percentages (`RowOrColumn` recomputes
+    them as `(size / total) * 100`, `items/row-or-column.ts:441`). Validate them
+    the way `parseSize` (`config/config.ts:1249`) does, not with an integer
+    regex, or a "repair" silently resets the user's panel proportions.
+  * Pinning a panel to an auto-hide edge REMOVES it from the GoldenLayout tree.
+    Anything that asks "is panel X in the layout?" must also consult the
+    auto-hide state (`~/.config/codetracer/auto_hide_state.json`), or pinning
+    FILES makes the loader declare the layout incompatible and delete it.
+  * The GUI fixture copies the bundled default over `default_layout.json` on
+    EVERY test setup (`src/tests/gui/lib/layout-reset.ts`), and the index
+    process reads the layout file exactly once at startup. A layout-loading
+    spec must therefore write `default_edit_layout.json` from a `beforeEach`
+    that requests no fixture — writing after `ctPage.reload()` tests nothing.
+- 2026-08-14 (#603): `services.editor.open` is NOT a list of visible source
+  tabs. `tabLoad` (`utils.nim`) inserts every entry straight from the IPC
+  payload, long before the Monaco editor component mounts and assigns
+  `TabInfo.monacoEditor`, and it also inserts calltrace / instruction tabs keyed
+  `path:functionName-key` that never get an editor at all. Anything that walks
+  `open` and dereferences `monacoEditor` must nil-guard, or it throws a native
+  `TypeError` on a perfectly ordinary session. That is what made Ctrl+R
+  re-record do nothing at all: `saveFiles` threw *after* `pendingReRecord` had
+  been armed and *before* a single `save-file` went out, so the queue was set,
+  nothing was saved, nothing could drain it and nothing was reported.
+  Related traps in the same area:
+  * The decision model now lives in the dependency-free
+    `src/frontend/file_conflicts.nim` (`requestReRecord` / `noteSaveOutcome` /
+    `applyConflictAction`), exercised natively by
+    `src/tests/gui/tests/welcome-screen/{file_conflicts,re_record_queue}_vm_test.nim`.
+    Its two load-bearing invariants are "a failed save aborts" and "dirty
+    buffers with nothing in flight aborts" — both are states the old code
+    waited in forever.
+  * A `writeFile` produces SEVERAL inotify `change` events, and up to three
+    watchers are registered per file (`fs.watch` on the file, `fs.watch` on the
+    directory, `fs.watchFile` polling). A counter that masks one event per
+    self-write cannot work; `index/config.nim` uses a time-boxed
+    `selfWriteUntilMs` window instead. Before that, saving a file raised the
+    "File changed on disk" dialog for the user's OWN save.
+  * Main-process IPC sends must carry the `CODETRACER::` prefix — the renderer
+    subscribes to the namespaced channel only, so an unprefixed send is
+    silently dropped (`traces.nim`'s `sendNotification` did this for every
+    record-progress message).
+  * `data.trace`, `data.services` and friends are Nim *templates* over
+    `sessions[activeSessionIndex]`, so they do not exist as JS properties.
+    Playwright specs must read `d.sessions[d.activeSessionIndex].trace`;
+    assigning `data.trace` from `page.evaluate` is inert.
+
+## The caption chrome is rebuilt by every `data.redraw()` (issue #555)
+
+`renderer.redrawAll` — which `data.redraw` is bound to — calls
+`renderer.sharedDirectRedraw`, installed by `ui/layout.nim`, and that calls
+`ui/menu.nim`'s `requestMenuRender`. So EVERY `data.redraw()` anywhere in the
+renderer reaches the menu.
+
+The surprising part: `#isonim-debug-controls`, `#debug` and the session tab-bar
+host are *not* static elements of `index.html` (no HTML file in the repo
+mentions them). They are emitted by
+`viewmodel/views/isonim_menu_shell_view.nim`, and `renderMenuShellInto` starts
+with `clearChildren(container)`. A menu render therefore destroys the mounted
+IsoNim debug toolbar every time, and `ui/debug.nim`'s
+`requestDebugControlsRender` mounts a fresh one. A clean trace open was
+measured re-mounting it ~45 times — the button flicker of #555.
+
+`ui/menu_render_gate.nim` now gates the rebuild on a content signature of the
+`MenuShellModel`. Two things it must not forget, both covered by
+`src/tests/gui/tests/session-chrome/menu_redraw_storm_test.nim`:
+
+* Object identity is useless here — `data.webTechMenu` builds a brand-new
+  `MenuNode` tree on every call, so structurally identical menus are never the
+  same objects.
+* `MenuComponent` is per ReplaySession while `#menu` is one shared host, and the
+  shell callbacks close over the component, so the gate is invalidated when the
+  owning component changes as well as when the DOM host is emptied.
+
+Still open in this area: `mountIsoNimDebugControls`
+(`views/isonim_debug_controls_view.nim`) calls `createRenderEffect` with no
+owner and no disposal, so every re-mount leaks a live set of reactive effects
+bound to detached DOM.
+
+## `array[N, bool]` becomes a `Uint8Array` in the JS backend
+
+Nim's JS codegen represents an array literal of small scalars with a typed
+array: `[true, false]` compiles to `new Uint8Array([true, false])`. Any JS
+library that validates an option with `Array.isArray()` rejects it.
+
+This is not hypothetical — it silently broke the Omniscience loop slider for
+the entire lifetime of the feature. `ui/flow.nim`'s `ensureLoopSlider` passed
+`"connect": [true, false]` to `noUiSlider.create`, whose `testConnect` does
+exactly that `Array.isArray` check, so EVERY create threw
+`noUiSlider: 'connect' option doesn't match handle count.`. `.noUi-base` was
+therefore never injected, the `slide` handler was never wired, and because the
+throw escaped through `resizeFlowSlider` the rest of that render pass was
+abandoned too (issue #562). It now passes noUiSlider's `"lower"` string
+shorthand, which means the same thing and survives the translation.
+
+When handing a Nim array to a JS API, prefer a `seq`, a string shorthand the
+library documents, or an explicit `{.importjs: "[#, #]".}` helper — and check
+the generated `src/build-debug/ui.js` if the API is fussy about its argument
+types.
+
+## The VCS panel's infinite-scroll sentinel is a busy loop on small repos
+
+`viewmodel/views/isonim_vcs_view.nim` rebuilds the whole panel subtree inside
+one `createRenderEffect`, and the rebuilt subtree ends with a
+`.vcs-load-more-sentinel` under a fresh `IntersectionObserver`. On any
+repository whose history is shorter than the panel, that sentinel is inside
+the viewport the moment it is attached, so it fires `onLoadMoreCommits`
+immediately — which used to shell out to `git log` for a page that does not
+exist and publish the unchanged commit list anyway, triggering the next
+rebuild. Measured at ~60 `git log` processes and ~440 DOM rebuilds per second;
+nothing in the panel could be clicked because every element was detached again
+before a click could land. `VCSComponent.allCommitsLoaded` now stops the paging
+once a short page comes back.
+
+The general lesson: a render effect that recreates an observer, a timer or an
+event source must not be able to reach its own trigger. Measure it with a
+`MutationObserver` on the panel host — a Playwright "element is not stable" or
+"element was detached from the DOM, retrying" failure is what a render storm
+looks like from the outside.
+
+## Menu rows carry two class vocabularies, and only one of them is styling
+
+A row in the global menu (`viewmodel/views/isonim_menu_shell_view.nim`,
+`menuItemClass`) renders BOTH the design-system component classes
+(`ct-menu-item` + `--active` / `--disabled`, styled by
+`styles/components/menu_item.styl`) AND a set of styling-free semantic hooks:
+`menu-node`, `menu-element` / `menu-folder`, the per-entry identity class from
+`node.nameClass` (`menu-folder-debug`, `menu-element-ruby-fibonacci`, built by
+`ui/menu.nim`) and `menu-enabled` / `menu-disabled`. The second set is the
+published selector contract of the GUI suite —
+`welcome-screen/launch_config.spec.ts` and
+`codetracer-specs/Testing/UI-Test-Catalog.md` § Launch Configuration Tests
+drive the whole Debug > Launch Configurations flow through it.
+
+A pure restyle onto `ct-menu-item` once deleted all of them, which left the
+menu looking fine and made every one of those Playwright selectors match
+nothing. If you restyle the menu, keep the hooks; and keep them out of
+`menu_bar.styl`'s selectors — `#menu .menu-node` outranks `.ct-menu-item`, so
+styling a hook silently overrides the component it is supposed to be neutral
+about.
+
+## Tests that grep production source break on refactors that change nothing
+
+`session-chrome/new_trace_caption_chrome_test.nim` guards JS-only Electron
+code by reading its source text, because a native `nim c -r` binary cannot run
+it. That is a legitimate last resort, but it is not free: its edit-layout
+sanitiser assertions were matching the *implementation text* of
+`sanitizeEditLayoutConfig`, and issue #608's extraction of that logic into
+`index/layout_config_repair.nim` failed the test while the behaviour was
+intact. Where the module under test is dependency-free (`layout_config_repair`
+imports nothing but `std/jsffi`), run it for real in the file's
+`when defined(js)` branch — `test-vm-js` executes those with node — and leave
+the native branch only the claims a native run can actually establish.
+
+## The auto-hide edge strip only renders from `autoHideState.onChanged`
+
+`__ctRedrawAll` does NOT redraw the auto-hide strips. `renderer.redrawAll`
+calls `sharedDirectRedraw`, which `ui/layout.nim` installs to refresh the menu,
+the status bar and the fixed search box — nothing else. `#auto-hide-strip-left`
+/ `-right`, `#auto-hide-bottom-strip` and `#auto-hide-collapsed-icon-zone` are
+mounted exclusively from the `autoHideState.onChanged` callback in
+`initLayout`. Anything that mutates the pinned-panel set must go through that
+hook, and a test that "forces a strip redraw" with `__ctRedrawAll` is measuring
+nothing.
+
+Two consequences worth remembering:
+
+* `onChanged` rebuilds each strip from scratch (`renderAutoHideSideStripInto`
+  clears the host and re-appends), so every spurious `onChanged` detaches the
+  strip tabs. `locator.hover()` on a tab then fails with "element is not
+  stable" / "element was detached from the DOM", and a `toHaveCount` poll can
+  land in the emptied window. If a strip tab is unhoverable, look for an
+  over-firing `onChanged`, not for a missing render.
+* An *open* request must use `auto_hide.revealOverlay`, never `showOverlay`.
+  `showOverlay` implements the strip tab's click gesture and toggles, so a
+  caller that fires repeatedly (one per search-result batch, one per debugger
+  step re-opening the current file) alternates show/hide and drives exactly
+  that rebuild loop.
+
+## Collapsed mode makes strip tabs disappear, and Xvfb always looks maximized
+
+`updateCollapsedMode` (ui/layout.nim) decides collapsed mode from
+`outerWidth >= screen.availWidth - 8 && outerHeight >= availHeight - 8`. Under
+Xvfb the Electron window fills the virtual screen, so the answer is always
+"maximized" and the side strips render as a 1 px `collapsed-strip-line` with no
+`.auto-hide-strip-tab` at all. `__ctForceCollapsedMode(false)` is now a sticky
+override for exactly this reason; before that it was silently overwritten by
+the next `resize` event, mid-test.
+
+In collapsed mode the replacement affordance is
+`#auto-hide-collapsed-icon-zone` in the status bar
+(`Planned-Features/Auto-Hide-Panes.md` §10, "the panel directory").
+
+## The recent-traces list is startup-path state, not welcome-screen state
+
+`Data.recentTraces` / `Data.recentFolders` are global (not session-forwarded)
+fields, and the welcome surface of *any* session tab reads them through
+`ui/welcome_screen.nim:syncLegacyWelcomeScreenIntoVM`. They used to be filled
+only by `ui_js.onWelcomeScreen`, i.e. only when the process was launched into
+the welcome screen — so `ct run <program>` left them empty forever and the tab
+bar's "+" opened a blank Recent Traces panel (#568).
+
+`src/frontend/index/recent_items.nim` now owns the decision of which startup
+path gets the lists over which channel, and `index/startup.nim` routes every
+exit of `init` through it. If you add a startup path to `init`, add it to
+`StartupPath` too: `recent_items_startup_vm_test.nim` iterates the enum and
+fails if a welcome-capable path delivers nothing.
+
+`findRecentTracesWithCodetracer` and friends `app.quit(1)` on a failed
+`codetracer trace-metadata` run; pass `quitOnError = false` from any path that
+already has a live debugging session on screen.
+
+## GUI-test `sourcePath` is relative to `test-programs/`, never to the CWD
+
+`test.use({ sourcePath: "noir_space_ship/" })` is resolved by
+`lib/fixtures.ts` as `path.join(testProgramsPath, sourcePath)`. Anything that
+inspects the same string has to apply the identical rule —
+`lib/lang-support.ts:isDbBased` used `path.resolve(sourcePath)` (i.e. the
+process CWD), so every relative *folder* looked non-existent, its DB-marker
+(`Nargo.toml`, `Forc.toml`, `Move.toml`, `program.json`, `aiken.toml`,
+`flow.json`) was never found, the language was classified as RR-based and the
+fixture skipped the test with "requires ct-native-replay". That silently hid
+all 18 `noir-space-ship` specs plus the noir smoke/page-object/scratchpad
+suites. Use `resolveTestProgramPath()` for any new classification helper.
+
+## The context menu's shortcut hint is `.ct-menu-item-sublabel`
+
+`viewmodel/views/context_menu_bridge.nim` renders each entry as
+`.ct-menu-item-label` + optional `.ct-menu-item-sublabel`. The page object
+`page-objects/components/context-menu.ts` used to look for
+`.context-menu-hint`, which exists nowhere, so `getEntries()` returned
+"Add value to scratchpad\nCTRL+<click on value>" as the action name for the
+only menus that declare hints (flow values, `ui/flow.nim`). jstree menus keep
+their own selectors via `createJsTreeContextMenu`.
+
+## `common_types` types exist TWICE, and a generic proc is how you share code
+
+`src/common/common_types.nim` is `include`d by both `src/common/types.nim`
+(`langstring = string`, native) and `src/frontend/types.nim`
+(`langstring = cstring`, renderer). Every type in it — `DeepReviewData`,
+`Diff`, `Trace`, … — therefore exists as two *distinct* types, and a module
+that names one has picked a backend. `state_vm.nim` records what happens when
+both end up in scope: "every type in it exists twice and the two copies are
+incompatible".
+
+Two ways to write code once and run it against both copies:
+
+1. **A generic proc in a ViewModel module.** `review_entry.reviewDatasetFrom[T]`
+   projects a `DeepReviewData` into a plain ViewModel value; the renderer
+   instantiates it over its copy, the headless tests over the native one, and
+   both run the same source. Read `langstring` fields with `$`.
+2. **A proc inside `common_types` itself.** Anything that maps between two
+   `common_types` types belongs there — it is compiled once per copy for free.
+   `codetracer_features/deepreview_from_diff.nim` (a trace's structured `Diff`
+   → a review dataset) and `utils/text_representation.nim` are the examples.
+   Convert with `langstring(x)`, which is `cstring(x)` or `string(x)` as
+   appropriate.
+
+A headless test *can* `import ../../../../common/types as ct_types` alongside
+ViewModel modules (`vcs_vm_test.nim`, `deepreview_entry_test.nim` do); what it
+must not do is drag `frontend/types` in as well.
+
+## Review entry has exactly one routine — do not add a second
+
+All three DeepReview launch paths (`ct review`, a trace with an
+associated diff, the agentic handoff) publish `data.deepReviewData` and then
+call `vcs.startDeepReviewNavigation(data)` → `review_entry.enterReview`, which
+populates the VCS panel, the Agent Activity DeepReview section and the editor.
+It is idempotent by design: the data half re-runs on every call (the agentic
+launcher re-syncs constantly) while the entry half — focus the panels, open
+the first file — is gated by `VCSVM.reviewEntered` and the selection is
+carried across a refresh *by path*. `src/tests/gui/tests/deepreview/
+deepreview_entry_test.nim` holds both a behavioural suite and a source
+contract asserting the hosts still call it.
+
+## `ct review` is DeepReview's whole CLI, and it is dispatched in two places
+
+`src/ct/review_cli.nim` holds a *pure* planner, `planReviewCli(argv)`, that
+resolves a `ct review …` line into a `ReviewPlan` with no filesystem and no
+subprocess. That is what makes the dispatch assertable on both Nim backends
+(`src/tests/gui/tests/deepreview/ct_review_cli_test.nim` runs under `nim c`
+*and* `nim js`). Everything effectful — resolving the dataset on disk, shelling
+out to the native collector — is in the file's `when not defined(js)` half.
+
+The two callers are deliberate and asymmetric:
+
+* `src/ct/codetracer.nim` intercepts `ct review collect|inspect` **before**
+  confutils parses argv, because those verbs carry flags that are not ct's
+  (`--repo`, `--diff-file`, `--preset`) and confutils rejects any unknown
+  dash-prefixed token. Same technique as `ct-complete` and `ct record --`.
+* `src/ct/launch/launch.nim` handles `ct review <PATH>` as an ordinary
+  `StartupCommand.review`, so it keeps ct's global options (`--inspect`,
+  `--remote-debugging-port`) that Playwright injects.
+
+Both call the planner, so they cannot disagree about what a line means.
+
+`reviewNeedsRawDispatch` must key on the VERB alone — `collect`, `inspect`,
+`export` — and never on argument count. Claiming the line as soon as a second
+token followed the path made `ct review DIR --remote-debugging-port=0` fail
+with "exactly one dataset path", i.e. it took back the one property the split
+exists to preserve. Extra positionals are confutils' job: it answers them with
+"The subcommand 'review' does not accept additional arguments", the same way it
+does for `ct edit`.
+
+Retired, and they fail rather than alias: `ct --deepreview <PATH>` (diagnosed
+deliberately in `codetracer.nim` — confutils' default names no replacement) and
+`ct-native-replay deepreview {collect,export,inspect}` (the group was renamed to
+a hidden `review-data` that `ct review` invokes; a hidden `deepreview` arm
+survives only to print the pointer). The *frontend* `--deepreview <PATH>`
+argument in `src/frontend/index/args.nim` is a different thing and is NOT
+retired: it is the internal ct → Electron wire.
+
+`ct review collect --output DIR` writes `DIR/review.json` as well as the binary
+`.dr` chunks, because the GUI reads JSON and the `export` step that used to
+bridge them is one of the retired commands. `ct review DIR` resolves the JSON
+inside the directory.
+
+- 2026-08-18 (RV-2): `ct review <PATH>` opens the EDITOR layout, not the
+  debugging one. `index/startup.init`'s `withDeepReview` branch calls
+  `index/config.loadReviewLayoutConfig` over
+  `userLayoutDir / "default_edit_layout.json"` and forwards THAT in
+  `CODETRACER::start-deepreview`; it no longer forwards the `layout` argument
+  `init` was handed. A dataset launch loads no recording, so EVENT LOG,
+  CALLTRACE, TIMELINE and TERMINAL OUTPUT used to come up present but empty.
+
+  Two traps live here:
+
+  * `editModeHiddenContentIds()` hides `Content.AgentActivity` and
+    `Content.AgentActivityDeepReview` — DeepReview's THIRD PILLAR. A review
+    therefore uses `reviewModeHiddenContentIds()`, which is the edit-mode set
+    minus `reviewPillarContentIds()`. Never "just reuse the edit set" for a
+    review: it deletes the Agent Activity panel and silently makes
+    `deepreview_layout.focusReviewActivityPane` a no-op.
+
+    That derived set is NECESSARY BUT NOT SUFFICIENT, and the difference is
+    the whole trap. It only stops the LOADER removing the panel. The same
+    file is WRITTEN by `index/window.onSaveConfig` through
+    `sanitizeEditLayoutJson`, whose hidden set *does* contain AgentActivity —
+    so once a user has opened a folder in edit mode, `default_edit_layout.json`
+    holds FILES + VCS and nothing else, and there is no panel for the hidden
+    set to spare. `deepreview_layout.ensureReviewActivityPane` (run first by
+    `focusReviewPanels`) puts an absent pillar back, in a slot of its OWN:
+    dropping it into the FILES/VCS stack would hide the VCS panel, because
+    the activity pane is focused last and two tabs of one stack cannot both
+    be visible.
+
+    General shape, worth remembering: one file shared by two modes with
+    different panel requirements, where one mode's SAVE is the other mode's
+    LOAD. Reasoning about the read path alone is not enough.
+  * CodeTracer ships NO `default_edit_layout.json` (`src/config/` has only
+    `default_layout.json`), so the edit-layout loader ALWAYS takes its
+    fallback on a fresh install. The fallback reads the debugging layout and
+    sanitises it, which is fine — but the loader's `resetLayoutToDefault`
+    paths (corrupt / unrepairable / incompatible file) used to return the
+    debugging layout RAW. They now go through
+    `resetHiddenPanelLayoutToDefault`, which applies the caller's hidden set.
+    Any new recovery path in that loader must do the same.
+
+  Only the dataset launch changed. A trace with an associated diff
+  (`vcs.startReviewForTraceDiff`) and the agentic handoff
+  (`agentic_session_launcher.syncDeepReview`) enter the review from the
+  renderer, on the layout the session already has, and keep the debugging
+  layout — they have a recording, so those panels are populated.
+  `renderer.saveConfig` still refuses to persist any layout while
+  `deepReviewActive`, which is what stops a review's reduced layout being
+  written over the user's `default_layout.json` (and what makes the
+  materialised pillar above ephemeral — nothing is written to disk).
+
+- 2026-08-18: GUI E2E tests share ONE `XDG_CONFIG_HOME` per Playwright worker
+  (`lib/fixtures.ts` mkdtemps it at module scope). So anything a test leaves
+  in `~/.config/codetracer` is input to every later test in that worker. The
+  `ctPage` fixture resets all three pieces of the saved arrangement before a
+  launch: `default_layout.json` (`ensureDefaultLayout`), `auto_hide_state.json`
+  (`resetAutoHideState`) and — since a `ct review` launch reads it —
+  `default_edit_layout.json` (`resetEditLayout`). Specs that seed one of those
+  themselves must do it in a fixture-free `beforeEach` (which runs BEFORE the
+  fixture) *and* opt out: `preserveAutoHideState` / `preserveEditLayout`.
+  To launch over a layout a previous session would have written, use the
+  `editLayoutPath` option instead of hand-writing the file.
+
+- 2026-08-18 (RV-2): `ct review --help` / `-h` / `help` are intercepted by
+  `reviewNeedsRawDispatch` and answered with `ReviewUsage`. Left to confutils
+  they printed `ct review <reviewPath>` — the declared shape of the LAUNCH
+  form only — and never named `collect` or `inspect`. `reviewNeedsRawDispatch`
+  still keys on the exact token, so `ct review ./help` launches a dataset in a
+  directory called `help`.
+
+- 2026-08-18 (RV-4): `FlowMode::Diff` in the db-backend is NOT implemented.
+  `flow_preloader::CallFlowPreloader::next_diff_flow_step` is a bare `todo!()`,
+  so `FlowPreloader::load_diff_flow` panics ("not yet implemented") on its
+  first call, and `diff::index_diff` — its only production caller, reached by
+  `replay-server index-diff` — panics for the same reason. Anything that needs
+  per-diff-line flow must drive `FlowMode::Call` per call instead, which is
+  what `deepreview::collector` does (find the calls whose steps land on the
+  diff's lines, ask for each of those calls' flow).
+
+  Two things bit while doing that, both worth knowing before driving
+  `FlowPreloader::load` from new code:
+    * The anchor `Location` must have a NON-ZERO `rrTicks`. With
+      `rrTicks == 0 && event == 0 && line > 0`,
+      `should_seek_materialized_call_body_from_line_only_location` treats the
+      request as line-only, sets a breakpoint on the line and continues to it —
+      and if the line's only occurrence IS step 0, the breakpoint is never hit
+      and the flow comes back with zero steps and no error.
+    * `load_flow` widens any exact step to the ENCLOSING CALL ENTRY, so any
+      step inside the call gives the same window. Picking the last matching
+      step is therefore free and dodges the trap above.
+
+- 2026-08-18 (RV-4): three on-disk layouts count as a materialized recording,
+  and they are not interchangeable between loaders. `dap_server::setup` reads
+  all three (a `*.ct` CTFS container, a legacy `runtime_tracing` `trace.json`,
+  a legacy `trace.bin`); `diff::load_and_postprocess_trace` reads ONLY the
+  container and rejects the other two outright. `nargo trace` writes a legacy
+  `trace.json`, and the committed `codetracer-example-recordings/python/` are
+  legacy `trace.bin`, so a helper built on `load_and_postprocess_trace`
+  silently excludes them. `materialized_source::open_materialized_trace` is
+  the shared opener for all three; use it rather than growing a fourth rule.
+
+  Which layout a recorder writes is a per-recorder DEFAULT, not a property of
+  the language: the Rust-backed `codetracer_python_recorder` writes a `*.ct`
+  container unless `CODETRACER_TRACE_FORMAT` says `json`/`binary`
+  (`codetracer-python-recorder/src/runtime/output_paths.rs`). So "Python
+  recordings are legacy" is only true of the old committed fixtures — anything
+  reading recordings has to handle all three.
+
+- 2026-08-18: `codetracer_python_recorder` IS importable in this dev shell,
+  but only from `python3.12`; the shell's default `python3` is 3.13 and has
+  no such module. `ct record prog.py` therefore answers "Python module
+  `codetracer_python_recorder` is not installed for interpreter …/python3" on
+  a machine where recording Python works perfectly well — the db-backend test
+  harness records with it routinely (`test_harness::find_suitable_python`
+  probes `python3.12` FIRST for exactly this reason). Before concluding "the
+  Python recorder is unavailable here", run
+  `python3.12 -c "import codetracer_python_recorder"`.
+
+- 2026-08-18 (RV-5 values): a Monaco DECORATION can carry DOM-ish annotations
+  without a view zone or a content widget — `options.after` (injected text)
+  renders `content` as a real inline span inside the line's own DOM, styled by
+  `after.inlineClassName`. That is how a review draws its Omniscience value
+  chips (`ui/unified_diff.monacoValueDecorations`, and `MonacoLineStyle`'s
+  `afterContent`/`afterClass` for the full-file editor) with the debugger's own
+  `ct-omni-name` / `flow-parallel-value-box` classes and no `FlowComponent`
+  behind it. Three gotchas:
+    * The range must be COLLAPSED at the end of the line's text. Injected text
+      is placed at the range's end position, and a non-empty range would also
+      apply the chip's class to the line's own characters. Set
+      `showIfCollapsed: true` or the decoration vanishes on an empty line.
+    * Set `inlineClassNameAffectsLetterSpacing: true`, or Monaco lays the span
+      out as if it were plain monospace text and the chip's padding overlaps
+      the code.
+    * Monaco splits a LONG injected string across several rendering chunks, so
+      one chip can yield more than one element — a Playwright
+      `allTextContents()` over the chip class must rejoin them (see
+      `DeepReviewPage.flowValueText`).
+  Corollary, recorded because RV-5 got it wrong first: `after`-content is not
+  itself the "text comment" DeepReview-GUI.md §4.4 forbids. The forbidden thing
+  was the CONTENT (`  // x = 10, y = 20`, the deleted
+  `ui/deepreview.buildInlineValueDecorations`), not the mechanism.
+
+- 2026-08-18: `.flow-parallel-value-box` and `.flow-parallel-value-before-only`
+  are COMMENTED OUT in `styles/components/flow.styl`. The debugger's value
+  chips get their box appearance from `.ct-omni-value`, the flex *container*
+  `ui/flow.flowSimpleValue` wraps them in — so anything that renders a chip
+  without that container (an injected span, for instance) gets the classes but
+  none of the paint, and has to restate the container's declarations on the
+  element that is actually rendered.
+
+- 2026-08-19 (`resources/codetracer-desktop-capabilities` finally has a producer,
+  and the `ct --version` shape is NOT what you think): that file is the launcher's
+  entire routing contract for this repo, but until LRC-0 nothing copied it into a
+  `codetracer-desktop@<ver>/` bundle — it was a checked-in resource with zero
+  consumers (`git grep` found it only in `.git/index`). `just
+  build-desktop-component` (`scripts/build-desktop-component.sh`) now assembles
+  `<out-root>/codetracer-desktop@<ver>/{capabilities, bin/codetracer}`. Two things
+  worth knowing before you touch it. (1) The bundle directory name and the binary
+  filename are *read out of the capability file itself* (`name` / `bin` lines)
+  rather than hardcoded, so the `bin` declaration and the file on disk cannot
+  drift; `<ver>` is re-derived from `src/ct/version.nim`'s `CodeTracerYear/Month/
+  Build` with the same `align(2, '0')` month padding, giving `25.11.1`. (2) The
+  capability file is copied with a plain `cp` and `ci/test/desktop-component-bundle.sh`
+  asserts byte-identity — do not "fix it up" at bundle time, or every downstream
+  routing test starts testing a file the product does not ship.
+  The trap: `ct --version` on the desktop core prints confutils' banner,
+  `CodeTracer version: 25.11.1(debug)` — NOT `ct 25.11.1`. The
+  `^ct [0-9]+\.[0-9]+` regex in the cross-repo packaging smoke workflows is a
+  property of the *launcher* binary, which answers `--version` itself from a
+  built-in string (`codetracer-launcher/src/launcher.nim`, `isBuiltin` case 1 →
+  `okOut(sCtVersion)`) and never execs the component. Asserting that prefix on the
+  desktop core would be asserting something the product does not do.
+  `ci/test/desktop_component_caps_check.nim` validates the capability file by
+  compiling against the sibling `codetracer-launcher/src/caps.nim` — the launcher's
+  real parser, not a local copy of the grammar — so a missing launcher checkout is
+  a hard failure, not a skip.
+
+- 2026-08-24 (UD-1, Monaco language ids): `common_lang.toCLang` is NOT a Monaco
+  language id table, but `ui/editor.nim` passes it to Monaco as one. Its answers
+  include `assembly`, `noir`, `c++`, `crystal`, `ada`, `fortran`, `move`,
+  `cairo`, `solidity` and `unknown`, and the vendored monaco-editor 0.54.0
+  registers *none* of those — Monaco silently tokenizes nothing for an id it
+  does not know, so those files have been opening unhighlighted with no error
+  anywhere. The 89 ids the build really has are enumerated in
+  `node_modules/monaco-editor/min/vs/basic-languages/monaco.contribution.js`
+  (plus `json`/`css`/`html`/`typescript` from the language services, plus `nim`,
+  which `src/frontend/languages/nimLanguage.js` registers itself). Solidity is
+  `sol`, shell is `shell`. `diff_document.DiffLanguageByExtension` is a table
+  checked against that list; use it, and extend it, rather than reaching for
+  `toCLang` when the consumer is Monaco.
+  The same milestone recorded that `.nr` has no tokenizer at all and is opened
+  as `rust`, which is the substitution `editor.nim` already made by hand.
+
+- 2026-08-24 (UD-1, Monaco's inline diff editor): four measured facts that are
+  not in the docs and cost a review round each.
+  (1) `renderSideBySide: false` still creates BOTH code editors and lays the
+  original one out as a narrow strip to the LEFT — it is where a deleted line's
+  old line number comes from. Its width is derived from its
+  `lineNumbersMinChars` ALONE: 3 characters produced a 29px strip while its own
+  margin was 65px, so the line-decorations lane pushed the digits off screen and
+  the deleted lines rendered unnumbered. Zero `lineDecorationsWidth` on that
+  side, or put whatever the lane held into the line-number label.
+  (2) In the standard inline view the deleted lines are rendered as
+  `view-lines line-delete` view zones inside the MODIFIED editor and carry NO
+  syntax tokens (`mtk1` throughout) even though the original model is
+  tokenized correctly — `experimental.useTrueInlineView: true` fixes that, and
+  also merges deletion and insertion into one line, so it is a UX decision and
+  not a bug fix.
+  (3) A model is only tokenized from ITS line 1, so a windowed model that starts
+  in the middle of a block comment or a docstring tokenizes the rest of the file
+  as a string. Feeding a diff editor whole files (with
+  `hideUnchangedRegions`) is the fix; feeding it hunk windows is not.
+  (4) Playwright strict mode: `.monaco-editor .view-lines` inside a diff tab
+  matches four elements (two editors + the deleted-line view zones). Scope to
+  `.monaco-editor.modified-in-monaco-diff-editor .lines-content > .view-lines`;
+  `.first()` picks a view zone, because the zones precede the document in DOM
+  order.
+
+- 2026-08-24 (UD-1, `.line-numbers`): `styles/index.styl` sets a GLOBAL
+  `.line-numbers { width: 100% !important; padding-right: 0 !important; }`.
+  It beats Monaco's own inline `width`/`left`, so the gutter label spans the
+  whole margin and right-aligns into the line-decorations lane — which is why
+  a `+` marker drawn there is invisible and the digits touch the code. Any
+  gutter work in an editor tab has to override it with `!important` or move the
+  content out of the margin.
+
+- 2026-08-24 (UD-1, hunk-line `content` is not the file's text): the two
+  producers disagree and always have. `ui/git_cli.parseGitDiffHunks` strips the
+  unified-diff marker for every kind; the materialized collector
+  (`db-backend/src/deepreview/unified_diff.rs`) KEEPS it for added and removed
+  lines and strips it for context. `ct/agent_cli.unifiedDiffLine` documents the
+  convention and adds it back only where missing; `vcs_vm.diffLineText` is its
+  inverse and is what the diff models and `buildPatchFromSelectedHunks` go
+  through. Before UD-1 the patch builder concatenated its own prefix onto the
+  raw content, so copy-as-patch on a REVIEW emitted `++foo` / `--foo` — a patch
+  git refuses. The goldens did not catch it because they are built from
+  git-shaped rows.
+
+## Every closure built in a `for` body shares ONE binding — both backends (UD-2)
+
+Nim creates one closure environment per enclosing *routine*, not per loop
+iteration, so a `let` in a `for` body is a single slot that every closure built
+in that loop captures — each of them sees whatever the last iteration left in
+it. Two live bugs came from it in `ui/diff_expansion.nim`: right-clicking the
+"show more above" handle opened the "below" menu, and the menu's "Expand 10
+lines" item revealed all twelve. The fix is to build each closure in its own
+**proc call** (`bindBoundaryHandlers`, `menuItem`), so the captured value is a
+parameter of a fresh frame; a `let` inside the loop body is not enough.
+
+Measured on this repo's Nim 2.2.8, at module scope and inside a proc, on BOTH
+backends — `nim js` and `nim c` print `@[20, 20, 20]` for the loop-body `let`
+and `@[0, 10, 20]` for the proc-call form. This was first written up as a
+JavaScript-backend quirk; it is not one, and reading it that way would leave
+the same bug unlooked-for in native code. Anywhere a module attaches one
+handler (or builds one callback) per element in a loop, look for this first.
+
+A third instance, and the nastiest so far, in `ui/unified_diff.nim` (UD-3): a
+`js{ getId: (proc: cstring = widgetId), ... }` built per line in a loop gave
+EVERY Monaco content widget the last line's id. Monaco keys `_contentWidgets`
+by `getId()`, so `addContentWidget` overwrote one map entry N times while
+appending N nodes, and `removeContentWidget` then removed exactly one of them.
+The symptom was not a wrong handler but a leak that looked like data: after
+stepping the invocation selector once, the previous call's values were still on
+screen beside the new call's, 9 bands becoming 16. The fix here is
+`udContentWidget`, an `importjs` factory that closes over its arguments in
+JAVASCRIPT — worth reaching for whenever a `js{}` literal of closures is built
+in a loop, because a proc call in Nim would still have to be written and the
+JS factory says what it is.
+
+## A Monaco content widget exists for every line you name; `.view-lines` does not
+
+Monaco virtualises `.view-lines` — only the lines inside the viewport have DOM
+— but `addContentWidget` creates the node for any line you register, viewport
+or not. Moving the review's inline values from injected text to content widgets
+therefore changed what a Playwright query over the whole tab returns: values
+from a function scrolled far off screen are now in the document, where before
+they simply did not exist yet. `deepreview-gui.spec.ts` Test 30 had asserted
+"the text does not contain 55" as a proxy for "line 10 is bare" and started
+matching an unrelated `<acc> 55` twenty lines away. If a test asserts the
+ABSENCE of something in a Monaco editor, it is probably relying on
+virtualisation; name the line instead.
+
+## The diff tab is one pane of a layout, not a window (UD-3)
+
+Measured in the design corpus at 1920x1080: the modified editor's content area
+is ~541px and the reviewed file's own annotated lines reach ~495px of it. Any
+design that puts something BESIDE the code — the debugger's flow band does,
+at `maxFlowLineWidth + distanceToSource` — has very little room here. The flow
+panel gets away with it because it owns a whole editor; a review does not, and
+a feature ported from one to the other has to measure rather than assume.
+
+## A fit test must ask for the width the CONTENT needs, not for a floor
+
+`ui/unified_diff.applyFlowValueBands` asked `reviewValueBandFitsBeside` for a
+twelve-character minimum column before placing the review's value band beside
+the code. Nothing is ever DRAWN at twelve characters, so the test answered a
+question no band was measured against: on `sample-review.json` at 1920x1080 it
+said yes to 210px of room for a column needing 240px, the column was drawn at
+its full width 19px past the pane's right edge, and — because the chip budget
+came from `available / charWidth div visible` rather than from the column's own
+width — the last chip of `<x> 10 <y> 20` was replaced by `…` and a recorded
+value left the screen. A floor in a fit test is almost always a bug: ask for
+the real number, and if you cannot compute it, that is the finding.
+
+Two more rules came out of fixing it, both general:
+
+  * **A "never draw zero of X" floor needs a companion that clamps X's size.**
+    `reviewVisibleColumnCount` always returned at least one column, which is
+    right — drawing none reads as "this line never executed" — but on its own
+    it is what drew a column that did not fit. `reviewDrawnColumnChars` caps
+    the width; the pair can then never put anything outside its container.
+  * **Give up whitespace before you give up a placement.** The obvious remedy
+    for "it does not fit beside the code" is the fallback placement, and here
+    that is a Monaco VIEW ZONE, which adds its own height to the document.
+    Moving all nine of the fixture's bands there cost ~315px in an 896px pane,
+    pushed the file's line 23 out of the viewport and turned four unrelated
+    expansion tests red. Shrinking the band's GAP instead
+    (`reviewValueBandLeftPx`'s three-argument form) costs nothing at all: no
+    code moves, no line hides, no chip drops, and the single left rail holds.
+
+## A loop's columns are sized per LOOP, not per line
+
+`FlowComponent.calculatePositionMaxWidth` raises
+`loopState.defaultIterationWidth` over EVERY position of the loop and every
+iteration at it, and `renderFlow` lays every line of the loop out against that
+one number. So pass 2's column starts at the same x on every line of the loop.
+UD-3's review band first sized per line, and the consequence was not only
+misalignment: a narrow line fitted more passes than a wide one, so the loop's
+header row showed four passes above body rows showing one, and a reviewer read
+that as "missing 3 of 4 passes' data". `reviewLoopColumnChars` is the per-loop
+maximum, and it is the debugger's rule rather than a review-specific one.
+
+## `ensureFlowLoopSlider(requireMeasurable)`: "never build at zero width" needs a way back
+
+#562's lesson is real, but it is only half a rule: refusing to construct until
+an element is measurable is safe exactly when somebody comes BACK. `ui/flow.nim`
+in EXTENSION mode has no such path — `resizeFlowSlider` is reachable only from
+`doRenderActiveLoopIterationValues` behind `if not data.self.inExtension`, from
+`resizeEditorHandler`, which needs an `editorUI.monacoEditor` the extension does
+not have, and from `ui/editor.nim` — so a refusal there is permanent and the
+VS Code / browser extension simply never grows a slider. That is why the shared
+`flow_loop_slider.ensureFlowLoopSlider` takes `requireMeasurable` and
+`ensureLoopSlider` passes `not self.inExtension`. Any guard of the form "not
+ready yet, come back later" needs the *later* proved for every host, not just
+for the one being worked on.
+
+## Monaco's overlay widgets are painted UNDER the code (UD-2)
+
+`.monaco-editor .lines-content` has `z-index: 2` and `.overlayWidgets` has
+none, so a widget in the overlay layer — which is where the diff editor's
+`hideUnchangedRegions` boundary lives — loses the hit test to `.view-line` at
+its own centre. Measured with `document.elementFromPoint`. The lift has to go
+on `.diff-hidden-lines-widget`, not on a child: `.diff-hidden-lines` carries a
+`transform`, which makes it a stacking context that a child's `z-index` can
+never escape.
+
+## `hideUnchangedRegions` will collapse a `@@` divider (UD-2)
+
+The divider is an unchanged line of both models and sits directly before the
+hunk's own leading context lines, which are unchanged too — so with
+`contextLineCount: 3` the three lines kept visible are the hunk's context and
+the divider is hidden. `diff_document.diffContextLineCount` derives the option
+from the document (longest divider-to-change tail, plus one) instead of fixing
+it at three.
+
+## A deleted line's colours come from a zone built ONCE, before the tokens exist (UD-4)
+
+Monaco's inline diff draws each deletion as a `view-lines line-delete` view zone
+inside the *modified* editor and builds it from the ORIGINAL model's tokens —
+`oe.originalRange.mapToLineArray(n => Ae.tokenization.getLineTokens(n))` in the
+shipped bundle. `getLineTokens` returns whatever tokenization has already
+reached; nothing in that computation observes token changes, so the zone is
+never rebuilt when they arrive. UD-1 diagnosed the flat `mtk1` deleted lines as
+missing tokens and recorded `experimental.useTrueInlineView` as the only fix.
+Both halves were wrong. Measured in the running product:
+
+  * the tokens are present — the original model's `  let y = x * 2;` reports
+    nine tokens with foregrounds `[1,23,1,25,1,25,1,34,25]` — while the zone
+    rendered from it is a single `mtk1` run;
+  * forcing tokenization earlier changes nothing, before or after `setModel`;
+  * invalidating the DIFF rebuilds the zone, and the rebuilt one is coloured.
+
+So the recipe is: wait for a zone to exist, then invalidate the diff *once*
+while the zone is monochrome (`ui/unified_diff.scheduleDeletedLineTokens`).
+`renderIndicators` does NOT work as the invalidation — the zones follow the diff
+result, not a rendering option; toggling `ignoreTrimWhitespace` and restoring it
+in the same synchronous block does.
+
+Corollary for tests: a span in a deleted zone carries `char-delete` as well as
+its `mtk<n>`, so collecting whole `className` strings counts `"mtk1"` and
+`"mtk1 char-delete"` as two token classes and passes on a document with no
+tokens at all. Match `/\bmtk\d+\b/`.
+
+## `tup` can miss a `.nim` edit, and the build then lies quietly (UD-4)
+
+`just build-once` reported "No commands to execute" against a freshly edited
+`src/frontend/ui/unified_diff.nim`, and the Playwright suite then ran green
+against the previous build — which is the worst possible outcome for a
+red-before-green step, because the test passes for the wrong reason. `touch`ing
+the edited file made tup rebuild it immediately. After editing frontend Nim or
+styl, `touch` the file before building, and confirm the compile actually
+happened (`frontend/ui_js.nim` in tup's output) rather than trusting exit 0.
+Note also that `src/public/dist/frontend_bundle.js` is the *vendor* bundle
+(Monaco et al.) — the renderer's own code is `src/build-debug/public/ui.js`, so
+grepping the bundle for your change proves nothing.
+
+## `.code-editor .flow-loop-step-container` absolutely positions whatever wears it (UD-4)
+
+`ui/flow.renderFlow` marks the selected loop pass with `flow-loop-step-container
+active-flow-step`, and any host that copies that convention inherits
+`text_editor.styl`'s `position: absolute; width: 3.125em; margin-right: 0.625em`
+along with the highlight — because in the debugger's own band the columns are
+placed by computed offsets. In a flex band (the review's value row) that is both
+the wrong width and out of the flow, and the symptom is subtle: only the rows
+that contain a loop start on a different left edge from every other row. Reach
+for the class for the highlight, and neutralise the layout in your own scope.
+
+## The Monaco theme had no `diffEditor.*` colour at all (UD-4)
+
+`codetracerDark.json` styled the editor and the brackets and nothing about a
+diff, so every unified diff CodeTracer has ever drawn wore Monaco's `vs-dark`
+defaults — a saturated crimson removal against a desaturated olive addition,
+which three independent reviewers measured as unbalanced. The keys worth knowing
+are `diffEditor.{inserted,removed}{Line,Text}Background`,
+`diffEditorOverview.{inserted,removed}Foreground` and, for the collapsed-region
+band, `diffEditor.unchangedRegion{Background,Foreground}` — that last pair is
+the supported way to colour the "N hidden lines" band, which otherwise ignores
+any colour set on `.diff-hidden-lines .center` alone.
+
+## The fold widget is 34px of content in a 0px box, straddling two code rows (UD-4)
+
+`.monaco-editor .diff-hidden-lines` is `height: 0; transform: translateY(-10px)`
+with a 24px `.center` and two handles stacked inside it, and the widget is an
+*overlay* widget, so the stack is painted across whatever is rendered above and
+below the fold. Measured: the last code line occupied y 483..505 and the band
+came out at 501..525. Moving the offset only trades the overlap from the line
+above to the line below — five reviewers across three milestones reported one or
+the other. The fix is to make the whole stack fit one code row (two 3px handles
+plus a 16px band = 22px) and zero the transform. Monaco's own
+`diff-hidden-lines-compact` variant is an 11px text row, so a compact band is
+its idiom rather than a shrink. Note also that the widget is drawn in BOTH
+editors, and the original one is a ~30px gutter strip — that slice of a
+full-width control is the "unexplained mark at the far left of the fold" three
+reviewers inventoried.
+
+## The diff gutter's gap takes TWO declarations, and neither works alone (UD-4 audit)
+
+`text_editor.styl`'s global `.line-numbers` rule is `width: 100% !important;
+box-sizing: border-box; text-align: right !important`, so in the diff editor
+that element is not the numbers COLUMN — it is the whole margin, and its right
+edge is where the code starts. Two consequences that cost a milestone each:
+
+  * a `padding-right` is the only thing that holds the digits off the code, and
+  * it only holds while the label still fits the box the padding shrinks.
+
+Monaco sizes the margin as `lineNumbersMinChars` x its own
+`typicalHalfwidthCharacterWidth`, and `diff_document.lineNumberLabels` emits a
+label of exactly that many characters, so the label always overflowed the padded
+box and spilled back to the right (an overflowing line box ignores `text-align`
+in `ltr`) — measured, glyphs `292..317.7` against code at `321`, a 3.3px gap
+that four reviewers called a collision while a `padding-right: 0.9em` sat in the
+stylesheet apparently answering them. The lane (`lineDecorationsWidth`, MODIFIED
+editor only — the original strip cannot afford it) buys back exactly what the
+padding spends. Keep the two numbers equal: if a font ever renders wider than
+Monaco's estimate the text overflows again and the gap degrades to the lane's
+width rather than to nothing.
+
+## Monaco's `.diff-hidden-lines .center` is a FLEX container (UD-4 audit)
+
+So a `::after` on it is a flex item: `vertical-align` does nothing at all, and
+`align-items: normal` means an item with no height STRETCHES to the flex line
+(the pseudo-element resolved to the band's own 24px) while an item with a height
+falls to the start of the line. The `expand` pill sat ~6px above the band's text
+for that reason, through two rounds in which `vertical-align: middle` looked
+like it was placing it. Use `align-self`, and give the pill a `height` equal to
+its `line-height` so its box is its line box.
+
+## `.margin-view-overlays div` is painted by `text_editor.styl` (UD-4 audit)
+
+Every child of a margin overlay gets the panel colour from a two-element
+selector, which outranks a bare decoration class — so a `marginClassName` whose
+CSS is a single class silently paints the panel colour instead. Scope the rule
+under `.monaco-diff-editor .modified-in-monaco-diff-editor` and it both wins and
+stays on the side you meant: both models carry the `@@` line, so an unscoped
+rule also paints the original editor's 29px strip.
+
+## Equal alpha is not equal weight, and neither is equal luminance (UD-4 audit)
+
+The add/remove washes were argued about by five reviewers across four
+milestones, because "heavier" was never defined and the three candidate measures
+disagree. Composited over `#282828`, `#7FC085` and `#E06C75` at the same alpha
+are equal in CIEDE2000 (10.59 / 10.49) and in chroma (7.5 / 8.2) and 1.54x apart
+in relative luminance. Equalising the luminance with alpha made two fresh
+reviewers report the opposite defect within one round, because at a fixed hue
+dE and dL grow together — their RATIO is a property of the hue (0.43 for that
+green, 0.66 for that red) and no alpha pair can match both. Changing the hue is
+the lever: `#408050 @0x30` matches `#E06C75 @0x26` on all three measures at
+once. Measure a wash as the COMPOSITE against the surface it lands on, on all
+three axes, before changing a number.
+
+## A nil mock-DOM lookup used to kill the whole `isonim_views_test.nim` binary
+
+FIXED — kept because the shape recurs in every file that hand-rolls
+`findByClass` over `isonim/testing/mock_dom` (about fifteen of them).
+
+What it was: `findByClass` returned nil when nothing matched, and essentially
+every caller dereferences the result on the next line. `unittest`'s `check`
+does NOT abort a failing case, so `check n != nil` reported the failure and the
+line after it dereferenced the nil. A nil `MockNode` deref is a SIGSEGV, and a
+SIGSEGV kills the process: the file declares 461 cases, the native lane
+reported 216 (212 OK + 4 FAILED), and **245 cases — 53% — produced no result at
+all**, AA-1's `no DeepReview roll-up` guard among them. It was a cascade, not
+one line: guarding the first site moved the crash to the next, same shape.
+
+The fix, and the reason it is NOT `require`: `std/unittest`'s own `require`
+sets `abortOnError`, so `fail()` ends in `quit(1)` — it kills the process just
+as the segfault did. `unittest`'s `test` template wraps each case body in
+`except Exception:`, so a raised CatchableError is the primitive that fails one
+case and lets the rest run. `findByClass` / `findById` / `findByTag` in
+`views/isonim_views_test.nim` therefore RAISE `MockNodeNotFoundError`, and the
+handful of assertions whose subject is absence use the `…OrNil` spellings. Both
+lanes now report the same 444 OK / 17 FAILED over the same 461 cases.
+
+The runner half: `test-vm-native` tested `fails > 0` before it tested the exit
+code, so the SIGSEGV printed as `PARTIAL (212 OK, 4 FAILED)` — indistinguishable
+from an ordinary partial run. All six compile-and-run lanes now classify
+through `ci/lib/test-lane-report.sh`, which reads the exit status FIRST;
+`ci/test/test-lane-report-test.sh` proves it against fixture processes that
+print plausible `[OK]` lines and then die.
+
+To run one case: `./isonim_views_test "<exact test name>"`. The filter is an
+exact match on the test's own name, not a glob and not a substring, and it
+matches nothing against suite names.
+
+## `configureMiddleware` does not run in a `ct review` launch (AA-2)
+
+`ui_js.configureMiddleware` is called only from `onTraceLoaded` and
+`onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
+`CODETRACER::no-trace`. A `ct review` dataset launch reaches neither:
+`index/startup.nim` sends `CODETRACER::start-deepreview` and returns, so
+`onStartDeepReview` is the only one of the three that runs. Everything wired
+inside `configureMiddleware` — including the whole `initPanelVM`
+block that installs the shared ViewModel store into the legacy panels — is
+therefore absent in review mode. Anything a review needs must be installed from
+`ui_js.configure`, which runs once per renderer in every launch mode. Symptom
+to recognise: a panel that renders correctly in a review but whose actions are
+silent no-ops, because the host service it calls through was never installed.
+
+## Nested render procs inside an `ui(r):` block build nothing (AA-2)
+
+The IsoNim DSL nests *tags*. A bare call to another `render*` proc inside a
+`ui` block evaluates, builds a node, and attaches it to nothing — the parent
+renders empty with no error. Take a container with `ref = host` and
+`r.appendRenderedChild(host, renderChild(r, ...))` after the block, the way
+`isonim_agent_workspace_view` and `isonim_agent_activity_view` do.
+
+## The sharing path is now kind-parameterised, not trace-shaped (AS-1)
+
+`src/ct/online_sharing/artifact.nim` holds the artifact model: a closed
+`ArtifactKind` enum (`recording`, `review-dataset`), a `const
+array[ArtifactKind, ArtifactKindSpec]` registry indexed BY THE ENUM (so a new
+kind that skips its row does not compile), and the one URL grammar every path
+in `api_client.nim` is now derived from.
+
+Two things that surprise people reading it:
+
+* The recording kind's URL segment is `traces`, not `recordings`, and that is
+  permanent. Every share URL the service has issued and every path the shipped
+  client sends contains it. `artifact_model_vm_test.nim` pins the generated
+  strings against string *literals* for that reason — regenerating the
+  expectation from the registry would agree with any rename.
+* The user-facing share URL — `/{orgSlug}/{id}/download` — carries NO kind.
+  That is what made the generalisation cheap, and it is why
+  `parseArtifactShareUrl` must never infer a kind from the URL shape.
+
+The module is deliberately free of filesystem, HTTP, `Trace` and `langstring`
+so it compiles on `nim js` too; `common/recording_id.nim` was split for the
+same reason (`isCanonicalUuidV7` is backend-neutral, `newRecordingId` is
+behind `when not defined(js)` because it needs the OS CSPRNG).
+
+`ArtifactProtection` has exactly one value, `apNone`. There is NO encryption
+and NO password protection anywhere on this path — AS-3 adds them. A test
+asserts the enum's cardinality so widening it has to be deliberate.
+
+## Nim test lanes are DISCOVERED now, and a guard keeps them that way
+
+Lanes used to enumerate by name, and a name list omits silently. Measured
+before the fix: 61 test-shaped `.nim` files carrying real `suite`/`test` blocks
+were reached by NO lane — every `src/ct_test/incremental/test_*.nim`, all
+thirteen `test_collab_*.nim`, ALL FIVE `src/common/*_test.nim` (including
+`trace_index_test.nim`, the M-REC-8 recording-id identity suite), six of the
+eight `src/frontend/tests/*_test.nim`, the three `src/ct/launch/*_test.nim`,
+`src/ct/test_sourcemap.nim`, `src/ct/utilities/zip_test.nim`, the four GUI
+suites needing `headless_session`, and the ten `docs/book-isonim/tests/*`.
+
+The shape of the fix, and where to look:
+
+* `ci/lib/test-lane-files.sh` — THE single source of truth for which files each
+  lane runs and with which nim flags. `test_lane_ids`, `test_lane_files <id>`,
+  `test_lane_backend`, `test_lane_extra_flags`. Almost every lane is a glob; the
+  four that stay enumerated (`m16-release-gate`, `ct-providers`,
+  `visual-replay-gate`, `agentic-headless`) each say in a comment what a glob
+  could not express.
+* `ci/lib/run-nim-test-lane.sh` — THE single loop that compiles, runs and
+  classifies. Six recipes used to carry hand-copied versions of it.
+* `ci/test/test-lane-coverage.sh` — the guard. "Test-shaped" has TWO arms and
+  the second one matters: NAME (`test_*.nim` / `*_test.nim` / `*_tests.nim` /
+  `tests_*.nim`, case-insensitive, `.nims` too) **or** CONTENT (imports
+  `unittest` AND declares a column-0 `suite`/`test`). The name-only version
+  shipped with a hole it could not see: five suites, 72 cases, 176 assertions —
+  including `src/tests/gui/tests/integration/real_backend.nim`, an unrun TWIN
+  of `real_backend_test.nim` in the same directory, each carrying a fix the
+  other never got (the twin had the `trace-`-prefix removal from 31812021; the
+  `_test` copy had the dual-backend work from e3bb3de7). A name-based rule
+  cannot find that, because the twin's whole problem is its name. The twins are
+  merged now, into the `_test` name.
+  Every test-shaped file must be in a lane or declare, IN ITSELF, that it is
+  not a test:
+  `## NOT-A-TEST-LANE-FILE: <reason>` in its first 40 lines, or a
+  `.not-a-test-lane` file in its directory (whose contents are the reason —
+  an EMPTY one silences nothing). It also fails when a lane names a file that
+  does not exist, which is how `agent_activity_deepreview_vm_test.nim` stayed
+  in `scripts/test-codetracer-agentic-headless.sh` for months after AA-1
+  deleted it. Runs in `ci/lint/nim.sh`; `just test-lane-coverage`.
+* `just test-lanes` prints every lane and its files without running anything.
+
+DEFERRED, and the justfile says so at the head of the lane block: none of the
+13 new recipes is in a workflow, in `ci/verdict/required-jobs.txt`, or in an
+aggregate recipe yet — 76 of the 220 files the lane library resolves are in
+lanes no pipeline runs. Seven of those lanes are red for reasons of their
+own (see the justfile comment for the list). The GUARD does run, in
+`ci/lint/nim.sh`, so the class stays closed even while the lanes wait.
+
+When a lane's file selection moves, guards that PIN JUSTFILE TEXT break without
+any test losing coverage. Three did: `release_gate_test.nim`,
+`ci/test/test-lane-report-test.sh` and `ci/test/vm-js-lane-test.sh` each
+asserted a literal that had moved into `ci/lib/`. All three now FOLLOW THE
+DELEGATION (and the first ASKS the lane library what a lane resolves to, rather
+than grepping for the glob's text). If you add such a guard, assert the
+behaviour, not the layout.
+
+So: to add a test, drop it in a directory a lane already globs and it runs. If
+you must put it somewhere new, the guard tells you by name on the next lint.
+
+Beware the false positives when counting test-shaped files — all of them now
+carry a marker saying so: `src/ct_test/frameworks/{go,js_node}_test.nim` are
+provider *implementations*, `src/frontend/viewmodel/viewmodels/test_*_vm.nim`
+are ViewModels, `src/ct/cli/e2e_tests.nim` is a subcommand, and
+`src/ct_test/fixtures/**` plus `src/db-backend/test-programs/**` are covered by
+directory markers.
+
+## What turning the lights on found (the 61 dark files)
+
+Almost all of them passed — but the ones that did not had rotted in ways only a
+compiler or a run could see, which is the argument for the guard:
+
+* `src/ct/utilities/zip_test.nim` did not PARSE: a multi-line `import` was
+  missing its commas, so the file had been dead since it was written.
+* `std/unittest`'s `skip()` only MARKS the case skipped — it does NOT leave the
+  body, and `return` is rejected inside a test body ("'return' not allowed
+  here"). The ONLY correct shape is `if cond: skip() else: <body>`, which is
+  what `src/frontend/viewmodel/tests/unit/recorder_gate.nim`'s
+  `requireRecorderOrSkip` already does; copy that. Found live in two files:
+  `src/ct/test_sourcemap.nim` (4 checks, which also needed `--mm:refc` because
+  its subject calls `GC_disable`) and
+  `src/frontend/tests/idle_timeout_integration_test.nim` (6 cases, which
+  reported FAILED where they meant SKIPPED on any machine without a built
+  `server_index.js`). That file also carried `check available or true` — a
+  tautology counted as a passing case forever; deleted.
+* A `check` inside a plain `proc` does NOT fail its case: `std/unittest`'s
+  `fail()` needs `testStatusIMPL` in scope, and in a proc there is none, so it
+  prints the message, sets `programResult` and lets the case report `[OK]`.
+  Extract shared assertions as a `template`, never a `proc` — a proc may
+  COMPUTE (see `laneFilesFor` in `release_gate_test.nim`) but must not assert.
+  Measured on that file's CLI-lane helper: as a proc, 5 OK / 0 FAILED with the
+  subject broken; as a template, 2 OK / 3 FAILED.
+* `real_backend_test.nim` and `multi_session_test.nim` walked five `parentDir`s
+  to reach the repo root when their depth needs six, so every path they built
+  had a doubled `src/` (`.../src/src/build-debug/...`). Both files still name
+  their pre-move home in their own headers. Fixing it took
+  `multi_session_test` from 0/16 to 16/16 and `real_backend_test` from 0/35 to
+  29/35.
+* `src/ct/online_sharing/online_sharing_test.nim` did not compile at all
+  (`findTraceForArgs` matched no current signature). It performs a LIVE
+  round-trip against the sharing service, so it must never run in CI — it is
+  compile-checked instead, by `just test-online-sharing-compile`, because a
+  compile is the weakest check that would have caught the rot. AS-2 brought the
+  call sites up to date and the lane is GREEN now; the three signatures it had
+  rotted against were three recorded defects, which is the payoff of compiling
+  something nothing runs.
+
+## Two suites in `src/ct/online_sharing/` ran in no lane (AS-1)
+
+`upload_wire_format_test.nim` — 35 assertions over 11 cases pinning the exact
+JSON keys and URL paths the sharing client sends — and
+`collab_invite_url_test.nim` were reachable by no justfile recipe and no CI
+script.
+
+SUPERSEDED, and instructively so. The fix at the time added
+`upload_wire_format_test.nim` to `just test-mcr-enrichment-units` BY NAME and
+missed `collab_invite_url_test.nim` in the same directory — while rewriting
+this note to claim the name list was deliberate and that there was "one other
+`*_test.nim` file in that directory" when there were two. That is the whole
+argument for discovery in one milestone.
+
+The lane now GLOBS `src/ct/online_sharing` and rejects exactly one file:
+`online_sharing_test.nim`, the live round-trip, which has its own compile-only
+lane. Add a `*_test.nim` there and it runs; you do not have to remember
+anything. The lane's `-d:ssl -d:useOpenssl3` (needed because `api_client.nim`
+pulls in `std/net`'s `newContext`; nothing opens a TLS connection) lives in
+`ci/lib/test-lane-files.sh` with the lane, not in the recipe.
+
+## Two-argument `parseEnum` is a FALLBACK, not a validator (fixed; do not reintroduce)
+
+`parseEnum[E](token, default)` silently substitutes `default` for anything it
+does not recognise and never raises, so a `try`/`except ValueError` around it is
+dead code. `artifact.parseArtifact` used it for `visibility`, `minimumWriteRole`
+and `protection`: `"public"` read as `avTenant`, `"owner"` read as `arMember`
+(fail-OPEN), `"aes-256-gcm"` read as `apNone`. AS-2 replaced all of them with
+`parseClosedEnum` / `readClosedEnumField` in `artifact.nim` — exact matching, no
+fallback arm, a refusal naming the token and the closed set. Use those for any
+new closed set that comes off the wire.
+
+Two adjacent holes of the same shape, also closed: `getStr()` on a NON-STRING
+JSON value returns `""`, which fed straight into the fallback (so
+`{"visibility": 7}` read as `tenant`), and the payload's `layout` had the same
+problem. And keep ABSENCE distinct from an unknown value: a record written
+before a field existed genuinely does not declare it, so an absent `protection`
+must still read as `apNone` or every wire-format addition becomes a breaking
+change.
+
+## `ct upload` / `UploadedInfo` — what the modern path can and cannot answer
+
+Fixed by AS-2; the shape is worth knowing because the reasons are wire facts,
+not code style.
+
+* `uploadTrace` RETURNS now; it used to end every path in `quit(...)`, which
+  made `uploadCommand`'s success output — and the machine-readable JSON line
+  `src/frontend/index/online_sharing.nim` parses — unreachable. If you add a
+  path here, return from it.
+* `UploadedInfo` carries `artifactId`, `kind`, `shareUrl`, `uploadSessionId`.
+  It used to carry `fileId` (the recording id after a single-file upload, the
+  SESSION id after a slice upload — one field, two namespaces) plus
+  `downloadKey` / `controlId` / `storedUntilEpochSeconds`, which are the
+  pre-M-REC-8 service's tokens that nothing on the modern path assigns.
+* **A sliced recording gets no share link, and that is correct.** The recording
+  kind's `…/upload-session` body is frozen to `{platform, recordingMode}` and
+  carries no artifact id, so the client never tells the service which recording
+  the session is for — the service names the result itself.
+  `ArtifactStoreOutcome.serviceAcknowledgedId` records whether it named it back,
+  and a link is printed only when it did.
+* The platform is `artifactPlatformToken(hostOS, hostCPU)`, not the literal
+  `"linux-x86_64"` it used to be on every machine. An untaught host pair yields
+  `""` — an absence, never a guess.
+
+## `totalSlices` counts PIECES, not uploaded objects (AS-2; a caught regression)
+
+The `/finalize` body's `totalSlices` is what the deployed CS-M7 service
+**reassembles the payload from**. A sliced recording uploads its `.smnf` /
+`.amnf` manifests through the same session, at indices after the slices, and
+the pre-AS-2 client deliberately did not count them. So `ArtifactPart` carries
+an `ArtifactPartRole` (`aprSlice` / `aprSidecar`) and the finalize body is
+built from `sliceCount(parts)`, never `parts.len` — on the normal
+`ct-mcr record --split` output those differ by two, and sending the larger tells
+the service to look for slices that do not exist.
+
+Two lessons worth more than the fix:
+
+* **A wire test must state what the PREVIOUS client sent, not what this one
+  computes.** The first draft of AS-2 shipped this regression with two suites
+  that both asserted `totalSlices == parts.len` — tautologies against the
+  implementation, green on the bug. They are now driven by a named directory
+  (`McrSplitDirectory`) and a literal `3`.
+* **Diff at the CALLER, not just the builder.** Every URL and every body
+  builder was byte-identical to `e356c20f`; the regression was in what the
+  caller passed the builder. `src/ct/online_sharing/` is verified by running
+  the real `uploadSplitTrace` against a recording HTTP server in both trees and
+  diffing the request log.
+
+## The sharing transport is ONE path, keyed on payload LAYOUT (AS-2)
+
+`src/ct/online_sharing/` splits into a pure planner and a native executor:
+`artifact_transfer.nim` produces the whole conversation (every URL, every body,
+every part, in order) as a function of the artifact and the local files;
+`artifact_store.nim` executes it and is the only place in the repo that moves an
+artifact's bytes. `storeArtifact` dispatches on `ArtifactPayloadLayout`
+(single-file vs slice set) and NEVER on `ArtifactKind`, which is what lets a
+review dataset use the slice transfer that was built for recordings.
+
+Two rules to keep:
+
+* The recording kind's request bodies and URLs are **frozen** — a deployed
+  service reads them, and `artifact_transfer_vm_test.nim` asserts their exact
+  key sets against literals. Adding a key there is a wire change.
+* `slice-upload-url` and `finalize` are keyed on a SERVER-issued session id, so
+  their collection segment comes from `ArtifactUploadSession` (the typed pair
+  `…/upload-session` returns), not from a literal and not from a kind supplied
+  again at the call. Revert that and a sliced review dataset publishes its parts
+  under `traces/`.
+
+## `ct download` probes a route that does not exist yet — be careful with 4xx
+
+`fetchArtifact` asks the kind-neutral `artifacts/{id}/download-url` BEFORE the
+kind's alias (AS-1 §5.4), and no deployed service routes it. So every existing
+user's download now begins with a request that fails, and what a service says
+about a path it has no rule for is not under our control — a gateway or WAF may
+answer 400, 403 or 501 as readily as 404. `downloadProbeMayContinue` therefore
+tolerates all of those ON THE NEUTRAL PROBE ONLY; a kind's own collection
+continues on 404/405 alone, because a 403 there is a real "you may not read
+this" and walking past it would report a permission problem as a missing
+artifact. 401 never continues, on either.
+
+## The sharing surface is ONE value, and it is the only place sharing copy lives
+
+`src/ct/online_sharing/artifact_sharing.nim` (AS-4) produces every sentence
+`ct upload`, `ct download` and `ct list` show about sharing, derived from the
+artifact model. It is pure and compiles on `nim js`, which is why the *claims*
+(what encryption covers, who can read what you shared) are asserted in the
+ViewModel lane without a socket.
+
+Per-kind variation may enter through FIVE doors and no more: the noun
+(`artifactSubjectNoun`), the kind's own facts (`artifactFacts`), the open
+command (`artifactOpenCommand`), §10.4's visible-metadata list
+(`describeVisibleToService`), and `accessApiNotices`. If you find yourself
+wanting a sixth, you are adding a second sharing flow — the thing this
+milestone removed, where four separate success blocks described one upload.
+
+**Know where the guarantee stops.** It covers the sharing VIEW — what the user
+is told about the artifact. It does NOT cover `upload.nim`'s narration about
+moving the bytes (`MCR trace with pre-split slices detected`, `Uploading N
+pre-split slices`, `Upload finalized: N slices`, the progress lines). Those
+differ per PAYLOAD SHAPE, not per kind, and they are declared in an allowlist
+that `sharing_flow_cli_test.nim` enforces against a real upload of each kind —
+including a genuinely sliced recording, so the list is driven and not merely
+written. A new line printed on one path only fails until somebody declares it.
+
+**The equality is asserted at THREE layers, and know why.** `sharingShape`
+strips the doors from the VIEW; `kindNeutralRenderedLines` strips them from
+`renderSharingView`'s TEXT; and the JSON comparison strips them from
+`sharingViewJson`. As AS-4 first shipped, only the first existed — and a door
+added to the renderer, gated on one kind and one stage, left every suite green
+while the pre-AS-4 wording came back in the product. A guarantee about a value
+is not a guarantee about the output built from it. The normaliser is pinned too,
+because widening it is the next hiding place, and it lives in the TEST rather
+than beside the renderer for the same reason. Note WHICH pin does the work: an
+earlier version claimed "removals must account for exactly that many lines",
+which is a tautology for any reconstruction whose lines each appear once, so it
+could not detect widening at all. Two things actually hold it. The reconstruction
+is built from the view's OWN neutral fields, so it can only absorb a line whose
+rendered text equals the field-derived text -- the instant that line differs per
+kind, `line in rendered` fails. And `doors.len == expectedDoorLineCount(view)`
+counts from the view's DECLARED doors, independently of how the reconstruction
+builds them, so the two must agree from different sources.
+
+Related: assert every STAGE. The gated door survived because the CLI suite
+compared line-for-line only at `assOffered`; `assShared` was JSON-only and
+`assReceived` was compared for neither kind. Downloading a *recording* needs a
+real CTFS container (`importTrace` reads its `meta.dat`), which is why that
+whole path had gone unexercised — `src/tests/cli/sharing_flow_cli_test.nim`
+now builds one with `m1_ctfs_fixture`.
+
+Two rules that are easy to break by accident:
+
+* **Do not state a fact the client was not told.** No deployed service returns
+  an artifact record, so `sharingView(..., accessKnown = false)` is what
+  `ct download` passes; without it the view printed the model's DEFAULT
+  visibility as though it were the artifact's. `ct list` has the same rule
+  under a different name (`ListingLocalOnly`). The same class one step over:
+  `accessApiNotices` is gated on the STAGE, because "CodeTracer recorded this
+  locally and the service was not told" is false after a download and
+  contradicted the "not stated" lines directly above it.
+* **`confutils` eats options you will swear you passed.** A bare `--flag` and
+  `--flag=` never reach the command for a value-taking option — the same defect
+  as AS-3's `--password-file -`. `artifact_crypto.bareDashInArgv` and
+  `optionGivenWithoutValueInArgv` read `argv` for exactly this, because by the
+  time a parsed value exists the token is gone. `libs/nim-confutils` is pinned;
+  refuse client-side. **And look at the NEIGHBOUR**: a bare `--flag` is only
+  value-less when it is last or the next entry starts with `-`. The first
+  version of that guard matched the token alone and refused
+  `--visibility tenant-or-invite`, the conventional spelling, which had
+  worked — under-firing and over-firing are the same mistake seen twice.
+* **`ct download`'s non-tty stdout is consumed WHOLE.**
+  `src/frontend/index/online_sharing.nim`'s `onDownloadTraceFile` takes
+  `$res.value.strip()` as the imported recording id, so the non-interactive
+  branch must print the locator and nothing else — AS-4's notices go to
+  **stderr** on that path for exactly this reason. `ct upload` is different:
+  its consumer scans back for the LAST non-empty line, so narration before the
+  JSON is harmless.
+
+## In-process sqlite does not load outside the test-lane runner
+
+`import db_connector/db_sqlite` compiles, then dies at process start with
+`could not load: libsqlite3.so(|.0)` unless the run inherits
+`CT_LD_LIBRARY_PATH` (the lane runner exports it for the RUN step; a bare
+`nim c -r` from the repo root does not). That is why `welcome_screen_vm_test`
+is a catalogued red on the JS lane, and why
+`src/tests/cli/sharing_flow_cli_test.nim` writes its one trace-index fixture
+row with the `sqlite3` CLI (which is in the dev shell, `nix/shells/ci-base.nix`)
+rather than linking the driver into the test binary.

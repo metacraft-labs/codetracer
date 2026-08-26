@@ -49,7 +49,7 @@ proc rustFiles*(projectRoot: string): seq[string] =
   for root in ["src", "tests"]:
     let dir = projectRoot / root
     if dirExists(dir):
-      for path in walkDirRec(dir):
+      for path in walkWorkspaceFiles(dir):
         if isRustFile(path):
           result.add path
   result.sort(system.cmp[string])

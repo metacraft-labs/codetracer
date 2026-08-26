@@ -9,6 +9,8 @@ import
   ../trace/[ replay, record, run, metadata, host, import_command, trace_forward ],
   ../ci/[ ci_commands ],
   ../codetracerconf,
+  ../review_cli,
+  ../review_session,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
   ../doctor,
@@ -254,7 +256,9 @@ proc runInitial*(conf: CodetracerConf) =
       )
     of StartupCommand.noCommand:
       # When ct is launched with no subcommand, show the welcome screen.
-      # If --deepreview is provided, open the deepreview view instead.
+      # (RV-1: the review launch moved out of here into
+      # `StartupCommand.review` below — DeepReview is reached with
+      # `ct review <PATH>`, never with a global option.)
       # Playwright launches the ct binary directly and passes the trace to
       # the Electron index process via CODETRACER_RECORDING_ID. In that case we
       # must not force --welcome-screen, or the renderer never enters replay
@@ -268,10 +272,7 @@ proc runInitial*(conf: CodetracerConf) =
       # ``launch_env_var_test`` share a single source of truth.
       refuseLegacyRecordingIdEnv(proc (msg: string) = errorMessage(msg))
       var frontendArgs: seq[string] = @[]
-      if conf.deepreview.len > 0:
-        frontendArgs.add("--deepreview")
-        frontendArgs.add(conf.deepreview)
-      elif getEnv("CODETRACER_RECORDING_ID", "").len == 0:
+      if getEnv("CODETRACER_RECORDING_ID", "").len == 0:
         frontendArgs.add("--welcome-screen")
       launchElectron(
         args = frontendArgs,
@@ -337,11 +338,23 @@ proc runInitial*(conf: CodetracerConf) =
         # M31 — forward the client-controlled omniscient-DB upload
         # mode (``--omniscient-db=off|on|lazy|pre-prepared``) into
         # the CS-M7 ``/finalize`` body.
-        conf.uploadOmniscientDbMode)
+        conf.uploadOmniscientDbMode,
+        # AS-2 — the kind-neutral `--artifact <PATH>` selection, with
+        # `--kind` for the cases the path cannot be classified on its own.
+        conf.uploadArtifactPath,
+        conf.uploadArtifactKind,
+        # AS-3 — one encryption flag for every kind.
+        conf.uploadEncrypt,
+        conf.uploadPasswordStdin,
+        conf.uploadPasswordFile,
+        # AS-4 — one access-control flag for every kind.
+        conf.uploadVisibility)
     of StartupCommand.download:
       downloadTraceCommand(conf.traceDownloadUrl,
         conf.downloadToken,
-        conf.downloadBaseUrl)
+        conf.downloadBaseUrl,
+        conf.downloadPasswordStdin,
+        conf.downloadPasswordFile)
     of StartupCommand.login:
       loginCommand(conf.loginDefaultOrg, conf.loginBaseUrl)
     of StartupCommand.`set-default-org`:
@@ -469,6 +482,76 @@ proc runInitial*(conf: CodetracerConf) =
         inspect = conf.inspect,
         remoteDebuggingPort = conf.remoteDebuggingPort,
         remoteDebuggingPipe = conf.remoteDebuggingPipe)
+    of StartupCommand.review:
+      # RV-1: `ct review <PATH>` replaces the retired `ct --deepreview <PATH>`.
+      #
+      # The decision of what the command line means is `planReviewCli`'s, so
+      # this arm and the pre-confutils dispatcher in `codetracer.nim` cannot
+      # disagree about it; only the *effect* differs, because launching
+      # Electron is the one thing the raw dispatcher deliberately does not do.
+      let plan = planReviewCli(@["review", conf.reviewPath])
+      case plan.kind
+      of rpkLaunch:
+        let resolved = resolveReviewDatasetJson(plan.datasetPath)
+        if resolved.error.len > 0:
+          errorMessage resolved.error
+          quit(1)
+        # RV-6 — resolve the agent session the dataset names, if it names
+        # one, *before* Electron starts.
+        #
+        # It happens here rather than in the renderer because reaching an
+        # agent means spawning a stdio ACP child or speaking HTTP to Agent
+        # Harbor, and `nim-acp`'s stdio transport does not exist on the
+        # JavaScript backend the Electron main process is compiled to.  `ct`
+        # is native, holds `nim-agents`, and is already the process that
+        # decided which dataset to open.
+        #
+        # The dataset still carries only a *reference*: the transcript this
+        # produces is a temporary file for this one window, never written
+        # back into `review.json` (DeepReview-GUI.md §2.1, "by reference,
+        # never by copy").  A dataset that names no session produces no file
+        # and no argument, which is the ordinary case.
+        var electronArgs = @["--deepreview", absolutePath(resolved.jsonPath)]
+        let sessionRef = reviewSessionRefOfDataset(resolved.jsonPath)
+        if hasSessionRef(sessionRef):
+          # `resolveReviewSession` never raises and never answers with
+          # silence: an unreachable agent, a pruned session or a missing
+          # agent command all come back as an explicit state the panel
+          # renders as such.  So a failure here must not stop the review
+          # opening — the review is complete without its session.
+          let sessionPath = writeResolvedReviewSession(
+            resolveReviewSession(sessionRef))
+          if sessionPath.len > 0:
+            electronArgs.add "--review-session"
+            electronArgs.add sessionPath
+          else:
+            # The one remaining way this whole path could go quiet: the
+            # resolution succeeded (or failed explicitly) but the handoff file
+            # could not be written, so the renderer gets no document and shows
+            # the panel a dataset with *no* reference shows.  That would be the
+            # "reads as the agent did nothing" state §2.1 forbids, arrived at
+            # from the other side, so it is said out loud here rather than
+            # swallowed.  It stays non-fatal: the review is complete without
+            # its session.
+            errorMessage "could not hand the agent session '" &
+              sessionRef.sessionId & "' to the review window; the review " &
+              "opens without it"
+        launchElectron(
+          args = electronArgs,
+          inspect = conf.inspect,
+          remoteDebuggingPort = conf.remoteDebuggingPort,
+          remoteDebuggingPipe = conf.remoteDebuggingPipe)
+      of rpkUsage:
+        echo ReviewUsage
+      of rpkError:
+        errorMessage plan.message
+        quit(1)
+      of rpkCollect, rpkInspect:
+        # Unreachable: `reviewNeedsRawDispatch` routes those verbs to the
+        # dispatcher in `codetracer.nim` before confutils ever runs.
+        errorMessage "internal: `ct review " & conf.reviewPath &
+          "` should have been dispatched before argument parsing"
+        quit(1)
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,

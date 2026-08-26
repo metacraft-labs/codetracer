@@ -1,0 +1,68 @@
+{
+    "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "responsiveMode": "always"
+    },
+    "dimensions": {
+        "borderWidth": 4,
+        "borderHeight": 4,
+        "headerHeight": 32,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+    },
+    "root": {
+        "type": "row",
+        "size": "100%",
+        "isClosable": false,
+        "content": [
+            {
+                "type": "stack",
+                "size": "30%",
+                "activeItemIndex": 0,
+                "content": [
+                    {
+                        "type": "component",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                            "id": 0,
+                            "label": "filesystemComponent",
+                            "content": 9
+                        },
+                        "title": "genericUiComponent"
+                    },
+                    {
+                        "type": "component",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                            "id": 0,
+                            "label": "agentActivityComponent-0",
+                            "content": 35
+                        },
+                        "title": "genericUiComponent"
+                    }
+                ]
+            },
+            {
+                "type": "stack",
+                "size": "70%",
+                "activeItemIndex": 0,
+                "content": [
+                    {
+                        "type": "component",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                            "id": 0,
+                            "label": "vCSComponent-0",
+                            "content": 41
+                        },
+                        "title": "genericUiComponent"
+                    }
+                ]
+            }
+        ]
+    },
+    "openPopouts": []
+}

@@ -1,0 +1,715 @@
+// The diff tab's empty state.  It sits as a sibling of the Monaco host inside
+// `.unified-diff-container`, and only one of the two is visible at a time, so it
+// has to fill the tab rather than sit above the editor.  The text treatment
+// itself comes from `components/empty_states.styl` via `.empty-overlay`.
+.unified-diff-empty
+  flex: 1
+  min-height: 0
+
+// Code surface: keep a monospace face.  This used to be inherited from the
+// app-wide `body` rule, which is now Space Grotesk (the interface face), so
+// it has to be stated here — diff bodies are source lines.
+.unified-diff
+  font-family: "SpaceMono", monospace
+
+// Unified diff editor tab (DR-R4, UD-1).
+//
+// Since UD-1 the tab is Monaco's own DIFF editor in the inline layout, over
+// two models built by src/frontend/viewmodel/viewmodels/diff_document.nim, so
+// the added / removed wash and the word-level intra-line marking are the
+// EDITOR's (`.line-insert` / `.line-delete` / `.char-insert` / `.char-delete`)
+// and everything here styles what is ours on top of it:
+//
+//   .ct-diff-line-*    -> whole-line decorations, rendered by Monaco into
+//                         `.view-overlays` as `<div class="cdr …">`.  The one
+//                         chrome line left in the model — the `@@` divider —
+//                         still carries paint; the added / removed / context
+//                         ones are classification only now, because the editor
+//                         paints those.
+//   .ct-diff-gutter-*  -> `linesDecorationsClassName`, rendered into
+//                         `.margin-view-overlays` as `<div class="cldr …">`.
+//                         Also classification only: the `+` / `-` markers
+//                         VCS-Panel.md ("Unified Diff View (Editor
+//                         Integration)") requires moved into the gutter
+//                         LABEL, and `.ct-diff-linenum-*` colours them there.
+//
+// COLOUR.  Every colour below is a design-system token, and where the editor
+// already colours the same concept the diff now uses the editor's own token:
+// an added marker is `text/success/primary` and a removed one
+// `text/error/primary`, exactly as `.diff-added-gutter` / `.diff-deleted-gutter`
+// in components/text_editor.styl paint them.  Selection is `border/action`, the
+// same indigo as the focus ring and the open branch picker.
+//
+// The row washes are the same tokens at low alpha rather than separate colours,
+// so a row and its marker are one hue at two strengths and cannot drift apart.
+//
+// Before this they were literals carried over from the pre-DR-R4 DOM renderer
+// (`deepreview-unified-line-*`) — GitHub's palette, not ours: #3fb950 against
+// the editor's #bbf7d0 for the same "added" idea, and #f85149 against #fca5a5
+// for "removed".  That renderer and its stylesheet are both gone (DR-R8), so
+// there was nothing left for them to stay consistent with.
+
+.unified-diff-container
+  display flex
+  flex-direction column
+  width 100%
+  height 100%
+  overflow hidden
+
+.unified-diff-toolbar-host
+  flex-shrink 0
+
+.unified-diff-editor
+  flex 1 1 auto
+  min-height 0
+  width 100%
+
+  // The old/new line numbers are one column per side of the diff editor —
+  // the original editor's margin carries the old numbers, the modified
+  // editor's the new ones — and each label is `<marker><number>`
+  // (`diff_document.lineNumberLabels`).  `white-space: pre` keeps the padding
+  // that aligns the digits under each other.
+  //
+  // THE GAP BETWEEN THE LAST DIGIT AND THE FIRST GLYPH OF THE CODE.
+  //
+  // It takes two declarations in two layers, and neither works alone — which
+  // is why the earlier attempt at this (a `padding-right` on its own) measured
+  // as no gap at all and reviewers kept reporting "`10def format_row`",
+  // "`+ 7fn scale(`".
+  //
+  //   1. `text_editor.styl`'s global `.line-numbers` rule is
+  //      `width: 100% !important; box-sizing: border-box; text-align: right`.
+  //      So this element is not the numbers COLUMN, it is the whole margin,
+  //      and its right edge IS where the code starts. Right-aligned text
+  //      therefore ends exactly on the code unless a `padding-right` holds it
+  //      off — that is what this declaration is, and the `!important` is to
+  //      beat the same global rule's `padding-right: 0 !important`.
+  //   2. A padding only holds the text off while the label still FITS the
+  //      padded content box. It did not: Monaco sizes the margin as
+  //      `lineNumbersMinChars` x its own `typicalHalfwidthCharacterWidth`, and
+  //      `diff_document.lineNumberLabels` emits a label of exactly that many
+  //      characters, so 25.7px of label went into a 16.4px content box, spilled
+  //      to the right the way an overflowing line box does in `ltr` whatever
+  //      `text-align` says, and ended 3.3px short of the code — under half a
+  //      character, which is what reviewers read as a collision.
+  //      `applyGutterOptions` therefore also gives the MODIFIED editor a
+  //      line-decorations lane of the same width, which widens the margin by
+  //      exactly what this padding takes out of it.
+  //
+  // Measured after both: label glyphs `293.3..319`, code at `327`.
+  //
+  // The two are the same number for a reason worth keeping: if a font ever
+  // renders the label wider than Monaco's estimate, the text overflows again
+  // and the gap falls back to the lane's own width — the same 8px, rather
+  // than to nothing.
+  .line-numbers
+    // Same type as the editor's line numbers — one definition, in
+    // components/text_editor.styl.  Without it this gutter fell back to
+    // Monaco's own metrics: 16px at weight 400 against the editor's 14px at
+    // 300, so the two panels showed visibly different numbers.
+    line-number-type()
+    // The editor dims its numbers to half strength — `opacity: 0.5` on
+    // `.gutter-line` (components/text_editor.styl), the box that holds the
+    // number inside its gutter markup.  Both gutters already share the colour
+    // token; without this the diff painted it at full strength and simply read
+    // brighter than the editor beside it.
+    //
+    // The same mechanism rather than a pre-blended colour, so the two stay
+    // identical if the token behind them moves.  It lives here and not in
+    // `line-number-type()` because the editor applies it one level further in:
+    // putting it in the shared mixin would multiply with `.gutter-line`'s own
+    // 0.5 and take the editor down to a quarter.
+    opacity 0.5
+    white-space pre
+    text-align right
+    padding-right 8px !important
+
+    // ...except the line the cursor is on, which `.active-line-number` in
+    // components/text_editor.styl brightens for both gutters.  The lift has to
+    // be repeated here: that rule and the `opacity 0.5` above tie on
+    // specificity, and this file loads later, so without it the dimming wins
+    // and halves the brighter colour straight back down.
+    &.active-line-number
+      opacity 1
+
+// --- Whole-line decorations ---------------------------------------------
+
+// UD-1: the added / removed wash is now MONACO's.  A diff editor paints
+// `.line-insert` and `.line-delete` over the lines it decided changed, and it
+// paints them over the editor's full scroll width; ours were painted over the
+// model's own line width, so the two disagreed at the right-hand edge and left
+// a visible seam where one band stopped and the other carried on.
+//
+// The classes are still emitted — they are the diff document's own
+// classification, they carry the hunk-selection modifier below, and the GUI
+// suites assert on them — but the paint belongs to whoever computed the diff,
+// and after this milestone that is the editor.
+//
+// WHERE THE TWO WASHES COME FROM, AND WHY THEY ARE THE COLOURS THEY ARE.
+// `diffEditor.{inserted,removed}{Line,Text}Background` in
+// `monaco-themes/themes/customThemes/json/codetracerDark.json`, which is JSON
+// and cannot carry the reason, so it is here.
+//
+// "The washes are unbalanced" has been raised by five reviewers across four
+// milestones and answered twice by moving alphas, each time producing the
+// opposite complaint. Measured properly, the reason is that ALPHA IS THE
+// WRONG LEVER, and the three numbers that matter disagree about which wash is
+// heavier. Composited over `#282828`, for the ORIGINAL pair at equal alpha:
+//
+//     #7FC085 @0x26 -> #353f36   dE2000 10.59   dL x1000 24.6   C* 7.5
+//     #E06C75 @0x26 -> #433233   dE2000 10.49   dL x1000 15.9   C* 8.2
+//
+// Equal in perceptual difference and in chroma, and 1.54x apart in relative
+// luminance — which is why one reviewer with a colour picker reported the
+// addition as heavier while others reported the removal as louder. Raising the
+// removal's alpha to equalise LUMINANCE was tried, measured and reviewed here:
+// it worked (20.9 against 21.9) and two fresh reviewers immediately reported
+// the opposite defect — "the removal maroon is markedly more saturated … so
+// deletions dominate every hunk", "removal carries ~22 points of chroma
+// against addition's ~9 at near-equal luminance". At a fixed hue dE and dL
+// grow together, so their RATIO is a property of the hue: 0.43 for `#7FC085`,
+// 0.66 for `#E06C75`. No pair of alphas can match both.
+//
+// So the HUE moved instead, on the addition side, to one whose ratio is the
+// removal's. `#408050` is the same green a step deeper and more saturated, and
+// the reader never sees it — only the composite:
+//
+//     #408050 @0x30 -> #2d3930   dE2000 10.17   dL x1000 15.8   C* 8.2
+//     #E06C75 @0x26 -> #433233   dE2000 10.49   dL x1000 15.9   C* 8.2
+//
+// Three measures, all within 3%. The removal side is untouched, because it is
+// the theme's own `error` colour; the intra-line pair (`…TextBackground`) is
+// matched the same way against its own line wash rather than against the
+// editor, because that is what it is drawn on.
+.ct-diff-line-added,
+.ct-diff-line-removed,
+.ct-diff-line-context
+  background-color transparent
+
+// The `@@ -N,M +N,M @@` divider.
+//
+// It is a real line of both models — that is what keeps it out of a collapsed
+// run (`diff_document.diffContextLineCount`) — so unless it is drawn as a
+// SEPARATOR it reads as a line of source that happens to start with `@@`, and
+// reviewers have read it exactly that way: "drawn between context lines 3 and
+// 4 … with no gutter numbers and no full-width band — it looks like a stray
+// code line", and, twice before that, a question about whether it still earns
+// its place now that context appears above it.
+//
+// It earns its place: it is the only thing that names the old and new line
+// ranges a hunk covers, which is what a reader reconciling a review against a
+// terminal `git diff` needs. What it did not have was the shape of a rule.
+// The wash it always carried is now bracketed by a hairline top and bottom, so
+// the band has edges, and the text is dimmed so the eye passes over it on the
+// way between hunks rather than stopping to read it as code.
+// Neutral grey, like the rest of the theme. Two reviewers measuring the frame
+// reported the earlier slate-blue as off-palette — "both `@@` bands are
+// indigo/blue … all off #282828/#3a3a3a", "off-palette chrome … blue-slate
+// against a neutral editor". Nothing about a hunk boundary is blue, and the
+// theme's own step above the editor surface is #3a3a3a.
+//
+// OPAQUE, and full bleed. Both are corrections a design audit measured, and
+// both come from the same place: a collapsed region's band sits directly
+// beside this one, and they are meant to read as the same kind of object.
+//
+//   * The fill was `rgba(58, 58, 58, 0.85)`, which composites to `#373737` on
+//     the editor surface while the fold band beside it paints the theme's
+//     `diffEditor.unchangedRegionBackground`, `#3a3a3a`, opaque. Two adjacent
+//     separators, three levels apart — "same object, two treatments".
+//   * The second selector paints the MARGIN copy of the decoration, which
+//     `diff_document.marginClassFor` now emits for this line kind alone. It is
+//     needed because `text_editor.styl`'s `.margin-view-overlays div` rule
+//     gives every margin child the panel colour and outranks a bare class, so
+//     without it the divider stopped at the code's left edge while the fold
+//     band ran to the editor's: "the collapsed band's left edge (x≈30) does
+//     not line up with the hunk divider's (x≈62)".
+//
+// `.modified-in-monaco-diff-editor` is load-bearing in that second selector,
+// for the same reason the gutter hairline below carries it. Both models hold
+// the `@@` line, so both editors draw the decoration, and unrestricted the
+// band also painted the ORIGINAL editor's 29px strip — which overshoots the
+// fold band by exactly as much as it used to undershoot it. The two bands are
+// aligned when the divider starts where the MODIFIED editor does.
+//
+// One declaration block, two selectors, because a second block is how the two
+// halves of one band drift into two colours.
+.ct-diff-line-hunk-header,
+.monaco-diff-editor .modified-in-monaco-diff-editor .margin-view-overlays div.ct-diff-line-hunk-header
+  background-color #3a3a3a
+  box-shadow inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.14)
+
+// A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
+// and gains a marked left edge, the way the DOM renderer's `.hunk-selected`
+// did.
+//
+// Monaco puts every line class on ONE element, so an unscoped selection
+// background here sits at the same specificity as `.ct-diff-line-added` and,
+// being declared later, wins — a selected added line would lose its green.
+// The DOM renderer did not have that problem: its `.hunk-selected` was on the
+// parent hunk container, so each child line's kind colour painted over it.
+// Restrict the wash to lines that have no kind colour of their own, and let
+// the left edge carry selection everywhere else.
+.ct-diff-hunk-selected
+  box-shadow inset 0.1875em 0 0 0 colors-ui-border-action
+
+.ct-diff-line-context.ct-diff-hunk-selected
+  background-color rgba(colors-ui-border-action, 0.10)
+
+// --- The file header (UD-2) ----------------------------------------------
+//
+// DeepReview-GUI.md §4.1: "A file header with path and diff metadata".  It
+// used to be line 1 of the Monaco model; UD-2 turned `hideUnchangedRegions`
+// on, and line 1 is exactly what a collapsed run at the top of a file hides,
+// so it is chrome above the editor now.  Colours carried over from
+// `.ct-diff-line-file-header`, which was that model line's decoration.
+
+.unified-diff-file-header-host
+  flex-shrink 0
+
+.unified-diff-file-header
+  display flex
+  align-items baseline
+  gap 0.6em
+  padding 0.25em 0.9em
+  font-family monospace
+  font-size 0.95em
+  // Neutral. A blue tint here measured as `#2C3339` against a `#282828`
+  // editor and a `#1b1b1b` panel, and two reviewers inventoried it as
+  // off-palette chrome — "the file header bar is #2C3339 … blue-tinted against
+  // the #282828 editor / #1b1b1b panel / #3a3a3a border palette". A file
+  // header is a surface, not an accent.
+  background-color rgba(255, 255, 255, 0.045)
+  border-bottom 1px solid rgba(255, 255, 255, 0.10)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.unified-diff-file-header-status
+  opacity 0.75
+
+.unified-diff-file-header-path
+  font-weight 600
+  overflow hidden
+  text-overflow ellipsis
+
+.unified-diff-file-header-stats
+  margin-left auto
+  opacity 0.75
+
+// --- Context expansion (DR-R5, UD-2) -------------------------------------
+//
+// DeepReview-GUI.md §4.2 requires "Expand surrounding context above/below a
+// visible region", and §4.3 "a draggable edge line" at each boundary.  Since
+// UD-2 both are Monaco's own: with `hideUnchangedRegions` on it draws a
+// `.diff-hidden-lines` widget at every collapsed run, whose `.top` and
+// `.bottom` children are drag handles bound to `showMoreAbove` /
+// `showMoreBelow`.
+//
+// What Monaco does NOT do is make them visible.  Its own rule is
+//
+//     .monaco-editor .diff-hidden-lines .top,
+//     .monaco-editor .diff-hidden-lines .bottom
+//       { height: 4px; background-color: transparent; … }
+//
+// with a colour only on `:hover` and `.dragging` — measured in
+// `min/vs/editor/editor.main.css`.  So before a reader touches the boundary
+// there is nothing to touch: a 4-pixel transparent strip.  A gesture nobody
+// discovers is not a feature, and these rules are what decide whether the
+// rest of this milestone is used at all.
+//
+// `ui/diff_expansion.nim` adds `.ct-diff-expand-boundary` to both handles
+// rather than the stylesheet reaching for Monaco's `.top` / `.bottom`
+// directly, so a Monaco upgrade that renames them stops painting instead of
+// painting the wrong thing.
+
+// The boundary widget must be ABOVE the code, and by default it is not.
+// Measured with `document.elementFromPoint` at the handle's own centre in the
+// running product: the hit was `div.view-line`, because Monaco gives
+// `.lines-content` `z-index: 2` while `.overlayWidgets` — which is where the
+// boundary widget lives — has none.  So the drag handle was drawn where a
+// reader could see it and could not reliably press it; only a press that
+// happened to land outside a rendered line went through.
+//
+// The lift goes on the widget rather than on the handle: `.diff-hidden-lines`
+// carries a `transform`, which makes it a stacking context, so a `z-index` on
+// the handle inside it can never raise it past a sibling of its ancestor.
+.monaco-editor .diff-hidden-lines-widget
+  z-index 3
+
+// The fold's band stops covering the line above it.
+//
+// Monaco's own rule is `.diff-hidden-lines { height: 0; transform:
+// translateY(-10px) }`, with a 24px `.center` and two handles stacked inside
+// that zero-height box — so the whole 34px stack is pulled up over whatever is
+// rendered above the fold. Measured in the running product: the last code line
+// occupies y 483..505, and the band came out at 501..525 with its upper handle
+// at 495..507. Four to six pixels of a line of source, under a control, on
+// every fold.
+//
+// That overlap is the single most-reported defect on this surface — five fresh
+// reviewers across three milestones, each describing it without prompting: "a
+// floating blue bar overlaps the code of line 12 … a control drawn on top of
+// source"; "the blue handle overlaps the context line above"; "blue fold
+// handles cross the word 'two'"; "the lower band sits on the bottom of line
+// 12's comment, visibly truncating that line's glyphs"; and the brief itself
+// carried it as a known gap. Zeroing the offset drops the stack into the space
+// the fold already reserves, below the last line rather than across it.
+//
+// `!important` because Monaco's rule has identical specificity and the two
+// stylesheets are injected by different mechanisms — the theme through the
+// `#theme` link, `editor.main.css` through the bundle — so their relative
+// order is not something this file can rely on.
+.monaco-editor .diff-hidden-lines
+  transform translateY(0) !important
+  font-size 11px
+  line-height 16px
+
+// The fold band belongs to the side a reader can read.
+//
+// An inline diff is still TWO code editors, and Monaco draws the
+// unchanged-region widget in both of them. The original one is laid out as a
+// ~30px gutter strip, so its copy of the band is a 30px-wide slice of a
+// full-width control — and that slice is what reviewers have been inventorying
+// as unexplained marks at the far left of every fold: "a small bordered square
+// holding a tiny up/down glyph plus a stray `‹`"; "a rounded-rect button
+// clipped at the band's far left showing `⇕ e` cut mid-word — apparently a
+// second expand control truncated by the pane's left edge". It is not a second
+// control; it is the same control, sliced.
+//
+// Hidden rather than restyled: there is no width at which a 30px slice of this
+// band says anything, and every gesture it offers is offered by the copy in the
+// modified editor, which is where `ui/diff_expansion.nim` stamps the handles
+// and where the GUI suite locates them.
+.monaco-diff-editor .original-in-monaco-diff-editor .diff-hidden-lines-widget
+  display none
+
+.ct-diff-expand-boundary
+  // The band's two edges, and the drag target.
+  //
+  // Monaco paints these handles only on `:hover`, so before a reader touches
+  // the boundary there is nothing to touch: a 4-pixel transparent strip. They
+  // are drawn at rest here, as the rules that give the band its top and bottom
+  // edges, and they keep Monaco's own `ns-resize` cursor and drag handlers.
+  //
+  // What they no longer carry is a grabber pill. Three rounds of this campaign
+  // put a stacked blue bar on each handle, with grip texture, and eight fresh
+  // reviewers in a row failed to read it as a handle: "too thin, too short, and
+  // lack grip texture or a resize cursor cue"; "more like an incidental
+  // underline/connector"; "a stray blue underline … reads as an unstyled
+  // selection or focus artifact"; "the tick-mark stacks read as decoration, not
+  // affordance … a texture swatch or loading dots". The last of those was
+  // looking at the version WITH the ridges. An affordance that has failed on
+  // eight readers is not underdone, it is the wrong affordance, and leaving it
+  // there costs the band the one thing it turned out to need — being legible as
+  // a single control (see `.diff-hidden-lines .center`).
+  //
+  // `height: 3px` and no borders, so the whole widget — two handles plus the
+  // 16px band between them — is exactly one 22px code row. Monaco stacks
+  // `.top`, `.center` and `.bottom` inside a ZERO-height box, so anything
+  // taller than the row is drawn across the lines either side of the fold
+  // whatever offset it is given; the campaign has traded that overlap from the
+  // line above to the line below and back again. Fitting the row is what
+  // removes it rather than moving it.
+  position relative
+  height 3px !important
+  border-top 0 !important
+  border-bottom 0 !important
+  // Palette grey, not accent blue.
+  //
+  // Blue rules bracketing a tinted strip are the vocabulary of a SPLITTER, and
+  // two reviewers of the accent-coloured version said exactly that without
+  // conferring: "two full-width rules bracketing a tinted strip, plus a
+  // vertical double-arrow glyph, is the exact vocabulary of a resize grip …
+  // the genuine slider at `iteration 1 / 5` is styled less like a handle than
+  // this is", and "restyle its rules to #3a3a3a so it stops signalling drag".
+  // The fold is primarily a BUTTON — a press reveals ten lines — and the drag
+  // is the secondary gesture; the rules should say "separator", and the label
+  // inside the band should carry the affordance.
+  //
+  // Still painted at rest, which is the property Monaco does not give and
+  // `deepreview-gui.spec.ts` "Test 14" pins: it refuses `rgba(0, 0, 0, 0)`.
+  background-color rgba(120, 120, 120, 0.55) !important
+  background-clip padding-box
+  transition background-color 0.1s ease-out, box-shadow 0.1s ease-out
+
+  &:hover
+    background-color rgba(190, 190, 190, 0.95) !important
+
+  // Keyboard reachability (§4.2's controls must not be mouse-only).  The
+  // handle is a few pixels high, so an outline on it alone is nearly
+  // invisible; the focus state rings the whole rule.
+  &:focus
+    outline none
+
+  &:focus-visible
+    background-color rgba(190, 190, 190, 0.95) !important
+    box-shadow 0 0 0 2px rgba(120, 190, 240, 0.9)
+
+.monaco-editor .diff-hidden-lines .top.dragging,
+.monaco-editor .diff-hidden-lines .bottom.dragging
+  background-color rgba(86, 156, 214, 0.8) !important
+
+// The band between the two handles carries Monaco's "N hidden lines" text and
+// its unfold link.  It is themed from `--vscode-diffEditor-unchangedRegion*`,
+// which CodeTracer's Monaco theme does not set, so it is given the tab's own
+// colours here rather than left to a default that reads as a blank strip, and
+// a pointer cursor, so it reads as the button it is (double clicking it, or
+// pressing the unfold icon at its left, reveals the whole region).
+//
+// It carries NO border of its own: the two drag handles are the band's edges,
+// and a rule beside each of them read as a second, broken line — a design
+// reviewer reported the bars as "crossing the band's bottom rule, so the band
+// looks broken rather than clickable".
+// It reads as a CONTROL, not as a label with a control somewhere near it.
+//
+// Every fresh reviewer shown this fold has said some version of the same
+// thing, and the last one said it as a design instruction: "label left, handle
+// centre, stray — right: three separate targets, one function"; "nothing here
+// reads as a button"; "the text — the only thing that says what would happen —
+// has no affordance at all"; "make the whole band one labelled, hoverable
+// expand control (chevron + 'Expand 27 lines', hairline rules)"; and "bands
+// lack top/bottom rules, so they read as code lines, not separators".
+//
+// So: hairline rules top and bottom so the band is a separator rather than a
+// row of code; the count text at ordinary UI contrast rather than at 0.8 of
+// it; and Monaco's own unfold codicon at the left brought up to the accent
+// colour, so the one glyph that already means "expand" is the one the eye
+// lands on. The pointer cursor it always had now has something to belong to.
+.monaco-editor .diff-hidden-lines .center
+  // Neutral, in the theme's own grey family. The first version of these rules
+  // used a blue-slate (rgba(56, 58, 68)), and a reviewer measuring the frame
+  // reported it as "off-palette chrome … blue-slate against a neutral #282828
+  // editor". Nothing about a fold is blue; the band is a step up from the
+  // editor surface, and #3a3a3a is the step the rest of this theme already
+  // uses.
+  //
+  // A FALLBACK, and measured to be one: `diffEditor.unchangedRegionBackground`
+  // in `codetracerDark.json` sets the same colour opaque and outranks this
+  // declaration, so the band paints `#3A3A3A` and changing the alpha here does
+  // nothing. It is kept because a theme that does not set that key would
+  // otherwise leave the band unpainted — but change the THEME key, not this
+  // one, and do not spend a round on the alpha the way a previous reader
+  // nearly did.
+  background-color rgba(58, 58, 58, 0.92)
+  color rgba(232, 232, 232, 0.98)
+  cursor pointer
+  transition background-color 0.1s ease-out
+  // 16px + the two 3px handles is one 22px code row, so the band occupies a
+  // row of its own instead of being drawn across the rows either side of it.
+  // Monaco's own compact variant of this widget uses an 11px/11px text row for
+  // the same reason, so this is its idiom rather than a shrink.
+  height 16px
+  line-height 16px
+  font-size 11px
+  // The rules the band needs are the two handles; a second pair inset here read
+  // as a broken line where the two met.
+  box-shadow none
+
+  // Monaco puts a symbol BREADCRUMB in this band — the enclosing function of
+  // the hidden run, as a chain of clickable items. In a 600px review pane it is
+  // three unexplained marks: a reviewer inventoried the band as "a small
+  // bordered square holding a tiny up/down glyph plus a stray `‹`, a light-blue
+  // snowflake icon, the text, a bordered pill … then two short stacks of blue
+  // vertical tick marks", and the breadcrumb is the first two of those. The
+  // band has one job, and the outline is reachable from the editor already.
+  div.breadcrumb-item
+    display none
+
+  // Monaco puts the count in a child element with its own colour, so a colour
+  // on the band alone does not reach it — a reviewer of the build that had
+  // only the rule above still described "dim grey text". The theme keys
+  // (`diffEditor.unchangedRegion*`, added to `codetracerDark.json`) are the
+  // supported way in; this is the belt to that braces, for the children Monaco
+  // themes from somewhere else.
+  *
+    color inherit
+
+  // Monaco's own unfold codicon — the one glyph in the band that already means
+  // "expand". Reviewers describe it as "a small snowflake/asterisk glyph" and
+  // walk past it; at the accent colour it is the thing the eye lands on, and
+  // it is where two of them said they would click.
+  .codicon
+    color rgba(210, 210, 210, 1) !important
+
+  // The band says what pressing it does.
+  //
+  // Everything else about the fold had been tried across four milestones — a
+  // hairline rule, a grabber pill, grip texture, a lift so it wins the hit
+  // test, an accent-coloured icon — and reviewers kept answering the same
+  // question the same way: "nothing here reads as a button"; "reads as a
+  // passive status strip; nothing about it says 'click me'"; "the text — the
+  // only thing that says what would happen — has no affordance at all". Nine
+  // of ten fresh readers across the campaign have located the COUNT TEXT as
+  // the thing they would aim at, and it was the one element with no chrome.
+  //
+  // So the chrome goes on the text, and it carries a verb. `⇕` because the
+  // control does both things — a press expands by ten lines, a drag follows
+  // the gesture — and an up/down glyph is the one that says both. Monaco owns
+  // the "N hidden lines" string, so the label is appended rather than
+  // replacing it; the count stays where a reader already found it.
+  &::after
+    // The VERB is what made this read as a control — a reviewer shown it cold
+    // called it "the only convincingly pressable thing: it has a border, a
+    // background, and a verb". The `⇕` that came with it did the opposite: two
+    // later reviewers read the double-headed arrow as a resize grip and the
+    // whole band as a splitter. The verb stays; the glyph goes.
+    content "expand"
+    // Sized in PIXELS against the band's own 16px row rather than in `em`
+    // against an inherited font: an em-sized pill with a border came out taller
+    // than the band and hung over its top edge onto the divider below, which a
+    // reviewer reported as "the expand pill overhangs the band's top border and
+    // both overlay the `@@` divider, partly occluding it".
+    display inline-block
+    margin-left 8px
+    padding 0 4px
+    // ALIGNED WITH THE BAND'S OWN TEXT, and `vertical-align` is not how.
+    //
+    // Monaco's `.center` is `display: flex`, so this pseudo-element is a FLEX
+    // ITEM: `vertical-align` has no effect on it at all, and the earlier
+    // `vertical-align: middle` was doing nothing while looking like it was.
+    // What actually placed the pill was `align-items`, which is `normal` —
+    // stretch — so with no height the pill grew to the flex line's full 24px,
+    // and with a height it fell back to the start of the line. Measured off a
+    // capture of the shipped build: the band's text ran y 55..63 and the
+    // pill's y 48..60, which three reviewers reported in three ways — "the
+    // `expand` label sits ~6px above the band's text baseline", "it sits ~4px
+    // above the label's baseline", "a pale grey capsule that breaks the
+    // band's top rule, sitting half outside it".
+    //
+    // `align-self: center` is the property that governs here, and it lands on
+    // the baseline as a consequence rather than by tuning: Monaco centres the
+    // "N hidden lines" label in the same 24px line (measured 121.9..137.9 in
+    // 117.9..141.9), so two centred boxes with the same text centre share a
+    // baseline. Measured after: both baselines at 132.9.
+    //
+    // `height` and `line-height` are the same number so the pill's box IS its
+    // line box — a box taller than its text is what let the alignment drift
+    // unnoticed in the first place. 12px plus two 1px borders is 14px in a
+    // 16px band, so the pill keeps a pixel of band above and below it and its
+    // border stays its own rather than merging into the band's rules.
+    align-self center
+    height 12px
+    line-height 12px
+    border 1px solid rgba(255, 255, 255, 0.30)
+    // A fill, for the same reason. An outline-only pill on a band that already
+    // has two rules is one more line among lines; a filled one is an object on
+    // top of them.
+    background-color rgba(255, 255, 255, 0.10)
+    border-radius 2px
+    font-size 10px
+    // Neutral, for the reason on `.ct-diff-line-hunk-header` above: this is
+    // chrome on a grey band, and a blue outline made two reviewers inventory it
+    // as something from a different product.
+    color rgba(226, 226, 226, 1)
+
+  &:hover
+    background-color rgba(74, 74, 74, 0.98)
+    color rgba(246, 246, 246, 1)
+
+    &::after
+      background-color rgba(255, 255, 255, 0.14)
+      border-color rgba(255, 255, 255, 0.55)
+
+// --- The boundary's context menu (UD-2) ----------------------------------
+//
+// "a context menu offering more lines or the whole file in that direction",
+// both directions independently.  Monaco has no menu on the boundary at all,
+// so this is ours; the items come from
+// `viewmodel/viewmodels/diff_expansion_menu.nim`.
+//
+// It is appended to `document.body` rather than into the editor, because the
+// editor clips its own overflow and a menu opened at a boundary near the
+// bottom of the tab would be cut in half.
+
+.ct-diff-expand-menu
+  z-index 10002
+  min-width 15em
+  padding 0.25em 0
+  border-radius 4px
+  background-color #252526
+  border 1px solid rgba(255, 255, 255, 0.12)
+  box-shadow 0 4px 14px rgba(0, 0, 0, 0.45)
+
+.ct-diff-expand-menu-item
+  display block
+  width 100%
+  padding 0.35em 1em
+  border none
+  background transparent
+  color inherit
+  font-family inherit
+  font-size 0.95em
+  text-align left
+  cursor pointer
+
+  &:hover,
+  &:focus
+    background-color rgba(86, 156, 214, 0.30)
+    outline none
+
+// --- The gutter reads as ONE rail (UD-4) ---------------------------------
+//
+// Monaco's inline diff is two code editors: the original laid out as a narrow
+// strip to the left of the modified one. That is where a deleted line's old
+// number comes from, so neither strip can be removed — but drawn on the
+// editor's own background they read as two unrelated columns of digits, and
+// every reviewer of every view has said so: "the `-` markers sit at the far
+// left, the `+` about 28px right of them … three misaligned columns for what
+// is one rail", "`-`/its number occupy x 0-19, `+`/its number x 26-50, ~28px
+// apart", "two columns, so the rail zig-zags".
+//
+// The columns cannot be merged — their widths are Monaco's, derived per editor
+// from `lineNumbersMinChars` — but they can be made one SURFACE. A single
+// slightly-recessed band behind both margins, with a hairline where it meets
+// the code, is what a reader reads as a gutter; the seam between the two
+// editors then falls inside it instead of between two floating columns.
+.monaco-diff-editor .monaco-editor .margin
+  background-color rgba(0, 0, 0, 0.16)
+
+// The hairline goes on the MODIFIED side only, because that is the one that
+// borders the code; a rule on the original strip would draw a second line down
+// the middle of the rail, which is the defect this rule exists to remove.
+.monaco-diff-editor .modified-in-monaco-diff-editor .margin
+  box-shadow inset -1px 0 0 rgba(255, 255, 255, 0.06)
+
+// The minimap is one of the affordances a DOM diff could not offer (DR-R4) and
+// stays, but in a pane this narrow it was reading louder than the code: "a
+// flat mid-grey ~#555 slab, far lighter than the palette; reads as a misplaced
+// scrollbar", "a bright grey ~30px column sits over the shear point". Dropped
+// to a weight where it is a map of the file rather than a second column of
+// content competing with the first.
+.monaco-diff-editor .minimap
+  opacity 0.5
+
+.ct-diff-gutter
+  text-align center
+  user-select none
+
+// UD-1 moved the visible marker into the gutter LABEL
+// (`diff_document.lineNumberLabels` emits `+42` / `-41` / ` 40`), so these
+// classes are now the classification only — the seam the GUI suites assert
+// the added / removed / context decision on, and the hook any future gutter
+// affordance hangs from.
+//
+// They stopped drawing the glyph because they cannot: Monaco sizes the
+// *original* editor of an inline diff from its `lineNumbersMinChars` alone,
+// and a line-decorations lane beside the numbers there does not fit at any
+// width Monaco grants — measured, it took the old line numbers off screen
+// with it, and a design review reported the deleted lines as unnumbered.
+// One marker, in a column that exists on both sides, is the resolution.
+.ct-diff-gutter-added::before,
+.ct-diff-gutter-removed::before,
+.ct-diff-gutter-context::before
+  content ""
+
+// The marker's colour comes from the label it now lives in.  Monaco applies a
+// decoration's `lineNumberClassName` to that line's gutter label
+// (`IModelDecorationOptions.lineNumberClassName`, monaco-editor 0.54), which
+// is the one hook that can colour a *specific* line's number — the polarity
+// has to be per line, not per side, or every context line in the new revision
+// would read as an addition.
+.ct-diff-linenum-added
+  color #3fb950 !important
+
+.ct-diff-linenum-removed
+  color #f85149 !important

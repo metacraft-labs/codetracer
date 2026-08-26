@@ -10,12 +10,60 @@ fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
 }
 
+/// Require the JavaScript recorder, or fail loudly.
+///
+/// `codetracer-js-recorder` is a **required** sibling for these suites
+/// (`ci/test/ct-providers.sh`), so its absence is an environment error
+/// rather than a reason to report success. Silently skipping is how the
+/// JS locals tests stayed green for the whole lifetime of issue #602 —
+/// the recorder was missing from CI, the tests returned early, and the
+/// broken State panel went unnoticed.
+///
+/// `CT_PROVIDERS_ALLOW_MISSING=1` is the documented escape hatch (see
+/// the repo CLAUDE.md) for running the suite without the recorder
+/// siblings; only then do we skip. Returns `true` when the caller should
+/// proceed.
+fn require_js_recorder() -> bool {
+    if find_js_recorder().is_some() {
+        return true;
+    }
+    if std::env::var("CT_PROVIDERS_ALLOW_MISSING").is_ok() {
+        eprintln!(
+            "SKIPPED (CT_PROVIDERS_ALLOW_MISSING=1): JavaScript recorder not found; \
+             set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder"
+        );
+        return false;
+    }
+    panic!(
+        "codetracer-js-recorder not found — it is a REQUIRED sibling for this suite. \
+         Set CODETRACER_JS_RECORDER_PATH, put codetracer-js-recorder on PATH, or set \
+         CT_PROVIDERS_ALLOW_MISSING=1 to skip."
+    );
+}
+
+/// Build the trace-directory label for one test in this file.
+///
+/// `TestRecording::create_db_trace` derives its temp directory from
+/// `(language, format, version_label, pid, source-path hash)`. Both tests
+/// in this file record the *same* source from the *same* process, so with
+/// a bare Node version label they resolve to the same directory and race:
+/// whichever test gets there second finds the recorder output already
+/// renamed away and fails with "failed to rename trace dir". Folding the
+/// test name into the label keeps the two recordings apart.
+fn trace_label(test_name: &str) -> String {
+    let node_version = std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("{node_version}-{test_name}")
+}
+
 #[test]
 fn javascript_flow_dap_variables_and_values() {
-    if find_js_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: JavaScript recorder not found (set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder)"
-        );
+    if !require_js_recorder() {
         return;
     }
 
@@ -29,14 +77,7 @@ fn javascript_flow_dap_variables_and_values() {
         source_path.display()
     );
 
-    // Get Node.js version for labeling
-    let version_label = std::process::Command::new("node")
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+    let version_label = trace_label("variables_and_values");
 
     // Record the trace
     let recording = TestRecording::create_db_trace(&source_path, Language::JavaScript, &version_label)
@@ -65,10 +106,7 @@ fn javascript_flow_dap_variables_and_values() {
 
 #[test]
 fn test_js_locals_all_statements() {
-    if find_js_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: JavaScript recorder not found (set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder)"
-        );
+    if !require_js_recorder() {
         return;
     }
 
@@ -82,13 +120,7 @@ fn test_js_locals_all_statements() {
         source_path.display()
     );
 
-    let version_label = std::process::Command::new("node")
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+    let version_label = trace_label("locals_all_statements");
 
     let recording = TestRecording::create_db_trace(&source_path, Language::JavaScript, &version_label)
         .expect("JavaScript recording failed");

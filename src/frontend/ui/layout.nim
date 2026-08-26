@@ -1,14 +1,15 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
-  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
+  state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   frame_viewer, pixel_history, shader_debug, video_player,
-  vcs,
-  agent_activity, agent_activity_deepreview, agent_workspace,
+  vcs, unified_diff,
+  agent_activity, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config, utils ],
+  ../index/layout_config_repair,
   ../lib/[ logging, misc_lib, jslib ]
 
 import kdom except Location
@@ -62,22 +63,24 @@ proc configureFind =
 var document {.importc.}: js
 
 proc enforceMinStackWidth*(layout: GoldenLayout) =
-  ## Walk every stack in the layout tree and distribute the desired constant
-  ## minimum width evenly across its component items so GL's per-component sum
-  ## always equals MIN_STACK_PX regardless of how many tabs are open.
+  ## Walk every stack in the layout tree and set each component item's
+  ## minimum size to MIN_STACK_PX.
+  ##
+  ## GL uses the ACTIVE component's minSize as the stack's effective minimum,
+  ## not the sum — so the minimum must be set on every component individually
+  ## (not divided by n) to ensure the stack stays at least MIN_STACK_PX wide
+  ## regardless of which tab is currently active.
   ## SizeUnitEnum.Pixel is the string "px" in GL 2.x.
   {.emit: """
-    const MIN_STACK_PX = 150;
+    const MIN_STACK_PX = 200;
     const MIN_STACK_PX_H = 50;
     function visit(item) {
       if (!item || !item.contentItems) return;
       if (item.isStack) {
         const n = item.contentItems.length;
         if (n > 0) {
-          const perW = Math.ceil(MIN_STACK_PX / n);
-          const perH = Math.ceil(MIN_STACK_PX_H / n);
           for (const ci of item.contentItems) {
-            ci.minSize     = `layout`.isColumn ? perH : perW;
+            ci.minSize     = `layout`.isColumn ? MIN_STACK_PX_H : MIN_STACK_PX;
             ci.minSizeUnit = "px";
           }
         }
@@ -242,6 +245,254 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   """.}
 
 
+proc setupDropdownDismissListeners() =
+  ## Close an open dropdown when Escape is pressed or the pointer goes down
+  ## outside it.  Without this the branch picker stayed open until its own
+  ## trigger was clicked again, so it could be left hanging over the panel while
+  ## the user worked elsewhere.
+  ##
+  ## Dismissal re-clicks the menu's own trigger rather than hiding the element:
+  ## each dropdown's open state lives in its ViewModel, and hiding the DOM alone
+  ## would leave that state saying "open" — the next click on the trigger would
+  ## then appear to do nothing.
+  ##
+  ## Listeners are in the capture phase and never call `preventDefault`, so the
+  ## click that dismisses a menu still reaches whatever it landed on.
+  {.emit: """
+    (function () {
+      // One entry per dropdown:
+      //   container — the whole control; a pointer landing inside it is not a
+      //               dismissal, so the menu's own rows stay clickable;
+      //   open      — a selector that exists only while the menu is open;
+      //   trigger   — what to re-click to close it.  Null means "the element
+      //               immediately before the open menu", which is how the
+      //               event-log filters are built.
+      //
+      // Context menus are absent on purpose: `viewmodel/views/context_menu_bridge`
+      // already dismisses them on Escape and on any document click, and driving
+      // them from here as well would close them twice.
+      var DISMISSIBLE = [
+        { container: '.vcs-branch-picker',
+          open: '.vcs-branch-current-open',
+          trigger: '.vcs-branch-current-open' },
+        { container: '.layout-buttons-container',
+          open: '.layout-buttons-container.active',
+          trigger: '.layout-buttons-container.active' },
+        { container: '.session-tab-bar',
+          open: '.session-tab-bar.overflow-open',
+          trigger: '.session-tab-bar.overflow-open .session-tab-overflow' },
+        { container: '.ct-picker',
+          open: '.ct-picker-trigger--open',
+          trigger: '.ct-picker-trigger--open' },
+        { container: '.hamburger-dropdown-container',
+          open: '.dropdown-list.active',
+          trigger: null }
+      ];
+
+      function triggerFor(entry) {
+        if (entry.trigger !== null) { return document.querySelector(entry.trigger); }
+        var opened = document.querySelector(entry.open);
+        return opened === null ? null : opened.previousElementSibling;
+      }
+
+      function closeOpenMenus(isInside) {
+        for (var i = 0; i < DISMISSIBLE.length; i++) {
+          var entry = DISMISSIBLE[i];
+          if (document.querySelector(entry.open) === null) { continue; }
+          if (isInside !== null && isInside(entry.container)) { continue; }
+          var trigger = triggerFor(entry);
+          if (trigger !== null) { trigger.click(); }
+        }
+      }
+
+      document.addEventListener('mousedown', function (ev) {
+        var target = ev.target;
+        if (!target || !target.closest) { return; }
+        closeOpenMenus(function (container) {
+          return target.closest(container) !== null;
+        });
+      }, true);
+
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Escape' && ev.keyCode !== 27) { return; }
+        closeOpenMenus(null);
+      }, true);
+    })();
+  """.}
+
+proc setupSelectedPanelOutline() =
+  ## Draw the selected panel's outline as ONE stroked SVG path.
+  ##
+  ## The tab's concave connectors are painted by box-shadows, and a shadow is a
+  ## fill with no edge — nothing to put a border on.  Every CSS attempt to
+  ## outline the shape therefore stroked some *other* rectangle and cut across
+  ## the curve.  A single path sidesteps that entirely: tab, both connectors and
+  ## the panel are one continuous outline, so the joins are exact by
+  ## construction rather than by alignment.
+  ##
+  ## The path is rebuilt from measured geometry, so it follows any tab width,
+  ## any radius and any panel size.  Stroke colour and width come from the
+  ## stylesheet (`.ct-selected-outline`), keeping them on design tokens.
+  {.emit: """
+    (function () {
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var OUTLINE_CLASS = 'ct-selected-outline';
+
+      // Each corner carries its own radius: they are not interchangeable.  The
+      // top-left is squared when the tab is flush against it, and reading one
+      // corner for all four drew a square outline over a rounded panel.
+      function buildPath(w, h, tabX0, tabX1, tabTop, panelTop, panelBottom,
+                         tabTL, tabTR, panelTL, panelTR, panelBR, panelBL,
+                         connR, inset, tabIsFirst) {
+        // Inset by half the stroke so the line sits INSIDE the shape: SVG
+        // centres a stroke on its path.
+        var l = inset, r = w - inset, b = panelBottom - inset, t = tabTop + inset;
+        var x0 = tabX0 + inset, x1 = tabX1 - inset, pt = panelTop + inset;
+
+        // Clockwise from the tab's top-left. Convex corners sweep 1, the two
+        // concave connectors sweep 0 — that flag is the whole difference
+        // between a rounded corner and the curve that flows into the panel.
+        var d = [];
+        d.push('M', x0 + tabTL, t);
+        d.push('L', x1 - tabTR, t);
+        d.push('A', tabTR, tabTR, 0, 0, 1, x1, t + tabTR);
+        d.push('L', x1, pt - connR);
+        d.push('A', connR, connR, 0, 0, 0, x1 + connR, pt);
+        d.push('L', r - panelTR, pt);
+        d.push('A', panelTR, panelTR, 0, 0, 1, r, pt + panelTR);
+        d.push('L', r, b - panelBR);
+        d.push('A', panelBR, panelBR, 0, 0, 1, r - panelBR, b);
+        d.push('L', l + panelBL, b);
+        d.push('A', panelBL, panelBL, 0, 0, 1, l, b - panelBL);
+        if (tabIsFirst) {
+          // The tab is flush with the panel's left edge: one straight run from
+          // the panel's bottom-left up the shared edge into the tab.  No corner
+          // to round, and no connector — there is nothing to its left.
+          d.push('L', l, t + tabTL);
+        } else {
+          d.push('L', l, pt + panelTL);
+          d.push('A', panelTL, panelTL, 0, 0, 1, l + panelTL, pt);
+          d.push('L', x0 - connR, pt);
+          d.push('A', connR, connR, 0, 0, 0, x0, pt - connR);
+          d.push('L', x0, t + tabTL);
+        }
+        d.push('A', tabTL, tabTL, 0, 0, 1, x0 + tabTL, t);
+        d.push('Z');
+        return d.join(' ');
+      }
+
+      function radiusOf(el, pseudo, prop) {
+        var v = parseFloat(window.getComputedStyle(el, pseudo || null)[prop]);
+        return isFinite(v) ? v : 0;
+      }
+
+      function clearOutlines(except) {
+        var existing = document.querySelectorAll('.' + OUTLINE_CLASS);
+        for (var i = 0; i < existing.length; i++) {
+          if (existing[i] !== except) { existing[i].remove(); }
+        }
+      }
+
+      function update() {
+        var stack = document.querySelector('.lm_stack:has(> .lm_header.lm_focused)');
+        if (stack === null) { clearOutlines(null); return; }
+
+        var tab = stack.querySelector(':scope > .lm_header .lm_tab.lm_active');
+        var items = stack.querySelector(':scope > .lm_items');
+        if (tab === null || items === null) { clearOutlines(null); return; }
+
+        var sr = stack.getBoundingClientRect();
+        var tr = tab.getBoundingClientRect();
+        var ir = items.getBoundingClientRect();
+        if (sr.width < 1 || ir.height < 1) { clearOutlines(null); return; }
+
+        var svg = stack.querySelector(':scope > .' + OUTLINE_CLASS);
+        if (svg === null) {
+          svg = document.createElementNS(SVG_NS, 'svg');
+          svg.setAttribute('class', OUTLINE_CLASS);
+          svg.appendChild(document.createElementNS(SVG_NS, 'path'));
+          stack.appendChild(svg);
+        }
+        clearOutlines(svg);
+
+        var path = svg.firstChild;
+        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
+
+        svg.setAttribute('viewBox', '0 0 ' + sr.width + ' ' + sr.height);
+        svg.setAttribute('width', sr.width);
+        svg.setAttribute('height', sr.height);
+
+        path.setAttribute('d', buildPath(
+          sr.width, sr.height,
+          tr.left - sr.left, tr.right - sr.left, tr.top - sr.top,
+          ir.top - sr.top, ir.bottom - sr.top,
+          radiusOf(tab, null, 'borderTopLeftRadius'),
+          radiusOf(tab, null, 'borderTopRightRadius'),
+          radiusOf(items, null, 'borderTopLeftRadius'),
+          radiusOf(items, null, 'borderTopRightRadius'),
+          radiusOf(items, null, 'borderBottomRightRadius'),
+          radiusOf(items, null, 'borderBottomLeftRadius'),
+          radiusOf(tab, '::before', 'borderBottomRightRadius') || 10,
+          strokeWidth / 2,
+          tab.parentElement !== null && tab.parentElement.firstElementChild === tab));
+      }
+
+      var pending = false;
+      function schedule() {
+        if (pending) { return; }
+        pending = true;
+        window.requestAnimationFrame(function () { pending = false; update(); });
+      }
+
+      // Focus moves by a class change, wherever it came from — a tab click, the
+      // click-to-focus listener, or GoldenLayout itself — so watch the class
+      // rather than any one entry point.  Resizes and tab drags change the
+      // geometry without touching focus, hence the resize hook too.
+      var observer = new MutationObserver(schedule);
+      observer.observe(document.body, {
+        attributes: true, attributeFilter: ['class'], subtree: true, childList: true
+      });
+      window.addEventListener('resize', schedule);
+      schedule();
+    })();
+  """.}
+
+proc setupClickToFocusListeners() =
+  ## Focus the panel the user clicks *into*, not only the one whose tab they hit.
+  ##
+  ## GoldenLayout only focuses a stack from its tab, so clicking straight into a
+  ## panel's body left the selected-panel surface behind on whichever tab was
+  ## touched last — the highlight pointed at a panel the user was not working in.
+  ##
+  ## The click is forwarded to the stack's already-active tab rather than the
+  ## focus class being set directly, so GoldenLayout's own focus bookkeeping runs
+  ## (it blurs the previously focused item and emits its focus event); setting the
+  ## class here would leave the two disagreeing.
+  ##
+  ## Listens in the capture phase and never calls `preventDefault`, so the click
+  ## still reaches whatever was clicked — this only runs alongside it.
+  {.emit: """
+    document.addEventListener('mousedown', function (ev) {
+      var target = ev.target;
+      if (!target || !target.closest) return;
+
+      var stack = target.closest('.lm_stack');
+      if (stack === null) return;
+
+      // Header clicks are GoldenLayout's own business: tabs, the close and pin
+      // buttons and the stack menu all live there and already focus correctly.
+      if (target.closest('.lm_header') !== null) return;
+
+      // Already the selected panel — nothing to do.
+      if (stack.querySelector(':scope > .lm_header.lm_focused') !== null) return;
+
+      var activeTab = stack.querySelector(':scope > .lm_header .lm_tab.lm_active');
+      if (activeTab !== null) {
+        activeTab.click();
+      }
+    }, true);
+  """.}
+
 proc setupDragToPinListeners(layout: GoldenLayout) =
   ## Wire drag-to-pin listener.
   ## Coordinates mousemove/mouseup events when a tab is dragged to check
@@ -358,6 +609,26 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   if not data.ui.componentMapping[content].hasKey(id):
     raise newException(Exception, "There is not any component with the given id.")
 
+  # Detach the component from the event bus BEFORE it leaves the registry.
+  # Dropping the reference alone is not enough: the component's handlers live
+  # on its private mediator, which is itself registered as a subscriber of
+  # `data.viewsApi`, so a closed panel keeps receiving (and acting on) every
+  # event it ever subscribed to.  Re-opening the panel then adds a second
+  # live handler, and each closed generation multiplies the effect — this is
+  # what made "Add to Scratchpad" append the same value once per generation
+  # (#612).  `itemDestroyed` suppresses this path while auto-hide is
+  # reparenting a panel, so a pinned panel is never unregistered here.
+  let closedComponent = data.ui.componentMapping[content][id]
+  if not closedComponent.isNil:
+    closedComponent.unregister()
+
+  # A closed diff tab drops its ViewModel and its source-text cache with it, so
+  # a re-opened tab starts with no hunk selection, no context expansion and no
+  # cached blobs — DR-R5: "Expansion state resets when the tab is closed and
+  # does not leak between files."
+  if content == Content.UnifiedDiff:
+    unified_diff.forgetUnifiedDiffTab(id)
+
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
 
@@ -375,6 +646,16 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
 # Menu/status/session-tab-bar/fixed-search are refreshed directly; the global
 # search-results footer placeholder is static and no longer has a Karax stub.
 var sharedRenderersInitialised = false
+
+# Coalescing state for the `window.resize` -> menu re-render below.
+#
+# MODULE level, deliberately, not per `initLayout` call: `initLayout` runs
+# once per session (`ui_js.nim` on load, `session_switch.nim` on first
+# activation of each new session) and the `resize` listener it installs is
+# never removed, so a workspace with N sessions has N listeners.  Holding the
+# throttle here means those N listeners still collapse to a single menu
+# render per window, instead of N renders per resize event.
+var menuResizeRenderPending = false
 
 proc ensureSharedRenderers() =
   ## Set up the shared global chrome elements that live outside individual
@@ -409,6 +690,135 @@ proc ensureSharedRenderers() =
 
   if not data.ui.status.isNil:
     discard windowSetTimeout(proc() = data.ui.status.requestStatusRender(), 0)
+
+## The layout shipped with CodeTracer, embedded at compile time.
+##
+## It is the last-resort fallback for `loadLayoutSafely`: if the persisted
+## layout AND its repaired form are both rejected by GoldenLayout, we still
+## have to hand `loadLayout` *something*, because everything after it in
+## `initLayout` — auto-hide init, the `stateChanged` / `itemDestroyed`
+## handlers, standalone panel registration — must still run.  Reading it
+## from disk here would need another IPC round trip during startup; the file
+## is ~6 KB, so embedding it is cheaper than the mechanism to fetch it.
+const bundledDefaultLayoutJson = staticRead("../../config/default_layout.json")
+
+proc tryParseLayoutJson(raw: cstring): js {.importjs:
+  """(function(raw) {
+    try { return JSON.parse(raw); } catch (error) { return null; }
+  })(#)""".}
+
+proc callLoadLayoutUnchecked(layout: GoldenLayout,
+                             config: GoldenLayoutResolvedConfig) =
+  ## Thin wrapper that calls `loadLayout` as a normal Nim call, so
+  ## `loadLayoutOnce` can reference the call site from inside a JS-level
+  ## try/catch without emit-level name-resolution issues.  Mirrors
+  ## `ui/session_switch.nim`'s `callInitLayoutUnchecked`.
+  layout.loadLayout(config)
+
+proc loadLayoutOnce(layout: GoldenLayout, config: GoldenLayoutResolvedConfig,
+                    what: cstring): bool =
+  ## Apply a config to GoldenLayout, reporting failure instead of propagating
+  ## it.  The try/catch is raw JavaScript on purpose: GoldenLayout signals a
+  ## rejected config with a native `Error` (`ActiveItemIndex out of range`,
+  ## `ConfigurationError`, a `TypeError` from an unknown component type), and
+  ## Nim's `except` catches only Nim-derived exceptions — the same reason
+  ## `ui/session_switch.nim:97-116` uses this pattern around `initLayout`.
+  if config.isNil:
+    return false
+  {.emit: """
+    try {
+      `callLoadLayoutUnchecked`(`layout`, `config`);
+      `result` = true;
+    } catch (e) {
+      console.warn("layout: loadLayout rejected " + `what` + ": " +
+        (e && e.message ? e.message : String(e)));
+      `result` = false;
+    }
+  """.}
+
+proc loadLayoutSafely(layout: GoldenLayout,
+                      initialLayout: GoldenLayoutResolvedConfig): bool
+                     {.discardable.} =
+  ## Apply the session's layout, degrading rather than aborting.
+  ##
+  ## A config that GoldenLayout rejects used to throw straight out of
+  ## `initLayout`, *after* `data.ui.layout` had been assigned but *before*
+  ## auto-hide init, the event handlers and the standalone panels were
+  ## installed — a half-initialised, unusable window that reappeared on every
+  ## launch because nothing rewrote the offending file (issue #608).
+  ##
+  ## Three attempts, in decreasing fidelity to what the user arranged:
+  ## the saved config, its repaired form, then the bundled default.
+  if loadLayoutOnce(layout, initialLayout, cstring"the saved layout"):
+    return true
+
+  let repair = repairLayoutConfig(cast[js](initialLayout))
+  if repair.ok:
+    for issue in repair.issues:
+      cwarn "layout: repairing the rejected layout: " & $issue
+    if loadLayoutOnce(layout,
+                      cast[GoldenLayoutResolvedConfig](repair.config),
+                      cstring"the repaired layout"):
+      cwarn "layout: restored the saved layout after repairing it"
+      return true
+
+  let bundled = tryParseLayoutJson(cstring(bundledDefaultLayoutJson))
+  if not bundled.isNil and
+      loadLayoutOnce(layout, cast[GoldenLayoutResolvedConfig](bundled),
+                     cstring"the bundled default layout"):
+    cerror "layout: the saved layout could not be restored; " &
+      "fell back to the bundled default"
+    return true
+
+  cerror "layout: no layout config could be applied; " &
+    "continuing with an empty GoldenLayout so the rest of the UI still mounts"
+  return false
+
+proc persistAutoHideState*() =
+  ## Send the current pinned-panel set to the index process, which writes it
+  ## to `~/.config/codetracer/auto_hide_state.json`.
+  ##
+  ## The panels a user pins are REMOVED from the GoldenLayout tree, so they
+  ## are not part of the layout config and cannot ride along with it — they
+  ## need their own persisted file, and this is the only writer.
+  if ipc.isNil or ipc.isUndefined:
+    return
+  let serialized = serializeAutoHideState()
+  if serialized.isNil or serialized.isUndefined:
+    return
+  ipc.send "CODETRACER::save-auto-hide-state", js{
+    state: JSON.stringify(serialized)
+  }
+
+var autoHideStateRestored = false
+  ## Guards the once-per-process restore in `initLayout`; see the call site.
+
+proc requestSavedAutoHideState(): JsObject =
+  ## Read back the auto-hide (pinned panel) state the index process persisted.
+  ##
+  ## Synchronous on purpose.  The standalone auto-hide panels are registered
+  ## on a 500 ms timer whose `findPanelByContent` skip is what keeps a
+  ## restored panel from being duplicated, so the restore has to have
+  ## happened before `initLayout` returns; an async round trip would make
+  ## that a race.  The payload is a few hundred bytes, read once per window.
+  ##
+  ## Returns `undefined` when there is no saved state, when the IPC bridge is
+  ## absent (server builds render without Electron), or when the payload does
+  ## not parse — every one of which is an ordinary first-run situation.
+  {.emit: """
+    `result` = undefined;
+    try {
+      if (`ipc` && typeof `ipc`.sendSync === 'function') {
+        const raw = `ipc`.sendSync("CODETRACER::request-auto-hide-state");
+        if (typeof raw === 'string' && raw.length > 0) {
+          `result` = JSON.parse(raw);
+        }
+      }
+    } catch (e) {
+      console.warn("layout: could not read the saved auto-hide state: " +
+        (e && e.message ? e.message : String(e)));
+    }
+  """.}
 
 # Triage: rename to initGoldenLayout
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
@@ -727,12 +1137,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # container.tab.contentItem reference to golden layout item
         lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-      if state.content == Content.VCS:
+      if state.content == Content.UnifiedDiff:
         let component = data.ui.componentMapping[state.content][state.id]
         if not component.isNil:
-          let vcsComp = VCSComponent(component)
-          if not vcsComp.diffTarget.isNil and ($vcsComp.diffTarget).startsWith("diff:"):
-            let target = ($vcsComp.diffTarget)[5 .. ^1]
+          let diffComp = UnifiedDiffComponent(component)
+          if not diffComp.diffTarget.isNil and ($diffComp.diffTarget).startsWith("diff:"):
+            let target = ($diffComp.diffTarget)[5 .. ^1]
             if target == "Working Tree":
               tab.setTitle("Diff: Working Tree")
             elif target.startsWith("file:"):
@@ -794,8 +1204,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
-      Content.DeepReview,
       Content.VCS,
+      Content.UnifiedDiff,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
       Content.AgentWorkspace,
@@ -980,39 +1390,29 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             CommandPaletteComponent(component))
           command.tryMountIsoNimCommandPalettePanel()
 
-        if state.content == Content.DeepReview:
-          deepreview.syncLegacyDeepReviewIntoVM(
-            DeepReviewComponent(component))
-          deepreview.tryMountIsoNimDeepReviewPanel(component.id)
-
         if state.content == Content.VCS:
           vcs.syncLegacyVCSIntoVM(VCSComponent(component))
           vcs.tryMountIsoNimVCSPanel(component.id)
+
+        # A unified diff is an editor-area *document*, not a second VCS panel
+        # (VCS-Panel.md, "Unified Diff View (Editor Integration)"): the sync
+        # parses the target's hunks into the tab's ViewModel and the mount
+        # creates the Monaco instance over them.
+        if state.content == Content.UnifiedDiff:
+          unified_diff.syncIntoVM(UnifiedDiffComponent(component))
+          unified_diff.tryMountUnifiedDiffTab(component.id)
 
         if state.content == Content.AgentActivity:
           agent_activity.syncLegacyAgentActivityIntoVM(
             AgentActivityComponent(component))
           agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
 
-        # AgentActivityDeepReview is now an IsoNim view -- its DOM
-        # is mounted by
-        # ``agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel``
-        # against the ``agentActivityDeepReviewComponent-{id}``
-        # container, and reactive effects keep it in sync.  No
-        # direct-DOM redraw hook is needed here. The
-        # legacy ``AgentActivityDeepReviewComponent`` remains as the
-        # event-bus carrier (the ``IPC_DEEPREVIEW_NOTIFICATION``
-        # handler keeps populating ``self.fileEntries`` /
-        # ``self.recentNotifications``) and
-        # ``syncLegacyAgentActivityDeepReviewIntoVM`` mirrors any
-        # rows already accumulated when the panel becomes visible.
-        # Mission goal #3 \u00a71.73.  The rich per-row affordances
-        # (per-file coverage bar, per-notification colour pills,
-        # the "Functions" summary card) remain a follow-up.
-        if state.content == Content.AgentActivityDeepReview:
-          agent_activity_deepreview.syncLegacyAgentActivityDeepReviewIntoVM(
-            AgentActivityDeepReviewComponent(component))
-          agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel()
+        # ``Content.AgentActivityDeepReview`` has no renderer of its own since
+        # AA-1 deleted the roll-up.  The id survives as the review's layout
+        # identity for the Agent Activity pillar (see the note on the
+        # ``Content`` enum), so a layout persisted by an older build still
+        # constructs its component and gets an empty pane; there is nothing to
+        # mount into it until AA-2/AA-3 render the session's own content.
 
         if state.content == Content.AgentWorkspace:
           agent_workspace.syncLegacyAgentWorkspaceIntoVM(
@@ -1057,7 +1457,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     `initialLayout`.dimensions.borderGrabWidth = 8;
     `initialLayout`.dimensions.headerHeight = `data`.ui.fontSize * 2;
   """.}
-  layout.loadLayout(initialLayout)
+  # NEVER call `loadLayout` directly here: a config GoldenLayout rejects
+  # throws a native JS Error that Nim cannot catch, which would abort the
+  # rest of this proc (auto-hide, event handlers, standalone panels) and
+  # leave a half-initialised window — issue #608.
+  loadLayoutSafely(layout, initialLayout)
   enforceMinStackWidth(layout)
 
   # M21: Register IPC handler for receiving panels from other windows.
@@ -1066,7 +1470,32 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.
   initAutoHideState()
+
+  # Restore the panels the user pinned to a screen edge in an earlier
+  # session.  This has to happen here — after `initAutoHideState`, before the
+  # 500 ms standalone-panel registration below — because that loop skips any
+  # content already present in the auto-hide state (`findPanelByContent`),
+  # which is what stops a restored BUILD/PROBLEMS/SEARCH/REQUESTS panel from
+  # being duplicated as a fresh standalone one.
+  #
+  # Before this call `restoreAutoHideState` had zero call sites and the state
+  # was posted to an IPC channel nobody listened on, so pinning a panel never
+  # survived a restart (issue #608).
+  #
+  # Once per renderer process, not once per `initLayout`: creating or
+  # switching to another session calls this proc again against the SAME
+  # module-level `autoHideState`, and `restoreAutoHideState` appends, so a
+  # second restore would duplicate every pinned panel in the strips.
+  if not autoHideStateRestored:
+    autoHideStateRestored = true
+    let savedAutoHideState = requestSavedAutoHideState()
+    if not savedAutoHideState.isNil and not savedAutoHideState.isUndefined:
+      restoreAutoHideState(savedAutoHideState)
+
   setupDragToPinListeners(layout)
+  setupClickToFocusListeners()
+  setupSelectedPanelOutline()
+  setupDropdownDismissListeners()
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
     let isEditor = panel.config.componentState.isEditor.to(bool)
     let edge = panel.edge
@@ -1163,6 +1592,28 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     if not data.ui.status.isNil:
       data.ui.status.requestStatusRender()
     requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
+    # …and the collapsed status-bar icon zone, for the same reason and on the
+    # same terms as the bottom strip: it is a host inside the status shell, so
+    # the mount below is a no-op while the host is missing and `ui/status.nim`
+    # re-mounts it whenever it rebuilds the shell.
+    #
+    # This line was missing, and its absence is a real defect rather than a
+    # missed optimisation.  When the strips are collapsed — the normal state for
+    # a maximized window, `Planned-Features/Auto-Hide-Panes.md` §1.3 — the side
+    # strip renders as a 1 px accent line with no tabs, and §10 makes the icon
+    # zone the replacement affordance: "This icon zone serves as the panel
+    # directory — it tells the user which panels" are pinned.  With no render
+    # request here, pinning a panel while collapsed left the zone empty until
+    # something unrelated happened to rebuild the status shell, so the panel had
+    # no visible affordance at all.
+    requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+    # Persist here rather than only from the `stateChanged` handler below.
+    # Pinning is a REPARENT, and `itemDestroyed` deliberately returns early
+    # while `data.ui.isReparenting` is set, so a pin can complete without
+    # ever setting `data.ui.saveLayout` — the flag that gates the save in
+    # `stateChanged`.  Hanging the write off the auto-hide state's own
+    # change hook makes the persistence follow the thing being persisted.
+    persistAutoHideState()
 
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-left",
@@ -1217,7 +1668,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let standaloneAutoHidePanels: seq[AutoHidePanelDef] = @[
       (content: Content.Build,         title: cstring"BUILD",          label: cstring"buildComponent-0"),
       (content: Content.BuildErrors,   title: cstring"PROBLEMS",       label: cstring"errorsComponent-0"),
-      (content: Content.SearchResults, title: cstring"SEARCH RESULTS", label: cstring"searchResultsComponent-0"),
+      (content: Content.SearchResults, title: cstring"FIND IN FILES", label: cstring"searchResultsComponent-0"),
       (content: Content.RequestPanel,  title: cstring"REQUESTS",       label: cstring"requestPanelComponent-0"),
     ]
 
@@ -1226,9 +1677,20 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     for panelDef in standaloneAutoHidePanels:
       # Skip if this content is already in the auto-hide state (e.g.
       # restored from a saved layout or previously pinned by the user).
-      if not autoHideState.isNil and
-         not autoHideState.findPanelByContent(panelDef.content).isNil:
-        continue
+      if not autoHideState.isNil:
+        let existing = autoHideState.findPanelByContent(panelDef.content)
+        if not existing.isNil:
+          if existing.standalone or not existing.liveElement.isNil:
+            continue
+          # A pinned-state entry restored from disk for one of the four
+          # standalone panes: it has no live element, and unlike a restored
+          # GL panel there is no component config the overlay could build one
+          # from.  Leaving it in place would suppress the registration below
+          # and leave a strip tab whose overlay is empty, so drop it and
+          # register the standalone pane normally.
+          cwarn "auto_hide: replacing a restored entry for standalone pane '" &
+            $panelDef.title & "' with a fresh registration"
+          autoHideState.panels = autoHideState.panels.filterIt(it != existing)
 
       # Check if GL created a container for this component (from a saved
       # layout that still includes it). If so, find the GL content item
@@ -1369,9 +1831,28 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Force collapsed mode on/off for E2E tests.  Bypasses maximize
   # detection so tests can capture collapsed-mode screenshots without
   # actually maximizing the window.
+  #
+  # The override is STICKY.  Without this, `updateCollapsedMode` below — which
+  # runs on every window `resize`, plus once 1 s after layout init — simply
+  # overwrote the forced value from its maximize heuristic, so the override
+  # silently expired at the next resize.  Under Xvfb the window
+  # fills the virtual screen, so the heuristic answers "maximized", and a spec
+  # that had asked for expanded strips would find `#auto-hide-strip-left`
+  # rendered as the 1 px `collapsed-strip-line` with its tabs gone —
+  # `auto-hide-panes.spec.ts`'s "editor unpin behavior" failed exactly that
+  # way, with the tab detached from under `locator.hover`.
+  #
+  # There is deliberately no way to clear the override: only test hooks set it,
+  # and a test that has pinned the rendering mode wants it pinned for the rest
+  # of the process.
+  var collapsedModeForced = false
+  var collapsedModeForcedValue = false
+
   proc forceCollapsedMode(enable: bool) =
     if autoHideState.isNil:
       initAutoHideState()
+    collapsedModeForced = true
+    collapsedModeForcedValue = enable
     autoHideState.collapsedMode = enable
     autoHideState.leftBounded = enable
     autoHideState.rightBounded = enable
@@ -1423,6 +1904,17 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     ## Electron's screen API (done via IPC in main process).
     ## For now, we use a heuristic: if outerWidth ~= screen.availWidth
     ## and outerHeight ~= screen.availHeight, the window is maximized.
+    ##
+    ## An explicit `forceCollapsedMode` override wins: see the note there.
+    if collapsedModeForced:
+      if not autoHideState.isNil and
+         autoHideState.collapsedMode != collapsedModeForcedValue:
+        autoHideState.collapsedMode = collapsedModeForcedValue
+        autoHideState.leftBounded = collapsedModeForcedValue
+        autoHideState.rightBounded = collapsedModeForcedValue
+        if not autoHideState.onChanged.isNil:
+          autoHideState.onChanged()
+      return
     {.emit: """
       var isMax = (window.outerWidth >= screen.availWidth - 8) &&
                   (window.outerHeight >= screen.availHeight - 8);
@@ -1442,9 +1934,39 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   # Check on initial load and on window resize/maximize.
   discard windowSetTimeout(proc() = updateCollapsedMode(), 1000)
+
+  proc requestMenuRenderAfterResize() =
+    ## Refresh the caption bar after a resize, at most once per 50 ms.
+    ##
+    ## The menu has to be re-rendered on resize because `model.maximized` is
+    ## recomputed only at render time (`ui/menu.nim`'s
+    ## `isWindowMaximizedForMenu`), so the maximize/restore glyph goes stale
+    ## otherwise.
+    ##
+    ## THROTTLED, because `requestMenuRender` is not cheap and not coalesced
+    ## itself: each call clears and rebuilds `#menu` wholesale and then
+    ## cascades into the session tab bar, the debug shell, the command
+    ## palette and the debug controls.  A drag-resize emits `resize`
+    ## continuously, so calling it per event rebuilds the entire caption
+    ## chrome dozens of times a second and destroys the command-palette
+    ## input's focus and caret along with it.
+    ##
+    ## 50 ms mirrors `ui/session_tabs.nim`'s `installResizeRender`, which
+    ## throttles the tab bar against the same event for the same reason;
+    ## `ui/status.nim`'s `requestStatusRender` is the other precedent.
+    if menuResizeRenderPending:
+      return
+    menuResizeRenderPending = true
+    discard windowSetTimeout(proc() =
+      menuResizeRenderPending = false
+      if not data.ui.menu.isNil:
+        data.ui.menu.requestMenuRender(),
+      50)
+
   {.emit: """
     window.addEventListener('resize', function() {
       `updateCollapsedMode`();
+      `requestMenuRenderAfterResize`();
     });
   """.}
 
@@ -1471,13 +1993,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       data.ui.saveLayout = false
 
       # Persist auto-hide panel state alongside the GL layout config.
-      # The auto-hide state is saved as a separate IPC message so that
-      # the existing config loading path does not need modification.
-      let autoHideSerialized = serializeAutoHideState()
-      if not autoHideSerialized.isNil and not autoHideSerialized.isUndefined:
-        ipc.send "CODETRACER::save-auto-hide-state", js{
-          state: JSON.stringify(autoHideSerialized)
-        }
+      # It travels on its own IPC channel and lands in its own file because
+      # a pinned panel is precisely a panel the GoldenLayout config no
+      # longer contains.  `autoHideState.onChanged` writes it too — this
+      # call additionally covers changes that never reach that hook, such
+      # as a resized overlay.
+      persistAutoHideState()
 
     dispatchLayoutUpdated()
 

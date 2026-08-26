@@ -1,47 +1,51 @@
 ## views/isonim_search_results_view.nim
 ##
-## IsoNim DOM-rendering view for the Search Results panel.
+## IsoNim DOM-rendering view for the Find in Files panel.
 ##
 ## Renders a live, reactive DOM tree driven by ``SearchResultsVM``
 ## signals.  Replaces the legacy Karax ``method render`` in
 ## ``frontend/ui/search_results.nim`` (the IsoNim view is the single
-## source of truth for the panel's DOM). The GoldenLayout, auto-hide,
-## onPanelShown, and ``__ctRenderPanel(20)`` paths all sync legacy state
-## into this VM and then mount the IsoNim view directly.
+## source of truth for the panel's DOM).
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
-## structure (matching the Playwright contract used by
-## ``src/tests/gui/tests/build/search-results-e2e.spec.ts`` — the spec
-## anchors on the ``.search-results`` class on the panel and on
-## ``.search-results-match-row`` for individual rows):
+## Panel structure (matching Figma design):
 ##
-##   div.component-container.search-results[.search-results-active|-non-active]
-##     div.search-results-header
-##       span.search-results-count                        text reactive
-##         (the optional " for \"<query>\"" suffix is rendered as
-##         children of a span.search-results-query-label)
-##     div.search-results-find-query
-##       input#search-results-find-input                  oninput→setFilter
-##     div.search-results-body
-##       div.search-results-empty                         when no rows
-##       OR div.search-results-file-group +
-##          div.search-results-file-header
-##          div.search-results-match-row                  click→vm.jumpToResult
-##            (one per visible result, grouped by file path in
-##             first-appearance order — mirrors the legacy
-##             ``groupResultsByFile`` proc.)
+##   div.fif-panel.search-results
+##     div.fif-header
+##       span.fif-title                    "FIND IN FILES"
+##       div.fif-header-actions
+##         div.fif-icon-btn.fif-close      × — clears results
+##     div.fif-search-bar
+##       span.fif-search-icon              ⌕ search glyph
+##       span.fif-chip                     "FIND IN FILES"
+##       input.fif-input                   query input (Enter → vm.onSearch)
+##     div.fif-body                        reactive body:
+##       -- state A: no active search --
+##       div.fif-empty
+##         div.fif-recent-label  "Recent searches"  (if any)
+##         div.fif-recent-item*  (click → re-run)
+##       -- state B: loading shimmer --
+##       div.fif-shimmer-block* (×6)
+##       -- state C: results --
+##       div.fif-file-group*
+##         div.fif-file-header   shortPath · N matches
+##         div.fif-match-row*    :line  text [highlighted]
 ##
-## The body is reactive: an outer ``createRenderEffect`` tears it down
-## and rebuilds it from the latest signal values whenever
-## ``vm.visibleResults``, ``vm.query``, or ``vm.active`` changes.  The
-## header count text and the panel root's active modifier update
-## reactively via DSL attribute expressions because the macro emits
-## per-attribute ``createRenderEffect``s automatically.
-##
-## On the Web renderer the ``.search-results-match-text`` span uses
-## ``textContent`` for the surrounding fragments and a child span with
-## class ``search-results-highlight`` for the matched substring — the
-## same shape the legacy ``highlightMatch`` proc emitted.
+## Implementation notes:
+## - Match rows and file groups are appended **imperatively** (outside the
+##   ``ui(r):`` macro block) to avoid the "proc-call results inside ``ui``
+##   are silently discarded" pitfall documented in the workspace MEMORY.
+## - ``for`` loops inside ``ui()`` only run once at construction time and
+##   are therefore only used for static content that does not need to update
+##   reactively.  Dynamic lists are built imperatively inside
+##   ``createRenderEffect``.
+## - A ``ref = varName`` DSL attribute captures an inner element so that
+##   imperative post-construction mutations (like appending highlight spans)
+##   can target the right node without ``childAt`` (which does not exist in
+##   ``isonim/web/dom_api``).
+## - The legacy class ``search-results`` is applied on the root so existing
+##   GoldenLayout / auto-hide wiring that looks up the component by CSS
+##   class keeps working.  Individual result rows carry
+##   ``search-results-match-row`` for Playwright E2E compatibility.
 
 import std/[strutils, tables]
 
@@ -57,46 +61,12 @@ import ../store/types
 import ../viewmodels/search_results_vm
 
 # ---------------------------------------------------------------------------
-# Reactive helpers used inside DSL expressions
+# Shared helpers
 # ---------------------------------------------------------------------------
 
-proc panelClass(vm: SearchResultsVM): string =
-  ## Class for the panel root.  Mirrors the legacy
-  ## ``componentContainerClass("search-results " & maybeActive)`` —
-  ## the page-object queries on ``.search-results`` and ``component-container``.
-  if vm.active.val:
-    "component-container search-results search-results-active"
-  else:
-    "component-container search-results search-results-non-active"
-
-proc countText(vm: SearchResultsVM): string =
-  ## Header count label.  Matches the legacy view's branching:
-  ## "No results" when empty, "<N> result" / "<N> results" otherwise.
-  let count = vm.resultCount.val
-  if count == 0:
-    "No results"
-  elif count == 1:
-    "1 result"
-  else:
-    $count & " results"
-
-proc onResultClick(vm: SearchResultsVM;
-                   res: SearchResultLine): proc() =
-  ## Closure factory so each row captures its own ``SearchResultLine``.
-  ## Without this each click handler would share the same loop variable
-  ## reference (the same DSL closure-sharing concern as in
-  ## ``isonim_errors_view``).
-  let captured = res
-  result = proc() = vm.jumpToResult(captured)
-
-# Group helper shared by both renderer overloads.  Stays at module
-# scope so the Mock and Web bodies can call it without re-declaring.
 proc groupByPath(rows: seq[SearchResultLine]):
     tuple[order: seq[string]; groups: Table[string, seq[SearchResultLine]]] =
-  ## Group rows by ``path``, preserving the order in which each path
-  ## first appears.  Mirrors the legacy ``groupResultsByFile`` proc.
-  ## Empty paths fall back to ``"<unknown>"`` for parity with the
-  ## legacy behaviour.
+  ## Group rows by ``path``, preserving the order each path first appears.
   for r in rows:
     let key = if r.path.len == 0: "<unknown>" else: r.path
     if not result.groups.hasKey(key):
@@ -104,118 +74,137 @@ proc groupByPath(rows: seq[SearchResultLine]):
       result.order.add(key)
     result.groups[key].add(r)
 
+proc shortPath(path: string): string =
+  ## Return the last two path components so file headers don't overflow
+  ## on deep directory trees.
+  let parts = path.replace("\\", "/").split("/")
+  if parts.len >= 2:
+    parts[^2] & "/" & parts[^1]
+  elif parts.len == 1:
+    parts[0]
+  else:
+    path
+
+proc matchParts(textValue, query: string):
+    tuple[matched: bool; before, hit, after: string] =
+  ## Split ``textValue`` around the first case-insensitive occurrence of
+  ## ``query``.  Returns ``matched = false`` when the query is empty or
+  ## not found.
+  if query.len == 0 or textValue.len == 0:
+    return (false, "", "", "")
+  let lowerText = textValue.toLowerAscii()
+  let lowerQuery = query.toLowerAscii()
+  let idx = lowerText.find(lowerQuery)
+  if idx < 0:
+    return (false, "", "", "")
+  result.matched = true
+  result.before = if idx > 0: textValue[0 ..< idx] else: ""
+  result.hit = textValue[idx ..< idx + query.len]
+  let afterStart = idx + query.len
+  result.after =
+    if afterStart < textValue.len: textValue[afterStart .. ^1] else: ""
+
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
-proc renderMatchRowMock(r: MockRenderer; vm: SearchResultsVM;
-                        res: SearchResultLine; query: string): MockNode =
-  ## Render a single match row for the Mock renderer.  The
-  ## ``search-results-match-text`` body is split into pre / highlight
-  ## / post fragments when the query appears inside the snippet, so
-  ## headless tests can assert on the highlighted text directly via
-  ## the ``search-results-highlight`` class.
-  let captured = res
-  let onClick = onResultClick(vm, captured)
-  result = ui(r):
-    tdiv(class = "search-results-match-row",
-         onclick = onClick):
-      span(class = "search-results-line-number"):
-        text $captured.line
-      span(class = "search-results-match-text"):
-        discard
-
-  # Build the highlighted text body imperatively so the highlight
-  # span and the surrounding text fragments both live as children of
-  # the ``.search-results-match-text`` span.
-  let textSpan = result.children[1]
-  if query.len > 0 and captured.text.len > 0:
-    let lowerText = captured.text.toLowerAscii()
-    let lowerQuery = query.toLowerAscii()
-    let idx = lowerText.find(lowerQuery)
-    if idx >= 0:
-      let before = captured.text[0 ..< idx]
-      let matched = captured.text[idx ..< idx + query.len]
-      let after = captured.text[idx + query.len .. ^1]
-      if before.len > 0:
-        let beforeNode = ui(r):
-          span:
-            text before
-        r.appendChild(textSpan, beforeNode)
-      let highlightNode = ui(r):
-        span(class = "search-results-highlight"):
-          text matched
-      r.appendChild(textSpan, highlightNode)
-      if after.len > 0:
-        let afterNode = ui(r):
-          span:
-            text after
-        r.appendChild(textSpan, afterNode)
-      return
-  # Fallback: no query / no match — render the snippet as plain text.
-  let plainNode = ui(r):
-    span:
-      text captured.text
-  r.appendChild(textSpan, plainNode)
-
 proc renderSearchResultsPanel*(r: MockRenderer;
                                vm: SearchResultsVM): MockNode =
-  ## Render the Search Results panel for the Mock renderer.
-  ##
-  ## The header / find-query input is built once via the DSL with
-  ## reactive attributes (panel root class, header count text).  An
-  ## outer ``createRenderEffect`` rebuilds the ``.search-results-body``
-  ## subtree whenever ``vm.visibleResults`` / ``vm.query`` /
-  ## ``vm.active`` changes — same shape the build / errors views use.
+  ## Mock renderer: produces the same class/id structure as the Web
+  ## renderer so Playwright / headless tests can assert against it.
   var bodyContainer: MockNode
 
   let panel = ui(r):
-    tdiv(class = panelClass(vm)):
-      tdiv(class = "search-results-header"):
-        span(class = "search-results-count"):
-          text countText(vm)
-      tdiv(class = "search-results-find-query"):
+    tdiv(class = "fif-panel search-results"):
+      tdiv(class = "fif-search-bar"):
         input(`type` = "text",
-              id = "search-results-find-input",
-              placeholder = "Filter results...")
+              id = "fif-input",
+              class = "fif-input ct-input-panel ct-input-search-image",
+              placeholder = "Search in files...")
+        span(class = "fif-badge"): text "Find in Files"
+        span(class = "fif-clear-btn"): text "×"
       tdiv(ref = bodyContainer,
-           class = "search-results-body"):
+           class = "fif-body"):
         discard
 
   createRenderEffect proc() =
+    let loading = vm.loading.val
     let visible = vm.visibleResults.val
     let query = vm.query.val
+    let recents = vm.recentSearches.val
     r.clearChildren(bodyContainer)
 
-    if visible.len == 0:
-      let empty = ui(r):
-        tdiv(class = "search-results-empty"):
-          text "Run a search to see results here."
-      r.appendChild(bodyContainer, empty)
+    if loading:
+      for i in 0 ..< 5:
+        let shimRow = ui(r):
+          tdiv(class = "fif-shimmer-block"): discard
+        r.appendChild(bodyContainer, shimRow)
       return
 
-    # Group rows by path so the panel renders the VS Code-style file
-    # headers + per-file row blocks the legacy view emitted.
+    if visible.len == 0:
+      let emptyNode = ui(r):
+        tdiv(class = "fif-empty"): discard
+      r.appendChild(bodyContainer, emptyNode)
+
+      if recents.len > 0:
+        let label = ui(r):
+          tdiv(class = "fif-recent-label"): text "Recent searches"
+        r.appendChild(emptyNode, label)
+        for rec in recents:
+          let captured = rec
+          let recNode = ui(r):
+            tdiv(class = "fif-recent-item",
+                 onclick = proc() =
+                   if not vm.onSearch.isNil:
+                     vm.onSearch(captured.query)):
+              span(class = "fif-recent-query"): text captured.query
+              span(class = "fif-recent-count"): text $captured.hitCount & " results"
+          r.appendChild(emptyNode, recNode)
+      else:
+        let prompt = ui(r):
+          tdiv(class = "fif-empty-prompt"):
+            text "Type a query above and press Enter to search"
+        r.appendChild(emptyNode, prompt)
+      return
+
     let grouping = groupByPath(visible)
     for path in grouping.order:
       let pathStr = path
       let rows = grouping.groups[pathStr]
-      let header = pathStr & " (" & $rows.len & ")"
       let groupNode = ui(r):
-        tdiv(class = "search-results-file-group"):
-          tdiv(class = "search-results-file-header"):
-            span(class = "search-results-file-path"):
-              text pathStr
-            span(class = "search-results-file-count"):
-              text " (" & $rows.len & ")"
-      # Surface the path|count combo in textContent for tests that
-      # introspect the header by string match (mirrors the errors panel
-      # ``"a.nim (2)"`` shape).
-      let _ = header  # suppress unused-warning if Nim devirtualises away
+        tdiv(class = "fif-file-group"):
+          tdiv(class = "fif-file-header"):
+            span(class = "fif-file-path"): text shortPath(pathStr)
+            span(class = "fif-file-count"): text $rows.len & " matches"
       r.appendChild(bodyContainer, groupNode)
+
       for res in rows:
-        let row = renderMatchRowMock(r, vm, res, query)
-        r.appendChild(groupNode, row)
+        let captured = res
+        let onClick = proc() = vm.jumpToResult(captured)
+        let parts = matchParts(captured.text, query)
+        let rowNode = ui(r):
+          tdiv(class = "fif-match-row search-results-match-row",
+               onclick = onClick):
+            span(class = "fif-line-number"): text $captured.line
+            span(class = "fif-match-text"): discard
+        # Append highlight children imperatively to the text span so
+        # the DSL "proc-call return silently discarded" rule is avoided.
+        let textSpan = rowNode.children[1]
+        if parts.matched:
+          if parts.before.len > 0:
+            let bn = ui(r): span: text parts.before
+            r.appendChild(textSpan, bn)
+          let hn = ui(r):
+            span(class = "fif-highlight search-results-highlight"):
+              text parts.hit
+          r.appendChild(textSpan, hn)
+          if parts.after.len > 0:
+            let an = ui(r): span: text parts.after
+            r.appendChild(textSpan, an)
+        else:
+          let pn = ui(r): span: text captured.text
+          r.appendChild(textSpan, pn)
+        r.appendChild(groupNode, rowNode)
 
   panel
 
@@ -225,112 +214,208 @@ proc renderSearchResultsPanel*(r: MockRenderer;
 
 when defined(js):
 
-  proc matchParts(textValue, query: string):
-      tuple[matched: bool; before, hit, after: string] =
-    if query.len == 0 or textValue.len == 0:
-      return (false, "", "", "")
-    let lowerText = textValue.toLowerAscii()
-    let lowerQuery = query.toLowerAscii()
-    let idx = lowerText.find(lowerQuery)
-    if idx < 0:
-      return (false, "", "", "")
-    result.matched = true
-    result.before = if idx > 0: textValue[0 ..< idx] else: ""
-    result.hit = textValue[idx ..< idx + query.len]
-    let afterStart = idx + query.len
-    result.after =
-      if afterStart < textValue.len: textValue[afterStart .. ^1] else: ""
+  proc eventKeyCode(ev: isonim_dom.Event): int {.importjs: "(#.keyCode || 0)".}
+    ## Extract ``keyCode`` from a DOM event without needing a full
+    ## ``KeyboardEvent`` type.  Mirrors the pattern in
+    ## ``isonim_calltrace_view.nim``.
 
-  proc renderWebMatchRow(r: WebRenderer;
+  proc inputNodeValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+    ## Read the ``value`` property of a DOM input node.
+
+  proc setInputNodeValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
+    ## Write the ``value`` property of a DOM input node.
+
+  proc appendTextSpanChildren(r: WebRenderer;
+                              textEl: isonim_dom.Element;
+                              textValue, query: string) =
+    ## Append pre-highlight-post text children into ``textEl``.
+    ## Called imperatively after the row element is built so we can
+    ## target the captured ``ref`` element directly without ``childAt``.
+    let parts = matchParts(textValue, query)
+    if parts.matched:
+      if parts.before.len > 0:
+        let bn = ui(r): span: text parts.before
+        isonim_dom.appendChild(isonim_dom.Node(textEl),
+                               isonim_dom.Node(bn))
+      let hn = ui(r):
+        span(class = "fif-highlight search-results-highlight"):
+          text parts.hit
+      isonim_dom.appendChild(isonim_dom.Node(textEl),
+                             isonim_dom.Node(hn))
+      if parts.after.len > 0:
+        let an = ui(r): span: text parts.after
+        isonim_dom.appendChild(isonim_dom.Node(textEl),
+                               isonim_dom.Node(an))
+    else:
+      let pn = ui(r): span: text textValue
+      isonim_dom.appendChild(isonim_dom.Node(textEl),
+                             isonim_dom.Node(pn))
+
+  proc renderMatchRowWeb(r: WebRenderer;
                          vm: SearchResultsVM;
                          res: SearchResultLine;
                          query: string): isonim_dom.Element =
-    ## Build a single match row in the real DOM.  The match text is
-    ## broken into pre / highlight / post fragments so the
-    ## ``search-results-highlight`` span renders as the matched substring
-    ## (same as the legacy ``highlightMatch`` proc).  Click handler
-    ## dispatches a jump request via the VM.
+    ## Build a single match row.  The text span is captured via ``ref``
+    ## so that highlight children can be appended imperatively after the
+    ## ``ui()`` block — avoiding the "proc-call return silently discarded
+    ## inside ui" pitfall.
     let captured = res
-    let onClick = onResultClick(vm, captured)
-    let parts = matchParts(captured.text, query)
-    ui(r):
-      tdiv(class = "search-results-match-row",
+    let onClick = proc() = vm.jumpToResult(captured)
+    var textSpanEl: isonim_dom.Element
+    let row = ui(r):
+      tdiv(class = "fif-match-row search-results-match-row",
            onclick = onClick):
-        span(class = "search-results-line-number"):
+        span(class = "fif-line-number"):
           text $captured.line
-        span(class = "search-results-match-text"):
-          if parts.matched:
-            if parts.before.len > 0:
-              span:
-                text parts.before
-            span(class = "search-results-highlight"):
-              text parts.hit
-            if parts.after.len > 0:
-              span:
-                text parts.after
-          else:
-            span:
-              text captured.text
+        span(ref = textSpanEl, class = "fif-match-text"):
+          discard
+    appendTextSpanChildren(r, textSpanEl, captured.text, query)
+    row
 
-  proc renderWebResultGroup(r: WebRenderer; vm: SearchResultsVM;
-                            path: string;
-                            rows: seq[SearchResultLine];
-                            query: string): isonim_dom.Element =
-    ui(r):
-      tdiv(class = "search-results-file-group"):
-        tdiv(class = "search-results-file-header"):
-          span(class = "search-results-file-path"):
-            text path
-          span(class = "search-results-file-count"):
-            text " (" & $rows.len & ")"
-        for res in rows:
-          renderWebMatchRow(r, vm, res, query)
+  proc renderFileGroupWeb(r: WebRenderer; vm: SearchResultsVM;
+                          path: string;
+                          rows: seq[SearchResultLine];
+                          query: string): isonim_dom.Element =
+    ## Build a file group (header + match rows).  Match rows are appended
+    ## **outside** the ``ui()`` block to avoid the silent-discard rule.
+    let groupEl = ui(r):
+      tdiv(class = "fif-file-group"):
+        tdiv(class = "fif-file-header"):
+          span(class = "fif-file-path"):
+            text shortPath(path)
+          span(class = "fif-file-count"):
+            text $rows.len & " matches"
+    for res in rows:
+      let rowEl = renderMatchRowWeb(r, vm, res, query)
+      isonim_dom.appendChild(isonim_dom.Node(groupEl),
+                             isonim_dom.Node(rowEl))
+    groupEl
+
+  proc setNodeDisplay(node: isonim_dom.Node; display: cstring)
+      {.importjs: "#.style.display = #".}
 
   proc renderSearchResultsPanel*(r: WebRenderer;
                                  vm: SearchResultsVM): isonim_dom.Element =
-    ## Render the Search Results panel for the real DOM.
+    ## Render the Find in Files panel for the real DOM.
+    ##
+    ## Search bar structure:
+    ##   div.fif-search-bar           (ct-input-com-pal-like wrapper)
+    ##     span.ct-origin-badge.fif-badge   "FIF" label badge
+    ##     input.fif-input            transparent inner input, flex:1
+    ##     button.fif-clear-btn       × clear, hidden when input is empty
     var bodyContainer: isonim_dom.Element
+    var inputEl: isonim_dom.Element
+    var clearBtnEl: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = panelClass(vm)):
-        tdiv(class = "search-results-header"):
-          span(class = "search-results-count"):
-            text countText(vm)
-        tdiv(class = "search-results-find-query"):
-          input(`type` = "text",
-                id = "search-results-find-input",
-                placeholder = "Filter results...")
+      tdiv(class = "fif-panel search-results"):
+        tdiv(class = "fif-search-bar"):
+          input(ref = inputEl,
+                `type` = "text",
+                id = "fif-input",
+                class = "fif-input ct-input-panel ct-input-search-image",
+                placeholder = "Search in files...")
+          span(class = "fif-badge"):
+            text "Find in Files"
+          span(ref = clearBtnEl,
+               class = "fif-clear-btn"):
+            text "×"
         tdiv(ref = bodyContainer,
-             class = "search-results-body"):
+             class = "fif-body"):
           discard
 
+    # Wire the search input:
+    #   Enter      → vm.onSearch (owns all state transitions)
+    #   oninput    → show/hide the clear button based on value presence
+    if not inputEl.isNil:
+      isonim_dom.addEventListener(isonim_dom.Node(inputEl), cstring"keydown",
+        proc(ev: isonim_dom.Event) =
+          if ev.eventKeyCode() == 13:
+            let qs = $isonim_dom.Node(inputEl).inputNodeValue()
+            if qs.len > 0 and not vm.onSearch.isNil:
+              vm.onSearch(qs)
+          else:
+            vm.setActive(true))
+      isonim_dom.addEventListener(isonim_dom.Node(inputEl), cstring"input",
+        proc(ev: isonim_dom.Event) =
+          let hasValue = isonim_dom.Node(inputEl).inputNodeValue().len > 0
+          if not clearBtnEl.isNil:
+            isonim_dom.Node(clearBtnEl).setNodeDisplay(
+              if hasValue: cstring"flex" else: cstring"none"))
+
+    # Wire the clear button: wipe the input, reset VM state.
+    if not clearBtnEl.isNil:
+      isonim_dom.addEventListener(isonim_dom.Node(clearBtnEl), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          if not inputEl.isNil:
+            isonim_dom.Node(inputEl).setInputNodeValue(cstring"")
+          isonim_dom.Node(clearBtnEl).setNodeDisplay(cstring"none")
+          vm.setLoading(false)
+          vm.clearResults())
+
+    # Reactive body: rebuilt from scratch whenever signals change.
     createRenderEffect proc() =
+      let loading = vm.loading.val
       let visible = vm.visibleResults.val
       let query = vm.query.val
-      # Stable host slot for the result list; rebuilt from declarative
-      # IsoNim nodes so grouping and row event handlers stay simple.
+      let recents = vm.recentSearches.val
       r.clearChildren(bodyContainer)
 
+      if loading:
+        for i in 0 ..< 6:
+          let shimEl = ui(r):
+            tdiv(class = "fif-shimmer-block"): discard
+          isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
+                                 isonim_dom.Node(shimEl))
+        return
+
       if visible.len == 0:
-        let empty = ui(r):
-          tdiv(class = "search-results-empty"):
-            text "Run a search to see results here."
-        r.appendChild(bodyContainer, empty)
+        let emptyEl = ui(r):
+          tdiv(class = "fif-empty"): discard
+        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
+                               isonim_dom.Node(emptyEl))
+
+        if recents.len > 0:
+          let labelEl = ui(r):
+            tdiv(class = "fif-recent-label"): text "Recent searches"
+          isonim_dom.appendChild(isonim_dom.Node(emptyEl),
+                                 isonim_dom.Node(labelEl))
+          for rec in recents:
+            let captured = rec
+            let recEl = ui(r):
+              tdiv(class = "fif-recent-item",
+                   onclick = proc() =
+                     if not vm.onSearch.isNil:
+                       if not inputEl.isNil:
+                         isonim_dom.Node(inputEl).setInputNodeValue(
+                           cstring(captured.query))
+                       vm.onSearch(captured.query)):
+                span(class = "fif-recent-query"): text captured.query
+                span(class = "fif-recent-count"):
+                  text $captured.hitCount & " results"
+            isonim_dom.appendChild(isonim_dom.Node(emptyEl),
+                                   isonim_dom.Node(recEl))
+        else:
+          let promptEl = ui(r):
+            tdiv(class = "fif-empty-prompt"):
+              text "Type a query above and press Enter to search"
+          isonim_dom.appendChild(isonim_dom.Node(emptyEl),
+                                 isonim_dom.Node(promptEl))
         return
 
       let grouping = groupByPath(visible)
       for path in grouping.order:
         let rows = grouping.groups[path]
-        r.appendChild(bodyContainer,
-                      renderWebResultGroup(r, vm, path, rows, query))
+        let grpEl = renderFileGroupWeb(r, vm, path, rows, query)
+        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
+                               isonim_dom.Node(grpEl))
 
     panel
 
   proc mountIsoNimSearchResults*(container: isonim_dom.Element;
                                  vm: SearchResultsVM) =
-    ## Mount the IsoNim search results panel as a child of
-    ## ``container``.  Reactive effects handle every subsequent update
-    ## — no manual redraw is needed.
+    ## Mount the IsoNim Find in Files panel as a child of ``container``.
+    ## Reactive effects handle every subsequent update.
     let r = WebRenderer()
     let panel = renderSearchResultsPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

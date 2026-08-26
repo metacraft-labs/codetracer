@@ -6,7 +6,7 @@ if !IS_EXTENSION
     background-color: transparent
 
   ::-webkit-scrollbar-corner
-    background-color: colors-ui-surface-panel
+    background-color: colors-ui-surface-base-panel
 
   ::-webkit-scrollbar:hover
     background-color: transparent
@@ -67,6 +67,154 @@ input::-moz-placeholder
 
 TRACE_LOG_EDITOR_Z_INDEX = 50
 
+// Icons inside a tab — the close and pin affordances on GoldenLayout tabs, and
+// any icon added to a tab later.  One rule so they cannot drift apart: close had
+// no hover at all, while pin dimmed itself to 0.7 and brightened on hover, so
+// the two behaved differently in the same tab.
+//
+// The icons ship as SVGs with `fill="#919191"` baked in, which cannot be
+// recoloured while they are background images.  They are drawn as masks instead,
+// with the colour supplied by `background-color` — so the state lives in CSS,
+// on tokens, rather than in the asset.
+TAB_ICON_COLOR = colors-ui-icon-primary-subtle
+// OFF-TOKEN: the design system has `icon/primary/subtle` but no
+// `icon/primary/subtle-hover`.  #C8C8C8 exists in the palette (colors-grey-150)
+// and is mapped for text roles only — binding a text role to an icon would be
+// the drift DESIGN_SYSTEM.md warns about.  Raised 2026-08-21; replace with the
+// role once it exists.
+TAB_ICON_COLOR_HOVER = #C8C8C8
+
+tab-icon(icon, size)
+  background-image: none !important
+  background-color: TAB_ICON_COLOR
+  -webkit-mask-image: icon
+  mask-image: icon
+  -webkit-mask-repeat: no-repeat
+  mask-repeat: no-repeat
+  -webkit-mask-position: center
+  mask-position: center
+  -webkit-mask-size: size
+  mask-size: size
+  opacity: 1
+
+  &:hover
+    background-color: TAB_ICON_COLOR_HOVER
+
+
+// Gap between a menu's trigger and the surface it opens into.
+//
+// 6px at the 16px root, and 6px in every menu: the value is deliberately rem
+// rather than em because these menus open from containers with different font
+// sizes — the layout menu inherits 16px, the command prompt 12px — and an em
+// gap would resolve to a different number of pixels in each, which is exactly
+// the drift this constant exists to stop.
+DROPDOWN_TRIGGER_GAP = 0.375rem
+
+// The same gap expressed as an offset from the bottom of a relatively
+// positioned trigger, for the menus that hang off their own control.
+DROPDOWN_TRIGGER_OFFSET = "calc(100% + %s)" % DROPDOWN_TRIGGER_GAP
+
+// Corner radius of a menu.
+//
+// One constant for every dropdown in the app, container and end rows alike:
+// the rounding of a menu is a property of "menu", not of the panel it happens
+// to open from.  rem for the same reason as the gap — these menus sit in
+// containers from 12px to 16px, and an em radius drew a different curve in
+// each.
+DROPDOWN_RADIUS = 0.375rem
+
+// Scrollbars inside a menu.
+//
+// The app-wide scrollbar (top of this file) is 0.5em, which is right for a
+// panel but heavy inside a menu a few rows tall — it takes a visible bite out
+// of a 12em-wide dropdown.  Its own constant rather than a reuse of
+// DROPDOWN_TRIGGER_GAP: the two happen to be the same 6px, but a scrollbar's
+// thickness and a menu's offset answer to different things and should be free
+// to move apart.
+DROPDOWN_SCROLLBAR_SIZE = 0.375rem
+
+// Applied both to the surface itself (the branch picker, the command results
+// and the tab-overflow menu each scroll as one element) and to anything that
+// scrolls inside it.
+dropdown-scrollbar()
+  &::-webkit-scrollbar,
+  ::-webkit-scrollbar
+    width: DROPDOWN_SCROLLBAR_SIZE
+    height: DROPDOWN_SCROLLBAR_SIZE
+
+// Dropdown surface — the panel a menu opens into.
+//
+// Defined once because two menus have to be indistinguishable: the layout menu
+// beside the panel tabs and the command prompt's results list.  Both fill it
+// with `ct-menu-item` rows, so only the container chrome lives here.
+// Dropdowns reveal with a short slide-and-fade rather than appearing abruptly.
+// Declared once so every menu that calls `dropdown-surface()` gets the same
+// motion.  Only the reveal is animated: these menus are removed from the DOM on
+// close, so there is no element left to animate out.
+@keyframes ct-dropdown-reveal
+  from
+    opacity: 0
+    transform: translateY(-0.25rem)
+  to
+    opacity: 1
+    transform: translateY(0)
+
+dropdown-surface()
+  // The VCS branch picker is the reference for every menu that opens over the
+  // UI: a panel surface, a hairline border and a small radius, with no shadow.
+  //
+  // rem, not em: these menus sit in containers with different font sizes (the
+  // layout menu inherits 16px, the command prompt 12px), and em-based values
+  // would resolve differently in each — the same declaration giving a 0.5px
+  // frame in one and 0.375px in the other.  The surface must not depend on
+  // where it opens.
+  background: colors-ui-surface-primary-default
+  border: 0.03125rem solid colors-ui-border-primary
+  border-radius: DROPDOWN_RADIUS
+  box-shadow: none
+  overflow: hidden
+  animation: ct-dropdown-reveal 120ms ease-out
+
+  // Motion is decoration here; the menu must still open instantly for anyone
+  // who has asked the system to reduce it.
+  @media (prefers-reduced-motion: reduce)
+    animation: none
+
+  dropdown-scrollbar()
+
+// One row inside that surface.  The row's colour, height and hover come from
+// the `ct-menu-item` component; this is only the hairline between rows and the
+// corner rounding that lets the ends sit inside the container's radius.
+dropdown-surface-row()
+  // Row height comes from the `ct-menu-item` component itself (2.25rem), which
+  // every dropdown row carries — see components/menu_item.styl.
+  font-size: 0.875rem
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+  padding-left: 0.5em
+  padding-right: 0.5em
+
+  // Rows differ in how they carry their text: the layout menu puts it straight
+  // in the row, the command prompt wraps it in `ct-menu-item-label`.  That
+  // label is sized `0.875em` for the application menu, which here multiplies
+  // against the row's own 0.875rem and lands two steps down — the same list
+  // rendered visibly smaller than its neighbour.  In a dropdown the row owns
+  // the size; the label just carries the text.
+  .ct-menu-item-label,
+  .ct-menu-item-sublabel
+    font-size: inherit
+
+  &:first-child
+    border-top: none
+    border-radius: DROPDOWN_RADIUS DROPDOWN_RADIUS 0 0
+
+  &:last-child
+    border-bottom: none
+    border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
+
+
+// Minimum breathing room between an empty panel's message and the panel sides.
+EMPTY_OVERLAY_SIDE_GAP = 2.5rem
+
 .hidden
   display: none !important
 
@@ -114,7 +262,11 @@ html, body
     overflow: hidden
 
 body
-  font-family: "SpaceMono", monospace !important
+  // Space Grotesk is the interface face: menus, tab titles, labels, panel
+  // chrome — everything that is not code.  Surfaces that render code (the
+  // editor, terminal, values, diffs) set a monospace face explicitly; see the
+  // note at the top of each of those component stylesheets.
+  font-family: "SpaceGrotesk", sans-serif !important
   -webkit-font-smoothing: antialiased
   -moz-osx-font-smoothing: grayscale
   background-color: colors-ui-surface-primary-default !important
@@ -197,8 +349,8 @@ body
 
 #root-container
   position: fixed
-  height: calc(100vh - 2.27em - 1.75rem)  // 1.75rem = bottom tab strip height
-  top: 2.27em
+  height: calc(100vh - 2.125em - 2rem)  // 2rem = #status-base height (2em at font-size:1rem)
+  top: 2.125em
   left: 0
   right: 0
   z-index: 0
@@ -234,7 +386,19 @@ body
 #dock
   height: 80%
 
+// Line-highlight flash: starts with a bright orange pulse then settles
+// to the subtle secondary surface colour for the remainder of the 2s
+// Monaco decoration lifetime set by highlightLine() in renderer.nim.
+@keyframes ct-line-flash
+  0%
+    background-color: rgba(251, 146, 60, 0.55)
+  40%
+    background-color: rgba(251, 146, 60, 0.20)
+  100%
+    background-color: colors-ui-surface-primary-secondary
+
 .highlight
+  animation: ct-line-flash 2s ease-out forwards
   background-color: colors-ui-surface-primary-secondary !important
 
 .value-expanded-compound::before
@@ -372,7 +536,7 @@ input:checked ~ .checkmark:after
   .active-line
     .excerpt-code
       color: colors-ui-text-primary-body !important
-    background: colors-ui-surface-canvas
+    background: colors-ui-surface-base-canvas
     border-radius: 4px
     width: fit-content
     padding-right: 4px
@@ -407,7 +571,9 @@ input:checked ~ .checkmark:after
     transform: rotate(45deg);
 
 .dropdown-list
-  border-radius: 0.325em
+  // 0.325em against an inherited font size — a curve that changed with whatever
+  // panel header the hamburger sat in, and never matched any other menu.
+  border-radius: DROPDOWN_RADIUS
   background: colors-ui-surface-base-raised
   color: colors-ui-surface-input-default
   display: flex
@@ -417,7 +583,11 @@ input:checked ~ .checkmark:after
   // padding-left: 10px
   // padding-bottom: 5px
   // padding-right: 10px
-  margin-top: 0.24em
+  // The gap below the hamburger button — see DROPDOWN_TRIGGER_GAP above.  It
+  // was 0.24em, which is 3.84px and rounds to 4: a hair tighter than every
+  // other menu, and tied to whatever font size the panel header happened to
+  // have.
+  margin-top: DROPDOWN_TRIGGER_GAP
   right: 0
   min-width: fit-content
   position: relative
@@ -482,18 +652,17 @@ input:checked ~ .checkmark:after
     border: 0.0625em solid colors-ui-surface-action-primary !important
 
   .layout-dropdown
+    dropdown-surface()
     width: fit-content;
     z-index: 100
     position: absolute;
-    top: 100%
+    // Opened flush against the button; now the shared 6px, like every other
+    // menu.
+    top: DROPDOWN_TRIGGER_OFFSET
     right: 0 !important
-    font-size: 0.875rem
-    border: 0.0625em solid colors-ui-border-tertiary
 
     .layout-dropdown-node
-      border-top: 0.0625em solid colors-ui-border-tertiary
-      padding-left: 0.5em
-      padding-right: 0.5em
+      dropdown-surface-row()
 
       &:hover
         background-color: colors-ui-surface-primary-default-hover
@@ -526,13 +695,112 @@ input:checked ~ .checkmark:after
   height: inherit
   justify-content: center
   align-items: center
-  font-family: "SpaceMono"
-  // font-size: 14px
-  // padding-left: 12px
-  // padding-right: 12px
+  font-family: "SpaceGrotesk"
+  // An empty panel's message is guidance, not content: one step down from the
+  // body size and dimmed, so it sits behind the panels that do have something
+  // to show rather than competing with them.
+  font-size: 0.875rem
+  opacity: 0.6
+  // Slightly tighter leading than the panel default.  `.component-container`
+  // sets `line-height: 1.5em`, which resolves against the panel's 16px and is
+  // inherited here as a fixed 24px regardless of this smaller font size — so it
+  // has to be restated rather than nudged.  1.25rem is that 24px less 0.25rem.
+  line-height: 1.25rem
+  // Keep the message clear of the panel edges.  `border-box` is required: the
+  // overlay inherits the panel's width, so without it the padding would push
+  // the box wider than the panel instead of insetting the text.
+  box-sizing: border-box
+  padding-left: EMPTY_OVERLAY_SIDE_GAP
+  padding-right: EMPTY_OVERLAY_SIDE_GAP
   text-align: center
-  // white-space: break-spaces
+  // Let the message wrap inside the inset rather than overflow it once the
+  // panel is narrow enough for the gaps to matter.
+  overflow-wrap: break-word
 
 .jstree-default-contextmenu
   display: none !important
   visibility: hidden !important
+
+// ---------------------------------------------------------------------------
+// ct-picker — shared pill-style picker / dropdown component
+//
+// Extracts the VCS branch-picker pattern into a reusable component.
+// Usage:
+//   div.ct-picker[.ct-picker--chevron-left | .ct-picker--chevron-right]
+//     div.ct-picker-trigger[.ct-picker-trigger--open]
+//       span.ct-picker-chevron   (SVG set via innerHTML)
+//       span.ct-picker-label     (current selection text)
+//     div.ct-picker-dropdown     (shown when open; absent when closed)
+//       div.ct-menu-item …       (one per option; see menu_item.styl)
+//
+// .ct-picker--chevron-left  — chevron DOM node before label (default; matches VCS branch picker)
+// .ct-picker--chevron-right — chevron appears visually to the RIGHT of the label
+//                             (achieved by reversing the flex row order so the
+//                             chevron span, which is first in the DOM, ends up
+//                             on the right side visually)
+// ---------------------------------------------------------------------------
+
+.ct-picker
+  position: relative
+  flex-shrink: 0
+
+.ct-picker-trigger
+  display: flex
+  align-items: center
+  height: 1.75rem
+  max-height: 1.75rem
+  padding: 0 0.625em
+  cursor: pointer
+  gap: 0.375em
+  user-select: none
+  border-radius: 0.5em
+  border: 0.03125em solid colors-ui-border-primary
+  background: colors-ui-surface-primary-default
+  font-family: "SpaceGrotesk"
+  font-size: 0.75rem
+  color: colors-ui-text-primary-body-subtle
+  white-space: nowrap
+  min-width: 7.5em
+
+  &:hover
+    background: colors-ui-surface-primary-default-hover
+    color: colors-ui-text-primary-body
+
+  &.ct-picker-trigger--open
+    border-color: colors-ui-border-action
+    color: colors-ui-text-primary-body
+
+.ct-picker-chevron
+  display: flex
+  align-items: center
+  flex-shrink: 0
+  opacity: 0.6
+
+.ct-picker-label
+  flex: 1
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.ct-picker-dropdown
+  // The look this defines is now shared — see `dropdown-surface()` above, which
+  // every menu that opens over the UI calls.
+  dropdown-surface()
+  position: absolute
+  top: DROPDOWN_TRIGGER_OFFSET
+  left: 0
+  right: 0
+  z-index: 100
+  padding: 0.25em
+  max-height: 12.5em
+  overflow-y: auto
+
+// .ct-picker--chevron-left: chevron DOM node is first → naturally appears on
+// the left. No reorder needed. Defined explicitly for self-documentation.
+.ct-picker--chevron-left .ct-picker-trigger
+  flex-direction: row
+
+// .ct-picker--chevron-right: chevron DOM node is first but we reverse the
+// visual order so it ends up on the right side of the label.
+.ct-picker--chevron-right .ct-picker-trigger
+  flex-direction: row-reverse

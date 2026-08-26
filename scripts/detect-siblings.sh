@@ -18,6 +18,20 @@
 # Environment:
 #   DETECT_SIBLINGS_QUIET=1  — suppress summary output to stderr.
 #
+# Scope, and its counterpart:
+#   This script is ADVISORY and covers the RUNTIME siblings — the recorders
+#   (`ct-mcr`, ruby/js/php/BEAM/blockchain), `nargo`, `ct-native-replay`, the
+#   trace-format FFI libraries. Their absence makes tests skip or `ct record`
+#   fail at run time, so a missing one is a warning, never an error, and the
+#   build scripts do not call this script at all.
+#
+#   The BUILD-TIME siblings — the source trees `nim --path` / cargo `path =` /
+#   `build.rs` resolve by relative path, without which nothing compiles — are
+#   a disjoint concern handled by `scripts/require-siblings.sh`, which
+#   `build-once.sh` runs before any build step and which HARD-FAILS. Keep a
+#   repo in whichever list matches what is needed from it; a repo can appear
+#   in both (codetracer-native-recorder does) for different reasons.
+#
 # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
 # =============================================================================
 
@@ -147,9 +161,10 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-b
 		fi
 	fi
 	_ct_detect_summary "codetracer-native-backend (ct-native-replay available)"
-elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-native-replay" ]; then
+	# Legacy checkout directory name; the binary inside is the current one.
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
-	_ct_detect_summary "codetracer-rr-backend (ct-rr-support available, legacy)"
+	_ct_detect_summary "codetracer-rr-backend (ct-native-replay available, legacy checkout name)"
 fi
 
 # --- codetracer-native-recorder (ct-mcr / Multi-Core Recorder) ---

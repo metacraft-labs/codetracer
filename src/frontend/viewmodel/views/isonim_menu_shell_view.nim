@@ -4,6 +4,7 @@
 ## owns the shared ``#menu`` host structure so the global menu chrome no longer
 ## needs a Karax ``setRenderer`` registration.
 
+import std/strutils
 import isonim/dsl/ui
 from isonim/core/computation import createRenderEffect
 import isonim/testing/mock_dom
@@ -67,6 +68,12 @@ type
 
 const
   MenuShellRootClass* = "menu-shell"
+  ## Set on the caption-bar host (`#menu`) while the platform paints its own
+  ## window controls over the bar and space must be reserved for them.
+  MenuShellReservedControlsClass* = "menu-shell--reserved-window-controls"
+  ## Set on the same host while the window is in native fullscreen, where those
+  ## controls are hidden and the bar reclaims the space.
+  MenuShellFullscreenClass* = "menu-shell--native-fullscreen"
   NavigationMenuId* = "navigation-menu"
   MenuShellSessionTabBarId* = "session-tab-bar"
   MenuRootId* = "menu-root"
@@ -74,6 +81,36 @@ const
   MenuElementsId* = "menu-elements"
   MenuSearchResultsId* = "menu-search-results"
   WindowMenuClass* = "window-menu"
+
+proc captionBarHostClasses*(
+    existing: string;
+    reserveWindowControls: bool;
+    fullscreen: bool): string =
+  ## Pure decision logic for the classes on the caption-bar host (`#menu` in
+  ## index.html) — kept free of any DOM call so it can be exercised headlessly,
+  ## in the spirit of `ui/menu_render_gate.nim`.
+  ##
+  ## Three states, only distinguishable at runtime:
+  ##
+  ## * platform draws its own frame (Windows/Linux) — neither class;
+  ## * macOS windowed — `MenuShellReservedControlsClass`, so the bar starts
+  ##   clear of the traffic-light buttons the OS paints over it;
+  ## * macOS fullscreen — `MenuShellFullscreenClass`; the buttons are gone, so
+  ##   the bar reclaims the space and left-aligns instead.
+  ##
+  ## Classes it does not own (`menu`, and anything added elsewhere) are
+  ## preserved in their original order.
+  var kept: seq[string] = @[]
+  for cls in existing.split({' ', '\t', '\n'}):
+    if cls.len > 0 and
+       cls != MenuShellReservedControlsClass and
+       cls != MenuShellFullscreenClass:
+      kept.add(cls)
+  if reserveWindowControls:
+    kept.add(
+      if fullscreen: MenuShellFullscreenClass
+      else: MenuShellReservedControlsClass)
+  kept.join(" ")
 
 proc invokeToggle(callbacks: MenuShellCallbacks) =
   if not callbacks.onToggleMenu.isNil:
@@ -143,6 +180,43 @@ proc searchResultClass(searchResult: MenuSearchResultRecord): string =
   else:
     "menu-node-name "
 
+proc menuItemClass*(node: MenuNodeRecord): string =
+  ## Class list for one rendered menu row (both the root menu and every
+  ## submenu use it, so the two stay addressable by the same selectors).
+  ##
+  ## Two vocabularies live on the row on purpose:
+  ##
+  ## * the design-system component classes — ``ct-menu-item`` plus the
+  ##   ``--active`` / ``--disabled`` modifiers — carry *all* of the visual
+  ##   styling (``styles/components/menu_item.styl``);
+  ## * the semantic hooks — ``menu-node``, ``menu-element`` / ``menu-folder``,
+  ##   the per-entry identity class in ``node.nameClass`` (``menu-folder-debug``,
+  ##   ``menu-element-ruby-fibonacci``, …, built in ``ui/menu.nim``) and
+  ##   ``menu-enabled`` / ``menu-disabled`` — carry no styling at all.  They
+  ##   exist so the menu remains *addressable*: they are the published contract
+  ##   the GUI test suite selects on
+  ##   (``codetracer-specs/Testing/UI-Test-Catalog.md`` § Launch Configuration
+  ##   Tests: ".menu-folder-debug", ".menu-folder-launch-configurations",
+  ##   ".menu-element-python-fibonacci", ".menu-element-ruby-fibonacci" and
+  ##   "Verifies `.menu-enabled` class on launch config elements"), and what
+  ##   ``welcome-screen/launch_config.spec.ts`` drives the Debug ▸ Launch
+  ##   Configurations flow through.
+  ##
+  ## They were dropped when the rows were restyled onto ``ct-menu-item``, which
+  ## silently unhooked every one of those selectors — hence this helper, so the
+  ## four call sites below cannot drift apart again.
+  let kindClass =
+    if node.kind == MenuRecordElement: "menu-element" else: "menu-folder"
+  result = "ct-menu-item menu-node " & kindClass
+  if node.nameClass.len > 0:
+    result.add ' '
+    result.add node.nameClass
+  result.add(if node.enabled: " menu-enabled" else: " menu-disabled")
+  if node.nodeClass == "menu-active-node":
+    result.add " ct-menu-item--active"
+  if not node.enabled:
+    result.add " ct-menu-item--disabled"
+
 template renderMenuShellImpl(
     r: untyped;
     model: MenuShellModel;
@@ -199,34 +273,22 @@ template renderMenuShellImpl(
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
-                            class = "menu-element menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            text ""
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
-                            span(class = "menu-node-shortcut"):
+                            span(class = "ct-menu-item-sublabel"):
                               text node.shortcut
                       else:
                         tdiv(
-                            class = "menu-folder menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            tdiv(class = "icon " & node.iconClass):
-                              discard
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
-                            if node.children.len > 0:
-                              span(class = "menu-expand"):
-                                discard
+                          span(class = "ct-menu-item-trailing"):
+                            discard
                       if node.beforeNextSubGroup:
                         hr(class = "menu-sub-group-separator"):
                           discard
@@ -249,34 +311,22 @@ template renderMenuShellImpl(
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
-                            class = "menu-element menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path),
                             onclick = nodeClickHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            text ""
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
-                            span(class = "menu-node-shortcut"):
+                            span(class = "ct-menu-item-sublabel"):
                               text node.shortcut
                       else:
                         tdiv(
-                            class = "menu-folder menu-node " &
-                              (if node.enabled: "menu-enabled" else: "menu-disabled"),
+                            class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
-                          span(class = "menu-node-icon"):
-                            tdiv(class = "icon " & node.iconClass):
-                              discard
-                          span(
-                              class = "menu-node-name " & node.nameClass,
-                              style = "width: " & $node.nameWidth & "ch"):
+                          span(class = "ct-menu-item-label"):
                             text node.name
-                            if node.children.len > 0:
-                              span(class = "menu-expand"):
-                                discard
+                          span(class = "ct-menu-item-trailing"):
+                            discard
                       if node.beforeNextSubGroup:
                         hr(class = "menu-sub-group-separator"):
                           discard
@@ -333,5 +383,9 @@ when defined(js):
     let shell = renderMenuShell(r, model, callbacks)
     let shellNode = isonim_dom.Node(shell)
     let containerNode = isonim_dom.Node(container)
+    # NB: only the shell's *children* are moved into the caller's host; this
+    # wrapper is discarded.  A class set on it never reaches the document, so
+    # the caption-bar host classes are owned by `ui/menu.nim` instead — it also
+    # has to track fullscreen, which no render pass knows about.
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)

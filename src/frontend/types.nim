@@ -769,7 +769,17 @@ type
     deletions*: int
 
   VCSComponent* = ref object of Component
-    diffTarget*: cstring
+    ## The docked VCS panel: branch picker, commit history, changed files.
+    ##
+    ## It is never a diff surface.  A unified diff is its own editor-area
+    ## document (``UnifiedDiffComponent``) — VCS-Panel.md, "Unified Diff View
+    ## (Editor Integration)" — and this panel only decides what a click on a
+    ## changed file opens (``VCSVM.openActionFor``).
+    openFileMode*: bool
+      ## View-mode toggle for the docked panel (VCS-Panel.md "View mode
+      ## toggle").  ``false`` — the spec's ``defaultView: "unified-diff"`` —
+      ## means clicking a file opens a unified diff tab; ``true`` means it
+      ## opens the file itself in the editor.
     currentBranch*: cstring
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
@@ -794,24 +804,6 @@ type
       ## ID of the debounce ``windowSetTimeout``. -1 when idle.
     debounceActive*: bool
       ## True while the 1-second debounce window is open.
-    # Unified diff from git state (Task #69).
-    unifiedDiffActive*: bool
-      ## True when the "Unified Diff" toggle is active in normal git mode.
-    gitDiffData*: DeepReviewData
-      ## Populated on-demand with parsed ``git diff HEAD`` output so that
-      ## the DeepReview unified diff renderer can be reused.
-    # Hunk editor state (hunk selection + actions).
-    selectedHunks*: seq[(int, int)]
-      ## Selected (fileIndex, hunkIndex) pairs for hunk operations.
-    hunkToolbarVisible*: bool
-      ## True when at least one hunk is selected and the action toolbar
-      ## should be displayed.
-    lastHunkClickIndex*: int
-      ## Index into ``selectedHunks``-eligible list used for Shift-click
-      ## range selection. Stores the flat hunk ordinal of the last
-      ## single-clicked hunk header.
-    hunkCopyFeedback*: bool
-      ## Briefly true after a successful "Copy as patch" to show feedback.
     # Commit graph pagination state.
     commitOffset*: int
       ## Number of commits already fetched; used as the --skip argument when
@@ -819,6 +811,131 @@ type
     loadingMore*: bool
       ## True while a background git-log call is in progress to load the
       ## next commit page.  Prevents concurrent overlapping fetches.
+    allCommitsLoaded*: bool
+      ## True once a page came back short (or empty), i.e. the repository has
+      ## no commits beyond the ones already in ``commits``.
+      ##
+      ## Without this the infinite-scroll sentinel is a busy loop on every
+      ## repository whose history is shorter than the panel: the sentinel sits
+      ## permanently inside the viewport, its IntersectionObserver fires,
+      ## ``loadMoreCommits`` shells out to ``git log`` for a page that does not
+      ## exist, publishes the unchanged list anyway, the panel's render effect
+      ## tears the whole subtree down and rebuilds it — sentinel included — and
+      ## the new sentinel is intersecting the moment it is attached.  Measured
+      ## at ~60 ``git log`` processes and ~440 DOM rebuilds per second, which is
+      ## also why nothing in the panel could ever be clicked: every element was
+      ## detached again before a click could land on it.
+      ## Reset wherever ``commitOffset`` is reset.
+
+  UnifiedDiffComponent* = ref object of Component
+    ## One unified-diff editor tab: a Monaco document showing the diff for a
+    ## single target.
+    ##
+    ## VCS-Panel.md, "Unified Diff View (Editor Integration)": "Uses the
+    ## standard CodeTracer Monaco editor".  Before DR-R4 this was a second
+    ## ``VCSComponent`` instance rendering nested ``tdiv`` elements, which had
+    ## no find, no cross-document selection, no minimap and no surface for the
+    ## Omniscience decorations DR-R6 adds.
+    ##
+    ## The component owns the *data* and the Monaco instance.  The selection
+    ## model and the patch builder live in ``VCSVM`` (see
+    ## ``viewmodel/viewmodels/vcs_vm.nim``), so there is one hunk-editor model
+    ## rather than one per surface.
+    diffTarget*: cstring
+      ## The layout path identifying what this tab shows —
+      ## ``diff:file:<path>``, ``diff:commit:<hash>[:<path>]`` or
+      ## ``diff:Working Tree``.  It is the tab's identity: asking for the same
+      ## target again focuses this tab instead of stacking a duplicate.
+    diffData*: DeepReviewData
+      ## Parsed hunks for the target.  Filled from the review dataset when the
+      ## session is a review and from ``git diff`` otherwise — VCS-Panel.md,
+      ## "Data Sources and Instantiation Modes".
+    reviewBacked*: bool
+      ## True when ``diffData`` came from ``deepReviewData`` rather than from
+      ## live git.  Drives *only* whether the mutating hunk operations are
+      ## offered ("Commit operations: Disabled (read-only view)"); the diff
+      ## rendering never consults it, per "Unified Diff View (Shared)".
+    initialized*: bool
+    diffEditor*: js
+      ## The Monaco **diff editor** (UD-1), or nil before the container
+      ## exists.  ``monaco.editor.createDiffEditor`` with
+      ## ``renderSideBySide: false`` is the unified view, and it owns both
+      ## revisions of the file, so the syntax highlighting and the word-level
+      ## intra-line marking come from the editor rather than from us.
+    editor*: MonacoEditor
+      ## The diff editor's **modified** side — the new revision, and the one
+      ## the inline view actually renders into.  Everything keyed on new-side
+      ## source lines attaches here: the diff decorations, the Omniscience
+      ## overlay, the value chips, the two steppers' view zones and the click
+      ## dispatch.  Nil before the container exists.
+    originalEditor*: MonacoEditor
+      ## The diff editor's **original** side — the old revision.  It carries
+      ## its own decorations (the removed lines' classes and its half of the
+      ## dual gutter); in the unified view Monaco draws its content as deleted
+      ## lines inside the modified editor's scroll.
+    originalModel*: js
+    modifiedModel*: js
+      ## The two models, held so they can be disposed when GoldenLayout
+      ## destroys the tab's DOM.  A model created with
+      ## ``monaco.editor.createModel`` outlives the editor it was handed to —
+      ## unlike the implicit model ``monaco.editor.create`` builds from
+      ## ``value`` — so not disposing them leaks one pair per tab open.
+    editorInitialized*: bool
+    decorationCollection*: js
+      ## Monaco decorations collection holding the modified side's per-line
+      ## diff decorations.
+    originalDecorationCollection*: js
+      ## The same for the original side.  Separate because a decorations
+      ## collection belongs to one editor.
+    lineLabels*: seq[cstring]
+      ## Dual old/new line-number labels for the *modified* model, one per
+      ## model line, handed to Monaco's ``lineNumbers`` callback.
+    originalLineLabels*: seq[cstring]
+      ## The same for the original model.  Two sequences rather than one
+      ## because the two models are renumbered independently — a removed line
+      ## occupies a line of the original model and none of the modified one.
+    flowDecorationCollection*: js
+      ## Monaco decorations collection holding the review's Omniscience flow
+      ## decorations (RV-5).  A *second* collection rather than more entries in
+      ## ``decorationCollection`` because the two have different lifetimes: the
+      ## diff decorations change when a hunk is selected or context is
+      ## expanded, the flow ones when the reader picks another invocation, and
+      ## a single collection would make each rebuild throw the other away.
+    flowValueWidgets*: seq[js]
+      ## The Monaco **content widgets** carrying the review's parallel value
+      ## bands (UD-3) — one per annotated line, each holding the
+      ## `.flow-parallel` row the debugger's own `ui/flow.renderFlow` builds.
+      ##
+      ## A content widget rather than an injected-text decoration, which is
+      ## what RV-5 used: injected text is part of the code line, so it starts
+      ## where that line happens to end (a ragged strip, not a column) and it
+      ## cannot hold the nested column elements the flow view lays a loop's
+      ## passes out in.  Held so a repaint can remove the previous set — Monaco
+      ## keys a content widget by the id its `getId` returns and silently keeps
+      ## the old node otherwise.
+    flowValueZoneIds*: seq[int]
+      ## Monaco view-zone ids of the value bands, when the pane is too narrow
+      ## to hold one beside the code and they are drawn on their own row under
+      ## it instead (UD-3).  Separate from `flowViewZoneIds`, which holds the
+      ## two in-editor *controls*: those are rebuilt whenever the reader's
+      ## choice changes, and the bands whenever the geometry does.
+    flowValueWidgetMax*: int
+      ## Where the value band was last laid out, in pixels from the editor's
+      ## content left.  Kept for the same reason the debugger keeps
+      ## `maxFlowLineWidth`: the band's offset is one number for every line, so
+      ## the values line up into columns a reader can scan downwards.
+    flowViewZoneIds*: seq[int]
+      ## Monaco view-zone ids of the review's in-editor controls — the
+      ## invocation selectors (DeepReview-GUI.md §7) and the loop iteration
+      ## controls (§4.4) alike — so a rebuild can remove the previous ones
+      ## instead of stacking a second control above every function — the defect
+      ## #562 recorded for the loop slider.
+      ##
+      ## One seq for both kinds because they are rebuilt together, by the same
+      ## proc, from the same document: the anchors of both move whenever
+      ## context expansion renumbers the model, so a rebuild that dropped one
+      ## kind and kept the other would leave that one pointing at somebody
+      ## else's lines.
 
   ViewKind* =       enum ViewTable, ViewLine, ViewPie
 
@@ -994,51 +1111,6 @@ type
     # lastScrollFireTime*: int64
     service*: FlowService
 
-  DeepReviewViewMode* = enum
-    ## Controls which view is active in the DeepReview component.
-    FullFiles,  ## Single-file Monaco editor view (original behaviour).
-    Unified     ## Unified diff view showing all files as a scrollable
-                ## list of hunks with added/removed/context line decorations.
-
-  DeepReviewComponent* = ref object of Component
-    ## Standalone DeepReview viewer.
-    ## Displays coverage, inline values, and call trace from a
-    ## DeepReview JSON export without requiring a debugger connection.
-    drData*: DeepReviewData
-    selectedFileIndex*: int
-    selectedExecutionIndex*: int
-    selectedIteration*: int
-    editor*: MonacoEditor
-    editorInitialized*: bool
-    currentDecorationIds*: js
-    decorationCollection*: js
-    fileContentCache*: JsAssoc[cstring, cstring]
-    viewMode*: DeepReviewViewMode
-    selectedTraceContextId*: int
-      ## Currently selected trace context id (index into
-      ## ``drData.traceContexts``). Defaults to 0 (first context).
-    ## Per-file, per-hunk expansion state. Outer key is file index,
-    ## inner key is hunk index. Each entry stores how many extra lines
-    ## have been expanded above and below the hunk.
-    expandAbove*: JsAssoc[cstring, JsAssoc[cstring, int]]
-    expandBelow*: JsAssoc[cstring, JsAssoc[cstring, int]]
-    glEmbedded*: bool
-      ## When true, the component is embedded inside a Golden Layout
-      ## panel alongside separate filesystem and calltrace panels.
-      ## The render method skips its own file-list and calltrace
-      ## sidebars, showing only the unified diff / editor area.
-    # Hunk editor state (hunk selection + actions).
-    drSelectedHunks*: seq[(int, int)]
-      ## Selected (fileIndex, hunkIndex) pairs for hunk operations.
-    drHunkToolbarVisible*: bool
-      ## True when at least one hunk is selected and the action toolbar
-      ## should be displayed.
-    drLastHunkClickIndex*: int
-      ## Flat ordinal of the last single-clicked hunk header, used for
-      ## Shift-click range selection.
-    drHunkCopyFeedback*: bool
-      ## Briefly true after "Copy as patch" to show feedback.
-
   AgentWorkspaceComponent* = ref object of Component
     ## Agent workspace view showing the agent's working directory files
     ## with DeepReview coverage annotations and test coverage overlay.
@@ -1079,16 +1151,18 @@ type
     ## See codetracer-specs/GUI/Debugging-Features/Visual-Replay.md.
 
   AgentActivityDeepReviewComponent* = ref object of Component
-    ## Enhanced agent activity pane that displays DeepReview data
-    ## (coverage summary, test results, traced functions) alongside
-    ## the agent's conversation history. Integrates with the existing
-    ## AgentActivityComponent via the ACP session id.
-    sessionId*: cstring
-    drSummary*: ActivityDeepReviewSummary
-    fileEntries*: seq[ActivityFileEntry]
-    recentNotifications*: seq[DeepReviewNotification]
-    testResults*: seq[DeepReviewNotification]
-    expanded*: bool
+    ## The review's identity in the Agent Activity pillar's layout —
+    ## ``Content.AgentActivityDeepReview``.
+    ##
+    ## It carried a DeepReview roll-up (a coverage summary, a test-results
+    ## row, a per-file coverage table and a notification feed) until AA-1
+    ## removed that outright: every fact it held is one the VCS panel already
+    ## carries, and DeepReview-GUI.md §2.1 is explicit that "there is no
+    ## 'DeepReview section' in this panel".  The type survives with no state
+    ## because the *id* does — a layout persisted by an older build may host a
+    ## pane of this content, and the id is what AA-2/AA-3 will render the
+    ## session's own content into.  An instance therefore renders an empty
+    ## pane rather than failing to construct.
 
   # -- HTTP Request Panel (M3) ------------------------------------------------
   HttpRequestEntry* = object
@@ -1397,6 +1471,21 @@ type
     editorUI*: EditorViewComponent
     focusedLine*: int
     flow*: FlowViewUpdate
+    ## Set when `EditorViewComponent.loadFlow` replaces this component with a
+    ## newer one for the same editor.  A superseded component still owns the
+    ## loop-control DOM the user can see and click until the replacement has
+    ## rendered, so it is not torn down — but it must stop *repainting*: its
+    ## deferred redraw/render timers were scheduled against the previous
+    ## debugger position and would otherwise rebuild the flow view zones (and
+    ## the loop counter inside them) from a stale location, on top of the ones
+    ## the live component is about to create.  See `ui/flow.nim::flowIsLive`.
+    superseded*: bool
+    handoffFlow*: FlowComponent
+      ## Previous `FlowComponent` whose Monaco view zones are still alive in
+      ## the editor and must be removed after the replacement has rendered.
+      ## `loadFlow` stores the outgoing component here so `onUpdatedFlow` can
+      ## call `resetFlow` on it only after the new DOM is fully constructed —
+      ## giving zero blank time compared with clearing eagerly before the load.
     flowLines*: JsAssoc[int, FlowLine]
     flowViewWidth*: int
     flowLoops*: JsAssoc[int, FlowLoop]
@@ -1410,6 +1499,11 @@ type
     inlineValueWidth*: int
     key*: cstring
     lastSliderUpdateTimeInMs*: int64
+    pendingRenderTimerId*: int
+      ## Timer ID of the debounced loop-iteration render scheduled by
+      ## ``scheduleActiveLoopIterationValueRender``. -1 when no timer is
+      ## pending. Stored so each new schedule can cancel the previous one and
+      ## prevent cascading re-renders during fast slider drags.
     lineGroups*: JsAssoc[int, Group]
     lineWidgets*: JsAssoc[int, js]
     loopColumnMinWidth*: int
@@ -1432,7 +1526,6 @@ type
     selectedStepCount*: int
     service*: FlowService
     shrinkedLoopColumnMinWidth*: int
-    sliderWidgets*: JsAssoc[int, js]
     status*: FlowUpdateState
     statusDom*: kdom.Node
     statusWidget*: js
@@ -1812,6 +1905,10 @@ type
     layoutSizes*:    LayoutSizes
     activeFocus*:    Component
     fontSize*:       int
+    codeFontFamily*: cstring
+      ## The face for code surfaces, when the user has chosen one.  Empty means
+      ## "use the default" — read it through `codeFontFamily()` in utils.nim
+      ## rather than directly, so the fallback lives in one place.
     monacoEditors*:  seq[MonacoEditor]
     traceMonacoEditors*: seq[MonacoEditor]
     hasLowLevelTabs*: bool
@@ -1911,17 +2008,27 @@ type
     pendingReRecord*:       JsObject
 
     # DeepReview data: populated when DeepReview mode is active.
-    # Stored at the Data level so that all panels (editor, filesystem,
-    # calltrace) can access it without going through a dedicated
-    # DeepReviewComponent. Set from data.startOptions.deepReview in
-    # onStartDeepReview.
+    # Stored at the Data level because a review has no panel of its own —
+    # the Editor, the VCS panel and the Agent Activity panel each read it
+    # (DeepReview-GUI.md §7).  Set from data.startOptions.deepReview in
+    # onStartDeepReview, or from a diff-associated trace / an agentic
+    # session handoff (ui/vcs.startDeepReviewNavigation).
     deepReviewActive*:      bool
     deepReviewData*:        DeepReviewData
     deepReviewSelectedFileIndex*: int
-      ## Index into ``deepReviewData.files`` shared between the VCS panel
-      ## (file list) and the DeepReview component (diff view).  Updated
-      ## by VCS clicks and read by the DeepReview component to determine
-      ## which file's diff to render.
+      ## Index into ``deepReviewData.files`` of the review's currently
+      ## selected file.  It describes the review rather than one panel —
+      ## the VCS panel's Changed Files list and the Agent Activity panel's
+      ## per-file coverage table are "two views of one selection"
+      ## (DeepReview-GUI.md §2.1) — so it is stored next to the data it
+      ## indexes.
+    deepReviewSelectedTraceContextId*: int
+      ## Id of the selected entry of ``deepReviewData.traceContexts``, shared
+      ## the same way: the selector lives in the VCS panel header
+      ## (DeepReview-GUI.md §2) but the selection describes the review, not
+      ## one panel, so it is stored next to the data it indexes.  Zero means
+      ## "not chosen yet"; the VCS panel resolves that to the first declared
+      ## context, which the export contract says is the default.
 
     # Multi-replay-window architecture (M0): session management.
     # During the migration the first (and only) session mirrors the
@@ -2374,6 +2481,27 @@ when defined(ctRenderer):
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
 
+  method unregister*(self: Component) {.base.} =
+    ## Counterpart of ``register`` — detach a destroyed component from the
+    ## event bus.
+    ##
+    ## ``register`` subscribes the component's handlers on a private mediator
+    ## created by ``setupLocalViewToMiddlewareApi``; that mediator in turn
+    ## registers itself as a subscriber of ``data.viewsApi``.  Neither side
+    ## used to have a removal path, so every panel that was closed and
+    ## reopened (``closeLayoutTab``), every layout reset
+    ## (``renderer.resetLayoutState``) and every closed session left its
+    ## handlers subscribed for the lifetime of the page.  A single emit was
+    ## then delivered once per dead component as well as to the live one —
+    ## the "Add to Scratchpad adds the value N times" symptom (#612).
+    ##
+    ## ``api`` is cleared so a component object that is later re-registered
+    ## (``registerComponent`` skips components that already carry an ``api``)
+    ## gets a fresh mediator instead of the silenced one.
+    if not self.api.isNil:
+      self.api.unsubscribeAll()
+      self.api = nil
+
   # === LocalViewSubscriber:
 
   type
@@ -2414,6 +2542,10 @@ when defined(ctRenderer):
     let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
     result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
     result.asSubscriber = newLocalViewSubscriber(transport)
+    # Remember which mediator this one subscribes to, so ``Component.unregister``
+    # can take the component off ``middlewareToViewsApi.subscribers`` as well as
+    # clear its own handlers.  See ``communication.unsubscribeAll``.
+    result.parent = middlewareToViewsApi
 
   proc registerComponent*(data: Data, component: Component, content: Content) =
     if data.ui.componentMapping[content].hasKey(component.id):
@@ -2462,6 +2594,21 @@ proc duration*(call: nil Call): int64 =
 proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
+
+method independentTabPath*(self: Component): cstring {.base.} =
+  ## The layout path this component instance is *keyed by* when it is opened
+  ## as an independent editor-area tab (see `opensAsIndependentTab`).
+  ##
+  ## The empty string means "no independent identity": the component is the
+  ## singleton instance of its content kind.  Because `openLayoutTab` only ever
+  ## compares this against a non-empty requested path, singleton instances can
+  ## never be mistaken for an independent tab.
+  cstring""
+
+method independentTabPath*(self: UnifiedDiffComponent): cstring =
+  ## A diff tab is identified by the target it shows, so a second `View Diff`
+  ## on the same file focuses the tab that already shows it (#611).
+  if self.diffTarget.isNil: cstring"" else: self.diffTarget
 
 method restart*(self: Component) {.base.} =
   discard

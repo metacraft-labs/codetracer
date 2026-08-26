@@ -117,10 +117,6 @@ build_rr_support() {
 		binary="${CLONE_DIR}/result/bin/ct-native-replay"
 	elif [[ -x "${CLONE_DIR}/target/debug/ct-native-replay" ]]; then
 		binary="${CLONE_DIR}/target/debug/ct-native-replay"
-	elif [[ -x "${CLONE_DIR}/result/bin/ct-rr-support" ]]; then
-		binary="${CLONE_DIR}/result/bin/ct-rr-support" # legacy fallback
-	elif [[ -x "${CLONE_DIR}/target/debug/ct-rr-support" ]]; then
-		binary="${CLONE_DIR}/target/debug/ct-rr-support" # legacy fallback
 	fi
 
 	if [[ -z $binary ]]; then
@@ -165,15 +161,11 @@ resolve_runtime_deps() {
 }
 
 export_to_github_env() {
-	local ct_rr_support=""
+	local ct_native_replay=""
 	if [[ -x "${CLONE_DIR}/result/bin/ct-native-replay" ]]; then
-		ct_rr_support="$(cd "${CLONE_DIR}/result/bin" && pwd)/ct-native-replay"
+		ct_native_replay="$(cd "${CLONE_DIR}/result/bin" && pwd)/ct-native-replay"
 	elif [[ -x "${CLONE_DIR}/target/debug/ct-native-replay" ]]; then
-		ct_rr_support="$(cd "${CLONE_DIR}/target/debug" && pwd)/ct-native-replay"
-	elif [[ -x "${CLONE_DIR}/result/bin/ct-rr-support" ]]; then
-		ct_rr_support="$(cd "${CLONE_DIR}/result/bin" && pwd)/ct-rr-support" # legacy
-	elif [[ -x "${CLONE_DIR}/target/debug/ct-rr-support" ]]; then
-		ct_rr_support="$(cd "${CLONE_DIR}/target/debug" && pwd)/ct-rr-support" # legacy
+		ct_native_replay="$(cd "${CLONE_DIR}/target/debug" && pwd)/ct-native-replay"
 	fi
 
 	if [[ -n ${GITHUB_ENV:-} ]]; then
@@ -186,7 +178,7 @@ export_to_github_env() {
 
 	if [[ -n ${GITHUB_PATH:-} ]]; then
 		local bin_dir
-		bin_dir=$(dirname "$ct_rr_support")
+		bin_dir=$(dirname "$ct_native_replay")
 		echo "$bin_dir" >>"$GITHUB_PATH"
 		# Also add the target/debug dir for rr, dlv, gdb symlinks
 		echo "${REPO_ROOT}/target/debug" >>"$GITHUB_PATH"
@@ -194,7 +186,7 @@ export_to_github_env() {
 
 	echo ""
 	echo "=== rr-backend setup complete ==="
-	echo "  ct-native-replay: $ct_rr_support"
+	echo "  ct-native-replay: $ct_native_replay"
 	echo "  CODETRACER_RR_BACKEND_PRESENT=1"
 }
 

@@ -174,15 +174,12 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     c[] = config
     c.shortcutMap = initShortcutMap(config.bindings)
 
-    # Auto-discover ct-native-replay from PATH if not configured,
-    # falling back to legacy ct-rr-support name.
+    # Auto-discover ct-native-replay from PATH if not configured.
     if c.rrBackend.path == "":
-      var ctRrPath = findExe("ct-native-replay")
-      if ctRrPath == "":
-        ctRrPath = findExe("ct-rr-support")  # legacy fallback
-      if ctRrPath != "":
+      let nativeReplayPath = findExe("ct-native-replay")
+      if nativeReplayPath != "":
         c.rrBackend.enabled = true
-        c.rrBackend.path = ctRrPath
+        c.rrBackend.path = nativeReplayPath
 
     return c
   except Exception as e:

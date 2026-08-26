@@ -1,0 +1,147 @@
+# =============================================================================
+# Desktop -> launcher/recorder end-to-end compatibility gate (THE DESKTOP EDGE).
+#
+# THIN CALLER.  All of the work lives in the reusable workflow beside this one,
+# `./.github/workflows/launcher-recorder-e2e.yml`, which the launcher and the
+# recorder repos call too -- one implementation, three trigger directions, so
+# the assertions cannot drift.
+#
+# Design: codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md
+#         section 6 "CI wiring: three trigger edges, one reusable workflow".
+# Milestone: LRC-3.
+#
+# WHAT THIS EDGE PINS.  This repository -- the codetracer-desktop core -- is the
+# one under test, so it is pinned to `github.sha`.  That happens without this
+# caller saying anything: the reusable workflow makes the TRIGGERING repo its
+# primary `actions/checkout` at `${{ github.sha }}`, and inside a reusable
+# workflow that context is the caller's.  The launcher, the recorder and
+# codetracer-trace-format-nim are cloned beside it at the revisions the
+# per-commit WORKSPACE LOCK pins for this commit -- metacraft-dev-guidelines/
+# policies/ci-shared-dev-env.md section 3.2, migrated to by LRC-6.  Until LRC-6
+# this caller passed `codetracer-ref: ${{ github.sha }}` plus a `ref: dev`
+# matrix column for the recorder; both are gone, the first because it was
+# telling the reusable workflow something it already knew and the second
+# because a branch tip is not a pin.
+#
+# LOCK STATUS: RESOLVES TODAY, HAS NEVER RUN -- the same note the other four
+# callers carry, because this edge is now neither better nor worse off than
+# they are.  A lock-resolved sibling needs a workspace lock keyed by THIS
+# repo's commit, and one now exists.  On 2026-08-22 a workspace lock was
+# published for each of this gate's five trigger repos to
+# metacraft-labs/metacraft-manifests@latest (commit 5de2a3ae); `dev` here had
+# already moved on by then, so a further lock was published for its newer tip
+# (commit c43c44b9):
+#
+#   locks/codetracer/codetracer/
+#     f790309a8a009b95351bab722dff0cc0919b970a.toml
+#
+# That was verified against a FRESH clone of the published manifest -- not the
+# working checkout that produced the lock -- using exactly the invocation
+# `clone-siblings` makes: `resolve-sibling-rev.sh --repo codetracer --sibling
+# <NAME> --sha f790309a --no-walk`.  All five siblings resolve at exit 0 with
+# a 40-hex revision, and the three recorder revisions it pins DO contain
+# `cross-repo/launcher-compat.yml` -- the pre-fixture pins that used to fail
+# the workspace-shape check forty minutes into a run are gone.
+#
+# THAT IS THE ONLY THING THAT CHANGED.  This gate has still NEVER executed in
+# CI -- not once, on any of its five edges -- so nothing about it is
+# CI-verified and CI-green is not claimed here.  It remains blocked on
+# self-hosted runner capacity.
+#
+# AND IT IS ONE PUSH AWAY FROM RED AGAIN.  A lock answers for an EXACT commit.
+# `clone-siblings` looks one up with `--no-walk` for `github.sha` (plus
+# `github.event.before`, on `push` events only), and for a `pull_request` it
+# probes the PR BASE sha alone.  So the lock named above answers for that
+# commit and for no other -- including the commit that carries this comment.
+# Push to this repo without publishing a lock for the new tip and this edge is
+# straight back to failing in `Setup dev env` with "No workspace lock for
+# codetracer": one push of grace on a `push` event, because the previous tip
+# is probed as a fallback, and none at all on a `pull_request` once the base
+# branch moves past the locked commit.  That is inherent to per-commit pinning
+# rather than a defect, and it recurs on every mainline commit.
+#
+# THE REMEDY IS NOT IN THIS REPOSITORY, and that matters when this job goes
+# red on a pull request.  Clearing it takes `repro workspace lock
+# --trigger-repo=codetracer` in a workspace that contains the commit under
+# test, plus a push of the resulting lock to
+# metacraft-labs/metacraft-manifests -- not a change here.  `repro check
+# --mode=pre-push` does exactly that on its own, but ONLY in a workspace whose
+# `.repro/manifests` is a real git CHECKOUT of the manifest repo; where it is
+# a plain directory the lock is generated and then silently dropped with `lock
+# publish skipped: ... is not a git checkout`, which is precisely what had
+# left every edge of this gate unlocked before 2026-08-22.  Do NOT paper over
+# a missing lock by reintroducing a `<name>=<ref>` sibling override; that is
+# the policy deviation this wiring exists to remove.
+#
+# The call uses the LOCAL path form (`./.github/workflows/...`), which GitHub
+# resolves inside the calling commit, so the desktop edge always runs the
+# version of the reusable workflow that ships with the commit under test.  The
+# other two edges necessarily reference it by ref (`@dev`).
+#
+# WHY THIS EDGE EXISTS ALONGSIDE `ct-test-providers`.  The existing
+# `ci/test/ct-providers.sh` gate drives the core `ct` binary DIRECTLY against
+# each recorder; it proves hops 2 and 3 and never exercises the launcher's
+# router.  This edge is the launcher-fronted superset: it additionally covers
+# hop 1 -- capability-file routing, the execv hand-off and the
+# CODETRACER_COMPONENT_DIR export that the decoded trace is asserted to contain.
+#
+# NO PATH FILTERS, deliberately.  A capability-file edit, a
+# language_detection.nim change and a recorder_dispatch.nim change can each
+# break routing, and LRC-3's verification is precisely that a trivial commit
+# triggers the edge.
+#
+# FAN-OUT.  Three rows: python (the LRC-2 pilot) plus ruby and js, added by
+# LRC-4.  Each recorder carries its own `cross-repo/launcher-compat.yml`
+# contract fixture, without which the driver hard-fails rather than skipping,
+# and `fail-fast: false` keeps one broken recorder from hiding the state of the
+# others.
+#
+# TWO EDGES ARE DELIBERATELY ABSENT, each on a blocker recorded against
+# milestone LRC-4 in
+# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.milestones.org:
+#
+#   native.  `ct record <native-binary>` carries no extension, so the launcher
+#     returns `mkNone` against a `record` line that declares only extensions and
+#     exits 1.  The routing rule has to be decided first.
+#
+#   beam.  Routing and dispatch both work, but this repo's
+#     `recorder_dispatch.nim` invokes codetracer-beam-recorder as
+#     `… -- elixir <program>` / `… -- escript <program>` and that recorder's
+#     `is_beam_target()` accepts only `mix` / `erl` / `rebar3`, so
+#     `ct record foo.ex` EXITS 0 having recorded a 2-event, 0-function trace.
+#     The contract fixture is checked in at
+#     codetracer-beam-recorder/cross-repo/launcher-compat.yml with the full
+#     diagnosis in its header.  Note this one is OURS as much as the recorder's:
+#     the invocation comes from this repo.
+# =============================================================================
+
+name: launcher-recorder-e2e (desktop edge)
+
+on:
+  push:
+    branches: [main, dev, stable]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - recorder: codetracer-python-recorder
+            lang: python
+          - recorder: codetracer-ruby-recorder
+            lang: ruby
+          - recorder: codetracer-js-recorder
+            lang: js
+    name: ${{ matrix.lang }}
+    uses: ./.github/workflows/launcher-recorder-e2e.yml
+    with:
+      edge: codetracer-desktop@${{ github.sha }} -> ${{ matrix.lang }}
+      recorder-repo: ${{ matrix.recorder }}
+      recorder-lang: ${{ matrix.lang }}
+    secrets: inherit

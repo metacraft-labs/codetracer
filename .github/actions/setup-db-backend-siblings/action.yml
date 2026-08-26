@@ -5,11 +5,32 @@ description: >
   codetracer-native-recorder), each at the revision pinned by the
   repo-workspaces workspace lock. This is a thin wrapper over the shared
   ``setup-dev-env`` action: it clones the three siblings adjacent to the
-  host checkout (``../<name>``) and installs the ``dev-exec`` wrapper. Nix
-  itself is installed by ``setup-dev-env`` when ``env-flavor: nix``; jobs
-  that already run their own ``setup-nix`` step can still call this action —
-  installing Nix twice is idempotent.
+  host checkout (``../<name>``) and installs the ``dev-exec`` wrapper.
+
+  Sibling cloning happens for every ``env-flavor``; the flavor decides only
+  which dev environment is materialised alongside it. Nix itself is installed
+  by ``setup-dev-env`` when ``env-flavor: nix``; jobs that already run their
+  own ``setup-nix`` step can still call this action — installing Nix twice is
+  idempotent.
 inputs:
+  env-flavor:
+    description: >
+      Which dev environment ``setup-dev-env`` should materialise alongside the
+      sibling clones: ``nix``, ``windows-diy`` or ``reprobuild``.
+
+      THERE IS NO DEFAULT, AND THAT IS THE POINT. This action hard-coded
+      ``nix`` for all of its callers, and ``nix`` cannot be installed on a
+      Windows runner at all: ``DeterminateSystems/nix-installer-action`` has no
+      Windows platform mapping, so the step aborts with "ArchOs (X64-Windows)
+      doesn't map to a supported Nix platform" before the calling job runs a
+      single step of its own. Windows callers pass ``windows-diy``, which
+      sources the repo's ``env.ps1``. A caller that says nothing gets an empty
+      value, which ``setup-dev-env``'s own ``Validate env-flavor`` step
+      rejects by name — a loud failure rather than a silently wrong platform.
+
+      ``ci/test/windows-runner-bootstrap-test.sh`` fails if a job on a Windows
+      runner reaches this action with the ``nix`` flavor.
+    required: true
   gh-token:
     description: GitHub token with access to sibling repositories.
     required: true
@@ -24,10 +45,14 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup dev env (clone db-backend siblings + install Nix)
-      # setup-dev-env resolves each sibling's revision from the per-commit
-      # repo-workspaces workspace lock (the single approved source of sibling
-      # revisions) and clones it to ../<name>. codetracer-native-recorder /
+    - name: Setup dev env (clone db-backend siblings + materialise the dev env)
+      # setup-dev-env clones each sibling to ../<name> at its pinned `dev`
+      # ref. The refs are explicit because a bare entry resolves through a
+      # per-commit workspace lock in the shared manifests repo, which has
+      # published nothing since 2026-08-02 -- see the note at the top of
+      # .github/workflows/codetracer.yml. This composite is used by six jobs,
+      # and every one of them died in this step until the refs were pinned.
+      # codetracer-native-recorder /
       # codetracer-trace-format / codetracer-trace-format-nim have no
       # .gitmodules; the recursive-submodule update is best-effort and a
       # no-op for them. The bespoke "direnv allow" fixup that used to live
@@ -35,11 +60,11 @@ runs:
       # needs it, and those jobs already perform it).
       uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
       with:
-        env-flavor: nix
+        env-flavor: ${{ inputs.env-flavor }}
         gh-token: ${{ inputs.gh-token }}
         substituters: ${{ inputs.substituters }}
         trusted-public-keys: ${{ inputs.trusted-public-keys }}
         siblings: |
-          codetracer-trace-format
-          codetracer-trace-format-nim
-          codetracer-native-recorder
+          codetracer-trace-format=dev
+          codetracer-trace-format-nim=dev
+          codetracer-native-recorder=dev

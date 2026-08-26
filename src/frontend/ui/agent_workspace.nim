@@ -368,10 +368,7 @@ proc initEditor(self: AgentWorkspaceComponent) =
 
   let entry = self.selectedFileEntry()
   let lang = if entry.path.len == 0: cstring"plaintext" else: guessLanguageFromPath(entry.path)
-  let theme = if self.data.config.theme == cstring"default_white":
-    cstring"codetracerWhite"
-  else:
-    cstring"codetracerDark"
+  let theme = monacoThemeName(self.data.config.theme)
   let placeholder = cstring"// Select a file to view agent workspace content"
 
   self.editor = awCreateMonacoEditor(divId, js{
@@ -382,6 +379,7 @@ proc initEditor(self: AgentWorkspaceComponent) =
     automaticLayout: true,
     folding: true,
     fontSize: self.data.ui.fontSize,
+    fontFamily: codeFontFamily(self.data.ui),
     minimap: js{ enabled: false },
     renderIndentGuides: true,
     renderLineHighlight: cstring"none",

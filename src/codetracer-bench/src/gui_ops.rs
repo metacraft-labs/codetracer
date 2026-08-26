@@ -879,7 +879,7 @@ impl MeasurementDriver for DapMeasurementDriver {
         // Materialized + both MCR variants share the `db` kind (the
         // same replay-server dap binary, distinguished by trace
         // contents + the replay-worker the dap-server discovers via
-        // PATH).  Rr uses its own ct-rr-support DAP binary, launched
+        // PATH).  Rr uses its own ct-native-replay DAP binary, launched
         // via `ct start_backend rr --stdio`.
         let backend_kind = match backend {
             Backend::Materialized | Backend::McrNoOmniscient | Backend::McrOmniscient => "db",
@@ -914,7 +914,7 @@ impl MeasurementDriver for DapMeasurementDriver {
         }
         // Prefer the user-facing `ct` CLI as the DAP host (it routes
         // through `start_backend` to the right replay binary per kind).
-        // Fall back to the direct `replay-server`/`ct-rr-support`
+        // Fall back to the direct `replay-server`/`ct-native-replay`
         // discovery so cells still measure when `ct` isn't built.
         let dap_binary = ct_cli_binary().or_else(ct_binary).ok_or_else(|| {
             "neither `ct` (preferred) nor `replay-server` is on PATH / discoverable; \

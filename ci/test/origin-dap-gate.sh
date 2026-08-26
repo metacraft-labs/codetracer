@@ -176,10 +176,14 @@ printf '%s\n' "$git_bootstrap" | grep -Fq '& $bootstrapScript' ||
 	fail "Windows Git bootstrap must invoke the downloaded tested helper"
 printf '%s\n' "$git_bootstrap" | grep -Fq 'Invoke-WebRequest' ||
 	fail "Windows Git bootstrap must retrieve the helper before checkout"
-# The app token is reserved for authenticated checkout and later private
-# recorder fetches. The public immutable helper fetch must not receive it.
+# The installation token is reserved for authenticated checkout and later
+# private recorder fetches. The public immutable helper fetch must not receive
+# it. Matched by SHAPE (`steps.<any-id>.outputs.token`) rather than by the id
+# of the day: this check previously named `app-token` literally and would have
+# gone quietly blind the moment that step was renamed, which is exactly what
+# the consolidation onto a single `ci_token` mint step did.
 if printf '%s\n' "$git_bootstrap" |
-	grep -Eq 'app-token\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
+	grep -Eq 'steps\.[A-Za-z0-9_-]+\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
 	fail "Windows Git bootstrap must not receive or transmit repository credentials"
 fi
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
@@ -246,7 +250,15 @@ done
 
 [ "$(printf '%s\n' "$checkout_step" | grep -c 'submodules: recursive$')" -eq 1 ] ||
 	fail "Windows checkout must retain recursive submodules"
-[ "$(printf '%s\n' "$checkout_step" | grep -c "token: \${{ steps.app-token.outputs.token }}$")" -eq 1 ] ||
+# Matched by SHAPE, not by the mint step's id of the day. The id moved from
+# `app-token` to `ci_token` when the workflows were consolidated onto a single
+# mint step per job, and an id-literal assertion would have started failing on
+# a workflow that had in fact got MORE correct. What must hold is that this
+# checkout authenticates with a token minted in this job at all -- the
+# credential contract in ci/test/sibling-provisioning-test.sh is what pins the
+# id to a mint step that actually exists.
+[ "$(printf '%s\n' "$checkout_step" |
+	grep -cE 'token: \$\{\{ steps\.[A-Za-z0-9_-]+\.outputs\.token \}\}$')" -eq 1 ] ||
 	fail "Windows checkout must retain the generated CI token"
 printf '%s\n' "$required_gate_step" | grep -Fq 'run: just test-origin-dap' ||
 	fail "Windows required gate must still run the strict origin-DAP router"

@@ -101,6 +101,25 @@ proc createMainWindow*: js =
     win.loadURL(cstring(url))
 
     win.on("close", onClose)
+
+    when defined(ctmacos):
+      # macOS hides the traffic-light buttons in native fullscreen, so the
+      # caption bar must stop reserving space for them (and drop the divider
+      # that separated them from its own controls).  Nothing in the renderer can
+      # observe this — it is a window-level OS state — so push it over IPC.
+      # `ui/menu.nim`'s `setCaptionBarFullscreen` consumes it.
+      proc sendFullscreenState(fullscreen: bool) =
+        win.webContents.send(
+          cstring"CODETRACER::window-fullscreen-changed",
+          js{"fullscreen": fullscreen})
+
+      win.on("enter-full-screen", proc() = sendFullscreenState(true))
+      win.on("leave-full-screen", proc() = sendFullscreenState(false))
+      # The window can already be fullscreen when the renderer first paints
+      # (a restored macOS space, or `--start-fullscreen`), and the renderer
+      # defaults to windowed, so state the truth once the contents are live.
+      win.webContents.on("did-finish-load", proc() =
+        sendFullscreenState(cast[bool](win.isFullScreen())))
     # TODO: eventually add a shortcut and ipc message that lets us
     # open the dev tools directly from the interface, as in browsers
     let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
@@ -131,7 +150,10 @@ proc onRestoreWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.restore()
 
 proc onMaximizeWindow*(sender: js, response: JsObject) {.async.} =
-  mainWindow.maximize()
+  if cast[bool](mainWindow.isMaximized()):
+    mainWindow.unmaximize()
+  else:
+    mainWindow.maximize()
 
 proc onCloseWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.close()
@@ -174,6 +196,63 @@ proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, 
     errorPrint "save layout config error: ", errWrite
   else:
     infoPrint fmt"Layout saved to {layoutFilePath} (editMode={response.isEditMode})"
+
+proc readFileSyncOrEmpty(path: cstring): cstring {.importjs:
+  """(function(path) {
+    try {
+      return require('fs').readFileSync(path, 'utf8');
+    } catch (error) {
+      return '';
+    }
+  })(#)""".}
+  ## Synchronous read used only by `onRequestAutoHideState`; see there for
+  ## why the auto-hide handshake cannot be asynchronous.
+
+proc setIpcReturnValue(event: js, value: cstring) {.importjs:
+  """(function(event, value) {
+    if (event && typeof event === 'object') { event.returnValue = value; }
+  })(#, #)""".}
+  ## Reply to an `ipcRenderer.sendSync` call.  Guarded because in server
+  ## builds the IPC shim invokes handlers with an undefined sender.
+
+proc onSaveAutoHideState*(sender: js,
+                          response: jsobject(state=cstring)) {.async.} =
+  ## Persist the set of panels the user pinned to a screen edge.
+  ##
+  ## Pinning REMOVES the component from the GoldenLayout tree, so this state
+  ## cannot live inside `default_layout.json`: it is exactly the panels that
+  ## are *not* in it.  It gets its own sibling file.
+  ##
+  ## Before this handler existed the renderer sent
+  ## `CODETRACER::save-auto-hide-state` into the void — the channel name
+  ## occurred at exactly one site in the whole repository, the send — so a
+  ## pinned panel was gone on the next launch and, when the pinned panel was
+  ## FILES, the layout validator declared the saved layout incompatible and
+  ## deleted it (issue #608).
+  let statePath = frontend_config.userLayoutDir / "auto_hide_state.json"
+  let payload = if response.state.isNil: cstring"{}" else: response.state
+  let errWrite = await fsWriteFileWithErr(cstring(statePath), payload)
+  if not errWrite.isNil:
+    errorPrint "save auto-hide state error: ", errWrite
+  else:
+    debugPrint "index: auto-hide state saved to ", statePath
+
+proc onRequestAutoHideState*(sender: js, response: js) =
+  ## Hand the persisted auto-hide state back to the renderer, synchronously.
+  ##
+  ## Deliberately NOT `{.async.}` and deliberately a synchronous read: the
+  ## renderer asks for this with `ipcRenderer.sendSync` from inside
+  ## `initLayout`, because the restore has to have completed before the
+  ## standalone auto-hide panels are registered (`ui/layout.nim`) — otherwise
+  ## a restored panel and a freshly-created standalone one race for the same
+  ## content.  `event.returnValue` is only read while this handler is on the
+  ## stack, so an `await` here would return `undefined` to the renderer.
+  ##
+  ## The payload is a few hundred bytes and is read once per window start.
+  ## A missing file is the normal first-run case and yields an empty string,
+  ## which the renderer treats as "nothing pinned".
+  let statePath = frontend_config.userLayoutDir / "auto_hide_state.json"
+  setIpcReturnValue(sender, readFileSyncOrEmpty(cstring(statePath)))
 
 proc onExitError*(sender: js, response: cstring) {.async.} =
   # we call this on fatal errors

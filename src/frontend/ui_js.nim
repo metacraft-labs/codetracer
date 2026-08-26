@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   options, json,
-  ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
+  ui/[agent_activity, agent_workspace, layout, editor, trace, event_log,
       state, calltrace, menu, status,
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
@@ -178,6 +178,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
+import viewmodel/viewmodels/deepreview_layout
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
@@ -188,6 +189,12 @@ import viewmodel/viewmodels/origin_chain_types
 from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, openSidePanel, onCancelLoad
 from isonim/core/signals import val
 from isonim/core/computation import val
+from viewmodel/viewmodels/trace_open import
+  TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
+from viewmodel/viewmodels/review_open import
+  ReviewOpenService, ReviewDatasetRequest, ReviewDatasetRequestKind
+from viewmodel/viewmodels/evidence_call_vm import
+  EvidenceDataset, EvidenceDatasetState, edsReady, edsUnavailable
 var activeSessionVM: SessionViewModel
 # Backend-reported `supportsStepBack` capability from the DAP `initialize`
 # response. The response can arrive (synchronously, via the in-process DAP
@@ -984,14 +991,25 @@ proc update*(self: Data, build: bool = false) =
 
 proc setEditorsEditable*(data: Data, editable: bool) =
   ## Update Monaco editors to match requested editability.
+  ##
+  ## A review opened from a dataset is the one state that never becomes
+  ## editable, whichever way the read-only flag is driven (`toggleReadOnly`,
+  ## the edit/debug mode switch).  DeepReview-GUI.md §5.1 requires the review
+  ## representation to stay read-only, and such a tab has no writable target to
+  ## begin with: its text is the dataset's snapshot of the reviewed commit
+  ## (`index/config.reviewSourceLookup`) and its name is the dataset's
+  ## repo-relative path, so a save would land under whatever directory
+  ## `ct review` was launched from — silently overwriting an unrelated file
+  ## that happens to sit at the same relative path.
+  let reallyEditable = editable and not data.isReviewDatasetSession()
   for label, editor in data.ui.editors:
     if editor.monacoEditor.isNil:
       continue
     let minimapEnabled =
-      if editable: data.config.showMinimap
+      if reallyEditable: data.config.showMinimap
       else: false
     let options = MonacoEditorOptions(
-      readOnly: not editable,
+      readOnly: not reallyEditable,
       minimap: js{ enabled: minimapEnabled }
     )
     editor.monacoEditor.updateOptions(options)
@@ -1179,6 +1197,23 @@ data.functions.focusEditorView = focusEditorView
 
 
 proc configure(data: Data) =
+  # macOS keeps its native traffic-light buttons and paints them over the top
+  # left of the web contents (`titleBarStyle: hidden`, `index/window.nim`), so
+  # the caption bar must start clear of them.  Marked here, at startup, rather
+  # than only when the menu shell renders: the session tab bar is rendered into
+  # `#menu` by `ui/session_tabs.nim` independently of the shell, and on the
+  # welcome screen it is the only thing there — it would sit under the buttons
+  # while waiting for a shell render that never comes.
+  when defined(ctmacos):
+    # Reserve room for the traffic-light buttons the OS paints over the caption
+    # bar, and follow the window in and out of fullscreen, where they vanish.
+    applyCaptionBarWindowMode()
+    let fullscreenIpc = data.ipc
+    fullscreenIpc["on"].call(
+        fullscreenIpc, cstring"CODETRACER::window-fullscreen-changed") do (
+        sender: js, response: js):
+      setCaptionBarFullscreen(response["fullscreen"].to(bool))
+
   # Hot module reload — only active when the binary was built with
   # `-d:ctHmr`. The renderer connects to the external LiveReload
   # daemon that `just build` started; `CT_HMR=0` opts out per
@@ -1206,6 +1241,70 @@ proc configure(data: Data) =
   domwindow.onresize = proc(e: js) =
     if not data.isNil and not data.ui.isNil and not data.ui.layout.isNil:
       data.ui.layout.updateSize()
+
+  # AA-2 — drilling from a `ct test` result in the Agent Activity session feed
+  # into the recording of that test.
+  #
+  # DeepReview-GUI.md §2.1.2 requires "the existing trace-opening path and tab
+  # model, honouring the `--open-policy` distinction between replacing the
+  # current tab and opening a new one", so the service is assembled from the
+  # two pieces that already implement it and nothing else:
+  #
+  #   * `createNewSession(data)` — the same call `onOpenTraceInTabReady` makes
+  #     for the "tab" newTracePolicy, i.e. the new-tab half of the policy;
+  #   * `CODETRACER::load-trace-file` — the existing open-a-trace-by-path IPC
+  #     (`index/traces.onLoadTraceFile`), which also owns the "no trace
+  #     registered at that path" answer.  §2.1.2 would rather the panel say so
+  #     than open a broken tab, and that handler already replies
+  #     `CODETRACER::trace-load-error` instead of creating one.
+  #
+  # `TraceOpenRequest.tracePath` is the recording's output *directory*, which
+  # is what every `ct test` provider reports as `TraceMetadata.path`.
+  #
+  # Installed here rather than beside the other panel-VM wiring in
+  # `configureMiddleware`: that routine runs only from `onTraceLoaded` and
+  # `onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
+  # `CODETRACER::no-trace` — and a `ct review` dataset launch reaches neither
+  # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns),
+  # so a review —
+  # the one mode this feature exists for — got a panel with no trace-opening
+  # service at all.  `configure` runs once per renderer in every launch mode.
+  agent_activity.installAgentActivityTraceOpenService(
+    TraceOpenService(openProc: proc(request: TraceOpenRequest) =
+      if request.policy == topNewTab:
+        createNewSession(data)
+      data.ipc.send cstring"CODETRACER::load-trace-file",
+        js{tracePath: cstring(request.tracePath)}))
+
+  # AA-3 — reading the review dataset an evidence tool call produced, so the
+  # session feed can name its shape and enter a review over it
+  # (DeepReview-GUI.md §2.1.1).
+  #
+  # The renderer cannot read files, so this is the request half of a round
+  # trip whose answer arrives as `CODETRACER::review-dataset-read` and is
+  # handled by `onReviewDatasetRead`.  The *read* on the other side is
+  # `index/review_dataset.readReviewDatasetFile` — the same one
+  # `index/args.nim`'s `--deepreview` branch performs for
+  # `ct review <PATH>` — and entering the review is
+  # `vcs.openReviewDataset`, which publishes the dataset where every launch
+  # path publishes it and calls the one host entry point.  Nothing here is a
+  # second way to open a review.
+  #
+  # Installed beside AA-2's service, in `configure`, and for the same
+  # measured reason: `configureMiddleware` runs only from `onTraceLoaded` and
+  # `onNoTrace`, and a `ct review` dataset launch reaches neither
+  # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns).
+  # A review is the one mode this feature exists for, so wiring placed there
+  # would be a silent no-op exactly where it is needed.  `configure` runs
+  # once per renderer in every launch mode.
+  agent_activity.installAgentActivityReviewOpenService(
+    ReviewOpenService(requestProc: proc(request: ReviewDatasetRequest) =
+      data.ipc.send cstring"CODETRACER::open-review-dataset",
+        js{
+          anchorId: cstring(request.anchorId),
+          datasetPath: cstring(request.datasetPath),
+          kind: cstring($request.kind)
+        }))
 
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config
@@ -1398,11 +1497,54 @@ proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
       cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
         getCurrentExceptionMsg()
 
+proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
+  initLayout(config)
+
 proc tryInitLayout*(data: Data) =
+  ## Mount the GoldenLayout tree once both the page and the init event are in.
+  ##
+  ## `initLayout` reaches into GoldenLayout, which throws *native* JavaScript
+  ## `Error`s that Nim's `except` does not catch — so a single bad saved layout
+  ## aborted this proc half-way and `redrawAll()` below never ran, leaving a
+  ## blank window with nothing in the log.  The guard therefore has to be
+  ## written in raw JS, the same way `ui/session_switch.nim` does it.
   if data.ui.pageLoaded and data.ui.initEventReceived:
     if data.ui.layout.isNil:
-      initLayout(data.ui.resolvedConfig)
+      var ok = false
+      {.emit: """
+        try {
+          `callInitLayoutUnchecked`(`data`.ui.resolvedConfig);
+          `ok` = true;
+        } catch (e) {
+          console.error("ui_js: initLayout failed: " +
+            (e && e.message ? e.message : String(e)));
+        }
+      """.}
+      if not ok:
+        cerror "ui_js: layout initialisation failed; see the console"
+        # A blank window with only a console line is exactly the class of
+        # silent failure this pass is removing.  The notification host is
+        # rendered outside the GoldenLayout tree, so it survives this.
+        try:
+          data.viewsApi.errorMessage(cstring(
+            "The saved panel layout could not be restored. " &
+            "Reset it from the View menu if the window stays empty."))
+        except:
+          cerror "ui_js: could not report the layout failure: " &
+            getCurrentExceptionMsg()
     redrawAll()
+
+    # DeepReview-GUI.md §7, "Transition into a Review", step 2: "The first
+    # modified file opens in the editor with unified diff view."
+    #
+    # It happens here rather than in `onStartDeepReview` because opening a tab
+    # needs a mounted GoldenLayout, and `CODETRACER::start-deepreview` can
+    # arrive before the document finishes loading — in which case the tree is
+    # only built on the later `onReady` pass through this proc.
+    # `startDeepReviewNavigation` is a one-shot, so a review opens its first
+    # file exactly once however many times the layout is initialised.
+    if data.deepReviewActive and not data.ui.layout.isNil:
+      vcs.startDeepReviewNavigation(data)
 
 # In both these `on` functions, we must communicate them to the ui
 
@@ -1656,8 +1798,8 @@ when not defined(ctInExtension):
           # VM that threw during construction leaves its panel wired to a
           # stub (or to nothing), and every later symptom — an empty
           # calltrace, a state panel that never fills — is downstream of
-          # this line.  It must survive the M51 demotion of the surrounding
-          # `[PIPELINE]` progress traces.
+          # this line.  It must stay at ERROR even though the surrounding
+          # `[PIPELINE]` progress traces were demoted to DEBUG.
           cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
 
       initPanelVM("initStateVMWithStore"):
@@ -1846,12 +1988,8 @@ when not defined(ctInExtension):
         video_player.initVideoPlayerVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityVMWithStore"):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
-      initPanelVM("initAgentActivityDeepReviewVMWithStore"):
-        agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentWorkspaceVMWithStore"):
         agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-      initPanelVM("initDeepReviewVMWithStore"):
-        deepreview.initDeepReviewVMWithStore(activeSessionVM.store)
       initPanelVM("installAgenticWorktreeTestHooks"):
         agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
           activeSessionVM.store)
@@ -1922,7 +2060,7 @@ when not defined(ctInExtension):
             inc data.ui.status.completeMoveId
             data.ui.status.redraw()
           else:
-            # Stays at ERROR (M51 review).  The "it just arrived early"
+            # Stays at ERROR.  The "it just arrived early"
             # reading of this branch does not survive checking: the only
             # thing that registers this subscription is
             # `configureMiddleware`, and both of its call sites
@@ -2247,6 +2385,26 @@ proc onTraceLoaded(
     else:
       await data.openNewEditorView(programTab, ViewSource)
 
+  # DeepReview-GUI.md §1, launch method 2: "Open a trace that is associated
+  # with a diff."  A trace recorded with `ct record --with-diff` carries its
+  # structured diff in the trace folder, and every stage up to here already
+  # forwarded it — `ct run` as `--diff <path>`, `index/args.nim` into
+  # `StartOptions.diff`, `index/traces.nim` into this very message — but the
+  # renderer used to drop it, so the launch method existed on paper only.
+  # It enters the review through the same routine `ct review` and the
+  # agentic handoff use.
+  if response.withDiff and not response.diff.isNil and
+      response.diff.files.len > 0:
+    await waitForLayoutGround(data)
+    let reviewedProgram = $baseName(data.trace.program)
+    vcs.startReviewForTraceDiff(
+      data, response.diff,
+      title = "Review: " & reviewedProgram,
+      # The open recording *is* the run under review, so it is the review's
+      # one trace context.
+      traceLabel = reviewedProgram,
+      recordingId = $data.trace.recordingId)
+
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
@@ -2307,14 +2465,31 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   data.tryInitLayout()
 
 
-proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions)) =
+proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions, layout=js)) =
   ## Handler for ``CODETRACER::start-deepreview`` IPC message.
-  ## Sets up the frontend for DeepReview offline review mode using the
-  ## standard GL layout (filesystem, editor, calltrace panels) instead
-  ## of a monolithic DeepReview panel.  The filesystem panel detects
-  ## ``data.deepReviewActive`` and shows changed files from the review
-  ## data.  Editor tabs receive diff decorations when a file has review
-  ## data.  The calltrace panel works as normal.
+  ##
+  ## Sets up the frontend for DeepReview offline review mode on the layout the
+  ## index process loaded, which is used as-is: a review adds no panel and
+  ## removes none, it only retargets the stacks hosting the VCS and Agent
+  ## Activity panels at them (``deepreview_layout.focusReviewPanels``).  Every
+  ## panel that layout declares therefore stays where the user put it
+  ## (issue #610; DeepReview-GUI.md §7).
+  ##
+  ## The VCS panel detects ``data.deepReviewActive`` and populates its file
+  ## list from ``data.deepReviewData.files``; clicking a file opens that
+  ## file's review representation as an ordinary editor document — a
+  ## ``Content.UnifiedDiff`` tab or the file itself, per the panel's view
+  ## mode toggle.
+  ##
+  ## NOTE (RV-2): the layout that arrives here for a *dataset* launch is the
+  ## EDITOR layout, not the debugging one (``index/config.loadReviewLayoutConfig``).
+  ## A dataset launch loads no recording at all — ``index/args.nim`` forces
+  ## ``recordingID = ""`` and ``index/startup.nim`` returns before
+  ## ``CODETRACER::init`` — so the replay-backed panels used to come up present
+  ## but EMPTY, which reads as missing data.  They are now simply not in the
+  ## layout (DeepReview-GUI.md §1.1).  The other two launch methods have a
+  ## recording, do not pass through this handler, and keep the debugging
+  ## layout with those panels populated.
   data.startOptions.loading = false
   data.startOptions.withDeepReview = true
   data.config = response.config
@@ -2322,6 +2497,11 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   # but since the renderer runs in a separate Electron process, the
   # startOptions are forwarded via the IPC message.
   data.startOptions.deepReview = response.startOptions.deepReview
+  # RV-6: and, when the dataset named an agent session, the resolution `ct`
+  # performed for it.  Nil when the dataset named none — which is normal, and
+  # is *not* the same as a reference that failed to resolve (that arrives with
+  # an explicit non-"loaded" state; DeepReview-GUI.md §2.1).
+  data.startOptions.reviewSession = response.startOptions.reviewSession
 
   # Store DeepReview data at the Data level so all panels can access it.
   data.deepReviewActive = true
@@ -2331,104 +2511,68 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   hideWelcomeScreenSurface()
 
-  # DeepReview GL layout: VCS panel (left) showing changed files from the
-  # review data, DeepReview component (center) rendering the unified diff
-  # for the selected file, and calltrace (right).  The VCS panel detects
-  # ``data.deepReviewActive`` and populates its file list from
-  # ``data.deepReviewData.files``.  Clicking a file updates
-  # ``data.deepReviewSelectedFileIndex`` which the DeepReview component
-  # reads to decide which file's diff to render.
-  let standardLayoutJson = cstring"""{
-    "settings": {
-      "constrainDragToContainer": true,
-      "reorderEnabled": true,
-      "popoutWholeStack": false,
-      "blockedPopoutsThrowError": true,
-      "responsiveMode": "always"
-    },
-    "dimensions": {
-      "borderWidth": 2,
-      "borderHeight": 4,
-      "headerHeight": 35,
-      "dragProxyWidth": 300,
-      "dragProxyHeight": 200
-    },
-    "root": {
-      "type": "row",
-      "size": "100%",
-      "isClosable": false,
-      "content": [
-        {
-          "type": "column",
-          "size": "20%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "size": "100%",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "vcsComponent-0",
-                    "content": 41
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "column",
-          "size": "60%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "deepReviewComponent-0",
-                    "content": 36
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "column",
-          "size": "20%",
-          "content": [
-            {
-              "type": "stack",
-              "content": [
-                {
-                  "type": "component",
-                  "componentType": "genericUiComponent",
-                  "componentState": {
-                    "id": 0,
-                    "label": "calltraceComponent-0",
-                    "content": 6
-                  },
-                  "title": "genericUiComponent"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    "openPopouts": []
-  }"""
-  data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](JSON.parse(standardLayoutJson))
+  # Parse the layout the index process loaded, bring the review's panels to
+  # the front of the stacks that already host them, and hand it back to
+  # GoldenLayout.  Nothing is inserted: DeepReview has no surface of its own
+  # (DeepReview-GUI.md §7).
+  var layoutNode = resolvedConfigToJsonNode(
+    cast[GoldenLayoutResolvedConfig](response.layout))
+  if layoutNode.isNil:
+    # `index/config.loadLayoutConfig` never returns nil (it resets to the
+    # bundled default, or exits), so this is an emergency path only: keep
+    # DeepReview usable with the file list it depends on rather than
+    # opening an empty window.
+    cerror "onStartDeepReview: no usable layout in the start message; " &
+      "falling back to a review-only layout"
+    layoutNode = %*{
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "responsiveMode": "always"
+      },
+      "dimensions": {
+        "borderWidth": 4,
+        "borderHeight": 4,
+        "headerHeight": 32,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "root": {
+        "type": "row",
+        "size": "100%",
+        "isClosable": false,
+        "content": [
+          {
+            "type": "stack",
+            "size": "20%",
+            "content": [
+              {
+                "type": "component",
+                "componentType": "genericUiComponent",
+                "componentName": "genericUiComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "vCSComponent-0",
+                  "content": VcsContentId
+                },
+                "title": "genericUiComponent"
+              }
+            ]
+          }
+        ]
+      },
+      "openPopouts": []
+    }
 
-  # Create UI components from the standard layout config.  This walks the GL
+  let reviewConfig = jsonNodeToResolvedConfig(focusReviewPanels(layoutNode))
+  if not reviewConfig.isNil:
+    data.ui.resolvedConfig = reviewConfig
+  else:
+    cerror "onStartDeepReview: could not build the DeepReview layout"
+
+  # Create UI components from the resolved layout config.  This walks the GL
   # config tree and instantiates each component.  The VCS panel detects
   # deepReviewActive and shows changed files; editor tabs get diff decorations.
   data.createUIComponents()
@@ -2436,10 +2580,10 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
-  # The DeepReview component (content 36) in the GL layout renders the
-  # unified diff view automatically.  Clicking a file in the VCS panel
-  # updates ``data.deepReviewSelectedFileIndex``, which the DeepReview
-  # component reads to decide which file's diff to display.
+  # The review's first modified file is opened by `tryInitLayout` itself, as
+  # soon as the GoldenLayout tree exists (DeepReview-GUI.md §7 step 2).  It
+  # cannot be done here: this message can arrive before the document has
+  # finished loading, and `data.ui.layout` is then still nil.
 
 
 proc onFilenamesLoaded(
@@ -2795,13 +2939,20 @@ proc onSuccessfulRecord(
 proc onFailedRecord(
   sender: js,
   response: jsobject(errorMessage=cstring)) =
+  ## A build/record run failed.
+  ##
+  ## The notification is unconditional.  Routing the message *only* into the
+  ## new-record form's status meant that any user who had ever opened "Record
+  ## new trace" got zero feedback from a failed re-record: `welcomeScreen` is
+  ## created once at startup and never cleared, and `newRecord` stays non-nil
+  ## once the form has been opened, so the form is usually hidden while it
+  ## silently absorbs the error (issue #603).
+  data.viewsApi.errorMessage(response.errorMessage)
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordError
     data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
     data.ui.welcomeScreen.requestWelcomeScreenRender()
-  else:
-    data.viewsApi.errorMessage(response.errorMessage)
 
 proc onLoadingTrace(
   sender: js,
@@ -2860,6 +3011,37 @@ proc onWelcomeScreen(
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
+proc onRecentItems(
+  sender: js,
+  response: jsobject(
+    recentTraces=seq[Trace],
+    recentFolders=seq[RecentFolder],
+    recentTransactions=seq[StylusTransaction]
+  )
+) =
+  ## Fill the recent-traces / recent-folders cache on startup paths that never
+  ## render the welcome screen themselves (issue #568).
+  ##
+  ## `onWelcomeScreen` above is the only other writer of these fields, and it
+  ## only ever runs when CodeTracer was launched *into* the welcome screen.
+  ## Started with `ct run <program>`, the process reached the session tab bar's
+  ## "+" button with `data.recentTraces` still empty, and
+  ## `ui/welcome_screen.nim:syncLegacyWelcomeScreenIntoVM` mirrored that empty
+  ## list into `WelcomeScreenVM` — the Recent Traces panel of the new tab was
+  ## blank while the identical click after a welcome-screen launch listed them.
+  ##
+  ## Only the cache is written here: rendering is not forced, so this cannot
+  ## draw the welcome surface over a live debugging session.  When a welcome
+  ## screen component already exists (an empty tab is open), its ViewModel is
+  ## re-synced so a visible, already-mounted panel picks the lists up
+  ## reactively.
+  clog "welcome_screen: on recent items"
+  data.recentTraces = response.recentTraces
+  data.recentFolders = response.recentFolders
+  data.stylusTransactions = response.recentTransactions
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
+
 proc onNewNotification(sender: js, notification: Notification) =
   data.viewsApi.showNotification(notification)
 
@@ -2888,23 +3070,44 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     data.services.editor.open[response.name].changed = false
     data.services.editor.open[response.name].lastSyncedSource =
       data.services.editor.open[response.name].source
-  if data.ui.editors.hasKey(response.name):
-    let editor = data.ui.editors[response.name]
-    if not editor.tabInfo.isNil:
-      editor.tabInfo.changed = false
-      editor.tabInfo.lastSyncedSource = editor.tabInfo.source
-    editor.name = response.name
-    if not data.services.search.paths.hasKey(response.name):
-      data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
-      data.services.search.paths[response.name] = true
-    var tokens = rsplit($response.name, {'/'}, maxsplit=1)
-    var label = $response.name
-    if tokens.len >= 2:
-      label = tokens[1]
-    editor.contentItem.setTitle(cstring(label))
-    editor.contentItem.config.componentState.label = response.name
-    editor.contentItem.config.componentState.fullPath = response.name
+  # The editor-chrome updates below touch GoldenLayout internals
+  # (`contentItem.config.componentState`) that are not guaranteed to exist for
+  # every tab.  They must never be able to stop `checkPendingReRecord` from
+  # running: that call is the *only* thing that drains a queued re-record
+  # request, and a throw here left the request armed forever (issue #603).
+  try:
+    if data.ui.editors.hasKey(response.name):
+      let editor = data.ui.editors[response.name]
+      if not editor.tabInfo.isNil:
+        editor.tabInfo.changed = false
+        editor.tabInfo.lastSyncedSource = editor.tabInfo.source
+      editor.name = response.name
+      if not data.services.search.paths.hasKey(response.name):
+        data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
+        data.services.search.paths[response.name] = true
+      var tokens = rsplit($response.name, {'/'}, maxsplit=1)
+      var label = $response.name
+      if tokens.len >= 2:
+        label = tokens[1]
+      editor.contentItem.setTitle(cstring(label))
+      editor.contentItem.config.componentState.label = response.name
+      editor.contentItem.config.componentState.fullPath = response.name
+  except:
+    cerror "saved-file: could not refresh the editor tab for " &
+      $response.name & ": " & getCurrentExceptionMsg()
   checkPendingReRecord(data)
+  data.redraw()
+
+proc onSaveFileError(sender: js, response: jsobject(name=cstring, error=cstring)) =
+  ## The main process could not write a buffer to disk.
+  ##
+  ## This message had no subscriber at all: the buffer stayed dirty, a queued
+  ## re-record request stayed armed with nothing left to answer it, and the
+  ## user was told nothing (issue #603).
+  cerror "save-file-error: " & $response.name & ": " & $response.error
+  data.viewsApi.errorMessage(
+    cstring("Could not save " & $response.name & ": " & $response.error))
+  data.noteReRecordSaveOutcome(failed = true)
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =
@@ -3001,6 +3204,43 @@ proc onTraceLoadError*(sender: js, response: jsobject(error=cstring)) =
   cwarn "trace-load-error: " & errorMsg
   data.viewsApi.errorMessage(errorMsg)
 
+proc onReviewDatasetRead*(sender: js,
+    response: jsobject(anchorId=cstring, datasetPath=cstring, kind=cstring,
+                       ok=bool, message=cstring, fileCount=int,
+                       commit=cstring, dataset=DeepReviewData)) =
+  ## AA-3 — the main process answered a request from an evidence card
+  ## (`index/review_dataset.onOpenReviewDataset`).
+  ##
+  ## Two shapes, one channel, because both carry the same fact — what is at
+  ## that path — and the panel has to record it either way.  Even the *open*
+  ## request lands its shape first: if the dataset vanished between the
+  ## inspection and the click, the card must stop offering the affordance and
+  ## start saying why, which is §2.1.1's "a dataset that no longer exists says
+  ## so when selected, rather than entering an empty review".
+  let datasetPath = $response.datasetPath
+  if datasetPath.len == 0:
+    return
+  agent_activity.applyAgentActivityEvidenceDataset(
+    datasetPath,
+    if response.ok:
+      EvidenceDataset(
+        state: edsReady,
+        fileCount: response.fileCount,
+        commit: $response.commit)
+    else:
+      EvidenceDataset(state: edsUnavailable, message: $response.message))
+  if not response.ok or response.kind != cstring"open":
+    return
+  if response.dataset.isNil:
+    # `ok` with no payload would silently enter an empty review, which is the
+    # outcome §2.1.1 names as the thing to avoid.
+    cerror "review-dataset-read: open answered without a dataset for " &
+      datasetPath
+    return
+  # The ordinary review-entry path from here on: publish the dataset where
+  # every launch path publishes it, then the one host entry point.
+  vcs.openReviewDataset(data, response.dataset)
+
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
   let data = ident("data")
@@ -3074,8 +3314,12 @@ proc configureIPC(data: Data) =
 
     "no-trace"
     "welcome-screen"
+    # #568: the recent-traces / recent-folders push for startup paths whose own
+    # startup message does not carry them (`index/recent_items.nim`).
+    "recent-items"
     "saved-as"
     "saved-file"
+    "save-file-error"
 
     # notifications
     "new-notification"
@@ -3177,6 +3421,11 @@ proc configureIPC(data: Data) =
 
     # Trace macro (M11): error loading a .ct file from the langserver
     "trace-load-error"
+
+    # AA-3: the answer to `open-review-dataset` — a review dataset an
+    # evidence tool call in the Agent Activity session feed names, either
+    # summarised or handed over whole.
+    "review-dataset-read"
 
   duration("configureIPCRun")
 

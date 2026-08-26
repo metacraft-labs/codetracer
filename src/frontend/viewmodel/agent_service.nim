@@ -124,7 +124,23 @@ proc taskPrompt*(instructions: string;
     result.add textBlock(evidenceRequirement)
 
 proc evidenceCommandForTab*(tabId: string): string =
-  "ct agent evidence --session " & tabId
+  ## The command CodeTracer *tells a launched agent to run*, and therefore the
+  ## one place the prompt has to agree with the CLI that ships.
+  ##
+  ## RV-7 (`codetracer-specs/DeepReview/Agentic-Coding-Integration.md` §4.4)
+  ## made the handoff two ordinary commands: `ct agent evidence` takes the
+  ## review dataset `ct review collect` produced.  This used to emit
+  ## `ct agent evidence --session <tab>` alone, which after RV-7 fails with
+  ## "needs the path of the review dataset to hand over" — an instruction the
+  ## agent cannot carry out is worse than none, because it spends a turn
+  ## discovering that.
+  ##
+  ## `--session` stays: an Agent Harbor session runs in a process CodeTracer
+  ## did not launch and whose environment it therefore did not set, so the tab
+  ## it belongs to has to be stated here.  §4.4 keeps the flag for exactly
+  ## this — "for use outside a managed session".
+  "ct review collect --diff main..HEAD --recordings .ct/runs -o review.json" &
+    " && ct agent evidence review.json --session " & tabId
 
 proc taskPrompt*(instructions: string; context: seq[string] = @[];
     evidenceCommand = ""; evidenceRequirement = ""):
@@ -289,6 +305,9 @@ proc toStoreEvent(event: AgentEvent; index: int): AgentServiceEventEntry =
     text: event.eventText(),
     status: event.status,
     toolName: event.toolName,
+    # AA-3: kept rather than dropped, so a live session can pair a tool call
+    # with the update that reports its outcome.
+    toolCallId: event.toolCallId,
     filePath: event.filePath,
     diff: event.diff,
     milestoneCompleted: event.milestoneCompleted,
@@ -351,6 +370,7 @@ proc registerAgentEvidence*(service: CodeTracerAgentService;
       testName: notification.testName,
       testCommand: notification.testCommand,
       workspacePath: notification.workspacePath,
+      datasetPath: notification.datasetPath,
       state: notification.status.toStoreEvidenceState(),
       statusMessage: notification.statusMessage,
       files: notification.files.mapIt(it.toStoreEvidenceFile()))

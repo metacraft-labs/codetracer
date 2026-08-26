@@ -10,7 +10,14 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
-  setSessionKey
+  setSessionKey, traceOpen, reviewOpen, applyEvidenceDataset,
+  retryPendingEvidenceInspections
+from ../viewmodel/viewmodels/trace_open import
+  TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
+from ../viewmodel/viewmodels/review_open import ReviewOpenService
+from ../viewmodel/viewmodels/evidence_call_vm import EvidenceDataset
+from ../viewmodel/viewmodels/review_session import
+  ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_agent_activity_view import
@@ -46,6 +53,58 @@ var agentActivityComponentRefs: JsAssoc[int, AgentActivityComponent] =
   JsAssoc[int, AgentActivityComponent]{}
 var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
   JsAssoc[int, bool]{}
+
+var agentActivityTraceOpenService: TraceOpenService = nil
+  ## AA-2 — how this panel opens the recording of a `ct test` test.
+  ##
+  ## Latched at the host level for the same reason `reviewSessionForPanels`
+  ## is: `tryMountIsoNimAgentActivityPanel` retries asynchronously, so a
+  ## panel's VM can be created either side of the moment `ui_js` installs the
+  ## service, and both orders have to end up wired.
+  ##
+  ## The service itself is supplied by `ui_js`, because that is where the tab
+  ## model lives — the current-tab / new-tab distinction is `createNewSession`
+  ## plus the *existing* `CODETRACER::load-trace-file` IPC, not a second
+  ## trace-opening path (DeepReview-GUI.md §2.1.2).
+
+var agentActivityReviewOpenService: ReviewOpenService = nil
+  ## AA-3 — how this panel reads the review dataset an evidence tool call
+  ## produced.  Latched for exactly the reason above, and supplied by `ui_js`
+  ## for the matching reason: only the renderer's IPC can reach the process
+  ## that reads files, and that read is the one `ct review <PATH>` performs
+  ## (DeepReview-GUI.md §2.1.1).
+
+proc installAgentActivityTraceOpenService*(service: TraceOpenService) =
+  ## Install (or replace) the panel's trace-opening service, and back-fill
+  ## every VM that already exists.
+  agentActivityTraceOpenService = service
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      vm.traceOpen = service
+
+proc installAgentActivityReviewOpenService*(service: ReviewOpenService) =
+  ## Install (or replace) the panel's review-dataset service, and back-fill
+  ## every VM that already exists.
+  agentActivityReviewOpenService = service
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      vm.reviewOpen = service
+      # A panel built before this call recorded its dataset reads and could
+      # send none.  This is the only moment at which that can change, so it
+      # is the moment they are re-issued — otherwise those cards would sit at
+      # "Reading …" for the life of the window.
+      vm.retryPendingEvidenceInspections()
+
+proc applyAgentActivityEvidenceDataset*(datasetPath: string;
+                                        dataset: EvidenceDataset) =
+  ## Land the host's answer about one review dataset on every panel.
+  ##
+  ## Broadcast rather than routed to the panel that asked: the answer is a
+  ## fact about a file, and a layout with two Agent Activity panels showing
+  ## the same session must not disagree about whether that file exists.
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      vm.applyEvidenceDataset(datasetPath, dataset)
 
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
 proc tryMountIsoNimAgentActivityPanel*(componentId: int)
@@ -165,6 +224,51 @@ proc safeStr(s: cstring): string =
   else:
     $s
 
+var reviewSessionForPanels = ReviewSession(state: rssAbsent)
+  ## RV-6 — the agent session the current review is bound to, latched at the
+  ## host level.
+  ##
+  ## The *decision* of what a review's session is, and what it means, belongs
+  ## entirely to `review_entry.enterReview` / `viewmodels/review_session.nim`;
+  ## this is only bookkeeping so a panel that mounts **after** the review was
+  ## entered ends up in the state that routine already computed.  Two things
+  ## make it necessary:
+  ##
+  ##   * `tryMountIsoNimAgentActivityPanel` retries asynchronously, so the
+  ##     panel's VM can be created after `startDeepReviewNavigation` has run;
+  ##   * `syncLegacyAgentActivityIntoVM` republishes the *legacy* conversation
+  ##     over the VM on every sync, which would otherwise wipe a loaded
+  ##     session moments after it was shown.
+  ##
+  ## Absent (the default) means no review, or a review whose dataset names no
+  ## session — in which case nothing here touches the panel at all.
+
+proc rememberReviewSessionForAgentActivity*(session: ReviewSession) =
+  ## Record the review's session so late-mounting panels and legacy syncs
+  ## converge on it.  Does not itself paint: `enterReview` does that for the
+  ## panels that already exist.
+  if session.state == rssAbsent:
+    return
+  reviewSessionForPanels = session
+
+proc agentActivityConversationVM*(): AgentActivityVM =
+  ## The conversation VM of whichever Agent Activity panel this window has,
+  ## or nil when none has mounted yet.
+  ##
+  ## A layout declares at most one Agent Activity panel in practice (the
+  ## review layout asserts exactly one), so "whichever" is "the".  Nil is a
+  ## legitimate answer and callers must treat it as one: a host whose layout
+  ## has no Agent Activity panel still gets a navigable review.
+  for _, vm in agentActivityVMInstances:
+    if not vm.isNil:
+      return vm
+  nil
+
+proc replayReviewSessionInto(vm: AgentActivityVM) =
+  ## Re-apply the latched review session over `vm`.  A no-op when there is
+  ## none, which is every non-review session.
+  applyReviewSession(vm, reviewSessionForPanels)
+
 proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   if self.isNil:
     return nil
@@ -189,6 +293,14 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
 
   result = createAgentActivityVM(agentActivityVMStore)
   agentActivityVMInstances[self.id] = result
+  # AA-2: a panel created after `ui_js` installed the service still opens
+  # recordings; one created before is back-filled by the installer.
+  result.traceOpen = agentActivityTraceOpenService
+  # AA-3: the same, for the evidence cards' review datasets.
+  result.reviewOpen = agentActivityReviewOpenService
+  # A panel that mounts into a review already in progress shows that review's
+  # session, not an empty conversation.
+  replayReviewSessionInto(result)
 
 proc initAgentActivityVMWithStore*(store: ReplayDataStore) =
   ## Install the shared ViewModel store used by production panels.
@@ -283,6 +395,15 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   vm.setLoading(self.isLoading)
   vm.setReRecordInProgress(self.reRecordInProgress)
   vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
+  # RV-6 — last, so a review's loaded session survives this sync.
+  #
+  # The legacy carrier's conversation is the *live* ACP one, which on the
+  # `ct review` path is empty (no agent was started, and CodeTracer must not
+  # start one).  Publishing it over a review's session would replace the
+  # thing the reviewer opened the review to read with nothing at all — and an
+  # empty conversation reads as "the agent did nothing" (DeepReview-GUI.md
+  # §2.1).  A non-review session leaves this a no-op.
+  replayReviewSessionInto(vm)
 
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent) =
   ## Refresh the Agent Activity IsoNim mount after legacy component state
@@ -439,11 +560,7 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
           continue
 
         var lang = fromPath(diffPreview.path)
-        let theme =
-          if self.data.config.theme == cstring"default_white":
-            cstring"codetracerWhite"
-          else:
-            cstring"codetracerDark"
+        let theme = monacoThemeName(self.data.config.theme)
 
         self.diffEditors[diffEditorId] = monaco.editor.createDiffEditor(
           jq(fmt"#{diffEditorId}"),
@@ -454,6 +571,7 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
             automaticLayout: true,
             folding: true,
             fontSize: self.data.ui.fontSize,
+            fontFamily: codeFontFamily(self.data.ui),
             minimap: js{ enabled: false },
             renderIndentGuides: true,
             find: js{ addExtraSpaceOnTop: false },

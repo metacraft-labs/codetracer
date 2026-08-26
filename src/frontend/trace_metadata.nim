@@ -40,7 +40,8 @@ proc normalizeTraceEnumsJs(trace: JsObject) {.importjs: """
     LangPythonDb:21, LangUnknown:22, LangBash:23, LangZsh:24, LangSolidity:25,
     LangMasm:26, LangSway:27, LangMove:28, LangPolkavm:29, LangCairo:30,
     LangCircom:31, LangLeo:32, LangTolk:33, LangAiken:34, LangCadence:35,
-    LangSolana:36, LangElixir:37, LangErlang:38, LangPhp:39
+    LangSolana:36, LangElixir:37, LangErlang:38, LangPhp:39,
+    LangGdScript:40
   };
   var MODE = {
     NoInstrumentation:0, CallKeyOnly:1, RawRecordNoValues:2, FullRecord:3
@@ -88,7 +89,15 @@ proc findTraceWithCodetracer*(app: ElectronApp, traceId: cstring): Future[Trace]
   normalizeTraceEnums(trace)
   return trace
 
-proc findRecentTracesWithCodetracer*(app: ElectronApp, limit: int): Future[seq[Trace]] {.async.} =
+proc findRecentTracesWithCodetracer*(
+    app: ElectronApp, limit: int, quitOnError: bool = true): Future[seq[Trace]] {.async.} =
+  ## List the most recent recordings.
+  ##
+  ## ``quitOnError = false`` degrades a failed ``trace-metadata --recent`` run
+  ## to an empty list instead of terminating CodeTracer.  The recent list is
+  ## also fetched on startup paths that are already showing a live debugging
+  ## session (issue #568); losing the quick-access list there must never cost
+  ## the user their session.
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"trace-metadata", cstring"--recent", cstring(fmt"--limit={limit}")])
@@ -101,7 +110,8 @@ proc findRecentTracesWithCodetracer*(app: ElectronApp, limit: int): Future[seq[T
     return traces
   else:
     echo "error: trying to run the codetracer trace metadata command: ", res.error
-    app.quit(1)
+    if quitOnError:
+      app.quit(1)
 
   # should be an unreachable default..
   # otherwise it doesn't compiler, maybe because of my async
@@ -109,7 +119,10 @@ proc findRecentTracesWithCodetracer*(app: ElectronApp, limit: int): Future[seq[T
   var emptyTraces: seq[Trace] = @[]
   return emptyTraces
 
-proc findRecentTransactions*(app: ElectronApp, limit: int): Future[seq[StylusTransaction]] {.async.} =
+proc findRecentTransactions*(
+    app: ElectronApp, limit: int, quitOnError: bool = true): Future[seq[StylusTransaction]] {.async.} =
+  ## List the most recent Stylus transactions.  See
+  ## ``findRecentTracesWithCodetracer`` for ``quitOnError``.
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"arb",  cstring"listRecentTx"]
@@ -124,10 +137,12 @@ proc findRecentTransactions*(app: ElectronApp, limit: int): Future[seq[StylusTra
       # assuming that json parse failed => assuming this is raw error output and output it
       echo ""
       echo "error: loading recent transactions problem: ", raw, " (or possibly invalid json)"
-      app.quit(1)
+      if quitOnError:
+        app.quit(1)
   else:
     echo "error: trying to run the codetracer arb listRecentTx command: ", res.error
-    app.quit(1)
+    if quitOnError:
+      app.quit(1)
 
   # should be an unreachable default..
   # otherwise it doesn't compiler, maybe because of my async
@@ -165,7 +180,10 @@ proc findByPath*(app: ElectronApp, path: cstring): Future[Trace] {.async.} =
     echo "error: trying to run the codetracer trace metadata command: ", res.error
     app.quit(1)
 
-proc findRecentFoldersWithCodetracer*(app: ElectronApp, limit: int): Future[seq[RecentFolder]] {.async.} =
+proc findRecentFoldersWithCodetracer*(
+    app: ElectronApp, limit: int, quitOnError: bool = true): Future[seq[RecentFolder]] {.async.} =
+  ## List the most recently opened project folders.  See
+  ## ``findRecentTracesWithCodetracer`` for ``quitOnError``.
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"trace-metadata", cstring"--recent-folders", cstring(fmt"--limit={limit}")])
@@ -176,7 +194,8 @@ proc findRecentFoldersWithCodetracer*(app: ElectronApp, limit: int): Future[seq[
     return folders
   else:
     echo "error: trying to run the codetracer trace metadata command: ", res.error
-    app.quit(1)
+    if quitOnError:
+      app.quit(1)
 
   # should be an unreachable default..
   # otherwise it doesn't compiler, maybe because of my async

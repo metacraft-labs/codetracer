@@ -16,6 +16,14 @@ cc = "1"
 [dependencies]
 num-traits = "0.2"
 num-derive = "0.4"
+# The canonical Rust `Lang` enum, shared with `src/tui` and
+# `libs/ct-dap-client`.  `src/lang.rs` re-exports it, so every
+# `use crate::lang::Lang` in this crate is unchanged.  It lives in a leaf
+# crate rather than here because those two consumers cannot afford this
+# crate's build.rs (which compiles the Nim MCR emulator) or its tree-sitter
+# grammars — and because ct-dap-client is a dev-dependency of this package,
+# so depending on it in the other direction would be a cycle.
+ct-lang = { path = "../../libs/ct-lang", features = ["schemars"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"

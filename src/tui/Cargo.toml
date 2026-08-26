@@ -13,6 +13,15 @@ sqlite = "0.34.0"
 tokio = { version = "1.38.2", features = ["full", "rt", "net", "signal"] }
 num-traits = "0.2"
 num-derive = "0.4"
+# The canonical Rust `Lang` enum.  The TUI used to carry its own copy in
+# src/tui/src/lang.rs, which had fallen three variants behind (it stopped at
+# `Solana`, missing `Elixir`, `Erlang` and `Php`) while still writing the
+# ordinal into the shared trace_index.db `lang` column and sending it over the
+# socket in `ConfigureArg`.  By definition the TUI supports every language the
+# GUI supports, so it takes the same definition rather than keeping a second
+# one.  `ct-lang` is a leaf crate with no build script and no path
+# dependencies, so this stays a standalone-buildable crate.
+ct-lang = { path = "../../libs/ct-lang" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"

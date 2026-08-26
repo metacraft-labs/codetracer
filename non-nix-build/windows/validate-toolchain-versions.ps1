@@ -38,7 +38,14 @@ $requiredKeys = @(
   "TUP_MSYS2_BASE_VERSION",
   "TUP_MSYS2_BASE_X64_SHA256",
   "TUP_MSYS2_PACKAGES",
-  "LDC_WIN_X64_SHA256"
+  "LDC_WIN_X64_SHA256",
+  # TTD/WinDbg msixbundle. Absent from this list until 2026-08-23, which is
+  # exactly how TTD_BUNDLE_SHA256 shipped EMPTY: Ensure-Ttd downloaded ~767 MB
+  # and executed it with only a warning, and nothing here objected. A pin that
+  # is not enforced is a comment.
+  "WINDBG_BUNDLE_VERSION",
+  "TTD_BUNDLE_URL",
+  "TTD_BUNDLE_SHA256"
 )
 
 $valuePatterns = @{
@@ -73,6 +80,9 @@ $valuePatterns = @{
   "TUP_MSYS2_BASE_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "TUP_MSYS2_PACKAGES" = '^[A-Za-z0-9+_.-]+(?: [A-Za-z0-9+_.-]+)*$'
   "LDC_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
+  "WINDBG_BUNDLE_VERSION" = '^[0-9]+(?:\.[0-9]+)*$'
+  "TTD_BUNDLE_URL" = '^https://\S+$'
+  "TTD_BUNDLE_SHA256" = '^[A-Fa-f0-9]{64}$'
 }
 
 if (-not (Test-Path -LiteralPath $FilePath)) {

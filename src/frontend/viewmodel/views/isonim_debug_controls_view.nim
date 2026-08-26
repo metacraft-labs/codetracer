@@ -172,7 +172,8 @@ when defined(js):
       revStepInBtn, stepInBtn:    isonim_dom.Element
       revStepOutBtn, stepOutBtn:  isonim_dom.Element
       revContBtn, contBtn:        isonim_dom.Element
-      headIndicator, jumpLiveBtn: isonim_dom.Element
+      headIndicator: isonim_dom.Element
+      # jumpLiveBtn: isonim_dom.Element  # TODO: re-enable with jump-to-live-debug button
 
     let panel = ui(r):
       tdiv(class = "ct-header isonim-debug-controls",
@@ -267,8 +268,6 @@ when defined(js):
                onclick = actionClick(vm, "run-tests")):
           tdiv(class = "custom-tooltip"):
             text "Record and replay tests in a new window"
-        tdiv(class = "separate-bar"):
-          discard
         if vm.toolbarModeText.val.len > 0:
           span(id = "debug-toolbar-mode",
                class = "debug-toolbar-mode"):
@@ -277,14 +276,15 @@ when defined(js):
              id = "recording-head-indicator",
              class = "recording-head-indicator"):
           text vm.recordingHeadText.val
-        button(ref = jumpLiveBtn,
-               id = "jump-to-live-debug",
-               class = "ct-button-image-md-secondary ct-button-no-border jump-to-live-debug",
-               onclick = proc() = vm.jumpToLive()):
-          tdiv(class = "custom-tooltip"):
-            text "Jump to live"
-        tdiv(class = "separate-bar"):
-          discard
+        # TODO: re-enable jump-to-live-debug button when ready
+        # button(ref = jumpLiveBtn,
+        #        id = "jump-to-live-debug",
+        #        class = "ct-button-image-md-secondary ct-button-no-border jump-to-live-debug",
+        #        onclick = proc() = vm.jumpToLive()):
+        #   tdiv(class = "custom-tooltip"):
+        #     text "Jump to live"
+        # tdiv(class = "separate-bar"):
+        #   discard
 
     reactiveDisabled(r, revNextBtn,    proc(): bool = not vm.canStepBackward.val)
     reactiveDisabled(r, nextBtn,       proc(): bool = not vm.canStepForward.val)
@@ -294,8 +294,8 @@ when defined(js):
     reactiveDisabled(r, stepOutBtn,    proc(): bool = not vm.canStepForward.val)
     reactiveDisabled(r, revContBtn,    proc(): bool = not vm.canReverseContinue.val)
     reactiveDisabled(r, contBtn,       proc(): bool = not vm.canContinue.val)
-    reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.canJumpToLive.val)
-    reactiveDisabled(r, jumpLiveBtn,     proc(): bool = not vm.showJumpToLive.val)
+    # reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.canJumpToLive.val)  # TODO: re-enable with jump-to-live-debug
+    # reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.showJumpToLive.val)  # TODO: re-enable with jump-to-live-debug
     reactiveHidden(r, headIndicator,   proc(): bool = not vm.showRecordingHead.val)
 
     panel

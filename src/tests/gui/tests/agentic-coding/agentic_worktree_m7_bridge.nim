@@ -13,7 +13,8 @@ import nim_agent_harbor
 import nim_agents
 import nim_everywhere
 
-import agent_evidence
+import ../../../../ct/agent_cli
+import ../deepreview/lib/review_dataset_fixture
 
 const
   ChangedFile = "src/feature.nim"
@@ -178,20 +179,26 @@ proc observeEvidence(payload: JsonNode): JsonNode =
   let workspace = payload.requirePayloadField("agentWorkspacePath")
   let traceDir = workspace / ".codetracer"
   createDir(traceDir)
-  let notification = executeAgentEvidenceCommand(@[
-      "--session", tabId,
-      "--tab", tabId,
-      "--workspace", workspace,
-      "--trace-id", "trace-m7-001",
-      "--trace-path", traceDir / "trace-m7-001",
-      "--test-name",
-      "e2e_agentic_worktree_session_progress_workspace_and_deepreview",
-      "--test-command", "nim c -r feature_test.nim",
-      "--exit-code", "0"
-    ],
+  # RV-7: `ct agent evidence` takes the review dataset `ct review collect`
+  # produced.  The scenario has no collector to run here — the point of this
+  # bridge is the RPC payload the renderer receives — so the dataset is
+  # written directly, in the shape both real collectors emit.
+  let dataset = writeReviewDataset(traceDir / "review" / "review.json",
+    @[fixtureFile(ChangedFile, @[
+        hunkLine("removed", "-proc answer(): int = 1"),
+        hunkLine("added", "+proc answer(): int = 42")])],
+    @[fixtureRecording("trace-m7-001",
+      "e2e_agentic_worktree_session_progress_workspace_and_deepreview")])
+  let outcome = runAgentEvidence(dataset,
+    AgentIdentityFlags(session: tabId, workspace: workspace),
     cwd = workspace,
     sendRpc = proc(notification: AgentEvidenceNotification) {.gcsafe.} =
-      discard)
+      discard,
+    lookup = proc(name: string): string = "")
+  if outcome.output.len == 0:
+    raise newException(ValueError,
+      "ct agent evidence failed: " & outcome.errorOutput)
+  let notification = evidenceNotificationFromJson(parseJson(outcome.output))
   if notification.status != aesReady:
     raise newException(ValueError,
       "ct agent evidence did not produce ready DeepReview evidence: " &

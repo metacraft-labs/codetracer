@@ -9,13 +9,18 @@
   // one row, so the new-tab button cannot drift over the omnibox.
   order 4
   position relative
-  flex 1 1 auto
-  min-width 56px
+  // Basis 0 so this and the debug toolbar split the caption bar's free space
+  // evenly, which is what leaves the command prompt centred between them.
+  flex 1 1 0
+  min-width 3.5em
   max-width 100%
   height 100%
-  padding 0 1px
+  padding 0
+  // #menu has gap: 0.5em between flex children. Negative margin brings the
+  // effective gap between the omnibox and the "+" button down to 0.25em.
+  margin-left calc(0.25em - 0.5em)
   z-index 21  // Above #menu (z-index 20) so tabs are clickable
-  -webkit-app-region no-drag
+  -webkit-app-region drag  // Empty bar area is draggable; child tabs/buttons override with no-drag
   overflow hidden
   box-sizing border-box
 
@@ -40,17 +45,16 @@
 .session-tab
   display flex
   align-items center
-  flex 0 1 160px
-  min-width 96px
-  max-width 160px
-  padding 0 10px
-  height 26px
+  flex 0 1 10em
+  min-width 6em
+  max-width 10em
+  padding 0 0.625em
+  height 1.625em
   cursor pointer
   color #b0b0b0
   opacity 0.7
-  font-size 12px
-  border-radius 4px
-  margin-right 2px
+  border-radius 0.25em
+  margin-right 0.25em
   white-space nowrap
   user-select none
   transition background-color 150ms ease, color 150ms ease, opacity 150ms ease
@@ -72,8 +76,14 @@
   flex 1 1 auto
 
 .session-tab-close
-  margin-left 8px
-  font-size 14px
+  width 0.6em
+  height 0.6em
+  background-image LAYOUT_TAB_CLOSE_ICON_PATH
+  background-size 0.6em 0.6em
+  background-repeat no-repeat
+  background-position center
+  margin-left 0.5em
+  flex-shrink 0
   cursor pointer
   opacity 0.4
   transition opacity 150ms ease
@@ -94,36 +104,35 @@
   align-items center
   justify-content center
   flex 0 0 auto
-  width 1.75em
-  height 1.75em
+  width 1.75em !important
+  max-width 1.75em !important
+  height 1.75em !important
+  max-height 1.75em !important
   cursor pointer
   user-select none
-  border-radius 0.375em
-  border 0.03125em solid colors-ui-border-primary
-  background-color colors-ui-surface-primary-default
-  color colors-ui-text-primary-body-subtle
+  border-radius 50% !important
+  border none !important
+  background-image url('../../public/resources/shared/session_tab_add.svg')
+  background-position center
+  background-repeat no-repeat
+  background-size 0.75em 0.75em !important
   font-size 1em
-  line-height 1
   -webkit-app-region no-drag
-  transition color 150ms ease, background-color 150ms ease
-  &:hover
-    color colors-ui-text-primary-body
-    background-color colors-ui-surface-primary-default-hover
 
 .session-tab-overflow
   display none
   align-items center
   justify-content center
-  flex 0 0 26px
-  width 26px
-  height 26px
-  margin-right 2px
+  flex 0 0 1.625em
+  width 1.625em
+  height 1.625em
+  margin-right 0.125em
   cursor pointer
   color #b0b0b0
-  font-size 18px
+  font-size 1.25em
   line-height 1
   user-select none
-  border-radius 4px
+  border-radius 0.25em
   -webkit-app-region no-drag
   transition color 150ms ease, background-color 150ms ease
   &:hover
@@ -133,33 +142,42 @@
 .session-tab-overflow-menu
   display none
   position absolute
-  right 4px
-  top 34px
-  min-width 220px
-  max-width 360px
+  right 0.25em
+  // Below the caption bar, by DROPDOWN_TRIGGER_GAP
+  // (components/shared_widgets.styl), like the application menu on the other
+  // side of the bar.
+  //
+  // Measured from THIS element's containing block, which is `.session-tab-bar`
+  // — and the tab bar starts 0.25em down, inside `#menu`'s padding.  So the
+  // offset is the bar's height less that inset, plus the gap:
+  // 2.125em - 0.25em + 0.375em = 2.25em.  The old 2.125em was the caption bar
+  // height used as if the tab bar began at the top of the bar, which left 4px
+  // rather than 6.
+  top 2.25em
+  min-width 13.75em
+  max-width 22.5em
   max-height 70vh
-  overflow auto
   flex-direction column
-  padding 4px
-  border-radius 6px
-  background-color colors-ui-surface-primary-default
-  border 1px solid colors-ui-border-primary
-  box-shadow 0 12px 30px rgba(0, 0, 0, 0.35)
+  padding 0.25em
+  dropdown-surface()
+  // After the mixin on purpose: it sets `overflow: hidden` so rows cannot spill
+  // past the rounded corners, but this menu has to scroll once enough tabs
+  // overflow to fill it.
+  overflow auto
   z-index 120
   -webkit-app-region no-drag
 
 .session-tab-overflow-item
-  min-height 28px
-  padding 0 10px
+  min-height 1.75em
+  padding 0 0.625em
   display flex
   align-items center
   color #b0b0b0
-  font-size 12px
   cursor pointer
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
-  border-radius 4px
+  border-radius 0.25em
   &.active
     background-color #3c3c3c
     color #ffffff

@@ -54,23 +54,78 @@ function Get-RepoRoot {
   return (Split-Path -Parent $PSCommandPath)
 }
 
+# Answers "can this bootstrap actually create directories here?" by trying it,
+# not by asking whether the directory exists.
+#
+# The distinction is the whole point. On an ephemeral `eph-win-x64` runner
+# `D:\` exists and is the cloudbase-init config drive: a read-only CDFS
+# volume (`Get-CimInstance Win32_LogicalDisk` -> DriveType 5, VolumeName
+# `config-2`). An existence probe says yes, and every subsequent `New-Item`
+# under it dies with
+#
+#     New-Item : Access to the path 'D:\metacraft-dev-deps\ttd' is denied.
+#
+# which is how this surfaced: `Ensure-Ttd` is simply the FIRST bootstrap step,
+# so it took the bullet for a root that all of them would have failed on.
+#
+# There is no cheaper honest test. `Test-Path` cannot see a read-only mount,
+# ACLs do not survive the POSIX permission bits Git-Bash reports, and a
+# writable-looking directory can still refuse a create. Making the directory
+# is the only probe that answers the question the caller is actually asking.
+function Test-DirectoryWritable {
+  param([string]$Path)
+
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+
+  $probe = Join-Path $Path (".codetracer-writable-probe-" + [guid]::NewGuid().ToString("N"))
+  try {
+    New-Item -ItemType Directory -Path $probe -ErrorAction Stop | Out-Null
+    return $true
+  } catch {
+    return $false
+  } finally {
+    Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Get-DefaultInstallRoot {
+  # An explicit operator choice is honoured verbatim, writable or not: if
+  # someone pinned this root, a silent relocation would hide their mistake and
+  # scatter half-populated toolchain trees across two locations.
   $envInstallRoot = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_INSTALL_ROOT")
   if (-not [string]::IsNullOrWhiteSpace($envInstallRoot)) {
     return $envInstallRoot.Trim()
   }
 
-  # Prefer D: drive root when available (more space, avoids C: bloat).
-  if (Test-Path -LiteralPath "D:\" -PathType Container) {
+  # A dev drive is an OPTIONAL performance feature. Prefer it when it is
+  # genuinely there and genuinely writable (more space, avoids C: bloat);
+  # never fail for want of one.
+  if (Test-DirectoryWritable -Path "D:\") {
     return "D:\metacraft-dev-deps"
   }
 
+  # The documented default, and the right fallback for CI: it PERSISTS across
+  # jobs on the two long-lived Windows runners, so a cache put here survives
+  # to be reused. `RUNNER_TEMP` deliberately does not -- Actions wipes it
+  # between jobs -- so making it the primary fallback would silently convert
+  # this toolchain cache into a re-download on every single job.
   $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
-  if ([string]::IsNullOrWhiteSpace($localAppData)) {
-    throw "Could not resolve LocalApplicationData for default WINDOWS_DIY_INSTALL_ROOT."
+  if (Test-DirectoryWritable -Path $localAppData) {
+    return (Join-Path (Join-Path $localAppData "codetracer") "windows-diy")
   }
 
-  return (Join-Path (Join-Path $localAppData "codetracer") "windows-diy")
+  # Last resort. A cold cache is a slow job; no writable root at all is a dead
+  # runner, so trade the persistence away rather than throw.
+  foreach ($name in @("RUNNER_TEMP", "TEMP", "TMP")) {
+    $candidate = [Environment]::GetEnvironmentVariable($name)
+    if (Test-DirectoryWritable -Path $candidate) {
+      Write-Host "::warning::No writable dev-deps root (D:\ and LOCALAPPDATA both refused); falling back to `$env:$name. Toolchain caches will not persist across jobs."
+      return (Join-Path (Join-Path $candidate "codetracer") "windows-diy")
+    }
+  }
+
+  throw "Could not resolve any writable WINDOWS_DIY_INSTALL_ROOT (tried D:\, LOCALAPPDATA, RUNNER_TEMP, TEMP, TMP). Set WINDOWS_DIY_INSTALL_ROOT explicitly."
 }
 
 function ConvertTo-BoolFromEnv {
@@ -1125,7 +1180,9 @@ if (-not [string]::IsNullOrWhiteSpace([string]$ttdRuntime["dbghelpDll"])) {
   [Environment]::SetEnvironmentVariable("WINDOWS_DIY_DBGHELP_DLL", [string]$ttdRuntime["dbghelpDll"], "Process")
 }
 
-$ensureTtd = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TTD" -Default $true
+# Same pairing as the .NET assertion below/above: WINDOWS_DIY_SKIP_TTD
+# suppressed Ensure-Ttd while this check kept its own $true default.
+$ensureTtd = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TTD" -Default (Test-BootstrapStepEnabled "TTD")
 if ($ensureTtd) {
   if ([string]::IsNullOrWhiteSpace($ttdExe)) {
     throw "Microsoft Time Travel Debugging is not available. Install with: winget install --id Microsoft.TimeTravelDebugging --exact --source winget"
@@ -1144,7 +1201,15 @@ if ($ensureTtd) {
 }
 
 [Environment]::SetEnvironmentVariable("DOTNET_SDK_VERSION_EFFECTIVE", $dotnetPinnedVersion, "Process")
-$ensureDotnet = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_DOTNET" -Default $true
+# The assertion defaults to whatever the PROVISIONING step decided.
+# These were two unpaired knobs: WINDOWS_DIY_SKIP_DOTNET suppressed
+# Ensure-Dotnet, while this assertion had its own default of $true -- so a
+# recorder that declared "I do not need .NET" (all of the blockchain
+# recorders set SKIP_DOTNET) still could not ACTIVATE its environment on a
+# box without SDK 9.0.310. Declaring a tool unnecessary and then refusing
+# to start without it is a contradiction the caller cannot resolve.
+# An explicit WINDOWS_DIY_ENSURE_DOTNET still wins in both directions.
+$ensureDotnet = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_DOTNET" -Default (Test-BootstrapStepEnabled "DOTNET")
 if ($ensureDotnet) {
   Assert-DotnetSdkPresent -DotnetExe $dotnetExe -PinnedSdkVersion $dotnetPinnedVersion
 }
@@ -1573,3 +1638,59 @@ Write-Host "CODETRACER_E2E_CT_PATH=$env:CODETRACER_E2E_CT_PATH"
 Write-Host "WINDOWS_DIY_GIT_BASH_BIN=$env:WINDOWS_DIY_GIT_BASH_BIN"
 Write-Host "WINDOWS_DIY_TTD_EXE=$env:WINDOWS_DIY_TTD_EXE"
 Write-Host "WINDOWS_DIY_CL_EXE=$env:WINDOWS_DIY_CL_EXE"
+
+# --- Toolchain summary: what the binaries THEMSELVES report -----------------
+#
+# Everything above prints provisioning INPUTS -- pinned versions, install
+# directories, source refs. Those are what we asked for. This block prints what
+# we actually got, and the two are not always the same.
+#
+# The concrete case that motivated it: `GCC_DIR` reads
+# `<root>\gcc\15.2.0`, and `gcc --version` on that exact path answers 16.1.0.
+# The directory name is not a fact about the compiler -- `ensure-gcc.ps1`
+# creates it as a JUNCTION into whatever `winget install
+# BrechtSanders.WinLibs.POSIX.UCRT` fetched, and winget accepts no version
+# argument. Every log line, CI record and bug report that quoted GCC_DIR was
+# therefore quoting a number no compiler ever claimed. That is the kind of
+# thing discovered months later while bisecting a miscompile.
+#
+# Reporting the self-reported version costs one process launch per tool and
+# makes the discrepancy visible on every activation instead of never. It is
+# deliberately non-fatal: a tool that is absent or refuses `--version` is
+# reported as such rather than failing an environment that may not need it.
+function Get-ReportedVersion {
+    param([string]$Exe)
+    if ([string]::IsNullOrWhiteSpace($Exe) -or -not (Test-Path -LiteralPath $Exe)) {
+        return "(not provisioned)"
+    }
+    try {
+        $line = & $Exe --version 2>&1 | Select-Object -First 1
+        if ("$line" -match '([0-9]+\.[0-9]+(\.[0-9]+)?)') { return $Matches[1] }
+        return "(no version reported)"
+    } catch {
+        return "(--version failed)"
+    }
+}
+
+function Write-ToolLine {
+    param([string]$Name, [string]$Exe, [string]$Pinned = "")
+    $reported = Get-ReportedVersion -Exe $Exe
+    $suffix = ""
+    if ($Pinned -and $reported -notmatch '^\(' -and $reported -ne $Pinned) {
+        # The whole point of the block. Say it loudly enough to notice.
+        $suffix = "   <-- MISMATCH: pinned $Pinned"
+    }
+    Write-Host ("  {0,-8} {1,-12} {2}{3}" -f $Name, $reported, $Exe, $suffix)
+}
+
+Write-Host ""
+Write-Host "codetracer toolchain -- versions as reported by the binaries:"
+Write-ToolLine -Name "gcc"  -Exe (Join-Path $gccDir "bin\gcc.exe") -Pinned $toolchain["GCC_VERSION"]
+Write-ToolLine -Name "nim"  -Exe (Join-Path $nimDir "bin" | Join-Path -ChildPath "nim.exe") -Pinned $toolchain["NIM_VERSION"]
+Write-ToolLine -Name "go"   -Exe (Join-Path $goDir "bin\go.exe") -Pinned $toolchain["GO_VERSION"]
+Write-ToolLine -Name "node" -Exe (Join-Path $nodeDir "node.exe") -Pinned $toolchain["NODE_VERSION"]
+Write-Host ""
+Write-Host "  A MISMATCH above is not cosmetic: the pinned number is what every"
+Write-Host "  log and bug report will quote, and the reported one is what built"
+Write-Host "  your artifacts. See windows/ensure-gcc.ps1 for why they diverge."
+Write-Host ""

@@ -63,12 +63,40 @@ just serve-docs    # one-shot SSR preview (no live reload)
 just test          # nav-order + dev-server tests
 ```
 
+### If the build says `cannot open file: build_site`
+
+Nim has no `--path` to the sibling framework. The book's `config.nims` — which
+used to supply them, resolved from `currentSourcePath()` — is matched by the
+repo-wide `*.nims` line in `codetracer/.gitignore`, so it is not in the
+checkout. `ci/deploy/docs.sh` works around this by generating an absolute
+`nim.cfg` before the build and deleting it after; do the same locally, once:
+
+```bash
+S="$(cd ../../.. && pwd)"      # the workspace root holding the sibling repos
+cat > nim.cfg <<CFG
+--path:"$S/isonim-docs/src"
+--path:"$S/isonim/src"
+--path:"$S/nim-everywhere/src"
+--path:"$S/nim-faststreams"
+--path:"$S/nim-stew"
+--path:"$S/isonim/vendor/chronicles"
+--path:"$S/isonim/vendor/serialization"
+--path:"$S/isonim/vendor/json_serialization"
+CFG
+```
+
+`nim.cfg` is git-ignored (RV-11 added the entry, after a run of this recipe left
+an untracked file full of one machine's absolute paths sitting in the tree), and
+CI writes and deletes its own copy regardless, so leaving it in place is
+local-only and safe. It must stay untracked: a committed copy would collide with
+the one `ci/deploy/docs.sh` generates.
+
 ## Where things live
 
 | Path | What |
 |------|------|
 | `content/index.md` | The home page (WebFlow landing: hero, cards, popular articles, video, help footer) |
-| `content/getting_started/`, `usage_guide/`, `reference/` | The three doc sections (order controlled by each page's `order:` front matter + `sectionOrder` in `src/docs_config.nim`) |
+| `content/getting_started/`, `usage_guide/`, `deep_review/`, `reference/` | The four doc sections (order controlled by each page's `order:` front matter + `sectionOrder` in `src/docs_config.nim` — without a `sectionOrder` entry a new section sorts *alphabetically*, ahead of Getting Started) |
 | `src/docs_config.nim` | Site config: title, logo, header/sidebar chrome (`headerLinks`, `sidebarLinks`, `sidebarThemeToggle`, `needHelp`), section order, redirects |
 | `src/{build,dev,ssr,redirects,theme_tokens}.nim` | The consumer's build/serve entry points |
 | `assets/style.css` | Book-owned CSS (theme + WebFlow-parity layout) |
@@ -77,6 +105,23 @@ just test          # nav-order + dev-server tests
 
 Add a page by dropping a Markdown file with front matter (`title`, `section`,
 `order`, optional `slug`/`aliases`) into the right `content/<section>/` folder.
+
+### Moving or renaming a page
+
+Its URL is published — on the released book, on `/nightly`, and in whatever
+links readers have already shared — so a move needs a redirect or the old URL
+starts 404ing. Add the pair to **`movedRoutes` in `src/redirects.nim`**:
+
+```nim
+(oldRoute: "/usage_guide/deep_review", newRoute: "/deep_review"),
+```
+
+The build then writes a meta-refresh stub at the old route's own `index.html`
+(the only path GitHub Pages serves for the trailing-slash URL a reader has) and
+adds the pair to `_redirects`, both carrying the channel prefix. The list is
+**append-only**: deleting an entry re-breaks the URL it was added for. Adding a
+new section is otherwise just a directory plus a `sectionOrder` entry in
+`src/docs_config.nim`.
 
 ## Changing the look (design system)
 
@@ -99,5 +144,72 @@ layout/overrides live in `assets/style.css`. (The editor itself lives in
 ## Deployment
 
 CI (`.github/workflows/codetracer.yml` → `ci/deploy/docs.sh`) builds this book
-and publishes it to GitHub Pages on every push to `main`, `dev`, or `stable`,
-decoupled from the app build/test matrix.
+and publishes it to GitHub Pages, decoupled from the app build/test matrix.
+There are **three channels**, chosen by the event and the branch:
+
+| Trigger | URL | Built with |
+|---|---|---|
+| push to `stable` | <https://docs.codetracer.com/> (plus the archived mdBook at `/old`) | `CT_DOCS_BASE_PATH` unset |
+| push to `dev` | <https://docs.codetracer.com/nightly> | `CT_DOCS_BASE_PATH=/nightly` |
+| pull request `N` | `https://docs.codetracer.com/pr/N/` | `CT_DOCS_BASE_PATH=/pr/N` |
+
+A push to `main` publishes nothing. All channels commit to the same `gh-pages`
+branch and each run replaces **only its own subtree**, so the other channels
+survive untouched; the deploy is a fast-forward push, never a force-push.
+
+### Pull-request previews
+
+A pull request that changes anything under `docs/` gets its book published at
+`/pr/<N>/`, and a single comment on the pull request links to it — edited in
+place on every later push, never re-posted, and naming the commit it was built
+from. When the pull request closes, `.github/workflows/docs-preview-cleanup.yml`
+removes `/pr/<N>/` again and corrects that comment. A pull request that touches
+no docs publishes nothing and says nothing.
+
+Previews are **same-repository pull requests only**. A pull request from a fork
+runs with a read-only token and no secrets, by design, because it builds code
+written by whoever opened it; publishing from such a run would mean executing
+untrusted build code with a token that can write to `gh-pages`. A fork pull
+request therefore gets no preview (and no comment — with a read-only token the
+job could not post one either).
+
+### robots.txt
+
+Search engines are asked to skip everything that is not the released book: the
+**root** `robots.txt` (the only one crawlers read) carries `Disallow: /nightly/`
+and `Disallow: /pr/`. Every released deploy regenerates that file from the build
+and re-adds both lines; a preview deploy adds the `/pr/` line if it is missing,
+so a preview is excluded from the moment it is first published rather than from
+the next release. To publish a channel to search engines instead, drop its
+`ensure_root_robots_disallow` call in `ci/deploy/docs.sh`.
+
+### Base path
+
+`CT_DOCS_BASE_PATH` is the URL prefix the build is hosted under: `src/build.nim`
+passes it to `bookDocsConfig()`, and the framework then rewrites every
+root-relative link, asset, stylesheet `url(...)`, search-index route and legacy
+redirect stub to carry it. Build a prefixed variant locally with:
+
+```bash
+CT_DOCS_BASE_PATH=/nightly just build     # or /pr/123
+```
+
+### Rehearsing a deploy
+
+To rehearse one without pushing anything, from the repo root:
+
+```bash
+DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_BRANCH=dev ./ci/deploy/docs.sh   # or =stable
+DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_CHANNEL=preview DOCS_DEPLOY_PR=123 ./ci/deploy/docs.sh
+```
+
+It prints the staged tree, including how many files it preserved from the
+channels it does not own. If the book build fails the deploy **fails**: it never
+substitutes older content under the published URLs, and because nothing is
+pushed the previously published site keeps serving.
+
+The whole channel model — every channel, both preservation directions, the
+robots.txt rules, the refusals, and real pushes/races/rejections against a local
+bare repository — is covered by `ci/test/docs-deploy-channels-test.sh`; the
+preview comment is covered by `ci/test/docs-preview-comment-test.sh`. Both run
+standalone with no network access.

@@ -1,3 +1,23 @@
+// Space reserved for window controls the operating system paints on top of our
+// web contents.  On macOS `titleBarStyle: hidden` keeps the native traffic-light
+// buttons and `trafficLightPosition` (src/frontend/index/window.nim) puts them at
+// x: 10; the three 12px buttons sit 20px apart, so the cluster ends at 62px.
+//
+// That trailing edge is deliberately px: the buttons are drawn by the OS at a
+// fixed size and do not scale with our font size, so an em/rem value there would
+// drift out of alignment whenever the UI scale changes.  The gap after them is
+// ours, so it follows the UI scale.
+NATIVE_WINDOW_CONTROLS_EDGE = 62px
+NATIVE_WINDOW_CONTROLS_GAP = 1rem
+NATIVE_WINDOW_CONTROLS_INSET = "calc(%s + %s)" % (NATIVE_WINDOW_CONTROLS_EDGE NATIVE_WINDOW_CONTROLS_GAP)
+
+// Left alignment for the caption bar when no OS window controls are present
+// (macOS native fullscreen).
+FULLSCREEN_EDGE_GAP = 8px
+
+// Command prompt: floor, viewport-tracking middle, ceiling.
+COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
+
 // The top bar
 #menu
   display: flex
@@ -8,17 +28,55 @@
   box-sizing: border-box
   -webkit-app-region: drag
   user-select: none
-  gap: 0.375em
-  height: 2.1em
-  max-height: 2.1em
+  // Spacing between the caption bar's three regions — the debug toolbar, the
+  // command prompt and the session tabs, so this is also the gap between the
+  // prompt and the new-tab button.  In rem, not em: it should stay 8px whatever
+  // font size the bar inherits, rather than scaling with it.
+  gap: 0.5rem
+  // Must equal `#root-container`'s `top` (shared_widgets.styl) — the content
+  // below starts there, so any shortfall leaves an unpainted strip between the
+  // two.  Because the strip shows the body background, which is the same colour
+  // as this bar, it reads as part of the bar and pushes its contents visually
+  // off-centre.  The auto-hide overlays assume the same value.
+  //
+  // 2.125em is exactly 34px at the 16px root, and the 1.625rem (26px) command
+  // prompt then leaves 8px to split — 4px above and 4px below, both whole
+  // pixels.  The value has to stay pixel-representable: an earlier 2.27em made
+  // the bar 36.31px and the halves 4.155px, which cannot render evenly, so one
+  // side rounded down and the field sat 3px from the top and 4px from the
+  // bottom.
+  height: 2.125em
+  max-height: 2.125em
   min-width: 0
 
   #debug
     -webkit-app-region: no-drag
-    flex: 0 0 min(20em, 20vw)
-    width: min(20em, 20vw)
+    // `.ct-header` gives this host `padding: 0 0.25em`, which sat outside the
+    // field's visible border and added to the gap beside the new-tab button.
+    // The bar's own `gap` is what spaces the regions.
+    padding-right: 0
+    // Centred on the bar, and deliberately still a flex child: the row is one
+    // flow on purpose (see `.session-tab-bar` in session_tabs.styl — "so the
+    // new-tab button cannot drift over the omnibox"), so taking this out of
+    // flow would let the tabs run underneath it.  Centring comes from the two
+    // neighbours sharing the free space equally instead — see the `flex: 1 1 0`
+    // on the toolbar below and on the tab bar.
+    // Responsive width.  `min()` was the bug: it always picks the *smaller* of
+    // the two, so the field could never exceed 24em however wide the display —
+    // fine on a laptop, visibly undersized on a large monitor.
+    //
+    // `clamp()` keeps the same floor and lets the viewport drive the middle
+    // term, with a ceiling so it stops being a search field and starts being a
+    // banner on very wide screens:
+    //   * below ~1600px the floor wins, so laptops keep today's size;
+    //   * above that it tracks the viewport;
+    //   * beyond ~2670px the ceiling holds it at 40em.
+    // The floor is also what keeps the caption bar intact at the 1050px minimum
+    // window width, where the toolbar and tab strip are already at their limits.
+    flex: 0 0 COMMAND_PROMPT_WIDTH
+    width: COMMAND_PROMPT_WIDTH
     min-width: 0
-    max-width: 20em
+    max-width: 40em
     gap: 0.5em
     align-items: center
     justify-content: center
@@ -30,6 +88,48 @@
 
   .debug-finished-background
     background-color: colors-ui-surface-base-panel
+
+// Keep the bar's own controls clear of the OS-drawn window buttons.  The class is
+// set by the menu view when the platform paints its own controls over the bar
+// (macOS today) — see `reserveWindowControls` in isonim_menu_shell_view.nim.  The
+// inset stays draggable, so the empty strip beside the buttons still moves the
+// window.
+#menu.menu-shell--reserved-window-controls
+  padding-left: NATIVE_WINDOW_CONTROLS_INSET
+  // Match the right edge to the left so the centred command prompt is centred
+  // on the *window*, not merely between two unequal paddings.  The 6em default
+  // reserves room for our own minimise/maximise/close buttons, which macOS
+  // never renders (`showWindowMenu` is false there), so the reserve is dead
+  // space and its asymmetry pulled the prompt off-centre.
+  padding-right: NATIVE_WINDOW_CONTROLS_INSET
+
+  // The session tab bar pulls itself back by the bar's default 0.25em padding
+  // so its first tab sits flush with the window edge.  Inside the reserved
+  // strip that would claw back part of the space the OS buttons need, so drop
+  // the pull-back and let every child start at the inset.
+  #session-tab-bar
+    margin-left: 0
+
+// Native fullscreen: the OS hides its window buttons, so there is nothing left
+// to reserve space for or to divide the bar from.  Left-align the contents at
+// FULLSCREEN_EDGE_GAP and drop the leading divider — see `setCaptionBarFullscreen`
+// in ui/menu.nim, driven by the window's enter/leave-full-screen events.
+#menu.menu-shell--native-fullscreen
+  padding-left: FULLSCREEN_EDGE_GAP
+  padding-right: FULLSCREEN_EDGE_GAP
+
+  #session-tab-bar
+    margin-left: 0
+
+// The debug toolbar opens with a divider, which separates whatever precedes it
+// in the caption bar from the toolbar's own controls.  On macOS nothing does:
+// the navigation menu is hidden in favour of the system menu bar, so the
+// toolbar is the first thing in the bar and the divider reads as a stray line
+// at the leading edge.  (Windows and Linux keep it — the navigation menu sits
+// before it there, so it still divides something.)
+#menu.menu-shell--reserved-window-controls .isonim-debug-controls > .separate-bar:first-child,
+#menu.menu-shell--native-fullscreen .isonim-debug-controls > .separate-bar:first-child
+  display: none
 
 .window-menu
   display: flex
@@ -44,12 +144,11 @@
   cursor: pointer
 
   .menu-button-svg
-    width: 1.325em
-    height: 1.75em
+    width: 1.5em
+    height: 1.5em
     border-radius: 50%
     background-position: center
     background-repeat: no-repeat
-    background-size: 1em
 
     &.minimize
       background-image: WINDOW_MINIMIZE_ICON_PATH
@@ -103,7 +202,11 @@
 
   #isonim-debug-controls
     order: 2
-    flex: 0 0 auto
+    // Equal share of the leftover space with the session tab bar, which is what
+    // centres the command prompt between them.  `min-width: max-content` keeps
+    // the buttons from ever being squeezed, so on a narrow window the prompt
+    // drifts right of centre rather than the toolbar clipping.
+    flex: 1 1 0
     min-width: max-content
 
   #debug
@@ -117,6 +220,23 @@
     min-width: fit-content
     align-items: center
     justify-content: center
+
+    // No POINTER feedback on hover or active: the logo reads as part of the
+    // caption bar rather than as a raised button, so it deliberately keeps
+    // the bar's own background in both states instead of the highlight
+    // `.ct-button-image-md-secondary` gives every other icon button.
+    &:hover:not(:disabled)
+      background-color: colors-ui-surface-primary-default !important
+    &:active
+      background-color: colors-ui-surface-primary-default !important
+
+    // The KEYBOARD focus ring stays.  `:focus-visible` only matches keyboard
+    // focus, never a mouse press, so suppressing it buys nothing visually and
+    // costs the menu its focus indicator — and `#menu-root` is the only entry
+    // point to the application menu, with `#navigation-menu` already running
+    // `outline: 0 !important` below.  Removing both leaves a keyboard user
+    // unable to see where focus is (WCAG 2.4.7).  If the ring is the wrong
+    // shape here, restyle it; do not remove it.
 
     #menu-logo-img
       width: 1.25em
@@ -146,15 +266,31 @@
     min-width: 12em
     padding: 0
     position: absolute
-    top: 2.1rem
+    // Below the caption bar, by the gap every other menu leaves below its
+    // trigger (DROPDOWN_TRIGGER_GAP, components/shared_widgets.styl).  This
+    // menu is positioned against `#menu` itself, so the offset has to carry the
+    // bar's own height: 2.125rem + 0.375rem = 2.5rem.  It was 2.1rem — 33.6px
+    // against a 34px bar — so the menu overlapped the bar's bottom edge by a
+    // fraction of a pixel instead of clearing it.
+    top: 2.5rem
     margin-left: 6px
-    background: colors-ui-surface-canvas
-    border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.75em
-    box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
+    dropdown-surface()
 
 
-  .menu-node, .menu-search-result
+  // Search results still use the pre-design-system row markup
+  // (`.menu-node-name` / `.menu-node-shortcut` / `.menu-node-icon`), so these
+  // rules stay — but scoped to `.menu-search-result` ALONE.
+  //
+  // `.menu-node` / `.menu-element` / `.menu-folder` are deliberately NOT
+  // styled here any more: on menu rows they are pure semantic hooks for the
+  // GUI test suite (see `viewmodel/views/isonim_menu_shell_view.menuItemClass`
+  // and `codetracer-specs/Testing/UI-Test-Catalog.md`), and the row's whole
+  // appearance comes from the `.ct-menu-item` component
+  // (`components/menu_item.styl`).  Because `#menu .menu-node` outranks
+  // `.ct-menu-item`, leaving them in this selector would repaint every row
+  // with the old input-surface background, margins and 4px radius the moment
+  // the hooks came back.
+  .menu-search-result
     font-size: MENU_FONT_SIZE
     height: auto
     min-width: fit-content //"calc(%s + 2px)" % MENU_NODE_MIN_WIDTH
@@ -181,7 +317,7 @@
   // .menu-node:hover > .menu-node-icon
   //   opacity: 1
 
-  .menu-element, .menu-search-result, .menu-folder
+  .menu-search-result
     .menu-node-name
       // width: MENU_ELEMENT_NAME_WIDTH
       width: -webkit-fill-available !important
@@ -300,8 +436,10 @@
 
   #menu-elements
     width: 100%
+    // Clips the end rows to the surface's curve, so it has to be the surface's
+    // curve — see DROPDOWN_RADIUS in components/shared_widgets.styl.
     overflow: hidden
-    border-radius: 0.75em
+    border-radius: DROPDOWN_RADIUS
 
   .menu-node-container
     width: 100%
@@ -312,29 +450,32 @@
     width: fit-content
     min-width: 12em
     padding: 0
-    background: colors-ui-surface-canvas
-    border: 0.0625em solid colors-ui-border-tertiary
-    border-radius: 0.75em
-    box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
+    dropdown-surface()
     overflow: hidden
 
   #menu-elements, .menu-nested-elements
+    .menu-node-container:first-child > .ct-menu-item
+      border-radius: DROPDOWN_RADIUS DROPDOWN_RADIUS 0 0
+
     .menu-node-container:last-child > .ct-menu-item
       border-bottom: none
+      border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
 
-  .menu-enabled
-    color: colors-ui-text-primary-body
-    cursor: pointer
-    border-radius: 4px
-
-  .menu-disabled
-    .menu-node-name
-      color: #777
+  // `.menu-enabled` / `.menu-disabled` are semantic hooks only — the enabled
+  // and disabled *appearance* of a menu row is owned by `.ct-menu-item` and
+  // `.ct-menu-item--disabled` (`components/menu_item.styl`).  They carry no
+  // declarations here on purpose: `#menu .menu-enabled` outranks
+  // `.ct-menu-item`, so the old `border-radius: 4px` would win over the
+  // component's square rows, and the old `.menu-disabled .menu-node-name`
+  // grey no longer has a `.menu-node-name` to colour.
 
   #menu-search-results
     height: auto
     margin-top: 5px
     margin-bottom: 5px
+
+    &:empty
+      display: none
 
   #menu-search
     margin-left: 4px
@@ -395,29 +536,11 @@
     background-color: colors-ui-surface-input-default
 
   .menu-sub-group-separator
-    border: 0
-    // width: "calc(%s - 2px)" % MENU_NODE_WIDTH
-    height: 14px
-    margin: 0
-    background-color: colors-ui-surface-input-default
-
-    &::after
-      content: ""
-      display: block
-      width: 100%
-      height: 1px
-      background-color: colors-ui-surface-primary-secondary
-      position: relative
-      top: 50%
+    display: none
 
   .menu-active-node
     background-color: colors-ui-surface-input-default
-
-    .menu-node
-      background-color: colors-ui-surface-primary-tertiary
-
-    .menu-node-icon
-      opacity: 1
+    // .ct-menu-item--active inside handles the blue focus bg via menu_item.styl
 
   .menu-active-search-result
     background-color: colors-ui-surface-primary-tertiary

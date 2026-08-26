@@ -894,7 +894,7 @@ mod tests {
         steps
     }
 
-    /// M58: `next_free_block` must FLOOR, not round up.
+    /// `next_free_block` must FLOOR, not round up.
     ///
     /// `CtfsBlockOverlay::new` used to compute `total.div_ceil(block_size)` —
     /// the one arithmetic `CTFS-Binary-Format.md` §5d forbids, because it makes
@@ -935,9 +935,9 @@ mod tests {
         );
     }
 
-    /// The bound the acceptance rests on, and the M57 lesson applied here:
-    /// tolerating a non-block-multiple length is only safe while nothing can
-    /// resolve bytes out of the partial region.
+    /// The bound the acceptance rests on: tolerating a non-block-multiple
+    /// length is only safe while nothing can resolve bytes out of the partial
+    /// region.
     ///
     /// **The read bound here is not a single site, and that was measured rather
     /// than assumed.** Three independent layers refuse the incomplete block:

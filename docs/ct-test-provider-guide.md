@@ -31,6 +31,38 @@ in `newDefaultProviderRegistry()`. Capability flags must be exact:
 Conditional or toolchain-heavy providers must make the condition explicit in
 diagnostics and tests. Do not expose GUI actions for unsupported capabilities.
 
+## Enumerating Workspace Files
+
+A provider must **never** call `walkDirRec` (or any other unrestricted
+traversal) on the workspace root. Use `walkWorkspaceFiles(root)` from
+`src/ct_test/workspace_scope.nim` instead — `import ../discovery` re-exports it:
+
+```nim
+for path in walkWorkspaceFiles(projectRoot):
+  if isCandidateFile(path):
+    result.add path
+```
+
+Two reasons, both learned the expensive way:
+
+1. **Scope.** `walkWorkspaceFiles` yields only the files the workspace claims as
+   its own — it honours the project's `git ls-files --cached --others
+   --exclude-standard` inventory (full `.gitignore` chain, stops at nested
+   checkouts, keeps untracked-but-not-ignored files) and falls back to a pruning
+   filesystem walk elsewhere. A vendored upstream source tree such as
+   `references/llvm-project` is therefore invisible to every provider at once,
+   instead of each provider needing its own reject list — and forgetting.
+2. **Cost.** `discover --workspace` runs `detect` on every registered provider
+   and `discoverProject` on every one that claims the workspace. The scope is
+   resolved once per invocation and shared, so N providers cost one traversal
+   rather than N.
+
+A `detect` implementation that reads file *contents* to decide whether it owns
+the workspace is the most expensive probe in the registry. Prefer a project
+marker (`Cargo.toml`, `go.mod`, `package.json`, …) and treat the content scan as
+a last resort — and when you do scan, guard `readFile` so an unreadable file
+cannot abort discovery.
+
 ## Fixtures And Trace Smoke
 
 Every provider needs a representative fixture under `src/ct_test/fixtures/` or,
@@ -50,6 +82,9 @@ Use launcher-backed commands in docs and workflows:
 ```bash
 ct test discover --workspace . --json
 ct test discover --file path/to/test_file --json
+# Vendored/ignored trees are excluded by default. To reproduce the old
+# unrestricted enumeration (rarely what you want):
+ct test discover --workspace . --scope unscoped --json
 ct test run --test <selector>
 ct test record --test <selector>
 ```
@@ -66,6 +101,13 @@ Run:
 ```bash
 just test-m16-release-gate
 ```
+
+CI runs the same script in the `ct-test-release-gate` job of
+`.github/workflows/codetracer.yml`, and the cross-language counterpart
+(`just test-ct-providers`, which additionally builds the native/JS/Ruby
+recorder siblings) in `ct-test-providers`. Both are listed in
+`ci/verdict/required-jobs.txt`, so a run in which either is skipped is
+reported as lost coverage rather than as a pass.
 
 The gate fails on:
 

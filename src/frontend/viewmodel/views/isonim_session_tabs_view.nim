@@ -37,6 +37,16 @@ const
   SessionTabLabelClass* = "session-tab-label"
   SessionTabCloseClass* = "session-tab-close"
   SessionTabAddClass* = "session-tab-add"
+  SessionTabAddTitle* = "New tab"
+    ## Accessible name / tooltip of the add-session control.
+    ##
+    ## `codetracer-specs/GUI/Multi-Window-Tab-Management.md` § Tab Behavior
+    ## calls it 'The "+" button' that "opens a new empty tab (for loading a
+    ## new trace)".  The plus glyph itself is drawn by
+    ## `styles/components/session_tabs.styl` as a background image
+    ## (`session_tab_add.svg`), so the button carries no text node; without
+    ## this title the control has no name at all for a user hovering it, for
+    ## a screen reader, or for a test.
   SessionTabOverflowClass* = "session-tab-overflow"
   SessionTabOverflowMenuClass* = "session-tab-overflow-menu"
   SessionTabOverflowItemClass* = "session-tab-overflow-item"
@@ -129,15 +139,16 @@ proc renderSessionTab(
       if multiSession:
         span(class = SessionTabCloseClass,
              onclick = proc() = callbacks.invokeClose(index)):
-          text "×"
+          discard
 
 proc renderAddButton(
     r: MockRenderer;
     callbacks: SessionTabsCallbacks): MockNode =
   ui(r):
-    tdiv(class = SessionTabAddClass,
-         onclick = proc() = callbacks.invokeAdd()):
-      text "+"
+    button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+           title = SessionTabAddTitle,
+           onclick = proc() = callbacks.invokeAdd()):
+      discard
 
 proc renderOverflowButton(r: MockRenderer): MockNode =
   ui(r):
@@ -181,7 +192,7 @@ when defined(js):
           text tab.label
         if multiSession:
           span(ref = closeBtn, class = SessionTabCloseClass):
-            text "×"
+            discard
 
     if multiSession:
       isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
@@ -194,9 +205,10 @@ when defined(js):
       r: WebRenderer;
       callbacks: SessionTabsCallbacks): isonim_dom.Element =
     ui(r):
-      tdiv(class = SessionTabAddClass,
-           onclick = proc() = callbacks.invokeAdd()):
-        text "+"
+      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+             title = SessionTabAddTitle,
+             onclick = proc() = callbacks.invokeAdd()):
+        discard
 
   proc renderOverflowMenu(
       r: WebRenderer;
@@ -246,12 +258,13 @@ proc renderSessionTabsPanel*(
           if multiSession:
             span(class = SessionTabCloseClass,
                  onclick = tabCloseHandler(callbacks, tabIndex)):
-              text "×"
+              discard
       tdiv(class = SessionTabOverflowClass):
         text "⌄"
-      tdiv(class = SessionTabAddClass,
-           onclick = proc() = callbacks.invokeAdd()):
-        text "+"
+      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+             title = SessionTabAddTitle,
+             onclick = proc() = callbacks.invokeAdd()):
+        discard
       tdiv(class = SessionTabOverflowMenuClass):
         for i, tab in tabs:
           let tabIndex = i

@@ -7,6 +7,11 @@ include_rules
 #: foreach *.styl |> !stylus |>
 
 : default_white_theme.styl |> !stylus |> default_white_theme.css
+# `loadTheme` (src/frontend/renderer.nim) resolves the configured theme to
+# `frontend/styles/{name}_theme_electron.css`, so the light theme needs its own
+# `_electron` build exactly as the dark one does; without it `theme:
+# "default_white"` points the `#theme` link at a file that is not there.
+: default_white_theme_electron.styl |> !stylus |> default_white_theme_electron.css
 : default_dark_theme_electron.styl |> !stylus |> default_dark_theme_electron.css
 : default_dark_theme_extension.styl |> !stylus |> default_dark_theme_extension.css
 # Web/server mode expects default_dark_theme.css; reuse extension variant for now.

@@ -1,9 +1,19 @@
-## codetracer/docs/book-isonim -- legacy mdBook URL redirect generation.
+## codetracer/docs/book-isonim -- published-URL redirect generation.
 ##
-## The old mdBook served every page at `/section/page.html` (with the root
-## chapter also copied to `/index.html`); the isonim-docs SSG serves clean
-## `/section/page` (output `<route>/index.html`). Without redirects every
-## existing `docs.codetracer.com/*.html` deep link would 404.
+## Two kinds of URL have to keep resolving after the content behind them moves,
+## and both are served the same way (see the mechanism note below):
+##
+##   1. **Legacy mdBook `*.html` deep links.** The old mdBook served every page
+##      at `/section/page.html` (with the root chapter also copied to
+##      `/index.html`); the isonim-docs SSG serves clean `/section/page` (output
+##      `<route>/index.html`). Without redirects every existing
+##      `docs.codetracer.com/*.html` deep link would 404.
+##   2. **Clean routes this book has since MOVED** (`movedRoutes` below). The
+##      SSG's own URLs are published too -- on the released channel, on
+##      `/nightly`, and in whatever links readers have shared -- so
+##      reorganizing a section is exactly as breaking as the mdBook migration
+##      was, just less obviously. A page that changes section without an entry
+##      here is a 404 somebody meets by following a link that used to work.
 ##
 ## This module enumerates the legacy `*.html` URL set from the OLD book's
 ## `SUMMARY.md` (the authoritative list of published pages -- pages absent
@@ -23,6 +33,7 @@
 ## and is deliberately NOT overwritten with a stub (the one collision).
 
 import std/[os, strutils]
+import core/base_path
 
 type
   LegacyRedirect* = object
@@ -30,6 +41,27 @@ type
     oldRelPath*: string  ## public-relative stub path, e.g. "getting_started/python.html"
     newRoute*: string    ## new clean route, e.g. "/getting_started/python"
     needsStub*: bool     ## false only for the root /index.html (real home page lives there)
+
+  RedirectCounts* = tuple[legacy, moved: int]
+    ## How many stubs each family contributed, reported separately so a build
+    ## log (and the tests) can tell "the mdBook migration is intact" from "the
+    ## book's own moves are covered". Collapsing them to one number hides a
+    ## whole family disappearing behind the other one growing.
+
+const movedRoutes*: array[1, tuple[oldRoute, newRoute: string]] = [
+  ## Clean routes this book has moved, oldest first. **Append only**: an entry
+  ## removed from here is a published URL that starts 404ing, and the reader who
+  ## finds out is the one following a link somebody sent them a year ago.
+  ##
+  ## DeepReview outgrew being one page inside the usage guide and was given a
+  ## section of its own. `/usage_guide/deep_review` is live on the NIGHTLY
+  ## channel today (`docs.codetracer.com/nightly/usage_guide/deep_review/`
+  ## answers 200; the released channel has not shipped that page yet), and the
+  ## page it served is now the section's Introduction at `/deep_review`. The
+  ## entry is written for both channels regardless -- the redirect costs one
+  ## 400-byte file, and the alternative is remembering to add it at release.
+  (oldRoute: "/usage_guide/deep_review", newRoute: "/deep_review"),
+]
 
 proc mapNewRoute*(relNoExt: string): string =
   ## Map an old book source path (no `.md`, forward-slash) to its new clean
@@ -99,6 +131,21 @@ proc legacyRedirects*(summaryPath: string): seq[LegacyRedirect] =
     newRoute: "/",
     needsStub: false)
 
+proc movedRouteRedirects*(): seq[LegacyRedirect] =
+  ## `movedRoutes` in the same shape as the legacy set, so both families share
+  ## one emitter, one manifest and one set of assertions.
+  ##
+  ## The stub path is the old route's own `index.html` -- the exact file the SSG
+  ## used to write there, and the one GitHub Pages serves for a trailing-slash
+  ## URL. Nothing else at that path would be found: Pages does not fall back to
+  ## a sibling `*.html`.
+  for moved in movedRoutes:
+    result.add LegacyRedirect(
+      oldUrl: moved.oldRoute,
+      oldRelPath: moved.oldRoute[1 .. ^1] & "/index.html",
+      newRoute: moved.newRoute,
+      needsStub: true)
+
 proc metaRefreshStub*(cleanUrl: string): string =
   ## A minimal, self-contained HTML page that redirects to `cleanUrl` three
   ## ways: an immediate `<meta http-equiv="refresh">`, a `<link rel=canonical>`
@@ -132,29 +179,66 @@ proc metaRefreshTarget*(stubHtml: string): string =
   if close < 0: return ""
   stubHtml[start ..< close].strip()
 
-proc generateRedirects*(publicDir, summaryPath: string): int =
-  ## Write a meta-refresh stub at every legacy `*.html` path under
-  ## `publicDir` and a `_redirects` manifest at `publicDir/_redirects`.
-  ## Returns the number of stub files written. A stub is skipped when its
-  ## target path already exists as a real generated page (the root
-  ## `/index.html`), so the real home page is never overwritten.
-  let redirects = legacyRedirects(summaryPath)
+proc isRedirectStub*(html: string): bool =
+  ## Whether a file already at a stub's path is one of OUR stubs rather than a
+  ## real rendered page. Used by the overwrite guard below, and by the tests
+  ## that count real pages in `public/`.
+  html.contains("http-equiv=\"refresh\"")
+
+proc generateRedirects*(publicDir, summaryPath: string;
+                        basePath = ""): RedirectCounts =
+  ## Write a meta-refresh stub at every legacy `*.html` path and every moved
+  ## clean route under `publicDir`, plus a `_redirects` manifest at
+  ## `publicDir/_redirects` covering both. Returns the per-family stub counts.
+  ##
+  ## `basePath` is the channel prefix this build is hosted under (`""` for the
+  ## released book at `docs.codetracer.com/`, `"/nightly"` for the nightly
+  ## channel, `"/pr/<N>"` for a pull-request preview). These stubs are
+  ## hand-emitted HTML the framework's base-path pass never sees, so BOTH the
+  ## URL a stub redirects to and the manifest's old/new URL pair are prefixed
+  ## here -- an unprefixed `/getting_started/python` in a `/nightly` stub would
+  ## bounce the reader out of the nightly site.
+  ##
+  ## **Never overwrites a real generated page.** The moved-route family made
+  ## that guard load-bearing rather than defensive: its stubs live at
+  ## `<route>/index.html`, which is exactly where the SSG writes real pages, so
+  ## a moved-route entry whose old page is still generated would otherwise
+  ## replace that page with a redirect to itself. The guard is on the file's
+  ## CONTENT, not on its name -- re-running is idempotent (a previous stub is
+  ## rewritten in place), while a real page is left alone and reported.
+  let base = normalizeBasePath(basePath)
   var lines: seq[string] = @[]
-  var written = 0
-  for r in redirects:
-    if r.needsStub:
-      lines.add r.oldUrl & " " & r.newRoute & " 301"
-      let outPath = publicDir / r.oldRelPath
-      # Never overwrite a real generated page. Clean pages are always
-      # emitted as `<route>/index.html`, so a stub whose basename is
-      # `index.html` would land on a real page (the home page, or any
-      # section index) -- skip those. Every other `*.html` stub path is
-      # distinct from every real page path, so re-running is idempotent
-      # (it simply rewrites the stub).
-      if outPath.extractFilename == "index.html":
-        continue
-      createDir(outPath.parentDir())
-      writeFile(outPath, metaRefreshStub(r.newRoute))
-      inc written
+  var counts: RedirectCounts = (legacy: 0, moved: 0)
+  var clobbered: seq[string] = @[]
+
+  proc emit(r: LegacyRedirect): bool =
+    ## True when a stub was written. Appends the manifest line either way: the
+    ## manifest describes the intended redirect, and (for the root `/index.html`
+    ## collision) the real page at the destination already satisfies it.
+    lines.add base & r.oldUrl & " " & base & r.newRoute & " 301"
+    if not r.needsStub:
+      return false
+    let outPath = publicDir / r.oldRelPath
+    if fileExists(outPath) and not isRedirectStub(readFile(outPath)):
+      clobbered.add r.oldUrl
+      return false
+    createDir(outPath.parentDir())
+    writeFile(outPath, metaRefreshStub(base & r.newRoute))
+    true
+
+  for r in legacyRedirects(summaryPath):
+    if emit(r): inc counts.legacy
+  for r in movedRouteRedirects():
+    if emit(r): inc counts.moved
+
   writeFile(publicDir / "_redirects", lines.join("\n") & "\n")
-  written
+
+  # A moved route whose old page is still being generated means the content did
+  # not actually move -- the redirect would be dead on arrival, and silently.
+  # The legacy root `/index.html` is the one designed collision and is marked
+  # `needsStub: false`, so it never reaches the guard.
+  if clobbered.len > 0:
+    raise newException(ValueError,
+      "redirect target is still a real generated page, so the content did " &
+      "not move: " & clobbered.join(", "))
+  counts

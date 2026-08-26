@@ -157,3 +157,22 @@
 .agent-workspace-editor
   flex 1
   min-height 0
+
+// --- Coverage line highlighting (Monaco decorations) ---
+//
+// Applied by ``ui/agent_workspace.nim``'s ``deltaDecorations`` call when the
+// agent runtime reports which lines of a workspace file were executed and
+// which were not reachable.  The class names keep their ``deepreview-``
+// prefix because they are what the component emits and what
+// ``tests/agentic-coding/page-objects/agentic-page.ts`` locates; the rules
+// moved here from the deleted ``components/deepreview.styl`` (DR-R8), where
+// they sat next to the standalone review panel that used to share them.
+// This component is now their only consumer.
+
+.deepreview-line-executed
+  background-color rgba(0, 180, 0, 0.08)
+  border-left 3px solid rgba(0, 200, 0, 0.5)
+
+.deepreview-line-unreachable
+  background-color rgba(220, 0, 0, 0.08)
+  border-left 3px solid rgba(220, 0, 0, 0.5)

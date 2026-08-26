@@ -114,6 +114,21 @@ proc safeStr(s: cstring): string =
   else:
     $s
 
+proc isLiveScratchpadComponent(self: ScratchpadComponent): bool =
+  ## True when ``self`` is the component whose IsoNim view is (or is about
+  ## to be) mounted, i.e. the panel the user can actually see.
+  ##
+  ## Defence in depth for #612: the VM instance is module-global, so any
+  ## ``ScratchpadComponent`` that is still subscribed to
+  ## ``InternalAddToScratchpad`` writes rows into whatever panel happens to
+  ## be mounted — including components belonging to panels that were closed
+  ## or wiped by a layout reset.  ``Component.unregister`` is the real fix
+  ## (it stops the event from ever reaching those components); this guard
+  ## makes the sink itself refuse to mirror on behalf of a stale component,
+  ## so a future teardown path that forgets to unregister degrades into a
+  ## dropped update instead of a duplicated row.
+  scratchpadComponentRef.isNil or scratchpadComponentRef == self
+
 proc valueTextRepr*(value: Value): string =
   ## Produce a short single-line text representation of a ``Value``
   ## ref-object suitable for the IsoNim placeholder cell.  Mirrors the
@@ -213,7 +228,7 @@ proc registerValue*(self: ScratchpadComponent,
       stateID: -1
     )
   )
-  if not scratchpadVMInstance.isNil:
+  if not scratchpadVMInstance.isNil and self.isLiveScratchpadComponent:
     scratchpadVMInstance.addValue(legacyValueToVm(expression, value))
 
 # ---------------------------------------------------------------------------
@@ -372,9 +387,20 @@ method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
   ## the ViewModel layer is enabled.
   self.api = api
   initScratchpadVM()
-  if scratchpadComponentRef.isNil:
-    scratchpadComponentRef = self
-    tryMountIsoNimScratchpadPanel()
+
+  # Always adopt the newest registration as the live panel.
+  #
+  # This used to latch onto the FIRST component ever registered and never let
+  # go, so once the Scratchpad panel was closed and re-opened (or the layout
+  # was reset) ``tryMountIsoNimScratchpadPanel`` kept looking for the DOM
+  # container of the dead component (``scratchpadComponent-{oldId}``) and the
+  # re-opened panel never mounted its IsoNim view at all.  The mount-tracking
+  # entry for this id is dropped as well: ids restart from 0 after a layout
+  # reset, so a stale "already mounted" marker would otherwise suppress the
+  # mount into the freshly created container.
+  discard jsDelete(isoNimScratchpadMountedIds[self.id])
+  scratchpadComponentRef = self
+  tryMountIsoNimScratchpadPanel()
 
   api.subscribe(InternalAddToScratchpad,
     proc(kind: CtEventKind, response: ValueWithExpression, sub: Subscriber) =
@@ -404,6 +430,19 @@ method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
     proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
       self.registerLocals(response)
   )
+
+method unregister*(self: ScratchpadComponent) =
+  ## Release the module-global panel slots before handing over to the base
+  ## implementation (which drops the event-bus subscriptions).
+  ##
+  ## Without this a closed Scratchpad panel would keep ``scratchpadComponentRef``
+  ## pointing at a component whose DOM container no longer exists, and the
+  ## "already mounted" marker for its id would survive into the next panel
+  ## that happens to be given the same id.
+  if scratchpadComponentRef == self:
+    scratchpadComponentRef = nil
+  discard jsDelete(isoNimScratchpadMountedIds[self.id])
+  procCall unregister(Component(self))
 
 proc registerScratchpadComponent*(component: ScratchpadComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =

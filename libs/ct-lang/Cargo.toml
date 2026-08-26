@@ -1,0 +1,25 @@
+[package]
+name = "ct-lang"
+version = "0.1.0"
+edition = "2021"
+description = "The canonical CodeTracer `Lang` enum, shared by every Rust crate in this repository."
+license = "MIT OR Apache-2.0"
+
+# This crate exists so that the `Lang` ordinal has exactly ONE definition on
+# the Rust side.  It is deliberately a leaf: no build script, no path
+# dependencies, nothing that escapes this directory.  That is a requirement,
+# not an accident — see the module doc in `src/lib.rs` for why the definition
+# could not simply live in `src/db-backend`.
+[dependencies]
+num-derive = "0.4"
+num-traits = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_repr = "0.1"
+schemars = { version = "0.8.2", optional = true }
+
+[features]
+default = []
+# Derives `schemars::JsonSchema` for `Lang`.  Enabled by `db-backend`, whose
+# `schema-generator` binary emits the DAP JSON schema; left off for the TUI and
+# the DAP test client so they do not pull schemars in for nothing.
+schemars = ["dep:schemars"]

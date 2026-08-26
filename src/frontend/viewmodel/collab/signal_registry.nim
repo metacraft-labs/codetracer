@@ -423,11 +423,16 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("ReplVM", ["displayMode"])
 
   entries.addMany("VCSVM",
-    ["deepReviewMode", "headerTitle", "headerIcon", "isGitRepo",
+    ["deepReviewMode", "headerTitle", "headerIcon", "statsText",
+     "traceContexts", "isGitRepo",
      "errorMessage", "currentBranch", "branches", "commits", "changedFiles",
      "diffFiles"],
     vscBackendAuthoritative,
     "VCS rows/status are local repository facts.")
+  entries.addEntry("VCSVM", "selectedTraceContextId", vscRendererLocal,
+    "Review trace-context selection is outside replay session sync.",
+    requiresStableId = true,
+    stableIdNote = "Would need stable trace-context id if synchronized.")
   entries.addMany("VCSVM", ["branchDropdownOpen", "unifiedDiffActive",
                             "hunkToolbarVisible", "hunkCopyFeedback"],
     vscRendererLocal,
@@ -438,6 +443,15 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     stableIdNote = "Would need commit hash/id if synchronized.")
   entries.addEntry("VCSVM", "selectedHunks", vscRendererLocal,
     "Hunk selection uses local diff coordinates.",
+    requiresStableId = true,
+    stableIdNote = "Would need stable diff hunk ids if synchronized.")
+  entries.addEntry("VCSVM", "reviewCommit", vscBackendAuthoritative,
+    "The commit a review's changeset belongs to is a fact of the dataset.")
+  entries.addEntry("VCSVM", "reviewEntered", vscRendererLocal,
+    "Whether this panel already ran review entry; a local one-shot that " &
+    "keeps re-entry from re-opening tabs or re-focusing panels.")
+  entries.addEntry("VCSVM", "lastHunkClickOrdinal", vscRendererLocal,
+    "Shift-click anchor for hunk range selection; a local pointer gesture.",
     requiresStableId = true,
     stableIdNote = "Would need stable diff hunk ids if synchronized.")
   entries.addDerived("VCSVM", ["fileCount", "selectedHunkCount"])
@@ -475,13 +489,13 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("DeepReviewVM", ["selectedFile", "fileCount"])
 
   entries.addMany("FilesystemVM",
-    ["rootEntry", "diffEntries", "deepReviewActive", "deepReviewFiles"],
+    ["rootEntry", "diffEntries"],
     vscBackendAuthoritative,
     "Filesystem tree/diff contents are local repository facts.")
   entries.addEntry("FilesystemVM", "expandedPaths", vscSharedSessionViewState,
     "Filesystem expansion can be shared as logical path state.",
     requiresStableId = true,
-    stableIdNote = "Paths may be enough for files, but virtual/deep-review nodes need stable ids.")
+    stableIdNote = "Paths may be enough for files, but virtual nodes need stable ids.")
   entries.addDerived("FilesystemVM", ["isEmpty", "hasDiff", "totalEntryCount"])
 
   entries.addMany("AgentActivityVM",
@@ -493,15 +507,6 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Prompt draft is local typing state.")
   entries.addDerived("AgentActivityVM",
     ["messageCount", "terminalCount", "hasMessages"])
-
-  entries.addMany("AgentActivityDeepReviewVM",
-    ["coverageSummary", "testResults", "fileCoverage", "notifications"],
-    vscBackendAuthoritative,
-    "Agent DeepReview data is service output.")
-  entries.addEntry("AgentActivityDeepReviewVM", "isExpanded", vscRendererLocal,
-    "Expansion of the embedded summary is local UI state.")
-  entries.addDerived("AgentActivityDeepReviewVM",
-    ["coveragePercent", "hasFailures", "notificationCount"])
 
   entries.addMany("AgentWorkspaceVM",
     ["viewKind", "workspacePath", "sessionId", "summary", "files",

@@ -380,7 +380,7 @@ impl TestRecording {
         source_path: &Path,
         language: Language,
         version_label: &str,
-        ct_rr_support: &Path,
+        ct_native_replay: &Path,
     ) -> Result<Self, String> {
         // `ct-native-replay record` increments the daily-replay-limit counter
         // even on its `record` subcommand path (the counter is incremented on
@@ -423,7 +423,7 @@ impl TestRecording {
         let binary_path = temp_dir.join(format!("{}{}", binary_name, std::env::consts::EXE_SUFFIX));
 
         // Build the program
-        let build_output = Command::new(ct_rr_support)
+        let build_output = Command::new(ct_native_replay)
             .args(["build", source_path.to_str().unwrap(), binary_path.to_str().unwrap()])
             .output()
             .map_err(|e| format!("failed to run ct-native-replay build: {}", e))?;
@@ -437,7 +437,7 @@ impl TestRecording {
         }
 
         // Record the trace
-        let record_output = Command::new(ct_rr_support)
+        let record_output = Command::new(ct_native_replay)
             .args([
                 "record",
                 "-o",
@@ -505,7 +505,7 @@ impl TestRecording {
         source_path: &Path,
         language: Language,
         version_label: &str,
-        ct_rr_support: &Path,
+        ct_native_replay: &Path,
     ) -> Result<Self, String> {
         // P7.4: bypasses `ct record --backend mcr`.  The MCR flow tests
         // need to assert against `ct-native-replay`'s raw CLI surface
@@ -535,7 +535,7 @@ impl TestRecording {
         let binary_path = temp_dir.join(format!("{}{}", binary_name, std::env::consts::EXE_SUFFIX));
 
         // Build the program
-        let build_output = Command::new(ct_rr_support)
+        let build_output = Command::new(ct_native_replay)
             .args(["build", source_path.to_str().unwrap(), binary_path.to_str().unwrap()])
             .output()
             .map_err(|e| format!("failed to run ct-native-replay build: {}", e))?;
@@ -550,7 +550,7 @@ impl TestRecording {
 
         // Record with MCR backend — produces a .ct file
         let trace_output = temp_dir.join("trace");
-        let record_output = Command::new(ct_rr_support)
+        let record_output = Command::new(ct_native_replay)
             .args([
                 "record",
                 "--backend",
@@ -619,7 +619,7 @@ pub struct DapTestClient {
 #[cfg(unix)]
 impl DapTestClient {
     /// Start a new DAP test client connected to db-backend
-    pub fn start(temp_dir: &Path, ct_rr_support: &Path) -> Result<Self, String> {
+    pub fn start(temp_dir: &Path, ct_native_replay: &Path) -> Result<Self, String> {
         let db_backend_bin = env!("CARGO_BIN_EXE_replay-server");
         let socket_path = temp_dir.join("dap.sock");
 
@@ -680,7 +680,7 @@ impl DapTestClient {
     }
 
     /// Initialize the DAP session and launch with a recording
-    pub fn initialize_and_launch(&mut self, recording: &TestRecording, ct_rr_support: &Path) -> Result<(), String> {
+    pub fn initialize_and_launch(&mut self, recording: &TestRecording, ct_native_replay: &Path) -> Result<(), String> {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;
@@ -707,7 +707,7 @@ impl DapTestClient {
             request: None,
             typ: None,
             session_id: None,
-            recreator_exe: Some(ct_rr_support.to_path_buf()),
+            recreator_exe: Some(ct_native_replay.to_path_buf()),
             restore_location: None,
             rename_list: None,
         };
@@ -915,7 +915,11 @@ impl DapStdioTestClient {
     ///
     /// Unlike `initialize_and_launch()` (for DB traces), this passes the
     /// `recreator_exe` so the backend can spawn the replay worker.
-    pub fn initialize_and_launch_rr(&mut self, recording: &TestRecording, ct_rr_support: &Path) -> Result<(), String> {
+    pub fn initialize_and_launch_rr(
+        &mut self,
+        recording: &TestRecording,
+        ct_native_replay: &Path,
+    ) -> Result<(), String> {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;
@@ -945,7 +949,7 @@ impl DapStdioTestClient {
             request: None,
             typ: None,
             session_id: None,
-            recreator_exe: Some(ct_rr_support.to_path_buf()),
+            recreator_exe: Some(ct_native_replay.to_path_buf()),
             restore_location: None,
             rename_list: None,
         };
@@ -1462,17 +1466,18 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Find ct-native-replay binary (formerly ct-rr-support).
+/// Find the ct-native-replay binary.
 ///
 /// Search order:
-/// 1. `CT_NATIVE_REPLAY_PATH` env var (explicit override),
-///    falling back to legacy `CT_RR_SUPPORT_PATH`
-/// 2. System PATH lookup (via `which`/`where`) for `ct-native-replay`,
-///    falling back to legacy `ct-rr-support`
+/// 1. `CT_NATIVE_REPLAY_PATH` env var (explicit override), falling back to
+///    `CT_RR_SUPPORT_PATH` — the spelling `codetracer-native-backend`'s
+///    `scripts/run-cross-repo-tests.sh` still exports when it drives this
+///    suite, so it stays until that repo switches over.
+/// 2. System PATH lookup (via `which`/`where`) for `ct-native-replay`
 /// 3. Common development locations relative to CARGO_MANIFEST_DIR
 /// 4. Home directory locations
-pub fn find_ct_rr_support() -> Option<PathBuf> {
-    // Tests calling `find_ct_rr_support` are about to spawn ct-native-replay
+pub fn find_ct_native_replay() -> Option<PathBuf> {
+    // Tests calling `find_ct_native_replay` are about to spawn ct-native-replay
     // (directly or via db-backend) and would otherwise deadlock when the
     // free-tier daily replay quota is exhausted.  See
     // `ensure_replay_license_bypass` for the gory details.
@@ -1490,53 +1495,45 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
         }
     }
 
-    // Check PATH — try new name first, then legacy name
-    for bin_name in &["ct-native-replay", "ct-rr-support"] {
-        let exe_name = format!("{}{}", bin_name, std::env::consts::EXE_SUFFIX);
-        if let Some(path) = find_on_path(&exe_name) {
-            return Some(path);
-        }
+    // Check PATH.
+    let exe_name = format!("ct-native-replay{}", std::env::consts::EXE_SUFFIX);
+    if let Some(path) = find_on_path(&exe_name) {
+        return Some(path);
     }
 
     // Check common development locations (try both repo names)
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let new_exe = format!("ct-native-replay{}", std::env::consts::EXE_SUFFIX);
-    let old_exe = format!("ct-rr-support{}", std::env::consts::EXE_SUFFIX);
-    for exe_name in &[&new_exe, &old_exe] {
-        let dev_locations = [
-            format!("../../codetracer-native-backend/target/debug/{}", exe_name),
-            format!("../../codetracer-native-backend/target/release/{}", exe_name),
-            format!("../../../codetracer-native-backend/target/debug/{}", exe_name),
-            // Legacy repo name fallbacks
-            format!("../../codetracer-rr-backend/target/debug/{}", exe_name),
-            format!("../../codetracer-rr-backend/target/release/{}", exe_name),
-            format!("../../../codetracer-rr-backend/target/debug/{}", exe_name),
-        ];
+    let dev_locations = [
+        format!("../../codetracer-native-backend/target/debug/{}", exe_name),
+        format!("../../codetracer-native-backend/target/release/{}", exe_name),
+        format!("../../../codetracer-native-backend/target/debug/{}", exe_name),
+        // Legacy repo name fallbacks
+        format!("../../codetracer-rr-backend/target/debug/{}", exe_name),
+        format!("../../codetracer-rr-backend/target/release/{}", exe_name),
+        format!("../../../codetracer-rr-backend/target/debug/{}", exe_name),
+    ];
 
-        for loc in &dev_locations {
-            let path = manifest_dir.join(loc);
-            if path.exists() {
-                return Some(safe_canonicalize(&path));
-            }
+    for loc in &dev_locations {
+        let path = manifest_dir.join(loc);
+        if path.exists() {
+            return Some(safe_canonicalize(&path));
         }
     }
 
     // Check from home directory
     if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
         let home_path = PathBuf::from(home);
-        for exe_name in &[&new_exe, &old_exe] {
-            let home_locations = [
-                format!("metacraft/codetracer-native-backend/target/debug/{}", exe_name),
-                format!("codetracer-native-backend/target/debug/{}", exe_name),
-                // Legacy repo name fallbacks
-                format!("metacraft/codetracer-rr-backend/target/debug/{}", exe_name),
-                format!("codetracer-rr-backend/target/debug/{}", exe_name),
-            ];
-            for loc in &home_locations {
-                let path = home_path.join(loc);
-                if path.exists() {
-                    return Some(path);
-                }
+        let home_locations = [
+            format!("metacraft/codetracer-native-backend/target/debug/{}", exe_name),
+            format!("codetracer-native-backend/target/debug/{}", exe_name),
+            // Legacy repo name fallbacks
+            format!("metacraft/codetracer-rr-backend/target/debug/{}", exe_name),
+            format!("codetracer-rr-backend/target/debug/{}", exe_name),
+        ];
+        for loc in &home_locations {
+            let path = home_path.join(loc);
+            if path.exists() {
+                return Some(path);
             }
         }
     }
@@ -1563,7 +1560,7 @@ pub fn is_rr_available() -> bool {
 /// TTD recording requires elevation on Windows.
 #[cfg(windows)]
 pub fn is_ttd_available() -> bool {
-    if find_ct_rr_support().is_none() {
+    if find_ct_native_replay().is_none() {
         return false;
     }
     // Check if TTD package is installed via PowerShell
@@ -1603,7 +1600,7 @@ pub fn is_ttd_available() -> bool {
 /// that CLI as `ct_cli` and export `CODETRACER_CT_MCR_CMD`; production builds
 /// usually expose it as `ct-mcr`.
 pub fn is_mcr_available() -> bool {
-    if find_ct_rr_support().is_none() {
+    if find_ct_native_replay().is_none() {
         return false;
     }
     if let Ok(path) = env::var("CODETRACER_CT_MCR_CMD") {
@@ -4823,21 +4820,21 @@ pub fn run_db_flow_test_with_format(
 /// Returns an error if ct-native-replay is not found or the replay backend (rr/TTD) is
 /// not available, which allows tests to skip gracefully.
 pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
-    // Find ct-native-replay (formerly ct-rr-support)
-    let ct_rr_support =
-        find_ct_rr_support().ok_or("ct-native-replay not found in PATH or development locations".to_string())?;
+    // Find ct-native-replay
+    let ct_native_replay =
+        find_ct_native_replay().ok_or("ct-native-replay not found in PATH or development locations".to_string())?;
 
     if !is_replay_backend_available() {
         return Err("replay backend not available (rr on Unix, TTD on Windows)".to_string());
     }
 
-    println!("Using ct-native-replay: {}", ct_rr_support.display());
+    println!("Using ct-native-replay: {}", ct_native_replay.display());
     println!("Source: {}", config.source_path.display());
     println!("Version: {}", version_label);
 
     // Create recording
     println!("Building and recording...");
-    let recording = TestRecording::create(&config.source_path, config.language, version_label, &ct_rr_support)?;
+    let recording = TestRecording::create(&config.source_path, config.language, version_label, &ct_native_replay)?;
     println!("Recording created at: {}", recording.trace_dir.display());
 
     // On Unix, try Unix socket client first; on Windows use stdio client
@@ -4845,11 +4842,11 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
     {
         // Start DAP client via Unix sockets
         println!("Starting DAP client (Unix sockets)...");
-        let mut client = DapTestClient::start(&recording.temp_dir, &ct_rr_support)?;
+        let mut client = DapTestClient::start(&recording.temp_dir, &ct_native_replay)?;
 
         // Initialize and launch
         println!("Initializing DAP session...");
-        client.initialize_and_launch(&recording, &ct_rr_support)?;
+        client.initialize_and_launch(&recording, &ct_native_replay)?;
 
         // Set breakpoint
         println!("Setting breakpoint at line {}...", config.breakpoint_line);
@@ -4877,7 +4874,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
 
         // Initialize and launch (using the rr-trace variant that passes recreator_exe)
         println!("Initializing DAP session...");
-        client.initialize_and_launch_rr(&recording, &ct_rr_support)?;
+        client.initialize_and_launch_rr(&recording, &ct_native_replay)?;
 
         // Set breakpoint
         println!("Setting breakpoint at line {}...", config.breakpoint_line);
@@ -4983,7 +4980,8 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
 /// A recording is worth committing only when it was made by a version
 /// that can no longer be built. That is a real category (see
 /// `codetracer-wasm-recorder`'s `legacy-encoding.ct`, produced by a
-/// pre-M52 `ct-instrument`) and it is not this one.
+/// `ct-instrument` that predates the current boundary-value encoding)
+/// and it is not this one.
 ///
 /// # Cost
 ///

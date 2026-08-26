@@ -267,7 +267,7 @@ proc resolveAgainstWorkdir(trace: Trace; folders: seq[cstring]): seq[cstring] =
     else:
       result.addUniquePath(nodePath.join(trace.workdir, folder))
 
-proc fallbackLiveSourceFolders(trace: Trace): seq[cstring] =
+proc fallbackLiveSourceFolders*(trace: Trace): seq[cstring] =
   if trace.program.len > 0:
     if ($trace.program).isAbsoluteFilesystemPath:
       if pathExists(trace.program):
@@ -280,7 +280,7 @@ proc fallbackLiveSourceFolders(trace: Trace): seq[cstring] =
   if result.len == 0 and trace.workdir.len > 0 and pathExists(trace.workdir):
     result.addUniquePath(trace.workdir)
 
-proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
+proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} =
   ## Materialized/self-contained traces store source files under
   ## ``trace/files`` using relative paths from ``paths.json`` (the
   ## runtime-materialized mirror of the CTFS internal ``paths.json``
@@ -915,12 +915,25 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
 
   infoPrint "index: loading trace file at ", tracePath
 
-  # The trace path from nimsuggest points to a .ct file.  The CodeTracer
-  # trace metadata lookup expects the containing folder (output folder).
+  # Two shapes reach this handler, and both must resolve:
+  #
+  #   * a **.ct file** path, from nimsuggest's macro trace — the metadata
+  #     lookup wants the containing output folder, so it needs `dirname`;
+  #   * a **trace folder** path, from AA-2's `ct test` drill-down — every
+  #     `ct test` provider reports `TraceMetadata.path` as the output
+  #     *directory* (`native_m11_common`, `js_common`, `ruby_common` and
+  #     `smart_contract_common` all do), and taking its `dirname` would look
+  #     up the parent directory and miss.
+  #
+  # So the path is tried as-is first, and only then as a file whose dirname to
+  # take.  The .ct-file caller is unaffected: `findByPath` does not match a
+  # file path, so it falls through to exactly the lookup it did before.
   let pathModule = require("path")
   let traceDir = cast[cstring](pathModule.dirname(tracePath))
 
-  let trace = await electron_vars.app.findByPath(traceDir)
+  var trace = await electron_vars.app.findByPath(tracePath)
+  if trace.isNil:
+    trace = await electron_vars.app.findByPath(traceDir)
   if not trace.isNil:
     mainWindow.webContents.send "CODETRACER::loading-trace",
       js{trace: trace}
@@ -930,9 +943,15 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
     await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
     await loadExistingRecord(trace.recordingId)
   else:
-    errorPrint "onLoadTraceFile: no trace found at path: ", traceDir
+    # Name the path the caller actually asked for, not the dirname.  While
+    # `dirname` was the only lookup this handler did, naming it was the same
+    # thing; now that the path is tried as-is first, reporting the dirname
+    # tells the reader about a directory nobody named — the `ct test`
+    # drill-down asked for `<...>/trace` and was told `<...>` was missing.
+    errorPrint "onLoadTraceFile: no trace found at path: ", tracePath,
+      " (nor at ", traceDir, ")"
     mainWindow.webContents.send "CODETRACER::trace-load-error",
-      js{error: cstring("No trace found at " & $traceDir &
+      js{error: cstring("No trace found at " & $tracePath &
          ". The .ct file may need to be imported first.")}
 
 proc initEditModeForFolder(sender: js; folder: cstring) {.async.}
@@ -1121,8 +1140,12 @@ proc onRecordWithLaunchConfig*(sender: js,
       js{errorMessage: errorText}
 
 proc sendNotification*(kind: NotificationKind, message: string) =
+  # The renderer subscribes to the namespaced channel (`ui_js.configureIPC`),
+  # so an unprefixed send is simply dropped.  Every progress message routed
+  # through this helper — "ct record process started", "starting live native
+  # session" — was therefore invisible; see issue #603.
   let notification = newNotification(kind, message)
-  mainWindow.webContents.send "new-notification", notification
+  mainWindow.webContents.send "CODETRACER::new-notification", notification
 
 proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   ## Initialize edit mode for a folder - called from welcome screen after folder selection
