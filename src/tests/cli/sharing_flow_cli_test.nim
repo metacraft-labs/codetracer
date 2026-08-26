@@ -60,6 +60,10 @@ import results
 # the container, so a hand-made file cannot reach the received view at all —
 # which is exactly why the recording download path had never been exercised.
 import ../../ct_test/incremental/m1_ctfs_fixture
+# For `$LangCpp` in the trace-index fixture row: the column stores the enum
+# NAME, so spelling it as the enum rather than as a string literal means a
+# rename breaks the fixture at compile time instead of at `ct list`.
+import ../../common/lang
 
 const
   CtBinary = "src/build-debug/bin/ct"
@@ -408,6 +412,24 @@ proc sharingViewLine(text: string): JsonNode =
       discard
   newJObject()
 
+proc arrayField(node: JsonNode, key: string): seq[JsonNode] =
+  ## The members of `node[key]`, or nothing when the key is absent.
+  ##
+  ## `node{key}` returns **nil** for a missing key, and iterating a nil
+  ## `JsonNode` is a SIGSEGV rather than an exception -- so a case that fails an
+  ## earlier `check` and then reaches such a loop takes the whole binary down
+  ## with it, and every case after it in the file never runs.  `unittest`'s
+  ## `check` does not abort, so this is reachable whenever an assertion above
+  ## the loop fails, which is exactly when a test is already telling you
+  ## something.  Reading array members through here keeps that failure a
+  ## reported one.
+  if node.isNil:
+    return @[]
+  let member = node{key}
+  if member.isNil or member.kind != JArray:
+    return @[]
+  member.getElems()
+
 proc lastJsonLine(output: string): JsonNode =
   ## `ct upload`'s machine-readable result is the last non-empty line.  Read
   ## the way the Electron handler reads it (`src/frontend/index/online_sharing.nim`),
@@ -499,13 +521,21 @@ proc registerRecordingRow(traceIndexDb, outputFolder: string,
   ## One row in the scratch trace index, so `ct upload --artifact <FOLDER>`
   ## can resolve the folder to a recording.  See the header on why this is the
   ## one substituted fixture.
+  ##
+  ## `lang` is written as the enum NAME rather than its ordinal.  Since the
+  ## trace_index schema's lang-name migration the column stores names such as
+  ## `LangRust`, and an integer there is refused as an unmigrated database --
+  ## correctly, since an ordinal silently means a different language the moment
+  ## anyone inserts an enum member.  A fixture that writes the old form does not
+  ## fail as a fixture; it fails as `ct list` reporting a corrupt trace index,
+  ## which is a much longer walk back to the cause.
   let insert = "INSERT OR REPLACE INTO recordings (recording_id, program, " &
     "args, compile_command, env, workdir, output, source_folders, " &
     "low_level_folder, output_folder, lang, imported, shell_id, rr_pid, " &
     "exit_code, calltrace, calltrace_mode, recorded_at, " &
     "remote_share_download_key) VALUES ('" & recordingId &
     "', 'sudoku', '', '', '', '/tmp', '', '', '', '" & outputFolder &
-    "', 1, 0, 0, 0, 0, 0, 'FullRecord', '2026/08/26', '');"
+    "', '" & $LangCpp & "', 0, 0, 0, 0, 0, 'FullRecord', '2026/08/26', '');"
   let outcome = execCmdEx("sqlite3 '" & traceIndexDb & "' \"" & insert & "\"")
   doAssert outcome.exitCode == 0,
     "could not write the recording fixture row with sqlite3 (it is in the " &
@@ -858,7 +888,7 @@ suite "AS-4 — one sharing flow, driven through the shipped ct binary":
     check view{"stage"}.getStr == "received"
     check view{"kind"}.getStr == "recording"
     var notices = ""
-    for notice in view{"notices"}:
+    for notice in view.arrayField("notices"):
       notices &= notice.getStr() & "\n"
     check "upload API" notin notices
     check "CodeTracer records who may open" notin notices

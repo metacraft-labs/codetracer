@@ -166,6 +166,10 @@ format.js
 config/.config.yaml
 /.config.yaml
 src/tests/trace_index.db
+# The lang-name migration writes a backup beside the database before it
+# rewrites it, so a test run leaves one of these behind. The database itself is
+# ignored; its backup is the same thing one step older.
+src/tests/trace_index.db.*.bak
 src/tests/programs/b
 src/tests/programs/c
 test_ui
