@@ -346,7 +346,9 @@ proc runInitial*(conf: CodetracerConf) =
         # AS-3 — one encryption flag for every kind.
         conf.uploadEncrypt,
         conf.uploadPasswordStdin,
-        conf.uploadPasswordFile)
+        conf.uploadPasswordFile,
+        # AS-4 — one access-control flag for every kind.
+        conf.uploadVisibility)
     of StartupCommand.download:
       downloadTraceCommand(conf.traceDownloadUrl,
         conf.downloadToken,

@@ -58,9 +58,6 @@ const
     # `ct-mcr record --split` — the RECORDER's flag, named when explaining
     # what a pre-split slice directory is.
     "--split",
-    # `ct review collect --output <DIR>` — named when a review dataset
-    # directory is missing its `review.json`.
-    "--output",
     # `ct-mcr export --portable` — the RECORDER's flag again, named by the
     # enrichment step's warnings. `ct upload` has `--no-portable`, which is a
     # different flag on a different binary; the scan finding both is the point.
@@ -163,6 +160,26 @@ suite "AS-3 — the sharing path never names a flag that does not exist":
     # Named, so the failure says which file and which flag rather than only
     # that the count is wrong.
     check offenders == newSeq[string]()
+
+  test "no allowlist entry is dead":
+    # AS-4. `--output` was on the allowlist with the comment "`ct review
+    # collect --output <DIR>` — named when a review dataset directory is
+    # missing its `review.json`", implying `ct` does not accept it. It does:
+    # `ct review --help` lists it, so the entry never fired and the comment
+    # said the opposite of the truth. A dead entry is worse than none, because
+    # it would silence a genuine miss the day `--output` were removed.
+    #
+    # So the allowlist is now guarded the same way the messages are: an entry
+    # the CLI *does* accept is an entry that is doing nothing, and it is named.
+    var accepted = initHashSet[string]()
+    for subcommand in ScannedSubcommands:
+      accepted = accepted + flagsIn(runCt([subcommand, "--help"]).output)
+    var dead: seq[string] = @[]
+    for entry in FlagsNotCtsOwn:
+      if entry in accepted:
+        dead.add entry
+    dead.sort()
+    check dead == newSeq[string]()
 
 suite "AS-3 — the sharing CLI accepts what this milestone documents":
 

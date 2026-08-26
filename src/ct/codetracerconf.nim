@@ -963,6 +963,22 @@ type
         desc: "read the encryption password from standard input " &
           "(for scripts and CI). Mutually exclusive with --password-file"
       .}: bool
+      # AS-4 — access control, on the same one surface and by the same rule as
+      # `--encrypt`: who may read is a property of the *store* and not of what
+      # is being stored, so this flag means the same thing for every kind.  An
+      # unrecognised value is refused against the closed set by name rather
+      # than read as the default.
+      #
+      # Left as an `Option[string]` and parsed in `uploadCommand` rather than
+      # typed as the enum here, because `confutils`' enum parsing is a
+      # different door from `parseClosedEnumArgument` and the point of the
+      # closed-set rule is that there is only one door.
+      uploadVisibility* {.
+        name: "visibility",
+        desc: "who may read the stored artifact: 'tenant' (members of the " &
+          "owning organisation, the default) or 'tenant-or-invite' (those, " &
+          "plus anyone holding an invite link)"
+      .}: Option[string]
     of download:
       traceDownloadUrl* {.
         argument,

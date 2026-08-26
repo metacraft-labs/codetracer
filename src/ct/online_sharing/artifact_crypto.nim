@@ -138,6 +138,28 @@ proc bareDashInArgv*(): bool =
       return true
   false
 
+proc optionGivenWithoutValueInArgv*(name: string): bool =
+  ## Whether `--name` appears on this process's command line with no value.
+  ##
+  ## **The same defect as `bareDashInArgv`, on a different option** (AS-4).
+  ## `confutils` drops `--visibility=` and a bare `--visibility` before
+  ## `uploadCommand` sees anything, so both resolved to `none` and the access
+  ## setting the user typed was silently the default. Measured against the
+  ## shipped binary, not inferred: `--visibility=` uploaded with
+  ## `"visibility":"tenant"` and exit 0.
+  ##
+  ## The observation only; the **rule** is
+  ## `artifact_protection.optionGivenWithoutValue`, which is pure and asserted
+  ## headlessly — including the case that matters most, `--visibility <VALUE>`
+  ## with a perfectly good value, which an earlier version of this guard
+  ## refused because it matched the bare token and never looked at the next one.
+  ##
+  ## It reads `argv` for the same reason `bareDashInArgv` does: the whole
+  ## problem is that the parser has already eaten the token by the time a
+  ## parsed value exists. Not fixable in `libs/nim-confutils` — that submodule
+  ## is pinned, and a client-side refusal is the smaller change.
+  optionGivenWithoutValue(commandLineParams(), name)
+
 type
   ArtifactSeal* = object
     ## A prepared encryption: the envelope that will be written into every

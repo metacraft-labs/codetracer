@@ -28,7 +28,8 @@ import ../../common/[ config, paths ]
 import ../cli/interactive_replay
 import ../codetracerconf
 import ../trace/shell
-import remote_config, api_client, artifact_store, tenant_resolver
+import remote_config, api_client, artifact_store, artifact_sharing,
+  tenant_resolver
 import mcr_enrichment
 
 const
@@ -46,28 +47,21 @@ type
       ## Temporary files and directories to remove once the transfer is over,
       ## whether it succeeded or not.
 
-proc announceProtection(kind: ArtifactKind, protection: ArtifactProtection) =
+proc announceOffer(kind: ArtifactKind, access: ArtifactAccess) =
   ## Tell the user what they are about to get, **before** the upload starts.
   ##
   ## AS-3's fourth deliverable: "what a user can do when the password is lost.
   ## If the answer is 'nothing', that is acceptable and must be said before
-  ## they choose it, not after."  So this runs before a byte moves, and every
-  ## line of it comes from the protection registry rather than being written
-  ## here — the CLI and AS-4's dialog therefore say the same things, because
-  ## they read the same fields.
-  if not protectionSpec(protection).encryptsPayload:
-    # Nothing to disclose, and nothing may be implied: an unprotected upload
-    # must not print a paragraph about what encryption does not cover.
-    return
-  let prompt = artifactProtectionPrompt(kind, protection)
+  ## they choose it, not after."  So this runs before a byte moves.
+  ##
+  ## AS-4 makes it the **same view** the upload's result and `ct download` are
+  ## rendered from, at the `assOffered` stage — one surface at every moment of
+  ## one flow, rather than a disclosure paragraph here and a success block
+  ## somewhere else.  Every sentence still comes from the protection registry
+  ## and the access record; nothing is written here.
   echo ""
-  echo prompt.headline
-  echo "  Protects against: " & prompt.protectsAgainst
-  echo "  Does NOT protect: " & prompt.doesNotProtect
-  echo "  Still visible to the service: " &
-    describeVisibleMetadata(serviceVisibleMetadataFields(kind)) &
-    " (and " & describeVisibleMetadata(serviceVisibleTransferFacts()) & ")"
-  echo "  If you lose the password: " & prompt.recoveryNotice
+  echo renderSharingView(
+    sharingView(prospectiveArtifact(kind, access), assOffered))
   echo ""
 
 proc readUploadPassword(encrypt: bool, passwordStdin: bool,
@@ -123,7 +117,8 @@ proc shareUrlFor(baseUrl, orgSlug, artifactId: string): string =
 
 proc reviewDatasetTarget*(datasetDir: string, tenantId: string,
     artifactId: string,
-    protection: ArtifactProtection = apNone):
+    protection: ArtifactProtection = apNone,
+    visibility: ArtifactVisibility = avTenant):
     tuple[target: UploadTarget, error: string] =
   ## Describe a `ct review collect` output directory as an artifact of the
   ## review-dataset kind, packed for transfer.
@@ -183,6 +178,7 @@ proc reviewDatasetTarget*(datasetDir: string, tenantId: string,
     fileCount = fileCount,
     recordingCount = recordingCount,
     sessionTitle = sessionTitle,
+    visibility = visibility,
     protection = protection)
 
   (UploadTarget(
@@ -198,6 +194,7 @@ proc uploadFile(
   baseUrl: Option[string] = none(string),
   protection: ArtifactProtection = apNone,
   secret: string = "",
+  visibility: ArtifactVisibility = avTenant,
 ): UploadedInfo {.raises: [KeyError, Exception].} =
   ## Uploads a single-file recording payload through the generic store.
   ##
@@ -230,6 +227,7 @@ proc uploadFile(
       layout = aplSingleFile,
       partCount = 1,
       platform = hostArtifactPlatformToken(),
+      visibility = visibility,
       protection = protection)
 
     let stored = client.storeArtifact(
@@ -240,6 +238,7 @@ proc uploadFile(
       return
 
     result.artifactId = stored.artifact.artifactId
+    result.artifact = stored.artifact
     result.protection = stored.protection
     # The rule §9.5 states, applied uniformly rather than only where it is
     # likely to bite: a link is issued ONLY when the service named the artifact
@@ -251,11 +250,12 @@ proc uploadFile(
       result.shareUrl = shareUrlFor(
         resolvedBaseUrl, resolvedSlug, stored.artifact.artifactId)
 
-    let replayUrl = fmt"{resolvedBaseUrl}/{resolvedSlug}/replay/confirm/{result.artifactId}"
-    echo "File uploaded successfully."
-    echo "Recording ID: " & result.artifactId
-    echo "You can run the replay in the browser from here:"
-    echo "  " & replayUrl
+    # AS-4: nothing is printed here.  What the user is told about a completed
+    # upload is `uploadCommand`'s one rendering of the one sharing view — this
+    # path used to print a recording-shaped block ("File uploaded successfully
+    # / Recording ID / You can run the replay in the browser from here") that
+    # the review-dataset path had no counterpart for, which is precisely the
+    # "two flows that resemble each other" this milestone removes.
 
   except CatchableError as e:
     echo "error: uploadFile exception: ", e.msg
@@ -275,7 +275,8 @@ proc uploadSplitTraceFallback(trace: Trace, slicesDir: string,
     token: Option[string] = none(string),
     baseUrl: Option[string] = none(string),
     protection: ArtifactProtection = apNone,
-    secret: string = ""): UploadedInfo =
+    secret: string = "",
+    visibility: ArtifactVisibility = avTenant): UploadedInfo =
   ## Fallback for servers that do not support the upload-session API.
   ## Zips the slices directory (store-only, no compression since CTFS files
   ## are already internally compressed) and uploads as a single file.
@@ -296,7 +297,7 @@ proc uploadSplitTraceFallback(trace: Trace, slicesDir: string,
   var uploadInfo = UploadedInfo()
   try:
     uploadInfo = uploadFile(
-      trace, outputZip, org, token, baseUrl, protection, secret)
+      trace, outputZip, org, token, baseUrl, protection, secret, visibility)
   except CatchableError as e:
     echo "uploadSplitTrace fallback error: ", e.msg
     uploadInfo.exitCode = 1
@@ -313,7 +314,8 @@ proc uploadSplitTrace*(trace: Trace, slicesDir: string,
     baseUrl: Option[string] = none(string),
     omniscientDbMode: OmniscientDbMode = OmniscientDbMode.off,
     protection: ArtifactProtection = apNone,
-    secret: string = ""): UploadedInfo =
+    secret: string = "",
+    visibility: ArtifactVisibility = avTenant): UploadedInfo =
   ## Upload a recording that is already split into slices, as a **slice-set
   ## payload** through the generic store.
   ##
@@ -365,6 +367,7 @@ proc uploadSplitTrace*(trace: Trace, slicesDir: string,
       layout = aplSliceSet,
       partCount = parts.len,
       platform = hostArtifactPlatformToken(),
+      visibility = visibility,
       protection = protection)
 
     # M31 — forward the client-controlled omniscient-DB upload mode on the
@@ -398,7 +401,7 @@ proc uploadSplitTrace*(trace: Trace, slicesDir: string,
           " has no effect on the legacy single-file upload path " &
           "(needs the upload-session API)."
       return uploadSplitTraceFallback(
-        trace, slicesDir, org, token, baseUrl, protection, secret)
+        trace, slicesDir, org, token, baseUrl, protection, secret, visibility)
 
     if stored.error.len > 0:
       echo "error: refusing to upload: " & stored.error
@@ -411,6 +414,7 @@ proc uploadSplitTrace*(trace: Trace, slicesDir: string,
       else: "")
 
     result.artifactId = stored.artifact.artifactId
+    result.artifact = stored.artifact
     result.protection = stored.protection
     # A distinct field, deliberately: the session id names the *transfer*, in
     # the service's own namespace, and is not an identity for the artifact.
@@ -436,7 +440,8 @@ proc uploadReviewDataset*(datasetDir: string,
     token: Option[string] = none(string),
     baseUrl: Option[string] = none(string),
     protection: ArtifactProtection = apNone,
-    secret: string = ""): UploadedInfo =
+    secret: string = "",
+    visibility: ArtifactVisibility = avTenant): UploadedInfo =
   ## Store a `ct review collect` output directory as an artifact of the
   ## review-dataset kind.
   ##
@@ -463,7 +468,7 @@ proc uploadReviewDataset*(datasetDir: string,
     # store mints one (AS-1 §4).  This is the common case; the recording kind
     # is the documented exception, not the rule.
     let described = reviewDatasetTarget(
-      datasetDir, tenantId, newArtifactId(), protection)
+      datasetDir, tenantId, newArtifactId(), protection, visibility)
     if described.error.len > 0:
       echo "error: refusing to upload: " & described.error
       result.exitCode = 1
@@ -480,13 +485,15 @@ proc uploadReviewDataset*(datasetDir: string,
       return
 
     result.artifactId = stored.artifact.artifactId
+    result.artifact = stored.artifact
     result.protection = stored.protection
     # Same rule as every other path — see `uploadFile`.
     if stored.serviceAcknowledgedId:
       result.shareUrl = shareUrlFor(
         resolvedBaseUrl, resolvedSlug, stored.artifact.artifactId)
-    echo "Review dataset uploaded."
-    echo "Artifact ID: " & result.artifactId
+    # AS-4: and, as on every other path, nothing is printed here.  This one
+    # said "Review dataset uploaded. / Artifact ID: …" where the recording path
+    # said something else entirely about the same event.
 
   except CatchableError as e:
     echo "error: uploadReviewDataset exception: ", e.msg
@@ -507,7 +514,8 @@ proc uploadTrace*(trace: Trace, org: Option[string],
     noSplitUpload: bool = false,
     omniscientDbMode: OmniscientDbMode = OmniscientDbMode.off,
     protection: ArtifactProtection = apNone,
-    secret: string = ""): UploadedInfo =
+    secret: string = "",
+    visibility: ArtifactVisibility = avTenant): UploadedInfo =
   ## Store a recording selected from the local trace index.
   ##
   ## **Returns** rather than `quit`s.  Every path through this procedure used
@@ -535,7 +543,7 @@ proc uploadTrace*(trace: Trace, org: Option[string],
         echo "MCR trace with pre-split slices detected"
         return uploadSplitTrace(
           trace, slicesDir, org, token, baseUrl, omniscientDbMode,
-          protection, secret)
+          protection, secret, visibility)
 
   # Full upload: zip the entire outputFolder and upload as one file.
   # try to generate a unique path, so even if we don't remove it/clean it up
@@ -562,7 +570,7 @@ proc uploadTrace*(trace: Trace, org: Option[string],
   var uploadInfo = UploadedInfo(kind: akRecording)
   try:
     uploadInfo = uploadFile(
-      trace, outputZip, org, token, baseUrl, protection, secret)
+      trace, outputZip, org, token, baseUrl, protection, secret, visibility)
   except CatchableError as e:
     echo "uploadTrace error: ", e.msg
     uploadInfo.exitCode = 1
@@ -575,7 +583,8 @@ proc uploadTrace*(trace: Trace, org: Option[string],
 
   uploadInfo
 
-proc uploadResultJson*(info: UploadedInfo): string =
+proc uploadResultJson*(info: UploadedInfo,
+    view: ArtifactSharingView): string =
   ## The machine-readable result of an upload, for a non-interactive caller.
   ##
   ## Kind-neutral in shape and explicit about the kind, which is AS-2's rule
@@ -595,6 +604,17 @@ proc uploadResultJson*(info: UploadedInfo): string =
     # stored needs a password to read, and it must be able to tell without
     # asking the service — which is the one party that cannot answer.
     "protection": protectionSpec(info.protection).wireToken,
+    # AS-4.  Access control is part of the one sharing surface, so it is part
+    # of the machine-readable half of it too: a script that sets
+    # `--visibility` must be able to see that the setting took, and the two
+    # closed-set tokens are the same spellings the wire and the record use.
+    "visibility": $info.artifact.access.visibility,
+    "minimumWriteRole": $info.artifact.access.minimumWriteRole,
+    # …and whether the service was actually told, which for a kind with frozen
+    # request bodies is `false`.  Reported rather than implied: a caller that
+    # read `visibility` and assumed the service enforces it would be wrong for
+    # the recording kind, and silently.
+    "accessRecordSentToService": kindCarriesAccessRecord(info.kind),
   }
   if info.shareUrl.len > 0:
     body["shareUrl"] = newJString(info.shareUrl)
@@ -603,6 +623,13 @@ proc uploadResultJson*(info: UploadedInfo): string =
     # named for what it is: a handle on the transfer, in the service's own
     # namespace, not an identity for the artifact.
     body["uploadSessionId"] = newJString(info.uploadSessionId)
+  # AS-4.  A script is shown the SAME sharing view a human is, rather than a
+  # subset somebody has to keep in step: the human branch renders
+  # `sharingView`, and this branch serialises it.  That is what makes "the
+  # sharing flow is identical across kinds" checkable against the shipped
+  # binary — `src/tests/cli/sharing_flow_cli_test.nim` uploads one of each kind
+  # through the real `ct` and compares these two views.
+  body["view"] = sharingViewJson(view)
   $body
 
 proc uploadCommand*(
@@ -633,6 +660,11 @@ proc uploadCommand*(
   encrypt: bool = false,
   passwordStdin: bool = false,
   passwordFile: Option[string] = none(string),
+  # AS-4 — access control, on the same one surface and by the same rule as
+  # `--encrypt`: who may read is a property of the store, not of what is being
+  # stored, so this flag means the same thing and takes the same path for every
+  # kind.  Refused against the closed set rather than coerced.
+  visibilityToken: Option[string] = none(string),
 ) =
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
@@ -645,6 +677,34 @@ proc uploadCommand*(
   let protection =
     if encrypt: apPasswordScryptAes256Gcm else: apNone
 
+  # And so is the access decision, for the same reason and through the same
+  # closed-set door every other untrusted token goes through: an unknown
+  # `--visibility` is refused by name against the declared set, not read as the
+  # default (`Artifact-Store.md` §8 defect 10, one input source over).
+  # Two halves, and both are needed.
+  #
+  # The whole `Option` is handed over, NOT `.get("")`: collapsing "not given"
+  # into "given as empty" is what let `--visibility ""` resolve silently to the
+  # default while the wire form refused the same value.
+  #
+  # And `confutils` never even delivers the other two spellings — `--visibility`
+  # bare and `--visibility=` — so `argv` is consulted for them, exactly as AS-3
+  # had to for `--password-file -` (§8 defect 16). Measured against the shipped
+  # binary: before this, `--visibility=` uploaded with `"visibility":"tenant"`
+  # and exit 0, and the user was never told their setting had been dropped.
+  let readVisibility =
+    if optionGivenWithoutValueInArgv("visibility"):
+      (value: avTenant, error: "--visibility was given with no value; " &
+        "CodeTracer understands only: " &
+        closedEnumTokens[ArtifactVisibility]().join(", "))
+    else:
+      parseClosedEnumArgument[ArtifactVisibility](
+        "visibility", visibilityToken, avTenant)
+  if readVisibility.error.len > 0:
+    echo "error: " & readVisibility.error
+    quit(1)
+  let visibility = readVisibility.value
+
   var uploadInfo: UploadedInfo
 
   if artifactPath.isSome and artifactPath.get.len > 0:
@@ -656,7 +716,8 @@ proc uploadCommand*(
     # The disclosures come BEFORE the password is asked for, which is before
     # anything is uploaded — AS-3's fourth deliverable is that "nothing" is an
     # acceptable answer to "what if I lose it" only if it is said in advance.
-    announceProtection(classified.kind.get, protection)
+    announceOffer(classified.kind.get,
+      initArtifactAccess("", visibility, protection = protection))
     let password = readUploadPassword(encrypt, passwordStdin, passwordFile)
     if password.error.len > 0:
       echo password.error
@@ -665,7 +726,7 @@ proc uploadCommand*(
     of akReviewDataset:
       uploadInfo = uploadReviewDataset(
         path, uploadOrg, uploadToken, uploadBaseUrl,
-        protection, password.secret)
+        protection, password.secret, visibility)
     of akRecording:
       # A recording named by path is the existing `--trace-folder` selection;
       # routing it there rather than duplicating the lookup keeps one way of
@@ -678,7 +739,7 @@ proc uploadCommand*(
       try:
         uploadInfo = uploadTrace(trace, uploadOrg, uploadToken, uploadBaseUrl,
           noPortable, noSplitUpload, omniscientDbMode,
-          protection, password.secret)
+          protection, password.secret, visibility)
       except CatchableError as e:
         echo e.msg
         quit(1)
@@ -693,7 +754,8 @@ proc uploadCommand*(
       echo "ERROR: can't find trace in local database"
       quit(1)
 
-    announceProtection(akRecording, protection)
+    announceOffer(akRecording,
+      initArtifactAccess("", visibility, protection = protection))
     let password = readUploadPassword(encrypt, passwordStdin, passwordFile)
     if password.error.len > 0:
       echo password.error
@@ -702,7 +764,7 @@ proc uploadCommand*(
     try:
       uploadInfo = uploadTrace(trace, uploadOrg, uploadToken, uploadBaseUrl,
         noPortable, noSplitUpload, omniscientDbMode,
-        protection, password.secret)
+        protection, password.secret, visibility)
     except CatchableError as e:
       echo e.msg
       quit(1)
@@ -713,39 +775,40 @@ proc uploadCommand*(
   if uploadInfo.exitCode != 0:
     quit(uploadInfo.exitCode)
 
+  # AS-4 — ONE rendering, for every kind, of the one sharing view.
+  #
+  # The three upload paths used to end in three different success blocks and
+  # `uploadCommand` added a fourth, protection-dependent one on top; the
+  # sensitivity sentence, the download instruction and the link were spelled
+  # out here while the kind-specific lines were spelled out three modules away.
+  # Now every one of those sentences comes out of `sharingView`, so a recording
+  # and a review dataset are told about in the same words, in the same order,
+  # with the kind differing only in the noun and in the facts the kind itself
+  # supplies.
+  #
+  # A link is still issued only when the service named the artifact back
+  # (§9.5), and the view renders no link and no download command when it did
+  # not — printing one built from the local id would send a user to something
+  # the service has never heard of.
+  #
+  # The artifact record is the one the store returned, addressed by the id the
+  # SERVICE acknowledged.  A success that somehow carried no record falls back
+  # to the prospective one rather than rendering a zero value, whose `kind`
+  # would be the enum's first value and could therefore describe a review
+  # dataset as a recording.
+  let storedArtifact =
+    if uploadInfo.artifact.artifactId.len > 0: uploadInfo.artifact
+    else: prospectiveArtifact(
+      uploadInfo.kind, initArtifactAccess("", visibility,
+        protection = uploadInfo.protection))
+  let shared = sharingView(storedArtifact, assShared,
+    link = uploadInfo.shareUrl)
   if isatty(stdout):
     echo ""
-    if uploadInfo.shareUrl.len > 0:
-      echo "OK: uploaded. You can share this link:"
-      echo "  " & uploadInfo.shareUrl
-      echo ""
-      # The sensitivity sentence is protection-dependent, and getting it wrong
-      # in either direction is the failure this milestone is most able to
-      # cause: "anyone with this link can open it" is false once the payload is
-      # encrypted, and printing it anyway would train users to distrust the
-      # warning that matters on the unencrypted path.
-      if protectionSpec(uploadInfo.protection).encryptsPayload:
-        echo "The link on its own is not enough to read it: whoever opens it " &
-          "also needs the password you just chose."
-        echo "Send the password by some other means, and remember that " &
-          "CodeTracer cannot recover it for either of you."
-        echo ""
-        echo "Download it with:"
-        echo "  ct download " & uploadInfo.shareUrl
-      else:
-        echo "NB: it is sensitive — anyone with this link can open what you " &
-          "shared."
-        echo ""
-        echo "Download it with:"
-        echo "  ct download " & uploadInfo.shareUrl
-    else:
-      # No link is printed when the service did not name the artifact back.
-      # Printing one built from the local id would send a user to something
-      # the service has never heard of, which is worse than saying less.
-      echo "OK: uploaded " & kindSpec(uploadInfo.kind).wireToken & " " &
-        uploadInfo.artifactId & "."
-      echo "Open the CodeTracer web app to get its sharing link."
+    echo renderSharingView(shared)
+    if uploadInfo.shareUrl.len == 0:
+      echo "  Open the CodeTracer web app to get its sharing link."
   else:
-    echo uploadResultJson(uploadInfo)
+    echo uploadResultJson(uploadInfo, shared)
 
   quit(0)

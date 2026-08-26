@@ -361,6 +361,39 @@ proc secretSource*(fromStdin: bool, file: string,
       "from standard input, use --password-stdin.")
   ("", "")
 
+proc optionGivenWithoutValue*(parameters: openArray[string],
+    name: string): bool =
+  ## Whether `--name` appears in `parameters` with **no value**.
+  ##
+  ## Pure, and separated from the `argv` read for the same reason `secretSource`
+  ## is separated from `bareDashInArgv`: the bug being guarded is a *parsing*
+  ## outcome, and a decision only observable by launching a process is a
+  ## decision nothing asserts. `artifact_crypto.optionGivenWithoutValueInArgv`
+  ## is the one line that looks at the real world.
+  ##
+  ## **The neighbour decides, and getting that wrong is how this guard shipped
+  ## broken once already.** `--name=` is unambiguous. A bare `--name` is not:
+  ## `confutils` takes the following token as the value unless there is none or
+  ## it starts with `-`, so `--visibility tenant-or-invite` is a perfectly good
+  ## invocation that an earlier version of this rule refused — it matched the
+  ## bare token and never looked at what came after it. That is AS-3's
+  ## `--password-file -` in mirror image: the first fix under-fired on one
+  ## spelling, the second over-fired on another, and both times the guard
+  ## reasoned about a token without reasoning about its neighbour.
+  for index in 0 ..< parameters.len:
+    let parameter = parameters[index]
+    if parameter == "--" & name & "=":
+      return true
+    if parameter == name:
+      # Not an option at all — a positional argument that happens to match.
+      continue
+    if parameter == "--" & name:
+      if index == parameters.len - 1:
+        return true
+      if parameters[index + 1].startsWith("-"):
+        return true
+  false
+
 proc validatePasswordChoice*(password, confirmation: string):
     tuple[problem: PasswordChoiceProblem, message: string] =
   ## Whether `password` may be used, with `confirmation` re-typed.
@@ -785,9 +818,11 @@ proc parseEnvelopeHeader*(headerJson: string): EnvelopeHeaderParse =
   if sealedBytes.error.len > 0:
     return EnvelopeHeaderParse(error: sealedBytes.error)
   # A frame always carries at least its own tag; the ceiling is the same
-  # unauthenticated-input reasoning as `MaxEnvelopeHeaderBytes`, one order up
-  # because payloads are genuinely large. 64 GiB is far above any artifact the
-  # store accepts and far below anything that could be allocated by accident.
+  # unauthenticated-input reasoning as `MaxEnvelopeHeaderBytes`, several orders
+  # up because payloads are genuinely large.  The number is
+  # `MaxEnvelopeFrameBytes` — **1 GiB**, and see its declaration for why a
+  # frame rather than a payload is the thing bounded.  (This comment said
+  # "64 GiB" until AS-4; the code was right and the comment was stale.)
   if sealedBytes.value < ArtifactEnvelopeTagBytes or
       sealedBytes.value > MaxEnvelopeFrameBytes:
     return EnvelopeHeaderParse(error:

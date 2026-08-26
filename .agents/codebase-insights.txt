@@ -2028,3 +2028,84 @@ tolerates all of those ON THE NEUTRAL PROBE ONLY; a kind's own collection
 continues on 404/405 alone, because a 403 there is a real "you may not read
 this" and walking past it would report a permission problem as a missing
 artifact. 401 never continues, on either.
+
+## The sharing surface is ONE value, and it is the only place sharing copy lives
+
+`src/ct/online_sharing/artifact_sharing.nim` (AS-4) produces every sentence
+`ct upload`, `ct download` and `ct list` show about sharing, derived from the
+artifact model. It is pure and compiles on `nim js`, which is why the *claims*
+(what encryption covers, who can read what you shared) are asserted in the
+ViewModel lane without a socket.
+
+Per-kind variation may enter through FIVE doors and no more: the noun
+(`artifactSubjectNoun`), the kind's own facts (`artifactFacts`), the open
+command (`artifactOpenCommand`), §10.4's visible-metadata list
+(`describeVisibleToService`), and `accessApiNotices`. If you find yourself
+wanting a sixth, you are adding a second sharing flow — the thing this
+milestone removed, where four separate success blocks described one upload.
+
+**Know where the guarantee stops.** It covers the sharing VIEW — what the user
+is told about the artifact. It does NOT cover `upload.nim`'s narration about
+moving the bytes (`MCR trace with pre-split slices detected`, `Uploading N
+pre-split slices`, `Upload finalized: N slices`, the progress lines). Those
+differ per PAYLOAD SHAPE, not per kind, and they are declared in an allowlist
+that `sharing_flow_cli_test.nim` enforces against a real upload of each kind —
+including a genuinely sliced recording, so the list is driven and not merely
+written. A new line printed on one path only fails until somebody declares it.
+
+**The equality is asserted at THREE layers, and know why.** `sharingShape`
+strips the doors from the VIEW; `kindNeutralRenderedLines` strips them from
+`renderSharingView`'s TEXT; and the JSON comparison strips them from
+`sharingViewJson`. As AS-4 first shipped, only the first existed — and a door
+added to the renderer, gated on one kind and one stage, left every suite green
+while the pre-AS-4 wording came back in the product. A guarantee about a value
+is not a guarantee about the output built from it. The normaliser is pinned too
+(every reconstructed door line must really appear, and removals must account
+for exactly that many lines), because widening it is the next hiding place, and
+it lives in the TEST rather than beside the renderer for the same reason.
+
+Related: assert every STAGE. The gated door survived because the CLI suite
+compared line-for-line only at `assOffered`; `assShared` was JSON-only and
+`assReceived` was compared for neither kind. Downloading a *recording* needs a
+real CTFS container (`importTrace` reads its `meta.dat`), which is why that
+whole path had gone unexercised — `src/tests/cli/sharing_flow_cli_test.nim`
+now builds one with `m1_ctfs_fixture`.
+
+Two rules that are easy to break by accident:
+
+* **Do not state a fact the client was not told.** No deployed service returns
+  an artifact record, so `sharingView(..., accessKnown = false)` is what
+  `ct download` passes; without it the view printed the model's DEFAULT
+  visibility as though it were the artifact's. `ct list` has the same rule
+  under a different name (`ListingLocalOnly`). The same class one step over:
+  `accessApiNotices` is gated on the STAGE, because "CodeTracer recorded this
+  locally and the service was not told" is false after a download and
+  contradicted the "not stated" lines directly above it.
+* **`confutils` eats options you will swear you passed.** A bare `--flag` and
+  `--flag=` never reach the command for a value-taking option — the same defect
+  as AS-3's `--password-file -`. `artifact_crypto.bareDashInArgv` and
+  `optionGivenWithoutValueInArgv` read `argv` for exactly this, because by the
+  time a parsed value exists the token is gone. `libs/nim-confutils` is pinned;
+  refuse client-side. **And look at the NEIGHBOUR**: a bare `--flag` is only
+  value-less when it is last or the next entry starts with `-`. The first
+  version of that guard matched the token alone and refused
+  `--visibility tenant-or-invite`, the conventional spelling, which had
+  worked — under-firing and over-firing are the same mistake seen twice.
+* **`ct download`'s non-tty stdout is consumed WHOLE.**
+  `src/frontend/index/online_sharing.nim`'s `onDownloadTraceFile` takes
+  `$res.value.strip()` as the imported recording id, so the non-interactive
+  branch must print the locator and nothing else — AS-4's notices go to
+  **stderr** on that path for exactly this reason. `ct upload` is different:
+  its consumer scans back for the LAST non-empty line, so narration before the
+  JSON is harmless.
+
+## In-process sqlite does not load outside the test-lane runner
+
+`import db_connector/db_sqlite` compiles, then dies at process start with
+`could not load: libsqlite3.so(|.0)` unless the run inherits
+`CT_LD_LIBRARY_PATH` (the lane runner exports it for the RUN step; a bare
+`nim c -r` from the repo root does not). That is why `welcome_screen_vm_test`
+is a catalogued red on the JS lane, and why
+`src/tests/cli/sharing_flow_cli_test.nim` writes its one trace-index fixture
+row with the `sqlite3` CLI (which is in the dev shell, `nix/shells/ci-base.nix`)
+rather than linking the driver into the test binary.

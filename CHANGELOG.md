@@ -6,6 +6,62 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
+- **`ct list` now lists every artifact CodeTracer holds, not only recordings —
+  and its columns changed.** It read the trace index and printed the trace
+  columns, so a review dataset that `ct download` had unpacked was on the
+  machine, openable with `ct review`, and invisible to the only listing the CLI
+  has. It now lists recordings *and* review datasets, from the artifact model,
+  with the kind as its own column.
+
+  **Three columns the recording rows used to carry are gone**, and the removal
+  is recorded here rather than left to be noticed: the recorded program's
+  **arguments**, the **`ran in <workdir>`** column, and the **date**. They are
+  facts a recording has and a review dataset does not, and the row is now
+  kind-neutral. A fourth, the **full 36-character id appended at the end of the
+  line**, was dropped by accident and **has been put back** — it is what
+  `ct replay` takes, and the leading column is a shortened prefix for reading.
+  A script that parsed the text rows should move to `--format json`.
+
+- **`ct list --format json` emits artifact rows, not the trace records it used
+  to.** Each entry is now `{kind, artifactId, displayName, summary, protection,
+  access, openCommand}`, with `kind` a token from the artifact registry
+  (`recording`, `review-dataset`). The previous shape was the serialised
+  internal `Trace` object; nothing in this repository parsed it.
+
+- **`ct upload` no longer prints the browser `replay/confirm` URL.** It was
+  printed on one of the three upload paths — the single-file recording one,
+  never the sliced recording path that is the normal shape for an MCR
+  recording, and never for a review dataset. The kind-neutral share link
+  (`/{orgSlug}/{artifactId}/download`), which every path now prints, opens the
+  same web app.
+
+- **`ct upload` and `ct download` print one sharing view instead of four
+  different success blocks.** A recording and a review dataset are now
+  described in the same words, in the same order; the id is called
+  `Artifact id` on both (it used to be `Recording ID` on one path and
+  `Artifact ID` on the other, for values in the same namespace). A sliced
+  recording upload, which previously reported only `Upload finalized: N
+  slices`, now reports its id, its access and its protection like every other
+  upload — and its share link when the service names the artifact back, which
+  on that path it may not (the recording kind's upload-session request carries
+  no artifact id, so the service names the result itself).
+
+- **`ct download` writes a machine-readable view to standard error when its
+  output is not a terminal.** Standard output is unchanged and still carries
+  the locator and nothing else — the recording id, or the unpacked review
+  dataset's directory — because that is what the desktop app consumes. The new
+  stderr line carries the same view a human is shown, including the warning
+  that the service served a payload sealed for a *different* artifact than the
+  link asked for.
+
+- **`ct upload --visibility` with no value is now refused instead of silently
+  meaning `--visibility=tenant`.** All three spellings — `--visibility=`, a
+  bare `--visibility`, and `--visibility ""` — exit non-zero and name the
+  accepted values. The argument parser dropped the first two before the command
+  saw them, so an access-control setting a user typed had no effect and nothing
+  said so. **`--visibility <VALUE>` and `--visibility=<VALUE>` both continue to
+  work**, and an unrecognised value is refused by name against the closed set.
+
 - **`ct record --backend <value>` now refuses a value the host cannot honour
   instead of silently recording with MCR.** `--backend rr` on macOS,
   `--backend ttd` on Linux, and any value that is not a recording backend at all
@@ -90,6 +146,22 @@ All notable changes to this project will be documented in this file.
   known.
 
 ### Added
+
+- **`ct upload --visibility <tenant|tenant-or-invite>`** — one access-control
+  flag for every artifact kind, saying who may read the stored copy. An
+  unrecognised or missing value is refused by name against the closed set. For
+  a recording the setting is recorded locally and **not** sent: that kind's
+  upload API cannot carry an access record, and the command says so rather than
+  displaying a setting the service was never told.
+
+- **`ct upload` now shows what it is about to share, before asking anything.**
+  Every upload — not only an encrypted one — prints who will be able to open
+  the artifact, who will be able to change it, and what protection the payload
+  will carry, ahead of the password prompt and ahead of any bytes moving.
+
+- **`ct list` says what to do when there is nothing to list**, instead of
+  printing an empty response: it names `ct record <PROGRAM>` and
+  `ct download <LINK>`.
 
 - **`ct record` and `ct run` now really ask `ct-native-replay` what a target
   is.** The core has always contained a delegation to the native backend for a

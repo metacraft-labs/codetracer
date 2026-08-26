@@ -264,6 +264,38 @@ proc parseClosedEnum*[E: enum](token: string): Option[E] =
       return some(value)
   none(E)
 
+proc parseClosedEnumArgument*[E: enum](fieldName: string,
+    token: Option[string], whenAbsent: E): tuple[value: E, error: string] =
+  ## Read one closed-set token out of a **command-line argument**.
+  ##
+  ## The `readClosedEnumField` rule, one input source over, and it keeps that
+  ## procedure's central distinction: **absent is not the same as empty.**
+  ##
+  ## * `none` — the option was not given.  `whenAbsent`, no error.
+  ## * `some("")` — the option WAS given, with nothing after the `=`.  Refused,
+  ##   by name.  This is the arm that was missing: taking the option as an
+  ##   `Option[string]` and then calling `.get("")` collapsed the two, so
+  ##   `--visibility=` resolved silently to the default while
+  ##   `{"visibility": ""}` on the wire was refused — the same shape as AS-3's
+  ##   `--password-file -` (§8 defect 16), in the safe direction and therefore
+  ##   even less likely to be noticed.
+  ## * anything else — must match a declared token exactly; an unrecognised one
+  ##   is refused by name with the closed set listed.  There is no fallback arm
+  ##   here either: AS-2 closed four holes of that shape and AS-3 a fifth, and
+  ##   a `--visibility=public` silently read as `tenant` would be the same
+  ##   defect wearing a CLI hat.
+  if token.isNone:
+    return (whenAbsent, "")
+  let given = token.get
+  if given.len == 0:
+    return (whenAbsent, "--" & fieldName & " was given with no value; " &
+      "CodeTracer understands only: " & closedEnumTokens[E]().join(", "))
+  let parsed = parseClosedEnum[E](given)
+  if parsed.isNone:
+    return (whenAbsent, "unknown " & fieldName & " '" & given &
+      "'; CodeTracer understands only: " & closedEnumTokens[E]().join(", "))
+  (parsed.get, "")
+
 proc readClosedEnumField*[E: enum](node: JsonNode, fieldName: string,
     whenAbsent: E): tuple[value: E, error: string] =
   ## Read one closed-set token out of `node[fieldName]`.
@@ -601,6 +633,42 @@ proc serviceVisibleTransferFacts*(): seq[string] =
   ## The facts every artifact reveals to the service whatever its kind and
   ## whatever its protection, because they are what a transfer is made of.
   @["artifactId", "kind", "tenantId", "fileName", "contentLength", "partCount"]
+
+proc kindCarriesAccessRecord*(kind: ArtifactKind): bool =
+  ## Whether this kind's **upload request bodies** can carry the artifact's
+  ## access record (AS-4).
+  ##
+  ## Exhaustive `case`, so this is the tenth thing a new kind owes (§3.1): a
+  ## kind must say whether the service is told who may read what it is about to
+  ## store, because that is the difference between an access-control change
+  ## that reaches the service and one that only this machine knows about.
+  ##
+  ## The recording kind answers **no**, and not by choice: its bodies are
+  ## frozen by AS-1's compatibility guarantee (§9.3), so an `access` object
+  ## added to them would be the wire change that milestone forbids.  AS-4 does
+  ## not paper over that — `ct upload` says so in the sharing surface rather
+  ## than printing a visibility the service was never told about.
+  case kind
+  of akRecording: false
+  of akReviewDataset: true
+
+proc serviceVisibleAccessFields*(kind: ArtifactKind): seq[string] =
+  ## The **access-control** keys that reach the service in the clear.
+  ##
+  ## Derived from `kindCarriesAccessRecord` rather than declared a second time,
+  ## so the list and the wire cannot disagree: a kind whose bodies carry the
+  ## access record discloses exactly the two fields that record holds, and a
+  ## kind whose bodies do not carry it discloses nothing.
+  ##
+  ## `protection` is deliberately **not** among them.  Telling the service that
+  ## a payload is encrypted buys nothing the client needs and is one more fact
+  ## about the artifact than it has to have; §10.6 records that for the
+  ## recording kind the service is never told at all, and AS-4 does not change
+  ## that for the kinds that could.
+  if kindCarriesAccessRecord(kind):
+    @["visibility", "minimumWriteRole"]
+  else:
+    @[]
 
 proc artifactSubjectNoun*(kind: ArtifactKind): string =
   ## What to call an artifact of `kind` in a sentence addressed to a user:
@@ -1110,16 +1178,32 @@ when not defined(js):
     ## `"linux-x86_64"`, character-identical to the constant it replaces.
     artifactPlatformToken(hostOS, hostCPU)
 
+proc accessToJson*(access: ArtifactAccess): JsonNode =
+  ## The access record as it travels on a kind-neutral request body (AS-4).
+  ##
+  ## Exactly the access-control decision the service has to enforce, and
+  ## nothing else: `tenantId` is already in the URL, and `protection` is
+  ## deliberately withheld (see `serviceVisibleAccessFields`).  Both tokens come
+  ## from the closed sets, so the service receives the same spellings
+  ## `parseArtifact` reads back and an unknown one is refused on the way in.
+  %*{
+    "visibility": $access.visibility,
+    "minimumWriteRole": $access.minimumWriteRole,
+  }
+
 proc buildArtifactUploadUrlBody*(artifact: Artifact,
     fileName: string): JsonNode =
   ## Request body for `…/upload-url`, built from the whole artifact.
   ##
   ## The recording arm is the frozen four-key body `buildArtifactUploadUrlBody`
-  ## already produced from an `ArtifactRef`; every other kind adds its metadata.
+  ## already produced from an `ArtifactRef`; every other kind adds its metadata,
+  ## and — AS-4 — its access record when the kind's bodies can carry one.
   result = buildArtifactUploadUrlBody(artifactRef(artifact), fileName,
     artifact.payload.contentType, artifact.payload.byteSize)
   if artifact.kind != akRecording:
     result["metadata"] = metadataToJson(artifact.metadata)
+  if kindCarriesAccessRecord(artifact.kind):
+    result["access"] = accessToJson(artifact.access)
 
 proc buildArtifactConfirmUploadBody*(etag: string): JsonNode =
   ## Request body for `…/confirm-upload`.  Kind-neutral already, and the ETag
@@ -1166,12 +1250,14 @@ proc buildArtifactUploadSessionBody*(artifact: Artifact,
       artifact.metadata.platform, recordingMode)
   of akReviewDataset:
     # No legacy binding, so the kind-neutral envelope: who this is, what kind
-    # it is, and its metadata in full.  `recordingMode` has no meaning here —
-    # a review dataset is not a run — so it is not sent rather than sent empty.
+    # it is, its metadata in full, and (AS-4) its access record.
+    # `recordingMode` has no meaning here — a review dataset is not a run — so
+    # it is not sent rather than sent empty.
     %*{
       "artifactId": artifact.artifactId,
       "kind": kindSpec(artifact.kind).wireToken,
       "metadata": metadataToJson(artifact.metadata),
+      "access": accessToJson(artifact.access),
     }
 
 proc buildArtifactSliceUploadUrlBody*(sliceIndex: int, fileName: string,

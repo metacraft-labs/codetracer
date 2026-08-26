@@ -46,4 +46,18 @@ type UploadedInfo* = ref object
     ## password goes with it, and the *uploader* is the only party who can say:
     ## the service was never told the key and, for the recording kind, whose
     ## request bodies are frozen, was never even told there is one.
+  artifact*: Artifact
+    ## The artifact **as stored**, which is what AS-4's sharing surface is
+    ## rendered from.
+    ##
+    ## Carried so that `uploadCommand` renders one view from the model rather
+    ## than each upload path printing its own success block — which is what
+    ## they did before AS-4: a recording said "File uploaded successfully /
+    ## Recording ID / You can run the replay in the browser from here" and a
+    ## review dataset said "Review dataset uploaded / Artifact ID", two
+    ## messages about one operation, free to drift.
+    ##
+    ## `artifactId` above stays, and stays authoritative: it is the id the
+    ## SERVICE acknowledged, which for a sliced recording is not the id this
+    ## machine minted (§9.5).
   exitCode*: int

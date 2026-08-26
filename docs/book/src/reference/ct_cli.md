@@ -51,7 +51,7 @@ ct <command> [options] [<program>] [<args>]
 | `ct install`          | Install the CLI tools                                                             |
 | `ct version`          | Print the CodeTracer version                                                      |
 | `ct help`             | Display help information                                                          |
-| `ct list`             | List recorded traces                                                              |
+| `ct list`             | List every artifact CodeTracer holds: recordings and review datasets alike       |
 | `ct console`          | Open the interactive console                                                      |
 | `ct doctor <lang>`    | Probe recorder-readiness for a language (currently `python`; more languages soon) |
 
@@ -59,8 +59,8 @@ ct <command> [options] [<program>] [<args>]
 
 | Command       | Description                           |
 | ------------- | ------------------------------------- |
-| `ct upload`   | Upload a trace                        |
-| `ct download` | Download a trace                      |
+| `ct upload`   | Share an artifact of any kind CodeTracer understands — a recording or a review dataset. `--encrypt` seals the payload on this machine under a password the service never receives; `--visibility` says who may read the stored copy |
+| `ct download` | Open a shared artifact from its link. The link carries no kind, so the command asks the store; a password is needed only if the payload turns out to be encrypted |
 | `ct login`    | Authenticate with the sharing service |
 
 ### ct record

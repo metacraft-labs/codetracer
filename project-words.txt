@@ -249,3 +249,8 @@ recolour
 recognisable
 travelling
 intraline
+serialised
+unrecognised
+recognise
+RPATHs
+rpath

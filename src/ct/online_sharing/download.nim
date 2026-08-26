@@ -23,8 +23,8 @@ import std/[ terminal, options, strutils, strformat, os ]
 import ../../common/[ config, trace_index, paths, lang, types ]
 import ../utilities/[ types, zip, language_detection ]
 import ../trace/storage_and_import, ../globals
-import remote_config, api_client, artifact_store, collab_native_session,
-  tenant_resolver
+import remote_config, api_client, artifact_store, artifact_sharing,
+  collab_native_session, tenant_resolver
 
 # M-REC-8: the previous private ``parseDownloadUrl`` helper moved to
 # ``api_client.parseDownloadShareUrl`` so the M-REC-8 wire-format tests
@@ -55,6 +55,17 @@ type
       ## every artifact stored before AS-3, which is what "an old-format
       ## artifact still downloads" means concretely: no envelope, no prompt,
       ## nothing on this path runs at all.
+    sealedForArtifactId*: string
+      ## The artifact id the opened envelope named, when there was one.
+      ##
+      ## **AS-4 carries this the last step.**  AS-3 computed it, reported it on
+      ## `ArtifactFetchOutcome` — and it stopped there: nothing propagated it
+      ## and nothing printed it, so §8 defect 18's residual (a service serving
+      ## artifact B for a link to A, which opens if the password was reused)
+      ## was invisible to the one person able to notice it.  `ct download` now
+      ## says so when it differs from the id that was asked for.  It is still
+      ## *reported* rather than enforced: enforcing it would make an encrypted
+      ## sliced recording unopenable through its own share link (§10.3).
     error*: string
 
 proc downloadArtifact*(url: string,
@@ -109,7 +120,8 @@ proc downloadArtifact*(url: string,
     record: fetched.record,
     hasRecord: fetched.hasRecord,
     protection: fetched.protection,
-    wasDecrypted: fetched.wasDecrypted)
+    wasDecrypted: fetched.wasDecrypted,
+    sealedForArtifactId: fetched.sealedForArtifactId)
 
 proc importDownloadedRecording(downloaded: DownloadedArtifact,
     sourceUrl: string): string =
@@ -199,6 +211,26 @@ proc unpackDownloadedReviewDataset(downloaded: DownloadedArtifact): string =
   removeFile(downloaded.archivePath)
   destination
 
+proc receivedArtifact(downloaded: DownloadedArtifact): Artifact =
+  ## The artifact record AS-4's "received" view is rendered from.
+  ##
+  ## The service's record when it carried one, and a prospective artifact of
+  ## the resolved kind when it did not (every deployment today).  Two facts are
+  ## taken from **this machine** rather than from the record in either case:
+  ##
+  ## * the id, which is the id the link named and the one that was asked for —
+  ##   the record's is something the service says;
+  ## * the protection, which is read from the downloaded bytes' own magic
+  ##   (`protectionOfPayload`) and not from an access record the service
+  ##   controls.  A record claiming `none` for an envelope, or the reverse, must
+  ##   not change what the user is told about what they just opened.
+  if downloaded.hasRecord:
+    result = downloaded.record
+  else:
+    result = prospectiveArtifact(downloaded.kind, initArtifactAccess(""))
+  result.artifactId = downloaded.artifactId
+  result.access.protection = downloaded.protection
+
 proc downloadTraceCommand*(traceDownloadUrl: string,
     token: Option[string] = none(string),
     baseUrl: Option[string] = none(string),
@@ -266,22 +298,57 @@ proc downloadTraceCommand*(traceDownloadUrl: string,
       echo downloaded.error
       quit(1)
 
-    case downloaded.kind
-    of akRecording:
-      let recordingId = importDownloadedRecording(
-        downloaded, traceDownloadUrl)
-      if isatty(stdout):
-        echo fmt"OK: downloaded with recording id {recordingId}"
-      else:
-        # being parsed by `ct` index code
-        echo recordingId
-    of akReviewDataset:
-      let datasetDir = unpackDownloadedReviewDataset(downloaded)
-      if isatty(stdout):
-        echo "OK: downloaded review dataset " & downloaded.artifactId
-        echo "Open it with: ct review " & datasetDir
-      else:
-        echo datasetDir
+    # The ONE per-kind step: put the bytes where that kind belongs, and say
+    # what names the local copy.  Exhaustive, so a kind added to the registry
+    # without an answer to "what does `ct download` do with it" is a compile
+    # error rather than an artifact that lands somewhere arbitrary.
+    #
+    # AS-4: it no longer decides what the user is *told*.  Both arms used to
+    # print their own success message — "OK: downloaded with recording id X"
+    # against "OK: downloaded review dataset X / Open it with: ct review DIR" —
+    # which is the same two-flows-that-resemble-each-other shape `ct upload`
+    # had.  Now the arm produces a locator and the one sharing view is
+    # rendered from the artifact model below.
+    let locator =
+      case downloaded.kind
+      of akRecording:
+        importDownloadedRecording(downloaded, traceDownloadUrl)
+      of akReviewDataset:
+        unpackDownloadedReviewDataset(downloaded)
+
+    # `accessKnown = downloaded.hasRecord`: no deployed service returns an
+    # artifact record (§9.4), so without this the view would print the model's
+    # DEFAULT visibility as though it were this artifact's — telling a user
+    # that "members of the owning organisation" can open something whose owner
+    # the client was never told. A fabricated fact is worse than an absent one
+    # (§8 defect 4, in another form).
+    let received = sharingView(
+      receivedArtifact(downloaded), assReceived, locator = locator,
+      sealedForArtifactId = downloaded.sealedForArtifactId,
+      accessKnown = downloaded.hasRecord)
+    if isatty(stdout):
+      echo renderSharingView(received)
+    else:
+      # The SAME view a human is shown, machine-readable, on **stderr** — which
+      # is where it has to go: the Electron download handler takes the WHOLE of
+      # stdout, stripped, as the imported recording id, so stdout carries the
+      # locator and nothing else.  `ct upload`'s non-interactive branch puts its
+      # view on stdout because its consumer scans back for the last non-empty
+      # line; the two contracts differ and this is the one that cannot.
+      #
+      # It is emitted for the same reason `ct upload` emits one: a script that
+      # only sees a path is not told whether the payload was encrypted, who can
+      # read it, or that the service served a different artifact than the link
+      # asked for.  That last is the whole of §8 defect 18's defence.
+      stderr.writeLine sharingViewJsonLine(received)
+      # The notices are ALSO written as plain lines, because a human reading a
+      # piped run's stderr should not have to parse JSON to be warned.  They
+      # must still be said: the cross-artifact
+      # substitution notice is the only thing standing between a user and a
+      # payload the service swapped (§10.3).
+      for notice in received.notices & received.kindApiNotices:
+        stderr.writeLine notice
+      echo locator
 
   except CatchableError as e:
     echo fmt"error: downloading file '{e.msg}'"

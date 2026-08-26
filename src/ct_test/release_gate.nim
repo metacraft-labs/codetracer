@@ -667,6 +667,48 @@ const
     # `src/ct/online_sharing/artifact_crypto_test.nim`, and end to end over a
     # real socket in `artifact_store_roundtrip_test.nim`; all three are needed.
     "src/tests/gui/tests/sharing/artifact_protection_vm_test.nim",
+    # AS-4 — ONE sharing surface: sharing, access control, encryption and
+    # password entry look and behave the same whatever you are sharing,
+    # because they *are* the same.
+    #
+    # Registered here because this file holds the property that makes that
+    # sentence true rather than aspirational.  `sharingView` is one builder and
+    # per-kind variation can enter it through a closed, enumerated set of doors
+    # (the noun, the kind's own facts, the command that opens it, §10.4's
+    # visible-metadata list, and the notice a kind with frozen request bodies
+    # owes); this suite demands that everything else is byte-identical over
+    # kind × kind × protection × visibility × stage.  A SIXTH door added later
+    # fails here, which is the only way "one flow" stays true after the people
+    # who wrote it have moved on — before AS-4 there really were four separate
+    # success blocks describing one operation.
+    #
+    # **The equality is asserted at three layers, and that is a correction.**
+    # As AS-4 first shipped it, only the VIEW was compared; `renderSharingView`
+    # — the function that produces what a user reads — was checked by substring
+    # probes alone.  Independent verification put a door in the renderer, gated
+    # on one kind and one stage, and every suite here stayed green while the
+    # pre-AS-4 wording came back in the product.  The suite now compares the
+    # view, the rendered text and the machine-readable JSON, and pins the
+    # normaliser those comparisons remove the doors with.
+    #
+    # The guarantee's EDGE is stated rather than implied: it covers the sharing
+    # view, not `upload.nim`'s narration about moving the bytes, which differs
+    # per payload shape.  That narration is declared in an allowlist
+    # `src/tests/cli/sharing_flow_cli_test.nim` enforces against a real upload
+    # of each kind.
+    #
+    # It also carries the milestone's second and third verification items in
+    # their headless form (a listing row makes each kind recognisable without
+    # opening it; an access-control change reaches the view, the record and the
+    # request body, and an unknown `--visibility` token is refused by name).
+    # Their in-the-running-product form is
+    # `src/tests/cli/sharing_flow_cli_test.nim`, which drives the shipped `ct`
+    # binary against a stand-in service over a real socket — both are needed,
+    # and AS-3 shipped two defects that only the second shape could catch.
+    #
+    # Runs on BOTH backends: the surface is pure — no filesystem, no HTTP, no
+    # `std/times` — for the same reason `artifact_protection.nim` is.
+    "src/tests/gui/tests/sharing/artifact_sharing_vm_test.nim",
   ]
 
   CliRecordGateTests* = [
