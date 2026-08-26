@@ -82,9 +82,6 @@ pub mod flow_preloader;
 pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;
-// N2 — nested-trace correlation: joins a materialized GDScript `.ct` to its
-// parent native MCR trace via the `ct-nested-join` events + the native `geid.idx`.
-pub mod nested_correlation;
 pub mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. The Nim shim
 // at `codetracer-native-recorder/ct_emulator/src/ct_emulator/omniscient_db_ffi.nim`

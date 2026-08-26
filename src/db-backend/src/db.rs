@@ -2860,27 +2860,6 @@ impl MaterializedReplaySession {
         crate::async_continuation::ContinuationPatternSet::built_in().discover_links(self.reader.events())
     }
 
-    /// N2 — the nested-trace correlation between this materialized GDScript trace
-    /// and its parent native MCR trace.
-    ///
-    /// Reads the container's `ct-nested-join:` events (emitted by the patched
-    /// Godot recorder running under `ct-mcr record`) and correlates them, both
-    /// directions, against the parent native trace's `geid.idx` — per the wire
-    /// contract in `codetracer-trace-format-spec/nested-trace-correlation.md`.
-    /// The caller supplies the decoded native index (via
-    /// [`NativeGeidIndex::from_file`](crate::nested_correlation::NativeGeidIndex::from_file)),
-    /// so this method has no dependency on where the native trace lives.
-    ///
-    /// A standalone GDScript trace (no parent MCR context) has no join events and
-    /// yields an [`is_unnested`](crate::nested_correlation::NestedCorrelation::is_unnested)
-    /// correlation.
-    pub fn nested_correlation(
-        &self,
-        native: crate::nested_correlation::NativeGeidIndex,
-    ) -> crate::nested_correlation::NestedCorrelation {
-        crate::nested_correlation::NestedCorrelation::build(self.reader.events(), native)
-    }
-
     /// Spec §6.1 Path B — value-origin chain on a materialized trace.
     ///
     /// The caller owns the `ExprLoader` (typically `Handler::expr_loader`)

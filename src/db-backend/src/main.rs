@@ -74,7 +74,6 @@ mod flow_preloader;
 mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
-mod nested_correlation;
 mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. Mirrors the
 // lib.rs declaration above; the bin needs its own copy because
