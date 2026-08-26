@@ -269,7 +269,8 @@ test_lane_files() {
 			_tlf_reject \
 				'^src/frontend/tests/frontend_lang_test\.nim$' \
 				'^src/frontend/tests/scratchpad_add_dispatch_test\.nim$' \
-				'^src/frontend/tests/ipc_registry_test\.nim$'
+				'^src/frontend/tests/ipc_registry_test\.nim$' \
+				'^src/frontend/tests/target_axes_js_test\.nim$'
 		;;
 
 	frontend-js)
@@ -281,10 +282,23 @@ test_lane_files() {
 		# `ipc_registry_test.nim` imports `std/jsffi`, which is a hard compile
 		# error on the C backend ("Module jsFFI is designed to be used with the
 		# JavaScript backend") — it belongs here and nowhere else.
+		#
+		# `target_axes_js_test.nim` is the JS half of the four-axis domain
+		# types' PLACEMENT requirement: `src/common/target_axes.nim` and
+		# `src/common/target_assessment.nim` must be reachable from every front
+		# end, so they have to compile on both backends and the compiling is
+		# itself part of the assertion (a stray `std/jsffi` or `os` import fails
+		# on one side and nowhere else).  It was previously claimed only by the
+		# C-backend `frontend-native-units` lane, which is the wrong backend for
+		# the property it exists to prove, and by `just test-frontend-js`, which
+		# no lane knew about — the "registered in only one place runs nowhere"
+		# shape.  Its C-backend counterpart is
+		# `src/tests/cli/target_axes_test.nim`, in the `cli-record` lane.
 		printf '%s\n' \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
-			src/frontend/tests/scratchpad_add_dispatch_test.nim
+			src/frontend/tests/scratchpad_add_dispatch_test.nim \
+			src/frontend/tests/target_axes_js_test.nim
 		;;
 
 	vm-unit)
