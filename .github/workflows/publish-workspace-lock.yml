@@ -11,8 +11,15 @@
 # commit the pre-push gate structurally cannot reach: the one GitHub creates
 # server-side when a pull request lands. Merge, squash or rebase, the result is
 # a brand-new SHA that no hook ever saw. Measured on `dev`: of the last 30
-# first-parent commits, ZERO carry a lock, while every PR head that produced
-# them does.
+# first-parent commits, ZERO carry a lock.
+#
+# A SECOND GAP THIS DOES NOT CLOSE. Only a minority of pull request heads carry
+# a lock either — 4 of the last 24 merged here. That is a hook-COVERAGE gap: a
+# branch pushed from a checkout without the managed hooks (or with
+# `--no-verify`) never reaches the pre-push gate, and no server-side
+# re-anchoring can invent a record that was never produced. Such a merge fails
+# this job by name, with the remedy, rather than passing quietly — the same
+# policy `workspace-lock-freshness` already applies to the same condition.
 #
 # `clone-siblings` probes exactly those commits — `pull_request` ->
 # `base.sha`, `push` -> `github.sha` — with `--no-walk`, so until this workflow
