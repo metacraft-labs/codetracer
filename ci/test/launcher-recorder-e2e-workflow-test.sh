@@ -773,6 +773,132 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 9b. "Allow direnv in the freshly cloned siblings" MUST NOT BLAME direnv FOR A
+#     SHELL THAT NEVER BUILT.
+#
+# `nix develop <shell> --command <probe>` exits non-zero for two unrelated
+# reasons: the shell did not BUILD, or it built and the probe failed. This step
+# used to funnel both into one message, "direnv is not on PATH in the codetracer
+# ci dev shell".
+#
+# Run 33021054045 is what that costs. The `ci` shell failed to build (reprobuild
+# would not compile against the runquota revision the flake pinned) and the gate
+# announced a missing direnv -- while `Error: undeclared identifier:
+# 'ExtensionCellWire'` sat in the log directly above. The message was false, not
+# just unhelpful: direnv is declared in nix/shells/ci-base.nix, as the step's own
+# comment says.
+#
+# So the step's script is EXECUTED here against a stub `nix`, once per failure
+# mode, and each must be named for what it is. Asserting this by grepping the
+# YAML for two `echo`s would pass on wiring that never reaches the second one.
+# ---------------------------------------------------------------------------
+echo
+echo "the direnv step distinguishes a shell that will not build from a missing direnv"
+
+# extract_step_script NAME FILE -> that step's `run: |` block, dedented.
+# Same scanner as extract_plan_script, parameterised by step name.
+extract_step_script() {
+	strip_cr "$2" | awk -v want="      - name: $1" '
+		$0 == want { in_step=1; next }
+		in_step && /^      - name: / { in_step=0 }
+		in_step && /^        run: \|[[:space:]]*$/ { in_run=1; next }
+		in_run && /^          / { sub(/^          /, ""); print; next }
+		in_run && /^[[:space:]]*$/ { print ""; next }
+		in_run { in_run=0; in_step=0 }
+	'
+}
+
+DV="$TMP/direnv-step"
+mkdir -p "$DV/bin" "$DV/ws/codetracer" \
+	"$DV/ws/codetracer-launcher" \
+	"$DV/ws/codetracer-ruby-recorder" \
+	"$DV/ws/codetracer-trace-format-nim"
+# Two siblings carry a .envrc, one does not -- the step must handle both.
+: >"$DV/ws/codetracer-launcher/.envrc"
+: >"$DV/ws/codetracer-ruby-recorder/.envrc"
+
+DIRENV_STEP="$DV/step.sh"
+extract_step_script "Allow direnv in the freshly cloned siblings" "$REUSABLE" >"$DIRENV_STEP"
+
+# A stub `nix` whose behaviour is chosen by $NIX_STUB_MODE, so the step's own
+# control flow -- not a re-implementation of it -- decides what is reported.
+cat >"$DV/bin/nix" <<'STUB'
+#!/usr/bin/env bash
+# Recognise the two shapes the step issues:
+#   nix develop '.?submodules=1#ci' --command true
+#   nix develop '.?submodules=1#ci' --command bash -c 'command -v direnv'
+#   nix develop '.?submodules=1#ci' --command direnv allow <dir>
+probe=""
+for a in "$@"; do probe="$probe $a"; done
+case "$NIX_STUB_MODE" in
+	shell-fails)
+		echo "error: Cannot build '/nix/store/deadbeef-nix-shell-env.drv'." >&2
+		echo "       Reason: 1 dependency failed." >&2
+		exit 1
+		;;
+	no-direnv)
+		case "$probe" in
+			*"command -v direnv"*) exit 1 ;;
+			*) exit 0 ;;
+		esac
+		;;
+	ok)
+		case "$probe" in
+			*"command -v direnv"*) echo "/nix/store/stub/bin/direnv"; exit 0 ;;
+			*" direnv allow "*) echo "STUB-ALLOW:${probe##* }"; exit 0 ;;
+			*) exit 0 ;;
+		esac
+		;;
+esac
+exit 0
+STUB
+chmod +x "$DV/bin/nix"
+
+# run_direnv_step MODE -> "<exit>|<combined output>"
+run_direnv_step() {
+	local out rc
+	out="$(
+		cd "$DV/ws/codetracer" &&
+			PATH="$DV/bin:$PATH" NIX_STUB_MODE="$1" \
+				CT_DIR="$DV/ws/codetracer" RECORDER_REPO="codetracer-ruby-recorder" \
+				bash "$DIRENV_STEP" 2>&1
+	)"
+	rc=$?
+	printf '%s|%s' "$rc" "$out"
+}
+
+dv_out="$(run_direnv_step shell-fails)"
+if [ "${dv_out%%|*}" != 0 ] &&
+	printf '%s' "$dv_out" | grep -q 'FAILED TO BUILD' &&
+	! printf '%s' "$dv_out" | grep -q 'direnv is not on PATH'; then
+	ok "a ci shell that will not build is reported as a shell build failure, not a missing direnv"
+else
+	fail "a ci shell that will not build is reported as a shell build failure, not a missing direnv" \
+		"got: ${dv_out}"
+fi
+
+dv_out="$(run_direnv_step no-direnv)"
+if [ "${dv_out%%|*}" != 0 ] &&
+	printf '%s' "$dv_out" | grep -q 'direnv is not on PATH inside it' &&
+	! printf '%s' "$dv_out" | grep -q 'FAILED TO BUILD'; then
+	ok "a shell that builds but lacks direnv is reported as a missing direnv"
+else
+	fail "a shell that builds but lacks direnv is reported as a missing direnv" \
+		"got: ${dv_out}"
+fi
+
+dv_out="$(run_direnv_step ok)"
+if [ "${dv_out%%|*}" = 0 ] &&
+	printf '%s' "$dv_out" | grep -q 'direnv allow: .*/codetracer-launcher' &&
+	printf '%s' "$dv_out" | grep -q 'direnv allow: .*/codetracer-ruby-recorder' &&
+	printf '%s' "$dv_out" | grep -q 'no .envrc in .*/codetracer-trace-format-nim'; then
+	ok "a healthy shell allows every sibling that has a .envrc and says so for the one that does not"
+else
+	fail "a healthy shell allows every sibling that has a .envrc and says so for the one that does not" \
+		"got: ${dv_out}"
+fi
+
+# ---------------------------------------------------------------------------
 # 10. THE CHECKER'S OWN MUTATION TEST.
 #
 # Everything above reports a defect by NOT finding something, which is the
@@ -1007,7 +1133,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=15
+readonly EXPECTED_ASSERTIONS=18
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
