@@ -94,6 +94,68 @@ proc firstTrace(events: seq[TestEvent]): TraceMetadata =
       return event.trace.get
   raise newException(ValueError, "missing trace metadata")
 
+proc withEnvValue(name, value: string; body: proc()) =
+  let
+    hadValue = existsEnv(name)
+    oldValue = getEnv(name)
+  putEnv(name, value)
+  try:
+    body()
+  finally:
+    if hadValue: putEnv(name, oldValue) else: delEnv(name)
+
+proc withoutEnvValue(name: string; body: proc()) =
+  let
+    hadValue = existsEnv(name)
+    oldValue = getEnv(name)
+  delEnv(name)
+  try:
+    body()
+  finally:
+    if hadValue:
+      putEnv(name, oldValue)
+
+proc withCurrentDir(dir: string; body: proc()) =
+  let old = getCurrentDir()
+  setCurrentDir(dir)
+  try:
+    body()
+  finally:
+    setCurrentDir(old)
+
+proc pathWithout(executable: string): string =
+  ## The current ``PATH`` with every directory that provides ``executable``
+  ## removed.
+  ##
+  ## A resolution test has to pin the *order* of the fallbacks, which means
+  ## knowing that the recorder is not reachable by an earlier one. Rebuilding
+  ## ``PATH`` from scratch would do that but would also take ``node`` and
+  ## ``sh`` away from the command under test; prepending a directory cannot
+  ## remove anything. Subtracting exactly the providers of one name leaves the
+  ## rest of the environment intact, so the assertion holds whether or not the
+  ## developer's shell happens to have the recorder installed.
+  var kept: seq[string] = @[]
+  for dir in getEnv("PATH").split(PathSep):
+    if dir.len > 0 and fileExists(dir / executable):
+      continue
+    kept.add dir
+  kept.join($PathSep)
+
+proc writeExecutable(path, contents: string) =
+  createDir(path.parentDir)
+  writeFile(path, contents)
+  setFilePermissions(path, {fpUserExec, fpUserRead, fpUserWrite})
+
+proc jsRecorderSibling(): string =
+  ## The real ``codetracer-js-recorder`` checkout beside this one, or ``""``.
+  ## Only the *test* is allowed to look here: it is describing the machine it
+  ## runs on, whereas the provider must answer from the workspace it is given.
+  let candidate = getCurrentDir().parentDir / "codetracer-js-recorder"
+  if fileExists(candidate / "packages" / "cli" / "dist" / "index.js"):
+    candidate
+  else:
+    ""
+
 proc compileCtTestBinary(name: string): string =
   let binary = getTempDir() / (name & "-" & $getCurrentProcessId())
   let compile = execCmdEx(
@@ -390,15 +452,50 @@ suite "ct-test M7 JavaScript and TypeScript providers":
     check nodeRecordResult.diagnostics[0].message.contains("single-case files")
 
   test "Node test provider records CommonJS and produces non-empty CTFS":
-    let catalog = nodeTestFileCatalog(nodeRoot(), nodeRecordSample()).value
-    let item = catalog.itemBySelector(NodeRecordSelector)
-    let provider = newJsNodeTestM1Provider()
-    let recordResult = provider.provider.record(TestScope(
-      kind: tskSingle,
-      projectRoot: nodeRoot(),
-      file: nodeRecordSample(),
-      testId: item.id,
-      selector: item.selector))
+    ## Runs against a workspace that CONTAINS the recorder checkout, which is
+    ## how a caller names a sibling recorder now that the provider no longer
+    ## searches the process working directory (see the resolution test below).
+    ##
+    ## The recorder used to be found because this suite happens to run from a
+    ## checkout sitting beside ``codetracer-js-recorder``, which is not a route
+    ## an end user has: their project is not beside ours. `just build` in the
+    ## recorder repo is also unable to create
+    ## ``node_modules/.bin/codetracer-js-recorder`` when the workspace's
+    ## ``node_modules`` comes from a read-only Nix derivation, so
+    ## ``scripts/detect-siblings.sh`` cannot put it on ``PATH`` either and says
+    ## so with a warning. Naming a workspace is the route that works in both
+    ## configurations, and it is the one asserted here.
+    let sibling = jsRecorderSibling()
+    if sibling.len == 0 and findExe("codetracer-js-recorder").len == 0 and
+        getEnv("CODETRACER_JS_RECORDER_PATH", "").len == 0:
+      # Per ci/test/ct-providers.sh, a recording test must fail rather than
+      # skip when its recorder is absent — a silent skip is how recorder
+      # coverage disappears.
+      checkpoint("codetracer-js-recorder is required: build the sibling " &
+        "checkout (`direnv exec ../codetracer-js-recorder just build`) or " &
+        "set CODETRACER_JS_RECORDER_PATH")
+    check (sibling.len > 0 or findExe("codetracer-js-recorder").len > 0 or
+      getEnv("CODETRACER_JS_RECORDER_PATH", "").len > 0)
+
+    let workspace = getTempDir() / ("ct-js-record-workspace-" &
+      $getCurrentProcessId())
+    removeDir(workspace)
+    copyDir(nodeRoot(), workspace)
+    if sibling.len > 0:
+      createSymlink(sibling, workspace / "codetracer-js-recorder")
+    defer: removeDir(workspace)
+
+    let
+      sampleInWorkspace = workspace / "test/record_single.test.cjs"
+      catalog = nodeTestFileCatalog(workspace, sampleInWorkspace).value
+      item = catalog.itemBySelector(NodeRecordSelector)
+      provider = newJsNodeTestM1Provider()
+      recordResult = provider.provider.record(TestScope(
+        kind: tskSingle,
+        projectRoot: workspace,
+        file: sampleInWorkspace,
+        testId: item.id,
+        selector: item.selector))
 
     if recordResult.diagnostics.len > 0:
       checkpoint($recordResult.diagnostics)
@@ -423,3 +520,100 @@ suite "ct-test M7 JavaScript and TypeScript providers":
     check getFileSize(artifacts[0]) > 0
     for event in recordResult.value:
       check event.validateEvent.valid
+
+  test "node:test recorder resolution is anchored to the workspace, not the cwd":
+    ## REGRESSION. ``jsRecorderCommandPrefix`` used to look for the recorder
+    ## checkout under ``getCurrentDir().parentDir``, so *whether a trace could
+    ## be recorded at all*, and by which repository's recorder, depended on the
+    ## directory the shell happened to be in. Measured against the pre-fix
+    ## binary with one workspace, one file, one selector and one environment,
+    ## varying only the cwd, this same call answered three different ways:
+    ##
+    ##   cwd beside the workspace  → the workspace's own recorder
+    ##   cwd = $HOME               → "codetracer-js-recorder is required"
+    ##   cwd = the codetracer repo → an UNRELATED checkout's recorder
+    ##
+    ## The third is the one worth naming: the trace is produced by a recorder
+    ## belonging to a repository the caller never mentioned, and nothing in the
+    ## output says so.
+    ##
+    ## The recorder here is a stub that exits non-zero. The assertion is on the
+    ## command the provider *chose* — reported verbatim by ``tekRecordStarted``
+    ## — because resolution is the whole subject; whether the recorder then
+    ## produces a trace is the preceding test's business.
+    let
+      sandbox = getTempDir() / ("ct-js-recorder-anchor-" &
+        $getCurrentProcessId())
+      workspace = sandbox / "workspace"
+      bareWorkspace = sandbox / "bare-workspace"
+      elsewhere = sandbox / "elsewhere"
+      workspaceCli = workspace / "codetracer-js-recorder" / "packages" /
+        "cli" / "dist" / "index.js"
+      pathDir = sandbox / "path-bin"
+      pathCli = pathDir / "codetracer-js-recorder"
+      configuredCli = pathDir / "configured-js-recorder"
+      selector = "test/only.test.cjs::records only"
+    removeDir(sandbox)
+    for dir in [workspace, bareWorkspace, elsewhere, pathDir]:
+      createDir(dir)
+    defer: removeDir(sandbox)
+
+    createDir(workspaceCli.parentDir)
+    writeFile(workspaceCli, "process.exit(3)\n")
+    writeExecutable(pathCli, "#!/bin/sh\nexit 4\n")
+    writeExecutable(configuredCli, "#!/bin/sh\nexit 5\n")
+    for root in [workspace, bareWorkspace]:
+      createDir(root / "test")
+      writeFile(root / "test/only.test.cjs",
+        "const { test } = require('node:test');\n" &
+        "test('records only', () => {});\n")
+
+    proc recordFrom(projectRoot: string): ProviderResult[seq[TestEvent]] =
+      recordNodeTestCommand("js-node-test", TestScope(
+        kind: tskSingle,
+        projectRoot: projectRoot,
+        file: projectRoot / "test/only.test.cjs",
+        testId: "anchor",
+        selector: selector))
+
+    proc chosenCommand(res: ProviderResult[seq[TestEvent]]): string =
+      let started = res.value.eventsOfKind(tekRecordStarted)
+      if started.len == 1: started[0].message else: ""
+
+    # The recorder must not be reachable by an earlier fallback than the one
+    # each case is about, so PATH is stripped of every provider of the name.
+    let neutralPath = pathWithout("codetracer-js-recorder")
+
+    withEnvValue("PATH", neutralPath):
+      withoutEnvValue("CODETRACER_JS_RECORDER_PATH"):
+        # THE REGRESSION: the same workspace, from directories that used to
+        # give three different answers, now gives one.
+        for cwd in [elsewhere, sandbox, getCurrentDir()]:
+          withCurrentDir(cwd):
+            let chosen = recordFrom(workspace).chosenCommand
+            checkpoint("cwd=" & cwd)
+            check chosen.contains(workspaceCli)
+
+        # A workspace that does not contain the recorder is refused, and the
+        # diagnostic names the root that was searched rather than leaving the
+        # caller to guess which directory was consulted.
+        for cwd in [elsewhere, getCurrentDir()]:
+          withCurrentDir(cwd):
+            let res = recordFrom(bareWorkspace)
+            checkpoint("cwd=" & cwd)
+            check res.value.len == 0
+            check res.diagnostics.len == 1
+            check res.diagnostics[0].message.contains(
+              "codetracer-js-recorder is required")
+            check res.diagnostics[0].message.contains(bareWorkspace)
+
+    # PRECEDENCE, unchanged by the anchoring: an explicitly configured recorder
+    # outranks everything, and PATH outranks the workspace checkout. Asserted
+    # from a cwd whose parent holds neither, so a pass cannot come from the
+    # removed fallback.
+    withCurrentDir(elsewhere):
+      withEnvValue("PATH", pathDir & PathSep & neutralPath):
+        withEnvValue("CODETRACER_JS_RECORDER_PATH", configuredCli):
+          check recordFrom(workspace).chosenCommand.contains(configuredCli)
+        withoutEnvValue("CODETRACER_JS_RECORDER_PATH"):
+          check recordFrom(workspace).chosenCommand.contains(pathCli)

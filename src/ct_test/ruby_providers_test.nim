@@ -171,6 +171,37 @@ proc withoutEnvValue(name: string; body: proc()) =
     if hadValue:
       putEnv(name, oldValue)
 
+proc withCurrentDir(dir: string; body: proc()) =
+  let old = getCurrentDir()
+  setCurrentDir(dir)
+  try:
+    body()
+  finally:
+    setCurrentDir(old)
+
+proc pathWithout(executable: string): string =
+  ## The current ``PATH`` with every directory that provides ``executable``
+  ## removed.
+  ##
+  ## A resolution test has to pin the *order* of the fallbacks, which means
+  ## knowing the recorder is not reachable by an earlier one — and
+  ## ``scripts/detect-siblings.sh`` puts a real ``codetracer-ruby-recorder`` on
+  ## ``PATH`` in the dev shell. Rebuilding ``PATH`` from scratch would hide it
+  ## but would also take ``ruby`` and ``sh`` away from the command under test;
+  ## prepending a directory cannot remove anything. Subtracting exactly the
+  ## providers of one name leaves the rest of the environment intact.
+  var kept: seq[string] = @[]
+  for dir in getEnv("PATH").split(PathSep):
+    if dir.len > 0 and fileExists(dir / executable):
+      continue
+    kept.add dir
+  kept.join($PathSep)
+
+proc writeExecutable(path, contents: string) =
+  createDir(path.parentDir)
+  writeFile(path, contents)
+  setFilePermissions(path, {fpUserExec, fpUserRead, fpUserWrite})
+
 suite "ct-test M9 Ruby RSpec and Minitest providers":
   test "RSpec detects project and discovers nested examples with source ranges":
     check hasRspecProject(rspecRoot())
@@ -303,41 +334,80 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
           "bundle", "exec", "ruby", "-Itest", "test/calculator_test.rb",
           "--name", "/CalculatorTest#test_adds_numbers$/"]
 
-  test "recorder resolution prefers explicit path then workspace sibling":
+  test "recorder resolution is anchored to the workspace, not the cwd":
+    ## REGRESSION. ``rubyRecorderCommandPrefix`` took no arguments and searched
+    ## two directories the caller never named: ``getCurrentDir().parentDir``
+    ## and ``currentSourcePath()``'s fifth parent. Measured against the pre-fix
+    ## binary, one workspace, one environment, varying only the cwd:
+    ##
+    ##   cwd beside the workspace  → the workspace's own recorder
+    ##   cwd = $HOME               → the recorder beside the SOURCE TREE this
+    ##                               binary was compiled from
+    ##
+    ## The second answer is deterministic and still wrong: it names a
+    ## repository chosen at compile time on the build machine. It is also why
+    ## Ruby resolution appeared to work where the otherwise identical
+    ## JavaScript resolution did not, which made one defect look like two.
+    ##
+    ## The recorder here is a stub. Whether it can record is a different
+    ## question, asked by the recording tests; this one is about which binary
+    ## is chosen and what that choice is allowed to depend on.
+    if rubyExecutable().len == 0:
+      checkpoint("ruby is required for recorder-resolution coverage")
+    check rubyExecutable().len > 0
+
     let
-      siblingCli = getCurrentDir().parentDir / "codetracer-ruby-recorder" /
-        "gems" / "codetracer-ruby-recorder" / "bin" /
-        "codetracer-ruby-recorder"
-      fakeDir = getTempDir() / ("ct-ruby-fake-recorder-" &
+      sandbox = getTempDir() / ("ct-ruby-recorder-anchor-" &
         $getCurrentProcessId())
-      fakeCli = fakeDir / "codetracer-ruby-recorder"
-      configuredCli = fakeDir / "configured-recorder"
-      oldPath = getEnv("PATH")
-    createDir(fakeDir)
-    writeFile(fakeCli, "#!/bin/sh\nexit 1\n")
-    writeFile(configuredCli, "#!/bin/sh\nexit 1\n")
-    setFilePermissions(fakeCli, {fpUserExec, fpUserRead, fpUserWrite})
-    setFilePermissions(configuredCli, {fpUserExec, fpUserRead, fpUserWrite})
+      workspace = sandbox / "workspace"
+      recorderRepo = workspace / "codetracer-ruby-recorder"
+      bareWorkspace = sandbox / "bare-workspace"
+      elsewhere = sandbox / "elsewhere"
+      workspaceCli = recorderRepo / "gems" / "codetracer-ruby-recorder" /
+        "bin" / "codetracer-ruby-recorder"
+      pathDir = sandbox / "path-bin"
+      pathCli = pathDir / "codetracer-ruby-recorder"
+      configuredCli = pathDir / "configured-recorder"
+      expected = @[rubyExecutable(), workspaceCli]
+    removeDir(sandbox)
+    for dir in [workspace, bareWorkspace, elsewhere, pathDir]:
+      createDir(dir)
+    defer: removeDir(sandbox)
+    writeExecutable(workspaceCli, "#!/bin/sh\nexit 1\n")
+    writeExecutable(pathCli, "#!/bin/sh\nexit 1\n")
+    writeExecutable(configuredCli, "#!/bin/sh\nexit 1\n")
 
-    withEnvValue("PATH", fakeDir & PathSep & oldPath):
-      withEnvValue("CODETRACER_RUBY_RECORDER_PATH", configuredCli):
-        check rubyRecorderCommandPrefix() == @[configuredCli]
+    # The recorder must not be reachable by a fallback other than the one each
+    # case is about; the dev shell puts a real one on PATH.
+    let neutralPath = pathWithout("codetracer-ruby-recorder")
 
+    withEnvValue("PATH", neutralPath):
       withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
-        if fileExists(siblingCli):
-          check rubyRecorderCommandPrefix() == @[rubyExecutable(), siblingCli]
-        else:
-          check rubyRecorderCommandPrefix() == @[fakeCli]
+        # THE REGRESSION: one workspace, one answer, from every cwd.
+        for cwd in [elsewhere, sandbox, getCurrentDir()]:
+          withCurrentDir(cwd):
+            checkpoint("cwd=" & cwd)
+            check rubyRecorderCommandPrefix(workspace) == expected
+            # The workspace root may also BE the recorder checkout
+            # (`ct test --workspace codetracer-ruby-recorder`).
+            check rubyRecorderCommandPrefix(recorderRepo) == expected
+            # A workspace that does not contain it resolves to nothing rather
+            # than borrowing a recorder from somewhere the caller never named.
+            check rubyRecorderCommandPrefix(bareWorkspace).len == 0
+            check rubyRecorderCommandPrefix("").len == 0
 
-    if fileExists(siblingCli):
-      let oldCwd = getCurrentDir()
-      setCurrentDir(getTempDir())
-      try:
-        withEnvValue("PATH", fakeDir & PathSep & oldPath):
-          withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
-            check rubyRecorderCommandPrefix() == @[rubyExecutable(), siblingCli]
-      finally:
-        setCurrentDir(oldCwd)
+    # PRECEDENCE, unchanged by the anchoring: an explicit path outranks
+    # everything, and the workspace checkout outranks PATH (a recorder shipped
+    # with the workspace matches the Gemfile the tests were written against).
+    # Asserted from a cwd whose parent holds no recorder, so a pass cannot come
+    # from the removed fallback.
+    withCurrentDir(elsewhere):
+      withEnvValue("PATH", pathDir & PathSep & neutralPath):
+        withEnvValue("CODETRACER_RUBY_RECORDER_PATH", configuredCli):
+          check rubyRecorderCommandPrefix(workspace) == @[configuredCli]
+        withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
+          check rubyRecorderCommandPrefix(workspace) == expected
+          check rubyRecorderCommandPrefix(bareWorkspace) == @[pathCli]
 
   test "recording failure diagnostics include command cwd out dir and no-output marker":
     if findExe("ruby").len == 0:

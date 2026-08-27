@@ -60,6 +60,22 @@
 ## ``setWorkspaceScopeMode(wsmUnscoped)`` (``ct-test test discover --unscoped``)
 ## or the ``CT_TEST_SCOPE`` environment variable (``auto``/``vcs``/``walk``/
 ## ``unscoped``).
+##
+## Everything anchored to the workspace root lives here
+## -----------------------------------------------------
+## Enumeration is the largest of the questions this module answers but not the
+## only one. It also owns the two other rules that must be decided from the
+## workspace root the caller named and from nothing else:
+##
+## * ``workspaceRelativePath`` / ``isInsideWorkspace`` — *does this file belong
+##   to the workspace?*, shared by discovery and attestation so the two cannot
+##   disagree about what a run covered; and
+## * ``siblingRepoInWorkspace`` — *where inside this workspace is repository
+##   X?*, used to locate sibling recorder checkouts.
+##
+## They are collected here because they share one adversary: each was once
+## answered from ``getCurrentDir()``, which names nothing the caller asked for,
+## so the same command produced different results from different shells.
 
 import std/[algorithm, os, sets, strutils, tables]
 
@@ -534,3 +550,46 @@ proc isInsideWorkspace*(workspaceRoot, path: string): bool =
   ## whose answer this is the boolean form of — the same resolution, so the two
   ## questions cannot be answered differently.
   workspaceRelativePath(workspaceRoot, path).len > 0
+
+proc siblingRepoInWorkspace*(workspaceRoot, repoName: string): string =
+  ## Locate the checkout named ``repoName`` **inside the workspace root the
+  ## caller named**, or return ``""`` to say it is not there.
+  ##
+  ## Two forms are recognised, and they are the two ways a caller names a
+  ## multi-repo CodeTracer workspace:
+  ##
+  ## * ``workspaceRoot`` *is* that repository — ``ct test --workspace
+  ##   codetracer-ruby-recorder``; and
+  ## * ``workspaceRoot`` *contains* it as a sibling checkout — ``ct test
+  ##   --workspace <multi-repo workspace>``.
+  ##
+  ## Nothing above the named root is searched, and — the point of this proc
+  ## existing — ``getCurrentDir()`` is never consulted. Three call sites used
+  ## to seed a sibling search from the process working directory, so *which*
+  ## repository answered a question depended on the directory the shell
+  ## happened to be in: `smart_contract_common.findRecorderRepo` (which decided
+  ## which fixtures became test units), and the JS and Ruby recorder-prefix
+  ## resolvers (which decide which recorder binary records a trace, if any).
+  ## Measured for the JS one, same ``--workspace``, same binary, same
+  ## environment, only the cwd differing: the workspace's own recorder, a
+  ## refusal to record at all, and an unrelated sibling repository's recorder.
+  ##
+  ## The answer is therefore a function of the caller's argument alone, which
+  ## is the only way a caller can predict it. Callers who want a sibling's
+  ## recorder or fixtures still have an exact way to ask: name the workspace
+  ## that contains it, or point the provider's ``*_RECORDER_PATH`` environment
+  ## variable straight at the binary.
+  ##
+  ## The root is resolved (``..``/``.`` collapsed) but the sibling is *not*
+  ## required to be a Git checkout: workspaces are also assembled by hand and
+  ## in test fixtures, and demanding a ``.git`` here would make this stricter
+  ## than the enumeration rules above it.
+  if workspaceRoot.len == 0 or repoName.len == 0:
+    return ""
+  let root = normalizedPath(absolutePath(workspaceRoot))
+  if splitPath(root).tail == repoName and dirExists(root):
+    return root
+  let nested = root / repoName
+  if dirExists(nested):
+    return nested
+  ""

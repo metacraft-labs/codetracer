@@ -4,6 +4,7 @@ import ../contracts
 import ../discovery
 import native_m11_common
 import ../process_exec
+import ../workspace_scope
 
 type
   SmartHarnessRecordMode* = enum
@@ -86,15 +87,13 @@ proc findRecorderRepo*(spec: SmartHarnessSpec; projectRoot: string): string =
   ##
   ## Callers who want a sibling's fixtures still have an exact, deterministic
   ## way to ask: name the workspace that contains it.
-  if projectRoot.len == 0:
-    return ""
-  let root = normalizedPath(absolutePath(projectRoot))
-  if splitPath(root).tail == spec.recorderRepo and dirExists(root):
-    return root
-  let nested = root / spec.recorderRepo
-  if dirExists(nested):
-    return nested
-  ""
+  ##
+  ## The rule itself lives in ``workspace_scope.siblingRepoInWorkspace``,
+  ## shared with the JS and Ruby recorder-prefix resolvers, which had the same
+  ## ``getCurrentDir()`` seed and lost it for the same reason. Three private
+  ## copies of "where is repository X relative to the workspace?" is three
+  ## chances for one of them to drift back.
+  siblingRepoInWorkspace(projectRoot, spec.recorderRepo)
 
 proc isExecutableCandidate(path: string): bool =
   if not fileExists(path):

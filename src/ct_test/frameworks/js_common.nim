@@ -5,6 +5,7 @@ import std/[
 import ../contracts
 import ../discovery
 import ../process_exec
+import ../workspace_scope
 
 type
   JsFrameworkKind* = enum
@@ -432,19 +433,47 @@ proc event(
 proc executableAvailable(name: string): bool =
   findExe(name).len > 0
 
-proc jsRecorderCommandPrefix(): seq[string] =
+const JsRecorderRepo = "codetracer-js-recorder"
+
+proc jsRecorderCommandPrefix(workspaceRoot: string): seq[string] =
+  ## Resolve the argv prefix that invokes the JavaScript recorder, in strict
+  ## precedence order:
+  ##
+  ## 1. ``CODETRACER_JS_RECORDER_PATH`` — an explicit path always wins and is
+  ##    never second-guessed by anything below. Note that
+  ##    ``scripts/detect-siblings.sh`` does NOT set this (despite the name
+  ##    suggesting a dev-shell contract); it is the caller's escape hatch.
+  ## 2. ``codetracer-js-recorder`` on ``PATH`` — an installed recorder, and the
+  ##    route the dev shell does use: ``detect-siblings.sh`` prepends the
+  ##    sibling's ``node_modules/.bin``. That directory only exists when ``npm
+  ##    install`` could write it, which it cannot when ``node_modules`` comes
+  ##    from a read-only Nix derivation; the script warns loudly in that case.
+  ## 3. The recorder checkout inside ``workspaceRoot``, run through ``node``.
+  ##    This is what makes the recorder reachable in the configuration step 2
+  ##    cannot cover — the caller names the workspace that contains it.
+  ##
+  ## ``workspaceRoot`` is ``TestScope.projectRoot``, which
+  ## ``run_orchestration.scopeForItem`` sets to the workspace root the caller
+  ## named. Step 3 used to start from ``getCurrentDir().parentDir`` instead, so
+  ## whether a trace could be recorded at all — and by *which* repository's
+  ## recorder — depended on the directory the shell happened to be in. Measured
+  ## with one workspace, one binary and one environment, only the cwd differing:
+  ## the workspace's own recorder from a directory beside it, a flat refusal
+  ## from ``$HOME``, and an unrelated checkout's recorder from a third
+  ## directory. See ``workspace_scope.siblingRepoInWorkspace``.
   let configured = getEnv("CODETRACER_JS_RECORDER_PATH", "")
   if configured.len > 0:
     return @[configured]
 
-  let onPath = findExe("codetracer-js-recorder")
+  let onPath = findExe(JsRecorderRepo)
   if onPath.len > 0:
     return @[onPath]
 
-  let siblingCli = getCurrentDir().parentDir / "codetracer-js-recorder" /
-      "packages" / "cli" / "dist" / "index.js"
-  if fileExists(siblingCli) and executableAvailable("node"):
-    return @["node", siblingCli]
+  let repo = siblingRepoInWorkspace(workspaceRoot, JsRecorderRepo)
+  if repo.len > 0:
+    let siblingCli = repo / "packages" / "cli" / "dist" / "index.js"
+    if fileExists(siblingCli) and executableAvailable("node"):
+      return @["node", siblingCli]
 
   @[]
 
@@ -556,13 +585,15 @@ proc recordNodeTestCommand*(providerId: string;
             scope.file)],
         value: @[])
 
-    let recorderPrefix = jsRecorderCommandPrefix()
+    let recorderPrefix = jsRecorderCommandPrefix(scope.projectRoot)
     if recorderPrefix.len == 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "codetracer-js-recorder is required for node:test recording. " &
-            "Set CODETRACER_JS_RECORDER_PATH or put codetracer-js-recorder " &
-            "on PATH",
+            "Set CODETRACER_JS_RECORDER_PATH, put codetracer-js-recorder on " &
+            "PATH, or name a workspace that contains the " &
+            "codetracer-js-recorder checkout (looked under " &
+            scope.projectRoot & ")",
             scope.file)],
         value: @[])
 

@@ -2376,12 +2376,17 @@ The two runners have never been wired to each other.
 ## `ct test` discovery is bounded by the workspace root you name (and used to
 ## depend on your shell's CWD)
 
-`smart_contract_common.findRecorderRepo` resolves a `smart-*` provider's
-recorder repo **inside `projectRoot` only**: either the root IS the recorder
-repo (`--workspace codetracer-cairo-recorder`) or it CONTAINS it as a sibling
-checkout (`--workspace <multi-repo workspace>` — the usual invocation, and the
-one `m13_smart_contract_harnesses_test.nim` exercises with
-`getCurrentDir().parentDir`). Nothing above the named root is searched.
+Every "where is repository X?" question in ct_test goes through ONE proc,
+`workspace_scope.siblingRepoInWorkspace(workspaceRoot, repoName)`: either the
+root IS that repo (`--workspace codetracer-cairo-recorder`) or it CONTAINS it
+as a sibling checkout (`--workspace <multi-repo workspace>` — the usual
+invocation, and the one `m13_smart_contract_harnesses_test.nim` exercises with
+`getCurrentDir().parentDir`). Nothing above the named root is searched and
+`getCurrentDir()` is never consulted. Its three callers are
+`smart_contract_common.findRecorderRepo` (which decides which fixtures become
+test units) and the JS/Ruby recorder-prefix resolvers (which decide which
+binary records a trace). Do not reintroduce a private copy — all three had the
+same cwd seed and all three lost it for the same reason.
 
 It used to also walk up from `projectRoot.parentDir` **and from
 `getCurrentDir()`**, and `fixtureFiles` then enumerated whatever sibling repo
@@ -2427,3 +2432,52 @@ Related invariants worth knowing before touching any of it:
   and gating on the catalog's capabilities instead would contradict
   `run_orchestration_test`'s "a provider that declares it cannot run is never
   dispatched to".
+
+## Which recorder binary the JS and Ruby providers use, and why the answer is
+## NOT what `scripts/detect-siblings.sh`'s name suggests
+
+`js_common.jsRecorderCommandPrefix` and `ruby_common.rubyRecorderCommandPrefix`
+each take the workspace root and try, in order:
+
+    JS    CODETRACER_JS_RECORDER_PATH  →  PATH  →  <workspace>/codetracer-js-recorder/packages/cli/dist/index.js (via node)
+    Ruby  CODETRACER_RUBY_RECORDER_PATH →  <workspace>/codetracer-ruby-recorder/gems/…/bin/…  →  PATH
+
+The two orders differ on purpose (a Ruby recorder shipped in the workspace
+matches the Gemfile the tests were written against); only the *starting
+directory* of the workspace step is shared. Both used to start it from
+`getCurrentDir().parentDir`, and Ruby additionally from `currentSourcePath()`
+five parents up. Measured before the fix with one workspace, one file and one
+environment, varying only the cwd, the same call answered three ways for JS —
+the workspace's own recorder, "codetracer-js-recorder is required", and an
+UNRELATED sibling checkout's recorder — and two ways for Ruby, the second
+being the recorder beside the *source tree the binary was compiled from*.
+
+Two things that will mislead you:
+
+* **`detect-siblings.sh` does NOT export `CODETRACER_JS_RECORDER_PATH` or
+  `CODETRACER_RUBY_RECORDER_PATH`.** Both variables are honoured by the code
+  and neither is set by the dev shell. What the script actually does is
+  prepend a directory to `PATH`: the recorder's `gems/…/bin` for Ruby (works),
+  and `node_modules/.bin` for JS — which `npm install` never populates when
+  the workspace's `node_modules` comes from a read-only Nix derivation, so in
+  that configuration nothing puts the JS CLI anywhere findable and the script
+  warns. `scripts/build-siblings.sh` says the same thing at :313-325. The
+  block comment at `detect-siblings.sh:330` describes materialising a shim
+  under `<repo>/.bin/`; it does not do that either. Until one of those is
+  fixed, a JS *recording* test must name a workspace containing the recorder
+  checkout (what `js_providers_test.nim`'s CommonJS recording test now does)
+  or set the env var itself.
+* Do not "fix" it by putting the JS recorder on `PATH` from the dev shell
+  without checking the lanes: `ci/test/cli-record-smoke.sh:166` skips its
+  JavaScript case on `command -v codetracer-js-recorder`, so making it
+  resolvable changes the `cli-record` lane's counts.
+
+Neither prefix proc can put a sibling path anywhere durable. It reaches only
+the argv, the `tekRecordStarted` message and `TraceMetadata.metadata
+["recordCommand"]`; `item.file` comes from discovery (always
+`normalizedRelative(projectRoot, …)` over `walkWorkspaceFiles(projectRoot)`),
+and `certificate_issuance.targetOfUnit` reads `unit.item.file` alone. Both
+providers' `TestCapabilities` are compile-time constants, so — unlike
+`smart-*` — recorder availability does not move their catalogs either. The
+blast radius is capability, not attestation: the same workspace could record
+from one shell and refuse from another.

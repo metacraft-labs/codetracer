@@ -4,6 +4,7 @@ import std/[tables, times]
 import ../contracts
 import ../discovery
 import ../process_exec
+import ../workspace_scope
 
 type
   RubyFrameworkKind* = enum
@@ -475,22 +476,58 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
             scope.file)],
         value: events)
 
-proc rubyRecorderCommandPrefix*(): seq[string] =
+const RubyRecorderRepo = "codetracer-ruby-recorder"
+
+proc rubyRecorderCommandPrefix*(workspaceRoot: string): seq[string] =
+  ## Resolve the argv prefix that invokes the Ruby recorder, in strict
+  ## precedence order:
+  ##
+  ## 1. ``CODETRACER_RUBY_RECORDER_PATH`` — an explicit path always wins. Note
+  ##    that ``scripts/detect-siblings.sh`` does NOT set this (despite the name
+  ##    suggesting a dev-shell contract); it is the caller's escape hatch.
+  ## 2. The recorder checkout inside ``workspaceRoot``, run through ``ruby``.
+  ## 3. ``codetracer-ruby-recorder`` on ``PATH`` — the route the dev shell
+  ##    actually uses: ``detect-siblings.sh`` prepends the sibling's
+  ##    ``gems/codetracer-ruby-recorder/bin``, which (unlike its JavaScript
+  ##    counterpart) exists as soon as the extension is built.
+  ##
+  ## The workspace checkout deliberately outranks ``PATH`` here (JS orders
+  ## those two the other way): a Ruby recorder in the workspace is the one the
+  ## workspace's Gemfile and ``RUBYLIB`` are set up for, and an installed gem
+  ## shadowing it would record with a different version of the recorder than
+  ## the tests were written against. That order is longstanding and unchanged;
+  ## only the *starting directory* of step 2 changed.
+  ##
+  ## ``workspaceRoot`` is ``TestScope.projectRoot``, the workspace root the
+  ## caller named (``run_orchestration.scopeForItem``). Step 2 used to search
+  ## two other places, neither of which the caller named:
+  ##
+  ## * ``getCurrentDir().parentDir`` — the shell's working directory, so which
+  ##   recorder ran depended on where the user happened to be standing; and
+  ## * ``currentSourcePath()`` five directories up — deterministic, but it
+  ##   points into the *source tree this file was compiled from*, not the
+  ##   user's workspace, and it hard-codes the assumption that this file sits
+  ##   exactly four levels below a checkout whose parent is a multi-repo
+  ##   workspace. In an installed build that path is the build sandbox and
+  ##   resolves to nothing; in a developer checkout it silently redirected the
+  ##   recording to a repository beside *this* source tree. It was also the
+  ##   reason Ruby resolution appeared to work in places the otherwise
+  ##   identical JS resolution did not, which made the shared defect look like
+  ##   two unrelated ones.
+  ##
+  ## See ``workspace_scope.siblingRepoInWorkspace``.
   let configured = getEnv("CODETRACER_RUBY_RECORDER_PATH", "")
   if configured.len > 0:
     return @[configured]
   let rubyExe = rubyExecutable()
   if rubyExe.len == 0:
     return @[]
-  let siblingRoots = [
-    getCurrentDir().parentDir,
-    currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir]
-  for root in siblingRoots:
-    let siblingCli = root / "codetracer-ruby-recorder" / "gems" /
-        "codetracer-ruby-recorder" / "bin" / "codetracer-ruby-recorder"
+  let repo = siblingRepoInWorkspace(workspaceRoot, RubyRecorderRepo)
+  if repo.len > 0:
+    let siblingCli = repo / "gems" / RubyRecorderRepo / "bin" / RubyRecorderRepo
     if fileExists(siblingCli):
       return @[rubyExe, siblingCli]
-  let onPath = findExe("codetracer-ruby-recorder")
+  let onPath = findExe(RubyRecorderRepo)
   if onPath.len > 0:
     return @[onPath]
   @[]
@@ -561,13 +598,15 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
             "Ruby is required for test recording but was not found on PATH",
             scope.file)],
         value: @[])
-    let recorderPrefix = rubyRecorderCommandPrefix()
+    let recorderPrefix = rubyRecorderCommandPrefix(scope.projectRoot)
     if recorderPrefix.len == 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "codetracer-ruby-recorder is required for Ruby test recording. " &
-            "Set CODETRACER_RUBY_RECORDER_PATH or keep the sibling checkout " &
-            "usable",
+            "Set CODETRACER_RUBY_RECORDER_PATH, put codetracer-ruby-recorder " &
+            "on PATH, or name a workspace that contains the " &
+            "codetracer-ruby-recorder checkout (looked under " &
+            scope.projectRoot & ")",
             scope.file)],
         value: @[])
 
