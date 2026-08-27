@@ -169,8 +169,27 @@
     #
     # See codetracer-specs/Working-with-the-CodeTracer-Repos.md for the
     # sibling-detection mechanism.
+    #
+    # `dev`, not `main`.  This was the last metacraft-labs sibling input still
+    # tracking `main`, and it broke the Nix lane outright: `src/db-backend`'s
+    # `ctfs_trace_reader` calls `NimTraceReaderHandle::{refresh, event_metadata}`,
+    # `{Call,Step,Value}StreamReader::from_files` and a public
+    # `decode_chunk_records`, none of which exist on `main`
+    # (`29b2e047`, "ci: migrate ci-reprobuild.yml to the 5-class platform
+    # matrix"), so `nix build '.?submodules=1#codetracer'` died with 13 compile
+    # errors in `db-backend` -- E0603 `decode_chunk_records is private`, six
+    # E0599 `no function ... named from_files`, E0599 `no method named refresh`
+    # / `event_metadata`, and the E0277s that follow from them.
+    #
+    # `dev` is where product work lands for this repo class, and every other
+    # lane already used it: the workflow's sibling-clone step asks for
+    # `codetracer-trace-format=dev` (`.github/workflows/codetracer.yml`), its
+    # matched FFI half `codetracer-trace-format-nim` is declared `/dev` five
+    # declarations below, and so is `codetracer-native-recorder`. Only this one
+    # input disagreed, so only the lane that consumes flake inputs rather than
+    # sibling checkouts -- the Nix lane -- could see the disagreement.
     codetracer-trace-format = {
-      url = "github:metacraft-labs/codetracer-trace-format/main";
+      url = "github:metacraft-labs/codetracer-trace-format/dev";
       flake = false;
     };
 

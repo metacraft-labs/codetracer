@@ -169,4 +169,13 @@ lint_step "contract suite: backend-manager checkPhase exclusion guards" \
 lint_step "contract suite: crates.io download URL (crate sources are fetchable)" \
 	bash ci/test/crates-io-download-url-test.sh
 
+# The Nix lane consumes siblings as flake inputs; every other lane clones them.
+# Nothing made the two agree on a branch until `codetracer-trace-format` was
+# found declared `/main` in flake.nix while the workflow cloned it at `dev`, 55
+# commits apart — which broke `nix build .#codetracer` alone, with 13 compile
+# errors in db-backend, while the lanes that clone stayed green. Two files, two
+# greps, no nix.
+lint_step "contract suite: sibling flake inputs track the branch CI clones" \
+	bash ci/test/sibling-input-branch-test.sh
+
 lint_summary
