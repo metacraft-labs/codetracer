@@ -120,4 +120,19 @@ lint_step "contract suite: lint-step isolation (no step can hide another)" \
 lint_step "contract suite: runtime-asset guard (a built ct can start)" \
 	bash ci/test/require-runtime-assets-test.sh
 
+# The backend-manager derivation's checkPhase excludes one unit test and one
+# whole test target from the nix build sandbox, because that sandbox cannot
+# supply what they need. Exclusions like that fail by growing until "green"
+# means "the tests stopped running", so the phase carries guards against that --
+# and this suite is what proves the guards work, by reintroducing each defect
+# and asserting the matching guard catches it.
+#
+# It runs here because it is cheap and self-contained: it reads the checkPhase
+# with `nix eval` and drives it against a stub `cargo`, so it needs no rustc and
+# no 86-crate compile. The alternative -- learning that a guard was broken from
+# `nix build .#codetracer` -- costs that whole compile and blocks six jobs.
+# Without nix on PATH it skips loudly rather than passing quietly.
+lint_step "contract suite: backend-manager checkPhase exclusion guards" \
+	bash ci/test/backend-manager-check-phase-test.sh
+
 lint_summary
