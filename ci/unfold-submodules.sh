@@ -107,7 +107,13 @@ fi
 # exit status is actually observable. Under `set -e` a failed walk stops the
 # script here instead of being mistaken for "no submodules".
 # ---------------------------------------------------------------------------
-listing="$(mktemp)"
+# Not `mktemp`: this script runs as a plain workflow `run:` step, on a
+# self-hosted runner whose ambient PATH is minimal -- the inline version this
+# replaced carried a comment saying it had no awk, and it is not worth
+# discovering in CI which other coreutils are missing. `$$` and `$RANDOM` are
+# bash builtins, `RUNNER_TEMP` is set by the runner, and the directory is
+# per-job, so a fixed-name collision is not reachable.
+listing="${RUNNER_TEMP:-/tmp}/unfold-submodules.$$.$RANDOM.list"
 # shellcheck disable=SC2064  # expand $listing now: that is the point.
 trap "rm -f '$listing'" EXIT
 
