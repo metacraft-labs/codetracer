@@ -137,15 +137,22 @@ suite "M6b — io-mon read-file capture for materialized recorders":
     # The READ-dependency set = paths read before first write, path-sorted,
     # de-duped: cfg + csv + readThenWrite. writeThenRead was written first,
     # pureWrite was never read, missing.dat failed.
+    #
+    # Sorted means sorted by PATH, not by the order these locals happen to be
+    # declared in above -- `read_then_write.txt` sorts before `table.csv`, so
+    # `readThenWrite` comes before `csv` here even though `csv` is named first
+    # when the records are built. This assertion used to list the locals in
+    # declaration order and so contradicted the sentence directly above it;
+    # the implementation was right and the expectation was not.
     let paths = readPathsFromDepFile(dep)
-    check paths == @[cfg, csv, readThenWrite]
+    check paths == @[cfg, readThenWrite, csv]
 
     let reads = readFilesFromDepFile(dep)
     check reads.isOk
     check reads.value.len == 3
     check reads.value[0].path == cfg
-    check reads.value[1].path == csv
-    check reads.value[2].path == readThenWrite
+    check reads.value[1].path == readThenWrite
+    check reads.value[2].path == csv
     # Each carries a non-empty capture-time content signature.
     for rf in reads.value:
       check rf.hash.len > 0
