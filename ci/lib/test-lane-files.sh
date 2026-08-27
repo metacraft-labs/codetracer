@@ -124,6 +124,7 @@ no-sidecar-manifests
 cli-record
 ct-test-incremental
 ct-test-incremental-e2e
+ct-test-certificates
 vm-recorder-gated
 m16-release-gate
 ct-providers
@@ -154,6 +155,7 @@ test_lane_description() {
 	cli-record) echo "ct record CLI dispatch suites" ;;
 	ct-test-incremental) echo "ct-test incremental engine suites" ;;
 	ct-test-incremental-e2e) echo "ct-test --incremental live-recorder e2e" ;;
+	ct-test-certificates) echo "ct-test test-certificate issuance, verification and conformance vectors" ;;
 	vm-recorder-gated) echo "recorder-gated column/formatted-view/statement-step suites" ;;
 	m16-release-gate) echo "M16 ct-test release gate" ;;
 	ct-providers) echo "cross-language ct-test provider suites" ;;
@@ -408,6 +410,15 @@ test_lane_files() {
 			echo src/ct_test/incremental_e2e_test.nim
 			_tlf_glob src/ct_test 'e2e_*.nim'
 		} | sort -u
+		;;
+
+	ct-test-certificates)
+		# Globbed on the prefix, not enumerated, so a new certificate suite
+		# runs on the next CI run without anyone editing this file — which is
+		# the rule the whole file exists to enforce. The conformance-vector
+		# walker in this lane needs the `test-certificates-spec` sibling repo
+		# and fails loudly without it, rather than passing vacuously.
+		_tlf_glob src/ct_test 'certificate*_test.nim'
 		;;
 
 	vm-recorder-gated)

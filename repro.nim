@@ -73,7 +73,6 @@ const
   ]
   CodeTracerKnownSiblingDirs = [
     "codetracer-native-backend",
-    "codetracer-rr-backend",
     "codetracer-native-recorder",
     "codetracer-native-test-programs",
     "codetracer-python-recorder",
@@ -117,7 +116,12 @@ const
   ]
   CodeTracerRepoEnvAliases = [
     ("codetracer-native-backend", "CODETRACER_NATIVE_BACKEND_REPO_PATH"),
-    ("codetracer-rr-backend", "CODETRACER_RR_BACKEND_PATH"),
+    # Second alias for the SAME sibling: the RR-era variable name is what
+    # `just test` and check_rr_prerequisites still gate on. Keyed on
+    # "codetracer-rr-backend" until now, i.e. on a directory that never
+    # exists, so the dev shell never set it. The loop over this table is flat,
+    # so two entries for one repo simply export both names.
+    ("codetracer-native-backend", "CODETRACER_RR_BACKEND_PATH"),
     ("codetracer-native-recorder", "CODETRACER_NATIVE_RECORDER_REPO_PATH"),
     ("codetracer-native-test-programs", "CODETRACER_NATIVE_TEST_PROGRAMS_PATH"),
     ("codetracer-python-recorder", "CODETRACER_PYTHON_RECORDER_REPO_PATH"),

@@ -318,6 +318,58 @@ proc recorderToolFor*(lang: Lang): RecorderTool =
         "then put ct_cli/ on PATH or set CODETRACER_CT_MCR_PATH",
         "(the CodeTracer dev shell exports CODETRACER_CT_MCR_CMD via",
         "scripts/detect-siblings.sh)"])
+  of LangGdScript:
+    # GDScript's recorder is not a `codetracer-*-recorder` sibling: it IS a
+    # patched Godot engine.  GDScript exposes no per-line hook a GDExtension
+    # can reach — the only per-line seam is the `OPCODE_LINE` case inside the
+    # engine's own bytecode interpreter (`GDScriptFunction::call`,
+    # `modules/gdscript/gdscript_vm.cpp`) — so the instrumentation has to live
+    # in the engine (codetracer-specs/Recording-Backends/GDScript-Recorder.md,
+    # "Why a Godot Engine Fork"; Planned-Features/Mixed-Trace-GDScript.md §1).
+    #
+    # `supported: false` is a statement about that ARTEFACT's availability, not
+    # about the trace it produces.  The patched engine links
+    # `libcodetracer_trace_writer.a` and emits a genuine self-contained CTFS
+    # container, which is why `usesMaterializedTraces(LangGdScript)` is
+    # correctly `true` and a `.gd` trace REPLAYS: the flag is read on the replay
+    # path by `loadCalltraceMode` (`src/common/trace_index.nim`),
+    # `DebuggerService.lineStepJump` (`src/frontend/services/debugger_service.nim`)
+    # and the Call Trace / Event Log panes.  Flipping it to silence the record
+    # side would break opening the traces this language exists to open.
+    #
+    # What does not exist yet is anything for `ct` to spawn: the fork
+    # `metacraft-labs/codetracer-engine-godot` is still a to-create deliverable
+    # (GDScript-Recorder.milestones.org, G1), there is no sibling checkout, and
+    # `scripts/detect-siblings.sh` exports no variable for it.  So
+    # `recorderEnvVar` is deliberately EMPTY rather than a plausible
+    # `CODETRACER_GODOT_*`: no such discovery variable is named by the recorder
+    # spec, and inventing one here would read as a contract the engine fork must
+    # honour.  The one variable the spec DOES name is `CT_GDSCRIPT_TRACE`, which
+    # the engine reads for its OUTPUT DIRECTORY (G2, "record + verify"), so it
+    # belongs in the by-hand recipe below and not in the discovery table.
+    #
+    # The arm exists so `ct record --lang gdscript <file>` is DECLARED rather
+    # than silent: with no arm at all this fell through to
+    # `RecorderTool(supported: false, recorderLabel: "")` and
+    # `missingRecorderMessage` printed one bare "error: CodeTracer has no
+    # recorder for GDScript." line with no remedy under it.
+    #
+    # `--lang` is the spelling here because a bare `ct record foo.gd` does not
+    # reach this arm yet: `LANGS` (`src/ct/utilities/language_detection.nim`)
+    # carries no `gd` extension, so the path resolves to `LangUnknown`.  That
+    # missing registration is a separate gap in the language table.
+    RecorderTool(
+      supported: false,
+      recorderLabel: "a patched Godot engine (for GDScript the engine IS the recorder)",
+      sibling: "codetracer-engine-godot",
+      installHint: @[
+        "GDScript has no standalone recorder binary: the per-line hook lives",
+        "inside Godot's own GDScript VM, so recording needs a patched engine",
+        "(a fork of godotengine/godot 4.6.2-stable). CodeTracer does not ship",
+        "that engine yet, so `ct record` cannot record GDScript for you.",
+        "If you already have a patched engine, record with it directly:",
+        "  CT_GDSCRIPT_TRACE=/path/to/out godot --headless --script res://<file>.gd",
+        "and then open the container with `ct replay -t /path/to/out`."])
   of LangMasm, LangMove, LangSolana, LangSway, LangCairo, LangCircom,
      LangLeo, LangPolkavm, LangTolk, LangAiken, LangCadence, LangSolidity:
     let name = blockchainRecorderName(lang)

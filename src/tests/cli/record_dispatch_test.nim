@@ -26,7 +26,11 @@
 ##    ``usesMaterializedTraces`` must have a supported recorder AND a
 ##    non-empty invocation.  A future language added to the ``Lang`` enum and
 ##    to ``USES_MATERIALIZED_TRACES`` but not to the dispatch table fails
-##    here, at the table, instead of at a user's terminal.
+##    here, at the table, instead of at a user's terminal.  The single
+##    exception is ``RecorderPendingLanguages`` — a language whose recorder
+##    does not EXIST yet, as opposed to existing and not being wired up — and
+##    it is an exception only to the *selection* half: a pending language is
+##    still required by (3) to name its recorder and its remedy.
 ## 3. Every language reachable from a file extension by ``detectLangFromPath``
 ##    either dispatches or is explicitly declared unsupported with a remedy —
 ##    there is no third, silent outcome.
@@ -142,6 +146,46 @@ const DispatchRows = [
     server: ssUnsupported),
 ]
 
+const RecorderPendingLanguages = {LangGdScript}
+  ## The materialized-trace languages whose RECORDER DOES NOT EXIST YET — as
+  ## distinct from a recorder that exists and is merely not wired up, which is
+  ## the PHP/Elixir/Erlang bug this file was written for and which this set must
+  ## never be allowed to hide.  Membership is not a way to silence the invariant
+  ## below: a member still has to be DECLARED, never silent, and "an unsupported
+  ## language is declared, never silent" asserts exactly that for every one of
+  ## them.
+  ##
+  ## `LangGdScript` is the only member, and it is the only kind of case that
+  ## qualifies.  GDScript's recorder is not a `codetracer-*-recorder` sibling at
+  ## all: the only per-line seam in GDScript is the `OPCODE_LINE` case inside
+  ## Godot's own bytecode interpreter, which no GDExtension can reach, so the
+  ## recorder IS a patched Godot engine
+  ## (codetracer-specs/Recording-Backends/GDScript-Recorder.md, "Why a Godot
+  ## Engine Fork"; Planned-Features/Mixed-Trace-GDScript.md §1).  CodeTracer
+  ## does not ship that engine: the repo the spec names for it
+  ## (`codetracer-engine-godot`) is not in the workspace, there is no sibling
+  ## checkout of it, and `scripts/detect-siblings.sh` exports no variable for
+  ## it.  There is therefore nothing for `ct` to select: a `supported: true` arm
+  ## could only be written by inventing a discovery variable and an argv that
+  ## the engine would afterwards have to honour, which is a worse failure than
+  ## saying plainly that the recorder is not available.
+  ##
+  ## `usesMaterializedTraces(LangGdScript)` stays `true` because it is right
+  ## about the ARTEFACT and is read on the REPLAY path, not only the record one:
+  ## `loadCalltraceMode` (`src/common/trace_index.nim`) would default a stored
+  ## GDScript trace to `NoInstrumentation`, `DebuggerService.lineStepJump`
+  ## (`src/frontend/services/debugger_service.nim`) would degrade a jump into
+  ## repeated `step-in`, and `ct record` itself would stop sending
+  ## `--trace-kind db` (`src/ct/trace/record.nim`) and try to record a `.gd`
+  ## file through the native rr/MCR path.  Flipping the flag to make this file
+  ## green would break opening the very traces the language was added to open.
+  ##
+  ## WHAT FLIPS A LANGUAGE OUT OF THIS SET: its recorder becomes something `ct`
+  ## can resolve and spawn — for GDScript, the patched engine is published and
+  ## discoverable.  Then `recorderToolFor` gains a `supported: true` arm with a
+  ## real invocation, and the entry is deleted from here; the invariant below
+  ## goes back to being unconditional for it with no other change.
+
 proc joinedArgs(lang: Lang): string =
   recorderInvocation(lang, Program, TraceFolder).args.join(" ")
 
@@ -214,6 +258,16 @@ suite "ct record dispatch table":
       if not lang.usesMaterializedTraces:
         continue
       checkpoint("materialized language: " & lang.toName)
+      if lang in RecorderPendingLanguages:
+        # There is no recorder to select yet, so there is nothing to assert an
+        # invocation against.  The requirement that survives is the other one:
+        # the language must still be declared rather than silent, which the
+        # two tests below assert for exactly this set.  Pinning
+        # `not supported` here is deliberate — it means a recorder that DOES
+        # get wired up fails this line until it is removed from the set, so
+        # the set cannot quietly outlive the gap it records.
+        check(not recorderToolFor(lang).supported)
+        continue
       check recorderToolFor(lang).supported
       let invocation = recorderInvocation(lang, Program, TraceFolder)
       if lang == LangNim:
@@ -234,6 +288,10 @@ suite "ct record dispatch table":
           invocation.workdir.len > 0 or envMentionsFolder
 
   test "every dispatchable language names its recorder and its remedy":
+    # Deliberately NOT skipped for `RecorderPendingLanguages`: a language whose
+    # recorder does not exist yet still has to name what the recorder is, which
+    # repo it comes from and how to get it.  "No recorder" is an answer; an
+    # empty label with no remedy is the silence this file exists to forbid.
     for lang in Lang:
       if not lang.usesMaterializedTraces:
         continue
@@ -247,8 +305,26 @@ suite "ct record dispatch table":
     # LangRuby and LangPython are the retired rr/gdb backends: they are still
     # reachable through an explicit `--lang ruby` / `--lang python`, and the
     # only correct answer is to say so and point at the working spelling.
-    for lang in [LangRuby, LangPython]:
-      checkpoint("retired backend: " & lang.toName)
+    #
+    # `RecorderPendingLanguages` is held to the SAME bar, from the other
+    # direction.  GDScript is reachable today through an explicit
+    # `--lang gdscript` (`toLang` in `src/common/lang.nim` maps both `gd` and
+    # `gdscript`), and before this arm existed that produced one bare
+    # "error: CodeTracer has no recorder for GDScript." line with no help under
+    # it and no way for the user to learn that the recorder is a patched Godot
+    # engine.
+    #
+    # NOTE, and it is a SEPARATE gap from the one this arm closes: `.gd` is NOT
+    # auto-detected.  `detectLangFromPath` reads `LANGS`
+    # (`src/ct/utilities/language_detection.nim`), which has no `gd` entry, so a
+    # bare `ct record foo.gd` resolves to `LangUnknown` and takes the native
+    # build path instead of reaching this message at all.  That is a missing
+    # extension registration in the language table, not a missing recorder, so
+    # it is deliberately NOT fixed here; this arm is what makes the answer
+    # correct the moment the extension is registered.
+    const DeclaredUnsupported = {LangRuby, LangPython} + RecorderPendingLanguages
+    for lang in DeclaredUnsupported:
+      checkpoint("declared-unsupported language: " & lang.toName)
       let tool = recorderToolFor(lang)
       check not tool.supported
       check tool.installHint.len > 0

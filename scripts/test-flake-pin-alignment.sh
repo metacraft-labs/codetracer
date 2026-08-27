@@ -100,25 +100,60 @@ skip() {
 	exit 0
 }
 
+# The one tool this check cannot do without. `flake.lock` is JSON and is read
+# with a JSON parser on purpose: a grep for `"rev"` would pick up whichever of
+# the ~200 nodes happened to sort first and answer confidently with the wrong
+# revision. So a missing python3 is a HARD FAILURE THAT NAMES ITSELF, never a
+# fallback and never an empty answer.
+#
+# This is not hypothetical. Before this check existed, `lock_rev` swallowed
+# every error and returned the empty string, so running the script outside the
+# dev shell printed
+#
+#   scripts/test-flake-pin-alignment.sh: line 105: python3: command not found
+#   FAIL: flake.lock has no locked rev for input 'runquota'.
+#
+# — a diagnostic that accuses a lock file which is in fact correct, and sends
+# the reader to edit the very pin the check is protecting. That is the same
+# false-attribution failure the direnv step in
+# .github/workflows/launcher-recorder-e2e.yml was fixed for; it has no more
+# business here than it had there.
+command -v python3 >/dev/null 2>&1 || fail \
+	"python3 is required to read flake.lock (it is JSON) and is not on PATH. This check does NOT fall back to grepping the lock, because a confidently wrong revision is worse than no answer. Run it inside the dev shell (\`nix develop '.?submodules=1#ci' --command just test-flake-pin-alignment\`), or put python3 on PATH. NOTHING about the pins has been established by this run."
+
 # Read <lock-file> <node-name> -> locked.rev, or empty when the node is absent.
+#
+# "Absent node" and "unreadable file" are DIFFERENT answers and must not share
+# the empty string: the first is a real verdict the caller turns into a precise
+# message about a renamed input, the second means this script learned nothing.
 lock_rev() {
-	python3 -c '
+	local out rc
+	out="$(python3 -c '
 import json, sys
-try:
-    nodes = json.load(open(sys.argv[1]))["nodes"]
-except Exception:
-    sys.exit(0)
+with open(sys.argv[1]) as handle:
+    nodes = json.load(handle)["nodes"]
 node = nodes.get(sys.argv[2])
-if node:
-    print(node.get("locked", {}).get("rev", ""))
-' "$1" "$2"
+print(node.get("locked", {}).get("rev", "") if node else "")
+' "$1" "$2" 2>&1)"
+	rc=$?
+	[ "$rc" -eq 0 ] || fail \
+		"could not read '$1' as a flake.lock (python3 exited $rc). This is a parse failure, NOT a statement about any pin — do not read it as 'the input is missing'. Parser output:
+$out"
+	printf '%s\n' "$out"
 }
 
 CT_LOCK="$REPO_ROOT/flake.lock"
 [ -f "$CT_LOCK" ] || fail "$CT_LOCK does not exist; this script must run inside the codetracer checkout."
 
-CT_RUNQUOTA="$(lock_rev "$CT_LOCK" runquota)"
-REPROBUILD_REV="$(lock_rev "$CT_LOCK" reprobuild)"
+# `|| exit 1` IS LOAD-BEARING, and it is the whole reason the parse-failure
+# diagnostic above is worth anything. `lock_rev` runs inside a command
+# substitution, so its `fail` exits THAT SUBSHELL and nothing else; without
+# this the script sails on with an empty rev and reports "flake.lock has no
+# locked rev for input 'runquota'" a few lines later — the exact false
+# accusation the parse diagnostic exists to replace, printed directly beneath
+# it. Proven by ci/test/flake-pin-alignment-test.sh.
+CT_RUNQUOTA="$(lock_rev "$CT_LOCK" runquota)" || exit 1
+REPROBUILD_REV="$(lock_rev "$CT_LOCK" reprobuild)" || exit 1
 
 # These two nodes are the subject of the check. If either has stopped existing,
 # the flake was restructured and this script is asserting about a shape that is
@@ -146,7 +181,7 @@ git -C "$REPROBUILD_DIR" show "${REPROBUILD_REV}:flake.lock" >"$RB_LOCK_TMP" 2>/
 
 # reprobuild calls its own input `runquota-src`; this repo calls the override
 # `runquota` and wires them with `inputs.runquota-src.follows = "runquota"`.
-RB_RUNQUOTA="$(lock_rev "$RB_LOCK_TMP" runquota-src)"
+RB_RUNQUOTA="$(lock_rev "$RB_LOCK_TMP" runquota-src)" || exit 1
 [ -n "$RB_RUNQUOTA" ] || fail "reprobuild@${REPROBUILD_REV} flake.lock has no locked rev for 'runquota-src'; the input reprobuild expects has been renamed. Update this check to match."
 
 echo "reprobuild pinned here:       ${REPROBUILD_REV}"

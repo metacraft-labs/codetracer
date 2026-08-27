@@ -26,6 +26,33 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that detect-siblings.sh can actually satisfy the prerequisite the
+# RR-based backend-manager integration tests demand. Those 48 tests gate on
+# CODETRACER_RR_BACKEND_PATH and tell the operator to run detect-siblings.sh
+# when it is unset; that instruction was false for as long as both the script
+# and the repro dev shell keyed the variable on a sibling directory named
+# `codetracer-rr-backend`, which is not a repository that exists. Hermetic and
+# fast (no build, no network) -- the real-checkout leg skips loudly when the
+# sibling is absent, as in the non-gui lane.
+test-sibling-backend-path:
+  bash ci/test/sibling-backend-path-test.sh
+
+# Assert that the built output tree carries the assets `ct` reads on startup
+# (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
+# build exits 0 when a runtime asset is simply never published -- there is no
+# rule to fail -- which is how `src/build-debug/config/` stayed empty across
+# every clean build while `ct` died on first run with an uncaught OSError.
+# `scripts/build-once.sh` runs this at the end of both build branches; the
+# recipe exists so it can be run against an existing tree on its own.
+# Defaults to the debug tup variant; pass another output root to override.
+require-runtime-assets OUT_ROOT="src/build-debug":
+  bash scripts/require-runtime-assets.sh {{OUT_ROOT}}
+
+# The contract suite for that guard -- synthetic trees, no toolchain, ~1s.
+# Also runs in the `lint-bash` job (ci/lint/bash.sh).
+test-runtime-assets-guard:
+  bash ci/test/require-runtime-assets-test.sh
+
 # Build all sibling-recorder binaries that the GUI tests reach for.
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
@@ -661,11 +688,12 @@ test:
   set -e
   just test-build-alignment
   just test-flake-pin-alignment
+  just test-sibling-backend-path
   just test-agent-api-contract
   just test-rust
   just test-nimsuggest
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
-    echo "codetracer-rr-backend detected — running cross-repo tests..."
+    echo "codetracer-native-backend detected — running cross-repo tests..."
     just cross-test
   else
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
@@ -2617,6 +2645,19 @@ test-ct-test-incremental-e2e:
   exec > >(tee test-logs/test-ct-test-incremental-e2e.log) 2>&1
   source scripts/detect-siblings.sh
   bash ci/lib/run-nim-test-lane.sh ct-test-incremental-e2e
+
+# `ct test`'s test-certificate producer and verifier, plus the walker over the
+# vendor-neutral conformance vectors.  The walker needs the
+# `test-certificates-spec` sibling repo (or CT_TEST_CERTIFICATE_VECTORS
+# pointing at its `vectors` directory) and FAILS rather than skipping without
+# it — a conformance suite that quietly passes when it found nothing to check
+# is worse than no suite.
+test-ct-test-certificates:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-test-certificates.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-test-certificates
 
 # GUI ViewModel suites that spawn a real backend process (`headless_session` /
 # `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until

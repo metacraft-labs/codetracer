@@ -62,7 +62,8 @@ lint_step "shellcheck: build prerequisites checked before tup runs" \
 	shellcheck \
 	scripts/require-fuse-mount-helper.sh \
 	scripts/require-siblings.sh \
-	scripts/require-tup-globs.sh
+	scripts/require-tup-globs.sh \
+	scripts/require-runtime-assets.sh
 
 # scripts/test-build-alignment.sh asserts that `just build` is `just build-once`
 # plus watchers. It executes both scripts under recording stubs, so a break in
@@ -113,10 +114,47 @@ lint_step "contract suite: direnv comes from a dev shell we define" \
 lint_step "contract suite: a job that runs nix installs Nix first" \
 	bash ci/test/nix-provisioning-test.sh
 
+# scripts/test-flake-pin-alignment.sh is the static guard on the `runquota` /
+# `reprobuild` lockstep. It is not under ci/, so the glob at the top does not
+# reach it.
+lint_step "shellcheck: flake pin alignment guard" \
+	shellcheck scripts/test-flake-pin-alignment.sh
+
+# Its contract suite runs here for the same reason the others do -- pure bash
+# and git, no nix, no network, under a second -- and because the thing it
+# actually asserts is that the guard's FAILURE PATHS accuse the right thing.
+# A guard that reports "flake.lock has no locked rev for input 'runquota'"
+# when python3 is merely absent sends the reader to edit a correct pin, and
+# that defect is invisible to shellcheck and to every happy-path run.
+lint_step "contract suite: flake pin alignment guard" \
+	bash ci/test/flake-pin-alignment-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
 lint_step "contract suite: lint-step isolation (no step can hide another)" \
 	bash ci/test/lint-step-isolation-test.sh
+
+# scripts/require-runtime-assets.sh is the end-of-build guard that a produced
+# `ct` can actually start. It is exactly the shape of thing that can rot into a
+# vacuous pass -- read no contract, check nothing, print "ok" -- so its own
+# contract suite runs here. Pure bash, synthetic trees, about a second.
+lint_step "contract suite: runtime-asset guard (a built ct can start)" \
+	bash ci/test/require-runtime-assets-test.sh
+
+# The backend-manager derivation's checkPhase excludes one unit test and one
+# whole test target from the nix build sandbox, because that sandbox cannot
+# supply what they need. Exclusions like that fail by growing until "green"
+# means "the tests stopped running", so the phase carries guards against that --
+# and this suite is what proves the guards work, by reintroducing each defect
+# and asserting the matching guard catches it.
+#
+# It runs here because it is cheap and self-contained: it reads the checkPhase
+# with `nix eval` and drives it against a stub `cargo`, so it needs no rustc and
+# no 86-crate compile. The alternative -- learning that a guard was broken from
+# `nix build .#codetracer` -- costs that whole compile and blocks six jobs.
+# Without nix on PATH it skips loudly rather than passing quietly.
+lint_step "contract suite: backend-manager checkPhase exclusion guards" \
+	bash ci/test/backend-manager-check-phase-test.sh
 
 lint_summary

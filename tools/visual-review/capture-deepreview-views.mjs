@@ -46,7 +46,31 @@
  *        [--sabotage KIND]
  */
 
-import { _electron } from "playwright";
+// Playwright is imported LAZILY, at the one call site that launches a browser.
+//
+// `--list` prints the view / size / theme matrix and nothing else -- it is
+// static data in this file, needs no driver, and is how three other scripts
+// (the shell wrapper, the review-prompt emitter and the contract suite) learn
+// the matrix. A top-level `import { _electron } from "playwright"` made all of
+// them depend on an npm package that no CI lane installs: `ci-verdict` runs
+// the contract suite on a stock runner and `lint-bash` runs it inside the dev
+// shell, and neither has a repo-root `node_modules`. Both died with
+//
+//     Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright'
+//       imported from .../tools/visual-review/capture-deepreview-views.mjs
+//
+// in every completed `dev` run of the last three weeks -- a data listing
+// blocked by a browser driver it never used.
+//
+// Note for anyone reproducing this: node resolves bare specifiers by walking
+// the FILESYSTEM upward, so a `node_modules/playwright` anywhere above the
+// checkout (a sibling workspace's, say) makes `--list` succeed on a developer
+// machine while failing in CI. `deepreview-harness-test.sh` runs its
+// regression case from a temporary directory for exactly that reason.
+async function electron() {
+  const { _electron } = await import("playwright");
+  return _electron;
+}
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -689,7 +713,7 @@ async function launch(opts) {
     "--ozone-platform-hint=x11",
   ].join(" ");
 
-  const app = await _electron.launch({
+  const app = await (await electron()).launch({
     executablePath: opts.ct,
     // A directory with no `.config.yaml` above it, so `findConfig`'s upward
     // walk falls through to XDG_CONFIG_HOME and the requested theme wins.

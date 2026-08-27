@@ -696,6 +696,31 @@ proc parseProviderEventLine*(
 
 proc parseRspecJsonResults*(
     providerId, runId: string; raw: string): seq[TestEvent] =
+  ## Parse rspec's ``--format json`` document into per-test events, mapping
+  ## ``passed`` / ``pending`` / ``failed`` to ``tsPassed`` / ``tsSkipped`` /
+  ## ``tsFailed``.
+  ##
+  ## **THIS IS ON NO RUN PATH. Nothing in the running system calls it.** Its
+  ## only caller anywhere is ``ruby_providers_test.nim:396``, a unit test of
+  ## this proc itself. The rspec provider runs through ``runRubyCommand``
+  ## (``ruby_rspec.nim:121``), whose single status decision is the exit-code
+  ## test at ``:461`` of this file — the same one minitest uses — so rspec
+  ## reports one verdict for a whole file and a ``pending`` example is
+  ## indistinguishable from a passing one.
+  ##
+  ## It is called out here because a correct implementation of something
+  ## nothing does is exactly what invites a false inference: a reader (or a
+  ## ``grep`` for ``tsSkipped``) sees the mapping in this file and concludes
+  ## rspec reports skips per test. It does not, and a certificate issued for an
+  ## all-``pending`` rspec suite will name that file as covered
+  ## (``certificate_issuance.recordUnitResult`` documents the consequence).
+  ##
+  ## To put it on the run path, two things are needed together:
+  ## ``buildRubyCommand`` (``:345``) must add ``--format json`` for
+  ## ``rfkRSpec``, and ``runRubyCommand`` must route rspec's captured output
+  ## through here instead of reading ``result.exitCode``. Both change what
+  ## every rspec run reports, so that is provider-fidelity work with its own
+  ## test surface, not a change to make in passing.
   let node = parseJson(raw)
   if not node.hasKey("examples") or node["examples"].kind != JArray:
     return @[]

@@ -44,7 +44,7 @@ STYLES_TUPFILE="${REPO_ROOT}/src/frontend/styles/Tupfile"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=65
+EXPECTED_ASSERTIONS=66
 
 ASSERTIONS=0
 FAILURES=0
@@ -117,6 +117,62 @@ command -v node >/dev/null 2>&1 || {
 	echo "deepreview-harness-test: missing 'node'; the matrix cannot be read" >&2
 	exit 3
 }
+
+# ---------------------------------------------------------------------------
+section "--list needs no npm packages"
+#
+# `--list` prints static data out of the driver, and three scripts (the shell
+# wrapper, the review-prompt emitter and THIS SUITE) learn the matrix from it.
+# It used to be gated behind a top-level `import { _electron } from
+# "playwright"`, so it needed an npm package no CI lane installs: `ci-verdict`
+# runs this suite on a stock runner and `lint-bash` runs it inside the dev
+# shell, and neither has a repo-root `node_modules`. Both failed with
+#
+#     Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright'
+#       imported from .../tools/visual-review/capture-deepreview-views.mjs
+#
+# in every completed `dev` run for three weeks -- and the suite exited 3 on its
+# FIRST assertion, so its other 65 contracts never ran either.
+#
+# THIS CASE MUST RUN SOMEWHERE WITH NO ANCESTOR node_modules. Node resolves a
+# bare specifier by walking the filesystem upward, so a checkout that sits
+# under a workspace with its own `node_modules/playwright` -- which is exactly
+# the layout this repo is developed in -- resolves the import and passes while
+# CI fails. Copying the driver into a temporary directory is what makes the
+# case honest, and the guard below refuses to pretend otherwise if even that
+# location turns out to be contaminated.
+# ---------------------------------------------------------------------------
+
+_probe_dir="${TEST_ROOT}/no-node-modules/tools/visual-review"
+mkdir -p "${_probe_dir}"
+cp "${DRIVER}" "${_probe_dir}/"
+_contaminated=""
+_d="${_probe_dir}"
+while [[ ${_d} != "/" ]]; do
+	if [[ -e ${_d}/node_modules/playwright ]]; then _contaminated="${_d}/node_modules"; fi
+	_d="$(dirname "${_d}")"
+done
+[[ -e /node_modules/playwright ]] && _contaminated="/node_modules"
+
+if [[ -n ${_contaminated} ]]; then
+	# Loud, and a FAILURE rather than a silent pass: a green here would claim
+	# the driver needs no npm packages while proving the opposite.
+	bad "--list runs with no node_modules anywhere above it" \
+		"cannot test: ${_contaminated}/playwright is visible from the probe directory," \
+		"so node would resolve the import regardless of how the driver is written." \
+		"Run this suite from a path with no ancestor node_modules."
+else
+	if _probe_out="$(node "${_probe_dir}/$(basename "${DRIVER}")" --list 2>&1)"; then
+		assert_contains "${_probe_out}" "review-shell" \
+			"--list runs with no node_modules anywhere above it"
+	else
+		bad "--list runs with no node_modules anywhere above it" \
+			"the driver imported an npm package before it had anything to launch;" \
+			"this is what fails ci-verdict and lint-bash on every run." \
+			"output: ${_probe_out:0:400}"
+	fi
+fi
+unset _probe_dir _contaminated _d _probe_out
 
 # ---------------------------------------------------------------------------
 section "the matrix covers what the campaign changes"

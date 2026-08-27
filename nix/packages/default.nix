@@ -616,9 +616,110 @@
             # path is linking the test binary either way.
             cargoTargetTriple=${pkgs.stdenv.targetPlatform.rust.rustcTarget}
 
-            # Two guards keep the exclusion honest -- it must stay exactly
-            # one test wide, and it must never become a no-op:
-            listing=$(cargo test --release --offline --target "$cargoTargetTriple" -- --list)
+            # ---------------------------------------------------------------
+            # Second exclusion: the WHOLE test target
+            # ``tests/real_recording_integration.rs``.
+            #
+            # The one above drops a single test. This one drops a target,
+            # because every one of its 75 non-ignored tests fails here for the
+            # same structural reason, and none of them can be fixed by
+            # anything this derivation is allowed to do.
+            #
+            # That file's tests each need a REAL recording pipeline --
+            # ``replay-server``, ``ct-native-replay``, ``rr``, ``nargo`` or the
+            # native Ruby recorder -- and its prerequisite gate
+            # (``enforce_prereq_present``) makes a missing prerequisite a hard
+            # PANIC rather than a skip. That policy is correct and is not
+            # weakened here: it was adopted because the previous default
+            # reported ``75 passed`` in 0.33s having touched no trace at all,
+            # and, in its own words, "reporting that as a pass would be a lie
+            # about coverage".
+            #
+            # A nix build sandbox is network-isolated and its source is the
+            # CRATE, so it has no sibling checkouts, no ``rr``, no recorded
+            # session and no ``CODETRACER_RR_BACKEND_PATH``. The prerequisites
+            # are not merely absent, they are unprovidable. Observed in CI run
+            # 32995542998 (job nix-build):
+            #
+            #   MISSING PREREQUISITE: CODETRACER_RR_BACKEND_PATH is not set
+            #   test result: FAILED. 4 passed; 75 failed; 7 ignored
+            #   error: test failed, to rerun pass `--test real_recording_integration`
+            #
+            # -- which took out ``backend-manager.drv`` and with it nix-build,
+            # test-ui-tests, test-ui-tests-rr, dev-build, the appimage/dmg
+            # builds and push-to-attic, i.e. everything downstream of the app
+            # build.
+            #
+            # The honest accounting, which the commit message and PR repeat
+            # rather than bury here: excluding this target from THIS lane
+            # loses no coverage this lane ever had (it had none -- the tests
+            # only ever panicked here). It does NOT give the target a working
+            # home, because it has none. ``test-non-gui`` runs it
+            # (``ci/test/non-gui.sh`` -> ``just test`` -> ``just test-rust`` ->
+            # ``cargo nextest run --release`` in this crate), but that script
+            # deliberately runs it with ``CODETRACER_RR_BACKEND_PATH=``
+            # ``CODETRACER_RR_BACKEND_PRESENT=0`` so cross-repo tests stay out
+            # of that lane -- which trips the very same gate. And
+            # ``test-ui-tests-rr``, the one job that sets
+            # ``CODETRACER_RR_BACKEND_PATH`` to a real path, runs only ``just
+            # test-gui`` and never enters this crate. Giving these 48 rr tests
+            # a lane that can actually satisfy them is a separate change to
+            # CI, tracked separately; it is not something this derivation can
+            # do, and pretending otherwise by leaving the target here only
+            # converts "no coverage" into "no builds".
+            #
+            # One real cost, stated rather than buried: of that target's 86
+            # tests, 4 need no prerequisites and DID pass here -- the gate's
+            # own unit tests (prereq_gate_hard_fails_by_default,
+            # prereq_gate_downgrades_only_under_the_documented_opt_out,
+            # allow_missing_resolution_is_hard_failure_by_default) and the
+            # source-scanning meta test
+            # every_skip_site_is_routed_through_the_prerequisite_gate. Dropping
+            # the target drops those 4 from this lane too. They are tests of
+            # the test file's own policy rather than of the product, and
+            # keeping only them would mean naming 82 tests to skip -- a list
+            # that goes stale the first time anyone adds a test. Splitting them
+            # into their own target would be the real fix, but they call
+            # private helpers in this file and each tests/*.rs is its own
+            # crate, so that is a test-file refactor and not a packaging
+            # change.
+            excludedTarget=real_recording_integration
+            if [ ! -f "tests/$excludedTarget.rs" ]; then
+              echo "ERROR: tests/$excludedTarget.rs does not exist." >&2
+              echo "The target exclusion below would silently filter nothing. If the" >&2
+              echo "target was renamed, rename it here; if it was deleted, delete this" >&2
+              echo "exclusion and let the target selection fall back to plain" >&2
+              echo "'cargo test'." >&2
+              exit 1
+            fi
+
+            # The KEPT targets are DISCOVERED, never enumerated. Writing out
+            # ``--test dive_in_url_fetch_test --test mcp_origin_test ...`` would
+            # mean a newly added ``tests/<name>.rs`` silently never runs here,
+            # which is the same class of quiet coverage loss the accounting
+            # guard below exists to prevent. Globbing keeps new targets opted
+            # IN by default; only the one named above is opted out.
+            #
+            # ``--bins`` and not ``--lib``: this crate is binary-only (no
+            # ``[lib]``, no ``src/lib.rs``), its unit tests live in
+            # ``src/main.rs``, and ``cargo test --lib`` would error out with
+            # "no library targets found".
+            cargoTestTargets="--bins"
+            for testFile in tests/*.rs; do
+              testTarget=$(basename "$testFile" .rs)
+              if [ "$testTarget" = "$excludedTarget" ]; then
+                continue
+              fi
+              cargoTestTargets="$cargoTestTargets --test $testTarget"
+            done
+
+            # Two guards keep the single-test exclusion honest -- it must stay
+            # exactly one test wide, and it must never become a no-op.
+            # ``$cargoTestTargets`` is deliberately unquoted: it is a list of
+            # arguments, not one argument.
+            # shellcheck disable=SC2086
+            listing=$(cargo test --release --offline --target "$cargoTargetTriple" \
+              $cargoTestTargets -- --list)
             listed=$(printf '%s\n' "$listing" | grep -c ': test$')
 
             excluded=browser_stream_host::tests::verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
@@ -629,12 +730,55 @@
               exit 1
             fi
 
+            # shellcheck disable=SC2086
             output=$(cargo test --release --offline --target "$cargoTargetTriple" \
-              -- --skip "$excluded" 2>&1) || {
+              $cargoTestTargets -- --skip "$excluded" 2>&1) || {
               printf '%s\n' "$output"
               exit 1
             }
             printf '%s\n' "$output"
+
+            # The excluded TARGET must really be gone from the run. Without
+            # this, a future ``cargo test`` that ignores ``--test`` selection,
+            # or a stray re-addition, would put the 75 unsatisfiable tests back
+            # in this lane and the accounting guard below would not notice --
+            # it counts only targets that reported ``test result: ok.``, and a
+            # panicking target reports FAILED.
+            if printf '%s\n' "$output" | grep -q "Running tests/$excludedTarget.rs"; then
+              echo "ERROR: tests/$excludedTarget.rs ran in this lane after all." >&2
+              echo "It cannot pass in a build sandbox; see the comment above." >&2
+              exit 1
+            fi
+
+            # The accounting guard below compares the run against the LISTING
+            # OF THE SAME SELECTION, so it is structurally blind to a target
+            # dropping out of that selection: both sides shrink together and
+            # stay consistent with each other. Before target selection existed
+            # this could not happen -- a bare ``cargo test`` always ran
+            # everything, so the listing was the whole truth -- but selecting
+            # targets is exactly what reopens it, and it is the one way this
+            # exclusion could still grow quietly. So check the selection
+            # against the crate's files on disk, which is the only source of
+            # truth this sandbox has. (Verified by mutation M5 in
+            # ci/test/backend-manager-check-phase-test.sh, which narrows the
+            # discovery glob and which the accounting guard alone does NOT
+            # catch.)
+            targetsOnDisk=$(ls tests/*.rs | wc -l)
+            keptOnDisk=$((targetsOnDisk - 1))
+            keptRan=$(printf '%s\n' "$output" | grep -c 'Running tests/')
+            if [ "$keptRan" -ne "$keptOnDisk" ]; then
+              echo "ERROR: ran $keptRan integration-test targets, expected $keptOnDisk" >&2
+              echo "(= all $targetsOnDisk tests/*.rs, minus $excludedTarget)." >&2
+              echo "A test target dropped out of the selection. Coverage in this" >&2
+              echo "lane must not shrink quietly." >&2
+              exit 1
+            fi
+            if ! printf '%s\n' "$output" | grep -q 'Running unittests'; then
+              echo "ERROR: the crate's own unit tests did not run." >&2
+              echo "'--bins' dropped out of the target selection. Coverage in this" >&2
+              echo "lane must not shrink quietly." >&2
+              exit 1
+            fi
 
             # ``--list`` counts ``#[ignore]``d tests too, so account for them
             # explicitly rather than letting them look like lost coverage.

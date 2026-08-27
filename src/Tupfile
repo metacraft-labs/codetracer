@@ -29,7 +29,18 @@ include_rules
 # must differ (frontend/index.html -> index.html): a same-relative-path
 # `!tup_preserve` from this parent Tupfile triggers a Tup "generated node
 # already exists as a normal file" conflict against the variant-mirrored
-# source copy.  The default config/layout files therefore need no rule here —
-# they already reach build-debug/config/ via the variant source mirror.
+# source copy.
+#
+# The default config/layout files are published by a Tupfile of their own,
+# `config/Tupfile`, for exactly that reason: a rule whose Tupfile sits in the
+# same directory as its inputs has no relative-path clash.  This comment used
+# to say they "already reach build-debug/config/ via the variant source
+# mirror" and needed no rule.  That was false, and it cost a working `ct`: the
+# variant mirror reproduces the source DIRECTORY tree into the variant and
+# copies no files, so `build-debug/config/` was created — and stayed empty —
+# on every clean build, and `ct` died on first run with an uncaught OSError
+# naming `build-debug/config/default_config.yaml`.  See `config/Tupfile` for
+# the full account and `scripts/require-runtime-assets.sh` for the guard that
+# now makes a regression loud.
 : frontend/index.html |> !tup_preserve |> index.html
 : frontend/subwindow.html |> !tup_preserve |> subwindow.html

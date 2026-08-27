@@ -1507,10 +1507,6 @@ pub fn find_ct_native_replay() -> Option<PathBuf> {
         format!("../../codetracer-native-backend/target/debug/{}", exe_name),
         format!("../../codetracer-native-backend/target/release/{}", exe_name),
         format!("../../../codetracer-native-backend/target/debug/{}", exe_name),
-        // Legacy repo name fallbacks
-        format!("../../codetracer-rr-backend/target/debug/{}", exe_name),
-        format!("../../codetracer-rr-backend/target/release/{}", exe_name),
-        format!("../../../codetracer-rr-backend/target/debug/{}", exe_name),
     ];
 
     for loc in &dev_locations {
@@ -1526,9 +1522,6 @@ pub fn find_ct_native_replay() -> Option<PathBuf> {
         let home_locations = [
             format!("metacraft/codetracer-native-backend/target/debug/{}", exe_name),
             format!("codetracer-native-backend/target/debug/{}", exe_name),
-            // Legacy repo name fallbacks
-            format!("metacraft/codetracer-rr-backend/target/debug/{}", exe_name),
-            format!("codetracer-rr-backend/target/debug/{}", exe_name),
         ];
         for loc in &home_locations {
             let path = home_path.join(loc);

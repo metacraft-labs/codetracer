@@ -2210,3 +2210,113 @@ empty value match too, and command substitution has already stripped trailing
 newlines. The printf form is strictly safer — `echo "-n"` prints nothing.
 `print_indented` in `ci/test/desktop-capabilities-dispatch.sh` is the shared
 helper.
+
+## `libs/parsetoml` does not compile against the pinned Nim 2.2
+
+Anything that needs to read TOML from Nim has to bring its own reader.
+`libs/parsetoml/src/parsetoml.nim:1725` compares two `seq[TomlValueRef]`, and
+seq equality is a `func` that cannot call parsetoml's own side-effecting
+`proc ==`:
+
+    comparisons.nim(324, 6) Error: '==' can have side effects
+
+The path IS on the search path (repo-root `config.nims:34`) and nothing under
+`src/` imports it, which is why this had never surfaced. It is also a pinned
+submodule, so patching it from this repo would leave a dirty submodule.
+`src/ct_test/certificate.nim` carries a ~250-line reader for the TOML subset
+test certificates and key stores use — strict on purpose, because a key store
+that cannot be read has to be reported as unreadable rather than silently
+degraded.
+
+## `ct test run` has never been able to run a Nim or Python test
+
+`canRunProject`/`canRunFile`/`canRunSingle` are all `false` for `nim-unittest`,
+`python-pytest`, `python-unittest` and every `smart-*` provider — they discover
+only. A run over such a workspace reports `executed: N` (units dispatched) with
+`passed: 0, failed: 0` (no `tekTestFinished` events) and still exits 0, because
+`runExitCode` keys off `failed > 0` alone. The providers that really run today
+are the C/C++, Go, D, Crystal, Rust, Ruby, JS and M12-fallback ones;
+`js_node_test` is the cheapest way to get a genuinely green `ct test run` on a
+dev box (a `package.json` plus a `node:test` file, no install).
+
+This matters to certificate issuance: a run with no finished tests attests
+nothing, so `src/ct_test/certificate_issuance.nim` withholds rather than
+issuing an empty claim, and `certificate_cli_test.nim` uses exactly that
+property to exercise the withheld path with no toolchain at all.
+
+## Private fields do not make a builder unforgeable
+
+Nim rejects `Obj(privateField: x)` from another module, so it is tempting to
+treat "all fields unexported" as a capability boundary. It is not: an exported
+mutator that fills those fields is a way to fill them. `certificate_issuance`
+shipped exactly that shape for a day — a private-field `AttestedRun` plus four
+exported mutators, one of which (`recordUnitResult`) took a caller-supplied
+`seq[TestEvent]` — and a caller could obtain a real, `ssh-keygen -Y verify`-valid
+test certificate for tests that never ran. The suite's own `passingRun` helper
+was that forgery, which is why nothing went red.
+
+The shape that does hold: **a routine that runs the tests does not take the
+results as arguments.** `runAndAttest` calls `runUnits` itself; the record and
+its mutators are unexported. When you need "only this module may build X",
+unexport the type AND the mutators, and expose one entry point that produces
+the value from something it computed.
+
+Two guards worth copying, both in `certificate_issuance_test.nim`:
+
+* A `compiles()` check is **vacuously true** whenever its expression fails to
+  compile for any reason at all — a typo passes just as well as a private
+  symbol. Put a positive control next to it (`check compiles(<exported call>)`)
+  or the check proves nothing.
+* An exported-surface allow-list must scan `template` and `macro`, not only
+  `proc`. A proc-only version stayed green while
+  `template signAnyBlob*(p, k) = signCanonicalPayload(p, k)` handed another
+  module the private routine.
+
+## `tsSkipped` is a fourth outcome, and "not failed" is not "passed"
+
+`TestResultStatus` has four values, and `summarize` in run_orchestration.nim
+counts a skip as neither passed nor failed — correct for a run summary, and a
+trap for anything downstream that gates on `failed == 0`. `ct test`'s
+certificate issuer did exactly that and, for a suite where every test was
+skipped, issued a signed certificate asserting `result = "passed"`; for the
+much commoner mixed suite it added the skipped file to the certificate's
+`targets`, claiming coverage for a file that executed no assertion.
+
+Two shipped providers reach this from the DEFAULT registry, both honestly:
+`frameworks/ruby_common.nim:709` maps rspec `pending` -> `tsSkipped`, and
+`frameworks/js_playwright.nim:263` maps `skipped` the same way. So any
+consumer of the event stream that means "a test ran" must test for
+`tsPassed | tsFailed | tsErrored` explicitly rather than for `not tsFailed`.
+`certificate_issuance.recordUnitResult` is the worked example.
+
+And know how far that gets you. **Exactly ONE provider reports skips per test
+on its run path: `js-playwright`** (`provider.run` at `js_playwright.nim:497`
+-> `runPlaywright:431` -> `--reporter=json` at `:84` -> `collectResultEvents:305`
+-> `statusFromPlaywright:258` -> `tsSkipped:263`). Everything else derives a
+whole file's status from one subprocess exit code (`js_common:504`,
+`cpp_common:544`, `native_m11_common:88`, `m12_fallback_common:193`, and
+`ruby_common:461`), so a skip is indistinguishable from a pass there.
+Concretely: `node --test <file>` with every test skipped prints
+`# pass 0 / # skipped 2` and EXITS 0.
+
+**rspec is an exit-code provider, despite appearances**, and this is the trap:
+`ruby_common.nim` contains a correct `pending -> tsSkipped` mapping
+(`parseRspecJsonResults`) whose only caller in the repo is a unit test of
+itself, and the rspec command at `:350` has no `--format json` anyway.
+`ruby_rspec.nim:121` runs `runRubyCommand`, the same exit-code proc minitest
+uses.
+
+So: `grep -rln tsSkipped src/ct_test/frameworks/` returns two files and is the
+WRONG evidence -- it answers "which files mention the token", not "which
+providers can emit it from `run`". Both a previous version of the certificate
+docs and a verification pass drew the false conclusion from that one grep.
+Follow `provider.run` to the proc that decides status. Any per-test property
+enforced downstream is bounded by that, and saying so is the difference
+between a guarantee and a hope.
+
+Related, same file: a unit whose provider returns diagnostics and NO
+`tekTestFinished` (crashed harness, missing toolchain) contributes nothing to
+either count, and `runExitCode` keys off `failed > 0` alone — so such a run
+still exits 0. That is a pre-existing defect, not a certificate one, but it is
+the reason `executed` in a summary is a count of dispatched UNITS while
+`passed + failed` counts finished TESTS, and the two can disagree wildly.

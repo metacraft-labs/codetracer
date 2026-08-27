@@ -90,6 +90,7 @@ STUB_HELPER_SCRIPTS=(
 	require-fuse-mount-helper.sh
 	require-tup-globs.sh
 	post-build-setcap.sh
+	require-runtime-assets.sh
 )
 
 write_recording_stub() {
@@ -197,8 +198,20 @@ run_script() {
 # `name<TAB>argv`, with the per-run volatile tokens folded away so two runs of
 # the same code compare equal. Currently just build-once.sh's runquotad socket,
 # which embeds `$$`.
+#
+# The `$$` is matched WITHOUT anchoring to what follows it. It used to be
+# anchored to `.sock`, which was right when the path was
+# `.../codetracer-reprobuild-<pid>.sock`. build-once.sh then moved the socket
+# into a directory of its own — `.../codetracer-reprobuild-<pid>/runquota.sock`,
+# because runquotad refuses a world-writable rendezvous directory — and the
+# anchored expression stopped matching. Nothing failed loudly: check (C) simply
+# started comparing two traces that could never be equal, and reported
+# `build.sh's trace does not contain build-once.sh's record 'runquotad ...'` in
+# all three reprobuild scenarios. That is three of this harness's checks dead
+# for as long as the socket path has had its current shape. Leave it unanchored
+# so the next relocation cannot silently do it again.
 normalized() {
-	cut -f1,3 <"$1" | sed -E 's#(codetracer-reprobuild-)[0-9]+(\.sock)#\1<pid>\2#g'
+	cut -f1,3 <"$1" | sed -E 's#(codetracer-reprobuild-)[0-9]+#\1<pid>#g'
 }
 names() { cut -f1 <"$1"; }
 
@@ -389,7 +402,11 @@ $(normalized "$build_trace" | sed 's/^/    /')"
 
 	# --- (E) the preflights and post-steps build.sh used to skip ------------
 	local step
-	local -a required_steps=(require-siblings build-tailwind)
+	# `require-runtime-assets` is in the base list, not the tup-only one: the
+	# assets `ct` reads on startup have to be in EVERY output tree, so both
+	# branches run it. (It was added when a clean tup build was found to leave
+	# `src/build-debug/config/` empty and `ct` unable to start.)
+	local -a required_steps=(require-siblings build-tailwind require-runtime-assets)
 	if [ "$expected_branch" = "tup" ]; then
 		required_steps+=(require-fuse-mount-helper require-tup-globs post-build-setcap)
 	fi
