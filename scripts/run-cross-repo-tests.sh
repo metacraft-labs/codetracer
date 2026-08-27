@@ -193,25 +193,27 @@ resolve_pin_ref() {
 # Find or build ct-native-replay
 # ---------------------------------------------------------------------------
 find_rr_backend_repo() {
-	# 1. METACRAFT_WORKSPACE_ROOT — try new name first, then legacy
-	if [[ -n ${METACRAFT_WORKSPACE_ROOT:-} ]]; then
-		for repo_name in codetracer-native-backend codetracer-rr-backend; do
-			local candidate="$METACRAFT_WORKSPACE_ROOT/$repo_name"
-			if [[ -d $candidate ]]; then
-				echo "$candidate"
-				return 0
-			fi
-		done
-	fi
+	# Only one name is searched: `codetracer-native-backend`, as declared by
+	# the workspace manifest. This used to also try a `codetracer-rr-backend`
+	# fallback for the repo's pre-rename name, but no such repository exists
+	# — the slug redirects on GitHub and nothing ever checks out under it —
+	# so the fallback could never match.
 
-	# 2. Sibling directory — try new name first, then legacy
-	for repo_name in codetracer-native-backend codetracer-rr-backend; do
-		local sibling="$REPO_ROOT/../$repo_name"
-		if [[ -d $sibling ]]; then
-			(cd "$sibling" && pwd)
+	# 1. METACRAFT_WORKSPACE_ROOT
+	if [[ -n ${METACRAFT_WORKSPACE_ROOT:-} ]]; then
+		local candidate="$METACRAFT_WORKSPACE_ROOT/codetracer-native-backend"
+		if [[ -d $candidate ]]; then
+			echo "$candidate"
 			return 0
 		fi
-	done
+	fi
+
+	# 2. Sibling directory
+	local sibling="$REPO_ROOT/../codetracer-native-backend"
+	if [[ -d $sibling ]]; then
+		(cd "$sibling" && pwd)
+		return 0
+	fi
 
 	return 1
 }
