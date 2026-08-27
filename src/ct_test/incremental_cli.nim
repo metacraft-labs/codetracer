@@ -262,7 +262,7 @@ proc captureMaterializedReadFiles(repo, programCommand, traceDir: string):
       " CLI on PATH (set " & IoMonSnoopEnvVar & " or build it via io-mon's " &
       "`nimble buildSnoop`); depfile→read-set conversion is exercised directly " &
       "by the M6b/M8 tests")
-  let depfile = traceDir / "io_mon_capture.rdep"
+  let depfile = traceDir / "io_mon_capture.iomon"
   # Run the snoop INSIDE the recorder's dev shell so the interpreter + the shim
   # resolve from the same toolchain the recording used. The shim is injected by
   # io-mon's fs_snoop via DYLD_INSERT_LIBRARIES / LD_PRELOAD around the command.

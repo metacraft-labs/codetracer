@@ -14,7 +14,7 @@
 ## read off disk. So for those recorders the runner must CAPTURE the read files a
 ## different way: by running the recorded process under the shared `io-mon`
 ## filesystem monitor (M5/M6b), whose syscall-interpose shim observes every
-## `open`/`read`/`stat` the process performs and writes them to a binary RMDF
+## `open`/`read`/`stat` the process performs and writes them to a binary iomon
 ## depfile.
 ##
 ## # One fold, two sources (the invariant this module preserves)
@@ -447,7 +447,7 @@ proc captureViaSnoopBinary(snoopCli: string; command: seq[string];
   ## Drive a live capture by invoking the standalone `io-mon` CLI OUT OF
   ## PROCESS (`snoopCli run --depfile <depfilePath> -- <command...>`). The snoop
   ## binary injects the shim around `command` in a clean subprocess and writes
-  ## the RMDF depfile. The shim shared library is located by the snoop binary via
+  ## the iomon depfile. The shim shared library is located by the snoop binary via
   ## `$REPRO_MONITOR_SHIM_LIB` / the canonical layout; we forward an explicit pin
   ## when one is locatable so a non-installed dev-shell shim still resolves.
   ##

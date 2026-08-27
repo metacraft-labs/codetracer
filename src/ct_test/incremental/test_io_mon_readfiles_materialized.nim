@@ -170,7 +170,7 @@ suite "M6b — io-mon read-file capture for materialized recorders":
     check converted.isErr
     check "incomplete" in converted.error
 
-    let depfile = work / "cap.rdep"
+    let depfile = work / "cap.iomon"
     writeCanonical(depfile, @[readRec(cfg), eventLossRec(10)])
     let projected = depFileToProjection(depfile, traceDir)
     check projected.isErr
@@ -374,7 +374,7 @@ suite "M6b — io-mon read-file capture for materialized recorders":
     # shim does not silently pass a fake live run.
     let work = tmpDir("live")
     defer: removeDir(work)
-    let depfile = work / "cap.rdep"
+    let depfile = work / "cap.iomon"
 
     if ioMonShimAvailable():
       # The shim IS present: a real capture of a trivial command must succeed and
@@ -394,7 +394,7 @@ suite "M6b — io-mon read-file capture for materialized recorders":
   test "empty command is rejected":
     let work = tmpDir("empty")
     defer: removeDir(work)
-    let res = captureReadFilesLive(@[], work / "x.rdep")
+    let res = captureReadFilesLive(@[], work / "x.iomon")
     check res.isErr
 
 # ---------------------------------------------------------------------------
@@ -463,7 +463,7 @@ suite "M8 — live interpose snoop-CLI wiring + gated-safe e2e":
       if userBin.len == 0:
         skip()  # no C compiler on this host
       else:
-        let depfile = work / "cap.rdep"
+        let depfile = work / "cap.iomon"
         let res = captureReadFilesLive(@[userBin, inputPath], depfile)
         checkpoint("live capture: " & (if res.isOk: "ok, reads=" &
           $res.value.len else: res.error))
