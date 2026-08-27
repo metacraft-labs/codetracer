@@ -551,7 +551,7 @@ proc monacoDecorations(doc: DiffDocument;
   ## line, with the `+` / `-` marker in the line-decorations lane.
   result = @[]
   for decoration in decorationsFor(doc, selected):
-    # Read the four fields into locals *before* building the descriptor.
+    # Read EVERY field this descriptor needs into a local *before* building it.
     #
     # `js{...}` closes over every expression it is given, and `items` over the
     # `seq[DiffDecoration]` `decorationsFor` returns yields `lent
@@ -563,11 +563,19 @@ proc monacoDecorations(doc: DiffDocument;
     # scalars out first means the closure captures owned values, which is what
     # it needs: the descriptor is handed to Monaco and kept, while the seq
     # backing `decoration` is gone by the time this proc returns.
+    #
+    # `marginClass` is here because it was NOT, and one missed field is enough:
+    # the rule is per-EXPRESSION, so hoisting four of five left the fifth
+    # reading `decoration` inside the closure and `nix build .#codetracer` died
+    # compiling `ui.js` at the `marginClassName:` line — the same diagnostic the
+    # paragraph above describes, from the one site it did not cover. Anything
+    # added to this descriptor must be read into a local here too.
     let
       lineNumber = decoration.line
       lineClass = cstring(decoration.className)
       gutterClass = cstring(decoration.gutterClassName)
       lineNumberClass = cstring(decoration.lineNumberClassName)
+      marginClass = cstring(decoration.marginClassName)
     result.add(js{
       range: js{
         startLineNumber: lineNumber,
@@ -584,7 +592,7 @@ proc monacoDecorations(doc: DiffDocument;
         # Paints the margin as well as the content, so the `@@` divider is a
         # full-bleed separator sharing its left edge with a collapsed region's
         # band. Empty on every other kind — see `diff_document.marginClassFor`.
-        marginClassName: cstring(decoration.marginClassName)
+        marginClassName: marginClass
       }
     })
 
