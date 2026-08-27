@@ -5181,3 +5181,88 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   class of collision is structurally impossible rather than greppable. Substring
   is simply the wrong default for a matcher over a set of names nobody has
   promised to keep prefix-free.
+||||||| parent of f0b8f50c4 (fix(re-record): start one recorder per Ctrl+R, and say why the extras were ignored)
+* A run over any workspace looks enormous and is almost entirely
+  `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
+  the CWD is inside a checkout with recorder siblings.
+* The registry's stored `TestProvider.info.capabilities` for `smart-*` is
+  computed by `newSmartHarnessProvider` with `projectRoot = ""`
+  (`smart_contract_common.nim:412`), so `canRunFile` there resolves the
+  recorder from the CWD too. `runRecorderCommand` re-resolves it from
+  `scope.projectRoot`, and the two can disagree when the recorder repo is
+  reachable from the workspace but not from the CWD, and the recorder is
+  neither on PATH nor named by `<SPEC>_CMD`. Since `runUnitOutcome` now gates
+  dispatch on the stored capability, that combination refuses a unit the
+  provider could have recorded. Fixing it properly needs a projectRoot-aware
+  capability hook on the provider interface; there is none today.
+* A run over any workspace looks enormous and is almost entirely
+  `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
+  the CWD is inside a checkout with recorder siblings.
+* The registry's stored `TestProvider.info.capabilities` for `smart-*` is
+  computed by `newSmartHarnessProvider` with `projectRoot = ""`
+  (`smart_contract_common.nim:412`), so `canRunFile` there resolves the
+  recorder from the CWD too. `runRecorderCommand` re-resolves it from
+  `scope.projectRoot`, and the two can disagree when the recorder repo is
+  reachable from the workspace but not from the CWD, and the recorder is
+  neither on PATH nor named by `<SPEC>_CMD`. Since `runUnitOutcome` now gates
+  dispatch on the stored capability, that combination refuses a unit the
+  provider could have recorded. Fixing it properly needs a projectRoot-aware
+  capability hook on the provider interface; there is none today.
+
+## The notification toast stack is capped at THREE, so "three of them" is a floor
+
+`NOTIFICATION_LIMIT = 3` in `src/frontend/ui/status.nim:15`, applied while
+building `statusShellModel` at `:189`. Only the first three *active*,
+non-operation-status notifications are rendered.
+
+This matters when reading a bug report. Issue #603's screenshots — two months
+apart, two different message texts — each show exactly three identical stacked
+toasts, which reads like a precise dispatch count and is not one: it is the
+ceiling. The number proves "at least three", never "exactly three". Do not
+build a diagnosis, or a fix, on the value 3.
+
+The complementary fact, which is what makes the floor meaningful: fan-out for
+`CtNotification` is 1. `viewsApi.emit` walks `subscribers[CtNotification]`
+(`src/frontend/communication.nim:72-81`); its only member is the session's
+`StatusComponent` (`src/frontend/ui/status.nim:341-351`), created once per
+session by the documented singleton `makeStatusComponent`
+(`src/frontend/renderer.nim:459`, `src/frontend/ui/session_switch.nim:286`),
+and `data.ui` is per-session (`src/frontend/types.nim:2222`). So N visible
+copies of one message means N emits, not one emit shown N times.
+
+Two mechanisms hold that "1" in place, and both are worth knowing before you
+suspect a fan-out defect again. `registerComponent` (`types.nim:2550`) subscribes
+a component only when its `(content, id)` is not already in
+`data.ui.componentMapping`, so the second `makeStatusComponent` call a session
+can make — `createUIComponents` and then `makeComponent(Content.Status)` from
+the layout — subscribes nothing. And `Component.unregister` (`types.nim:2484`)
+takes a closed panel back off the parent's subscriber list; before it existed,
+every closed-and-reopened panel doubled its own fan-out (issue #612). Note the
+shape of that bug when you are reading a report: a fan-out defect multiplies
+*every* notification the component receives, not one particular message.
+
+## `data.recordProcess` is a single slot and (until #603) was never released
+
+`src/frontend/index/config.nim:26`. `onNewRecord` and `onRecordWithLaunchConfig`
+both assign it and both used to test `not data.recordProcess.isNil` to decide
+whether to report a failure — which is true for *any* live recording, so a
+superseded process reported its own failure against its successor. Both now
+compare pids and clear the slot on exit, and `onNewRecord` refuses to start a
+second `ct record` while one is running. If you add a third record entry point,
+it has to do the same three things or the re-record gate in the renderer
+(`file_conflicts.ReRecordQueue.recording`) will look stuck.
+
+## `just build-once` does not work on macOS at f0ee7008
+
+Two independent blockers, both pre-existing; see the macOS rows in
+`codetracer-specs/Testing/Known-Test-Failures.md`. Consequence for agents: you
+cannot run the Playwright lanes on a Mac. You *can* still type-check the
+Electron-side Nim, which is the next best thing:
+
+    nim -d:chronicles_enabled=off -d:ctRenderer -d:ctHmr -d:isonimHmr \
+        -d:nimNoLentIterators --out:/tmp/ui.js js src/frontend/ui_js.nim
+    nim -d:ctIndex -d:nodejs --out:/tmp/index.js js src/frontend/index.nim
+
+(the defines are the ones `src/Tuprules.tup`'s `!nim_js` / `!nim_node_index`
+macros use; `-d:nimNoLentIterators` is only there to step past the unrelated
+`ui/unified_diff.nim` compile error.)

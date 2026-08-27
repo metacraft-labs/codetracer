@@ -1782,6 +1782,7 @@ proc checkPendingReRecord*(data: Data)
 proc reRecordCurrent*(data: Data, projectOnly: bool)
 proc resolveFileConflict*(data: Data, action: FileConflictAction, path: cstring)
 proc abandonPendingReRecord*(data: Data, reason: string)
+proc noteReRecordFinished*(data: Data)
 
 proc updateDialog(data: Data, path: cstring) {.async.} =
   let tab =
@@ -2059,19 +2060,24 @@ proc pendingReRecordQueue(data: Data): ReRecordQueueRef =
   else:
     cast[ReRecordQueueRef](data.pendingReRecord)
 
-proc launchReRecord(data: Data, projectOnly: bool) =
+proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
   ## Build/record a new trace for the current target.  Only reached once every
   ## modified buffer is on disk.
+  ##
+  ## Returns whether `CODETRACER::new-record` actually went out.  The caller
+  ## needs to know: the single-flight latch is held from the moment the model
+  ## decides to dispatch, and a launch that bails out here would otherwise
+  ## hold it forever with no recorder to release it.
   ##
   ## The trace can disappear while the saves are in flight (session switch,
   ## trace teardown), so it is re-checked here rather than only at request
   ## time.
   if data.trace.isNil:
     data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
-    return
+    return false
   if data.trace.program.len == 0:
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
-    return
+    return false
 
   var programArg = data.trace.program
   if data.trace.lang == LangNoir and data.trace.workdir.len > 0:
@@ -2114,6 +2120,12 @@ proc launchReRecord(data: Data, projectOnly: bool) =
       projectOnly: projectOnly,
     }
   )
+  # No `recordBackend` field: the index's live-MCR branch — the one exit of
+  # `onNewRecord` that reports neither `successful-record` nor `failed-record`
+  # — is gated on `recordBackend == "mcr"` and is therefore unreachable from
+  # here.  Every path a re-record can take ends in a message that releases the
+  # single-flight latch.
+  result = true
 
 proc applyReRecordEffects(data: Data, queue: ReRecordQueueRef,
                           effects: seq[ReRecordEffect]) =
@@ -2151,12 +2163,22 @@ proc applyReRecordEffects(data: Data, queue: ReRecordQueueRef,
     reRecordWatchdog = windowSetTimeout(
       proc = data.abandonPendingReRecord(reRecordTimedOutMessage),
       reRecordWatchdogMs)
+  elif queue.recording:
+    # The saves are done and the recorder is running.  The request stays
+    # observable so the next Ctrl+R is refused instead of starting a second
+    # recorder beside this one (issue #603), but the save watchdog is
+    # disarmed: nothing is waiting for a save any more, and a build can
+    # legitimately outlast it by minutes.
+    data.pendingReRecord = cast[JsObject](queue)
+    cancelReRecordWatchdog()
   else:
     data.pendingReRecord = nil
     cancelReRecordWatchdog()
 
-  if launch:
-    data.launchReRecord(queue.projectOnly)
+  if launch and not data.launchReRecord(queue.projectOnly):
+    # Nothing was sent, so nothing will report back.  Release the latch here
+    # or every later Ctrl+R is refused by a recording that never started.
+    data.noteReRecordFinished()
 
 proc abandonPendingReRecord*(data: Data, reason: string) =
   ## Give up on a queued re-record request, loudly.
@@ -2164,6 +2186,19 @@ proc abandonPendingReRecord*(data: Data, reason: string) =
     return
   let queue = data.pendingReRecordQueue()
   data.applyReRecordEffects(queue, abandonReRecord(queue[], reason))
+
+proc noteReRecordFinished*(data: Data) =
+  ## The index reported the outcome of a recording we launched
+  ## (`CODETRACER::successful-record` / `CODETRACER::failed-record`).
+  ##
+  ## This is the single-flight latch's only release, so it has to run for a
+  ## failure just as much as for a success — a failed re-record that left the
+  ## latch set would refuse every subsequent attempt, which is a worse version
+  ## of the bug it exists to fix.
+  if data.pendingReRecord.isNil:
+    return
+  let queue = data.pendingReRecordQueue()
+  data.applyReRecordEffects(queue, noteRecordFinished(queue[]))
 
 proc reRecordCurrent*(data: Data, projectOnly: bool) =
   ## Save edits and restart the recorder for the current file or project
@@ -2179,11 +2214,23 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
   #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
   #   return
 
-  # Supersede any earlier request rather than stacking two queues.
-  cancelReRecordWatchdog()
-  let queue = ReRecordQueueRef()
-  data.applyReRecordEffects(
-    queue, requestReRecord(queue[], data.saveTargets(), projectOnly))
+  # Continue the request already in flight rather than allocating a fresh
+  # queue over the top of it.  Allocating unconditionally is what made the
+  # model's single-flight guard unreachable: every press arrived at
+  # `requestReRecord` with a pristine, idle queue, so every press dispatched
+  # (issue #603).
+  let queue = data.pendingReRecordQueue()
+  let refused = queue.active or queue.recording
+  let effects = requestReRecord(queue[], data.saveTargets(), projectOnly)
+  if refused:
+    # Report why, and leave the in-flight request exactly as it is — in
+    # particular without pushing its save watchdog further out, which is what
+    # republishing an unchanged queue would do.
+    for effect in effects:
+      if effect.kind == rreWarn:
+        data.viewsApi.warnMessage(effect.message.cstring)
+    return
+  data.applyReRecordEffects(queue, effects)
 
 proc noteReRecordSaveOutcome*(data: Data, failed: bool) =
   ## Feed one `saved-file` / `save-file-error` reply into the queued request.

@@ -426,6 +426,12 @@ const
     # with nothing in flight is unreachable-by-waiting.  Note
     # `file_conflicts_vm_test.nim` already existed and was NOT listed here, so
     # it was gated by nothing at all.
+    #
+    # `re_record_queue_vm_test.nim` additionally carries the "Re-record is
+    # single-flight" suite: the request stays observable from Ctrl+R until the
+    # recorder reports back, so a burst of presses cannot put two `ct record`
+    # runs on one build directory.  That was #603's residual defect after the
+    # queue-arming fix, and the stacked notifications the reporter kept seeing.
     "src/tests/gui/tests/welcome-screen/file_conflicts_vm_test.nim",
     "src/tests/gui/tests/welcome-screen/re_record_queue_vm_test.nim",
     # #594 (M33) — the flow decoration layer must survive the window between

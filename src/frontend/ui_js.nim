@@ -3982,6 +3982,14 @@ proc onPathValidated(
 proc onSuccessfulRecord(
   sender: js,
   response: jsobject()) =
+  ## A build/record run finished.
+  ##
+  ## Releasing the re-record latch is the first thing done here and in
+  ## `onFailedRecord`: those two messages are the only reports the index sends
+  ## for a launched recording, and until one arrives the next Ctrl+R is
+  ## refused so two recorders cannot run against one build directory
+  ## (issue #603).
+  data.noteReRecordFinished()
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordSuccess
@@ -4000,6 +4008,10 @@ proc onFailedRecord(
   ## created once at startup and never cleared, and `newRecord` stays non-nil
   ## once the form has been opened, so the form is usually hidden while it
   ## silently absorbs the error (issue #603).
+  ##
+  ## The latch has to be released on the failure path too, or one failed
+  ## re-record locks the feature out for the rest of the session.
+  data.noteReRecordFinished()
   data.viewsApi.errorMessage(response.errorMessage)
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:

@@ -68,6 +68,11 @@ proc markSaveFailed(ws: var Workspace; name: string) =
   ## The `CODETRACER::save-file-error` round-trip: the buffer stays dirty.
   ws.apply noteSaveOutcome(ws.queue, ws.tabs, failed = true)
 
+proc markRecordFinished(ws: var Workspace) =
+  ## The `CODETRACER::successful-record` / `CODETRACER::failed-record` round
+  ## trip: the recorder we launched has reported back.
+  ws.apply noteRecordFinished(ws.queue)
+
 proc answerDialog(ws: var Workspace; action: FileConflictAction;
                   path: string) =
   if action == fcaDiscardMemory:
@@ -252,3 +257,139 @@ suite "Re-record queue and the conflict dialog":
     check ws.count(newRecordMsg) == 0
     check ws.errors.len == 0
     check ws.warnings.len == 0
+
+suite "Re-record is single-flight":
+  ## Issue #603, second defect.  The reporter's screenshots show a *stack* of
+  ## identical notifications — "Building/recording a new trace…" on 2026-07-22,
+  ## "ct record process started" on 2026-08-17 — and the stack is three deep
+  ## because `NOTIFICATION_LIMIT` in `src/frontend/ui/status.nim` renders at
+  ## most three toasts, not because exactly three requests were made.  Both of
+  ## those messages are emitted exactly once per recording launch, so a stack
+  ## of them means the recorder was launched more than once for what the user
+  ## experienced as one action.
+  ##
+  ## Concurrent `ct record` runs share one project build directory and one
+  ## `data.recordProcess` slot in the index, so they fight and report each
+  ## other's failures — which is the "program won't start" the issue is about.
+  ## A re-record request must therefore be single-flight: while one is queued
+  ## or running, another must be refused *visibly*, never silently stacked.
+  ##
+  ## What this suite CANNOT see, stated plainly so nobody reads it as more
+  ## evidence than it is: `Workspace` threads one persistent `ReRecordQueue`
+  ## through every simulated press, because that is what the fixed
+  ## `renderer.reRecordCurrent` does.  The bug also had a renderer half — it
+  ## allocated a *fresh* `ReRecordQueueRef()` per press, so every press reached
+  ## this model with a pristine, idle queue and the guard below was
+  ## unreachable.  Restoring that line would leave all 21 cases here green.
+  ## The renderer, `ui_js` and index halves are covered by the Playwright case
+  ## "a burst of Ctrl+R presses starts one recorder and says why" in
+  ## `file_conflicts.spec.ts`, and by nothing else.
+
+  test "a burst of Ctrl+R presses launches exactly one recording":
+    # Key auto-repeat, or an impatient second press during a slow build, is
+    # the whole repro: nothing in the model remembered that a recording was
+    # already under way, so every press dispatched another one.
+    var ws = Workspace(tabs: @[
+      SaveTarget(name: "/w/main.py", changed: false, editorReady: true)])
+    ws.pressCtrlR()
+    ws.pressCtrlR()
+    ws.pressCtrlR()
+
+    check ws.count(newRecordMsg) == 1
+    check ws.errors.len == 0
+    check ws.warnings.len == 2
+
+  test "a second press while saves are in flight does not re-send them":
+    var ws = twoDirtyTabs()
+    ws.pressCtrlR()
+    check ws.count(saveFileMsg) == 2
+
+    ws.pressCtrlR()
+    # Re-sending the saves both doubles the disk writes (waking the file
+    # watchers again) and resets `savesInFlight` under the replies already
+    # on their way back.
+    check ws.count(saveFileMsg) == 2
+    check ws.count(newRecordMsg) == 0
+    check ws.warnings.len == 1
+    check ws.queue.active
+
+  test "a press while the recording runs is refused, not stacked":
+    var ws = twoDirtyTabs()
+    ws.pressCtrlR()
+    ws.markSaved("/w/main.py")
+    ws.markSaved("/w/lib.py")
+    check ws.count(newRecordMsg) == 1
+
+    # The recorder has not reported back yet.  A second launch here is what
+    # produced the reporter's stacked notifications.
+    ws.pressCtrlR()
+    check ws.count(newRecordMsg) == 1
+    check ws.warnings.len == 1
+    check ws.errors.len == 0
+
+  test "the refusal names the phase the request is actually in":
+    # "Still saving" and "already recording" are different situations and the
+    # user can act on the difference; one generic message cannot be acted on.
+    var ws = twoDirtyTabs()
+    ws.pressCtrlR()
+    ws.pressCtrlR()
+    check ws.warnings == @[reRecordAlreadySavingMessage]
+
+    ws.markSaved("/w/main.py")
+    ws.markSaved("/w/lib.py")
+    ws.pressCtrlR()
+    check ws.warnings == @[reRecordAlreadySavingMessage,
+                           reRecordAlreadyRunningMessage]
+
+  test "the gate reopens once the recorder reports back":
+    var ws = Workspace(tabs: @[
+      SaveTarget(name: "/w/main.py", changed: false, editorReady: true)])
+    ws.pressCtrlR()
+    check ws.count(newRecordMsg) == 1
+
+    ws.markRecordFinished()
+    ws.pressCtrlR()
+    check ws.count(newRecordMsg) == 2
+    check ws.warnings.len == 0
+    check ws.errors.len == 0
+
+  test "a released gate arms the save queue again from scratch":
+    # The second cycle, and the one that goes back through the saves: after a
+    # release, `savesInFlight` / `failedSaves` have to start clean or the next
+    # request drains against stale counters.
+    #
+    # Note what this can and cannot see.  The model has one release entry
+    # point, so it cannot tell `failed-record` from `successful-record` — that
+    # distinction lives in `ui_js.onFailedRecord` / `onSuccessfulRecord`, which
+    # both call `data.noteReRecordFinished()` and are covered by no headless
+    # test.  What is asserted here is the release itself, and that it leaves a
+    # queue the next request can re-arm.
+    var ws = Workspace(tabs: @[
+      SaveTarget(name: "/w/main.py", changed: true, editorReady: true)])
+    ws.pressCtrlR()
+    ws.markSaved("/w/main.py")
+    check ws.count(newRecordMsg) == 1
+
+    ws.markRecordFinished()   # `successful-record` or `failed-record`
+    ws.tabs[0].changed = true
+    ws.pressCtrlR()
+    check ws.count(saveFileMsg) == 2
+    ws.markSaved("/w/main.py")
+    check ws.count(newRecordMsg) == 2
+
+  test "an abandoned save queue does not hold the gate shut":
+    # This one passes against the unmodified model too, by construction: it
+    # guards the *fix* rather than reproducing the bug.  The latch must be
+    # taken only where a recorder was actually launched, so a request the
+    # watchdog abandoned before any launch cannot lock the feature out.
+    var ws = twoDirtyTabs()
+    ws.pressCtrlR()
+    ws.apply abandonReRecord(ws.queue, reRecordTimedOutMessage)
+    check ws.count(newRecordMsg) == 0
+
+    # Nothing was launched, so nothing has to report back before the next
+    # attempt is allowed.
+    for tab in ws.tabs.mitems:
+      tab.changed = false
+    ws.pressCtrlR()
+    check ws.count(newRecordMsg) == 1

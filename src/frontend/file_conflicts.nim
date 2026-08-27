@@ -91,13 +91,24 @@ type
     message*: string  ## user-facing text, for `rreError` / `rreWarn`
 
   ReRecordQueue* = object
-    ## The state of a queued re-record request.
+    ## The state of a re-record request, from Ctrl+R to the recorder's reply.
     ##
     ## `active` replaces the old "is `pendingReRecord` non-nil" test.  The
     ## distinction matters: a request that was abandoned must be observably
     ## different from one that completed, and previously both merely cleared
     ## the field.
+    ##
+    ## `recording` is the second half of that lifetime and the reason issue
+    ## #603 survived its first fix.  Once the saves drained, the model forgot
+    ## the request entirely, so the *next* Ctrl+R — a key auto-repeat, or an
+    ## impatient second press during a slow build — saw an idle world and
+    ## launched another recorder alongside the first.  Concurrent `ct record`
+    ## runs share the project's build directory and the index's single
+    ## `data.recordProcess` slot, so they fight and report each other's
+    ## failures; the reporter saw a stack of identical notifications and a
+    ## program that never started.
     active*: bool
+    recording*: bool
     projectOnly*: bool
     savesInFlight*: int
     failedSaves*: int
@@ -115,6 +126,11 @@ const
   reRecordTimedOutMessage* =
     "Timed out waiting for the modified files to be saved; " &
     "re-recording aborted."
+  reRecordAlreadySavingMessage* =
+    "A re-recording is already saving your changes; " &
+    "the new request was ignored."
+  reRecordAlreadyRunningMessage* =
+    "A recording is already in progress; the new request was ignored."
 
 proc classifyExternalChange*(bufferChanged: bool): ExternalChangeDecision =
   if bufferChanged:
@@ -255,6 +271,10 @@ proc settle(queue: var ReRecordQueue; gate: ReRecordGate;
   case gate
   of rrgDispatch:
     queue.active = false
+    # The request is not over when the recorder is launched — it is over when
+    # the recorder answers.  Holding `recording` across that window is what
+    # makes the request single-flight; `noteRecordFinished` releases it.
+    queue.recording = true
     result.add ReRecordEffect(kind: rreDispatchRecord)
   of rrgWaitForSaves:
     discard
@@ -268,6 +288,19 @@ proc requestReRecord*(queue: var ReRecordQueue; tabs: openArray[SaveTarget];
                       projectOnly: bool): seq[ReRecordEffect] =
   ## Start a re-record request.  Either dispatches immediately, or arms the
   ## queue and returns the saves that will eventually drain it.
+  ##
+  ## A request made while one is already in flight is **refused, out loud**.
+  ## Silently starting a second one is issue #603's remaining defect: it
+  ## doubles the saves (waking the file watchers for CodeTracer's own writes)
+  ## and puts two recorders on the same build directory.  Saying so is also
+  ## the only feedback the user gets during a long build, and the absence of
+  ## any feedback is what provokes the extra press in the first place.
+  if queue.recording:
+    return @[ReRecordEffect(kind: rreWarn,
+                            message: reRecordAlreadyRunningMessage)]
+  if queue.active:
+    return @[ReRecordEffect(kind: rreWarn,
+                            message: reRecordAlreadySavingMessage)]
   queue = ReRecordQueue(active: true, projectOnly: projectOnly)
   let dirty = countDirty(tabs)
   case classifyReRecordRequest(dirty)
@@ -329,9 +362,20 @@ proc applyConflictAction*(queue: var ReRecordQueue; action: FileConflictAction;
       "Re-recording cancelled — some files still have unsaved changes"
   result.add queue.settle(gate, cancelled, abortIsWarning = true)
 
+proc noteRecordFinished*(queue: var ReRecordQueue): seq[ReRecordEffect] =
+  ## The recorder reported back (`successful-record` / `failed-record`).
+  ##
+  ## This is the only thing that reopens the gate for the next Ctrl+R, so
+  ## every reachable exit of the index's record handler has to reach it —
+  ## otherwise "single-flight" degrades into "one flight, ever".
+  queue.recording = false
+
 proc abandonReRecord*(queue: var ReRecordQueue;
                       reason: string): seq[ReRecordEffect] =
   ## Give up on a queued request (watchdog expiry, trace teardown, ...).
+  ##
+  ## Only the *save* half can be abandoned this way: once the recorder is
+  ## running, the process — not a timer — decides when the request ends.
   if not queue.active:
     return
   result = queue.settle(rrgAbort, reason)

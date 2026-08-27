@@ -876,6 +876,12 @@ proc onStopRecordingProcess*(sender: js, response: js) {.async.} =
   if not data.recordProcess.isNil:
     if data.recordProcess.kill():
       data.recordProcess = nil
+      # Clearing the slot here means the killed process no longer owns it and
+      # will report nothing on exit, so the stop has to be reported instead —
+      # the renderer's re-record gate stays shut until a recording it launched
+      # is accounted for.
+      mainWindow.webContents.send "CODETRACER::failed-record",
+        js{errorMessage: cstring"Recording stopped."}
     else:
       warnPrint "Unable to stop recording process"
   else:
@@ -1120,6 +1126,14 @@ proc onRecordWithLaunchConfig*(sender: js,
     data.recordProcess = processResult.value
     let error = await waitProcessResult(processResult.value)
 
+    # Same ownership rule as `onNewRecord`: release the slot on exit, and only
+    # report for the process that still holds it.  Leaving it set here would
+    # make every later re-record look like "a recording is already running".
+    let ownsSlot = not data.recordProcess.isNil and
+      data.recordProcess.pid == processResult.value.pid
+    if ownsSlot:
+      data.recordProcess = nil
+
     if error.isNil:
       infoPrint "index: recorded successfully from launch config, now loading trace..."
       mainWindow.webContents.send "CODETRACER::successful-record"
@@ -1129,7 +1143,7 @@ proc onRecordWithLaunchConfig*(sender: js,
     else:
       errorPrint "record error: ", error
       errorPrint "record error message: ", cast[cstring](error)
-      if not data.recordProcess.isNil:
+      if ownsSlot:
         mainWindow.webContents.send "CODETRACER::failed-record",
           js{errorMessage: cstring"codetracer record command failed"}
   else:
@@ -1211,6 +1225,19 @@ proc onNewRecord*(sender: js,
     response: jsobject(filename=cstring, args=seq[cstring], options=JsObject,
                        projectOnly=bool, recordBackend=cstring)) {.async.}=
   infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly
+  # One recorder at a time.  `data.recordProcess` is a single slot and
+  # `ct build` writes into the target project's own build directory, so a
+  # second `ct record` started while the first is running clobbers the build
+  # and then reports its failure against the other one's slot — the stack of
+  # identical "ct record process started" / "codetracer record command failed"
+  # notifications in issue #603.  The renderer refuses the second request
+  # first; this is the backstop for every other sender.
+  if not data.recordProcess.isNil:
+    warnPrint "index: a record process is already running; refusing a second one"
+    mainWindow.webContents.send "CODETRACER::failed-record",
+      js{errorMessage: cstring"A recording is already running; " &
+                       cstring"wait for it to finish before starting another."}
+    return
   # TODO fix replay
   var recordArgs = response.args
   let recordBackendArgs =
@@ -1329,13 +1356,23 @@ proc onNewRecord*(sender: js,
     data.recordProcess = processResult.value
     let error = await waitProcessResult(processResult.value)
 
+    # Only the process that still owns the slot may report on it, and it
+    # releases the slot as it does.  The old guard was `not
+    # data.recordProcess.isNil`, which is true for *any* live recording — so a
+    # process that had already been superseded reported its own failure
+    # against its successor, and nothing ever cleared the slot (issue #603).
+    let ownsSlot = not data.recordProcess.isNil and
+      data.recordProcess.pid == processResult.value.pid
+    if ownsSlot:
+      data.recordProcess = nil
+
     if error.isNil:
       infoPrint "index: recorded successfully"
       mainWindow.webContents.send "CODETRACER::successful-record"
       await onLoadTraceByRecordProcessId(nil, processResult.value.pid)
     else:
       errorPrint "record error: ", error
-      if not data.recordProcess.isNil:
+      if ownsSlot:
         mainWindow.webContents.send "CODETRACER::failed-record",
           js{errorMessage: cstring"codetracer record command failed"}
 

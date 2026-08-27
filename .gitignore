@@ -234,6 +234,13 @@ src/tests/trace_index.db-wal
 # rewrites it, so a test run leaves one of these behind. The database itself is
 # ignored; its backup is the same thing one step older.
 src/tests/trace_index.db.*.bak
+# SQLite's WAL sidecars. The `*.db` rule below does not reach them — their
+# names end in `-wal` / `-shm`, not `.db` — so a test run that opened the index
+# in WAL mode left two untracked files behind and every later `git status` in
+# this repo reported them. They are regenerable residue of a run, exactly like
+# the database they belong to.
+src/tests/trace_index.db-wal
+src/tests/trace_index.db-shm
 src/tests/programs/b
 src/tests/programs/c
 test_ui

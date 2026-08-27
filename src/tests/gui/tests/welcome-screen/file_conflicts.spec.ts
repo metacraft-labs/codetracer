@@ -34,12 +34,21 @@ async function setActiveEditorValue(ctPage: any, value: string): Promise<void> {
  * ("Building/recording a new trace…") can come and go between two polls.  The
  * observer keeps a de-duplicated log of `<kind-class>|<message>` entries for
  * the rest of the test.
+ *
+ * It ALSO keeps a per-entry count of distinct notification elements, which the
+ * de-duplicated log cannot express and which issue #603 turns on: the reporter
+ * saw a *stack* of identical messages, and the toast stack is capped at three
+ * by `NOTIFICATION_LIMIT` (`src/frontend/ui/status.nim`), so "how many" is only
+ * answerable by counting elements as they are created.  Each element is marked
+ * with `data-ct-counted` the first time it is seen so a re-render or a second
+ * poll cannot inflate the number.
  */
 async function recordNotifications(ctPage: any): Promise<void> {
   await ctPage.evaluate(() => {
     const w = window as any;
     if (w.__ctNotificationLog) return;
     w.__ctNotificationLog = [];
+    w.__ctNotificationCounts = {};
     const capture = () => {
       const host = document.querySelector("#active-notifications");
       if (!host) return;
@@ -54,6 +63,11 @@ async function recordNotifications(ctPage: any): Promise<void> {
         const entry = `${kind}|${message}`;
         if (!w.__ctNotificationLog.includes(entry)) {
           w.__ctNotificationLog.push(entry);
+        }
+        if (!(node as HTMLElement).dataset.ctCounted) {
+          (node as HTMLElement).dataset.ctCounted = "1";
+          w.__ctNotificationCounts[entry] =
+            (w.__ctNotificationCounts[entry] ?? 0) + 1;
         }
       });
     };
@@ -71,6 +85,20 @@ async function seenNotifications(ctPage: any): Promise<string[]> {
   return await ctPage.evaluate(
     () => ((window as any).__ctNotificationLog ?? []) as string[],
   );
+}
+
+/**
+ * How many distinct notification elements carried a message containing
+ * `substring`.  One per dispatch — `renderer.launchReRecord` emits
+ * "Building/recording a new trace…" exactly once per `CODETRACER::new-record`.
+ */
+async function notificationCount(ctPage: any, substring: string): Promise<number> {
+  return await ctPage.evaluate((needle: string) => {
+    const counts = ((window as any).__ctNotificationCounts ?? {}) as Record<string, number>;
+    return Object.keys(counts)
+      .filter((entry) => entry.includes(needle))
+      .reduce((sum, entry) => sum + counts[entry], 0);
+  }, substring);
 }
 
 async function seenErrors(ctPage: any): Promise<string[]> {
@@ -118,6 +146,8 @@ const reRecordFixture = makeFixtureDir(
   "ct-re-record-", 'print("initial")\n');
 const readOnlyFixture = makeFixtureDir(
   "ct-re-record-readonly-", 'print("initial")\n');
+const burstFixture = makeFixtureDir(
+  "ct-re-record-burst-", 'print("initial")\n');
 
 test.describe("External File Changes - clean buffers", () => {
   test.use({ launchMode: "edit", editFolderPath: cleanFixture.dir });
@@ -214,6 +244,73 @@ test.describe("Re-record after edits", () => {
 
     expect(await seenErrors(ctPage)).toEqual([]);
     expect(await pendingReRecordIsSet(ctPage)).toBe(false);
+  });
+});
+
+/**
+ * Issue #603, second defect — the rendering half of the headless suite
+ * "Re-record is single-flight" in `re_record_queue_vm_test.nim`.
+ *
+ * The reporter's two screenshots two months apart both show exactly three
+ * stacked identical notifications.  Three is `NOTIFICATION_LIMIT`
+ * (`src/frontend/ui/status.nim`) — the toast stack's ceiling — so the count
+ * they show is a floor, not a total: the recorder was launched *at least*
+ * three times for one user action.  Concurrent `ct record` runs share the
+ * project build directory and the index's single `data.recordProcess` slot,
+ * so they fight and the program never starts.
+ *
+ * This test counts notification ELEMENTS rather than distinct messages,
+ * because the de-duplicated log the other cases use cannot tell one dispatch
+ * from ten.
+ */
+test.describe("Re-record while one is already running", () => {
+  test.use({ launchMode: "trace", sourcePath: burstFixture.file });
+
+  test("a burst of Ctrl+R presses starts one recorder and says why", async ({ ctPage }) => {
+    test.setTimeout(300_000);
+
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
+    await recordNotifications(ctPage);
+
+    const originalRecordingId = await currentRecordingId(ctPage);
+    expect(originalRecordingId).toBeTruthy();
+
+    await expect.poll(async () => activeEditorValue(ctPage), { timeout: 20_000 })
+      .toContain("initial");
+
+    await enterEditMode(ctPage);
+    await setActiveEditorValue(ctPage, 'print("burst marker")\n');
+    await expect.poll(async () => activeEditorValue(ctPage), { timeout: 10_000 })
+      .toContain("burst marker");
+
+    // Three presses, no waiting between them: key auto-repeat and an
+    // impatient user both look exactly like this.
+    await ctPage.keyboard.press("Control+R");
+    await ctPage.keyboard.press("Control+R");
+    await ctPage.keyboard.press("Control+R");
+
+    // One recorder was launched...
+    await expect.poll(
+      async () => notificationCount(ctPage, "Building/recording a new trace"),
+      { timeout: 60_000 },
+    ).toBe(1);
+
+    // ...and the presses that were refused said so, rather than going quiet.
+    await expect.poll(async () => seenNotifications(ctPage), { timeout: 60_000 })
+      .toEqual(expect.arrayContaining([
+        expect.stringContaining("already"),
+      ]));
+
+    // The single recording still completes and replaces the trace: refusing
+    // the extra presses must not cost the user the one they meant.
+    await expect.poll(async () => currentRecordingId(ctPage), { timeout: 180_000 })
+      .not.toBe(originalRecordingId);
+    expect(await notificationCount(ctPage, "Building/recording a new trace")).toBe(1);
+    expect(await notificationCount(ctPage, "ct record process started")).toBeLessThanOrEqual(1);
+
+    // And the gate reopens afterwards, so re-recording is not a one-shot.
+    await expect.poll(async () => pendingReRecordIsSet(ctPage), { timeout: 30_000 })
+      .toBe(false);
   });
 });
 
