@@ -2605,6 +2605,19 @@ test-ct-test-incremental-e2e:
   source scripts/detect-siblings.sh
   bash ci/lib/run-nim-test-lane.sh ct-test-incremental-e2e
 
+# `ct test`'s test-certificate producer and verifier, plus the walker over the
+# vendor-neutral conformance vectors.  The walker needs the
+# `test-certificates-spec` sibling repo (or CT_TEST_CERTIFICATE_VECTORS
+# pointing at its `vectors` directory) and FAILS rather than skipping without
+# it — a conformance suite that quietly passes when it found nothing to check
+# is worse than no suite.
+test-ct-test-certificates:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-test-certificates.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-test-certificates
+
 # GUI ViewModel suites that spawn a real backend process (`headless_session` /
 # `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until
 # this recipe existed those exclusions pointed at nothing, so three of the four

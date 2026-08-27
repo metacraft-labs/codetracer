@@ -1,8 +1,10 @@
-import std/[json, os, strutils]
+import std/[json, nativesockets, os, strutils, tables]
 
 import contracts
 import discovery
 import run_orchestration
+import certificate
+import certificate_issuance
 import frameworks/ada_fallback
 import frameworks/assembly_fallback
 import frameworks/crystal_spec
@@ -68,7 +70,13 @@ proc ctTestUsageMessage*(): string =
   "discover (--workspace <path> | --file <path>) [--json] " &
   "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
   "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
-  "[--threads N] [--json] [--summary <path>]); " &
+  "[--threads N] [--json] [--summary <path>] " &
+  "[--certificate <path>] [--no-certificate] " &
+  "[--sign-key <path> --key-id <id>]); " &
+  "a passing run issues a test certificate (schema " & CertificateSchema &
+  ", framework " & CtTestFramework & ") in the run summary, and writes it to " &
+  "`--certificate <path>` when one is given; signing is OPTIONAL and OFF " &
+  "unless `--sign-key` is passed; " &
   "discovery is scoped to the workspace's own files by default — " &
   "`--scope` (or the CT_TEST_SCOPE environment variable) selects the rule, " &
   "and `--unscoped` is shorthand for `--scope unscoped`, which INCLUDES " &
@@ -108,6 +116,10 @@ type
     threads: int                 ## 0 ⇒ REPRO_TEST_THREADS / CPU count
     jsonOutput: bool
     summaryPath: string          ## optional path to also write the summary to
+    certificatePath: string      ## optional path to write the certificate to
+    noCertificate: bool          ## suppress issuance entirely
+    signKeyPath: string          ## OpenSSH ed25519 private key; empty ⇒ unsigned
+    keyId: string                ## which key signed, for a consumer's key store
     errors: seq[string]
 
 proc parseRunArgs(args: seq[string]): RunOptions =
@@ -137,6 +149,17 @@ proc parseRunArgs(args: seq[string]): RunOptions =
     of "--summary":
       if i + 1 >= args.len: result.errors.add "missing value for --summary"
       else: result.summaryPath = args[i + 1]; inc i
+    of "--certificate":
+      if i + 1 >= args.len: result.errors.add "missing value for --certificate"
+      else: result.certificatePath = args[i + 1]; inc i
+    of "--no-certificate":
+      result.noCertificate = true
+    of "--sign-key":
+      if i + 1 >= args.len: result.errors.add "missing value for --sign-key"
+      else: result.signKeyPath = args[i + 1]; inc i
+    of "--key-id":
+      if i + 1 >= args.len: result.errors.add "missing value for --key-id"
+      else: result.keyId = args[i + 1]; inc i
     of "--json":
       result.jsonOutput = true
     else:
@@ -144,6 +167,13 @@ proc parseRunArgs(args: seq[string]): RunOptions =
     inc i
   if result.workspaceRoot.len == 0:
     result.errors.add "missing required --workspace <path>"
+  if result.signKeyPath.len > 0 and result.keyId.len == 0:
+    # A signed certificate whose key a consumer cannot resolve is a
+    # certificate nobody can check (Verification.md §3.1), so refuse the
+    # combination up front rather than issuing one.
+    result.errors.add "--sign-key requires --key-id <id>"
+  if result.keyId.len > 0 and result.signKeyPath.len == 0:
+    result.errors.add "--key-id requires --sign-key <path>"
 
 proc emitRunError(messages: seq[string]): int =
   ## Print a partition/argument error as a summary-shaped JSON document with an
@@ -156,6 +186,73 @@ proc emitRunError(messages: seq[string]): int =
     "errors": arr
   }).pretty
   1
+
+proc invocationArgv(args: seq[string]): seq[string] =
+  ## The command this process is executing, as an argument vector.
+  ##
+  ## ``argv[0]`` is the binary's own name (``ct`` or ``ct-test``) rather than
+  ## its full path, so the record is reproducible on another machine; the rest
+  ## is the vector this CLI was handed, verbatim. Producers MUST record what
+  ## was actually run, not a normalised or idealised form (Standard.md §3.3),
+  ## so nothing here rewrites, reorders or drops an argument — secret
+  ## redaction, which the same section asks for, happens in
+  ## ``recordExecutedCommand``.
+  var program = "ct-test"
+  try:
+    program = getAppFilename().lastPathPart
+  except OSError:
+    discard
+  if program.len == 0:
+    program = "ct-test"
+  @[program] & args
+
+proc issuerIdentity(): string =
+  ## Free-form identification of the issuing component. **Informational, and
+  ## explicitly not a trust input** (Standard.md §3.1) — which is why a
+  ## hostname that cannot be read degrades to a constant rather than blocking
+  ## issuance.
+  try:
+    "ct-test@" & getHostname()
+  except CatchableError:
+    "ct-test"
+
+proc certificateReport(issuance: Issuance; writtenTo, writeError: string): JsonNode =
+  ## The ``certificate`` object attached to every run summary.
+  ##
+  ## Present whether or not a certificate was issued: "no certificate, and
+  ## here is why, and here is what would change that" is the report a producer
+  ## owes its user, and silence is what makes a withholding producer unusable.
+  # `vcs` is TRI-state, not a boolean. A run that failed its own gate (no tests
+  # executed, tests failed) never reaches git at all, and reporting that as
+  # "could not determine the repository state" would send an operator after a
+  # VCS problem that does not exist.
+  let vcsState =
+    if not issuance.vcs.probed: "not-probed"
+    elif issuance.vcs.determined: "determined"
+    else: "undetermined"
+  result = %*{
+    "schema": CertificateSchema,
+    "framework": CtTestFramework,
+    "issued": issuance.issued,
+    "vcs": vcsState
+  }
+  if issuance.vcs.determined:
+    result["commit"] = %issuance.vcs.commit
+    result["clean"] = %issuance.vcs.clean
+    result["untracked"] = %issuance.vcs.untracked
+  elif issuance.vcs.probed:
+    result["vcs_undetermined_reason"] = %issuance.vcs.undeterminedReason
+  if issuance.issued:
+    result["signed"] = %issuance.certificate.isSigned
+    result["document"] = %issuance.document
+    if writtenTo.len > 0:
+      result["written_to"] = %writtenTo
+    if writeError.len > 0:
+      result["write_error"] = %writeError
+  else:
+    result["withheld_reason"] = %($issuance.reason)
+    result["message"] = %issuance.message
+    result["remedy"] = %issuance.remedy
 
 proc runRun(args: seq[string]; registry: var ProviderRegistry;
     cache: DiscoveryCache): int =
@@ -191,10 +288,47 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
     return emitRunError(messages)
 
   # Enumerate → filter → run in parallel → aggregate.
-  let units = enumerateRunUnits(response, registry)
-  let runResult = runUnits(registry, units, partition, opts.threads)
-  let summary = summarize(runResult)
-  let summaryJson = summaryToJson(summary)
+  # ---- Run, and attest as a by-product of running --------------------------
+  # `runAndAttest` IS the run: it drives the worker pool and reads the outcome
+  # from the providers' own event streams. There is no way to hand it a result
+  # (Standard.md §6.2), which is why this call replaced a `runUnits` here plus
+  # a separate issuance step that took the events back as arguments.
+  # Withholding never changes the exit code — the tests ran either way, and
+  # only the claim about them is withheld.
+  let outcome = runAndAttest(
+    registry, response, partition, opts.threads,
+    [invocationArgv(@["test", "run"] & args)],
+    IssuanceOptions(
+      disabled: opts.noCertificate,
+      issuer: issuerIdentity(),
+      signingKeyPath: opts.signKeyPath,
+      keyId: opts.keyId))
+  let summary = outcome.summary
+  var summaryJson = summaryToJson(summary)
+
+  if not opts.noCertificate:
+    let issuance = outcome.issuance
+    var writtenTo, writeError: string
+    if issuance.issued and opts.certificatePath.len > 0:
+      try:
+        let parent = parentDir(opts.certificatePath)
+        if parent.len > 0:
+          createDir(parent)
+        writeFile(opts.certificatePath, issuance.document)
+        writtenTo = opts.certificatePath
+      except CatchableError as err:
+        writeError = err.msg
+    summaryJson["certificate"] = certificateReport(issuance, writtenTo, writeError)
+
+    if not issuance.issued:
+      # stderr, so a machine consumer parsing the summary on stdout is
+      # unaffected while a human is told, in one place, what happened and what
+      # to do about it.
+      stderr.writeLine "ct test: no certificate issued — " & issuance.message
+      stderr.writeLine "ct test: " & issuance.remedy
+    elif writeError.len > 0:
+      stderr.writeLine "ct test: certificate issued but not written to " &
+                       opts.certificatePath & ": " & writeError
 
   echo summaryJson.pretty
   if opts.summaryPath.len > 0:
