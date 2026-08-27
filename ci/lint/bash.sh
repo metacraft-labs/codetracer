@@ -157,4 +157,16 @@ lint_step "contract suite: runtime-asset guard (a built ct can start)" \
 lint_step "contract suite: backend-manager checkPhase exclusion guards" \
 	bash ci/test/backend-manager-check-phase-test.sh
 
+# nix/overlays/crates-io-download-url.nix is what lets `importCargoLock` fetch a
+# crate at all: crates.io's API host answers 403 to every `curl/*` User-Agent,
+# which is exactly what `pkgs.fetchurl` sends, so without it `nix build
+# .#backend-manager` / `.#codetracer` dies on its first dependency and takes six
+# jobs with it. It runs here for the same reasons the suite above does -- it
+# instantiates rather than builds, so it needs no rustc and downloads no crate --
+# and because the alternative is learning that the fix rotted from a full nix
+# build. Its one live request is deliberate: only a real request can notice the
+# CDN adopting the API host's policy.
+lint_step "contract suite: crates.io download URL (crate sources are fetchable)" \
+	bash ci/test/crates-io-download-url-test.sh
+
 lint_summary

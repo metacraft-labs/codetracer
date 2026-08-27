@@ -357,6 +357,16 @@
               ];
             };
             overlays = [
+              # crates.io's API host now answers 403 to every `curl/*`
+              # User-Agent, which is exactly what `pkgs.fetchurl` sends, so
+              # `importCargoLock` could not fetch a single Rust crate source
+              # and `nix build .#backend-manager` / `.#codetracer` could not
+              # start. This routes those fetches at `static.crates.io`, the
+              # same substitution nixpkgs made upstream and which our pin
+              # predates. Output paths are unchanged; see the file for the
+              # measurement and for who owns the durable fix.
+              (import ./nix/overlays/crates-io-download-url.nix)
+
               # Substitute nixpkgs' upstream `nimlangserver` source with our
               # metacraft-labs/langserver fork (branch `codetracer`), so the
               # binary in the dev shell carries the `nim/traceExpandMacro`
@@ -395,11 +405,19 @@
                 "electron-24.8.6"
               ];
             };
+            # `nixpkgs-unstable` `follows` `nixpkgs`, so this set is the same
+            # revision and carries the same 403 on every crate download. It gets
+            # the same overlay rather than being left as the one package set in
+            # this flake that still cannot fetch a crate.
+            overlays = [ (import ./nix/overlays/crates-io-download-url.nix) ];
           };
 
           # Pre-commit hooks configuration
           pre-commit.settings = import ./nix/pre-commit.nix {
-            pkgs = import nixpkgs { inherit system; };
+            pkgs = import nixpkgs {
+              inherit system;
+              overlays = [ (import ./nix/overlays/crates-io-download-url.nix) ];
+            };
             rustPkgs = config.packages;
           };
 
