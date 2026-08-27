@@ -88,7 +88,6 @@ pub(crate) fn find_ct_native_replay() -> Result<PathBuf, BoxError> {
         let manifest = PathBuf::from(&manifest_dir);
         let names_and_repos: &[(&str, &str)] = &[
             ("ct-native-replay", "codetracer-native-backend"),
-            ("ct-native-replay", "codetracer-rr-backend"), // legacy repo name
         ];
         for &(bin, repo) in names_and_repos {
             let exe_name = format!("{bin}{}", std::env::consts::EXE_SUFFIX);

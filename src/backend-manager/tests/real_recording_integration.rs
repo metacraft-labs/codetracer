@@ -449,10 +449,6 @@ fn find_ct_native_replay() -> Option<PathBuf> {
         "../../../codetracer-native-backend/target/debug/ct-native-replay",
         "../../../codetracer-native-backend/target/release/ct-native-replay",
         "../../codetracer-native-backend/target/debug/ct-native-replay",
-        // Legacy repo name fallbacks
-        "../../../codetracer-rr-backend/target/debug/ct-native-replay",
-        "../../../codetracer-rr-backend/target/release/ct-native-replay",
-        "../../codetracer-rr-backend/target/debug/ct-native-replay",
     ];
 
     for loc in dev_locations {
@@ -469,10 +465,6 @@ fn find_ct_native_replay() -> Option<PathBuf> {
             "metacraft/codetracer-native-backend/target/debug/ct-native-replay",
             "metacraft/codetracer-main/codetracer-native-backend/target/debug/ct-native-replay",
             "codetracer-native-backend/target/debug/ct-native-replay",
-            // Legacy repo name fallbacks
-            "metacraft/codetracer-rr-backend/target/debug/ct-native-replay",
-            "metacraft/codetracer-main/codetracer-rr-backend/target/debug/ct-native-replay",
-            "codetracer-rr-backend/target/debug/ct-native-replay",
         ];
         for loc in home_locations {
             let path = home_path.join(loc);
@@ -952,8 +944,20 @@ fn create_rr_recording_from_source(
 /// reachable when that opt-out is in force, so the `Err` arms at the call
 /// sites cannot silently turn a broken environment into a green test.
 fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
-    // Gate: the codetracer-native-backend sibling repo must be detected by
-    // detect-siblings.sh (which sets CODETRACER_RR_BACKEND_PATH). The legacy
+    // Gate: the codetracer-native-backend sibling repo must be detected, which
+    // sets CODETRACER_RR_BACKEND_PATH to that checkout.  Two mechanisms do so,
+    // and both are now able to:
+    //
+    //   * `source scripts/detect-siblings.sh` — exports the variable whenever
+    //     the sibling directory is present.
+    //   * the repro dev shell — `repro.nim`'s CodeTracerRepoEnvAliases maps
+    //     the same sibling to the same variable.
+    //
+    // Until this was fixed both keyed on a sibling directory named
+    // `codetracer-rr-backend`, a repository that does not exist (the slug
+    // redirects to codetracer-native-backend, which is what the workspace
+    // manifest declares), so neither ever set the variable and the advice
+    // printed below could not be followed.  The legacy
     // CODETRACER_RR_BACKEND_PRESENT=1 is also accepted for backward compat.
     // This ensures we have the correct rr wrapper and libraries. Without it,
     // tests would find a system rr that may lack soft-mode support, or an
@@ -969,8 +973,14 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
         let msg = "CODETRACER_RR_BACKEND_PATH is not set — the \
                    codetracer-native-backend sibling was not detected, so the \
                    rr wrapper and libraries these tests need are not the ones \
-                   under test.  Run detect-siblings.sh (see \
-                   codetracer-specs/Working-with-the-CodeTracer-Repos.md).";
+                   under test.  Check the sibling is checked out next to \
+                   codetracer (`repro ws enable codetracer` clones it), then \
+                   either enter the repro dev shell or run \
+                   `source scripts/detect-siblings.sh` from the codetracer \
+                   repo root; both export the variable once that directory \
+                   exists.  Verify with \
+                   `bash ci/test/sibling-backend-path-test.sh`.  (See \
+                   codetracer-specs/Working-with-the-CodeTracer-Repos.md.)";
         prereq_missing(msg);
         return Err(msg.to_string());
     }
