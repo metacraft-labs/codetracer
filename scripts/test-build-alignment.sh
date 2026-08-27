@@ -533,6 +533,269 @@ while time.time() < deadline:
 }
 
 # ---------------------------------------------------------------------------
+# (I) Nim flag alignment: the tup lane vs the Nix lane.
+#
+# ## The defect this exists to catch
+#
+# `src/Tuprules.tup` defines NIM_COMMON_FLAGS, and EVERY tup Nim rule carries
+# it: each macro (`!nim_js`, `!nim_node`, `!nim_node_index`, `!codetracer`,
+# `!codetracer_bpf`, ...) expands `$(NIM_SELECTED)`, which is
+# `$(NIM_BIN) $(NIM_DEBUG_FLAGS)`, and NIM_DEBUG_FLAGS opens with
+# `$(NIM_COMMON_FLAGS)`. The Nix lane compiles the SAME sources
+# (`src/frontend/ui_js.nim`, `src/ct/codetracer.nim`, ...) from hand-written
+# flag lists in `nix/packages/default.nix` that were never derived from
+# NIM_COMMON_FLAGS and share no mechanism with it.
+#
+# So a flag can be added to one lane and be silently absent from the other, and
+# the lanes then disagree about the dialect they are compiling. That is not
+# hypothetical. `-d:nimNoLentIterators` is in NIM_COMMON_FLAGS and in NONE of
+# the Nix invocations, which is why `src/frontend/ui_js.nim` compiled green
+# under tup and red under Nix: the failure arrived as an ordinary Nim error
+# inside a store path, naming neither the lane, nor the flag, nor the fact that
+# two lanes existed. `-d:nimOldCaseObjects` is missing from every Nix
+# invocation in exactly the same way and has simply not been stepped on yet.
+#
+# ## Why a recorded baseline and not an equality assertion
+#
+# The two lanes are NOT equal today, and this script cannot make them equal:
+# aligning them means editing the Nix derivations, and that edit is only
+# provable by BUILDING them, which takes a warm store and minutes — the same
+# reason `test-flake-pin-alignment.sh` is a static check. Asserting equality
+# here would therefore either fail on mainline or force a fix nobody could
+# verify from this harness.
+#
+# What this check does instead is pin the divergence to an exact, enumerated
+# baseline. Every absence below is a fact about the tree, recorded rather than
+# left silent. The check fails when the real divergence differs from the record
+# in EITHER direction:
+#
+#   * a flag newly present in one lane and absent in the other (the regression
+#     this exists to catch) adds a line the baseline does not have;
+#   * a divergence that gets FIXED removes a line the baseline still has, so
+#     the record cannot rot into a lie about a problem that is gone;
+#   * a new Nix Nim invocation added with no baseline entry shows up as an
+#     unrecorded target.
+#
+# Diagnostic-only flags (`--hint[...]`, `--warning[...]`, `--hints:`,
+# `--warnings:`) are recorded on the same footing as semantic ones. They do not
+# change generated code, but excluding them by category would mean this harness
+# silently decided which divergences matter, and the whole point is that it
+# decides nothing and reports everything.
+# ---------------------------------------------------------------------------
+
+# The backslash-continued value of NIM_COMMON_FLAGS, one flag per line, in
+# source order. Continuation is detected by testing the last CHARACTER rather
+# than with a `/\\$/` regex: awk reads that as an escaped `$`, i.e. "contains a
+# literal dollar", which silently matches unrelated lines such as
+# `ln -sf $out/nim/bin/nim $out/bin/nim2`.
+tup_common_flags() {
+	awk '
+		function cont(s) { return substr(s, length(s), 1) == "\\" }
+		$0 == "NIM_COMMON_FLAGS=\\" { inblock = 1; next }
+		inblock {
+			line = $0
+			c = cont(line)
+			if (c) { line = substr(line, 1, length(line) - 1) }
+			gsub(/^[ \t]+|[ \t]+$/, "", line)
+			if (line != "") { print line }
+			if (!c) { exit }
+		}
+	' "$REPO_ROOT/src/Tuprules.tup"
+}
+
+# Each `nim2` invocation in the Nix packages, flattened to one line.
+nix_nim_invocations() {
+	awk '
+		function cont(s) { return substr(s, length(s), 1) == "\\" }
+		index($0, "bin/nim2") && cont($0) { inblock = 1; buf = ""; next }
+		inblock {
+			line = $0
+			c = cont(line)
+			if (c) { line = substr(line, 1, length(line) - 1) }
+			gsub(/^[ \t]+|[ \t]+$/, "", line)
+			buf = buf " " line
+			if (!c) { print buf; inblock = 0 }
+		}
+	' "$REPO_ROOT/nix/packages/default.nix"
+}
+
+# `<nix target> <NIM_COMMON_FLAGS entry the Nix invocation does not carry>`
+nim_flag_divergence_actual() {
+	local block target tok flag found
+	local -a toks common
+	mapfile -t common < <(tup_common_flags)
+	while IFS= read -r block; do
+		read -r -a toks <<<"$block"
+		target=""
+		for tok in "${toks[@]}"; do
+			case "$tok" in
+			--out:*) target="${tok#--out:}" ;;
+			esac
+		done
+		[ -n "$target" ] || continue
+		for flag in "${common[@]}"; do
+			found=0
+			for tok in "${toks[@]}"; do
+				if [ "$tok" = "$flag" ]; then
+					found=1
+					break
+				fi
+			done
+			[ "$found" -eq 0 ] && printf '%s %s\n' "$target" "$flag"
+		done
+	done < <(nix_nim_invocations)
+}
+
+# The recorded divergence, as measured at b9677d24. See the header above for
+# what a difference from this list means and how to respond to it.
+nim_flag_divergence_recorded() {
+	cat <<'RECORDED'
+./index.js -d:asyncBackend=asyncdispatch
+./index.js -d:chronicles_line_numbers=true
+./index.js -d:chronicles_timestamps=UnixTime
+./index.js -d:ssl
+./index.js --mm:refc
+./index.js -d:nimNoLentIterators
+./index.js -d:nimOldCaseObjects
+./index.js --hints:off
+./index.js --hint[Processing]:off
+./index.js --hint[Conf]:off
+./index.js --hint[CC]:off
+./index.js --hint[Pattern]:off
+./index.js --hint[XDeclaredButNotUsed]:off
+./index.js --hint[XCannotRaiseY]:off
+./index.js --warning[CaseTransition]:off
+./server_index.js -d:asyncBackend=asyncdispatch
+./server_index.js -d:chronicles_line_numbers=true
+./server_index.js -d:chronicles_timestamps=UnixTime
+./server_index.js -d:ssl
+./server_index.js --mm:refc
+./server_index.js -d:nimNoLentIterators
+./server_index.js -d:nimOldCaseObjects
+./server_index.js --hints:off
+./server_index.js --hint[Processing]:off
+./server_index.js --hint[Conf]:off
+./server_index.js --hint[CC]:off
+./server_index.js --hint[Pattern]:off
+./server_index.js --hint[XDeclaredButNotUsed]:off
+./server_index.js --hint[XCannotRaiseY]:off
+./server_index.js --warning[CaseTransition]:off
+./subwindow.js -d:asyncBackend=asyncdispatch
+./subwindow.js -d:chronicles_sinks=json
+./subwindow.js -d:chronicles_line_numbers=true
+./subwindow.js -d:chronicles_timestamps=UnixTime
+./subwindow.js -d:ssl
+./subwindow.js --mm:refc
+./subwindow.js -d:nimNoLentIterators
+./subwindow.js -d:nimOldCaseObjects
+./subwindow.js --hint[Processing]:off
+./subwindow.js --hint[Conf]:off
+./subwindow.js --hint[CC]:off
+./subwindow.js --hint[Pattern]:off
+./subwindow.js --hint[XDeclaredButNotUsed]:off
+./subwindow.js --hint[XCannotRaiseY]:off
+./subwindow.js --warning[CaseTransition]:off
+./ui.js -d:asyncBackend=asyncdispatch
+./ui.js -d:chronicles_sinks=json
+./ui.js -d:chronicles_line_numbers=true
+./ui.js -d:chronicles_timestamps=UnixTime
+./ui.js -d:ssl
+./ui.js --mm:refc
+./ui.js -d:nimNoLentIterators
+./ui.js -d:nimOldCaseObjects
+./ui.js --hint[Processing]:off
+./ui.js --hint[Conf]:off
+./ui.js --hint[CC]:off
+./ui.js --hint[Pattern]:off
+./ui.js --hint[XDeclaredButNotUsed]:off
+./ui.js --hint[XCannotRaiseY]:off
+./ui.js --warning[CaseTransition]:off
+./console -d:asyncBackend=asyncdispatch
+./console -d:chronicles_sinks=json
+./console -d:chronicles_timestamps=UnixTime
+./console -d:ssl
+./console --mm:refc
+./console -d:nimNoLentIterators
+./console -d:nimOldCaseObjects
+./console --hint[Processing]:off
+./console --hint[Conf]:off
+./console --hint[CC]:off
+./console --hint[Pattern]:off
+./console --hint[XDeclaredButNotUsed]:off
+./console --hint[XCannotRaiseY]:off
+./console --warning[CaseTransition]:off
+ct -d:nimNoLentIterators
+ct -d:nimOldCaseObjects
+ct --hint[Processing]:off
+ct --hint[Conf]:off
+ct --hint[CC]:off
+ct --hint[Pattern]:off
+ct --hint[XCannotRaiseY]:off
+ct --warning[CaseTransition]:off
+db-backend-record -d:nimNoLentIterators
+db-backend-record -d:nimOldCaseObjects
+db-backend-record --hint[Processing]:off
+db-backend-record --hint[Conf]:off
+db-backend-record --hint[CC]:off
+db-backend-record --hint[Pattern]:off
+db-backend-record --hint[XCannotRaiseY]:off
+db-backend-record --warning[CaseTransition]:off
+RECORDED
+}
+
+run_nim_flag_alignment_check() {
+	printf '\n  scenario: nim-flag-alignment (tup NIM_COMMON_FLAGS vs nix/packages/default.nix)\n'
+
+	local common_count invocation_count
+	common_count="$(tup_common_flags | grep -c .)"
+	invocation_count="$(nix_nim_invocations | grep -c .)"
+
+	# A parser that silently matches nothing would make every assertion below
+	# vacuously true, so establish that both sides were actually read.
+	if [ "$common_count" -gt 0 ]; then
+		pass "(I) NIM_COMMON_FLAGS parsed from src/Tuprules.tup ($common_count flags)"
+	else
+		fail "(I) NIM_COMMON_FLAGS parsed from src/Tuprules.tup" \
+			"parsed 0 flags -- the assignment moved or changed shape"
+		return 0
+	fi
+
+	if [ "$invocation_count" -gt 0 ]; then
+		pass "(I') nim invocations parsed from nix/packages/default.nix ($invocation_count)"
+	else
+		fail "(I') nim invocations parsed from nix/packages/default.nix" \
+			"parsed 0 invocations -- the buildPhase shape changed"
+		return 0
+	fi
+
+	local actual recorded delta
+	actual="$(nim_flag_divergence_actual | sort)"
+	recorded="$(nim_flag_divergence_recorded | sort)"
+
+	if [ "$actual" = "$recorded" ]; then
+		pass "(I'') tup/nix Nim flag divergence matches the recorded baseline"
+	else
+		delta="$(diff <(printf '%s\n' "$recorded") <(printf '%s\n' "$actual") |
+			sed -n 's/^< /  no longer diverging (fix the baseline): /p;s/^> /  NEW divergence: /p')"
+		fail "(I'') tup/nix Nim flag divergence matches the recorded baseline" "$delta"
+	fi
+
+	# Called out by name because it is the one that has already cost a debugging
+	# session, and because a baseline is easy to regenerate without reading it.
+	#
+	# Matched against the captured string rather than through `| grep -q`: this
+	# file runs under `set -o pipefail`, and `grep -q` closes the pipe as soon as
+	# it matches, so the producer dies of SIGPIPE and the PIPELINE reports 141 --
+	# a successful match reads as false, and the note silently never prints.
+	case "$actual" in
+	*'-d:nimNoLentIterators'*)
+		printf '    note %s\n' \
+			"-d:nimNoLentIterators is still absent from every nix Nim invocation (blocker (2))"
+		;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
 
 echo "Build-alignment harness: executing scripts/build.sh and scripts/build-once.sh"
 echo "under recording stubs, and comparing their traces."
@@ -543,6 +806,7 @@ run_scenario linux-reprobuild Linux repro src/build-debug-repro CODETRACER_REPRO
 run_scenario darwin Darwin repro src/build-debug-repro
 run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro
 run_port_busy_scenario
+run_nim_flag_alignment_check
 
 printf '\n%d checks, %d failure(s)\n' "$checks" "$failures"
 if [ "$failures" -ne 0 ]; then
