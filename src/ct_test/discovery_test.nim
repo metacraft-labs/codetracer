@@ -1,4 +1,45 @@
-import std/[algorithm, json, os, osproc, strutils, tables, unittest]
+## Tests for workspace/file discovery, the discovery cache, workspace scoping
+## and the workspace-containment bound (discovery.nim).
+##
+## WHAT IS REAL AND WHAT IS MOCKED — read this before adding a case
+## ----------------------------------------------------------------
+## Everything about the workspace is real: real directories on the real
+## filesystem, real files, the real `git ls-files` inventory where a case sets
+## up a repository, and the real `discover` entry point end to end. Several
+## cases additionally spawn the real CLI binary and parse its real JSON.
+##
+## What is faked is only the *provider*, and only where the behaviour under
+## test is a property discovery must hold **whatever a provider does**:
+##
+## * `m1Registry` wraps `discovery.newFakeProviderRegistry`, which is not a
+##   test double at all — it is the shipped M1 `.fake` reference provider,
+##   walking the real workspace and parsing real fixture files. The only thing
+##   added here is a `FakeProviderCounters` recorder, so the cache tests can
+##   assert *how many times* discovery called into a provider; that count is
+##   the behaviour under test and is not observable from a provider's result.
+## * `emptyFileProviderRegistry` — a provider returning an empty catalog, with
+##   or without diagnostics. Discovery's rule ("omit empty catalogs, but never
+##   omit one carrying an error") is about the aggregation, and pinning it to
+##   whichever shipped provider happens to return nothing today would make the
+##   guard depend on that provider's fixtures rather than on the rule.
+## * `escapingRegistry` — a provider that reports item paths verbatim,
+##   including paths outside the workspace root. `boundToWorkspace` exists to
+##   make "a workspace discovery reports only the tests that workspace
+##   contains" a property of discovery rather than of each provider's good
+##   behaviour, so the guard must be driven by a provider that misbehaves.
+##   No shipped provider can be made to: `smart_contract_common.harnessItem`
+##   was the one that escaped, and it is now bounded to the named root, while
+##   every other provider spells `item.file` against the project root — either
+##   `relativePath(file, root)` or a fixed root-relative constant
+##   (`cpp_ctest`) — neither of which can leave it. The bound is also
+##   unreachable from outside the module (`boundToWorkspace` is private, and
+##   `discover` takes a registry), so there is no non-mock route to the drop
+##   path at all.
+##
+## No provider *result* is faked into an assertion: every expected catalog and
+## diagnostic below is what the real code produced from the real tree.
+
+import std/[algorithm, json, os, osproc, sequtils, strutils, tables, unittest]
 
 import contracts
 import discovery
@@ -562,3 +603,92 @@ suite "ct-test workspace scoping guards":
       check cut.output == payload[0 ..< 4]
       check cut.outputBytes == uint64(payload.len)
       check cut.truncated
+
+suite "ct-test workspace containment":
+  ## A workspace discovery answers "which tests does THIS workspace have?".
+  ## An item naming a file outside the named root is not a narrow answer, it
+  ## is a wrong one: `run_orchestration.scopeForItem` resolves item paths
+  ## against that same root (so the provider is invoked on a path that does
+  ## not exist) and `certificate_issuance.targetOfUnit` refuses to attest a
+  ## file the workspace does not contain. Discovery used to have no bound at
+  ## all, which is how the M13 recorder harnesses came to report 330 fixtures
+  ## belonging to sibling repositories the caller never named.
+
+  proc escapingItem(providerId, file: string): TestItem =
+    TestItem(
+      id: makeTestItemId(providerId, "fake", "fixture", file, file),
+      providerId: providerId,
+      language: "fake",
+      framework: "fixture",
+      name: lastPathPart(file),
+      kind: tikCase,
+      file: file,
+      range: SourceRange(startLine: 1, startColumn: 1, endLine: 1,
+          endColumn: 1),
+      selector: file,
+      parentId: "",
+      tags: @[],
+      location: LocationProvenance(source: lskPattern, detail: "fixture",
+          confidence: lcLow),
+      stale: false,
+      staleReason: "")
+
+  proc escapingRegistry(id: string; files: seq[string]): ProviderRegistry =
+    ## A provider that reports the given item paths verbatim, whatever they
+    ## are. Mocked deliberately: no shipped provider can be made to escape on
+    ## demand now that `findRecorderRepo` is bounded, and the guard has to be
+    ## pinned against the escape it exists to stop, not against the one
+    ## provider that used to produce it.
+    let info = testProviderInfo(id)
+    var provider = TestProvider(info: info)
+    provider.detect = proc(projectRoot: string): ProviderResult[
+        bool] {.gcsafe.} =
+      ProviderResult[bool](diagnostics: @[], value: true)
+    provider.discoverProject = proc(projectRoot: string): ProviderResult[
+        TestCatalog] {.gcsafe.} =
+      var catalog = emptyCatalog(info)
+      for file in files:
+        catalog.items.add escapingItem(id, file)
+      ProviderResult[TestCatalog](diagnostics: @[], value: catalog)
+    provider.discoverFile = proc(projectRoot, file: string): ProviderResult[
+        TestCatalog] {.gcsafe.} =
+      ProviderResult[TestCatalog](diagnostics: @[], value: emptyCatalog(info))
+    ProviderRegistry(providers: @[M1Provider(provider: provider,
+        relevantConfigFiles: @[])])
+
+  test "workspace discovery drops items outside the workspace root":
+    let root = makeWorkspace("containment")
+    let outside = expandFilename(getTempDir())
+    let response = discover(
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root),
+      escapingRegistry("escaper", @[
+        "inside/a_test.fake",                    # kept
+        "../outside/b_test.fake",                # escapes upward
+        "sub/../../outside/c_test.fake",         # escapes through an interior ..
+        outside / "d_test.fake",                 # absolute, outside
+        "sub/../inside/e_test.fake"              # interior .., resolves inside
+      ]),
+      newDiscoveryCache())
+    check response.catalogs.len == 1
+    let kept = response.catalogs[0].items.mapIt(it.file)
+    check kept == @["inside/a_test.fake", "sub/../inside/e_test.fake"]
+    let text = messages(response)
+    check text.contains("outside the workspace root")
+    check text.contains("3 test item(s)")
+    removeDir(root)
+
+  test "a workspace-relative path is the same question attestation asks":
+    ## `workspaceRelativePath` is shared with `certificate_issuance` precisely
+    ## so the two cannot drift: whatever discovery keeps is exactly what a
+    ## certificate is able to name.
+    let root = makeWorkspace("containment-shared")
+    check workspaceRelativePath(root, "spec/a_test.rb") == "spec/a_test.rb"
+    check workspaceRelativePath(root, root / "spec/a_test.rb") ==
+      "spec/a_test.rb"
+    check workspaceRelativePath(root, "../elsewhere/a_test.rb") == ""
+    check workspaceRelativePath(root, "sub/../../elsewhere/a_test.rb") == ""
+    # A sibling directory sharing a name prefix is not "inside".
+    check workspaceRelativePath(root, root & "-other/a_test.rb") == ""
+    check isInsideWorkspace(root, "spec/a_test.rb")
+    check not isInsideWorkspace(root, "../elsewhere/a_test.rb")
+    removeDir(root)

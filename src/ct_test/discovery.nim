@@ -252,6 +252,51 @@ proc hasErrorDiagnostics(diagnostics: seq[TestDiagnostic]): bool =
       return true
   false
 
+proc boundToWorkspace(catalog: var TestCatalog;
+    workspaceRoot: string): seq[TestDiagnostic] =
+  ## Drop the items whose file lies outside ``workspaceRoot``, and say so.
+  ##
+  ## A workspace discovery answers one question — *which tests does this
+  ## workspace have?* — so an item naming a file the workspace does not
+  ## contain is not a narrow result, it is a wrong one. It is also unusable
+  ## downstream in both directions: ``run_orchestration.scopeForItem``
+  ## resolves ``item.file`` against this same root, so the provider is invoked
+  ## on a path that does not exist, and ``certificate_issuance.targetOfUnit``
+  ## declines to attest it — leaving a run that reports hundreds of covered
+  ## tests and can certify none of them. That is not hypothetical: the M13
+  ## recorder harnesses used to walk *out* of the workspace to sibling
+  ## repositories, and 330 of a 341-item catalog came from repositories the
+  ## caller never named.
+  ##
+  ## Enforced here, once, rather than in each provider, because "the tests
+  ## this workspace contains" is a property of discovery and not a courtesy
+  ## each provider may forget. The containment test is
+  ## ``workspace_scope.workspaceRelativePath`` — the same one attestation
+  ## applies, so discovery and attribution cannot drift apart again.
+  ##
+  ## Only the *workspace* route is bounded. The ``--file`` route is a file the
+  ## caller named explicitly, which is a deliberate act rather than an escape;
+  ## a provider that resolves some *other* root from it (the recorder
+  ## harnesses) bounds itself there.
+  if workspaceRoot.len == 0 or catalog.items.len == 0:
+    return @[]
+  var kept: seq[TestItem] = @[]
+  var dropped: seq[string] = @[]
+  for item in catalog.items:
+    if item.file.len == 0 or workspaceRelativePath(workspaceRoot,
+        item.file).len > 0:
+      kept.add item
+    else:
+      dropped.add item.file
+  if dropped.len == 0:
+    return @[]
+  catalog.items = kept
+  result.add diagnostic(dsWarning,
+    "provider " & catalog.provider.id & " reported " & $dropped.len &
+    " test item(s) outside the workspace root " & workspaceRoot &
+    " (first: " & dropped[0] & "); they were dropped — a workspace " &
+    "discovery reports only the tests that workspace contains")
+
 proc discover*(
     request: DiscoverRequest;
     registry: ProviderRegistry;
@@ -326,9 +371,11 @@ proc discover*(
         "unsupported provider: " & provider.provider.info.id &
         " cannot discover workspaces")
         continue
-      let providerResult = provider.provider.discoverProject(
+      var providerResult = provider.provider.discoverProject(
           request.workspaceRoot)
       for item in providerResult.diagnostics:
+        result.diagnostics.add item
+      for item in boundToWorkspace(providerResult.value, request.workspaceRoot):
         result.diagnostics.add item
       result.catalogs.add providerResult.value
 

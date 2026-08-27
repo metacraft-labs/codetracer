@@ -453,3 +453,84 @@ iterator walkWorkspaceFiles*(root: string): string =
   let scope = workspaceScope(root)
   for path in scope.files:
     yield path
+
+proc workspaceRelativePath*(workspaceRoot, path: string): string =
+  ## The workspace-relative spelling of ``path``, or ``""`` when ``path`` lies
+  ## **outside** ``workspaceRoot``.
+  ##
+  ## The one containment test in ct_test, shared by the two places that must
+  ## agree about it: discovery, which may not report a test the caller's
+  ## workspace does not contain, and attestation
+  ## (``certificate_issuance.targetOfUnit``), which may not claim coverage of
+  ## one. They were previously separate — discovery had no bound at all — and
+  ## the disagreement was observable: a run could report 331 discovered units
+  ## and attest almost none of them, because the units belonged to sibling
+  ## repositories the certificate's ``[certificate.vcs]`` section does not
+  ## describe.
+  ##
+  ## **Containment is resolved, not spelled.** Deciding it on the written form
+  ## — ``path == ".." or path.startsWith("../")`` — gets three cases wrong: a
+  ## relative path whose *interior* ``..`` escapes
+  ## (``sub/../../outside/tests/o.rb``) is not caught; a legitimate absolute
+  ## path under a **symlinked** workspace root is wrongly rejected; and an
+  ## interior ``..`` that resolves back inside is accepted under its
+  ## unnormalized spelling, so one file can appear twice under two names and
+  ## defeat deduplication. So both sides are resolved first: ``..`` segments
+  ## are collapsed, and the root is additionally resolved through symlinks
+  ## where the filesystem can answer.
+  ##
+  ## The file itself is **not** required to exist. Callers ask this about a
+  ## path a provider reported — a test file deleted mid-run, or a fixture
+  ## enumerated a moment ago — and a ``stat`` would answer a different
+  ## question at a different time.
+  ##
+  ## One residue: a symlinked *directory inside* the root is reported under
+  ## the link spelling rather than the target's, so one file can still be
+  ## named two ways. That is an alias within the workspace rather than an
+  ## escape from it, and resolving it would mean stat-ing every path
+  ## component, which this deliberately does not do.
+  if path.len == 0 or workspaceRoot.len == 0:
+    return ""
+
+  proc resolvedDir(dir: string): string =
+    ## Collapse ``..``/``.`` and, when the directory exists, follow symlinks.
+    ## Falls back to the lexical form so a not-yet-created root still works.
+    let lexical = normalizedPath(absolutePath(dir))
+    try:
+      expandFilename(lexical)
+    except OSError, IOError:
+      lexical
+
+  let roots = block:
+    let lexical = normalizedPath(absolutePath(workspaceRoot))
+    let real = resolvedDir(workspaceRoot)
+    if real == lexical: @[lexical] else: @[lexical, real]
+
+  # Resolve the path against the workspace root when it is relative, then
+  # collapse. `..` that escapes the root survives this as a path outside it,
+  # which the containment test below then rejects.
+  let lexicalPath = normalizedPath(
+    if isAbsolute(path): path
+    else: normalizedPath(absolutePath(workspaceRoot)) / path)
+  # A symlinked root reaches its files under the resolved name, so try that
+  # spelling too — resolving the DIRECTORY only, never requiring the file.
+  let realPath = block:
+    let parent = resolvedDir(parentDir(lexicalPath))
+    if parent.len == 0: lexicalPath else: parent / lastPathPart(lexicalPath)
+
+  for root in roots:
+    for candidate in [lexicalPath, realPath]:
+      if candidate.len <= root.len or not candidate.startsWith(root):
+        continue
+      # Guard the prefix boundary: `/ws-other/x` must not count as inside
+      # `/ws`, which a bare `startsWith` would accept.
+      if candidate[root.len] != DirSep and candidate[root.len] != '/':
+        continue
+      return candidate[root.len + 1 .. ^1].replace('\\', '/')
+  ""
+
+proc isInsideWorkspace*(workspaceRoot, path: string): bool =
+  ## Does ``path`` lie inside ``workspaceRoot``? See ``workspaceRelativePath``,
+  ## whose answer this is the boolean form of — the same resolution, so the two
+  ## questions cannot be answered differently.
+  workspaceRelativePath(workspaceRoot, path).len > 0

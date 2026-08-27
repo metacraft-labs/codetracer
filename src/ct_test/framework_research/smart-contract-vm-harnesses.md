@@ -8,9 +8,22 @@ workspace. Recorder repos are treated as read-only inputs.
 
 Common contract:
 
-- Detect the sibling recorder repo by name from the workspace root or a parent.
+- Detect the sibling recorder repo by name **inside the workspace root the
+  caller named** — either the root *is* that repo (`--workspace
+  codetracer-cairo-recorder`) or it *contains* it as a sibling checkout
+  (`--workspace <multi-repo workspace>`, the usual invocation). Nothing above
+  the named root is searched, and the process working directory is not
+  consulted at all: it decided which repos were found, so the same
+  `--workspace` yielded different suites from different shells, and the
+  fixtures it reached lay outside the workspace, where `ct test` can neither
+  invoke a recorder on them (item paths resolve against the workspace root)
+  nor attest them (`certificate_issuance.targetOfUnit` refuses a file the
+  workspace does not contain). To catalog a sibling's fixtures, name the
+  workspace that contains it.
 - Discover fixtures from each recorder's documented `test-programs` or example
-  directories.
+  directories. Fixture roots below are repo-relative; catalog items report
+  paths relative to the **workspace root**, so they resolve for whichever of
+  the two invocations above was used.
 - Advertise file run/record only when a recorder executable is available on
   `PATH`, in `target/{debug,release}`, or through the provider-specific
   `CODETRACER_*_RECORDER_CMD` environment variable. Sibling `target` binaries

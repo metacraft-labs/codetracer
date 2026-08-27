@@ -48,23 +48,52 @@ proc isIgnored(spec: SmartHarnessSpec; path: string): bool =
   false
 
 proc findRecorderRepo*(spec: SmartHarnessSpec; projectRoot: string): string =
-  var starts = @[projectRoot, getCurrentDir()]
-  if projectRoot.len > 0:
-    starts.add projectRoot.parentDir
-  for start in starts:
-    var dir = absolutePath(start)
-    while dir.len > 0:
-      let direct =
-        if splitPath(dir).tail == spec.recorderRepo:
-          dir
-        else:
-          dir / spec.recorderRepo
-      if dirExists(direct):
-        return direct
-      let parent = dir.parentDir
-      if parent == dir:
-        break
-      dir = parent
+  ## Locate ``spec.recorderRepo`` **inside the workspace root the caller
+  ## named**, or report that it is not there.
+  ##
+  ## Two forms are recognised, and they are the two the recorder harnesses are
+  ## for:
+  ##
+  ## * ``projectRoot`` *is* the recorder repo — ``ct test --workspace
+  ##   codetracer-cairo-recorder``; and
+  ## * ``projectRoot`` *contains* it as a sibling checkout — ``ct test
+  ##   --workspace <multi-repo workspace>``, the invocation the M13 research
+  ##   note describes ("catalog integration for sibling recorder repositories
+  ##   present in the workspace") and the one ``m13_smart_contract_harnesses_
+  ##   test.nim`` exercises.
+  ##
+  ## **Two former search seeds are deliberately gone.**
+  ##
+  ## ``getCurrentDir()`` used to seed the search, so which sibling repos a
+  ## provider found depended on the directory the shell happened to be in.
+  ## The same ``--workspace`` and the same binary discovered 1 catalog / 11
+  ## items from ``$HOME`` and 15 catalogs / 341 items from a checkout inside
+  ## the multi-repo workspace — 330 fixtures belonging to repositories the
+  ## caller never named. A suite whose contents cannot be predicted from the
+  ## command line is not a suite, and the working directory names nothing the
+  ## caller asked for.
+  ##
+  ## The walk up through ``projectRoot``'s *ancestors* was deterministic, but
+  ## escaped the workspace in the same way: with ``--workspace codetracer`` it
+  ## reached the sibling recorder repos one level up and enumerated their
+  ## fixtures as tests of *this* workspace. Those units are unusable in both
+  ## directions — ``run_orchestration.scopeForItem`` resolves an item's file
+  ## against the workspace root, so a fixture living in another repository is
+  ## handed to the recorder under a path that does not exist, and
+  ## ``certificate_issuance.targetOfUnit`` refuses to attest a file the
+  ## workspace does not contain. Discovery now applies the rule attestation
+  ## already applied, instead of contradicting it.
+  ##
+  ## Callers who want a sibling's fixtures still have an exact, deterministic
+  ## way to ask: name the workspace that contains it.
+  if projectRoot.len == 0:
+    return ""
+  let root = normalizedPath(absolutePath(projectRoot))
+  if splitPath(root).tail == spec.recorderRepo and dirExists(root):
+    return root
+  let nested = root / spec.recorderRepo
+  if dirExists(nested):
+    return nested
   ""
 
 proc isExecutableCandidate(path: string): bool =
@@ -195,10 +224,21 @@ proc isFixtureFile(spec: SmartHarnessSpec; projectRoot,
 
 proc harnessItem(spec: SmartHarnessSpec; projectRoot,
     filePath: string): TestItem =
+  ## One catalog item for one fixture file.
+  ##
+  ## ``file`` is relative to the **workspace root**, not to the recorder repo.
+  ## Every consumer of ``item.file`` resolves it against the workspace root —
+  ## ``run_orchestration.scopeForItem`` to build the absolute path the recorder
+  ## is invoked on, ``certificate_issuance.targetOfUnit`` to name what the run
+  ## covered — so a repo-relative spelling was not merely a different
+  ## convention: with any workspace root other than the recorder repo itself it
+  ## pointed at a file that does not exist, and would have had a certificate
+  ## claim coverage of ``test-programs/cairo/flow_test.cairo`` in a repository
+  ## containing no such path. Since ``findRecorderRepo`` now resolves only
+  ## inside the workspace root, this spelling can no longer escape it either.
   let
     info = providerInfo(spec, projectRoot)
-    repo = spec.findRecorderRepo(projectRoot)
-    relative = normalizedRelative(repo, filePath)
+    relative = normalizedRelative(projectRoot, filePath)
     selector = relative
   TestItem(
     id: makeTestItemId(info.id, info.language, info.framework, relative,
@@ -409,6 +449,34 @@ proc runRecorderCommand(spec: SmartHarnessSpec; scope: TestScope;
     ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
 
 proc newSmartHarnessProvider*(spec: SmartHarnessSpec): M1Provider =
+  ## KNOWN GAP — the registry-stored capabilities are computed with no project
+  ## root, and dispatch is gated on them.
+  ##
+  ## ``providerInfo(spec)`` defaults ``projectRoot`` to ``""``, so the
+  ## ``canRunFile``/``canRecordFile`` stored on the provider can only see the
+  ## two root-independent ways to reach a recorder: ``<SPEC>_CMD`` and
+  ## ``PATH``. ``runRecorderCommand`` re-resolves from ``scope.projectRoot``
+  ## and additionally accepts ``<repo>/target/{debug,release}/<binary>`` —
+  ## the location ``just build-siblings`` actually produces, and one nothing
+  ## in this tree exports as either env var or ``PATH`` entry.
+  ##
+  ## So a workspace whose recorder was built but never installed yields a
+  ## catalog that correctly advertises ``canRunFile: true`` (computed with the
+  ## real root) while ``run_orchestration.runUnitOutcome`` consults the stored
+  ## value, finds ``false``, and marks every unit *unrunnable* without ever
+  ## invoking the provider that would have recorded it.
+  ##
+  ## Closing it needs a project-root-aware capability hook that the
+  ## ``TestProvider`` interface does not have: the registry is built once,
+  ## before any workspace is known, and is caller-supplied (a library consumer
+  ## may install its own providers), so it cannot simply be rebuilt per run.
+  ## Gating dispatch on the *catalog's* capabilities instead would contradict
+  ## ``run_orchestration_test``'s "a provider that declares it cannot run is
+  ## never dispatched to", which deliberately makes the registered provider the
+  ## authority. Left as-is rather than half-fixed — but note it is now at least
+  ## *deterministic*: before ``findRecorderRepo`` stopped consulting the
+  ## working directory, the stored value additionally varied with where the
+  ## shell happened to be.
   var provider = TestProvider(info: providerInfo(spec))
   provider.detect = proc(projectRoot: string): ProviderResult[bool] {.gcsafe.} =
     ProviderResult[bool](diagnostics: @[],

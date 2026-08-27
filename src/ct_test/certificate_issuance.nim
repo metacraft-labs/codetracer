@@ -106,6 +106,7 @@ import certificate
 import discovery
 import process_exec
 import run_orchestration
+import workspace_scope
 
 const
   CtTestFramework* = "ct-test"
@@ -810,74 +811,16 @@ proc targetOfUnit(workspaceRoot: string; unit: RunUnit): string =
   ## formally clean and substantively false — a real, passing test bound to a
   ## commit that says nothing about it. Declining to claim it is safe in the
   ## other direction: a certificate covers exactly the targets it names, and
-  ## partial coverage is normal (Standard.md §8). No shipped provider emits an
-  ## absolute ``item.file`` — they all go through ``normalizedRelative`` — so
-  ## nothing reaches that branch through the CLI; it is guarded because an
-  ## in-process caller can supply one.
-  ## **Containment is resolved, not spelled.** An earlier version tested the
-  ## string — ``file == ".." or file.startsWith("../")`` — which decides the
-  ## question by how a path happens to be written and gets three cases wrong:
-  ## a relative path whose *interior* ``..`` escapes
-  ## (``sub/../../outside/tests/o.rb``) is not caught; a legitimate absolute
-  ## path under a **symlinked** workspace root is wrongly rejected, losing a
-  ## target a real test earned; and an interior ``..`` that resolves back
-  ## inside is claimed under its unnormalized spelling, so the same file can
-  ## reach ``targets`` under two names and defeat deduplication.
+  ## partial coverage is normal (Standard.md §8).
   ##
-  ## So both sides are resolved first: ``..`` segments are collapsed, and the
-  ## root is additionally resolved through symlinks where the filesystem can
-  ## answer. The file itself is *not* required to exist. ``item.file`` is what
-  ## the provider reported having **run**, and a stat asks a different question
-  ## at a different time: a file deleted mid-run should still be named, because
-  ## the certificate is a claim about the run, not about the tree afterwards.
-  ##
-  ## One residue, so the dedup argument above is not read as absolute: a
-  ## symlinked *directory inside* the root is claimed under the link spelling
-  ## rather than the target's, so one file can still reach ``targets`` under two
-  ## names. That is an alias within the repository rather than a false claim —
-  ## the commit covers both spellings — and real discovery does not follow
-  ## directory symlinks, so only a hand-built catalog produces it. Resolving it
-  ## would mean stat-ing every path component, which is the stat this
-  ## deliberately does not do.
-  if unit.item.file.len == 0 or workspaceRoot.len == 0:
-    return ""
-
-  proc resolvedDir(path: string): string =
-    ## Collapse ``..``/``.`` and, when the directory exists, follow symlinks.
-    ## Falls back to the lexical form so a not-yet-created root still works.
-    let lexical = normalizedPath(absolutePath(path))
-    try:
-      expandFilename(lexical)
-    except OSError, IOError:
-      lexical
-
-  let roots = block:
-    let lexical = normalizedPath(absolutePath(workspaceRoot))
-    let real = resolvedDir(workspaceRoot)
-    if real == lexical: @[lexical] else: @[lexical, real]
-
-  # Resolve the file against the workspace root when it is relative, then
-  # collapse. `..` that escapes the root survives this as a path outside it,
-  # which the containment test below then rejects.
-  let lexicalFile = normalizedPath(
-    if isAbsolute(unit.item.file): unit.item.file
-    else: normalizedPath(absolutePath(workspaceRoot)) / unit.item.file)
-  # A symlinked root reaches its files under the resolved name, so try that
-  # spelling too — resolving the DIRECTORY only, never requiring the file.
-  let realFile = block:
-    let parent = resolvedDir(parentDir(lexicalFile))
-    if parent.len == 0: lexicalFile else: parent / lastPathPart(lexicalFile)
-
-  for root in roots:
-    for candidate in [lexicalFile, realFile]:
-      if candidate.len <= root.len or not candidate.startsWith(root):
-        continue
-      # Guard the prefix boundary: `/ws-other/x` must not count as inside
-      # `/ws`, which a bare `startsWith` would accept.
-      if candidate[root.len] != DirSep and candidate[root.len] != '/':
-        continue
-      return candidate[root.len + 1 .. ^1].replace('\\', '/')
-  ""
+  ## The containment test itself is ``workspace_scope.workspaceRelativePath``
+  ## — resolved rather than spelled, and shared with discovery so the two
+  ## cannot disagree about which files belong to the workspace. It used to
+  ## live here alone, which is how discovery came to enumerate sibling
+  ## repositories that this proc then refused to attest: the run reported
+  ## hundreds of units and the certificate could claim none of them. Read that
+  ## proc for the three spelling cases the resolution exists to get right.
+  workspaceRelativePath(workspaceRoot, unit.item.file)
 
 proc runAndAttest*(registry: var ProviderRegistry;
                    response: DiscoverResponse;

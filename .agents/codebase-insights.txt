@@ -2373,40 +2373,57 @@ invokes it as `run --bin-dir=… --summary-json=… --results-dir=… --no-build
 <binaries>` — every one of which `parseRunArgs` rejects as an unknown argument.
 The two runners have never been wired to each other.
 
-## `ct test discover|run` enumerate files OUTSIDE the workspace, and the count
-## depends on your shell's CWD
+## `ct test` discovery is bounded by the workspace root you name (and used to
+## depend on your shell's CWD)
 
-`smart_contract_common.findRecorderRepo` walks up from `projectRoot`, from
-`projectRoot.parentDir` **and from `getCurrentDir()`** looking for a sibling
-recorder repo, then `fixtureFiles` enumerates that repo's `test-programs/`
-tree. Those files are not in the workspace and are not reachable from it —
-they arrive purely because of where the shell happened to be.
+`smart_contract_common.findRecorderRepo` resolves a `smart-*` provider's
+recorder repo **inside `projectRoot` only**: either the root IS the recorder
+repo (`--workspace codetracer-cairo-recorder`) or it CONTAINS it as a sibling
+checkout (`--workspace <multi-repo workspace>` — the usual invocation, and the
+one `m13_smart_contract_harnesses_test.nim` exercises with
+`getCurrentDir().parentDir`). Nothing above the named root is searched.
 
-Measured, same `--workspace` (a scratch dir holding one `calc_test.nim`),
-same binary, only the CWD differing:
+It used to also walk up from `projectRoot.parentDir` **and from
+`getCurrentDir()`**, and `fixtureFiles` then enumerated whatever sibling repo
+that found. Measured before the fix, same `--workspace` (a scratch dir holding
+one rspec project), same binary, only the CWD differing:
 
-    cd ~                            → 1 catalog,  2 items
-    cd .../prox-fixes/codetracer    → 15 catalogs, 332 items
+    cd ~                            → 1 catalog,  11 items
+    cd .../prox-fixes/codetracer    → 15 catalogs, 341 items
 
-The 330 extra items are `smart-{cairo,move,evm,solana,fuel,miden,circom,leo,
+The 330 extras were `smart-{cairo,move,evm,solana,fuel,miden,circom,leo,
 polkavm,ton,cardano,flow,wasm,wasmi}` fixtures under the sibling recorder
-repos, with `file` paths like `test-programs/cairo/control_flow_test.cairo`
-relative to the RECORDER repo, not to the workspace. `--scope`/`--unscoped`
-does not affect this: workspace scoping constrains the workspace walk, not
-this second enumeration.
+repos. All three cwds now answer 11. `--scope`/`--unscoped` never affected
+this either way: workspace scoping constrains the workspace walk, not the
+recorder-repo enumeration.
 
-Two consequences worth knowing before debugging either:
+Related invariants worth knowing before touching any of it:
 
-* A run over any workspace looks enormous and is almost entirely
-  `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
-  the CWD is inside a checkout with recorder siblings.
-* The registry's stored `TestProvider.info.capabilities` for `smart-*` is
-  computed by `newSmartHarnessProvider` with `projectRoot = ""`
-  (`smart_contract_common.nim:412`), so `canRunFile` there resolves the
-  recorder from the CWD too. `runRecorderCommand` re-resolves it from
-  `scope.projectRoot`, and the two can disagree when the recorder repo is
-  reachable from the workspace but not from the CWD, and the recorder is
-  neither on PATH nor named by `<SPEC>_CMD`. Since `runUnitOutcome` now gates
-  dispatch on the stored capability, that combination refuses a unit the
-  provider could have recorded. Fixing it properly needs a projectRoot-aware
-  capability hook on the provider interface; there is none today.
+* `item.file` is relative to the **workspace root** for every provider,
+  `smart-*` included (it used to be relative to the recorder repo). Both
+  consumers resolve it against that root — `run_orchestration.scopeForItem`
+  builds the absolute path the provider is invoked on, and
+  `certificate_issuance.targetOfUnit` names it as what the run covered — so a
+  repo-relative spelling silently pointed at a non-existent file and would
+  have had a certificate claim `test-programs/…` of a repo with no such path.
+* Containment is one shared, resolved (not spelled) test:
+  `workspace_scope.workspaceRelativePath` / `isInsideWorkspace`, used by
+  `discovery.boundToWorkspace` (which drops out-of-workspace items from a
+  workspace discovery and warns) and by `targetOfUnit`. Keep them sharing it;
+  discovery enumerating what attestation refuses to claim is exactly the
+  defect above.
+* KNOWN GAP: the registry's stored `TestProvider.info.capabilities` for
+  `smart-*` is computed by `newSmartHarnessProvider` with `projectRoot = ""`,
+  so its `canRunFile` can only see `<SPEC>_CMD` and `PATH`, while
+  `runRecorderCommand` re-resolves from `scope.projectRoot` and also accepts
+  `<repo>/target/{debug,release}/<binary>` — the location `just
+  build-siblings` produces and nothing in this tree exports. Since
+  `runUnitOutcome` gates dispatch on the stored value, a workspace whose
+  recorder was built but not installed gets a catalog advertising
+  `canRunFile: true` and every unit refused as `unrunnable`. Deterministic
+  now (it used to vary with the CWD too), but still wrong. Fixing it needs a
+  projectRoot-aware capability hook the provider interface does not have: the
+  registry is built once before any workspace is known and is caller-supplied,
+  and gating on the catalog's capabilities instead would contradict
+  `run_orchestration_test`'s "a provider that declares it cannot run is never
+  dispatched to".
