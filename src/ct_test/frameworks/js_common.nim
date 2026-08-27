@@ -485,6 +485,254 @@ proc ctFilesUnder(root: string): seq[string] =
       result.add path
   result.sort(system.cmp[string])
 
+# ---------------------------------------------------------------------------
+# node:test's machine-readable results
+# ---------------------------------------------------------------------------
+
+type
+  NodeTapResults* = object
+    ## What ``node --test``'s TAP stream said — or, when it could not be
+    ## trusted, why not.
+    ##
+    ## Same shape and same reason as ``ruby_common.RspecJsonResults``: an empty
+    ## ``events`` seq is ambiguous between "the runner matched no test" and
+    ## "there was nothing here to read", and only the second may fall back to
+    ## the exit code.
+    usable*: bool
+    reason*: string
+    events*: seq[TestEvent]
+
+  TapPoint = object
+    ## One TAP test point: an ``ok`` / ``not ok`` line plus what its YAML block
+    ## said about it.
+    ok: bool
+    name: string
+    directive: string      ## upper-cased ``SKIP`` / ``TODO``, or empty
+    isSuite: bool          ## ``type: 'suite'`` — a container, not a test
+    error: string
+    durationMs: int
+
+proc indentOf(line: string): int =
+  while result < line.len and line[result] == ' ':
+    inc result
+
+proc unquoteYaml(raw: string): string =
+  let trimmed = raw.strip
+  if trimmed.len >= 2 and trimmed[0] == trimmed[^1] and
+      trimmed[0] in {'\'', '"'}:
+    trimmed[1 ..< trimmed.high]
+  else:
+    trimmed
+
+proc parseTapPointLine(body: string): tuple[ok: bool; found: bool;
+    name: string; directive: string] =
+  ## Split ``ok 3 - name # SKIP why`` (or ``not ok 3 - name``) into its parts.
+  ##
+  ## ``body`` is the line with its leading indentation already removed; TAP
+  ## nests subtests by indentation and node uses that for ``describe`` blocks,
+  ## so the caller strips it rather than this routine assuming column 0.
+  var rest = body
+  var ok = true
+  if rest.startsWith("not ok"):
+    ok = false
+    rest = rest["not ok".len .. ^1]
+  elif rest.startsWith("ok"):
+    rest = rest["ok".len .. ^1]
+  else:
+    return (false, false, "", "")
+  # A bare `ok`/`not ok` must be followed by a separator, or `okay_thing` and
+  # `not okay` would parse as test points.
+  if rest.len > 0 and rest[0] notin {' ', '\t'}:
+    return (false, false, "", "")
+  rest = rest.strip
+  # Drop the test number.
+  var i = 0
+  while i < rest.len and rest[i].isDigit:
+    inc i
+  rest = rest[i .. ^1].strip
+  if rest.startsWith("-"):
+    rest = rest[1 .. ^1].strip
+  # ` # DIRECTIVE reason` — TAP's own escape is `\#`, which node does not emit
+  # but which must not be mistaken for a directive if it ever does.
+  var directive = ""
+  var name = rest
+  var hash = -1
+  var j = 0
+  while j < rest.len:
+    if rest[j] == '\\':
+      inc j
+    elif rest[j] == '#':
+      hash = j
+      break
+    inc j
+  if hash >= 0:
+    name = rest[0 ..< hash].strip
+    let note = rest[(hash + 1) .. ^1].strip
+    let firstWord = note.split({' ', '\t'})[0]
+    if firstWord.len > 0:
+      directive = firstWord.toUpperAscii
+  (ok, true, name, directive)
+
+proc parseNodeTapResults*(
+    providerId, runId, fallbackTestId, raw: string): NodeTapResults =
+  ## Turn ``node --test``'s TAP stream into one ``tekTestFinished`` per test.
+  ##
+  ## **This is the node:test provider's status decision**, and the exit code is
+  ## consulted only when this returns ``usable = false``. ``node --test`` with
+  ## every test skipped prints ``# pass 0`` / ``# skipped 2`` and **exits 0**,
+  ## so an exit-code verdict reports the file as passing and
+  ## ``certificate_issuance`` then claims it as a covered target
+  ## (Standard.md §8 forbids exactly that).
+  ##
+  ## **No command flag is involved, deliberately.** ``node --test`` selects its
+  ## reporter by whether stdout is a TTY — ``spec`` when it is, ``tap`` when it
+  ## is not — and ``ct test`` always captures, so this stream is already TAP
+  ## and the user's visible output is unchanged by reading it. Passing
+  ## ``--test-reporter=tap`` to say so explicitly would buy nothing and would
+  ## break Node 18.1–18.14, which have ``--test`` but not ``--test-reporter``.
+  ## What guards the assumption is not a flag but the cross-check below.
+  ##
+  ## **The cross-check is the load-bearing part.** Parsing a nested TAP stream
+  ## by hand can go wrong quietly — a ``describe`` block emits its own
+  ## ``not ok`` line (``type: 'suite'``) that must NOT be counted, and a format
+  ## change could make every point unrecognisable. Under-counting is the
+  ## dangerous direction: zero events would read as "this unit executed
+  ## nothing" and *withhold* a certificate that should have been issued. So the
+  ## parsed tallies are checked against node's own trailing ``# tests`` /
+  ## ``# pass`` / ``# fail`` / ``# skipped`` / ``# todo`` counters, and any
+  ## disagreement is reported as unusable rather than believed.
+  ##
+  ## ``todo`` maps to ``tsSkipped``, not ``tsPassed``, and the directive is
+  ## what decides it rather than the ``ok`` / ``not ok`` beside it. Node writes
+  ## BOTH spellings — measured on Node 22.22: a passing ``todo`` is
+  ## ``ok N - name # TODO``, one whose body throws is
+  ## ``not ok N - name # TODO`` — and counts both under ``# todo`` rather than
+  ## under ``# pass`` or ``# fail``. So a todo result is not evidence that
+  ## anything held, whichever way node spelled it.
+  var
+    points: seq[TapPoint] = @[]
+    sawVersion = false
+    sawPlan = false
+    counters = initTable[string, int]()
+    lines = raw.splitLines
+    i = 0
+  while i < lines.len:
+    let
+      line = lines[i]
+      indent = indentOf(line)
+      body = line[min(indent, line.len) .. ^1]
+    inc i
+
+    if body.startsWith("TAP version"):
+      sawVersion = true
+      continue
+    if indent == 0 and body.startsWith("1.."):
+      sawPlan = true
+      continue
+    if indent == 0 and body.startsWith("# "):
+      # The trailing summary block: `# tests 5`, `# pass 2`, …
+      let parts = body[2 .. ^1].strip.splitWhitespace()
+      if parts.len == 2:
+        try:
+          counters[parts[0]] = parseInt(parts[1])
+        except ValueError:
+          discard
+      continue
+
+    let parsed = parseTapPointLine(body)
+    if not parsed.found:
+      continue
+
+    var point = TapPoint(ok: parsed.ok, name: parsed.name,
+        directive: parsed.directive, isSuite: false, error: "", durationMs: 0)
+    # The YAML block that follows describes the point: `type:` says whether it
+    # is a test or a suite, `error:` says why it failed.
+    if i < lines.len and lines[i].strip == "---":
+      let yamlIndent = indentOf(lines[i])
+      inc i
+      while i < lines.len:
+        let
+          yamlLine = lines[i]
+          yamlBody = yamlLine[min(indentOf(yamlLine), yamlLine.len) .. ^1]
+        if indentOf(yamlLine) == yamlIndent and yamlBody == "...":
+          inc i
+          break
+        if indentOf(yamlLine) == yamlIndent:
+          if yamlBody.startsWith("type:"):
+            point.isSuite = unquoteYaml(yamlBody["type:".len .. ^1]) == "suite"
+          elif yamlBody.startsWith("error:"):
+            point.error = unquoteYaml(yamlBody["error:".len .. ^1])
+          elif yamlBody.startsWith("duration_ms:"):
+            try:
+              point.durationMs = int(
+                parseFloat(yamlBody["duration_ms:".len .. ^1].strip))
+            except ValueError:
+              discard
+        inc i
+    points.add point
+
+  if not sawVersion or not sawPlan:
+    return NodeTapResults(usable: false,
+      reason: "node --test did not produce a TAP stream (no `TAP version` " &
+        "header or no plan line); its reporter may have been overridden")
+  for required in ["tests", "pass", "fail", "skipped", "todo"]:
+    if not counters.hasKey(required):
+      return NodeTapResults(usable: false,
+        reason: "node --test's TAP stream carried no `# " & required &
+          "` summary counter, so its per-test results could not be checked")
+
+  var
+    events: seq[TestEvent] = @[]
+    passed = 0
+    failed = 0
+    skipped = 0
+  for point in points:
+    if point.isSuite:
+      continue
+    let status =
+      if point.directive in ["SKIP", "TODO"]: tsSkipped
+      elif point.ok: tsPassed
+      else: tsFailed
+    case status
+    of tsPassed: inc passed
+    of tsSkipped: inc skipped
+    else: inc failed
+    let testId = if point.name.len > 0: point.name else: fallbackTestId
+    if testId.len == 0:
+      return NodeTapResults(usable: false,
+        reason: "a node --test TAP point carried no name, so its result " &
+          "could not be attributed")
+    let message =
+      if point.error.len > 0: $status & ": " & point.error
+      else: $status
+    events.add event(tekTestFinished, providerId, runId, testId, some(status),
+      message, durationMs = point.durationMs)
+
+  # THE CROSS-CHECK. `# tests` counts leaf tests and excludes suites, and
+  # `# skipped` + `# todo` is what this maps onto `tsSkipped`, so agreement on
+  # all three tallies means the walk above saw exactly what node reported.
+  #
+  # `# cancelled` is deliberately NOT folded into any of them. A cancelled test
+  # is rare, its TAP spelling is not pinned by a test here, and guessing which
+  # tally it lands in would make a WRONG parse pass this check — which is worse
+  # than the alternative, since a run containing one simply falls back to the
+  # exit code with the mismatch spelled out in `reason`.
+  let
+    expectedTotal = counters["tests"]
+    expectedPassed = counters["pass"]
+    expectedFailed = counters["fail"]
+    expectedSkipped = counters["skipped"] + counters["todo"]
+  if events.len != expectedTotal or passed != expectedPassed or
+      failed != expectedFailed or skipped != expectedSkipped:
+    return NodeTapResults(usable: false,
+      reason: "node --test's TAP stream did not parse consistently with its " &
+        "own summary (parsed " & $events.len & " tests / " & $passed &
+        " passed / " & $failed & " failed / " & $skipped &
+        " skipped+todo; node reported " & $expectedTotal & " / " &
+        $expectedPassed & " / " & $expectedFailed & " / " & $expectedSkipped &
+        ")")
+  NodeTapResults(usable: true, reason: "", events: events)
+
 proc selectedSingleCaseOnly(projectRoot, filePath, selector: string): bool =
   let catalog =
     parseJsTestDeclarations(projectRoot, filePath, readFile(filePath))
@@ -530,12 +778,75 @@ proc runNodeTestCommand*(providerId: string; scope: TestScope): ProviderResult[
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
 
+    # ---- Per-test results, with the exit code as the fallback ---------------
+    # Read before the exit-code branch below: when node produced a TAP stream
+    # that stream is a strictly better answer than its exit status, which
+    # cannot tell an all-skipped file from a fully-passing one.
+    let reported = parseNodeTapResults(providerId, runId, testId, result.output)
+    if reported.usable:
+      var
+        anyFailed = false
+        anyPassed = false
+        anySkipped = false
+      for finished in reported.events:
+        let status = finished.status.get(tsErrored)
+        case status
+        of tsFailed, tsErrored:
+          anyFailed = true
+          events.add event(tekFailure, providerId, runId, finished.testId,
+              some(status), finished.message, result.output)
+        of tsPassed: anyPassed = true
+        of tsSkipped: anySkipped = true
+        events.add finished
+
+      let runStatus =
+        if anyFailed: tsFailed
+        elif anyPassed: tsPassed
+        elif anySkipped: tsSkipped
+        else: tsErrored
+      events.add event(tekRunFinished, providerId, runId, testId,
+          some(runStatus), $runStatus)
+
+      var diagnostics: seq[TestDiagnostic] = @[]
+      if anyFailed:
+        diagnostics.add diagnostic(dsError,
+            "node:test execution failed: at least one test did not pass " &
+            "(exit code " & $result.exitCode & ")",
+            scope.file)
+      elif result.exitCode != 0:
+        # A non-zero exit its own TAP stream does not explain — a module that
+        # threw at load, an uncaught async error after the plan. Never
+        # swallowed.
+        diagnostics.add diagnostic(dsError,
+            "node --test exited with " & $result.exitCode &
+            " but reported no failing test; treat the run as failed and " &
+            "check the output for an error outside the tests",
+            scope.file)
+      elif reported.events.len == 0:
+        diagnostics.add diagnostic(dsWarning,
+            "node --test matched no test for " &
+            (if scope.selector.len > 0: scope.selector else: scope.file) &
+            "; nothing executed, so this unit attests nothing",
+            scope.file)
+      return ProviderResult[seq[TestEvent]](diagnostics: diagnostics,
+          value: events)
+
+    # ---- The exit-code decision --------------------------------------------
+    # The fallback when no trustworthy TAP stream was produced. It cannot see a
+    # skip — announced rather than assumed, so a run that regressed onto this
+    # path says so instead of looking identical to a per-test one.
+    var diagnostics = @[diagnostic(dsWarning,
+        "falling back to node --test's exit code for this unit's status: " &
+        reported.reason &
+        ". An exit code cannot distinguish a skipped test from a passing " &
+        "one, so a skip in this unit is reported as a pass",
+        scope.file)]
     if result.exitCode == 0:
       events.add event(tekTestFinished, providerId, runId, testId, some(
           tsPassed), "passed")
       events.add event(tekRunFinished, providerId, runId, testId, some(
           tsPassed), "passed")
-      ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
+      ProviderResult[seq[TestEvent]](diagnostics: diagnostics, value: events)
     else:
       events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
           "node --test exited with " & $result.exitCode, result.output)
@@ -543,11 +854,10 @@ proc runNodeTestCommand*(providerId: string; scope: TestScope): ProviderResult[
           tsFailed), "failed")
       events.add event(tekRunFinished, providerId, runId, testId, some(
           tsFailed), "failed")
-      ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "node:test execution failed with exit code " & $result.exitCode,
-            scope.file)],
-        value: events)
+      diagnostics.add diagnostic(dsError,
+          "node:test execution failed with exit code " & $result.exitCode,
+          scope.file)
+      ProviderResult[seq[TestEvent]](diagnostics: diagnostics, value: events)
 
 proc recordNodeTestCommand*(providerId: string;
     scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =

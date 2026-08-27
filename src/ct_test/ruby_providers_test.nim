@@ -202,6 +202,35 @@ proc writeExecutable(path, contents: string) =
   writeFile(path, contents)
   setFilePermissions(path, {fpUserExec, fpUserRead, fpUserWrite})
 
+proc diagnosticText(runResult: ProviderResult[seq[TestEvent]]): string =
+  var parts: seq[string] = @[]
+  for item in runResult.diagnostics:
+    parts.add $item.severity & ": " & item.message
+  parts.join("\n")
+
+proc rspecScratchProject(
+    name, specFileName, specSource: string;
+    rspecOptions = ""): string =
+  ## Materialise a throwaway rspec project for one test.
+  ##
+  ## The Gemfile and Gemfile.lock are copied verbatim from
+  ## ``fixtures/ruby_rspec_project``, so once ``ensureRubyBundle(rspecRoot())``
+  ## has installed that bundle (and pointed ``BUNDLE_PATH`` at it) this project
+  ## resolves against the same gems with no second install and no network.
+  ##
+  ## Scratch rather than a checked-in fixture on purpose: the workspace-scope
+  ## discovery assertions above pin ``ruby_rspec_project``'s exact item count,
+  ## so a new spec file dropped in there would break a test that has nothing to
+  ## do with skips.
+  result = getTempDir() / (name & "-" & $getCurrentProcessId())
+  removeDir(result)
+  createDir(result / "spec")
+  copyFile(rspecRoot() / "Gemfile", result / "Gemfile")
+  copyFile(rspecRoot() / "Gemfile.lock", result / "Gemfile.lock")
+  if rspecOptions.len > 0:
+    writeFile(result / ".rspec", rspecOptions)
+  writeFile(result / "spec" / specFileName, specSource)
+
 suite "ct-test M9 Ruby RSpec and Minitest providers":
   test "RSpec detects project and discovers nested examples with source ranges":
     check hasRspecProject(rspecRoot())
@@ -463,7 +492,10 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
         }
       ]
     }
-    let events = parseRspecJsonResults("ruby-rspec", "run-1", $rspecJson)
+    let parsed = parseRspecJsonResults("ruby-rspec", "run-1", $rspecJson)
+    check parsed.usable
+    check parsed.reason.len == 0
+    let events = parsed.events
     check events.len == 2
     check events[0].status.get == tsPassed
     check events[0].durationMs == 12
@@ -576,6 +608,250 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
     else:
       check runResult.value.len > 0 or runResult.diagnostics.len > 0
       check recordResult.value.len > 0 or recordResult.diagnostics.len > 0
+
+  test "RSpec reports a pending example as skipped rather than as a pass":
+    ## THE REGRESSION. rspec exits 0 for a suite in which every example is
+    ## `pending`, and the provider's only status source was that exit code, so
+    ## an all-pending file reported `tsPassed` — which
+    ## `certificate_issuance.recordUnitResult` then counted as an executed test
+    ## and claimed as a covered target. Measured through the shipped
+    ## `ct-test test run` CLI on exactly this suite, before the fix:
+    ##
+    ##   executed 3, passed 3, skipped 0, verdict "passed", exit 0
+    ##   certificate ISSUED, targets = ["spec/pending_spec.rb"]
+    ##
+    ## after:
+    ##
+    ##   executed 0, skipped 4, verdict "nothing-executed", exit 2
+    ##   certificate WITHHELD (wrNoTestsExecuted), no target claimed
+    ##
+    ## A skip must land on `tsSkipped` and NOT on `tsFailed`: the point is that
+    ## skips stop being claimed as passes, not that they start reddening
+    ## suites, so this asserts the run carries no failure and no diagnostic
+    ## either.
+    ensureRubyBundle(rspecRoot())
+    let project = rspecScratchProject("ct-rspec-pending", "pending_spec.rb", """
+RSpec.describe "all pending" do
+  it "is skipped", skip: "not implemented yet" do
+    expect(1).to eq(2)
+  end
+
+  it "is also skipped", skip: "still not implemented" do
+    expect(1).to eq(3)
+  end
+end
+""")
+    defer: removeDir(project)
+
+    let provider = newRubyRspecM1Provider()
+    let runResult = provider.provider.run(TestScope(
+      kind: tskFile,
+      projectRoot: project,
+      file: project / "spec" / "pending_spec.rb",
+      selector: "spec/pending_spec.rb"))
+
+    if runResult.diagnostics.len > 0:
+      checkpoint(runResult.diagnosticText)
+    check runResult.diagnostics.len == 0
+
+    let finished = runResult.value.eventsOfKind(tekTestFinished)
+    check finished.len == 2
+    for event in finished:
+      check event.status.get == tsSkipped
+    check runResult.value.eventsOfKind(tekFailure).len == 0
+    check runResult.value.eventsOfKind(tekRunFinished).len == 1
+    for event in runResult.value.eventsOfKind(tekRunFinished):
+      check event.status.get == tsSkipped
+
+    # `--format json --out FILE` alone would have silenced rspec's terminal
+    # output entirely; the explicit `--format progress` beside it is what keeps
+    # this line in the captured stream.
+    check runResult.value.outputContains("2 examples, 0 failures, 2 pending")
+    for event in runResult.value:
+      check event.validateEvent.valid
+
+  test "RSpec still reports a real failure as a failure":
+    ## The counterpart to the test above, and the reason it is a separate case:
+    ## routing status through rspec's JSON must not turn failures into skips
+    ## either. A file with one passing and one failing example must report
+    ## exactly that, with the failure's message carried on a `tekFailure`.
+    ensureRubyBundle(rspecRoot())
+    let project = rspecScratchProject("ct-rspec-mixed", "mixed_spec.rb", """
+RSpec.describe "mixed" do
+  it "passes" do
+    expect(1 + 1).to eq(2)
+  end
+
+  it "fails" do
+    expect(1).to eq(2)
+  end
+
+  it "is skipped", skip: "not implemented yet" do
+    expect(1).to eq(3)
+  end
+end
+""")
+    defer: removeDir(project)
+
+    let provider = newRubyRspecM1Provider()
+    let runResult = provider.provider.run(TestScope(
+      kind: tskFile,
+      projectRoot: project,
+      file: project / "spec" / "mixed_spec.rb",
+      selector: "spec/mixed_spec.rb"))
+
+    let finished = runResult.value.eventsOfKind(tekTestFinished)
+    check finished.len == 3
+    var passed, failed, skipped = 0
+    for event in finished:
+      case event.status.get(tsErrored)
+      of tsPassed: inc passed
+      of tsFailed, tsErrored: inc failed
+      of tsSkipped: inc skipped
+    check passed == 1
+    check failed == 1
+    check skipped == 1
+    check runResult.value.eventsOfKind(tekFailure).len == 1
+    check runResult.diagnostics.len == 1
+    check runResult.diagnosticText.contains(
+      "rspec reported at least one failing example")
+    for event in runResult.value:
+      check event.validateEvent.valid
+
+  test "an rspec run that writes no JSON falls back to its exit code and says so":
+    ## The fallback must survive, and must be AUDIBLE. An invalid option in
+    ## `.rspec` makes rspec abort during option parsing, before any formatter
+    ## exists, so nothing is ever written to the `--out` path — the same shape
+    ## as a signal, a bundler failure or a crash in `spec_helper`. The path
+    ## itself was created (exclusively) before rspec was launched, so what is
+    ## left behind is an EMPTY file rather than no file at all; both spellings
+    ## of the reason start "rspec wrote no JSON results to", which is what this
+    ## asserts.
+    ##
+    ## What the provider owes its caller here is a result, not silence: the
+    ## exit code still decides (so the aborted run is reported as failed), and
+    ## a warning names the reason so a run that quietly regressed onto the
+    ## exit-code path cannot be mistaken for a per-test one.
+    ensureRubyBundle(rspecRoot())
+    let project = rspecScratchProject("ct-rspec-no-json", "ok_spec.rb", """
+RSpec.describe "fine" do
+  it "passes" do
+    expect(1).to eq(1)
+  end
+end
+""", rspecOptions = "--totally-not-an-rspec-option\n")
+    defer: removeDir(project)
+
+    let provider = newRubyRspecM1Provider()
+    let runResult = provider.provider.run(TestScope(
+      kind: tskFile,
+      projectRoot: project,
+      file: project / "spec" / "ok_spec.rb",
+      selector: "spec/ok_spec.rb"))
+
+    let messages = runResult.diagnosticText
+    checkpoint(messages)
+    check messages.contains("falling back to rspec's exit code")
+    check messages.contains("rspec wrote no JSON results to")
+    check messages.contains("Ruby test execution failed with exit code")
+
+    let finished = runResult.value.eventsOfKind(tekTestFinished)
+    check finished.len == 1
+    for event in finished:
+      check event.status.get == tsFailed
+    for event in runResult.value:
+      check event.validateEvent.valid
+
+  test "rspec's unexplained non-zero exit is reported rather than swallowed":
+    ## A spec file that fails to LOAD: rspec writes a perfectly well-formed
+    ## JSON document whose `examples` array is empty, and exits 1. The document
+    ## is usable — it truthfully says nothing ran — so no test event is
+    ## emitted and no target can be claimed; but an exit code the example list
+    ## does not explain must still be reported as an error rather than
+    ## disappearing behind "no failing example".
+    ensureRubyBundle(rspecRoot())
+    let project = rspecScratchProject("ct-rspec-load-error",
+      "broken_spec.rb", "this is not ruby (((\n")
+    defer: removeDir(project)
+
+    let provider = newRubyRspecM1Provider()
+    let runResult = provider.provider.run(TestScope(
+      kind: tskFile,
+      projectRoot: project,
+      file: project / "spec" / "broken_spec.rb",
+      selector: "spec/broken_spec.rb"))
+
+    let messages = runResult.diagnosticText
+    checkpoint(messages)
+    check messages.contains("reported no failing example")
+    check runResult.value.eventsOfKind(tekTestFinished).len == 0
+
+  test "rspec's command asks for JSON results without silencing the terminal":
+    ## `--out` binds to the `--format` immediately before it, so the argument
+    ## order here is load-bearing: `--format progress` keeps a human-readable
+    ## stream on stdout (rspec installs its default formatter only when NO
+    ## formatter has been configured, and a file-bound one counts), and
+    ## `--format json --out PATH` puts the machine-readable document where the
+    ## provider can read it.
+    ##
+    ## Minitest is handed the same argument and must ignore it: there is no
+    ## minitest equivalent, and the point of the shared proc is that adding one
+    ## for rspec did not fork it.
+    let jsonOut = "/tmp/ct-test-rspec-results.json"
+    check buildRubyCommand(rfkRSpec, rspecRoot(), rspecSample(),
+        RspecAddsSelector, rcsFile, jsonOut) == @[
+          "bundle", "exec", "rspec", "spec/calculator_spec.rb",
+          "--format", "progress", "--format", "json", "--out", jsonOut]
+    check buildRubyCommand(rfkRSpec, rspecRoot(), rspecSample(),
+        RspecAddsSelector, rcsSingle, jsonOut) == @[
+          "bundle", "exec", "rspec", RspecAddsSelector,
+          "--format", "progress", "--format", "json", "--out", jsonOut]
+    check buildRubyCommand(rfkMinitest, minitestRoot(), minitestSample(),
+        MinitestAddsSelector, rcsFile, jsonOut) == @[
+          "bundle", "exec", "ruby", "-Itest", "test/calculator_test.rb"]
+
+  test "an unusable rspec JSON document is refused rather than read as empty":
+    ## "No events" must never be produced by a document that could not be read:
+    ## an empty `events` seq with `usable = true` means *rspec matched no
+    ## example*, which withholds a certificate, and reporting a parse failure
+    ## that way would withhold one for the wrong reason and hide the real
+    ## problem. Each refusal carries its own reason, because the caller turns
+    ## it into the diagnostic an operator reads.
+    let malformed = parseRspecJsonResults("ruby-rspec", "run-1", "{not json")
+    check not malformed.usable
+    check malformed.reason.contains("could not be parsed")
+
+    let notAnObject = parseRspecJsonResults("ruby-rspec", "run-1", "[1, 2]")
+    check not notAnObject.usable
+    check notAnObject.reason.contains("not a JSON object")
+
+    let noExamples = parseRspecJsonResults("ruby-rspec", "run-1",
+      """{"version": "3.13.6"}""")
+    check not noExamples.usable
+    check noExamples.reason.contains("no `examples` array")
+
+    # An EMPTY array is the opposite case: a usable answer meaning nothing ran.
+    let noneMatched = parseRspecJsonResults("ruby-rspec", "run-1",
+      """{"examples": []}""")
+    check noneMatched.usable
+    check noneMatched.events.len == 0
+
+    # An example rspec could not name gets the scheduled unit's id, because
+    # `validateEvent` rejects a test-finished event with an empty testId.
+    let unnamed = parseRspecJsonResults("ruby-rspec", "run-1",
+      """{"examples": [{"status": "passed"}]}""", fallbackTestId = "unit-7")
+    check unnamed.usable
+    check unnamed.events.len == 1
+    for event in unnamed.events:
+      check event.testId == "unit-7"
+      check event.validateEvent.valid
+
+    # …and with nothing to fall back to, the document is refused rather than
+    # yielding an invalid event.
+    let unattributable = parseRspecJsonResults("ruby-rspec", "run-1",
+      """{"examples": [{"status": "passed"}]}""")
+    check not unattributable.usable
+    check unattributable.reason.contains("could not be attributed")
 
   test "CLI JSON includes Ruby provider catalog":
     let executable = compileCtTestBinary("ct-test-m9-ruby-cli")

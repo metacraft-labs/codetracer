@@ -475,44 +475,51 @@ proc recordUnitResult(run: var AttestedRun; target: string;
   ##
   ## **THE GUARANTEE IS ONLY AS FINE-GRAINED AS THE PROVIDER'S REPORTING**, and
   ## saying otherwise would overstate it. This fold refuses every ``tsSkipped``
-  ## it is given. **Exactly one shipped provider reports skips per test on its
-  ## run path: ``js-playwright``.** Follow the wiring:
+  ## it is given; whether it is *given* one is the provider's decision, and
+  ## **three shipped providers report skips per test on their run path**:
   ##
-  ## * ``js_playwright.nim:497`` — ``provider.run = runPlaywright``
-  ## * ``:431`` ``runPlaywright`` → ``buildPlaywrightCommand``, which passes
-  ##   ``--reporter=json`` (``:84``)
-  ## * → ``parsePlaywrightResultsJson`` → ``collectResultEvents`` (``:305``)
-  ##   → ``statusFromPlaywright`` (``:258``), mapping ``"skipped"`` to
-  ##   ``tsSkipped`` (``:263``).
+  ## * ``js-playwright`` — ``js_playwright.nim:497`` sets
+  ##   ``provider.run = runPlaywright``; ``:431`` builds the command with
+  ##   ``--reporter=json`` (``:84``) and parses it through
+  ##   ``parsePlaywrightResultsJson`` → ``collectResultEvents`` (``:305``) →
+  ##   ``statusFromPlaywright`` (``:258``), mapping ``"skipped"`` (``:263``).
+  ## * ``ruby-rspec`` — ``ruby_rspec.nim:121`` sets
+  ##   ``provider.run = runRubyCommand(…, rfkRSpec, …)``, which asks for
+  ##   ``--format json --out <path>`` (``ruby_common.buildRubyCommand``) and
+  ##   decides status in ``parseRspecJsonResults`` → ``statusFromRspec``,
+  ##   mapping rspec's ``pending``. rspec exits 0 when every example is
+  ##   pending, so this had to stop being an exit-code decision before an
+  ##   all-pending suite could report anything but a pass.
+  ## * ``js-node-test`` — ``js_node_test.nim:126`` sets
+  ##   ``provider.run = runNodeTestCommand``, which parses node's TAP stream in
+  ##   ``js_common.parseNodeTapResults``. ``node --test`` with every test
+  ##   skipped prints ``# pass 0 / # skipped 2`` and **exits 0**, so the same
+  ##   argument applies.
   ##
-  ## Every other provider derives a whole file's status from a single
-  ## subprocess **exit code**, and a skip is invisible to it — **rspec
-  ## included**, which is easy to get wrong: ``ruby_rspec.nim:121`` sets
-  ## ``provider.run = runRubyCommand(...)``, whose one status decision is
-  ## ``ruby_common.nim:461`` (``exitCode == 0`` ⇒ ``tsPassed``, else
-  ## ``tsFailed``) — the same proc minitest uses
-  ## (``ruby_minitest.nim:122``). ``parseRspecJsonResults`` does map
-  ## ``example{"status"} == "pending"`` to ``tsSkipped``, but nothing on any
-  ## run path calls it and the command built at ``ruby_common.nim:350`` carries
-  ## no ``--format json`` for it to read. rspec exits 0 when every example is
-  ## pending, so an all-``pending`` suite yields ``tsPassed``.
+  ## The remaining providers still derive a whole file's status from a single
+  ## subprocess **exit code**, and a skip is invisible to them: ``cpp_common``
+  ## (cpp-gtest, cpp-catch2, cpp-ctest), ``native_m11_common`` (go-test,
+  ## d-unittest, crystal-spec), ``m12_fallback_common`` (pascal, fortran, ada,
+  ## odin, v, lean, julia, assembly), ``smart_contract_common`` (the M13
+  ## harnesses), and ``ruby_common``'s minitest branch — minitest has no
+  ## machine-readable reporter in the sense rspec's ``--format json`` is one,
+  ## so it shares ``runRubyCommand``'s exit-code fallback rather than its JSON
+  ## path. For those, a certificate can still name a file in which nothing ran.
+  ## Closing it needs per-test reporting in each provider, not a change here.
   ##
-  ## The same holds for ``js_common``, ``cpp_common``, ``native_m11_common``
-  ## and ``m12_fallback_common``: ``node --test <file>`` with every test
-  ## skipped reports ``# pass 0 / # skipped 2`` and **exits 0**, so
-  ## ``js-node-test`` yields ``tsPassed`` and the file IS claimed as a covered
-  ## target.
+  ## The registry's other providers are not on that list and are not a gap
+  ## either, because they never report a finished test at all: ``js-jest`` and
+  ## ``js-vitest`` wire ``provider.run`` to ``js_common.unsupportedRun``, and
+  ## ``python-pytest``, ``python-unittest``, ``nim-unittest`` and
+  ## ``rust-libtest`` wire it to their own not-implemented stub. All of them
+  ## return a diagnostic and an empty event seq, so this fold sees no
+  ## ``tekTestFinished`` and claims no target for them.
   ##
   ## **Do not check this with a grep for ``tsSkipped``.** A token search answers
-  ## "which files mention it", not "which providers can emit it from ``run``",
-  ## and ``ruby_common.nim`` contains that token on a dead path — which is
-  ## precisely how an earlier version of this comment came to claim rspec.
-  ## Follow ``provider.run`` to the proc that decides status.
-  ##
-  ## So "a skipped test is never claimed" is unconditionally true of this fold,
-  ## and true end to end only under Playwright. Everywhere else a certificate
-  ## can still name a file in which nothing ran. Closing that needs per-test
-  ## reporting in the providers, not a change here.
+  ## "which files mention it", not "which providers can emit it from ``run``" —
+  ## which is how an earlier version of this comment came to claim rspec while
+  ## the mapping it pointed at was on no run path at all. Follow
+  ## ``provider.run`` to the proc that decides status.
   ##
   ## **A target is attributed to the SCHEDULED unit, never to an event's
   ## ``testId``, and that indirection is deliberate rather than incidental.**

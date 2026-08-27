@@ -146,6 +146,26 @@ proc writeExecutable(path, contents: string) =
   writeFile(path, contents)
   setFilePermissions(path, {fpUserExec, fpUserRead, fpUserWrite})
 
+proc diagnosticText(runResult: ProviderResult[seq[TestEvent]]): string =
+  var parts: seq[string] = @[]
+  for item in runResult.diagnostics:
+    parts.add $item.severity & ": " & item.message
+  parts.join("\n")
+
+proc nodeScratchProject(name, testFileName, testSource: string): string =
+  ## Materialise a throwaway `node --test` project for one test.
+  ##
+  ## Scratch rather than a checked-in fixture because the discovery assertions
+  ## above pin `js_node_test_project`'s exact item and test counts, so a new
+  ## test file dropped in there would break cases that have nothing to do with
+  ## skips. Nothing is installed: `node --test` needs no dependencies.
+  result = getTempDir() / (name & "-" & $getCurrentProcessId())
+  removeDir(result)
+  createDir(result / "test")
+  writeFile(result / "package.json",
+    """{"name": "ct-test-scratch", "version": "1.0.0"}""")
+  writeFile(result / "test" / testFileName, testSource)
+
 proc jsRecorderSibling(): string =
   ## The real ``codetracer-js-recorder`` checkout beside this one, or ``""``.
   ## Only the *test* is allowed to look here: it is describing the machine it
@@ -392,6 +412,134 @@ suite "ct-test M7 JavaScript and TypeScript providers":
       tsPassed
     check runResult.value.outputContains("# tests 5")
     check runResult.value.outputContains("# suites 1")
+
+  test "node:test reports a skipped test as skipped rather than as a pass":
+    ## THE REGRESSION. `node --test` with every test skipped prints
+    ## `# pass 0` / `# skipped 2` and **exits 0**, and the provider's only
+    ## status source was that exit code, so the file reported `tsPassed` —
+    ## which `certificate_issuance.recordUnitResult` then counted as an
+    ## executed test and claimed as a covered target. Measured through the
+    ## shipped `ct-test test run` CLI on exactly this file, before the fix:
+    ##
+    ##   executed 2, passed 2, skipped 0, verdict "passed", exit 0
+    ##   certificate ISSUED, targets = ["test/skipped.test.js"]
+    ##
+    ## after:
+    ##
+    ##   executed 0, skipped 2, verdict "nothing-executed", exit 2
+    ##   certificate WITHHELD (wrNoTestsExecuted), no target claimed
+    let project = nodeScratchProject("ct-node-skipped", "skipped.test.js", """
+const { test } = require('node:test');
+
+test('first is skipped', { skip: 'not implemented yet' }, () => {
+  throw new Error('never runs');
+});
+
+test('second is skipped', { skip: 'still not implemented' }, () => {
+  throw new Error('never runs either');
+});
+""")
+    defer: removeDir(project)
+
+    let provider = newJsNodeTestM1Provider()
+    let runResult = provider.provider.run(TestScope(
+      kind: tskFile,
+      projectRoot: project,
+      file: project / "test" / "skipped.test.js",
+      selector: "test/skipped.test.js"))
+
+    if runResult.diagnostics.len > 0:
+      checkpoint(runResult.diagnosticText)
+    check runResult.diagnostics.len == 0
+
+    let finished = runResult.value.eventsOfKind(tekTestFinished)
+    check finished.len == 2
+    for event in finished:
+      check event.status.get == tsSkipped
+    check runResult.value.eventsOfKind(tekFailure).len == 0
+    for event in runResult.value.eventsOfKind(tekRunFinished):
+      check event.status.get == tsSkipped
+    for event in runResult.value:
+      check event.validateEvent.valid
+
+  test "node:test separates suites, skips, todos and real failures":
+    ## Three things this must get right at once, which is why they share a
+    ## fixture: a `describe` emits its own TAP point (`type: 'suite'`) that
+    ## must NOT be counted as a test; a `todo` carries a `# TODO` directive
+    ## and is counted under node's `# todo` even when its body throws (node
+    ## writes `not ok ... # TODO` for that one and `ok ... # TODO` for a
+    ## passing todo, so the DIRECTIVE decides, not the `ok`), which makes it
+    ## no evidence and maps it to `tsSkipped`; and a genuine failure must
+    ## still be a failure.
+    let project = nodeScratchProject("ct-node-shapes", "shapes.test.js", """
+const { test, describe, it } = require('node:test');
+const assert = require('node:assert');
+
+describe('outer suite', () => {
+  it('passes', () => { assert.strictEqual(1, 1); });
+  it('is skipped', { skip: 'why not' }, () => { assert.fail('nope'); });
+  it('fails', () => { assert.strictEqual(1, 2); });
+});
+
+test('top level passes', () => { assert.ok(true); });
+test('top level todo', { todo: 'later' }, () => { assert.fail('ignored'); });
+""")
+    defer: removeDir(project)
+
+    let provider = newJsNodeTestM1Provider()
+    let runResult = provider.provider.run(TestScope(
+      kind: tskFile,
+      projectRoot: project,
+      file: project / "test" / "shapes.test.js",
+      selector: "test/shapes.test.js"))
+
+    let finished = runResult.value.eventsOfKind(tekTestFinished)
+    # Five TESTS, not six: node's own `# tests 5` excludes the suite, and the
+    # parser's cross-check against that counter is what keeps the suite's
+    # `not ok` line from being counted as a sixth.
+    check finished.len == 5
+    var passed, failed, skipped = 0
+    for event in finished:
+      case event.status.get(tsErrored)
+      of tsPassed: inc passed
+      of tsFailed, tsErrored: inc failed
+      of tsSkipped: inc skipped
+    check passed == 2
+    check failed == 1
+    check skipped == 2
+    check runResult.value.eventsOfKind(tekFailure).len == 1
+    check runResult.diagnosticText.contains("at least one test did not pass")
+    for event in runResult.value:
+      check event.validateEvent.valid
+
+  test "a node:test stream that is not TAP falls back to the exit code and says so":
+    ## The fallback must survive, and must be AUDIBLE. `node --test` picks its
+    ## reporter by whether stdout is a TTY — `tap` when it is not, which is
+    ## always the case under capture — so this is what a future default change
+    ## or an overridden reporter would look like, and the provider must produce
+    ## an honest result with a named reason rather than reporting nothing.
+    let notTap = parseNodeTapResults("js-node-test", "run-1", "unit-1",
+      "> passes (0.4ms)\n> is skipped (0.1ms) # not implemented\n" &
+      "tests 2\npass 0\nskipped 2\n")
+    check not notTap.usable
+    check notTap.reason.contains("did not produce a TAP stream")
+
+    # A stream that parses to counts node itself contradicts is refused too:
+    # under-counting would read as "this unit executed nothing" and withhold a
+    # certificate that should have been issued, which is a worse failure than
+    # falling back.
+    let inconsistent = parseNodeTapResults("js-node-test", "run-1", "unit-1",
+      "TAP version 13\nok 1 - a\n1..1\n# tests 3\n# pass 3\n# fail 0\n" &
+      "# skipped 0\n# todo 0\n")
+    check not inconsistent.usable
+    check inconsistent.reason.contains("did not parse consistently")
+
+    # And one with no summary counters at all cannot be checked, so it is not
+    # believed.
+    let noCounters = parseNodeTapResults("js-node-test", "run-1", "unit-1",
+      "TAP version 13\nok 1 - a\n1..1\n")
+    check not noCounters.usable
+    check noCounters.reason.contains("summary counter")
 
   test "commands are explicit and Jest/Vitest run and record stay unsupported":
     let jestItem = jestFileCatalog(jestRoot(), jestSample(

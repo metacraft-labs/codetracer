@@ -1,5 +1,5 @@
 import std/[algorithm, json, options, os, osproc, sequtils, strutils]
-import std/[tables, times]
+import std/[tables, tempfiles, times]
 
 import ../contracts
 import ../discovery
@@ -344,7 +344,33 @@ proc parseMinitestDeclarations*(
     adjustRubyDepth(stripped, depth)
 
 proc buildRubyCommand*(kind: RubyFrameworkKind; projectRoot, filePath,
-    selector: string; scope: RubyCommandScope): seq[string] =
+    selector: string; scope: RubyCommandScope;
+    rspecJsonOut = ""): seq[string] =
+  ## Build the argv that runs one rspec/minitest scope.
+  ##
+  ## ``rspecJsonOut`` is the path rspec's machine-readable results are written
+  ## to. It applies to ``rfkRSpec`` only, and passing it is what puts the run on
+  ## the per-test reporting path: without it the caller can learn nothing about
+  ## the run beyond rspec's exit code, and rspec exits 0 for a suite in which
+  ## every example was ``pending``. ``runRubyCommand`` always supplies one; the
+  ## empty default exists so the *command shape* can be asserted on its own
+  ## (the path is a fresh temporary file per invocation, so a command built
+  ## with one is not comparable to a literal).
+  ##
+  ## **Why three formatter arguments rather than one.** ``--format json --out
+  ## <path>`` on its own is enough to produce the document, but it also
+  ## *replaces* the formatter that writes to the terminal: rspec installs its
+  ## default (or the one the project's ``.rspec`` names) only when no formatter
+  ## has been configured at all, and a file-bound one counts. Measured against
+  ## rspec 3.13 with an all-pending suite: ``--format json --out FILE`` printed
+  ## nothing at all to stdout, `.rspec`'s ``--format documentation`` included.
+  ## So the stdout formatter is named explicitly and ``--out`` binds to the
+  ## ``--format`` immediately before it, which is rspec's own rule.
+  ##
+  ## That does override a project's configured formatter with ``progress``, and
+  ## the trade is deliberate: ``progress`` is rspec's own default, it still
+  ## prints the failure list, the pending list and the counts line, and the
+  ## alternative on offer is not "the project's formatter" but *silence*.
   let relative = if filePath.len > 0: normalizedRelative(projectRoot,
       filePath) else: ""
   case kind
@@ -357,6 +383,9 @@ proc buildRubyCommand*(kind: RubyFrameworkKind; projectRoot, filePath,
       result.add relative
     of rcsSingle:
       result.add selector
+    if rspecJsonOut.len > 0:
+      result.add @["--format", "progress", "--format", "json", "--out",
+        rspecJsonOut]
   of rfkMinitest:
     result = @["bundle", "exec", "ruby", "-Itest"]
     case scope
@@ -411,6 +440,181 @@ proc bundleExecutable*(): string =
 proc commandLine(args: seq[string]): string =
   args.mapIt(quoteShell(it)).join(" ")
 
+# ---------------------------------------------------------------------------
+# rspec's machine-readable results
+# ---------------------------------------------------------------------------
+
+type
+  RspecJsonResults* = object
+    ## What rspec's ``--format json`` document said — or, when it could not be
+    ## used, why not.
+    ##
+    ## The two are kept in one value on purpose. "No events" is ambiguous
+    ## between *rspec ran and matched no example* (a real, usable answer that
+    ## must not be reported as a pass) and *there was no document to read* (the
+    ## caller has to fall back to the exit code, and say so). Collapsing them
+    ## into an empty ``seq`` is what would let a crashed run read as an honest
+    ## report of nothing.
+    usable*: bool
+      ## ``true`` when a document was read and carried an ``examples`` array —
+      ## including an EMPTY one.
+    reason*: string
+      ## Why the document was unusable. Empty when ``usable``.
+    events*: seq[TestEvent]
+      ## One ``tekTestFinished`` per example, in rspec's own order.
+
+proc statusFromRspec(raw: string): TestResultStatus =
+  ## Map one rspec example status onto the vocabulary the runner counts by.
+  ##
+  ## ``pending`` is rspec's spelling for a skip — an example that was declared
+  ## and deliberately not executed (``skip:``, ``pending``, ``xit``). It maps to
+  ## ``tsSkipped``, which ``run_orchestration.summarize`` and
+  ## ``certificate_issuance.recordUnitResult`` both count separately and neither
+  ## treats as evidence. It is emphatically NOT ``tsFailed``: the point of
+  ## reporting skips is that they stop being claimed as passes, not that they
+  ## start reddening suites.
+  ##
+  ## An unrecognised status becomes ``tsErrored`` rather than being dropped or
+  ## optimistically passed — a status this build does not understand is a thing
+  ## that happened and could not be judged.
+  case raw
+  of "passed": tsPassed
+  of "pending": tsSkipped
+  of "failed": tsFailed
+  else: tsErrored
+
+proc rspecFailureMessage(example: JsonNode): string =
+  ## The human-readable reason an example did not pass, from whichever of
+  ## rspec's shapes carries it.
+  let exception = example{"exception"}
+  if exception != nil and exception.kind == JObject:
+    let message = exception{"message"}.getStr("")
+    if message.len > 0:
+      let class = exception{"class"}.getStr("")
+      return if class.len > 0: class & ": " & message else: message
+  let pendingMessage = example{"pending_message"}.getStr("")
+  if pendingMessage.len > 0:
+    return pendingMessage
+  ""
+
+proc parseRspecJsonResults*(
+    providerId, runId, raw: string;
+    fallbackTestId = ""): RspecJsonResults =
+  ## Parse rspec's ``--format json`` document into one ``tekTestFinished``
+  ## event per example.
+  ##
+  ## **This is the rspec provider's status decision.** ``runRubyCommand`` routes
+  ## every rspec run through here, and the exit code is consulted only when this
+  ## returns ``usable = false``. That indirection is the whole point: rspec
+  ## exits 0 for a suite in which every example was ``pending``, so an exit-code
+  ## verdict cannot tell an all-skipped file from a fully-passing one, and
+  ## ``certificate_issuance`` would then name a file in which nothing ran as a
+  ## covered target — which ``test-certificates-spec/Standard.md`` §8 forbids in
+  ## as many words.
+  ##
+  ## ``fallbackTestId`` names the event when rspec's document carries neither an
+  ## ``id`` nor a ``full_description``; ``contracts.validateEvent`` rejects a
+  ## ``tekTestFinished`` with an empty ``testId``, so an event that would be
+  ## invalid gets the scheduled unit's id instead of being emitted broken.
+  ## Callers should pass one. Note that the ids in a normal document are rspec's
+  ## own (``./spec/x_spec.rb[1:1]``) and never equal a catalog item id — target
+  ## attribution deliberately does not go through them; see
+  ## ``certificate_issuance.recordUnitResult``.
+  ##
+  ## Raises nothing: a malformed document is a ``usable = false`` result
+  ## carrying the parser's own message, because the caller's job when rspec
+  ## produced garbage is to fall back and say so, not to abort a worker thread.
+  var document: JsonNode
+  try:
+    document = parseJson(raw)
+  except CatchableError as err:
+    return RspecJsonResults(usable: false,
+      reason: "rspec's JSON results could not be parsed: " & err.msg)
+  if document == nil or document.kind != JObject:
+    return RspecJsonResults(usable: false,
+      reason: "rspec's JSON results were not a JSON object")
+  let examples = document{"examples"}
+  if examples == nil or examples.kind != JArray:
+    return RspecJsonResults(usable: false,
+      reason: "rspec's JSON results carried no `examples` array")
+
+  # An EMPTY array reaches here as `usable`, and that is the interesting case:
+  # it means rspec ran and matched no example, which must be reported as "this
+  # unit executed nothing" rather than as the pass its exit code claims.
+  result = RspecJsonResults(usable: true, reason: "", events: @[])
+  for example in examples:
+    if example.kind != JObject:
+      continue
+    let
+      rawId = example{"id"}.getStr(example{"full_description"}.getStr(""))
+      testId = if rawId.len > 0: rawId else: fallbackTestId
+      statusText = example{"status"}.getStr("")
+      status = statusFromRspec(statusText)
+      duration = int(example{"run_time"}.getFloat(0.0) * 1000)
+      detail = rspecFailureMessage(example)
+      message =
+        if detail.len > 0: statusText & ": " & detail
+        else: statusText
+    if testId.len == 0:
+      # Nothing to attribute the result to, and an event without a testId is
+      # invalid by `validateEvent`. Skipping it silently would be the same
+      # invisible-loss failure this change exists to remove, so the run is
+      # reported as unusable and falls back to the exit code.
+      return RspecJsonResults(usable: false,
+        reason: "an rspec example carried neither `id` nor " &
+          "`full_description`, so its result could not be attributed")
+    result.events.add event(tekTestFinished, providerId, runId, testId,
+      some(status), message, durationMs = duration)
+
+proc readRspecJsonResults(
+    providerId, runId, fallbackTestId, path: string): RspecJsonResults =
+  ## Read and parse the document ``buildRubyCommand``'s ``--out`` asked for.
+  ##
+  ## Every way of not getting one is a distinct, named ``reason`` rather than a
+  ## shrug, because the caller turns it into a diagnostic the operator reads:
+  ## the file is absent when rspec died before its formatter closed (a Ruby
+  ## syntax error in a spec file, a signal, a bundler failure), and empty when
+  ## it was killed mid-write.
+  if path.len == 0:
+    return RspecJsonResults(usable: false,
+      reason: "no JSON results path was requested")
+  if not fileExists(path):
+    return RspecJsonResults(usable: false,
+      reason: "rspec wrote no JSON results to " & path &
+        " (it exited before its formatter produced one)")
+  var raw = ""
+  try:
+    raw = readFile(path)
+  except CatchableError as err:
+    return RspecJsonResults(usable: false,
+      reason: "rspec's JSON results at " & path & " could not be read: " &
+        err.msg)
+  if raw.strip.len == 0:
+    # The usual shape of "rspec died early", because the path is created
+    # (exclusively) before rspec is launched: an aborted run leaves the empty
+    # file behind rather than no file at all.
+    return RspecJsonResults(usable: false,
+      reason: "rspec wrote no JSON results to " & path &
+        " (the file is empty; it exited before its formatter produced one)")
+  parseRspecJsonResults(providerId, runId, raw, fallbackTestId)
+
+proc newRspecJsonPath(): string =
+  ## A fresh, exclusively-created path for one rspec invocation's results.
+  ##
+  ## Created rather than merely generated, and created per invocation rather
+  ## than per provider: ``runRubyCommand`` runs on the orchestrator's worker
+  ## threads, so several rspec processes are in flight at once and a shared or
+  ## guessable name would have them overwrite each other's results — which
+  ## would not fail loudly, it would silently attribute one file's outcomes to
+  ## another. Returns an empty string if no temporary file can be made, which
+  ## the caller reports as an exit-code fallback rather than treating as fatal.
+  try:
+    let (handle, path) = createTempFile("ct-test-rspec-", ".json")
+    handle.close()
+    path
+  except CatchableError:
+    ""
+
 proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
     scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -435,8 +639,17 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
         of tskProject: rcsProject
         of tskFile: rcsFile
         of tskSingle: rcsSingle
+      # rspec is asked for machine-readable results; minitest is not, and gets
+      # a byte-identical command to the one it has always been given. There is
+      # no minitest equivalent to hand it here — minitest emits a human summary
+      # line and nothing structured — so the empty path is what keeps this one
+      # proc serving both without forking it, and minitest's status still comes
+      # from the exit-code branch below. (`parseMinitestSummary` at the bottom
+      # of this file could read that summary line, but nothing calls it; it is
+      # the same on-no-run-path shape `parseRspecJsonResults` used to have.)
+      rspecJsonPath = if kind == rfkRSpec: newRspecJsonPath() else: ""
       args = buildRubyCommand(kind, scope.projectRoot, scope.file,
-          scope.selector, commandScope)
+          scope.selector, commandScope, rspecJsonPath)
       execArgs =
         if args.len >= 3 and args[0] == "bundle" and args[1] == "exec":
           let executable =
@@ -459,22 +672,119 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
+
+    # ---- rspec: per-test results, with the exit code as the fallback --------
+    # Read before the exit-code branch below, because when rspec produced a
+    # results document that document is a strictly better answer than its exit
+    # status — it distinguishes a pending example from a passing one, which the
+    # exit status cannot do at all.
+    var reportedResults = RspecJsonResults(usable: false, reason: "")
+    if kind == rfkRSpec:
+      reportedResults = readRspecJsonResults(providerId, runId, testId,
+          rspecJsonPath)
+    if rspecJsonPath.len > 0:
+      try:
+        removeFile(rspecJsonPath)
+      except OSError:
+        discard
+
+    if reportedResults.usable:
+      var
+        anyFailed = false
+        anyPassed = false
+        anySkipped = false
+      for finished in reportedResults.events:
+        let status = finished.status.get(tsErrored)
+        case status
+        of tsFailed, tsErrored:
+          anyFailed = true
+          # A failure event carries the reason where a reader looks for it; the
+          # `tekTestFinished` beside it is what the counters read.
+          events.add event(tekFailure, providerId, runId, finished.testId,
+              some(status), finished.message, result.output)
+        of tsPassed: anyPassed = true
+        of tsSkipped: anySkipped = true
+        events.add finished
+
+      # The run-level status summarises the examples, and it summarises them in
+      # this order for a reason: a failure outranks everything, a pass outranks
+      # a skip, and a run whose every example was skipped finishes `tsSkipped`
+      # rather than `tsPassed`. Nothing counts this event — `summarize` and
+      # `recordUnitResult` both read `tekTestFinished` only — but a run that
+      # reported "passed" while executing nothing is precisely the sentence
+      # this change exists to stop anyone writing down.
+      let runStatus =
+        if anyFailed: tsFailed
+        elif anyPassed: tsPassed
+        elif anySkipped: tsSkipped
+        else: tsErrored
+      events.add event(tekRunFinished, providerId, runId, testId,
+          some(runStatus), $runStatus)
+
+      var diagnostics: seq[TestDiagnostic] = @[]
+      if anyFailed:
+        diagnostics.add diagnostic(dsError,
+            "Ruby test execution failed: rspec reported at least one failing " &
+            "example (exit code " & $result.exitCode & ")",
+            scope.file)
+      elif result.exitCode != 0:
+        # rspec exited non-zero for a reason its example list does not explain
+        # — a spec file that failed to load, `--require` blowing up, a
+        # `config.failure_exit_code`. Never swallowed: an unexplained non-zero
+        # exit is reported as an error even though every example that DID run
+        # passed.
+        diagnostics.add diagnostic(dsError,
+            "rspec exited with " & $result.exitCode &
+            " but reported no failing example; treat the run as failed and " &
+            "check the output for an error outside the examples",
+            scope.file)
+      elif reportedResults.events.len == 0:
+        diagnostics.add diagnostic(dsWarning,
+            "rspec matched no example for " &
+            (if scope.selector.len > 0: scope.selector else: scope.file) &
+            "; nothing executed, so this unit attests nothing",
+            scope.file)
+      return ProviderResult[seq[TestEvent]](diagnostics: diagnostics,
+          value: events)
+
+    # ---- The exit-code decision --------------------------------------------
+    # Minitest's only status source, and rspec's fallback when no usable
+    # results document was produced. It cannot see a skip — that is the known
+    # limitation, and for rspec it is now announced rather than assumed, so a
+    # run that quietly regressed onto this path says so instead of looking
+    # identical to a per-test one.
+    var diagnostics: seq[TestDiagnostic] = @[]
+    if kind == rfkRSpec:
+      diagnostics.add diagnostic(dsWarning,
+          "falling back to rspec's exit code for this unit's status: " &
+          reportedResults.reason &
+          ". An exit code cannot distinguish a pending example from a " &
+          "passing one, so a skip in this unit is reported as a pass",
+          scope.file)
     if result.exitCode == 0:
       events.add event(tekTestFinished, providerId, runId, testId, some(
           tsPassed), "passed")
       events.add event(tekRunFinished, providerId, runId, testId, some(
           tsPassed), "passed")
-      ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
+      ProviderResult[seq[TestEvent]](diagnostics: diagnostics, value: events)
     else:
       events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
           "Ruby test command exited with " & $result.exitCode, result.output)
+      # The `tekTestFinished` is what the COUNTERS read: `summarize` and
+      # `certificate_issuance.recordUnitResult` both ignore `tekFailure`
+      # entirely. Without it a failing unit contributed nothing to `failed`,
+      # so a run in which every Ruby unit failed reported `executed 0,
+      # failed 0` and exited 2 ("nothing executed") instead of 1 ("tests
+      # failed") — a real failure reported as an absence. `js_common`'s
+      # matching fallback has always emitted this event; this one did not.
+      events.add event(tekTestFinished, providerId, runId, testId, some(
+          tsFailed), "failed")
       events.add event(tekRunFinished, providerId, runId, testId, some(
           tsFailed), "failed")
-      ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "Ruby test execution failed with exit code " & $result.exitCode,
-            scope.file)],
-        value: events)
+      diagnostics.add diagnostic(dsError,
+          "Ruby test execution failed with exit code " & $result.exitCode,
+          scope.file)
+      ProviderResult[seq[TestEvent]](diagnostics: diagnostics, value: events)
 
 const RubyRecorderRepo = "codetracer-ruby-recorder"
 
@@ -732,49 +1042,6 @@ proc parseProviderEventLine*(
           providerId & " could not parse normalized event line: " & err.msg)],
       value: TestEvent(schemaVersion: TestEventSchemaVersion,
           providerId: providerId))
-
-proc parseRspecJsonResults*(
-    providerId, runId: string; raw: string): seq[TestEvent] =
-  ## Parse rspec's ``--format json`` document into per-test events, mapping
-  ## ``passed`` / ``pending`` / ``failed`` to ``tsPassed`` / ``tsSkipped`` /
-  ## ``tsFailed``.
-  ##
-  ## **THIS IS ON NO RUN PATH. Nothing in the running system calls it.** Its
-  ## only caller anywhere is ``ruby_providers_test.nim:396``, a unit test of
-  ## this proc itself. The rspec provider runs through ``runRubyCommand``
-  ## (``ruby_rspec.nim:121``), whose single status decision is the exit-code
-  ## test at ``:461`` of this file — the same one minitest uses — so rspec
-  ## reports one verdict for a whole file and a ``pending`` example is
-  ## indistinguishable from a passing one.
-  ##
-  ## It is called out here because a correct implementation of something
-  ## nothing does is exactly what invites a false inference: a reader (or a
-  ## ``grep`` for ``tsSkipped``) sees the mapping in this file and concludes
-  ## rspec reports skips per test. It does not, and a certificate issued for an
-  ## all-``pending`` rspec suite will name that file as covered
-  ## (``certificate_issuance.recordUnitResult`` documents the consequence).
-  ##
-  ## To put it on the run path, two things are needed together:
-  ## ``buildRubyCommand`` (``:345``) must add ``--format json`` for
-  ## ``rfkRSpec``, and ``runRubyCommand`` must route rspec's captured output
-  ## through here instead of reading ``result.exitCode``. Both change what
-  ## every rspec run reports, so that is provider-fidelity work with its own
-  ## test surface, not a change to make in passing.
-  let node = parseJson(raw)
-  if not node.hasKey("examples") or node["examples"].kind != JArray:
-    return @[]
-  for example in node["examples"]:
-    let
-      testId = example{"id"}.getStr(example{"full_description"}.getStr(""))
-      statusText = example{"status"}.getStr("")
-      duration = int(example{"run_time"}.getFloat(0.0) * 1000)
-      status =
-        if statusText == "passed": tsPassed
-        elif statusText == "pending": tsSkipped
-        elif statusText == "failed": tsFailed
-        else: tsErrored
-    result.add event(tekTestFinished, providerId, runId, testId, some(status),
-        statusText, durationMs = duration)
 
 proc parseMinitestSummary*(providerId, runId, testId, raw: string): TestEvent =
   var status = tsErrored

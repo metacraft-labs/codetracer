@@ -331,9 +331,15 @@ suite "ct test certificate issuance":
     ## all-skipped run issued a signed certificate claiming `passed`.
     ##
     ## This shape is not exotic and is not caller-induced — it comes out of the
-    ## DEFAULT registry through the shipped CLI. `ruby_common.nim` maps rspec
-    ## `pending` to `tsSkipped` and `js_playwright.nim` maps `skipped` the same
-    ## way, and both providers are honest in doing so.
+    ## DEFAULT registry through the shipped CLI, and has been reproduced there:
+    ## an all-`pending` rspec suite and an all-skipped `node --test` file both
+    ## used to exit 0 and issue a certificate claiming the file as a covered
+    ## target, because those two providers read only a subprocess exit code and
+    ## both runners exit 0 for an all-skipped suite. `ruby_common.nim` now maps
+    ## rspec `pending` to `tsSkipped` on its run path, `js_common.nim` maps
+    ## node:test's TAP `# SKIP` / `# TODO`, and `js_playwright.nim` maps
+    ## `skipped`; all three are honest in doing so, and this fold is what makes
+    ## the honesty count for something.
     let repo = committedRepo("all-skipped")
     var options = unsignedOptions()
     options.signingKeyPath = generateSigningKey("all-skipped-key")
