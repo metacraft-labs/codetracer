@@ -6,6 +6,13 @@
 }:
 let
   ourPkgs = self'.packages;
+
+  # The Python interpreter, forwarded from the repo that owns it (see
+  # ../python.nix). This shell is not currently wired into flake.nix, but it
+  # carried the same `pkgs.python3Packages` opinion the other shells did, and a
+  # dead file that still names a version is a defect waiting to be revived
+  # along with it.
+  pythonEnv = import ../python.nix { inherit pkgs inputs; };
 in
 with pkgs;
 mkShell {
@@ -148,7 +155,7 @@ mkShell {
     rust-analyzer
 
     # ci deps
-    python3Packages.flake8
+    pythonEnv.pythonPackages.flake8
     shellcheck
     awscli2
 
@@ -157,7 +164,7 @@ mkShell {
     # (i.e. during the `yarn install` step).
     # TODO: This is quite curious. We should investigate how the AppImage
     # build environment is different from the regular one.
-    python3Packages.distutils
+    pythonEnv.pythonPackages.distutils
 
     # ui-test dependencies
     playwright-driver.browsers

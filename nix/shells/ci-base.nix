@@ -16,6 +16,12 @@
 }:
 let
   ourPkgs = self'.packages;
+
+  # The Python interpreter, read from the repo that owns it: ../python.nix
+  # forwards `codetracer-python-recorder`'s own `.python-version` declaration
+  # through the flake input. Nothing in this file may name a Python version.
+  pythonEnv = import ../python.nix { inherit pkgs inputs; };
+
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
   runquotaPkgs = inputs'.runquota.packages;
   reprobuildPkgs = inputs'.reprobuild.packages;
@@ -33,14 +39,17 @@ let
     cp -R ${inputs.codetracer-trace-format-nim} "$out/codetracer-trace-format-nim"
   '';
 
-  upstreamPythonRecorderPkg =
-    (inputs."codetracer-python-recorder".lib.mkCodetracerPackages pkgs pkgs.python312)
-    .codetracer-python-recorder;
+  # Built by the recorder repo for the interpreter IT declares. This used to
+  # be `mkCodetracerPackages pkgs pkgs.python312` — this repo asserting a
+  # version at the repo that owns the ABI, which is the inversion that let the
+  # two drift. `mkCodetracerPackagesDefault` takes no interpreter argument, so
+  # there is nothing here left to disagree with.
+  upstreamPythonRecorderPkg = pythonEnv.recorderPackages.codetracer-python-recorder;
   pythonRecorderPkg = upstreamPythonRecorderPkg.overrideAttrs (old: {
     src = pythonRecorderSource;
     sourceRoot = "codetracer-python-recorder-layout/codetracer-python-recorder/codetracer-python-recorder";
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ ourPkgs.nim-codetracer ];
-    propagatedBuildInputs = (old.propagatedBuildInputs or [ ]) ++ [ pkgs.python312Packages.black ];
+    propagatedBuildInputs = (old.propagatedBuildInputs or [ ]) ++ [ pythonEnv.pythonPackages.black ];
 
     # writer_nim normally asks nimble to fetch these dependencies. Nix builds
     # are network-isolated, so use the exact nim-stew gitlink revision pinned
@@ -49,7 +58,7 @@ let
     CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
     CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
   });
-  pythonWithRecorder = pkgs.python312.withPackages (ps: [
+  pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black
     pythonRecorderPkg
   ]);
@@ -169,8 +178,17 @@ with pkgs;
     # Linting / Python build-deps used by both lint lanes and the
     # node-module install step (lzma-native needs distutils on
     # Linux/ARM).
-    python3Packages.flake8
-    python3Packages.distutils
+    #
+    # These MUST come from `pythonEnv.pythonPackages`, not from
+    # `pkgs.python3Packages`. A `buildPythonPackage` propagates the
+    # interpreter it was built for, so the `pkgs.python3Packages` forms put
+    # nixpkgs' DEFAULT python (3.13 on the current pin) into this shell —
+    # and, sitting above `pythonWithRecorder` in this list, ahead of the
+    # pinned 3.12 in the PATH search. `main.nix`'s venv setup then picked it
+    # up, producing a 3.13 venv that could not load the recorder's
+    # `cpython-312` extension. See ../python.nix.
+    pythonEnv.pythonPackages.flake8
+    pythonEnv.pythonPackages.distutils
     pythonWithRecorder
     shellcheck
 
@@ -336,6 +354,25 @@ with pkgs;
     # Python or an adjacent checkout. This absolute interpreter contains the
     # Rust-backed recorder built from the flake-locked input above.
     export CODETRACER_PYTHON_CMD="${pythonWithRecorder}/bin/python3"
+
+    # The declared interpreter — `codetracer-python-recorder`'s own
+    # `.python-version`, reached through ../python.nix — published so that
+    # shell code never has to resolve `python3` from PATH (which is how
+    # `.python-recorder-venv` came to be built with a different minor version
+    # than the recorder's compiled extension) and never has to restate the
+    # version as a literal. The recorder's own dev shell exports the same three
+    # names, so a script that reads them works in either.
+    #
+    #   CODETRACER_PYTHON_VERSION  "3.12"       — derived from package.version
+    #   CODETRACER_PYTHON_ABI_TAG  "cpython-312" — the tag a compiled
+    #                                              extension module must carry
+    #
+    # `nix/shells/main.nix` builds the venv from CODETRACER_PYTHON_CMD, and
+    # `scripts/test-python-version-alignment.sh` compares the venv, the
+    # recorder's built `.so` and the recorder's `requires-python` against
+    # these. Both read them; neither hardcodes a version.
+    export CODETRACER_PYTHON_VERSION="${pythonEnv.version}"
+    export CODETRACER_PYTHON_ABI_TAG="${pythonEnv.abiTag}"
 
     export PATH=$CODETRACER_BUILD_DIR/bin:$PATH
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
