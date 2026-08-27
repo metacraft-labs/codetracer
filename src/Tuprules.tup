@@ -268,13 +268,25 @@ endif
 # not include these flags, so `installCtHmrTransport` there is the
 # no-op stub and no connection is attempted.
 #
-# Note: `--hotCodeReloading:on` is intentionally NOT set here.
-# Nim's JS HCR wraps each module's init in a `if (loaded == undefined)`
-# guard, which makes module init code run only once per process — the
-# opposite of what our HMR pipeline needs (we want every bundle
-# re-evaluation to re-run module init so changed Nim source actually
-# takes effect). No code in the codebase calls the Nim HCR runtime,
-# so dropping the flag is a no-op for everything except HMR.
+# Note: `--hotCodeReloading:on` is intentionally NOT set in ANY of the
+# JavaScript rules below, and must not be re-added to one.
+#
+# Two independent reasons:
+#
+#   1. Correctness. Under HCR the JS backend names routines from a hash of
+#      their type and owning module only, with a collision counter reset per
+#      Nim module, while the backend emits one bundle in one global scope.
+#      Distinct routines therefore get byte-identical JS names and the later
+#      `function` declaration silently replaces the earlier one — see the note
+#      on `ctNimJs` in `repro.nim`, and
+#      `src/frontend/tests/renderer_js_symbol_uniqueness_test.nim`, which
+#      fails if the flag reappears in this file.
+#   2. HMR. Nim's JS HCR wraps each module's init in a
+#      `if (loaded == undefined)` guard, which makes module init code run only
+#      once per process — the opposite of what our HMR pipeline needs (we want
+#      every bundle re-evaluation to re-run module init so changed Nim source
+#      actually takes effect). No code in the codebase calls the Nim HCR
+#      runtime, so dropping the flag is a no-op for everything except HMR.
 !nim_js = |> ^ %f^ $(NIM_SELECTED)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
@@ -304,7 +316,6 @@ js %f |> %B.js %B.js.map
 -d:ctRenderer\
 --debugInfo:on\
 --lineDir:on\
---hotCodeReloading:on\
 --sourcemap:on\
 --out:%o\
 js %f |> %B.js %B.js.map

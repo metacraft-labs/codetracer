@@ -650,8 +650,29 @@ package codeTracer:
                      extraInputsValue: openArray[string] = [];
                      extraOutputsValue: openArray[string] = [];
                      debugInfoOnValue = false;
-                     sourcemapOnValue = false;
-                     hotCodeReloadingOnValue = false): BuildActionDef =
+                     sourcemapOnValue = false): BuildActionDef =
+      # NOTE: `hotCodeReloadingOn` is deliberately absent, and must stay
+      # absent.  On the JS backend `--hotCodeReloading:on` switches symbol
+      # mangling to `idOrSig`, which hashes a routine's *type* and owning
+      # module but not its name, and disambiguates collisions with a
+      # CountTable created fresh for every Nim module — while the backend
+      # emits one bundle with one global scope.  Two routines with the same
+      # signature and owner, emitted while two different modules are being
+      # generated, then get byte-identical JS names and the later `function`
+      # declaration silently replaces the earlier one.  Closures inside
+      # generic procs collide this way by construction: every instantiation's
+      # inner lambda has the same `proc ()` type and the same owner, so
+      # `createMemo[A]`'s closure and `createMemo[B]`'s closure become one
+      # function carrying one instantiation's type info.  That took the whole
+      # renderer down at startup with "Cannot read properties of undefined
+      # (reading 'slice')" out of `nimCopy`.  Nim hot code reloading is also
+      # explicitly a non-goal of CodeTracer's HMR design — see
+      # codetracer-specs/Front-Ends/IsoNim/Hot-Module-Reload.md — so nothing
+      # here needs it.  The same flag had to be removed from the three other
+      # build definitions that compile these sources (`justfile`,
+      # `src/Tuprules.tup`, `build_for_extension.sh`);
+      # `src/frontend/tests/renderer_js_symbol_uniqueness_test.nim` guards all
+      # four.
       nim.js(
         defines = definesValue,
         mm = "refc",
@@ -665,7 +686,6 @@ package codeTracer:
         stacktraceOn = true,
         linetraceOn = true,
         sourcemapOn = sourcemapOnValue,
-        hotCodeReloadingOn = hotCodeReloadingOnValue,
         output = outputPath,
         extraInputs = extraInputsValue,
         extraOutputs = extraOutputsValue,
@@ -773,16 +793,14 @@ package codeTracer:
         "src/frontend/index/ipc_registry.nim",
         "src/frontend/lib/jslib.nim"
       ],
-      debugInfoOnValue = true,
-      hotCodeReloadingOnValue = true)
+      debugInfoOnValue = true)
     target("nim-js-ipc-registry-test", ipcRegistryTest)
 
     let reloadReconnectTest = ctNimJs(
       definesValue = CommonNimDefines & HmrRendererDefines,
       outputPath = buildDebugPath("tests/reload_reconnect.js"),
       sourcePath = "src/frontend/tests/test_suites/reload_reconnect.nim",
-      debugInfoOnValue = true,
-      hotCodeReloadingOnValue = true)
+      debugInfoOnValue = true)
     target("nim-js-reload-reconnect-test", reloadReconnectTest)
 
     let reloadBootstrapHost = fs.copyFile(

@@ -21,7 +21,13 @@ async function activeEditorValue(ctPage: any): Promise<string> {
 }
 
 async function setActiveEditorValue(ctPage: any, value: string): Promise<void> {
-  await ctPage.locator(".monaco-editor .view-line").first().click();
+  // Column 0, for the reason spelled out on `enterEditMode` below: an inline
+  // omniscience value chip covers the middle of the line and would swallow an
+  // unpositioned click.
+  await ctPage
+    .locator(".monaco-editor .view-line")
+    .first()
+    .click({ position: { x: 2, y: 2 } });
   await ctPage.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
   await ctPage.keyboard.type(value);
 }
@@ -35,23 +41,39 @@ async function setActiveEditorValue(ctPage: any, value: string): Promise<void> {
  * observer keeps a de-duplicated log of `<kind-class>|<message>` entries for
  * the rest of the test.
  *
- * It ALSO keeps a per-entry count of distinct notification elements, which the
- * de-duplicated log cannot express and which issue #603 turns on: the reporter
- * saw a *stack* of identical messages, and the toast stack is capped at three
- * by `NOTIFICATION_LIMIT` (`src/frontend/ui/status.nim`), so "how many" is only
- * answerable by counting elements as they are created.  Each element is marked
- * with `data-ct-counted` the first time it is seen so a re-render or a second
- * poll cannot inflate the number.
+ * It ALSO records the *instantaneous* multiset of notifications at every tick,
+ * which the de-duplicated log cannot express and which issue #603 turns on: the
+ * reporter saw a *stack* of identical messages, and the toast stack is capped
+ * at three by `NOTIFICATION_LIMIT` (`src/frontend/ui/status.nim`), so "how
+ * many" is answered by the largest number of matching toasts ever on screen at
+ * the same moment.  Consecutive identical snapshots are collapsed, so the array
+ * stays short over a five-minute test.
+ *
+ * This used to mark each element with `data-ct-counted` the first time it was
+ * seen and accumulate, which over-counts and cannot be repaired by polling
+ * less: `renderStatusInto`
+ * (`src/frontend/viewmodel/views/isonim_status_view.nim`) removes *every* child
+ * of `#status` and rebuilds the subtree whenever `statusStructureSignature`
+ * changes, and that signature folds in each active notification's `index` and
+ * `text`.  So every notification that appears or disappears destroys and
+ * re-creates the elements of the toasts still on screen, taking their
+ * `data-ct-counted` attribute with them, and the same single toast is counted
+ * again.  A peak-concurrency measure is immune to that — a rebuild reproduces
+ * the same instantaneous set — and it is a closer reading of the evidence than
+ * the cumulative count was: what the reporter photographed is three identical
+ * toasts stacked *at once*, not three dispatches spread over time.
  */
 async function recordNotifications(ctPage: any): Promise<void> {
   await ctPage.evaluate(() => {
     const w = window as any;
     if (w.__ctNotificationLog) return;
     w.__ctNotificationLog = [];
-    w.__ctNotificationCounts = {};
+    w.__ctNotificationTicks = [];
+    let previousTick = "";
     const capture = () => {
       const host = document.querySelector("#active-notifications");
       if (!host) return;
+      const present: Record<string, number> = {};
       host.querySelectorAll(".ct-notification").forEach((node: Element) => {
         const message =
           (node.querySelector(".notification-message") as HTMLElement | null)
@@ -64,12 +86,13 @@ async function recordNotifications(ctPage: any): Promise<void> {
         if (!w.__ctNotificationLog.includes(entry)) {
           w.__ctNotificationLog.push(entry);
         }
-        if (!(node as HTMLElement).dataset.ctCounted) {
-          (node as HTMLElement).dataset.ctCounted = "1";
-          w.__ctNotificationCounts[entry] =
-            (w.__ctNotificationCounts[entry] ?? 0) + 1;
-        }
+        present[entry] = (present[entry] ?? 0) + 1;
       });
+      const tick = JSON.stringify(present);
+      if (tick !== previousTick) {
+        previousTick = tick;
+        w.__ctNotificationTicks.push(present);
+      }
     };
     capture();
     new MutationObserver(capture).observe(document.body, {
@@ -88,16 +111,28 @@ async function seenNotifications(ctPage: any): Promise<string[]> {
 }
 
 /**
- * How many distinct notification elements carried a message containing
- * `substring`.  One per dispatch — `renderer.launchReRecord` emits
- * "Building/recording a new trace…" exactly once per `CODETRACER::new-record`.
+ * The largest number of notification elements carrying a message containing
+ * `substring` that were ever on screen *at the same moment*.  One per live
+ * dispatch — `renderer.launchReRecord` emits "Building/recording a new trace…"
+ * exactly once per `CODETRACER::new-record`, and three concurrent dispatches
+ * are what the reporter photographed.
+ *
+ * Peak concurrency rather than a running total, because the status bar's DOM
+ * is rebuilt from scratch whenever its structure signature changes — see the
+ * note on `recordNotifications`.
  */
 async function notificationCount(ctPage: any, substring: string): Promise<number> {
   return await ctPage.evaluate((needle: string) => {
-    const counts = ((window as any).__ctNotificationCounts ?? {}) as Record<string, number>;
-    return Object.keys(counts)
-      .filter((entry) => entry.includes(needle))
-      .reduce((sum, entry) => sum + counts[entry], 0);
+    const ticks = ((window as any).__ctNotificationTicks ?? []) as Record<string, number>[];
+    let peak = 0;
+    for (const tick of ticks) {
+      let concurrent = 0;
+      for (const entry of Object.keys(tick)) {
+        if (entry.includes(needle)) concurrent += tick[entry];
+      }
+      if (concurrent > peak) peak = concurrent;
+    }
+    return peak;
   }, substring);
 }
 
@@ -134,9 +169,34 @@ async function pendingReRecordIsSet(ctPage: any): Promise<boolean> {
   });
 }
 
-/** Leave replay's read-only editors so the buffer can be edited (Ctrl+E). */
+/**
+ * Leave replay's read-only editors so the buffer can be edited (Ctrl+E).
+ *
+ * Clicks the *start* of the first code line rather than its centre.  Once a
+ * replay has inline omniscience values, a `span.ct-omni-name-std` content
+ * widget sits over the middle of the line — that is where the values are
+ * drawn — and an unpositioned click lands on it, so Playwright's actionability
+ * check reports *"subtree intercepts pointer events"* and retries for the full
+ * 30s before failing.  Those spans are deliberately clickable
+ * (`page-objects/panes/editor/flow-value.ts` clicks them), so the widget is
+ * not what should change; where in the line the helper aims is.  Column 0 of
+ * the line is code, never a value chip.
+ *
+ * NOTE (2026-08-27): getting past this reveals the next blocker rather than a
+ * green test — the three re-record cases now fail on the assertion that the
+ * typed text reached the buffer (`activeEditorValue` still reads
+ * `print("initial")`), i.e. the editor does not actually leave read-only mode.
+ * Dropping the click entirely and sending the shortcut to `document.body`
+ * — on the theory that Mousetrap ignores keys raised inside a focused editable
+ * element — was tried and changes nothing, so that is not the explanation.
+ * These cases had never been executed anywhere before the renderer startup
+ * crash was fixed, so this is a first observation, not a regression.
+ */
 async function enterEditMode(ctPage: any): Promise<void> {
-  await ctPage.locator(".monaco-editor .view-line").first().click();
+  await ctPage
+    .locator(".monaco-editor .view-line")
+    .first()
+    .click({ position: { x: 2, y: 2 } });
   await ctPage.keyboard.press("Control+E");
 }
 

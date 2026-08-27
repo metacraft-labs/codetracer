@@ -5252,12 +5252,63 @@ second `ct record` while one is running. If you add a third record entry point,
 it has to do the same three things or the re-record gate in the renderer
 (`file_conflicts.ReRecordQueue.recording`) will look stuck.
 
-## `just build-once` does not work on macOS at f0ee7008
+## NEVER build a JS bundle with `--hotCodeReloading:on`
 
-Two independent blockers, both pre-existing; see the macOS rows in
-`codetracer-specs/Testing/Known-Test-Failures.md`. Consequence for agents: you
-cannot run the Playwright lanes on a Mac. You *can* still type-check the
-Electron-side Nim, which is the next best thing:
+It silently aliases distinct routines onto one JS function name, and the bug it
+produces looks like a data bug rather than a build bug.
+
+Under HCR the JS backend names routines with `idOrSig` (Nim
+`compiler/sighashes.nim`), whose `hashProc` hashes a routine's *type* and its
+owning module and **not its name**, and breaks ties with
+`BModule.sigConflicts` — a CountTable created fresh for every Nim module
+(`compiler/jsgen.nim`, `newModule`). The backend emits one bundle in one global
+scope, so two routines with the same signature and the same owner that are
+emitted while two *different* modules are being generated get byte-identical JS
+names, each starting the tie-break counter at zero, and the later `function`
+declaration wins for both.
+
+Closures inside generic procs collide by construction — every instantiation's
+inner lambda is `proc ()` owned by the generic's module. The renderer died at
+startup on every session because `createMemo[string]`'s closure (emitted from
+`debug_controls_vm`) and `createMemo[DeepReviewFileEntry]`'s closure (emitted
+from `deepreview_vm`) became one function: the `Memo[string]` then ran the
+record's copy code and `nimCopy` read `.path` off a Nim string, giving
+`TypeError: Cannot read properties of undefined (reading 'slice')` ~1200 times
+per launch. `ui.js` declared that one name three times.
+
+Diagnosis technique worth reusing: instrument the *shipped* bundle rather than
+reasoning about the Nim. Adding a guard in `nimCopyAux`'s leaf arm that logs
+`n.offset`, `Object.keys(src)` and `new Error().stack` when `src[n.offset]` is
+`undefined`, then running one Playwright case with
+`CODETRACER_TEST_CONSOLE_DUMP_PATH=/tmp/x.log`, named the wrong-typed value and
+the real call chain in a single run. A cheap check for the whole class:
+
+    grep -o '^function [A-Za-z0-9_$]*(' ui.js | sort | uniq -d
+
+`src/frontend/tests/renderer_js_symbol_uniqueness_test.nim` guards the build
+setting. (That grep still reports one name: `debugRepl`, declared `{.exportc.}`
+in both `renderer.nim` and `services/debugger_service.nim` — a separate, latent
+instance of the same class.)
+
+**Four different files run `nim js` on these sources, and the flag was in all
+of them.** `repro.nim` is the reprobuild recipe, but it is not the only build
+definition: `src/Tuprules.tup` (`!nim_js`, `!nim_node_subwindow`) is what
+`just build-once` still uses by default on Linux, `justfile` has two
+hand-written renderer recipes, and `build_for_extension.sh` builds `ui.js` for
+the VS Code extension. Fixing one and not the others leaves the bug shipping on
+a platform or a surface you did not check; the guard above scans all four.
+
+## `just build-once` on macOS
+
+It gets all the way to the last action and fails there (`dmg-staging`, four
+dangling relative symlinks); every binary and `ui.js` are produced first, so
+check `ui.js`'s hash rather than the exit code. It also leaves `config.nims`
+dirty with an appended blank line. `just test-gui` and `test-gui-visible`
+declare `build-once` as a prereq and so abort — use `just test-gui-prebuilt`.
+See the macOS rows in `codetracer-specs/Testing/Known-Test-Failures.md`.
+
+`just build-ui-js` has drifted from the reprobuild recipe and fails; that is not
+evidence the renderer is broken. To type-check the Electron-side Nim by hand:
 
     nim -d:chronicles_enabled=off -d:ctRenderer -d:ctHmr -d:isonimHmr \
         -d:nimNoLentIterators --out:/tmp/ui.js js src/frontend/ui_js.nim
