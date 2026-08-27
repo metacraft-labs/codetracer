@@ -27,6 +27,7 @@ mkdir -p "$DIST_DIR/pkg"
 
 # Step 3: Copy app files
 cp "$SCRIPT_DIR/app/index.html" "$DIST_DIR/"
+cp "$SCRIPT_DIR/app/gateway-client.js" "$DIST_DIR/"
 cp "$SCRIPT_DIR/app/worker.js" "$DIST_DIR/"
 cp "$SCRIPT_DIR/app/transport-test.html" "$DIST_DIR/"
 
@@ -59,6 +60,30 @@ http {
     }
 }
 NGINX_EOF
+
+# Step 6b: Cloudflare Pages `_headers`.
+#
+# web.codetracer.com serves this bundle as a CROSS-ORIGIN engine: the HTML
+# page (e.g. blocktracer.org) lives on a different origin and loads worker.js
+# + pkg/*.js + *.wasm from here. Three things must be permitted cross-origin:
+#   * the ES-module `import` of worker.js (blob-bootstrap in gateway-client.js)
+#     and pkg/db_backend.js — module fetches honour CORS,
+#   * `WebAssembly.compileStreaming` of db_backend_bg.wasm — an ordinary CORS
+#     fetch,
+#   * whole-file `?trace=<url>` and Range fetches of `.ct` containers.
+# So publish a permissive `Access-Control-Allow-Origin: *` for the engine
+# assets. Cross-Origin-Resource-Policy: cross-origin lets the assets be
+# embedded by a document on another origin. (Cloudflare Pages serves .wasm as
+# application/wasm automatically, so no content-type override is needed.)
+cat >"$DIST_DIR/_headers" <<'HEADERS_EOF'
+# Cloudflare Pages headers — see browser-replay/build-dist.sh for rationale.
+/*
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET, HEAD, OPTIONS
+  Access-Control-Allow-Headers: Range
+  Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges
+  Cross-Origin-Resource-Policy: cross-origin
+HEADERS_EOF
 
 # Step 7: Print summary
 WASM_SIZE=$(wc -c <"$DIST_DIR/pkg/db_backend_bg.wasm" | tr -d ' ')
