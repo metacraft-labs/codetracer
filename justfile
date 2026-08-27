@@ -26,6 +26,22 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that every place a Python version can be observed still agrees with
+# the one place it is CHOSEN (nix/python.nix): the dev shell's exports and its
+# first `python3` on PATH, `.python-recorder-venv`'s interpreter, the ABI tag
+# of the recorder sibling's compiled extension, and the `requires-python`
+# windows the recorder declares. A CPython extension is ABI-locked to its
+# minor version, so a disagreement here is not a style problem — it is
+# `ct record x.py` refusing to run and the `record-python-happy-path` E2E edge
+# going red. Every figure it compares is derived from an artifact or from the
+# pin; nothing is restated as a literal, so bumping nix/python.nix keeps this
+# green while choosing a version anywhere else does not. Reads files and runs
+# interpreters; no build, seconds. Conditions it cannot observe (no venv, an
+# unbuilt sibling) are printed as `n/a` and counted separately — never as
+# passes. See the header of scripts/test-python-version-alignment.sh.
+test-python-version-alignment:
+  bash scripts/test-python-version-alignment.sh
+
 # Assert that detect-siblings.sh can actually satisfy the prerequisite the
 # RR-based backend-manager integration tests demand. Those 48 tests gate on
 # CODETRACER_RR_BACKEND_PATH and tell the operator to run detect-siblings.sh
@@ -688,6 +704,7 @@ test:
   set -e
   just test-build-alignment
   just test-flake-pin-alignment
+  just test-python-version-alignment
   just test-sibling-backend-path
   just test-agent-api-contract
   just test-rust

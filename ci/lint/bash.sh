@@ -107,6 +107,24 @@ lint_step "shellcheck: flake pin alignment guard" \
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
 
+# scripts/test-python-version-alignment.sh is the static+artifact guard on the
+# ONE place this repo chooses a Python version (nix/python.nix). It sits here
+# for the same reason the pin guard does: it is not under ci/, so the glob at
+# the top does not reach it.
+lint_step "shellcheck: python version alignment guard" \
+	shellcheck scripts/test-python-version-alignment.sh
+
+# And its contract suite runs here because this guard is unusually exposed to
+# passing vacuously: most of what it compares (a venv, a built `.so`, a sibling
+# checkout) may simply be absent, and a guard that finds nothing to compare and
+# exits 0 is indistinguishable from a guard that checked everything. The suite
+# drives it against synthetic trees with one seeded defect each -- including
+# one case that MOVES the pin and asserts the verdicts invert, which is what
+# proves no version is written into the guard as a literal. Pure bash, stub
+# interpreters, no nix, no real Python, about a second.
+lint_step "contract suite: python version alignment guard" \
+	bash ci/test/python-version-alignment-test.sh
+
 # ci/unfold-submodules.sh is what makes codetracer-native-backend's `path:`
 # flake inputs resolvable in `Cross-Repo Integration Tests`. Its suite is pure
 # bash + git against repositories it builds under mktemp -- no siblings, no
