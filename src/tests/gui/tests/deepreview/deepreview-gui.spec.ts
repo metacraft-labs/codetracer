@@ -182,6 +182,24 @@ test.describe("DeepReview GUI - main features", () => {
     // the panel; it is the same guard pointed the other way.
     expect(titles.filter((t) => t === "DEEP REVIEW").length).toBe(0);
 
+    // ...and exactly ONE VCS panel. Issue #610's third complaint, in the
+    // reporter's own words (2026-08-17): "The VCS panel is opened three times
+    // and should be only one component." Two producers made that true and
+    // both are gone — DR-R4 (`openUnifiedDiffTab` opened a second
+    // `Content.VCS` instance per diff target, and because `isDeepReviewMode`
+    // is a window-global flag every instance rendered the whole review) and
+    // DR-R8 (the standalone panel's own modified-files list). Nothing counted
+    // them, here or in the headless lanes, so nothing would notice a third
+    // producer appearing. VCS-Panel.md: the panel "sits alongside the
+    // FILESYSTEM panel in the same stack (as a separate tab)" and is
+    // "parametric" over its two data sources — one panel, two data modes.
+    //
+    // Headless counterpart, which is the load-bearing one:
+    //   `test_a_review_mounts_exactly_one_vcs_panel` and the "#610 the diff
+    //   tab is a document, not a second VCS panel" suite in
+    //   src/tests/gui/tests/layout/deepreview_layout_test.nim.
+    expect(titles.filter((t) => t === "VCS").length).toBe(1);
+
     // The mode switcher is the VCS panel's view mode toggle (§2: "Mode
     // switcher | The VCS panel's view mode toggle"), which DR-R1 made render
     // in review mode.

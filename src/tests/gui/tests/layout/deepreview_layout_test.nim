@@ -260,6 +260,55 @@ suite "#610 DeepReview layout — the bundled default survives a review":
     check updated.findStackWithContent(VcsContentId){
       "activeItemIndex"}.getInt(-1) == 0
 
+  test "test_a_review_mounts_exactly_one_vcs_panel":
+    ## Issue #610's third complaint, in the reporter's own words (2026-08-17):
+    ## "The VCS panel is opened three times and should be only one component."
+    ##
+    ## The count is what nothing asserted.  The suite above pins the panel
+    ## *set* — "nothing was dropped and nothing was added" — with a sequence
+    ## comparison, and `review_layout_test.nim` pins the length of the
+    ## prepared review layout.  Both are exact, and neither says the number
+    ## the reporter counted, so neither is the assertion a reader looking for
+    ## this defect would find.  `VCS-Panel.md` states the rule the reporter is
+    ## quoting: the panel "sits alongside the FILESYSTEM panel in the same
+    ## stack (as a separate tab)" and is "**parametric**" over its two data
+    ## sources — one panel with two data modes, never two panels.
+    ##
+    ## Deliberately a count and not a `layoutHasContent`: the defect was never
+    ## an absent VCS panel, it was three of them, and a presence predicate is
+    ## true of all three cases.
+    proc vcsPanelCount(layout: JsonNode): int =
+      for contentId in contentIdsInLayout(layout):
+        if contentId == VcsContentId:
+          inc result
+
+    let original = bundledLayout()
+    # The premise: the layout users actually get declares exactly one, so the
+    # assertions below are about what a review does to it rather than about a
+    # fixture that happened to hold one.
+    check vcsPanelCount(original) == 1
+
+    let once = focusReviewPanels(original)
+    check vcsPanelCount(once) == 1
+    # ...and re-entering (a second `ct review` over a layout a review already
+    # prepared) still does not make a second one — obligation 3 of
+    # Layout-System.md, "DeepReview and the Layout", counted rather than
+    # compared.
+    check vcsPanelCount(focusReviewPanels(once)) == 1
+
+    # The materialisation path too: a layout with no Agent Activity panel gets
+    # the third pillar back (obligation 4), and that is the ONE panel a review
+    # may add.  It must not bring a VCS panel with it.
+    let editLikeLayout = wrap(makeRow("100%", [
+      makeColumn("20%", [makeStack([
+        makeComponent(FilesystemContentId, "filesystemComponent"),
+        makeComponent(VcsContentId, "vCSComponent-0"),
+      ])]),
+    ]))
+    let materialised = focusReviewPanels(editLikeLayout)
+    check materialised.layoutHasContent(AgentActivityContentId)
+    check vcsPanelCount(materialised) == 1
+
   test "the Agent Activity panel becomes the visible tab of its stack":
     ## DR-R3 / Layout-System.md, "DeepReview and the Layout", obligation 2:
     ## the stack hosting each of the three review panels is retargeted at it,
@@ -721,3 +770,137 @@ when not defined(js):
       check utils.contains(
         "of Content.AgentActivityDeepReview: " &
         "data.makeAgentActivityDeepReviewComponent(id)")
+
+  suite "#610 the diff tab is a document, not a second VCS panel":
+    ## Issue #610's third complaint (2026-08-17): "The VCS panel is opened
+    ## three times and should be only one component."
+    ##
+    ## The *layout* half of that count is asserted above and in
+    ## `review_layout_test.nim`: a review adds no VCS panel to the tree it was
+    ## handed.  This suite covers the other producer, and it is the one the
+    ## reporter was actually looking at.  DR-R4 records it verbatim:
+    ##
+    ##   "Today `openUnifiedDiffTab` opens a second `Content.VCS` panel
+    ##    instance with `path = \"diff:<target>\"`."
+    ##
+    ## Every changed file the reviewer clicked therefore produced another VCS
+    ## panel, and because `isDeepReviewMode` reads a window-global flag
+    ## (`ui/vcs.nim`), each one rendered the whole review — the same header,
+    ## the same changed-files list.  Three panels showing one review.
+    ##
+    ## DR-R4 fixed it by making the diff a content kind of its own
+    ## (`Content.UnifiedDiff = 46`, `ui/unified_diff.nim`).  What DR-R4 left
+    ## guarded is what the tab *renders*: `e2e_unified_diff_tab_is_a_monaco_editor`
+    ## (`vcs/vcs_unified_diff.spec.ts`) checks Monaco's view layers, minimap and
+    ## per-side diff decorations, and three headless cases in
+    ## `vcs/vcs_diff_decorations_test.nim` check the decorations themselves.
+    ## Those are real tests and this suite does not replace them.
+    ##
+    ## What none of them checks is which *content kind* the host asks for.  A
+    ## Monaco diff editor renders inside a `Content.VCS` panel just as happily
+    ## as inside a `Content.UnifiedDiff` one — that is exactly what made the
+    ## original defect invisible — so a DOM assertion cannot distinguish the
+    ## fixed arrangement from the broken one.  Headless-first
+    ## (`codetracer-specs/Testing/Testing-Guidelines.md`) wants the rule
+    ## itself, and the rule is about which `Content` a routine asks for.
+    ##
+    ## A SOURCE CONTRACT, for the same reason the suite above is one:
+    ## `ui/vcs.nim` reaches GoldenLayout, Monaco and `document` on the way to
+    ## this decision, so it cannot be imported by a headless test at all.  The
+    ## ViewModel half of the decision *is* covered behaviourally — the panel's
+    ## resolver returns `voaDiffTab` (`vcs_vm_test.nim`,
+    ## `test_vcs_open_action_in_review_mode_opens_diff_tab`) — but nothing
+    ## anywhere says which panel kind the host opens when it sees one.
+    const
+      VcsPath = "src/frontend/ui/vcs.nim"
+      LauncherPath = "src/frontend/ui/agentic_session_launcher.nim"
+      VcsViewPath = "src/frontend/viewmodel/views/isonim_vcs_view.nim"
+
+    proc withoutWhitespace(text: string): string =
+      ## Call sites wrap across lines, so the needles below are matched
+      ## against the source with every space and newline removed.  A
+      ## substring test on the raw text would pass simply because someone
+      ## reformatted the call.
+      for ch in text:
+        if ch notin {' ', '\t', '\r', '\n'}:
+          result.add(ch)
+
+    proc openUnifiedDiffTabBody(): string =
+      ## The body of `openUnifiedDiffTab`, up to the next top-level `proc`.
+      ## A missing anchor raises naming the anchor rather than slicing at -1,
+      ## the same convention `deepReviewStartupBody` uses.
+      let body = source(VcsPath)
+      let start = body.find("proc openUnifiedDiffTab*")
+      if start < 0:
+        raise newException(ValueError,
+          "source-contract anchor not found in " & VcsPath &
+          ": \"proc openUnifiedDiffTab*\" — renamed, moved or removed")
+      let rest = body[start .. ^1]
+      let stop = rest.find("\nproc ", 1)
+      if stop < 0: rest else: rest[0 ..< stop]
+
+    test "test_the_unified_diff_tab_is_not_a_second_vcs_panel":
+      ## The defect itself, at the line that had it.
+      let body = openUnifiedDiffTabBody()
+      let dense = withoutWhitespace(body)
+      check dense.contains("openLayoutTab(Content.UnifiedDiff")
+      check dense.contains("generateId(Content.UnifiedDiff)")
+      # ...and no part of it names the docked panel's content kind, which is
+      # what it used to open and what it must never open again.
+      check not body.contains("Content.VCS")
+
+    test "test_no_module_opens_a_vcs_panel_as_an_editor_document":
+      ## The general form, over every production frontend module rather than
+      ## the one that had the bug: a `Content.VCS` request may only ever mean
+      ## the docked singleton.  `opensAsIndependentTab` (asserted by
+      ## `vcs_vm_test.nim`) makes ANY content opened with `isEditor = true`
+      ## into an editor-area instance of its own, so a single new call site
+      ## spelled that way brings the whole defect back.
+      ##
+      ## Walked rather than enumerated: a list of modules to check is a list
+      ## that a new module is not on.
+      var scanned = 0
+      for path in walkDirRec("src/frontend"):
+        if not path.endsWith(".nim"):
+          continue
+        inc scanned
+        let dense = withoutWhitespace(source(path))
+        # `content` is `openLayoutTab`'s first argument after the `data`
+        # receiver, so these two are the whole of its direct call surface for
+        # a named content kind — positional and keyword.
+        check not dense.contains("openLayoutTab(Content.VCS")
+        check not dense.contains("openLayoutTab(content=Content.VCS")
+      # The walk really did read the tree: a `walkDirRec` over a path that
+      # moved would otherwise pass by checking nothing at all.
+      check scanned > 50
+
+    test "test_the_only_route_to_a_vcs_tab_asks_for_the_docked_panel":
+      ## `openLayoutTab` is also reachable indirectly, and exactly once:
+      ## `agentic_session_launcher.ensurePanel` forwards whatever content it
+      ## is handed, and one of its callers hands it `Content.VCS`.  A source
+      ## scan cannot see through that indirection, so the contract is on the
+      ## forwarder: it must request the docked singleton, never an
+      ## editor-area document.
+      let launcher = source(LauncherPath)
+      let dense = withoutWhitespace(launcher)
+      check dense.contains("ensurePanel(Content.VCS,VcsId)")
+      check dense.contains("data.openLayoutTab(content,id=id)")
+      # `ensurePanel` names no `isEditor`, so its request defaults to false
+      # and `opensAsIndependentTab` is false for it.  If the module ever grows
+      # one, this contract must be re-derived rather than silently widened.
+      check not launcher.contains("isEditor")
+
+    test "test_the_dom_diff_renderer_is_gone_from_the_vcs_panel":
+      ## DR-R4's ninth deliverable — "Delete the DOM diff renderer path only
+      ## once the Monaco tab passes the rewritten `vcs_unified_diff.spec.ts`;
+      ## do not run both" — which likewise had only a Playwright guard.  The
+      ## `deepreview-unified-*` `tdiv` tree the VCS panel used to draw is the
+      ## surface that made a second `Content.VCS` instance look like a diff.
+      let view = source(VcsViewPath)
+      for gone in ["proc renderUnifiedDiff", "proc renderDiffFile",
+                   "proc renderDiffHunk", "proc renderDiffLine",
+                   "proc renderHunkToolbar", "deepreview-unified-line"]:
+        check not view.contains(gone)
+      # The panel is still the thing under test — an empty or renamed file
+      # would make every assertion above vacuously true.
+      check view.contains("vcs-changed-files")

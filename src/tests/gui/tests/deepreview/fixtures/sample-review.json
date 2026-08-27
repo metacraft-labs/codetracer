@@ -5,8 +5,8 @@
   "recordingCount": 2,
   "sessionTitle": "DeepReview: parser cleanup",
   "traceContexts": [
-    {"id": 0, "label": "latest passing run", "traceId": 42},
-    {"id": 1, "label": "previous run", "traceId": 41}
+    {"id": 0, "label": "latest passing run"},
+    {"id": 1, "label": "previous run"}
   ],
   "files": [
     {
