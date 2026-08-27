@@ -110,6 +110,18 @@ const LANGS* = {
   "erl": LangErlang,
   "hrl": LangErlang,
   "php": LangPhp,
+  # `.gd` was missing here while `src/common/lang.nim`'s `toLang` map already
+  # knew both `gd` and `gdscript`.  Two extension tables, only one of them
+  # updated, is drift this enum has suffered before — and the consequence was
+  # not a missing feature but a WRONG diagnostic.  Measured on the shipped
+  # binary: `ct record player.gd` fell through to `LangUnknown`, took the
+  # NATIVE branch of `src/ct/trace/record.nim`, and printed "Assuming recording
+  # language LangUnknown" followed by a complaint that `ct-native-replay` is
+  # not installed.  Installing it would not have helped, and nothing about the
+  # failure named GDScript.  With this entry the file reaches `LangGdScript`,
+  # whose `recorderToolFor` arm says what is actually missing — the patched
+  # Godot engine — see `src/ct/trace/recorder_dispatch.nim`.
+  "gd": LangGdScript,
 }.toTable()
 
 const WASM_LANGS = {

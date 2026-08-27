@@ -314,14 +314,12 @@ suite "ct record dispatch table":
     # it and no way for the user to learn that the recorder is a patched Godot
     # engine.
     #
-    # NOTE, and it is a SEPARATE gap from the one this arm closes: `.gd` is NOT
-    # auto-detected.  `detectLangFromPath` reads `LANGS`
-    # (`src/ct/utilities/language_detection.nim`), which has no `gd` entry, so a
-    # bare `ct record foo.gd` resolves to `LangUnknown` and takes the native
-    # build path instead of reaching this message at all.  That is a missing
-    # extension registration in the language table, not a missing recorder, so
-    # it is deliberately NOT fixed here; this arm is what makes the answer
-    # correct the moment the extension is registered.
+    # The SEPARATE gap this note used to record — "`.gd` is NOT auto-detected"
+    # — is now closed, and the case below is the one that closes it.  The
+    # extension is registered in `LANGS`
+    # (`src/ct/utilities/language_detection.nim`), so a bare
+    # `ct record foo.gd` reaches this message instead of resolving to
+    # `LangUnknown` and taking the native build path.
     const DeclaredUnsupported = {LangRuby, LangPython} + RecorderPendingLanguages
     for lang in DeclaredUnsupported:
       checkpoint("declared-unsupported language: " & lang.toName)
@@ -332,6 +330,37 @@ suite "ct record dispatch table":
       check "error:" in message
       check "help:" in message
       check lang.toName in message
+
+  test "a declared-unsupported language is reachable from a FILE, not just --lang":
+    # The arm above is only worth having if a user reaches it the way a user
+    # actually invokes `ct record`: by naming a file.  `.gd` was registered in
+    # `src/common/lang.nim`'s `toLang` map and NOT in the CLI's own `LANGS`
+    # table, so `--lang gdscript` reached the message and `player.gd` did not.
+    # Measured on the shipped binary before the extension was registered:
+    #
+    #   $ ct record /tmp/ct-gd-probe/player.gd ; echo $?
+    #   ERROR [ct](build.nim:60):This functionality requires a ct-native-replay installation.
+    #   Assuming recording language LangUnknown:
+    #   1
+    #
+    # Loud, but naming a component whose installation would not have helped,
+    # and never mentioning GDScript.  That is the "confident wrong answer"
+    # failure mode `detectLangFromPath`'s own doc comment was written about.
+    #
+    # Asserted here rather than only in `lang_enum_contract_test.nim`, whose
+    # sweep over unknown extensions is GENERATED from `LANGS` and therefore
+    # cannot notice a key that is missing from it.
+    for lang in RecorderPendingLanguages:
+      checkpoint("pending language: " & lang.toName)
+      let extension = getExtension(lang)
+      check extension.len > 0
+      let reached = detectLangFromPath("program." & extension, isWasm = false)
+      check reached == lang
+      # …and what it reaches is the declaration, not silence.
+      check recorderToolFor(reached).installHint.len > 0
+    # Both spellings of the explicit flag keep working, unchanged.
+    check toLang("gd") == LangGdScript
+    check toLang("gdscript") == LangGdScript
 
   test "the missing-recorder message names the language and the remedy":
     for row in DispatchRows:

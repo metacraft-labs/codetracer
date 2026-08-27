@@ -55,7 +55,9 @@ help-delegate
 record .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc noext
 record-test .py
 run .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc noext
-known-extensions .c .cpp .rs .go .pas .f90 .d .cr .lean .adb
+# `.gd` is KNOWN, not recorded: the core refuses GDScript by name (its patched
+# Godot engine is unpublished).  On `record` it would advertise a missing tool.
+known-extensions .c .cpp .rs .go .pas .f90 .d .cr .lean .adb .gd
 replay
 list
 print
