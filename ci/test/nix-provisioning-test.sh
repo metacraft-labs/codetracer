@@ -84,6 +84,13 @@ echo "every job that runs nix installs Nix first"
 is_provisioning_step() { # $1 = a stripped YAML line
 	case "$1" in
 	*'.github/actions/setup-nix'*) return 0 ;;
+	# What `.github/actions/setup-nix` wraps, and the OTHER upstream action
+	# beside it: `push-tag` and `create-release` call `install-nix@main`
+	# directly. Leaving this spelling out made the scanner report
+	# `create-release` as unprovisioned when it was not -- a false positive
+	# that nearly had a redundant second Install Nix step committed to it.
+	*'nixos-modules/.github/setup-nix'*) return 0 ;;
+	*'nixos-modules/.github/install-nix'*) return 0 ;;
 	*'metacraft-github-actions/setup-dev-env'*) return 0 ;;
 	*'.github/actions/setup-db-backend-siblings'*) return 0 ;;
 	*'.github/actions/setup-isonim-siblings'*) return 0 ;;
