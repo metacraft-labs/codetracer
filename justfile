@@ -26,6 +26,17 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that detect-siblings.sh can actually satisfy the prerequisite the
+# RR-based backend-manager integration tests demand. Those 48 tests gate on
+# CODETRACER_RR_BACKEND_PATH and tell the operator to run detect-siblings.sh
+# when it is unset; that instruction was false for as long as both the script
+# and the repro dev shell keyed the variable on a sibling directory named
+# `codetracer-rr-backend`, which is not a repository that exists. Hermetic and
+# fast (no build, no network) -- the real-checkout leg skips loudly when the
+# sibling is absent, as in the non-gui lane.
+test-sibling-backend-path:
+  bash ci/test/sibling-backend-path-test.sh
+
 # Assert that the built output tree carries the assets `ct` reads on startup
 # (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
 # build exits 0 when a runtime asset is simply never published -- there is no
@@ -677,11 +688,12 @@ test:
   set -e
   just test-build-alignment
   just test-flake-pin-alignment
+  just test-sibling-backend-path
   just test-agent-api-contract
   just test-rust
   just test-nimsuggest
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
-    echo "codetracer-rr-backend detected — running cross-repo tests..."
+    echo "codetracer-native-backend detected — running cross-repo tests..."
     just cross-test
   else
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"

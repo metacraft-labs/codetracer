@@ -65,7 +65,6 @@ _ct_try_workspace_root() {
 	local candidate="$1"
 	# A valid workspace root should contain at least one known sibling directory.
 	if [ -d "$candidate/codetracer-native-backend" ] ||
-		[ -d "$candidate/codetracer-rr-backend" ] ||
 		[ -d "$candidate/codetracer-python-recorder" ] ||
 		[ -d "$candidate/codetracer-php-recorder" ] ||
 		[ -d "$candidate/codetracer-ruby-recorder" ] ||
@@ -141,6 +140,23 @@ _ct_detect_summary() {
 # recipe — not detection — is responsible for triggering the build.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native-backend" ]; then
 	export CT_CODETRACER_NATIVE_BACKEND_SIBLING="$_CT_WORKSPACE_ROOT/codetracer-native-backend"
+	# Consumers gate on CODETRACER_RR_BACKEND_PATH rather than the canonical
+	# CT_* name above: `just test` decides whether to run `just cross-test`
+	# from it, and `check_rr_prerequisites` in
+	# src/backend-manager/tests/real_recording_integration.rs treats it as
+	# proof that the native-backend sibling under test is the one on PATH.
+	# Its failure message tells the operator to run this script, so this
+	# script has to be able to satisfy it; before this export the only place
+	# that ever set the variable was one GitHub Actions step, which is why
+	# those 48 RR tests never ran anywhere else.
+	#
+	# The value is the sibling REPO directory, regardless of whether
+	# ct-native-replay has been built yet — the same value
+	# .github/workflows/codetracer.yml sets, and what
+	# codetracer-ci/scripts/record-test-traces.sh expects when it appends
+	# /target/debug.  Build state is a separate question, answered by the
+	# CODETRACER_RR_BACKEND_PRESENT probe further down.
+	export CODETRACER_RR_BACKEND_PATH="$_CT_WORKSPACE_ROOT/codetracer-native-backend"
 fi
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" ]; then
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug:$PATH"
@@ -161,10 +177,6 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-b
 		fi
 	fi
 	_ct_detect_summary "codetracer-native-backend (ct-native-replay available)"
-elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-native-replay" ]; then
-	# Legacy checkout directory name; the binary inside is the current one.
-	export PATH="$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
-	_ct_detect_summary "codetracer-rr-backend (ct-native-replay available, legacy checkout name)"
 fi
 
 # --- codetracer-native-recorder (ct-mcr / Multi-Core Recorder) ---
