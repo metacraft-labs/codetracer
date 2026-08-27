@@ -14,11 +14,11 @@
 ##
 ## ## What the last suite pins, and why it is the important one
 ##
-## The four axes are only worth having if the 40 values of `Lang` genuinely
+## The four axes are only worth having if the 41 values of `Lang` genuinely
 ## decompose onto them.  The last suite writes that decomposition out as an
 ## exhaustive `case` — so a new `Lang` member is a compile error here — and then
 ## checks it against `usesMaterializedTraces`, the one-bit projection the tree
-## carries today.  It agrees on 38 of 40 values.  The two disagreements are
+## carries today.  It agrees on 39 of 41 values.  The two disagreements are
 ## named, explained and asserted individually, because each is a fact about the
 ## tree rather than an error in the decomposition:
 ##
@@ -476,7 +476,7 @@ type
                         approach: RecordingApproach]
 
 func decompose(lang: Lang): Decomposition =
-  ## Every one of the 40 current `Lang` values, on the four axes.
+  ## Every one of the 41 current `Lang` values, on the four axes.
   ##
   ## This lives in the test, not in production, on purpose: this increment
   ## lands the types alongside `Lang` and migrates nothing.  Its job is to
@@ -536,6 +536,35 @@ func decompose(lang: Lang): Decomposition =
   of LangElixir: (slElixir, tiBeam, raInstrumentedRuntime)
   of LangErlang: (slErlang, tiBeam, raInstrumentedRuntime)
   of LangPhp: (slPhp, tiInterpreted, raInstrumentedRuntime)
+  # GDScript, decided from the recorder spec rather than by copying a
+  # neighbouring scripting language:
+  #
+  # * `slGdScript` — `.gd` is a notation people write files in, so it is a real
+  #   member of the language axis.  `slUnknown` is reserved for the two platform
+  #   pseudo-languages (asserted below), and GDScript is not one of them.
+  # * `tiGdScriptVm` — `.gd` is compiled to bytecode and executed by
+  #   `GDScriptFunction::call` in `modules/gdscript/gdscript_vm.cpp`
+  #   (GDScript-Recorder.md, "The interpreter is a single, well-bounded
+  #   function" / "The blocked single-step route"), which is a VM with its own
+  #   opcodes and not one of the seven runtimes `tiInterpreted` closes over.
+  #   The ISA axis has to separate it from the Godot HOST for the mixed-trace
+  #   design to be expressible at all: Mixed-Trace-GDScript.md §1 makes the
+  #   native altitude the patched Godot recorded by `ct-mcr` and the VM altitude
+  #   the GDScript trace the engine emits.
+  # * `raInstrumentedRuntime` — the recorder IS the runtime.  The patched engine
+  #   links `libcodetracer_trace_writer.a` and calls the writer's chokepoints
+  #   itself (Mixed-Trace-GDScript.md §2; GDScript-Recorder.md "The writer
+  #   (link, do not reimplement)").  Nothing emulates the artefact, so this is
+  #   not `raVmEmulation`.
+  #
+  # This makes `producesMaterializedTrace` agree with
+  # `usesMaterializedTraces(LangGdScript)`, which is why GDScript is NOT a third
+  # member of `MaterializedFlagExceptions` below.  That CodeTracer does not ship
+  # the patched engine yet is a fact about the RECORDER's availability, not
+  # about these axes, and it is asserted where it belongs: `recorderToolFor`'s
+  # `LangGdScript` arm (`src/ct/trace/recorder_dispatch.nim`), pinned by
+  # `record_dispatch_test.nim`.
+  of LangGdScript: (slGdScript, tiGdScriptVm, raInstrumentedRuntime)
 
 const
   MaterializedFlagExceptions = {LangNim, LangLua}
@@ -543,9 +572,9 @@ const
     ## with `producesMaterializedTrace(decompose(lang).approach)`.  Both
     ## disagreements are facts about the tree, asserted individually below.
 
-suite "all 40 Lang values decompose onto the four axes":
+suite "all 41 Lang values decompose onto the four axes":
 
-  test "the decomposition agrees with usesMaterializedTraces on 38 of 40":
+  test "the decomposition agrees with usesMaterializedTraces on 39 of 41":
     var disagreements: seq[string] = @[]
     for lang in Lang:
       let d = decompose(lang)
@@ -610,7 +639,7 @@ suite "all 40 Lang values decompose onto the four axes":
 
   test "every SourceLanguage member is reachable from some Lang value":
     # The axis was derived from `Lang` and must not have grown a member that
-    # nothing in the tree can produce.  33 real languages plus the sentinel.
+    # nothing in the tree can produce.  34 real languages plus the sentinel.
     var langs: set[SourceLanguage] = {}
     for lang in Lang:
       langs.incl(decompose(lang).language)
@@ -759,3 +788,33 @@ suite "one source language, two artefacts: .nim versus .nims":
     # It must not collide with a reserved source-language token.
     for reserved in ReservedSourceLanguageTokens:
       check token(tiNimVm) != reserved
+
+  test "GDScript is a first-class language AND a first-class ISA":
+    # The same knock-on checks for the GDScript pair, so neither half can be
+    # half-added.  Both are needed and they are NOT the same axis: `slGdScript`
+    # is what a `.gd` FILE is written in, `tiGdScriptVm` is the machine that
+    # runs it, and the Godot process hosting that machine is `tiNative` — the
+    # two altitudes of Mixed-Trace-GDScript.md §1.
+    check token(slGdScript) == "gdscript"
+    check token(tiGdScriptVm) == "gdscriptvm"
+    var gotLang: SourceLanguage
+    check parseSourceLanguage("gdscript", gotLang)
+    check gotLang == slGdScript
+    var gotIsa: TargetIsa
+    check parseTargetIsa("  GDScriptVM  ", gotIsa)   # strips and lowercases
+    check gotIsa == tiGdScriptVm
+
+    # The engine's own VM emits the container, so the approach is the
+    # instrumented-runtime one and the trace it produces is materialized.
+    check fallbackTargetIsaForLanguage(slGdScript) == tiGdScriptVm
+    check defaultRecordingApproach(tiGdScriptVm) == raInstrumentedRuntime
+    check producesMaterializedTrace(defaultRecordingApproach(tiGdScriptVm))
+    check(not isNativeReplay(defaultRecordingApproach(tiGdScriptVm)))
+
+    # `tiInterpreted`'s list is closed on purpose; a new substrate gets its own
+    # value rather than being filed there.  Assert GDScript took that route.
+    check decompose(LangGdScript).isa != tiInterpreted
+    check decompose(LangGdScript).isa != tiNative
+    for reserved in ReservedSourceLanguageTokens:
+      check token(slGdScript) != reserved
+      check token(tiGdScriptVm) != reserved

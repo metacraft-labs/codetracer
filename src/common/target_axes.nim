@@ -114,6 +114,10 @@ type
     slNoir
     slAsm               ## assembly, dialect deliberately not committed
     slMidenAsm          ## Miden VM assembly — the one dialect with real support
+    slGdScript          ## GDScript, the notation Godot `.gd` files are written
+                        ## in.  It is a real per-file language and not a
+                        ## substrate, so it belongs here and not on `TargetIsa`:
+                        ## the substrate it runs on is `tiGdScriptVm` below.
 
   TargetIsa* = enum
     ## What the machine that actually runs the artefact executes.
@@ -177,6 +181,30 @@ type
     tiCircomWitness     ## the substrate `codetracer-circom-recorder` observes
                         ## (`:133`)
     tiBeam              ## the BEAM — `codetracer-beam-recorder` (`:248-271`)
+    tiGdScriptVm        ## Godot's GDScript bytecode VM.  `.gd` is compiled to
+                        ## bytecode and executed by `GDScriptFunction::call`
+                        ## (`modules/gdscript/gdscript_vm.cpp`), a computed-goto
+                        ## interpreter with its own opcodes — which is why it is
+                        ## its own value rather than being filed under
+                        ## `tiInterpreted`, whose list is closed on purpose.
+                        ## `tiNimVm` above is the same shape and the precedent.
+                        ##
+                        ## The distinction is load-bearing for the mixed-trace
+                        ## design rather than decorative: a GDScript session has
+                        ## TWO altitudes, the patched Godot host (`tiNative` /
+                        ## `raMcr`) and the GDScript VM inside it
+                        ## (`codetracer-specs/Planned-Features/Mixed-Trace-GDScript.md`
+                        ## §1), and one ISA value cannot name both.
+                        ##
+                        ## The recorder that observes it is the ENGINE ITSELF —
+                        ## a patched Godot linking the CTFS writer
+                        ## (`codetracer-specs/Recording-Backends/GDScript-Recorder.md`),
+                        ## so the approach is `raInstrumentedRuntime`.  That
+                        ## engine is not something CodeTracer ships yet, which is
+                        ## a fact about the recorder's availability rather than
+                        ## about this axis; see
+                        ## `recorderToolFor`'s `LangGdScript` arm
+                        ## (`src/ct/trace/recorder_dispatch.nim`).
 
   Toolchain* = enum
     ## What turned the source into the artefact.
@@ -328,6 +356,7 @@ func token*(v: SourceLanguage): string =
   # token intentionally differs from the `Lang` member name (`LangMasm`) and
   # from `libs/tree-sitter-masm`; do not "fix" it back.
   of slMidenAsm: "midenasm"
+  of slGdScript: "gdscript"
 
 func token*(v: TargetIsa): string =
   ## The wire spelling of a target ISA.
@@ -351,6 +380,7 @@ func token*(v: TargetIsa): string =
   of tiAcir: "acir"
   of tiCircomWitness: "circomwitness"
   of tiBeam: "beam"
+  of tiGdScriptVm: "gdscriptvm"
 
 func token*(v: Toolchain): string =
   ## The wire spelling of a toolchain.
@@ -508,6 +538,7 @@ func fallbackTargetIsaForLanguage*(lang: SourceLanguage): TargetIsa =
   of slCadence: tiFlowVm
   of slNoir: tiAcir
   of slMidenAsm: tiMidenVm
+  of slGdScript: tiGdScriptVm
 
 func defaultRecordingApproach*(isa: TargetIsa): RecordingApproach =
   ## How CodeTracer records a given target ISA when nothing says otherwise.
@@ -538,6 +569,12 @@ func defaultRecordingApproach*(isa: TargetIsa): RecordingApproach =
   of tiInterpreted: raInstrumentedRuntime
   of tiNimVm: raInstrumentedRuntime
   of tiBeam: raInstrumentedRuntime
+  # The patched Godot engine instruments its own GDScript VM and writes the
+  # container itself by linking `libcodetracer_trace_writer.a` — the same
+  # relationship `tiNimVm` has with `nim e --trace:` (GDScript-Recorder.md,
+  # "The writer (link, do not reimplement)").  Nothing emulates the artefact,
+  # so this is `raInstrumentedRuntime` and not `raVmEmulation`.
+  of tiGdScriptVm: raInstrumentedRuntime
   of tiWasm, tiEvm, tiMidenVm, tiMoveVm, tiFuelVm, tiPolkaVm, tiCairoVm,
      tiAleoVm, tiTonVm, tiPlutus, tiFlowVm, tiSolanaSbf, tiAcir,
      tiCircomWitness:
