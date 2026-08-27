@@ -4185,6 +4185,11 @@ jobs:
     # not share the failure mode it watches for.
     runs-on: ubuntu-latest
     if: always()
+    # The check gives a missing lock a bounded 300s grace window to arrive (see
+    # the script header). This ceiling is far above that on purpose: it is the
+    # backstop that makes "this alarm can never hold a runner" true even if the
+    # window logic were broken, not the mechanism that bounds the wait.
+    timeout-minutes: 20
     steps:
       - name: Mint installation token for the manifests repo
         id: ci_token
@@ -4212,6 +4217,14 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/metacraft-manifests.git" \
             "${RUNNER_TEMP}/metacraft-manifests"
 
+      - name: Self-test the lock-freshness alarm
+        # Same rule as `ci-verdict` and `queue-watchdog`: an alarm is only worth
+        # trusting if its own contracts hold. The decisive fixture here is a
+        # lock that arrives WHILE the check is running — the race that used to
+        # make this job intermittently red on commits that were in fact locked.
+        # Pure bash + git against local repositories; no network, no build.
+        run: bash ci/verdict/workspace-lock-freshness-test.sh
+
       - name: Assert this commit has a published workspace lock
         run: |
           set -uo pipefail
@@ -4219,6 +4232,14 @@ jobs:
           # probes. `git rev-parse HEAD^` is empty for a root commit or if the
           # fetch depth did not reach the parent; the script ignores empty and
           # all-zero candidates.
+          #
+          # The clone above is a snapshot, and the lock is published
+          # asynchronously by the pusher's pre-push hook — measured at 54s after
+          # the clone for 84a8b633. The check therefore re-fetches this
+          # checkout (the clone URL carries the installation token, so no extra
+          # credential plumbing is needed) until the lock appears or its grace
+          # window expires. It returns the moment a fetch finds the lock, so the
+          # healthy case is no slower than before.
           PARENT="$(git rev-parse --verify --quiet HEAD^ || true)"
           bash ci/verdict/workspace-lock-freshness.sh \
             --manifest-dir "${RUNNER_TEMP}/metacraft-manifests" \
