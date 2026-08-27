@@ -22,6 +22,7 @@ import certificate
 import certificate_issuance
 import ct_test
 import discovery
+import run_orchestration
 
 proc scratchDir(name: string): string =
   result = getTempDir() / "ct-test-cert-cli" / name & "-" & $getCurrentProcessId()
@@ -127,6 +128,55 @@ suite "ct test run certificate CLI":
     let withoutCertificate = runCli(@["test", "run", "--workspace", workspace,
                                       "--threads", "1", "--no-certificate"])
     check withCertificate == withoutCertificate
+
+  test "a run that executed no test does not exit 0":
+    ## **The exit code and the attestation must not contradict each other.**
+    ## This workspace's only suite is a Nim ``std/unittest`` file whose
+    ## provider declares ``canRun* = false``, so nothing executes. The
+    ## certificate path has always refused to attest such a run
+    ## (``wrNoTestsExecuted``) — while the exit code said 0, which is the whole
+    ## defect: one half of the same binary called the run fine and the other
+    ## half said nothing happened.
+    let workspace = committedWorkspace("nothing-executed-exit")
+    let summaryPath = workspace / "summary.json"
+    let code = runCli(@["test", "run", "--workspace", workspace,
+                        "--summary", summaryPath, "--threads", "1"])
+    check code == ExitNothingExecuted
+    check code != 0
+
+    require fileExists(summaryPath)
+    let summary = parseJson(readFile(summaryPath))
+    # `executed` counts TESTS that finished, so it is 0 even though units were
+    # dispatched. `dispatched` carries the count `executed` used to report.
+    check summary["executed"].getInt == 0
+    check summary["passed"].getInt == 0
+    check summary["failed"].getInt == 0
+    check summary["dispatched"].getInt > 0
+    check summary["verdict"].getStr == $rvNothingExecuted
+    # The units nothing could run are named, per provider, in the summary
+    # itself rather than left to be inferred from `executed == 0`.
+    check summary["unrunnable"].getInt > 0
+    require summary.hasKey("errors")
+    check summary["errors"].len > 0
+    var mentionsNim = false
+    for entry in summary["errors"]:
+      if "nim-unittest" in entry.getStr:
+        mentionsNim = true
+    check mentionsNim
+    # And the verdict agrees with the attestation, which is the invariant the
+    # defect broke. Guarded with `hasKey` rather than indexed blind: `[]`
+    # raises on a missing key and `{}` yields nil, and neither makes a good
+    # failure report.
+    require summary.hasKey("certificate")
+    require summary["certificate"].hasKey("withheld_reason")
+    check summary["certificate"]["withheld_reason"].getStr == $wrNoTestsExecuted
+
+  test "the nothing-executed exit code survives --no-certificate":
+    ## The verdict is a property of the RUN, so switching attestation off must
+    ## not switch the honest exit status off with it.
+    let workspace = committedWorkspace("nothing-executed-nocert")
+    check runCli(@["test", "run", "--workspace", workspace, "--threads", "1",
+                   "--no-certificate"]) == ExitNothingExecuted
 
   test "a workspace outside a repository reports the probe ran and could not tell":
     ## The mirror of the case above: here the probe DOES run, and its verdict

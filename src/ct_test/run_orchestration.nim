@@ -31,7 +31,8 @@
 ## re-materialising them in the calling thread's heap — *before* the workers are
 ## allowed to exit.
 
-import std/[cpuinfo, json, locks, options, os, sets, strutils, times]
+import std/[algorithm, cpuinfo, json, locks, options, os, sets, strutils,
+             tables, times]
 
 import contracts
 import discovery
@@ -62,28 +63,88 @@ type
     ## test id so aggregation does not depend on the events carrying them.
     providerId*: string
     testId*: string
+    unrunnable*: bool
+      ## The owning provider declared it cannot run this unit's scope, so its
+      ## ``run`` proc was never invoked and no test was even attempted.
+      ##
+      ## Deliberately distinct from "ran and reported no finished test": the
+      ## first is a *capability* gap the runner can name up front, the second is
+      ## a provider that tried and produced nothing. Collapsing them is how a
+      ## suite nobody can execute came to look like a suite that passed.
     events*: seq[TestEvent]
     diagnostics*: seq[TestDiagnostic]
 
   TestRunResult* = object
-    ## Raw, aggregated output of a run: the flattened events from every executed
-    ## unit, plus the bookkeeping the summary is computed from.
+    ## Raw, aggregated output of a run: the flattened events from every
+    ## dispatched unit, plus the bookkeeping the summary is computed from.
     totalDiscovered*: int          ## RunUnits enumerated before partitioning
     skippedByPartition*: int       ## discovered units dropped by the partition
-    executedUnits*: int            ## units actually handed to a provider
+    dispatchedUnits*: int          ## units actually handed to a provider
+      ## **Named for what it is.** This used to be called ``executedUnits`` and
+      ## was reported to the world as ``executed``, which is what let a run that
+      ## dispatched 333 units and finished zero tests print ``"executed": 333``
+      ## and exit 0. A dispatched unit is *work handed out*, not a test that
+      ## ran; the number of tests that ran lives in ``TestRunSummary.executed``
+      ## and is derived from the providers' own ``tekTestFinished`` events.
     threads*: int                  ## worker threads used
     wallTimeMs*: int               ## wall-clock duration of the parallel phase
     outcomes*: seq[RunUnitOutcome] ## per-unit event streams (run order varies)
 
   TestRunSummary* = object
     ## The reduced, reportable summary derived from a ``TestRunResult``.
+    ##
+    ## **``executed`` counts TESTS, not units**, and it counts only the three
+    ## statuses that mean a test genuinely ran — ``tsPassed``, ``tsFailed``,
+    ## ``tsErrored``. This is deliberately the same definition
+    ## ``certificate_issuance.AttestedRun.executed`` uses, because two counters
+    ## in one binary that disagree about what "executed" means is exactly how
+    ## the exit code and the certificate came to contradict each other: the
+    ## certificate refused to attest a run (``wrNoTestsExecuted``) that the exit
+    ## code called a success.
+    ##
+    ## The invariant every reader already assumed now actually holds:
+    ## ``passed + failed == executed``, and ``executed + skipped`` is the number
+    ## of tests that reported a terminal status at all.
     totalDiscovered*: int
-    executed*: int
+    dispatchedUnits*: int
+      ## Units handed to a provider. Carries no information the rest of the
+      ## summary lacks — it is always ``totalDiscovered - skippedByPartition``
+      ## — which is precisely why redefining ``executed`` costs a consumer
+      ## nothing: the old value is still reported, under a name that says what
+      ## it is.
     skippedByPartition*: int
+    executed*: int
+      ## Tests that finished as passed, failed or errored.
     passed*: int
     failed*: int
+    skipped*: int
+      ## Tests that finished as ``tsSkipped``. **Never evidence** — a skip runs
+      ## no assertion — but counted so a "nothing executed" verdict can say
+      ## *why* to someone who just watched a suite report skips.
+    unrunnableUnits*: int
+      ## Dispatched units whose provider declares it cannot run them.
     wallTimeMs*: int
     threads*: int
+
+  RunVerdict* = enum
+    ## What a finished run is allowed to claim. Three outcomes, because two are
+    ## not enough: with only pass/fail, "nothing ran" is indistinguishable from
+    ## "everything passed", which is the defect this enum exists to remove.
+    rvPassed = "passed"
+      ## Tests ran and every one of them passed.
+    rvFailed = "failed"
+      ## Tests ran and at least one failed or errored.
+    rvNothingExecuted = "nothing-executed"
+      ## No test reported a terminal status of passed, failed or errored. The
+      ## run proves nothing, so it must not report success.
+      ##
+      ## An all-skipped run lands here too, matching
+      ## ``certificate_issuance``'s single ``wrNoTestsExecuted`` reason rather
+      ## than inventing a fourth verdict: a skipped test runs no assertion, so
+      ## a suite of nothing but skips has established exactly as much as a
+      ## suite that never started. The two are told apart in the *message*, not
+      ## in the verdict, because they need different remedies but support the
+      ## same (empty) claim.
 
 const
   ReproTestThreadsEnv* = "REPRO_TEST_THREADS"
@@ -91,6 +152,18 @@ const
     ## standalone ``ct-test-runner`` so reprobuild's sharding driver can pin the
     ## thread budget uniformly across both runners.
   PartitionFilePrefix* = "file:"
+
+  ExitRunPassed* = 0
+    ## Tests ran and all passed.
+  ExitTestsFailed* = 1
+    ## Tests ran and at least one failed. **Unchanged**, so every consumer that
+    ## only ever distinguished "zero" from "non-zero" keeps working, and every
+    ## consumer that special-cased 1 keeps working too.
+  ExitNothingExecuted* = 2
+    ## No test executed. Distinct from ``ExitTestsFailed`` on purpose: "your
+    ## tests are broken" and "your runner ran nothing" call for entirely
+    ## different investigations, and a CI lane that cannot tell them apart will
+    ## debug the wrong one.
 
 # ---------------------------------------------------------------------------
 # Partition parsing
@@ -333,28 +406,69 @@ proc nextUnit(queue: ptr Queue; outUnit: var RunUnit): bool =
   inc queue.pos
   true
 
+proc canRunScope*(capabilities: TestCapabilities; kind: TestScopeKind): bool =
+  ## Does a provider declaring ``capabilities`` claim it can run a ``kind``
+  ## scope? This is the *declared* capability from ``TestProviderInfo``, which
+  ## is the only thing the orchestrator can consult before dispatching.
+  case kind
+  of tskProject: capabilities.canRunProject
+  of tskFile: capabilities.canRunFile
+  of tskSingle: capabilities.canRunSingle
+
 proc runUnitOutcome(
     registry: ptr ProviderRegistry; unit: RunUnit): RunUnitOutcome {.gcsafe.} =
   ## Execute one run unit by invoking the owning provider's ``run`` proc with
-  ## the unit's scope, and tag the returned events. A missing provider or a
-  ## provider with no ``run`` proc yields an error outcome rather than crashing
-  ## the worker.
+  ## the unit's scope, and tag the returned events. A missing provider, a
+  ## provider with no ``run`` proc, or a provider that declares it cannot run
+  ## this scope yields an error outcome rather than crashing the worker — or,
+  ## worse, silently producing nothing.
   result = RunUnitOutcome(
     providerId: unit.providerId,
     testId: unit.item.id,
+    unrunnable: false,
     events: @[],
     diagnostics: @[])
   let provider = findProvider(registry, unit.providerId)
   if provider == nil:
+    result.unrunnable = true
     result.diagnostics.add diagnostic(
       dsError, "no registered provider for id: " & unit.providerId,
       unit.item.file)
     return
   if provider.run == nil:
+    result.unrunnable = true
     result.diagnostics.add diagnostic(
       dsError, "provider has no run implementation: " & unit.providerId,
       unit.item.file)
     return
+
+  # ---- The upstream half of "a run that ran nothing reported success" -------
+  # A provider whose declared capabilities say it cannot run this scope is not
+  # asked to. Several shipped providers (``nim-unittest``, ``python-pytest``,
+  # ``python-unittest``, every ``smart-*`` harness) declare
+  # ``canRunProject/File/Single = false`` and wire ``run`` to a stub that
+  # returns a *warning* diagnostic and an empty event stream. Dispatching to
+  # that stub was indistinguishable, downstream, from a provider that ran and
+  # found nothing to report — and the warning went nowhere, because the run
+  # summary never surfaced per-unit diagnostics.
+  #
+  # So the refusal is recorded HERE, as an error, before the stub can turn it
+  # into silence. The unit still exists and is still counted (it was genuinely
+  # discovered); what changes is that "no provider could run this" is now a
+  # fact the summary carries rather than an absence the summary cannot see.
+  #
+  # This does NOT implement the missing providers — that is its own milestone —
+  # and it deliberately does not fail the run on its own (see ``runVerdict``).
+  if not provider.info.capabilities.canRunScope(unit.scope.kind):
+    result.unrunnable = true
+    result.diagnostics.add diagnostic(
+      dsError,
+      "provider '" & unit.providerId & "' declares it cannot run a " &
+      $unit.scope.kind & " scope, so this test was discovered but never " &
+      "executed",
+      unit.item.file)
+    return
+
   let providerResult = provider.run(unit.scope)
   result.events = providerResult.value
   result.diagnostics = providerResult.diagnostics
@@ -428,7 +542,7 @@ proc runUnits*(
   result = TestRunResult(
     totalDiscovered: units.len,
     skippedByPartition: skipped,
-    executedUnits: selected.len,
+    dispatchedUnits: selected.len,
     threads: threadCount,
     wallTimeMs: 0,
     outcomes: @[])
@@ -530,20 +644,33 @@ proc runUnits*(
 # ---------------------------------------------------------------------------
 
 proc summarize*(runResult: TestRunResult): TestRunSummary =
-  ## Reduce a ``TestRunResult`` into pass/fail counts. A test is counted once
-  ## per ``tekTestFinished`` event carrying a status: ``tsPassed`` increments
-  ## ``passed``; every other terminal status (``tsFailed`` / ``tsErrored`` /
-  ## ``tsSkipped``) is treated as not-passed and, for failed/errored, counted as
-  ## ``failed``. ``tsSkipped`` is neither passed nor failed.
+  ## Reduce a ``TestRunResult`` into the counts a run is reported by.
+  ##
+  ## A test is counted once per ``tekTestFinished`` event carrying a status.
+  ## ``tsPassed`` increments ``passed``, ``tsFailed``/``tsErrored`` increment
+  ## ``failed``, and all three increment ``executed`` — because all three mean a
+  ## test genuinely ran. ``tsSkipped`` increments ``skipped`` and **nothing
+  ## else**: a skip runs no assertion, so it is neither passed, nor failed, nor
+  ## executed. That is the same rule ``certificate_issuance.recordUnitResult``
+  ## applies, and it is stated in one voice in both places on purpose.
+  ##
+  ## ``dispatchedUnits`` is carried through unchanged. It is the count of units
+  ## handed to a provider, which is *not* a count of tests and must never again
+  ## be reported as one.
   result = TestRunSummary(
     totalDiscovered: runResult.totalDiscovered,
-    executed: runResult.executedUnits,
+    dispatchedUnits: runResult.dispatchedUnits,
     skippedByPartition: runResult.skippedByPartition,
+    executed: 0,
     passed: 0,
     failed: 0,
+    skipped: 0,
+    unrunnableUnits: 0,
     wallTimeMs: runResult.wallTimeMs,
     threads: runResult.threads)
   for outcome in runResult.outcomes:
+    if outcome.unrunnable:
+      inc result.unrunnableUnits
     for event in outcome.events:
       if event.kind != tekTestFinished:
         continue
@@ -551,26 +678,171 @@ proc summarize*(runResult: TestRunResult): TestRunSummary =
         continue
       case event.status.get
       of tsPassed:
+        inc result.executed
         inc result.passed
       of tsFailed, tsErrored:
+        inc result.executed
         inc result.failed
       of tsSkipped:
-        discard
+        inc result.skipped
+
+proc unrunnableByProvider*(runResult: TestRunResult):
+    seq[tuple[providerId: string; units: int]] =
+  ## Which providers refused how many units, sorted by provider id.
+  ##
+  ## Sorted rather than table-ordered so the report is byte-identical between
+  ## runs; a diagnostic that reorders itself run to run is one nobody can diff.
+  ## Aggregated rather than listed per unit because a workspace can produce
+  ## hundreds of refusals from a handful of providers, and three hundred
+  ## identical lines is not a report.
+  var counts = initTable[string, int]()
+  for outcome in runResult.outcomes:
+    if outcome.unrunnable:
+      counts.mgetOrPut(outcome.providerId, 0) += 1
+  result = @[]
+  for providerId, units in counts:
+    result.add (providerId: providerId, units: units)
+  result.sort(proc(a, b: tuple[providerId: string; units: int]): int =
+    cmp(a.providerId, b.providerId))
+
+proc runVerdict*(summary: TestRunSummary): RunVerdict =
+  ## What this run is allowed to claim.
+  ##
+  ## Order matters and is load-bearing:
+  ##
+  ## 1. ``failed > 0`` wins outright, so the failing case keeps its exit status
+  ##    no matter what else the run did or did not manage.
+  ## 2. Otherwise ``executed == 0`` is ``rvNothingExecuted``. **This is the
+  ##    whole fix**: with only pass/fail, a run that finished no test was
+  ##    indistinguishable from a run in which everything passed, and reported
+  ##    the latter.
+  ## 3. Only a run that executed at least one test and failed none passes.
+  ##
+  ## A run with *some* executed tests and *some* unrunnable units passes, and
+  ## that is deliberate — see ``runVerdictReport``.
+  if summary.failed > 0: rvFailed
+  elif summary.executed == 0: rvNothingExecuted
+  else: rvPassed
 
 proc summaryToJson*(summary: TestRunSummary): JsonNode =
-  ## Serialise a run summary to the JSON shape the standalone runner emits, so
-  ## downstream consumers (reprobuild sharding, CI dashboards) read one schema
-  ## across both runners.
+  ## Serialise a run summary to the machine-readable schema.
+  ##
+  ## ``executed`` now means *tests that finished with a real status* rather
+  ## than *units dispatched*. Nothing is lost by that redefinition: the old
+  ## value is reported as ``dispatched``, and it was in any case always exactly
+  ## ``total - skipped_by_partition``. What is gained is that ``executed``
+  ## finally means what its name, and every one of its neighbours in this
+  ## object, already implied — so ``passed + failed == executed`` is now a real
+  ## invariant instead of a coincidence.
+  ##
+  ## ``verdict`` is emitted alongside the counts so a consumer never has to
+  ## re-derive the run's own conclusion (and never has to re-derive it
+  ## *wrongly*); it mirrors the process exit status exactly.
   %*{
     "total": summary.totalDiscovered,
+    "dispatched": summary.dispatchedUnits,
     "executed": summary.executed,
+    "skipped": summary.skipped,
     "skipped_by_partition": summary.skippedByPartition,
     "passed": summary.passed,
     "failed": summary.failed,
+    "unrunnable": summary.unrunnableUnits,
     "wall_time_ms": summary.wallTimeMs,
-    "threads": summary.threads
+    "threads": summary.threads,
+    "verdict": $summary.runVerdict
   }
 
 proc runExitCode*(summary: TestRunSummary): int =
-  ## A run fails (non-zero exit) iff any executed test failed or errored.
-  if summary.failed > 0: 1 else: 0
+  ## The process exit status for a finished run.
+  ##
+  ## ``0`` only when tests ran and all passed. ``ExitTestsFailed`` (1) is
+  ## unchanged for the failing case. ``ExitNothingExecuted`` (2) is new, and is
+  ## the point: the shipped binary used to exit 0 for a run that finished no
+  ## test at all, while the certificate path refused to attest the very same
+  ## run — the exit code and the attestation actively contradicted each other.
+  case summary.runVerdict
+  of rvPassed: ExitRunPassed
+  of rvFailed: ExitTestsFailed
+  of rvNothingExecuted: ExitNothingExecuted
+
+proc runVerdictReport*(summary: TestRunSummary):
+    tuple[message, remedy: string] =
+  ## Why this run is not a success, and what would make it one.
+  ##
+  ## An exit code that changes from 0 to non-zero with no explanation is worse
+  ## than the bug it fixes, so every non-zero verdict carries both halves — the
+  ## same contract ``certificate_issuance.Issuance`` holds itself to, in the
+  ## same voice, because a user meeting both messages in one run should not
+  ## have to work out that they are about the same thing.
+  ##
+  ## Returns two empty strings for ``rvPassed``: there is nothing to explain.
+  case summary.runVerdict
+  of rvPassed:
+    ("", "")
+  of rvFailed:
+    ($summary.failed & " of " & $summary.executed &
+       " executed tests did not pass",
+     "fix the failing tests and re-run")
+  of rvNothingExecuted:
+    # Four ways to execute nothing, and they send an operator to four different
+    # places. "No tests executed" alone is baffling to someone who just watched
+    # a suite report skips, or who passed a partition file that matched
+    # nothing, and would send them hunting a discovery bug that is not there.
+    if summary.skipped > 0:
+      ("no test executed: all " & $summary.skipped &
+         " that finished were skipped, so this run proves nothing",
+       "a skipped test runs no assertion and is not evidence, so a run of " &
+       "nothing but skips cannot report success; un-skip at least one test, " &
+       "or narrow the run to a suite that actually executes")
+    elif summary.dispatchedUnits == 0:
+      ("no test executed: no unit was dispatched at all (" &
+         $summary.totalDiscovered & " discovered, " &
+         $summary.skippedByPartition & " removed by the partition allow-list)",
+       "check the workspace and any --partition allow-list: an allow-list " &
+       "that admits nothing runs nothing, and a run that runs nothing " &
+       "cannot report success")
+    elif summary.unrunnableUnits >= summary.dispatchedUnits:
+      ("no test executed: all " & $summary.dispatchedUnits &
+         " dispatched units were handed to a provider that declares it " &
+         "cannot run them, so nothing was even attempted",
+       "no shipped ct_test provider can yet run these suites; the run's " &
+       "`unrunnable` count and the `errors` list say which providers " &
+       "refused. Run those suites with their own runner until a provider " &
+       "implements them — an exit status of 0 here would mean 'the tests " &
+       "passed', which nothing in this run establishes")
+    else:
+      ("no test executed: " & $summary.dispatchedUnits &
+         " units were dispatched but no provider reported a finished test",
+       # Deliberately does NOT point at a flag: `run` emits only the summary,
+       # and its `--json` is accepted but changes nothing, so a remedy naming
+       # either would send an operator somewhere that cannot help them.
+       "the providers were asked to run and emitted no test-finished event " &
+       "at all; run the suite with its own runner to see what it does, and " &
+       "treat this as a provider defect rather than a passing suite")
+
+proc unrunnableNotice*(summary: TestRunSummary): string =
+  ## The warning a run owes its user when it executed *some* tests but was
+  ## handed units nothing could run.
+  ##
+  ## This case stays **green**, and the reasoning is the certificate's: partial
+  ## coverage is normal (test-certificates-spec Standard.md §8), and a
+  ## certificate is issued for a partial run while a zero run withholds. The
+  ## exit code answers "did the tests you asked for pass?" — a unit no provider
+  ## can run is one the runner could not ask about, which narrows the answer's
+  ## scope rather than falsifying it. A run that could ask about *nothing* has
+  ## no answer at all, and that is the case that reddens.
+  ##
+  ## Reddening here instead would fail a great many runs that legitimately pass
+  ## today, since discovery routinely turns up suites whose providers are still
+  ## unimplemented. So the narrowing is reported loudly, in the summary as
+  ## ``unrunnable`` and on stderr as this line, and never hidden.
+  ##
+  ## Empty when there is nothing to warn about.
+  if summary.unrunnableUnits == 0 or summary.runVerdict == rvNothingExecuted:
+    return ""
+  let tests =
+    if summary.executed == 1: "1 executed test covers"
+    else: $summary.executed & " executed tests cover"
+  $summary.unrunnableUnits & " of " & $summary.dispatchedUnits &
+    " dispatched units were never attempted: their provider declares it " &
+    "cannot run them. This run's " & tests & " only the rest."

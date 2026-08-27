@@ -49,8 +49,39 @@ ct-test test run --workspace <root> [--file <f>]
    (falling back to `run-file` when `canRunSingle` is false), each subprocess
    launched through `process_exec.execCaptured` (runquota_process).
 4. **Aggregate** the per-test `seq[TestEvent]` into a run result + JSON summary:
-   total discovered, executed, skipped-by-partition, passed, failed, wall time,
-   threads.
+   total discovered, dispatched, executed, skipped, skipped-by-partition,
+   passed, failed, unrunnable, wall time, threads, verdict.
+
+### What `executed` counts, and what the exit code says
+
+`executed` counts **tests that finished** with `tsPassed`, `tsFailed` or
+`tsErrored` — not units dispatched. This is the same definition
+`certificate_issuance` uses for the certificate gate, deliberately: two
+counters in one binary that disagree about what "executed" means is how the
+exit code came to report success for a run the certificate refused to attest.
+A `tsSkipped` test counts in `skipped` and nowhere else, because a skip runs no
+assertion and is not evidence. The units-dispatched count is reported as
+`dispatched` (always `total - skipped_by_partition`).
+
+The exit status distinguishes three outcomes, because two cannot tell "nothing
+ran" from "everything passed":
+
+| Verdict | Exit | Meaning |
+|---|---|---|
+| `passed` | 0 | at least one test executed and none failed |
+| `failed` | 1 | at least one executed test failed or errored (also: a rejected invocation) |
+| `nothing-executed` | 2 | no test finished passed/failed/errored |
+
+`nothing-executed` covers an all-skipped run, an allow-list that matched
+nothing, and a dispatch every provider refused — one verdict with four
+messages, mirroring `certificate_issuance`'s single `wrNoTestsExecuted` reason
+with its two wordings. Every non-zero verdict prints its message and remedy on
+stderr, including under `--no-certificate`.
+
+A unit whose provider declares it cannot run that scope is **not dispatched**;
+it is recorded as `unrunnable` with a `dsError` and surfaced in the summary's
+`errors` array. A run that executed some tests and refused some units stays
+green — partial coverage is normal — but says so loudly.
 
 ### Parallelism
 

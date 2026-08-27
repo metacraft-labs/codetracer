@@ -120,6 +120,23 @@ proc newFixtureProvider(canRunSingle: bool): M1Provider =
 proc fixtureRegistry(canRunSingle = true): ProviderRegistry =
   ProviderRegistry(providers: @[newFixtureProvider(canRunSingle)])
 
+proc newRefusingProvider(): M1Provider =
+  ## A provider that declares it can run NOTHING — the shape ``nim-unittest``,
+  ## ``python-pytest``, ``python-unittest`` and every ``smart-*`` harness ship
+  ## in today — but whose ``run`` proc would nonetheless report a pass.
+  ##
+  ## The lie is the instrument: if the orchestrator ever dispatches to it, the
+  ## summary shows ``executed == 1`` and ``passed == 1``. Asserting those stay
+  ## zero is what proves ``run`` was never invoked, without needing to observe
+  ## a side effect from inside a worker thread.
+  var info = fixtureInfo(canRunSingle = false)
+  info.capabilities.canRunProject = false
+  info.capabilities.canRunFile = false
+  info.capabilities.canRunSingle = false
+  var provider = TestProvider(info: info)
+  provider.run = fixtureRun
+  M1Provider(provider: provider, relevantConfigFiles: @[])
+
 proc fixtureResponse(items: seq[TestItem]; workspaceRoot = "/tmp/ws"): DiscoverResponse =
   DiscoverResponse(
     schemaVersion: DiscoverSchemaVersion,
@@ -346,57 +363,202 @@ suite "partition filtering":
     check selected.len == 2
     check skipped == 0
 
+proc finishedEvent(status: TestResultStatus): TestEvent =
+  TestEvent(
+    schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
+    providerId: FixtureProviderId, runId: "r", testId: "t",
+    status: some(status))
+
 suite "summary aggregation":
-  test "counts passed, failed, and ignores skipped":
-    proc finished(status: TestResultStatus): TestEvent =
-      TestEvent(
-        schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
-        providerId: FixtureProviderId, runId: "r", testId: "t",
-        status: some(status))
+  test "executed counts finished TESTS, not dispatched units":
+    ## The defect this pins: ``executed`` used to be ``dispatchedUnits``, so a
+    ## run that handed out four units and finished three tests reported four
+    ## — and a run that handed out 333 and finished none reported 333.
     let runResult = TestRunResult(
       totalDiscovered: 5,
       skippedByPartition: 1,
-      executedUnits: 4,
+      dispatchedUnits: 4,
       threads: 2,
       wallTimeMs: 7,
       outcomes: @[
-        RunUnitOutcome(events: @[finished(tsPassed)]),
-        RunUnitOutcome(events: @[finished(tsPassed)]),
-        RunUnitOutcome(events: @[finished(tsFailed)]),
-        RunUnitOutcome(events: @[finished(tsSkipped)])])
+        RunUnitOutcome(events: @[finishedEvent(tsPassed)]),
+        RunUnitOutcome(events: @[finishedEvent(tsPassed)]),
+        RunUnitOutcome(events: @[finishedEvent(tsFailed)]),
+        RunUnitOutcome(events: @[finishedEvent(tsSkipped)])])
     let summary = summarize(runResult)
     check summary.totalDiscovered == 5
-    check summary.executed == 4
+    check summary.dispatchedUnits == 4
+    check summary.executed == 3
+    check summary.skipped == 1
     check summary.skippedByPartition == 1
     check summary.passed == 2
     check summary.failed == 1
     check summary.threads == 2
     check summary.wallTimeMs == 7
-    check runExitCode(summary) == 1
+    # The invariant every reader already assumed, now actually true.
+    check summary.passed + summary.failed == summary.executed
+    check summary.runVerdict == rvFailed
+    check runExitCode(summary) == ExitTestsFailed
 
-  test "errored status counts as failed":
+  test "errored status counts as failed and as executed":
     let runResult = TestRunResult(
-      totalDiscovered: 1, executedUnits: 1, threads: 1,
-      outcomes: @[RunUnitOutcome(events: @[TestEvent(
-        schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
-        providerId: FixtureProviderId, runId: "r", testId: "t",
-        status: some(tsErrored))])])
+      totalDiscovered: 1, dispatchedUnits: 1, threads: 1,
+      outcomes: @[RunUnitOutcome(events: @[finishedEvent(tsErrored)])])
     let summary = summarize(runResult)
     check summary.failed == 1
+    check summary.executed == 1
+    check summary.runVerdict == rvFailed
     check runExitCode(summary) == 1
+
+  test "a run that dispatched units but finished no test does not pass":
+    ## The reported defect, at the reduction that produced it: 333 units
+    ## dispatched, zero tests finished, exit 0.
+    let runResult = TestRunResult(
+      totalDiscovered: 333, dispatchedUnits: 333, threads: 4,
+      outcomes: @[RunUnitOutcome(events: @[])])
+    let summary = summarize(runResult)
+    check summary.executed == 0
+    check summary.passed == 0
+    check summary.failed == 0
+    check summary.runVerdict == rvNothingExecuted
+    check runExitCode(summary) == ExitNothingExecuted
+    check runExitCode(summary) != 0
+    # And it says why, in both halves.
+    let report = runVerdictReport(summary)
+    check "no test executed" in report.message
+    check "333" in report.message
+    check report.remedy.len > 0
+
+  test "an all-skipped run is nothing-executed, and the message says so":
+    ## Same verdict as "nothing ran at all" — a skip runs no assertion, so it
+    ## is not evidence — but a different message, because the two need
+    ## different remedies. This mirrors ``certificate_issuance``'s single
+    ## ``wrNoTestsExecuted`` reason with its two wordings.
+    let runResult = TestRunResult(
+      totalDiscovered: 2, dispatchedUnits: 2, threads: 1,
+      outcomes: @[
+        RunUnitOutcome(events: @[finishedEvent(tsSkipped)]),
+        RunUnitOutcome(events: @[finishedEvent(tsSkipped)])])
+    let summary = summarize(runResult)
+    check summary.skipped == 2
+    check summary.executed == 0
+    check summary.runVerdict == rvNothingExecuted
+    check runExitCode(summary) == ExitNothingExecuted
+    let report = runVerdictReport(summary)
+    check "skipped" in report.message
+    check "2" in report.message
+    check "un-skip" in report.remedy
+
+  test "an empty dispatch names the partition allow-list":
+    let summary = summarize(TestRunResult(
+      totalDiscovered: 5, skippedByPartition: 5, dispatchedUnits: 0,
+      threads: 1, outcomes: @[]))
+    check summary.runVerdict == rvNothingExecuted
+    check runExitCode(summary) == ExitNothingExecuted
+    let report = runVerdictReport(summary)
+    check "no unit was dispatched" in report.message
+    check "allow-list" in report.remedy
+
+  test "an entirely unrunnable dispatch says which capability refused":
+    let runResult = TestRunResult(
+      totalDiscovered: 2, dispatchedUnits: 2, threads: 1,
+      outcomes: @[
+        RunUnitOutcome(providerId: "nim-unittest", unrunnable: true),
+        RunUnitOutcome(providerId: "nim-unittest", unrunnable: true)])
+    let summary = summarize(runResult)
+    check summary.unrunnableUnits == 2
+    check summary.runVerdict == rvNothingExecuted
+    check runExitCode(summary) == ExitNothingExecuted
+    let report = runVerdictReport(summary)
+    check "cannot run them" in report.message
+    check "unrunnable" in report.remedy
+    # No standalone warning: the verdict already covers it.
+    check unrunnableNotice(summary) == ""
+    check unrunnableByProvider(runResult) == @[(providerId: "nim-unittest", units: 2)]
+
+  test "a partly unrunnable run still passes, but warns unmissably":
+    ## Deliberate boundary. Partial coverage is normal and a unit no provider
+    ## can run is one the runner could not ASK about — it narrows the answer's
+    ## scope rather than falsifying it. Reddening here would fail a great many
+    ## runs that legitimately pass. A run that could ask about NOTHING is the
+    ## case that reddens, and it is covered above.
+    let runResult = TestRunResult(
+      totalDiscovered: 3, dispatchedUnits: 3, threads: 1,
+      outcomes: @[
+        RunUnitOutcome(providerId: "fixture", events: @[finishedEvent(tsPassed)]),
+        RunUnitOutcome(providerId: "nim-unittest", unrunnable: true),
+        RunUnitOutcome(providerId: "python-pytest", unrunnable: true)])
+    let summary = summarize(runResult)
+    check summary.executed == 1
+    check summary.unrunnableUnits == 2
+    check summary.runVerdict == rvPassed
+    check runExitCode(summary) == 0
+    check runVerdictReport(summary).message == ""
+    let notice = unrunnableNotice(summary)
+    check "2 of 3" in notice
+    check "never attempted" in notice
+    # Sorted, aggregated per provider — not one line per unit.
+    check unrunnableByProvider(runResult) == @[
+      (providerId: "nim-unittest", units: 1),
+      (providerId: "python-pytest", units: 1)]
+
+  test "a run that executed and passed still exits 0":
+    let summary = summarize(TestRunResult(
+      totalDiscovered: 2, dispatchedUnits: 2, threads: 1,
+      outcomes: @[
+        RunUnitOutcome(events: @[finishedEvent(tsPassed)]),
+        RunUnitOutcome(events: @[finishedEvent(tsPassed)])]))
+    check summary.executed == 2
+    check summary.runVerdict == rvPassed
+    check runExitCode(summary) == ExitRunPassed
+    check runVerdictReport(summary).message == ""
+    check unrunnableNotice(summary) == ""
+
+  test "a failing run outranks a mostly-skipped one":
+    ## Order in ``runVerdict`` is load-bearing: ``failed > 0`` wins outright so
+    ## the failing case keeps its exit status regardless of what else the run
+    ## did or did not manage.
+    let summary = summarize(TestRunResult(
+      totalDiscovered: 3, dispatchedUnits: 3, threads: 1,
+      outcomes: @[
+        RunUnitOutcome(events: @[finishedEvent(tsFailed)]),
+        RunUnitOutcome(events: @[finishedEvent(tsSkipped)]),
+        RunUnitOutcome(providerId: "nim-unittest", unrunnable: true)]))
+    check summary.runVerdict == rvFailed
+    check runExitCode(summary) == ExitTestsFailed
 
   test "summaryToJson uses the cross-runner schema keys":
     let summary = TestRunSummary(
-      totalDiscovered: 3, executed: 2, skippedByPartition: 1,
-      passed: 1, failed: 1, wallTimeMs: 9, threads: 4)
+      totalDiscovered: 3, dispatchedUnits: 2, executed: 2,
+      skipped: 0, skippedByPartition: 1, passed: 1, failed: 1,
+      unrunnableUnits: 0, wallTimeMs: 9, threads: 4)
     let node = summaryToJson(summary)
     check node["total"].getInt == 3
+    check node["dispatched"].getInt == 2
     check node["executed"].getInt == 2
+    check node["skipped"].getInt == 0
     check node["skipped_by_partition"].getInt == 1
     check node["passed"].getInt == 1
     check node["failed"].getInt == 1
+    check node["unrunnable"].getInt == 0
     check node["wall_time_ms"].getInt == 9
     check node["threads"].getInt == 4
+    check node["verdict"].getStr == "failed"
+
+  test "the JSON verdict always agrees with the process exit status":
+    ## The two must never diverge: a consumer that reads the field and a
+    ## consumer that reads `$?` have to reach the same conclusion.
+    for summary in [
+        TestRunSummary(executed: 1, passed: 1),
+        TestRunSummary(executed: 1, failed: 1),
+        TestRunSummary(dispatchedUnits: 3),
+        TestRunSummary(dispatchedUnits: 3, skipped: 3)]:
+      let verdict = summaryToJson(summary)["verdict"].getStr
+      case runExitCode(summary)
+      of ExitRunPassed: check verdict == "passed"
+      of ExitTestsFailed: check verdict == "failed"
+      of ExitNothingExecuted: check verdict == "nothing-executed"
+      else: check false
 
 # ---------------------------------------------------------------------------
 # Integration: full worker-pool run via an in-process provider
@@ -420,7 +582,7 @@ suite "parallel run integration":
     # Fixed thread count for determinism per the design's worker-pool note.
     let runResult = runUnits(registry, units, emptyPartition(), threads = 3)
     check runResult.totalDiscovered == 5
-    check runResult.executedUnits == 5
+    check runResult.dispatchedUnits == 5
     check runResult.skippedByPartition == 0
     check runResult.outcomes.len == 5
     # Each unit produced the full four-event lifecycle.
@@ -454,7 +616,7 @@ suite "parallel run integration":
     let spec = parsePartitionFile(path)
     let runResult = runUnits(registry, units, spec, threads = 2)
     check runResult.totalDiscovered == 5
-    check runResult.executedUnits == 2
+    check runResult.dispatchedUnits == 2
     check runResult.skippedByPartition == 3
     check runResult.outcomes.len == 2
     var executedIds = initHashSet[string]()
@@ -510,15 +672,55 @@ suite "parallel run integration":
     # The run must actually have been concurrent, or it proves nothing.
     check childThreads == threads
 
-  test "empty partition skips everything and runs nothing":
+  test "a provider that declares it cannot run is never dispatched to":
+    ## The upstream half of the defect. Every shipped Nim/Python/smart-contract
+    ## provider declares ``canRun* = false`` and wires ``run`` to a stub that
+    ## returns a *warning* and an empty event stream — so "no provider can run
+    ## this" and "the provider ran and found nothing" were the same observation
+    ## downstream, and neither reached the summary at all.
+    var refusing = ProviderRegistry(providers: @[newRefusingProvider()])
+    let refusedUnits = enumerateRunUnits(response, refusing)
+    check refusedUnits.len == 5
+    # No ``canRunSingle`` ⇒ file scope, which this provider also refuses.
+    check refusedUnits[0].scope.kind == tskFile
+
+    let runResult = runUnits(refusing, refusedUnits, emptyPartition(), threads = 2)
+    check runResult.dispatchedUnits == 5
+    check runResult.outcomes.len == 5
+    for outcome in runResult.outcomes:
+      check outcome.unrunnable
+      check outcome.events.len == 0
+      # An ERROR, not the warning the stub used to return: a discovered test
+      # nothing can run is a fact the run must state, not a footnote.
+      check outcome.diagnostics.len == 1
+      check outcome.diagnostics[0].severity == dsError
+      check "cannot run a file scope" in outcome.diagnostics[0].message
+
+    let summary = summarize(runResult)
+    # If ``run`` had been invoked these would be 5 and 3 — see the fixture.
+    check summary.executed == 0
+    check summary.passed == 0
+    check summary.failed == 0
+    check summary.unrunnableUnits == 5
+    check summary.runVerdict == rvNothingExecuted
+    check runExitCode(summary) == ExitNothingExecuted
+
+  test "empty partition skips everything, runs nothing, and does NOT pass":
+    ## **Behaviour change, and the one that matters most in CI.** An allow-list
+    ## that matches nothing used to exit 0 — so a mis-generated shard reported
+    ## a clean run of the tests it never had. It is now
+    ## ``ExitNothingExecuted``, with a message that names the allow-list.
     let path = tempPartitionFile("none", "# no ids here\n")
     defer: removeFile(path)
     let spec = parsePartitionFile(path)
     let runResult = runUnits(registry, units, spec, threads = 2)
-    check runResult.executedUnits == 0
+    check runResult.dispatchedUnits == 0
     check runResult.skippedByPartition == 5
     check runResult.outcomes.len == 0
     let summary = summarize(runResult)
     check summary.passed == 0
     check summary.failed == 0
-    check runExitCode(summary) == 0
+    check summary.executed == 0
+    check summary.runVerdict == rvNothingExecuted
+    check runExitCode(summary) == ExitNothingExecuted
+    check "allow-list" in runVerdictReport(summary).remedy

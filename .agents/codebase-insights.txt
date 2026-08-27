@@ -2238,12 +2238,18 @@ degraded.
 
 `canRunProject`/`canRunFile`/`canRunSingle` are all `false` for `nim-unittest`,
 `python-pytest`, `python-unittest` and every `smart-*` provider — they discover
-only. A run over such a workspace reports `executed: N` (units dispatched) with
-`passed: 0, failed: 0` (no `tekTestFinished` events) and still exits 0, because
-`runExitCode` keys off `failed > 0` alone. The providers that really run today
-are the C/C++, Go, D, Crystal, Rust, Ruby, JS and M12-fallback ones;
-`js_node_test` is the cheapest way to get a genuinely green `ct test run` on a
-dev box (a `package.json` plus a `node:test` file, no install).
+only. The providers that really run today are the C/C++, Go, D, Crystal, Rust,
+Ruby, JS and M12-fallback ones; `js_node_test` is the cheapest way to get a
+genuinely green `ct test run` on a dev box (a `node:test` file, no install).
+
+Such a run used to report `executed: N` (units dispatched) with
+`passed: 0, failed: 0` and **exit 0**. Both halves are fixed:
+`run_orchestration.runUnitOutcome` now refuses to dispatch to a provider whose
+declared `canRunScope` is false — recording a `dsError` and
+`RunUnitOutcome.unrunnable` instead of calling the stub `run` that returned a
+warning nobody read — and `runVerdict` distinguishes three outcomes, so
+`ExitNothingExecuted` (2) is what a run that finished no test now exits with.
+See "the `executed` field means TESTS" below.
 
 This matters to certificate issuance: a run with no finished tests attests
 nothing, so `src/ct_test/certificate_issuance.nim` withholds rather than
@@ -2322,7 +2328,85 @@ between a guarantee and a hope.
 
 Related, same file: a unit whose provider returns diagnostics and NO
 `tekTestFinished` (crashed harness, missing toolchain) contributes nothing to
-either count, and `runExitCode` keys off `failed > 0` alone — so such a run
-still exits 0. That is a pre-existing defect, not a certificate one, but it is
-the reason `executed` in a summary is a count of dispatched UNITS while
-`passed + failed` counts finished TESTS, and the two can disagree wildly.
+either count. That used to exit 0; it no longer does — see below.
+
+## The `executed` field means TESTS, and the exit code has three outcomes
+
+`TestRunSummary.executed` (JSON `executed`) counts `tekTestFinished` events
+whose status is `tsPassed | tsFailed | tsErrored` — the SAME definition
+`certificate_issuance.AttestedRun.executed` uses. A `tsSkipped` test counts in
+`skipped` and NOWHERE else: a skip runs no assertion and is not evidence.
+`passed + failed == executed` is a real invariant.
+
+It used to mean *units dispatched*, which is why a run that handed out 333
+units and finished zero tests printed `"executed": 333` and exited 0 while the
+certificate path withheld with `wrNoTestsExecuted` — the exit code and the
+attestation contradicting each other inside one binary. The dispatched count
+still ships, as `dispatched`; it is always `total - skipped_by_partition`, so
+redefining `executed` cost no consumer any information.
+
+`runVerdict` → `runExitCode`, checked in that order:
+- `failed > 0` ⇒ `rvFailed` / exit 1 (unchanged).
+- else `executed == 0` ⇒ `rvNothingExecuted` / exit **2**. Covers an
+  all-skipped run, an allow-list that matched nothing, and a dispatch no
+  provider could run — one verdict, four messages, because they need different
+  remedies but support the same (empty) claim.
+- else exit 0.
+The verdict is also emitted as the summary's `verdict` key, and
+`run_orchestration_test.nim` pins that the field and `$?` never disagree.
+
+A run that executed SOME tests and had SOME unrunnable units stays green
+(partial coverage is normal — the certificate issues for one too) but reports
+`unrunnable`, a per-provider `errors` array, and a stderr warning. If you want
+that to redden, it is a policy change, not a bug fix.
+
+No consumer outside this repo reads this schema: reprobuild's readers
+(`repro_cli_support.summarizeTestResults`, the `ct_test_unittest_parallel`
+suites) expect the standalone `repro_test_runner`'s NESTED `{"summary": {…},
+"tests": […]}` shape — a top-level `summary` object CodeTracer's flat document
+has no key for, so those readers see `(0, 0)` / `{}` rather than misreading it.
+And nothing can invoke this CLI as that runner anyway: reprobuild resolves
+`CT_TEST_RUNNER` / a `ct-test-runner` on PATH / `repro_test_runner`, none of
+which codetracer produces (the standalone `ct-test` binary is built ad hoc by
+`ci/test/m16-release-gate.sh` into a cache dir and installed nowhere), and it
+invokes it as `run --bin-dir=… --summary-json=… --results-dir=… --no-build
+<binaries>` — every one of which `parseRunArgs` rejects as an unknown argument.
+The two runners have never been wired to each other.
+
+## `ct test discover|run` enumerate files OUTSIDE the workspace, and the count
+## depends on your shell's CWD
+
+`smart_contract_common.findRecorderRepo` walks up from `projectRoot`, from
+`projectRoot.parentDir` **and from `getCurrentDir()`** looking for a sibling
+recorder repo, then `fixtureFiles` enumerates that repo's `test-programs/`
+tree. Those files are not in the workspace and are not reachable from it —
+they arrive purely because of where the shell happened to be.
+
+Measured, same `--workspace` (a scratch dir holding one `calc_test.nim`),
+same binary, only the CWD differing:
+
+    cd ~                            → 1 catalog,  2 items
+    cd .../prox-fixes/codetracer    → 15 catalogs, 332 items
+
+The 330 extra items are `smart-{cairo,move,evm,solana,fuel,miden,circom,leo,
+polkavm,ton,cardano,flow,wasm,wasmi}` fixtures under the sibling recorder
+repos, with `file` paths like `test-programs/cairo/control_flow_test.cairo`
+relative to the RECORDER repo, not to the workspace. `--scope`/`--unscoped`
+does not affect this: workspace scoping constrains the workspace walk, not
+this second enumeration.
+
+Two consequences worth knowing before debugging either:
+
+* A run over any workspace looks enormous and is almost entirely
+  `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
+  the CWD is inside a checkout with recorder siblings.
+* The registry's stored `TestProvider.info.capabilities` for `smart-*` is
+  computed by `newSmartHarnessProvider` with `projectRoot = ""`
+  (`smart_contract_common.nim:412`), so `canRunFile` there resolves the
+  recorder from the CWD too. `runRecorderCommand` re-resolves it from
+  `scope.projectRoot`, and the two can disagree when the recorder repo is
+  reachable from the workspace but not from the CWD, and the recorder is
+  neither on PATH nor named by `<SPEC>_CMD`. Since `runUnitOutcome` now gates
+  dispatch on the stored capability, that combination refuses a unit the
+  provider could have recorded. Fixing it properly needs a projectRoot-aware
+  capability hook on the provider interface; there is none today.

@@ -409,6 +409,15 @@ type
     executed: int
       ## Tests that actually RAN — passed, failed or errored. A skipped test is
       ## not one of them; see ``recordUnitResult``.
+      ##
+      ## ``run_orchestration.summarize`` derives ``TestRunSummary.executed`` by
+      ## the identical rule, and ``runVerdict`` refuses to exit 0 when it is
+      ## zero. That is not duplication for its own sake — this counter must
+      ## stay derived from the events *inside* ``runAndAttest`` (§6.2: a
+      ## producer must not accept a caller-supplied result), so it cannot read
+      ## the summary. What it must do is agree with it, and it does: the two
+      ## used to differ, and the run that exposed it exited 0 while withholding
+      ## for ``wrNoTestsExecuted``.
     passed: int
     failed: int
     skipped: int

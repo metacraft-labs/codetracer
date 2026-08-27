@@ -178,14 +178,24 @@ proc parseRunArgs(args: seq[string]): RunOptions =
 proc emitRunError(messages: seq[string]): int =
   ## Print a partition/argument error as a summary-shaped JSON document with an
   ## ``errors`` field so machine consumers always parse one schema.
+  ##
+  ## The key set tracks ``summaryToJson`` exactly — including ``verdict`` — so
+  ## "one schema" stays true rather than being merely asserted in a comment.
+  ## Exit ``ExitTestsFailed`` rather than ``ExitNothingExecuted``: the run never
+  ## started, so this is a failure of the *invocation*, and reporting it as
+  ## "the run executed nothing" would point an operator at their workspace when
+  ## the problem is their command line (which the ``errors`` array names).
   var arr = newJArray()
   for m in messages: arr.add %m
   echo (%*{
-    "total": 0, "executed": 0, "skipped_by_partition": 0,
-    "passed": 0, "failed": 0, "wall_time_ms": 0, "threads": 0,
+    "total": 0, "dispatched": 0, "executed": 0, "skipped": 0,
+    "skipped_by_partition": 0, "passed": 0, "failed": 0, "unrunnable": 0,
+    "wall_time_ms": 0, "threads": 0, "verdict": $rvFailed,
     "errors": arr
   }).pretty
-  1
+  for m in messages:
+    stderr.writeLine "ct test: " & m
+  ExitTestsFailed
 
 proc invocationArgv(args: seq[string]): seq[string] =
   ## The command this process is executing, as an argument vector.
@@ -257,8 +267,13 @@ proc certificateReport(issuance: Issuance; writtenTo, writeError: string): JsonN
 proc runRun(args: seq[string]; registry: var ProviderRegistry;
     cache: DiscoveryCache): int =
   ## ``ct-test test run`` — discover, enumerate, partition-filter, run in
-  ## parallel, and emit the aggregated JSON summary. Returns a non-zero exit
-  ## code when any executed test failed (or on argument/partition errors).
+  ## parallel, and emit the aggregated JSON summary.
+  ##
+  ## The exit status distinguishes three outcomes (``run_orchestration``'s
+  ## ``RunVerdict``): ``0`` tests ran and all passed; ``1`` tests ran and at
+  ## least one failed, or the invocation itself was rejected; ``2`` **no test
+  ## executed at all**, which is not a success and must never again be reported
+  ## as one.
   let opts = parseRunArgs(args)
   if opts.errors.len > 0:
     return emitRunError(opts.errors)
@@ -306,6 +321,20 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
   let summary = outcome.summary
   var summaryJson = summaryToJson(summary)
 
+  # ---- The units nothing could run ----------------------------------------
+  # Surfaced as machine-readable `errors` (aggregated per provider, not one
+  # line per unit) so "333 tests were discovered and none of them can be run
+  # here" is a fact the summary states rather than an absence a reader has to
+  # infer from `executed == 0`.
+  let refused = unrunnableByProvider(outcome.runResult)
+  if refused.len > 0:
+    var arr = newJArray()
+    for entry in refused:
+      arr.add %("provider '" & entry.providerId & "' cannot run " &
+                $entry.units & " of the units dispatched to it, so they were " &
+                "discovered but never executed")
+    summaryJson["errors"] = arr
+
   if not opts.noCertificate:
     let issuance = outcome.issuance
     var writtenTo, writeError: string
@@ -334,6 +363,33 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
   if opts.summaryPath.len > 0:
     createDir(parentDir(opts.summaryPath))
     writeFile(opts.summaryPath, summaryJson.pretty)
+
+  # ---- Say why, in the same breath as saying so ----------------------------
+  # An exit code that changes from 0 to non-zero with no explanation is worse
+  # than the bug it fixes. Every non-zero verdict prints its message and its
+  # remedy on stderr — always, including under `--no-certificate`, because the
+  # verdict is a property of the RUN and the certificate's withholding notice
+  # (which is about the *claim*) can be switched off independently.
+  #
+  # Note the two are now consistent by construction rather than by coincidence:
+  # `runVerdict` and `issueCertificate` both count only tests that finished
+  # passed/failed/errored, so a run can no longer exit 0 while its certificate
+  # is withheld for `wrNoTestsExecuted`.
+  let verdict = runVerdictReport(summary)
+  if verdict.message.len > 0:
+    # The verdict and the exit status are named in the line itself. A run can
+    # print *two* stderr paragraphs — the certificate's withholding notice and
+    # this one — and they are about different things (what the producer will
+    # claim, vs. what the run itself concluded), so each has to say which it
+    # is or the second reads as a duplicate of the first.
+    stderr.writeLine "ct test: run verdict: " & $summary.runVerdict &
+                     " (exit " & $runExitCode(summary) & ") — " & verdict.message
+    stderr.writeLine "ct test: " & verdict.remedy
+  else:
+    let notice = unrunnableNotice(summary)
+    if notice.len > 0:
+      stderr.writeLine "ct test: warning — " & notice
+
   runExitCode(summary)
 
 proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
