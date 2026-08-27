@@ -166,6 +166,32 @@ jobs:
 
       - name: Build ct-native-replay
         run: |
+          # Cargo's default libgit2 transport does NOT read gitconfig, so the
+          # private `lldb-sys.rs` dependency fails to authenticate and the
+          # build dies with:
+          #
+          #   failed to load source for dependency `lldb-sys`
+          #   failed to authenticate when downloading repository
+          #   attempted to find username/password via git's `credential.helper`
+          #
+          # Forcing the git CLI makes cargo use the credential `Setup dev env`
+          # has ALREADY installed job-wide: that step runs the shared
+          # `setup-nix`, which exports
+          #
+          #   GIT_CONFIG_KEY_0=http.https://github.com/metacraft-labs/.extraHeader
+          #
+          # through $GITHUB_ENV. So nothing is configured here — the one
+          # missing piece was the transport. This mirrors the identical
+          # single-line fix on codetracer.yml's `just build-ct-mcr` step, which
+          # fetches this same dependency.
+          #
+          # Deliberately NOT the `git config --global url.…insteadOf` form:
+          # that was removed from this repo on purpose because `--global` IS
+          # inherited by `git clone`, putting the token into argv, into the
+          # `.git/config` of every clone it touches, and into git's own error
+          # messages — for nixpkgs and every third-party fetch too, none of
+          # which the token is for. The scoped extraHeader avoids all of that.
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
           nix develop "$CLONE_DIR" --command \
             bash -c "cd '$CLONE_DIR' && cargo build"
