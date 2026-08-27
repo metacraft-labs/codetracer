@@ -72,13 +72,41 @@ runs:
       uses: metacraft-labs/metacraft-github-actions/clone-siblings@main
       with:
         gh-token: ${{ inputs.gh-token }}
+        # A BARE entry resolves its revision from the workspace lock. An entry
+        # of the form `name=ref` SKIPS the lock and clones `ref` directly.
+        #
+        # PIN ONLY WHAT THE LOCK CANNOT ANSWER FOR. Every bare entry below is
+        # bare on purpose: the lock pins it, and a lock pin is the reproducible
+        # answer. Adding `=dev` to one of those would silently trade a pinned
+        # revision for a moving branch tip — a real loss of reproducibility,
+        # and invisible, because CI would go on passing.
+        #
+        # The five pinned entries are the ones the lock genuinely cannot
+        # answer: they are not members of codetracer's project in
+        # `metacraft-labs/metacraft-manifests`, so the lock has nothing to say
+        # about them and a bare entry fails the step outright:
+        #
+        #   The workspace lock for codetracer@<sha> pins no revision for these
+        #   sibling(s): isonim isonim-tui isonim-gpui nim-termctl nim-pty
+        #
+        # That failure took out ~15 jobs on every pull request — dev-build,
+        # nix-build, test-non-gui, test-ui-tests, appimage-build and the
+        # ct-test gates — because they all reach this action through
+        # `Setup dev env`.
+        #
+        # THE PROPER FIX is to declare these five in codetracer's project
+        # manifest so the lock pins them too, and then delete the `=dev` from
+        # all five. It is a change in `metacraft-manifests` and CI stays red
+        # until it lands and a new lock publishes, which is the only reason it
+        # is not done here. Until then these five, and ONLY these five, are
+        # unpinned.
         siblings: |
-          isonim
-          isonim-tui
-          isonim-gpui
+          isonim=dev
+          isonim-tui=dev
+          isonim-gpui=dev
+          nim-termctl=dev
+          nim-pty=dev
           nim-everywhere
-          nim-termctl
-          nim-pty
           nim-acp
           nim-agent-harbor
           nim-agents
