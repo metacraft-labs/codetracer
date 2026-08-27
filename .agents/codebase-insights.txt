@@ -1738,7 +1738,13 @@ as the segfault did. `unittest`'s `test` template wraps each case body in
 case and lets the rest run. `findByClass` / `findById` / `findByTag` in
 `views/isonim_views_test.nim` therefore RAISE `MockNodeNotFoundError`, and the
 handful of assertions whose subject is absence use the `…OrNil` spellings. Both
-lanes now report the same 444 OK / 17 FAILED over the same 461 cases.
+lanes now report the same result over the same case count — 465 OK, 0 FAILED.
+
+The 17 that used to fail were NOT a property of the raising lookups: they were
+cases still written against the pre-redesign Find in Files DOM (and one against
+a button size class that moved). They were re-expressed against what the view
+emits today, so "17 known-acceptable failures in `isonim_views_test.nim`" is no
+longer a thing; a failure here is a real one.
 
 The runner half: `test-vm-native` tested `fails > 0` before it tested the exit
 code, so the SIGSEGV printed as `PARTIAL (212 OK, 4 FAILED)` — indistinguishable

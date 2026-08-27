@@ -1350,8 +1350,17 @@ suite "IsoNim State Panel — variables":
       let button = findById(panel, "value-history")
       check button != nil
       check button.tag == "button"
-      check "ct-button-image-sm-secondary" in button.attributes["class"]
-      check "ct-custom-button-size" in button.attributes["class"]
+      # `a6dec58a` moved this button from the `sm` size class to `xs` and
+      # dropped `ct-custom-button-size`.  That was deliberate and coordinated:
+      # the same commit added `[class*="ct-button-image-xs-"]` (the 1em box) to
+      # `styles/components/button.styl` and made the identical edit to the
+      # legacy Karax renderer in `ui/value.nim`, so the two markups still
+      # agree.  `ct-custom-button-size` is now defined nowhere in the tree —
+      # asserting it would pin a class that styles nothing.
+      let btnClasses = button.attributes["class"].split(' ')
+      check "value-history-button" in btnClasses
+      check "ct-button-image-xs-secondary" in btnClasses
+      check "ct-custom-button-size" notin btnClasses
       check findByClass(button, "custom-tooltip").textContent ==
         "Toggle history value"
 
@@ -5420,15 +5429,39 @@ suite "IsoNim Errors Panel — interactions":
       dispose()
 
 # ===========================================================================
-# IsoNim Search Results Panel — tests
+# IsoNim Find in Files (Search Results) Panel — tests
 #
-# Cover the IsoNim Search Results view introduced in section 1.X of the
-# migration handoff (the third and final ``vnodeToDom`` Karax bridge to
-# come off after build / errors).  Verifies the same flows the legacy
-# Karax view used to support: panel structure, header count badge,
-# match-row rendering with grouping by file, query highlighting, filter
-# narrowing, active / inactive root modifier, and click → jump-location
-# routing.
+# Cover ``views/isonim_search_results_view.nim``: panel structure, the
+# reactive body's three states (pre-search overlay / loading / results),
+# match-row rendering grouped by file, count badges, query highlighting,
+# filter narrowing, and click → jump-location routing.
+#
+# VOCABULARY NOTE.  The panel was redesigned by 529c8dd1 / 182f9e6c into a
+# ``fif-*`` (Find In Files) DOM, and these cases were re-expressed against
+# it.  Three things the pre-redesign contract asserted are gone on purpose
+# and are NOT asserted here:
+#
+#   * ``component-container`` on the panel root — the GoldenLayout host the
+#     panel mounts into (``ui/layout.nim``) already carries it; ``fif-panel``
+#     now carries the flex/height layout itself.
+#   * the ``search-results-header`` row and its panel-wide
+#     ``search-results-count`` badge — removed by 182f9e6c ("panel now starts
+#     directly with the search input"); the per-file-group ``fif-file-count``
+#     badge is the count the design shows.
+#   * the ``search-results-active`` / ``search-results-non-active`` root
+#     modifier, whose CSS is ``display: flex`` / ``display: none``.  The panel
+#     now OWNS the query input, so hiding it before a search would hide the
+#     only way to start one.  The state transition it used to express is
+#     asserted through the body (overlay ⇄ file groups) and through
+#     ``vm.active``, which the wiring layer still mirrors
+#     (``ui/search_results.nim``'s ``syncLegacySearchResultsIntoVM``).
+#
+# Two class names are deliberately still asserted in their legacy spelling:
+# ``search-results`` on the root and ``search-results-match-row`` /
+# ``search-results-highlight`` on rows.  Those are the anchors
+# ``tests/build/search-results-e2e.spec.ts`` and the auto-hide / render-panel
+# wiring look the panel up by, so a case that stopped naming them would stop
+# protecting them.
 # ===========================================================================
 
 proc makeResult(path: string = "src/main.nim";
@@ -5442,7 +5475,7 @@ proc makeResult(path: string = "src/main.nim";
 
 suite "IsoNim Search Results Panel — structure":
 
-  test "renders root with component-container + search-results classes":
+  test "renders root with fif-panel + search-results identity classes":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -5452,25 +5485,16 @@ suite "IsoNim Search Results Panel — structure":
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      let cls = panel.attributes["class"]
-      check "component-container" in cls
+      # Whole-word membership, not substring containment: `"search-results" in
+      # cls` would also be satisfied by `search-results-anything`, so it could
+      # not tell the wiring anchor apart from a modifier that replaced it.
+      let cls = panel.attributes["class"].split(' ')
       check "search-results" in cls
+      check "fif-panel" in cls
 
       dispose()
 
-  test "starts inactive (search-results-non-active modifier)":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createSearchResultsVM(store)
-      let r = MockRenderer()
-
-      let panel = renderSearchResultsPanel(r, vm)
-      check "search-results-non-active" in panel.attributes["class"]
-      check "search-results-active" notin panel.attributes["class"]
-
-      dispose()
-
-  test "renders header, find-query input, and body container":
+  test "starts in the pre-search state with no rows":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -5478,23 +5502,59 @@ suite "IsoNim Search Results Panel — structure":
 
       let panel = renderSearchResultsPanel(r, vm)
 
-      check findByClassOrNil(panel, "search-results-header") != nil
-      check findByClassOrNil(panel, "search-results-count") != nil
-      check findByClassOrNil(panel, "search-results-find-query") != nil
-      check findByClassOrNil(panel, "search-results-body") != nil
+      # "Inactive" is no longer a root class (see the vocabulary note above);
+      # it is the body showing the pre-search overlay and nothing else, plus
+      # the VM flag the wiring layer mirrors back out of the panel.
+      check vm.active.val == false
+      let body = findByClass(panel, "fif-body")
+      check body.children.len == 1
+      check "fif-empty" in body.children[0].attributes["class"].split(' ')
+      check findAllByClass(panel, "fif-match-row").len == 0
+      check findAllByClass(panel, "fif-file-group").len == 0
 
       dispose()
 
-  test "header count starts at \"No results\" with no rows":
+  test "renders the search bar, the query input, and the body container":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
       let panel = renderSearchResultsPanel(r, vm)
-      let count = findByClass(panel, "search-results-count")
-      check count != nil
-      check count.textContent == "No results"
+
+      let bar = findByClass(panel, "fif-search-bar")
+      # The panel's input is the SEARCH input (Enter → `vm.onSearch`), which
+      # 529c8dd1 moved into the panel.  It is not the pre-redesign
+      # `search-results-find-query` filter box — no filter input is rendered
+      # any more, though the filter itself is still honoured (see the filter
+      # suite below, which drives `vm.setFilter` directly).
+      let input = findById(panel, "fif-input")
+      check input.tag == "input"
+      check input.attributes["placeholder"] == "Search in files..."
+      check findByClassOrNil(bar, "fif-input") == input
+      check findByClass(bar, "fif-badge").textContent == "Find in Files"
+
+      # The reactive body: every state the render effect rebuilds hangs here.
+      check findByClassOrNil(panel, "fif-body") != nil
+
+      dispose()
+
+  test "with no results the panel renders no count badge and no rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      # The panel-wide "No results" badge went away with the header row.
+      # What must still hold is that an empty result set produces no count
+      # affordance at all: an empty file group reading "0 matches" would be
+      # a real bug, and is exactly what a careless grouping change emits.
+      check vm.resultCount.val == 0
+      check findAllByClass(panel, "fif-file-group").len == 0
+      check findAllByClass(panel, "fif-file-count").len == 0
+      check findAllByClass(panel, "fif-match-row").len == 0
 
       dispose()
 
@@ -5505,19 +5565,56 @@ suite "IsoNim Search Results Panel — structure":
       let r = MockRenderer()
 
       let panel = renderSearchResultsPanel(r, vm)
-      let empty = findByClass(panel, "search-results-empty")
-      check empty != nil
-      check empty.textContent == "Run a search to see results here."
+      let empty = findByClass(panel, "fif-empty")
+      # With no recent searches the overlay is the call-to-action prompt;
+      # with recent searches it lists them instead (asserted below).
+      check findByClass(empty, "fif-empty-prompt").textContent ==
+        "Type a query above and press Enter to search"
+
+      dispose()
+
+  test "the loading state shows the shimmer skeleton and nothing else":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      let body = findByClass(panel, "fif-body")
+
+      vm.setLoading(true)
+
+      # The shimmer REPLACES the overlay rather than sitting beside it: a
+      # search in flight must not still be showing "press Enter to search".
+      # Six blocks because that is what the production (web) renderer draws;
+      # the two used to disagree, so the count is a shared constant and this
+      # is what pins it.
+      check findAllByClass(panel, "fif-shimmer-block").len == 6
+      check body.children.len == 6
+      check findByClassOrNil(panel, "fif-empty") == nil
+      check findAllByClass(panel, "fif-match-row").len == 0
+
+      # Results ending the search clear the shimmer — the transition the
+      # panel would otherwise be stuck in when a batch arrives.
+      vm.setResults(@[makeResult()])
+      check vm.loading.val == false
+      check findAllByClass(panel, "fif-shimmer-block").len == 0
+      check findAllByClass(panel, "fif-match-row").len == 1
 
       dispose()
 
 # ---------------------------------------------------------------------------
-# Header reactivity
+# Count reactivity
+#
+# The pre-redesign panel-wide badge is gone; the count surfaces that
+# survived are the per-file-group `fif-file-count` badge, the number of
+# rendered rows, and `vm.resultCount` (which `ui/search_results.nim` reads
+# back via `currentResultCount` to build the recent-searches entries).
 # ---------------------------------------------------------------------------
 
-suite "IsoNim Search Results Panel — header reactivity":
+suite "IsoNim Search Results Panel — count reactivity":
 
-  test "header count badge reflects setResults updates":
+  test "setResults is reflected in the rows and the per-file count badges":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -5531,9 +5628,13 @@ suite "IsoNim Search Results Panel — header reactivity":
         makeResult(path = "b.nim", line = 7),
       ])
 
-      let count = findByClass(panel, "search-results-count")
-      check count != nil
-      check count.textContent == "3 results"
+      check vm.resultCount.val == 3
+      check findAllByClass(panel, "fif-match-row").len == 3
+
+      let counts = findAllByClass(panel, "fif-file-count")
+      check counts.len == 2
+      check counts[0].textContent == "2 matches"
+      check counts[1].textContent == "1 match"
 
       dispose()
 
@@ -5544,43 +5645,68 @@ suite "IsoNim Search Results Panel — header reactivity":
       let r = MockRenderer()
 
       let panel = renderSearchResultsPanel(r, vm)
+
+      # Noun agreement is the property; only the badge carrying it moved.
+      # The redesign lost it (the file badge read "1 matches"), so the view
+      # was fixed rather than the assertion weakened — `countLabel` in
+      # `isonim_search_results_view.nim` is now shared by both renderers.
       vm.setResults(@[makeResult()])
-      let count = findByClass(panel, "search-results-count")
-      check count.textContent == "1 result"
+      check findByClass(panel, "fif-file-count").textContent == "1 match"
+
+      # The recent-searches list is the other place a count reaches the
+      # user, and it goes through the same helper.
+      vm.clearResults()
+      vm.addRecentSearch("solo", 1)
+      check findByClass(panel, "fif-recent-count").textContent == "1 result"
+      vm.addRecentSearch("pair", 2)
+      check findByClass(panel, "fif-recent-count").textContent == "2 results"
 
       dispose()
 
-  test "appendResults updates the badge incrementally":
+  test "appendResults grows the rows and the count incrementally":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
       let panel = renderSearchResultsPanel(r, vm)
-      let count = findByClass(panel, "search-results-count")
-      check count.textContent == "No results"
+      check vm.resultCount.val == 0
+      check findAllByClass(panel, "fif-match-row").len == 0
 
       vm.appendResults(@[makeResult()])
-      check count.textContent == "1 result"
+      check vm.resultCount.val == 1
+      check findAllByClass(panel, "fif-match-row").len == 1
+      check findByClass(panel, "fif-file-count").textContent == "1 match"
 
+      # Same path for all three rows, so they accumulate into one group —
+      # a batch that replaced rather than appended would show "2 matches".
       vm.appendResults(@[makeResult(line = 9), makeResult(line = 10)])
-      check count.textContent == "3 results"
+      check vm.resultCount.val == 3
+      check findAllByClass(panel, "fif-match-row").len == 3
+      check findByClass(panel, "fif-file-count").textContent == "3 matches"
 
       dispose()
 
-  test "panel root flips to search-results-active when results arrive":
+  test "results arriving replace the empty overlay and flip the active flag":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
       let panel = renderSearchResultsPanel(r, vm)
-      check "search-results-non-active" in panel.attributes["class"]
+      let body = findByClass(panel, "fif-body")
+      check "fif-empty" in body.children[0].attributes["class"].split(' ')
+      check vm.active.val == false
 
       vm.setResults(@[makeResult()])
 
-      check "search-results-active" in panel.attributes["class"]
-      check "search-results-non-active" notin panel.attributes["class"]
+      # This is the transition the `search-results-active` root modifier used
+      # to express: the body swaps the overlay for file groups, and the VM
+      # flag the wiring layer reads flips with it.
+      check vm.active.val == true
+      check findByClassOrNil(panel, "fif-empty") == nil
+      check findAllByClass(panel, "fif-file-group").len == 1
+      check findAllByClass(panel, "fif-match-row").len == 1
 
       dispose()
 
@@ -5604,15 +5730,21 @@ suite "IsoNim Search Results Panel — row rendering":
         makeResult(path = "b.nim", line = 3, text = "echo z"),
       ])
 
-      let rows = findAllByClass(panel, "search-results-match-row")
+      let rows = findAllByClass(panel, "fif-match-row")
       check rows.len == 3
 
-      let groups = findAllByClass(panel, "search-results-file-group")
+      let groups = findAllByClass(panel, "fif-file-group")
       check groups.len == 2
+
+      # Grouping is structural, not just a header caption: each row must live
+      # UNDER the group for its own path.  A flat list with group headers
+      # interleaved would satisfy the two counts above and nothing else here.
+      check findAllByClass(groups[0], "fif-match-row").len == 2
+      check findAllByClass(groups[1], "fif-match-row").len == 1
 
       dispose()
 
-  test "file-header preserves first-appearance order with row count":
+  test "file-header preserves first-appearance order with match count":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -5620,26 +5752,27 @@ suite "IsoNim Search Results Panel — row rendering":
 
       let panel = renderSearchResultsPanel(r, vm)
 
+      # "z" before "a" so first-appearance order is distinguishable from
+      # sorted order — the property is that groups follow the result stream.
+      # The paths are nested rather than bare filenames so the header's
+      # `shortPath` shortening (last TWO components, so deep trees do not
+      # overflow the panel) is exercised: with one-component paths it is the
+      # identity function and a header that printed the whole path would look
+      # identical.
       vm.setResults(@[
-        makeResult(path = "z.nim", line = 1),
-        makeResult(path = "a.nim", line = 2),
-        makeResult(path = "z.nim", line = 5),
+        makeResult(path = "src/frontend/z.nim", line = 1),
+        makeResult(path = "src/common/a.nim", line = 2),
+        makeResult(path = "src/frontend/z.nim", line = 5),
       ])
 
-      let headers = findAllByClass(panel, "search-results-file-header")
+      let headers = findAllByClass(panel, "fif-file-header")
       check headers.len == 2
 
-      let firstPath = findByClass(headers[0], "search-results-file-path")
-      let firstCount = findByClass(headers[0], "search-results-file-count")
-      check firstPath != nil
-      check firstCount != nil
-      check firstPath.textContent == "z.nim"
-      check firstCount.textContent == " (2)"
+      check findByClass(headers[0], "fif-file-path").textContent == "frontend/z.nim"
+      check findByClass(headers[0], "fif-file-count").textContent == "2 matches"
 
-      let secondPath = findByClass(headers[1], "search-results-file-path")
-      let secondCount = findByClass(headers[1], "search-results-file-count")
-      check secondPath.textContent == "a.nim"
-      check secondCount.textContent == " (1)"
+      check findByClass(headers[1], "fif-file-path").textContent == "common/a.nim"
+      check findByClass(headers[1], "fif-file-count").textContent == "1 match"
 
       dispose()
 
@@ -5654,12 +5787,10 @@ suite "IsoNim Search Results Panel — row rendering":
       vm.setResults(@[makeResult(path = "main.nim", line = 42,
                                  text = "let foo = 1")])
 
-      let rows = findAllByClass(panel, "search-results-match-row")
+      let rows = findAllByClass(panel, "fif-match-row")
       check rows.len == 1
-      let lineNum = findByClass(rows[0], "search-results-line-number")
-      let matchText = findByClass(rows[0], "search-results-match-text")
-      check lineNum != nil
-      check matchText != nil
+      let lineNum = findByClass(rows[0], "fif-line-number")
+      let matchText = findByClass(rows[0], "fif-match-text")
       check lineNum.textContent == "42"
       check matchText.textContent == "let foo = 1"
 
@@ -5674,15 +5805,17 @@ suite "IsoNim Search Results Panel — row rendering":
       let panel = renderSearchResultsPanel(r, vm)
 
       vm.setResults(@[makeResult(), makeResult(line = 2)])
-      check findAllByClass(panel, "search-results-match-row").len == 2
+      check findAllByClass(panel, "fif-match-row").len == 2
 
       vm.clearResults()
 
-      let body = findByClass(panel, "search-results-body")
+      let body = findByClass(panel, "fif-body")
       check body.children.len == 1
-      check "search-results-empty" in body.children[0].attributes["class"]
-      # And the panel root flips back to non-active.
-      check "search-results-non-active" in panel.attributes["class"]
+      check "fif-empty" in body.children[0].attributes["class"].split(' ')
+      check findAllByClass(panel, "fif-match-row").len == 0
+      # And the panel goes back to inactive — what the root's
+      # `search-results-non-active` modifier used to show.
+      check vm.active.val == false
 
       dispose()
 
@@ -5763,18 +5896,21 @@ suite "IsoNim Search Results Panel — filter behaviour":
         makeResult(path = "c.nim", line = 3, text = "alpha gamma"),
       ])
 
-      check findAllByClass(panel, "search-results-match-row").len == 3
+      check findAllByClass(panel, "fif-match-row").len == 3
 
       vm.setFilter("alpha")
 
-      let visible = findAllByClass(panel, "search-results-match-row")
-      check visible.len == 2
+      check findAllByClass(panel, "fif-match-row").len == 2
+      # The excluded row's whole group goes with it.
+      check findAllByClass(panel, "fif-file-group").len == 2
 
-      # The header count tracks the unfiltered total — same as the
-      # legacy view (the count is "results" from the search service,
-      # the filter narrows display only).
-      let count = findByClass(panel, "search-results-count")
-      check count.textContent == "3 results"
+      # The filter narrows DISPLAY only: the panel renders
+      # `vm.visibleResults`, while `vm.resultCount` keeps reporting the
+      # unfiltered total the search service produced (the pre-redesign
+      # header badge asserted the same split).  A view that rendered
+      # `vm.results` instead of `vm.visibleResults` would satisfy every
+      # other case in this file and fail only here.
+      check vm.resultCount.val == 3
 
       dispose()
 
@@ -5789,12 +5925,15 @@ suite "IsoNim Search Results Panel — filter behaviour":
       vm.setResults(@[
         makeResult(path = "a.nim", line = 1, text = "alpha"),
       ])
-      check findAllByClass(panel, "search-results-match-row").len == 1
+      check findAllByClass(panel, "fif-match-row").len == 1
 
       vm.setFilter("nothingmatchesthis")
-      let body = findByClass(panel, "search-results-body")
+      let body = findByClass(panel, "fif-body")
       check body.children.len == 1
-      check "search-results-empty" in body.children[0].attributes["class"]
+      check "fif-empty" in body.children[0].attributes["class"].split(' ')
+      check findAllByClass(panel, "fif-match-row").len == 0
+      # The results themselves are untouched — only the view narrowed.
+      check vm.resultCount.val == 1
 
       dispose()
 
@@ -5863,10 +6002,13 @@ suite "IsoNim Search Results Panel — interactions":
       ])
       mock.clearReceivedCommands()
 
-      # Click the third row, which lives under the second file group.
-      let groups = findAllByClass(panel, "search-results-file-group")
+      # Click the third row, which lives under the second file group.  The
+      # closure each row captures must be its own: a shared loop variable
+      # would dispatch b.nim:9 (or a.nim:5) from this click and nothing
+      # about the rendered markup would look wrong.
+      let groups = findAllByClass(panel, "fif-file-group")
       check groups.len == 2
-      let bGroupRows = findAllByClass(groups[1], "search-results-match-row")
+      let bGroupRows = findAllByClass(groups[1], "fif-match-row")
       check bGroupRows.len == 2
       bGroupRows[1].fireEvent("click")
 

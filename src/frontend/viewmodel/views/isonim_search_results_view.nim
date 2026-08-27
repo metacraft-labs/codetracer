@@ -10,25 +10,28 @@
 ## Panel structure (matching Figma design):
 ##
 ##   div.fif-panel.search-results
-##     div.fif-header
-##       span.fif-title                    "FIND IN FILES"
-##       div.fif-header-actions
-##         div.fif-icon-btn.fif-close      × — clears results
 ##     div.fif-search-bar
-##       span.fif-search-icon              ⌕ search glyph
-##       span.fif-chip                     "FIND IN FILES"
-##       input.fif-input                   query input (Enter → vm.onSearch)
+##       input#fif-input.fif-input          query input (Enter → vm.onSearch)
+##       span.fif-badge                     "Find in Files"
+##       span.fif-clear-btn                 × — wipes the input and results
 ##     div.fif-body                        reactive body:
 ##       -- state A: no active search --
 ##       div.fif-empty
 ##         div.fif-recent-label  "Recent searches"  (if any)
 ##         div.fif-recent-item*  (click → re-run)
+##         div.fif-empty-prompt  (when there are no recent searches)
 ##       -- state B: loading shimmer --
-##       div.fif-shimmer-block* (×6)
+##       div.fif-shimmer-block* (×``ShimmerBlockCount``)
 ##       -- state C: results --
 ##       div.fif-file-group*
 ##         div.fif-file-header   shortPath · N matches
 ##         div.fif-match-row*    :line  text [highlighted]
+##
+## There is deliberately no panel header row and no panel-wide result
+## count badge: the panel owns the query input, so it must stay visible
+## before a search has run (which is also why the root no longer carries
+## the ``search-results-non-active`` display:none modifier), and the
+## per-file-group badge is the only count the Figma design shows.
 ##
 ## Implementation notes:
 ## - Match rows and file groups are appended **imperatively** (outside the
@@ -85,6 +88,33 @@ proc shortPath(path: string): string =
   else:
     path
 
+const ShimmerBlockCount = 6
+  ## Placeholder rows the loading state draws while a search is in flight.
+  ##
+  ## Shared by both renderers for the same reason ``countLabel`` is: the two
+  ## had each hard-coded their own literal and had already drifted apart (the
+  ## mock DOM drew five blocks, the production DOM six), so a headless test
+  ## could not have told the difference between the two skeletons.
+
+proc countLabel(n: int; singular, plural: string): string =
+  ## Render ``"<n> <noun>"`` with the noun agreeing in number.
+  ##
+  ## The pre-redesign panel header rendered ``"1 result"`` / ``"N results"``
+  ## and never emitted a mismatched noun.  When the header was replaced by
+  ## the per-file-group badge the agreement was dropped and a single hit
+  ## read ``"1 matches"``.  Both renderer overloads go through this proc so
+  ## the mock DOM the tests assert against and the production DOM cannot
+  ## disagree about the copy.
+  $n & " " & (if n == 1: singular else: plural)
+
+proc matchCountLabel(n: int): string =
+  ## Count badge shown on a file group header ("3 matches", "1 match").
+  countLabel(n, "match", "matches")
+
+proc resultCountLabel(n: int): string =
+  ## Count shown against a recent search ("3 results", "1 result").
+  countLabel(n, "result", "results")
+
 proc matchParts(textValue, query: string):
     tuple[matched: bool; before, hit, after: string] =
   ## Split ``textValue`` around the first case-insensitive occurrence of
@@ -135,7 +165,7 @@ proc renderSearchResultsPanel*(r: MockRenderer;
     r.clearChildren(bodyContainer)
 
     if loading:
-      for i in 0 ..< 5:
+      for i in 0 ..< ShimmerBlockCount:
         let shimRow = ui(r):
           tdiv(class = "fif-shimmer-block"): discard
         r.appendChild(bodyContainer, shimRow)
@@ -158,7 +188,8 @@ proc renderSearchResultsPanel*(r: MockRenderer;
                    if not vm.onSearch.isNil:
                      vm.onSearch(captured.query)):
               span(class = "fif-recent-query"): text captured.query
-              span(class = "fif-recent-count"): text $captured.hitCount & " results"
+              span(class = "fif-recent-count"):
+                text resultCountLabel(captured.hitCount)
           r.appendChild(emptyNode, recNode)
       else:
         let prompt = ui(r):
@@ -175,7 +206,7 @@ proc renderSearchResultsPanel*(r: MockRenderer;
         tdiv(class = "fif-file-group"):
           tdiv(class = "fif-file-header"):
             span(class = "fif-file-path"): text shortPath(pathStr)
-            span(class = "fif-file-count"): text $rows.len & " matches"
+            span(class = "fif-file-count"): text matchCountLabel(rows.len)
       r.appendChild(bodyContainer, groupNode)
 
       for res in rows:
@@ -284,7 +315,7 @@ when defined(js):
           span(class = "fif-file-path"):
             text shortPath(path)
           span(class = "fif-file-count"):
-            text $rows.len & " matches"
+            text matchCountLabel(rows.len)
     for res in rows:
       let rowEl = renderMatchRowWeb(r, vm, res, query)
       isonim_dom.appendChild(isonim_dom.Node(groupEl),
@@ -298,11 +329,12 @@ when defined(js):
                                  vm: SearchResultsVM): isonim_dom.Element =
     ## Render the Find in Files panel for the real DOM.
     ##
-    ## Search bar structure:
-    ##   div.fif-search-bar           (ct-input-com-pal-like wrapper)
-    ##     span.ct-origin-badge.fif-badge   "FIF" label badge
-    ##     input.fif-input            transparent inner input, flex:1
-    ##     button.fif-clear-btn       × clear, hidden when input is empty
+    ## Search bar structure — the same one the mock renderer above builds,
+    ## and the one the module header documents:
+    ##   div.fif-search-bar
+    ##     input#fif-input.fif-input  the query input (Enter → vm.onSearch)
+    ##     span.fif-badge             "Find in Files" label badge
+    ##     span.fif-clear-btn         × clear, hidden when the input is empty
     var bodyContainer: isonim_dom.Element
     var inputEl: isonim_dom.Element
     var clearBtnEl: isonim_dom.Element
@@ -362,7 +394,7 @@ when defined(js):
       r.clearChildren(bodyContainer)
 
       if loading:
-        for i in 0 ..< 6:
+        for i in 0 ..< ShimmerBlockCount:
           let shimEl = ui(r):
             tdiv(class = "fif-shimmer-block"): discard
           isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
@@ -392,7 +424,7 @@ when defined(js):
                        vm.onSearch(captured.query)):
                 span(class = "fif-recent-query"): text captured.query
                 span(class = "fif-recent-count"):
-                  text $captured.hitCount & " results"
+                  text resultCountLabel(captured.hitCount)
             isonim_dom.appendChild(isonim_dom.Node(emptyEl),
                                    isonim_dom.Node(recEl))
         else:
