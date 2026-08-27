@@ -108,7 +108,27 @@
     runquota = {
       # runquota/main is stale and lacks the bounded grant-stream API
       # (pollNextGrantBounded / GrantPollResult) that current reprobuild uses.
-      url = "github:metacraft-labs/runquota/dev";
+      #
+      # PINNED to the exact revision that the `reprobuild` input below locks as
+      # its own `runquota-src`, and it must be kept equal to it. This is NOT a
+      # "keep it recent" pin, and a branch is the wrong thing here: the
+      # `inputs.runquota-src.follows = "runquota"` line below means REPROBUILD
+      # IS COMPILED AGAINST WHATEVER THIS RESOLVES TO, so any drift in either
+      # direction is a compile error inside reprobuild's own sources, minutes
+      # into `nix develop`, naming an identifier nobody here has heard of:
+      #
+      #   behind  -> repro_runquota.nim(932): undeclared identifier: 'ExtensionCellWire'
+      #   ahead   -> repro_runquota.nim(501): undeclared identifier: 'LeaseFinishOutcome'
+      #
+      # Both were observed on this tree: `dev` had moved past the pinned
+      # reprobuild and REMOVED LeaseFinishOutcome, so tracking the branch tip
+      # was no more correct than lagging behind it.
+      #
+      # Bump this in lockstep with `reprobuild` below — read the new
+      # reprobuild revision's own flake.lock and mirror its `runquota-src`.
+      # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
+      # equality so the two pins cannot silently diverge again.
+      url = "github:metacraft-labs/runquota/b71e8e9061b479334d9b78638cfb828af2db938d";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
