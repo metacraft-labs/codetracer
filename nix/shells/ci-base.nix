@@ -181,6 +181,15 @@ with pkgs;
     gh
     awscli2
 
+    # Cloudflare Pages deploy. `wrangler pages deploy` publishes the
+    # browser-replay bundle (browser-replay/dist) to the `web-codetracer`
+    # Pages project on merges to `cloud` — see
+    # .github/workflows/deploy-web-codetracer.yml. We do NOT preinstall
+    # node/npx on the eph-* runners; wrangler is pinned by flake.lock and
+    # every deploy command runs inside `nix develop .#ci`, mirroring the
+    # proven metacraft-labs/web-site pattern. (nixpkgs pin: wrangler 4.x.)
+    wrangler
+
     # Playwright (M5 lane + codetracer's own TS e2e suite).
     playwright-driver.browsers
     playwright

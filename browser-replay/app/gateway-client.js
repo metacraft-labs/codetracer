@@ -65,12 +65,20 @@ const traceId = params.get("traceId") || "";
 const authToken = params.get("authToken") || "";
 const traceFolder = params.get("traceFolder") || "trace";
 const testMode = params.get("mode") || "basic";
+// `?trace=<absoluteUrl>` -- open an arbitrary cross-origin `.ct` container by
+// whole-file fetch into the WASM VFS. This is the public web.codetracer.com
+// entry point: no gateway, no auth token, no manifest -- just a direct URL to
+// a single CTFS `.ct` file. It is only honoured when the gateway config is
+// absent so it stays backward-compatible with the M40 gateway path.
+const traceUrl = params.get("trace") || "";
 
 const haveGatewayConfig = Boolean(gatewayBaseUrl && traceId && authToken);
+const haveDirectTraceUrl = Boolean(traceUrl) && !haveGatewayConfig;
 appendLog(
   `config: gatewayBaseUrl=${gatewayBaseUrl ? "<set>" : "<unset>"}, ` +
     `traceId=${traceId || "<unset>"}, ` +
     `authToken=${authToken ? "<set>" : "<unset>"}, ` +
+    `trace=${traceUrl || "<unset>"}, ` +
     `traceFolder=${traceFolder}, mode=${testMode}`,
 );
 
@@ -78,7 +86,32 @@ appendLog(
 // Worker bootstrap
 // ---------------------------------------------------------------------------
 
-const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+// Create the replay worker. In the same-origin case (traditional deploy,
+// `just test-wasm-replay`) this is a plain module worker pointing at the
+// sibling worker.js. In the CDN-split case -- this driver + the engine
+// assets (worker.js, pkg/*.js, *.wasm) are served from web.codetracer.com
+// while the HTML page lives on a *different* origin (e.g. blocktracer.org) --
+// a dedicated worker's script URL is required to be same-origin with the
+// document, so `new Worker("https://web.codetracer.com/worker.js")` throws
+// even with `type:"module"` and permissive CORS. The workaround: build a tiny
+// *same-origin* blob module worker that statically `import`s the absolute
+// cross-origin worker.js. ES-module imports honour CORS (so the engine origin
+// only needs `Access-Control-Allow-Origin`), and every relative specifier
+// inside worker.js (`./pkg/db_backend.js`, `new URL("./pkg/..._bg.wasm",
+// import.meta.url)`) resolves against worker.js's own absolute URL -- i.e. the
+// engine origin -- so the whole engine loads from the CDN, not the page origin.
+function createReplayWorker() {
+  const workerUrl = new URL("./worker.js", import.meta.url);
+  if (workerUrl.origin === self.location.origin) {
+    return new Worker(workerUrl, { type: "module" });
+  }
+  appendLog(`engine is cross-origin (${workerUrl.origin}); using blob module-worker bootstrap`);
+  const bootstrap = `import ${JSON.stringify(workerUrl.href)};`;
+  const blobUrl = URL.createObjectURL(new Blob([bootstrap], { type: "text/javascript" }));
+  return new Worker(blobUrl, { type: "module" });
+}
+
+const worker = createReplayWorker();
 let workerAlive = true;
 let nextSeq = 1;
 
@@ -210,7 +243,7 @@ window.addEventListener("manual-dap-initialize", async () => {
     await waitForMessage((d) => d && d.type === "wasm-loaded", 30_000, "wasm-loaded");
     appendLog("WASM module loaded");
 
-    if (!haveGatewayConfig) {
+    if (!haveGatewayConfig && !haveDirectTraceUrl) {
       // Legacy / manual mode: leave the page idle so the user (or an external
       // test) can drive the worker by hand. The "Send DAP Initialize" button
       // is enabled so the original transport-test flow still works.
@@ -230,14 +263,27 @@ window.addEventListener("manual-dap-initialize", async () => {
     // the bytes never have to cross postMessage as ArrayBuffers larger than
     // what we strictly need.
     // -------------------------------------------------------------------
-    setStatus("Fetching manifest and trace bytes from gateway...", "pending");
-    worker.postMessage({
-      type: "load-trace-from-gateway",
-      gatewayBaseUrl,
-      traceId,
-      authToken,
-      traceFolder,
-    });
+    if (haveDirectTraceUrl) {
+      // ?trace=<url> path: whole-file fetch the cross-origin `.ct` container
+      // into the VFS at the canonical `<folder>/trace.ct` name so the WASM
+      // launch-time auto-detect (see dap_server.rs candidate list
+      // ["trace.ct", "trace.json"]) mounts it without an explicit trace_file.
+      setStatus("Fetching trace from URL...", "pending");
+      appendLog(`direct: fetching ${traceUrl} into VFS as ${traceFolder}/trace.ct`);
+      worker.postMessage({
+        type: "load-trace",
+        files: [{ url: traceUrl, vfsPath: `${traceFolder}/trace.ct` }],
+      });
+    } else {
+      setStatus("Fetching manifest and trace bytes from gateway...", "pending");
+      worker.postMessage({
+        type: "load-trace-from-gateway",
+        gatewayBaseUrl,
+        traceId,
+        authToken,
+        traceFolder,
+      });
+    }
 
     const loadResult = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -259,7 +305,11 @@ window.addEventListener("manual-dap-initialize", async () => {
       worker.addEventListener("message", handler);
     });
 
-    appendLog(`gateway: manifest=${loadResult.manifestStatus}, ranges=${loadResult.rangeStatuses.join(",")}`);
+    if (haveDirectTraceUrl) {
+      appendLog(`direct: loaded ${traceUrl}`);
+    } else {
+      appendLog(`gateway: manifest=${loadResult.manifestStatus}, ranges=${loadResult.rangeStatuses.join(",")}`);
+    }
     for (const f of loadResult.files) {
       appendLog(`VFS: ${f.vfsPath} (${f.bytes} bytes, source=${f.source})`);
     }
