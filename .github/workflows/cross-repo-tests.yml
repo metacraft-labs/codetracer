@@ -129,9 +129,18 @@ jobs:
         # ct_emulator/build_native_api.sh`` to materialise generated C
         # sources.  A fresh clone's .envrc is in the "blocked" state,
         # so direnv refuses to run.  ``direnv allow`` whitelists it.
+        #
+        # THE HOST SHELL IS OURS, NOT THE SIBLING'S.  This ran
+        # ``nix develop "$CLONE_DIR"`` -- codetracer-native-backend's shell --
+        # which declares no direnv, so it died with ``exec: direnv: not found``
+        # and exit 127 (run 32489213400, the one run in months that got past
+        # the submodule unfold and reached this step at all).  direnv is a
+        # declared package of THIS repo's shell, in nix/shells/ci-base.nix,
+        # precisely because build.rs needs it; a sibling's flake is not ours to
+        # fix.  ci/test/direnv-provenance-test.sh keeps every direnv call site
+        # on a dev shell this repo defines.
         run: |
-          CLONE_DIR="$(pwd)/../codetracer-native-backend"
-          nix develop "$CLONE_DIR" --command \
+          nix develop .#devShells.x86_64-linux.default --command \
             direnv allow "$(pwd)/../codetracer-native-recorder"
 
       - name: Resolve ct_emulator nimble dependencies
@@ -140,9 +149,13 @@ jobs:
         # without ``nimble install --depsOnly`` the script aborts with
         # ``cannot open file: results`` and db-backend's build.rs
         # panics during the cross-repo integration test cargo runs.
+        #
+        # The outer shell only has to supply direnv (see the step above); nim
+        # and nimble come from the RECORDER's own flake, which is what
+        # ``direnv exec "$RECORDER_DIR"`` loads.
         run: |
           RECORDER_DIR="$(pwd)/../codetracer-native-recorder"
-          nix develop "$(pwd)/../codetracer-native-backend" --command \
+          nix develop .#devShells.x86_64-linux.default --command \
             direnv exec "$RECORDER_DIR" \
               bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
 

@@ -116,6 +116,13 @@ lint_step "contract suite: flake pin alignment guard" \
 lint_step "contract suite: submodule unfold for path: flake inputs" \
 	bash ci/test/unfold-submodules-test.sh
 
+# direnv is a declared package of this repo's dev shell because
+# src/db-backend/build.rs shells out to it. That declaration cannot put direnv
+# in a SIBLING's dev shell, and a step that reached for one died with
+# `exec: direnv: not found` / exit 127. Static, pure bash, no nix.
+lint_step "contract suite: direnv comes from a dev shell we define" \
+	bash ci/test/direnv-provenance-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
