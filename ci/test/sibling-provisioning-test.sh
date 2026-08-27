@@ -208,7 +208,7 @@ readonly LOCK_RESOLVED_REPOS='isonim isonim-tui isonim-gpui nim-everywhere nim-t
 # `<=`, never `==`: converting more of them must not fail the suite, and adding
 # one must. Lower this number as blocks are converted; there is no legitimate
 # reason to raise it.
-readonly BRANCH_TIP_CEILING=61
+readonly BRANCH_TIP_CEILING=59
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -760,6 +760,179 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 2b. Every job that runs cargo against `src/db-backend` provisions
+#     codetracer-native-recorder.
+#
+# `src/db-backend/build.rs` resolves the Nim MCR emulator as a SIBLING of the
+# codetracer checkout and PANICS when it is absent -- it is not an optional
+# feature, because `src/lib.rs` exports `emulator_ffi`, `emulator_origin`,
+# `emulator_session` and `data_watch` unconditionally:
+#
+#   thread 'main' panicked at build.rs:170:5:
+#   db-backend requires the sibling `codetracer-native-recorder` checkout,
+#   and it was not found.
+#     workspace sibling: .../src/db-backend/../../../codetracer-native-recorder/ct_emulator
+#
+# Observed in run 32995543471, job `shell-recorder-tests`, step "Run
+# shell-recorder integration tests", after twenty minutes of tree-sitter
+# compilation -- the panic is the LAST thing cargo reaches, so the job burns a
+# full build before reporting a defect that is visible in the workflow file.
+#
+# The sibling list of `cross-repo-tests.yml`'s `rr-backend-tests` job names
+# codetracer-native-recorder; `shell-recorder-tests`, added later and reasoning
+# only about the shell recorders' own path dependencies, did not -- yet it runs
+# `cargo test` from inside `src/db-backend`, so it compiles the same build.rs.
+# `.github/actions/setup-db-backend-siblings/action.yml` exists precisely to
+# stop this being re-derived per job, and a job that hand-rolls the list
+# instead has to get it right by hand.
+#
+# This is the same shape as assertion 2: a call site, and the provisioning that
+# must precede it IN THE SAME JOB. Comment lines are skipped, so a job that
+# merely NAMES the recorder in prose (this one has several such comments) does
+# not thereby satisfy the contract.
+# ---------------------------------------------------------------------------
+echo
+echo "db-backend cargo legs provision codetracer-native-recorder"
+
+# The call site this scanner is known to match, named explicitly. If the
+# detector regresses -- a step is reworded, the scanner stops matching -- this
+# anchor turns "nothing forbidden was found" into a FAILURE instead of a
+# vacuous pass. Two vacuous greens have already been paid for in this file.
+readonly DB_BACKEND_ANCHOR='cross-repo-tests.yml:shell-recorder-tests'
+
+# A job satisfies this contract by naming the composite instead of the repo --
+# which is the shape this contract WANTS, and also a way to launder the defect
+# past it. If `setup-db-backend-siblings` ever stops provisioning
+# codetracer-native-recorder, every caller silently stops provisioning it too,
+# and a scanner that accepted `uses:` on faith would keep saying "ok". So the
+# delegation is only honoured while the delegate actually does the work. The
+# per-block repo lists collected by assertion 1 are the evidence.
+readonly DB_BACKEND_COMPOSITE='setup-db-backend-siblings/action.yml'
+composite_provisions_recorder=0
+for _i in "${!BLOCK_WHERE[@]}"; do
+	case "${BLOCK_WHERE[$_i]}" in
+	"$DB_BACKEND_COMPOSITE":*)
+		case " ${BLOCK_REPOS[$_i]} " in
+		*" codetracer-native-recorder "*) composite_provisions_recorder=1 ;;
+		esac
+		;;
+	esac
+done
+unset _i
+
+if [ "$composite_provisions_recorder" -eq 1 ]; then
+	ok "$DB_BACKEND_COMPOSITE provisions codetracer-native-recorder"
+else
+	fail "$DB_BACKEND_COMPOSITE provisions codetracer-native-recorder" \
+		"Every job that delegates its db-backend siblings to this composite is" \
+		"credited with provisioning the recorder BECAUSE this block names it. With the" \
+		"entry gone, that credit is a fiction and the assertion below would pass while" \
+		"every one of those jobs panicked in build.rs."
+fi
+
+db_backend_sites=()
+db_backend_missing=()
+
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+	case "$wf" in
+	"$ACTIONS_DIR"/*) wf_name="${wf#"$ACTIONS_DIR"/}" ;;
+	*) wf_name="${wf##*/}" ;;
+	esac
+	job=""
+	seen_recorder=0
+	line_no=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		stripped_line="${line#"${line%%[![:space:]]*}"}"
+		# Job boundaries are two-space-indented keys under `jobs:`; anything
+		# deeper belongs to the job above it. (Composite actions have no
+		# `jobs:` at all, so `job` stays empty and the whole file is one
+		# scope -- which is correct: a composite IS one step sequence.)
+		case "$line" in
+		'  '[a-zA-Z0-9_-]*':'*)
+			case "$line" in
+			'   '*) ;;
+			*)
+				job="${line#  }"
+				job="${job%%:*}"
+				seen_recorder=0
+				;;
+			esac
+			;;
+		esac
+		# A YAML comment naming the repo is prose, not provisioning. Skipping
+		# these is what keeps this assertion from being satisfied by the very
+		# comments that explain the failure it guards against.
+		case "$stripped_line" in
+		'#'*) ;;
+		*)
+			case "$stripped_line" in
+			'codetracer-native-recorder='* | 'codetracer-native-recorder')
+				seen_recorder=1
+				;;
+			*'setup-db-backend-siblings'*)
+				# The composite provisions the three db-backend siblings --
+				# but only credit the caller while it demonstrably still
+				# names the recorder (checked above).
+				[ "$composite_provisions_recorder" -eq 1 ] && seen_recorder=1
+				;;
+			esac
+			;;
+		esac
+		# A quoted YAML sequence item is a `paths:` filter, not a command --
+		# `.github/workflows/cross-repo-tests.yml` lists
+		# `- 'scripts/run-cross-repo-tests.sh'` among its triggers. Matching
+		# those would attribute a call site to the `on:`/`push:` pseudo-jobs.
+		case "$stripped_line" in
+		"- '"* | '- "'*) continue ;;
+		esac
+		# The cargo invocations that compile `src/db-backend/build.rs`: a `run:`
+		# step that `cd`s in, an out-of-tree invocation naming the manifest, and
+		# the cross-repo driver, whose `run_db_backend_test` does
+		# `cd "$REPO_ROOT/src/db-backend"; cargo test` (scripts/
+		# run-cross-repo-tests.sh:446).
+		case "$stripped_line" in
+		'cd src/db-backend' | 'cd src/db-backend '* | "cd 'src/db-backend'"* | \
+			*'--manifest-path src/db-backend'* | *'--manifest-path=src/db-backend'* | \
+			*'run-cross-repo-tests.sh'*)
+			db_backend_sites+=("$wf_name:$job")
+			if [ "$seen_recorder" -eq 0 ]; then
+				db_backend_missing+=("$wf_name:$line_no: job '$job' builds src/db-backend with no codetracer-native-recorder sibling before it")
+			fi
+			;;
+		esac
+	done <"$wf"
+done
+
+_anchor_found=0
+for _s in "${db_backend_sites[@]}"; do
+	[ "$_s" = "$DB_BACKEND_ANCHOR" ] && _anchor_found=1
+done
+unset _s
+
+if [ "$_anchor_found" -eq 1 ]; then
+	ok "the db-backend cargo scanner still matches its anchor (${#db_backend_sites[@]} call site(s))"
+else
+	fail "the db-backend cargo scanner still matches its anchor" \
+		"expected to find a db-backend cargo call site at '$DB_BACKEND_ANCHOR'," \
+		"and did not. Either that job was removed -- in which case move the anchor to" \
+		"another real call site -- or this scanner has stopped matching the steps it" \
+		"scans, which would make the assertion below a vacuous pass." \
+		"found: ${db_backend_sites[*]:-<none>}"
+fi
+unset _anchor_found
+
+if [ "${#db_backend_missing[@]}" -eq 0 ]; then
+	ok "every db-backend cargo leg provisions codetracer-native-recorder first"
+else
+	fail "every db-backend cargo leg provisions codetracer-native-recorder first" \
+		"src/db-backend/build.rs panics at build.rs:170 with 'db-backend requires the" \
+		"sibling codetracer-native-recorder checkout, and it was not found' -- after the" \
+		"whole tree-sitter dependency tree has been compiled." \
+		"${db_backend_missing[@]}"
+fi
+
+# ---------------------------------------------------------------------------
 # 3. Every `ci/setup-rr-backend.sh` step overrides the ref explicitly.
 # ---------------------------------------------------------------------------
 echo
@@ -1248,7 +1421,10 @@ fi
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=23
+# 23 -> 26: assertion 2b ("db-backend cargo legs provision
+# codetracer-native-recorder") contributes the composite-integrity check, the
+# scanner-anchor check, and the contract itself.
+readonly EXPECTED_ASSERTIONS=26
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
