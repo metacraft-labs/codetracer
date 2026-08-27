@@ -463,6 +463,64 @@ proc recordUnitResult(run: var AttestedRun; target: string;
   ## an otherwise baffling "no tests executed" to someone who just watched a
   ## suite report skips.
   ##
+  ## **THE GUARANTEE IS ONLY AS FINE-GRAINED AS THE PROVIDER'S REPORTING**, and
+  ## saying otherwise would overstate it. This fold refuses every ``tsSkipped``
+  ## it is given. **Exactly one shipped provider reports skips per test on its
+  ## run path: ``js-playwright``.** Follow the wiring:
+  ##
+  ## * ``js_playwright.nim:497`` — ``provider.run = runPlaywright``
+  ## * ``:431`` ``runPlaywright`` → ``buildPlaywrightCommand``, which passes
+  ##   ``--reporter=json`` (``:84``)
+  ## * → ``parsePlaywrightResultsJson`` → ``collectResultEvents`` (``:305``)
+  ##   → ``statusFromPlaywright`` (``:258``), mapping ``"skipped"`` to
+  ##   ``tsSkipped`` (``:263``).
+  ##
+  ## Every other provider derives a whole file's status from a single
+  ## subprocess **exit code**, and a skip is invisible to it — **rspec
+  ## included**, which is easy to get wrong: ``ruby_rspec.nim:121`` sets
+  ## ``provider.run = runRubyCommand(...)``, whose one status decision is
+  ## ``ruby_common.nim:461`` (``exitCode == 0`` ⇒ ``tsPassed``, else
+  ## ``tsFailed``) — the same proc minitest uses
+  ## (``ruby_minitest.nim:122``). ``parseRspecJsonResults`` does map
+  ## ``example{"status"} == "pending"`` to ``tsSkipped``, but nothing on any
+  ## run path calls it and the command built at ``ruby_common.nim:350`` carries
+  ## no ``--format json`` for it to read. rspec exits 0 when every example is
+  ## pending, so an all-``pending`` suite yields ``tsPassed``.
+  ##
+  ## The same holds for ``js_common``, ``cpp_common``, ``native_m11_common``
+  ## and ``m12_fallback_common``: ``node --test <file>`` with every test
+  ## skipped reports ``# pass 0 / # skipped 2`` and **exits 0**, so
+  ## ``js-node-test`` yields ``tsPassed`` and the file IS claimed as a covered
+  ## target.
+  ##
+  ## **Do not check this with a grep for ``tsSkipped``.** A token search answers
+  ## "which files mention it", not "which providers can emit it from ``run``",
+  ## and ``ruby_common.nim`` contains that token on a dead path — which is
+  ## precisely how an earlier version of this comment came to claim rspec.
+  ## Follow ``provider.run`` to the proc that decides status.
+  ##
+  ## So "a skipped test is never claimed" is unconditionally true of this fold,
+  ## and true end to end only under Playwright. Everywhere else a certificate
+  ## can still name a file in which nothing ran. Closing that needs per-test
+  ## reporting in the providers, not a change here.
+  ##
+  ## **A target is attributed to the SCHEDULED unit, never to an event's
+  ## ``testId``, and that indirection is deliberate rather than incidental.**
+  ## ``run_orchestration.runUnitOutcome`` stamps ``RunUnitOutcome.testId`` with
+  ## ``unit.item.id`` and never reads it back out of an event, so the file this
+  ## claims is the file the runner dispatched. Events carry the *provider's
+  ## own* naming: ``ruby_common`` takes ``testId`` from rspec's
+  ## ``example{"id"}`` (``./spec/x_spec.rb[1:1]``), which can never equal
+  ## ``makeTestItemId(...)``. Requiring the two to match would therefore
+  ## attribute nothing at all for every real provider — the rule has to be
+  ## "what we asked it to run", not "what it says it ran".
+  ##
+  ## The consequence worth being explicit about: a provider whose events name a
+  ## *different* unit still gets only its own dispatched file claimed. It
+  ## cannot reach across and add a target for a unit it was not given. What it
+  ## can do is lie about its own file, which is the caller-registered-provider
+  ## seam in the module header and not something this fold can adjudicate.
+  ##
   ## The three statuses that DO count all mean a test genuinely ran:
   ## ``tsPassed``, ``tsFailed`` and ``tsErrored`` (which started and blew up,
   ## and lands in ``failed``, so it withholds). ``tekTestFinished`` carrying no
@@ -743,22 +801,74 @@ proc targetOfUnit(workspaceRoot: string; unit: RunUnit): string =
   ## formally clean and substantively false — a real, passing test bound to a
   ## commit that says nothing about it. Declining to claim it is safe in the
   ## other direction: a certificate covers exactly the targets it names, and
-  ## partial coverage is normal (Standard.md §8). Discovery only ever produces
-  ## workspace-relative paths, so nothing reaches this through the CLI.
-  var file = unit.item.file
-  if file.len == 0:
+  ## partial coverage is normal (Standard.md §8). No shipped provider emits an
+  ## absolute ``item.file`` — they all go through ``normalizedRelative`` — so
+  ## nothing reaches that branch through the CLI; it is guarded because an
+  ## in-process caller can supply one.
+  ## **Containment is resolved, not spelled.** An earlier version tested the
+  ## string — ``file == ".." or file.startsWith("../")`` — which decides the
+  ## question by how a path happens to be written and gets three cases wrong:
+  ## a relative path whose *interior* ``..`` escapes
+  ## (``sub/../../outside/tests/o.rb``) is not caught; a legitimate absolute
+  ## path under a **symlinked** workspace root is wrongly rejected, losing a
+  ## target a real test earned; and an interior ``..`` that resolves back
+  ## inside is claimed under its unnormalized spelling, so the same file can
+  ## reach ``targets`` under two names and defeat deduplication.
+  ##
+  ## So both sides are resolved first: ``..`` segments are collapsed, and the
+  ## root is additionally resolved through symlinks where the filesystem can
+  ## answer. The file itself is *not* required to exist. ``item.file`` is what
+  ## the provider reported having **run**, and a stat asks a different question
+  ## at a different time: a file deleted mid-run should still be named, because
+  ## the certificate is a claim about the run, not about the tree afterwards.
+  ##
+  ## One residue, so the dedup argument above is not read as absolute: a
+  ## symlinked *directory inside* the root is claimed under the link spelling
+  ## rather than the target's, so one file can still reach ``targets`` under two
+  ## names. That is an alias within the repository rather than a false claim —
+  ## the commit covers both spellings — and real discovery does not follow
+  ## directory symlinks, so only a hand-built catalog produces it. Resolving it
+  ## would mean stat-ing every path component, which is the stat this
+  ## deliberately does not do.
+  if unit.item.file.len == 0 or workspaceRoot.len == 0:
     return ""
-  if isAbsolute(file) and workspaceRoot.len > 0:
+
+  proc resolvedDir(path: string): string =
+    ## Collapse ``..``/``.`` and, when the directory exists, follow symlinks.
+    ## Falls back to the lexical form so a not-yet-created root still works.
+    let lexical = normalizedPath(absolutePath(path))
     try:
-      file = relativePath(file, workspaceRoot)
-    except ValueError:
-      return ""
-  if isAbsolute(file):
-    return ""
-  file = file.replace('\\', '/')
-  if file == ".." or file.startsWith("../"):
-    return ""
-  file
+      expandFilename(lexical)
+    except OSError, IOError:
+      lexical
+
+  let roots = block:
+    let lexical = normalizedPath(absolutePath(workspaceRoot))
+    let real = resolvedDir(workspaceRoot)
+    if real == lexical: @[lexical] else: @[lexical, real]
+
+  # Resolve the file against the workspace root when it is relative, then
+  # collapse. `..` that escapes the root survives this as a path outside it,
+  # which the containment test below then rejects.
+  let lexicalFile = normalizedPath(
+    if isAbsolute(unit.item.file): unit.item.file
+    else: normalizedPath(absolutePath(workspaceRoot)) / unit.item.file)
+  # A symlinked root reaches its files under the resolved name, so try that
+  # spelling too — resolving the DIRECTORY only, never requiring the file.
+  let realFile = block:
+    let parent = resolvedDir(parentDir(lexicalFile))
+    if parent.len == 0: lexicalFile else: parent / lastPathPart(lexicalFile)
+
+  for root in roots:
+    for candidate in [lexicalFile, realFile]:
+      if candidate.len <= root.len or not candidate.startsWith(root):
+        continue
+      # Guard the prefix boundary: `/ws-other/x` must not count as inside
+      # `/ws`, which a bare `startsWith` would accept.
+      if candidate[root.len] != DirSep and candidate[root.len] != '/':
+        continue
+      return candidate[root.len + 1 .. ^1].replace('\\', '/')
+  ""
 
 proc runAndAttest*(registry: var ProviderRegistry;
                    response: DiscoverResponse;

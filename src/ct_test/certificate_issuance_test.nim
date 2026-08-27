@@ -79,6 +79,10 @@ type FixtureOutcome = enum
   foFail = "fail"
   foSkip = "skip"
   foSilent = "silent"
+  foForeign = "foreign"
+    ## A finished PASS whose event ``testId`` names a unit the provider was
+    ## never asked to run. Real providers routinely emit event ids that do not
+    ## equal ``item.id``; this is the sharpest version of that.
 
 proc fixtureInfo(): TestProviderInfo =
   TestProviderInfo(
@@ -102,11 +106,20 @@ proc fixtureRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   ## Note that the provider is HONEST in every arm, including ``foSkip``: it
   ## reports exactly what happened. Anything wrong that comes out of a skip is
   ## manufactured downstream, in the fold under test.
-  let outcome =
-    if scope.selector.endsWith("::fail"): foFail
-    elif scope.selector.endsWith("::skip"): foSkip
-    elif scope.selector.endsWith("::silent"): foSilent
-    else: foPass
+  # Decoded from the selector so the worker stays stateless, and DERIVED FROM
+  # THE ENUM rather than restated as a chain of branches. `fixtureItem` builds
+  # the selector as `… & "::" & $outcome`, so this is the exact inverse and a
+  # new enum value is dispatched the moment it exists.
+  #
+  # The hand-written chain this replaces silently mapped anything it did not
+  # recognise to `foPass`: `foForeign` was added without a branch, so the case
+  # meant to exercise it exercised nothing and passed. An exhaustive `case`
+  # would not have helped — the mapping runs string→enum, and a missing branch
+  # is not a compile error in that direction. Only the red-before caught it.
+  var outcome = foPass
+  for value in FixtureOutcome:
+    if scope.selector.endsWith("::" & $value):
+      outcome = value
   result = ProviderResult[seq[TestEvent]](diagnostics: @[], value: @[
     TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekRunStarted,
               providerId: FixtureProviderId, runId: scope.testId)])
@@ -120,13 +133,19 @@ proc fixtureRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
     of foFail: tsFailed
     of foSkip: tsSkipped
     else: tsPassed
+  # The id the provider puts on its OWN events. `foForeign` names a unit that
+  # was never scheduled; every real provider's ids differ from `item.id` too,
+  # just less dramatically.
+  let eventTestId =
+    if outcome == foForeign: "a-unit-that-was-never-scheduled"
+    else: scope.testId
   result.value.add TestEvent(
     schemaVersion: TestEventSchemaVersion, kind: tekTestStarted,
-    providerId: FixtureProviderId, runId: scope.testId, testId: scope.testId)
+    providerId: FixtureProviderId, runId: scope.testId, testId: eventTestId)
   result.value.add TestEvent(
     schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
     providerId: FixtureProviderId, runId: scope.testId,
-    testId: scope.testId, status: some(status), durationMs: 1)
+    testId: eventTestId, status: some(status), durationMs: 1)
   result.value.add TestEvent(
     schemaVersion: TestEventSchemaVersion, kind: tekRunFinished,
     providerId: FixtureProviderId, runId: scope.testId)
@@ -382,6 +401,39 @@ suite "ct test certificate issuance":
     check issuance.certificate.targets == @["tests/ok_test.nim"]
     check "tests/broken_test.nim" notin issuance.document
 
+  test "the claimed target is the scheduled unit's file, not an event's testId":
+    ## Attribution runs through ``RunUnitOutcome.testId``, which
+    ## ``run_orchestration.runUnitOutcome`` stamps with ``unit.item.id`` and
+    ## never reads back out of an event. That indirection looks accidental
+    ## reading ``runUnitOutcome`` cold, and it is load-bearing: every real
+    ## provider's event ids differ from ``item.id`` — ``ruby_common`` takes
+    ## ``testId`` from rspec's ``example{"id"}`` (``./spec/x_spec.rb[1:1]``),
+    ## which can never equal ``makeTestItemId(...)`` — so requiring a match
+    ## would attribute nothing at all, for anyone.
+    let repo = committedRepo("foreign-test-id")
+    let issuance = attest(repo, @[
+      fixtureItem("tests/dispatched_test.rb", "reports someone else's id",
+                  foForeign)], unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    # The file the runner DISPATCHED is claimed...
+    check issuance.certificate.targets == @["tests/dispatched_test.rb"]
+    # ...and the id the provider invented reaches the certificate nowhere.
+    check "a-unit-that-was-never-scheduled" notin issuance.document
+
+    # The sharper shape: a provider whose events name another unit cannot
+    # reach across and add a target for a unit it was not given. Only the two
+    # files actually dispatched are claimed, and the skipped one is still not.
+    let reaching = attest(repo, @[
+      fixtureItem("tests/dispatched_test.rb", "lies about its id", foForeign),
+      fixtureItem("tests/other_test.rb", "runs honestly", foPass),
+      fixtureItem("tests/pending_test.rb", "is skipped", foSkip)],
+      unsignedOptions()).issuance
+    require reaching.issued
+    check reaching.certificate.targets ==
+          @["tests/dispatched_test.rb", "tests/other_test.rb"]
+    check "tests/pending_test.rb" notin reaching.document
+
   test "a test outside the workspace is not bound to the workspace's commit":
     ## `[certificate.vcs]` describes the repository at the workspace root, so
     ## naming a file that repository does not contain would be a record that is
@@ -410,6 +462,59 @@ suite "ct test certificate issuance":
     require mixed.issued
     check mixed.certificate.targets == @["tests/inside_test.js"]
     check ".." notin mixed.document
+
+  test "containment is decided after resolving the path, not by how it is spelled":
+    ## The lexical test this replaced — `file == ".." or startsWith("../")` —
+    ## asked how a path was *written*. Three shapes disagree with how it
+    ## *resolves*, and one of them costs a legitimate test its target.
+    let repo = committedRepo("containment")
+    createDir(repo / "sub")
+    createDir(repo / "tests")
+
+    # (a) An interior `..` that ESCAPES the root. Spelled with no leading
+    # "../", so the lexical test claimed it.
+    let escaping = attest(repo, @[
+      fixtureItem("sub/../../outside/tests/o.rb", "escapes", foPass)],
+      unsignedOptions()).issuance
+    check not escaping.issued
+    check escaping.reason == wrNoTargets
+
+    # (b) An interior `..` that resolves back INSIDE. Claimed either way — but
+    # it must be claimed under its NORMALIZED name, or the same file reaches
+    # `targets` under two spellings and deduplication cannot see they are one.
+    let winding = attest(repo, @[
+      fixtureItem("sub/../tests/t.rb", "winds", foPass),
+      fixtureItem("tests/t.rb", "direct", foPass)], unsignedOptions()).issuance
+    require winding.issued
+    # Both units record the SAME normalized spelling — which is exactly what
+    # lets the serializer's deduplication see they are one file. Unnormalized,
+    # the payload would carry the file twice under two names.
+    check winding.certificate.targets == @["tests/t.rb", "tests/t.rb"]
+    check "targets = [\"tests/t.rb\"]\n" in winding.document
+    check ".." notin winding.document
+
+    # (c) A SYMLINKED workspace root, reached by an absolute path through the
+    # real directory. The lexical test computed "../<real>/tests/o.rb" and
+    # withheld — a real, passing test losing the target it earned.
+    let linkedRoot = scratchRoot / "containment-link"
+    removeFile(linkedRoot)
+    createSymlink(repo, linkedRoot)
+    let throughReal = attest(linkedRoot, @[
+      fixtureItem(repo / "tests" / "t.rb", "through the real path", foPass)],
+      unsignedOptions()).issuance
+    checkpoint throughReal.message & " / " & throughReal.remedy
+    require throughReal.issued
+    check throughReal.certificate.targets == @["tests/t.rb"]
+
+    # (d) The prefix boundary: a sibling directory sharing a name prefix with
+    # the root is outside it, which a bare `startsWith` would accept.
+    let sibling = scratchDir("containment-sibling")
+    createDir(sibling / "tests")
+    let siblingRun = attest(repo, @[
+      fixtureItem(sibling / "tests" / "t.rb", "sibling", foPass)],
+      unsignedOptions()).issuance
+    check not siblingRun.issued
+    check siblingRun.reason == wrNoTargets
 
   test "a run that executed nothing issues none":
     let repo = committedRepo("empty-run")

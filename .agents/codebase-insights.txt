@@ -2289,6 +2289,31 @@ consumer of the event stream that means "a test ran" must test for
 `tsPassed | tsFailed | tsErrored` explicitly rather than for `not tsFailed`.
 `certificate_issuance.recordUnitResult` is the worked example.
 
+And know how far that gets you. **Exactly ONE provider reports skips per test
+on its run path: `js-playwright`** (`provider.run` at `js_playwright.nim:497`
+-> `runPlaywright:431` -> `--reporter=json` at `:84` -> `collectResultEvents:305`
+-> `statusFromPlaywright:258` -> `tsSkipped:263`). Everything else derives a
+whole file's status from one subprocess exit code (`js_common:504`,
+`cpp_common:544`, `native_m11_common:88`, `m12_fallback_common:193`, and
+`ruby_common:461`), so a skip is indistinguishable from a pass there.
+Concretely: `node --test <file>` with every test skipped prints
+`# pass 0 / # skipped 2` and EXITS 0.
+
+**rspec is an exit-code provider, despite appearances**, and this is the trap:
+`ruby_common.nim` contains a correct `pending -> tsSkipped` mapping
+(`parseRspecJsonResults`) whose only caller in the repo is a unit test of
+itself, and the rspec command at `:350` has no `--format json` anyway.
+`ruby_rspec.nim:121` runs `runRubyCommand`, the same exit-code proc minitest
+uses.
+
+So: `grep -rln tsSkipped src/ct_test/frameworks/` returns two files and is the
+WRONG evidence -- it answers "which files mention the token", not "which
+providers can emit it from `run`". Both a previous version of the certificate
+docs and a verification pass drew the false conclusion from that one grep.
+Follow `provider.run` to the proc that decides status. Any per-test property
+enforced downstream is bounded by that, and saying so is the difference
+between a guarantee and a hope.
+
 Related, same file: a unit whose provider returns diagnostics and NO
 `tekTestFinished` (crashed harness, missing toolchain) contributes nothing to
 either count, and `runExitCode` keys off `failed > 0` alone — so such a run
