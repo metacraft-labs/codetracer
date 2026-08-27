@@ -86,7 +86,18 @@
     };
 
     codetracer-python-recorder = {
-      url = "github:metacraft-labs/codetracer-python-recorder";
+      # `/dev`, not the bare URL.  A bare `github:owner/repo` resolves the
+      # repo's DEFAULT branch, and this repo's default is `stable` -- the last
+      # released recorder snapshot, the same distinction spelled out for
+      # `codetracer-native-recorder` below.  `nix/python.nix` reads
+      # `inputs."codetracer-python-recorder".lib.python`, the single
+      # declaration of the interpreter version that repo now owns
+      # (`.python-version`); that output exists on `dev` and not on `stable`,
+      # so the bare URL made `nix develop` fail outright with
+      # `error: attribute 'python' missing`.  Every lane other than the Nix
+      # lane took the recorder from a local checkout or a workspace override
+      # and so never saw the disagreement.
+      url = "github:metacraft-labs/codetracer-python-recorder/dev";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
