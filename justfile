@@ -882,12 +882,17 @@ test-gui-prebuilt *args:
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
   case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*|*_NT*)
-      # Windows: no Xvfb needed; Electron uses the native display.
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      # Windows and macOS: no Xvfb needed; Electron uses the native display
+      # server (Win32 / Cocoa).  There is no Xvfb in the macOS dev shell at
+      # all, and Chromium on Darwin ignores $DISPLAY, so the branch below
+      # would have started nothing and then exported a $DISPLAY pointing at
+      # an X server that does not exist.  `test-e2e` exempts Darwin from its
+      # $DISPLAY precondition for the same reason; this keeps the two in step.
       just test-e2e {{args}}
       ;;
     *)
-      # Linux/macOS: start a persistent Xvfb so Playwright/Electron tests have a display.
+      # Linux: start a persistent Xvfb so Playwright/Electron tests have a display.
       DISPLAY_NUM=99
       while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
         DISPLAY_NUM=$((DISPLAY_NUM + 1))
