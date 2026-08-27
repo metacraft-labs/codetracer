@@ -45,7 +45,7 @@ import root_hash       # rootHashOfDeps, rootHashOfDepsAndReadFiles, ReadFileDep
 import invalidation    # the M4b query (+ foldFileInvalidation)
 import native_readfiles # M6a extractor (the SHARED fold input)
 import io_mon_capture  # M6b: the io-mon capture → read-file-set conversion under test
-import io_mon          # MonitorRecord/MonitorDepFile/depFileFromRecords (the capture wire model)
+import io_mon/depfile  # MonitorRecord/MonitorDepFile/depFileFromRecords (format-only surface)
 
 # ---------------------------------------------------------------------------
 # A controlled io-mon depfile, as the interpose shim would emit for a

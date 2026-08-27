@@ -80,7 +80,13 @@
 import std/[algorithm, os, osproc, sets, strtabs, tables, times]
 import results
 
-import io_mon
+import io_mon/depfile  # the format-only surface (readMonitorDepFile /
+                       # MonitorDepFile / MonitorRecord / depFileFromRecords /
+                       # findShimLibrary) — NOT the `io_mon` umbrella, which
+                       # pulls in `fs_snoop` and its by-value `=destroy` that the
+                       # refc `ct` build rejects. This module only reads/writes
+                       # the depfile and locates the shim; capture itself runs in
+                       # a subprocess `io-mon run` (see incremental_cli.nim).
 import native_readfiles  # ReadFile, signatureOf, NativeReadFilesFile, the shared fold input
 import stackable_hooks/propagation as ct_propagation
   # sandboxToolsDir / unrewriteSipPath: map a SIP-rewritten exec path (a transient
@@ -91,13 +97,13 @@ export results
 export native_readfiles.ReadFile
 # Re-export the shim locator so the CLI can pin REPRO_MONITOR_SHIM_LIB for the
 # out-of-process snoop child it spawns in the recorder dev shell (M8).
-export io_mon.findShimLibrary
+export depfile.findShimLibrary
 # Re-export the depfile reader + type so the CLI can perform the §16.7.8
 # process-tree confirmation check (`unconfirmedSpawnedSubtrees`) on the captured
 # depfile without importing io-mon directly — this module is the single seam
 # between ct_test and io-mon's capture format.
-export io_mon.MonitorDepFile
-export io_mon.readMonitorDepFile
+export depfile.MonitorDepFile
+export depfile.readMonitorDepFile
 
 type
   CapturedReadSet* = object
@@ -473,13 +479,15 @@ proc captureReadFilesLive*(command: seq[string];
   ## LIVE interpose monitor, producing a depfile at `depfilePath`, then derive the
   ## read-file dependency set from it.
   ##
-  ## M8 wiring: when the standalone `io-mon` CLI is locatable
-  ## (`findSnoopCli`), the capture runs OUT OF PROCESS through that binary (the
-  ## shim injected around `command` in a clean subprocess — the correct topology,
-  ## since the shim must wrap the recorder's program, not the runner). When the
-  ## snoop binary is absent but the shim shared library IS present, we fall back
-  ## to the IN-PROCESS `runFsSnoopCli` driver (the relocated fs_snoop entry point)
-  ## so the controlled-depfile / single-host path still works.
+  ## M8 wiring: the capture runs OUT OF PROCESS through the standalone `io-mon`
+  ## CLI (`findSnoopCli`) — the shim injected around `command` in a clean
+  ## subprocess, the correct topology since the shim must wrap the recorder's
+  ## program, not the runner. CodeTracer is a consumer of io-mon's depfile
+  ## FORMAT (import io_mon/depfile), not of its in-process capture machinery, so
+  ## when no standalone `io-mon` binary is locatable this gates with an honest
+  ## Err rather than driving fs_snoop in-process; the earlier in-process fallback
+  ## is what pulled `MonitorHandle`'s by-value `=destroy` into the refc `ct`
+  ## build.
   ##
   ## GATED + FAIL-SAFE: requires at minimum the platform shim shared library
   ## (`ioMonShimAvailable`). When the shim is missing, returns an HONEST `Err`
@@ -496,21 +504,24 @@ proc captureReadFilesLive*(command: seq[string];
       " unset and no librepro_monitor_shim found (build it via io-mon's " &
       "scripts/build_shim.sh)")
   let snoopCli = findSnoopCli()
-  if snoopCli.len > 0:
-    let ran = captureViaSnoopBinary(snoopCli, command, depfilePath)
-    if ran.isErr:
-      return err(ran.error)
-  else:
-    # No standalone snoop binary on PATH — fall back to the in-process driver.
-    var args = @["run", "--depfile", depfilePath, "--"]
-    args.add command
-    var exitCode: int
-    try:
-      exitCode = runFsSnoopCli("ct-test-io-mon", args)
-    except CatchableError as e:
-      return err("io-mon snoop run failed: " & e.msg)
-    if exitCode != 0:
-      return err("io-mon snoop run exited non-zero (" & $exitCode & ")")
+  if snoopCli.len == 0:
+    # No standalone `io-mon` binary is locatable. CodeTracer records THROUGH the
+    # io-mon tool out of process (the correct topology — the shim must wrap the
+    # recorder's program in a clean subprocess, not the runner) and then consumes
+    # the depfile FORMAT; it does not drive capture in-process. Running fs_snoop
+    # in-process here is what forced this module to import the io_mon capture
+    # umbrella (`MonitorHandle` + its ARC/ORC by-value `=destroy`), which the
+    # refc `ct` build rejects. Returning an honest gated Err instead keeps this
+    # module a pure consumer of the format (import io_mon/depfile) and matches
+    # the existing fail-safe contract: a missing capture tool gates the live arm
+    # and the caller re-runs, never a fabricated capture.
+    return err("io-mon live capture gated: no standalone `io-mon` binary found " &
+      "(set " & IoMonSnoopEnvVar & " or put `io-mon` on PATH — the dev shell " &
+      "prepends io-mon's build/bin when the sibling is present). CodeTracer " &
+      "records via the io-mon tool out of process; it does not snoop in-process.")
+  let ran = captureViaSnoopBinary(snoopCli, command, depfilePath)
+  if ran.isErr:
+    return err(ran.error)
   var dep: MonitorDepFile
   try:
     dep = readMonitorDepFile(depfilePath)

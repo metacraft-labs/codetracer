@@ -33,7 +33,7 @@ import ctfs_store      # StoreTest, buildStore, key64
 import root_hash       # rootHashOfDeps, rootHashOfDepsAndReadFiles, ReadFileDep
 import invalidation    # the M4b query (FileSignal, invalidateShallow, irReadFileChanged)
 import io_mon_capture  # the fold under test (launchedBinaryPathsFromDepFile, readFilesFromDepFile)
-import io_mon          # MonitorRecord/MonitorDepFile/depFileFromRecords
+import io_mon/depfile  # MonitorRecord/MonitorDepFile/depFileFromRecords (format-only surface)
 import stackable_hooks/propagation as ct_propagation  # prepareSandboxCopy
 
 proc tmpDir(name: string): string =
