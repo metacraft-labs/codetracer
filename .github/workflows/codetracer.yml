@@ -2879,28 +2879,40 @@ jobs:
           CODETRACER_DB_TESTS_ONLY: "1"
 
   test-ui-tests-rr:
-    # DELIBERATELY NOT ROUTED to eph-linux-x64-g1/-g2 with the rest of this
-    # workflow (H4). This is the one job in the Linux set that drives `rr`, and
-    # the GPU hosts were measured, not assumed:
+    # ROUTED to the GPU hosts (H4). The earlier hold on this job -- "the GPU
+    # hosts are hybrid i9-12900Ks, so unpinned rr is a core-type lottery" --
+    # was wrong, and rr's own source says so: rr already confines itself to
+    # the P-cores without being asked.
     #
-    #   * Guest exposes kernel.perf_event_paranoid = -1 and a fully visible PMU;
-    #     perf_event_open(HW_BRANCH_INSTRUCTIONS) succeeds unprivileged. So the
-    #     container is NOT the obstacle.
-    #   * But both GPU hosts are i9-12900K (Alder Lake), a HYBRID part:
-    #     cpu_core (P) = CPUs 0-15, cpu_atom (E) = CPUs 16-23. rr needs the
-    #     retired-conditional-branch counter (`r5111c4`), which only the
-    #     P-cores implement.
-    #   * Measured on both hosts: `rr record` + `rr replay` PASS when the tracee
-    #     is pinned to a P-core (`taskset -c 0-15`), and FAIL hard in
-    #     PerfCounters::start() when pinned to an E-core.
-    #   * Unpinned -- which is how this job invokes rr today -- is a coin flip:
-    #     in one probe run the identical command passed on -g1 and failed on -g2.
+    #   * RecordCommand.cc:214 -- RecordFlags' default is
+    #     `bind_cpu(BindCPU::PREFER_PERF_CORE)`. Not ANY, not UNBOUND.
+    #   * util.cc:2166 -- choose_cpu() calls filter_for_perf_cores(cpus) for
+    #     that mode, and util.cc:2075-2081 keeps only CPUs whose CPUGroup kind
+    #     is P_CORE (CPUs.cc:106-112 maps /sys/devices/cpu_core -> P_CORE and
+    #     cpu_atom -> E_CORE).
+    #   * The chosen P-core is then recorded as the bound CPU
+    #     (RecordSession.cc:2579) and Session::do_bind_cpu (Session.cc:768)
+    #     sets affinity to it, so PerfCounters only ever sees a P-core PMU.
+    #   * PerfCounters.cc:216 -- "For hybrid products the data in this table is
+    #     for the P-cores of that product", i.e. the P-core PMU is the one rr's
+    #     counter table is written against.
     #
-    # Routing this job as-is would therefore manufacture flaky CI rather than
-    # move load. It can move once the rr invocation confines the tracee to the
-    # P-cores; until then it stays on high-mem-server, whose Xeon E5-2650 is
-    # uniform (no E-cores) and so has no core-type lottery.
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    # There is no "unpinned" path here to lose the lottery on: rr's UNBOUND
+    # mode is a hard CLEAN_FATAL on multi-PMU systems (PerfCounters.cc:325,
+    # "Multiple PMU types detected. Unbinding CPU is not supported."), and
+    # nothing on this job's path asks for it -- codetracer-native-backend's
+    # record_program_with_rr (src/record.rs:153-167) spawns
+    # `rr record [-W] -n -o <dir> ...` with no --bind-to-cpu and no -u, and
+    # codetracer's own E-core workaround (src/common/intel_fix.nim,
+    # workaroundIntelECoreProblem) is `discard` -- dead since rr fixed this
+    # upstream. The E-core abort the probe saw was manufactured by the probe
+    # explicitly binding to an E-core; that is not what CI does.
+    #
+    # The one host-side precondition is that the guest exposes
+    # /sys/devices/cpu_core and cpu_atom, or cpu_groups() comes back empty and
+    # the filter no-ops. Both GPU guests do expose them -- that was measured
+    # when the hold was written.
+    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     timeout-minutes: 120
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -3271,7 +3283,11 @@ jobs:
   # recording assertions into no-ops.
   # ---------------------------------------------------------------------------
   ct-test-release-gate:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # Moved -g2 -> -g1 as the counterweight to test-ui-tests-rr (22.1 min)
+    # landing on -g2 in this same commit; without it the always-on subset skews
+    # 103.4 vs 122.2. Lands next to ct-test-providers, which it shares a closure
+    # with, so the move is locality-positive as well as arithmetic.
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     name: ct-test release gate (M16 provider matrix)
     steps:
       - name: Mint installation token for cross-repo sibling access
