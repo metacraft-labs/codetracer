@@ -833,7 +833,7 @@ const
     # old rows decode as the wrong language.
     #
     # `target_axes_test` pins the successor types (`src/common/target_axes.nim`,
-    # `src/common/target_assessment.nim`), including the decomposition of all 40
+    # `src/common/target_assessment.nim`), including the decomposition of all 41
     # `Lang` values onto the four axes.  It is registered here rather than left
     # to the glob because it is the safety net for the migration that removes
     # `Lang` members, which is exactly when "the test quietly stopped running"

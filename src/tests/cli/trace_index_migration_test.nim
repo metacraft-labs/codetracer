@@ -12,7 +12,7 @@
 ## migration that half-applies leaves a database no release can read and no
 ## rebuild can repair.  So the properties below are not "the happy path works":
 ##
-##   1. an **old** database is remapped correctly, value for value, for all 40
+##   1. an **old** database is remapped correctly, value for value, for all 41
 ##      `Lang` variants;
 ##   2. a **new** database is not touched;
 ##   3. running the migration **twice** is a no-op;
