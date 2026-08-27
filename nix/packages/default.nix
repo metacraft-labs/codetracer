@@ -20,36 +20,67 @@
         fenix = inputs.fenix;
       };
 
-      # Stage isonim sources in a writable sibling layout that mirrors
-      # ``../isonim`` etc. as expected by codetracer's ``nim.cfg`` path
-      # directives.  The flake inputs come from /nix/store and are
+      # The sibling checkouts a workspace reaches through codetracer's
+      # ``nim.cfg`` ``path:"../isonim/src"`` directives, named ONCE. The staging
+      # commands and the ``--path:`` flags below are both derived from this
+      # list, so the set that gets copied and the set that gets made importable
+      # cannot drift apart -- and the flake-input attribute name is the
+      # directory name, which is what makes deriving both possible.
+      isonimSiblings = [
+        "isonim"
+        "isonim-tui"
+        "isonim-gpui"
+        "nim-everywhere"
+        "nim-termctl"
+        "nim-pty"
+        "nim-acp"
+        "nim-agent-harbor"
+        "nim-agents"
+      ];
+
+      # Stage those sources in a writable sibling layout that mirrors
+      # ``../isonim`` etc.  The flake inputs come from /nix/store and are
       # read-only, but ``isonim/dsl/tailwind.nim`` does
-      # ``staticRead("<isonim-root>/build/tailwind-styles.json")``; the
-      # JS-target branch tries to fall back to ``"{}"`` on failure but
-      # ``staticRead`` raises a compile-time Error that ``try/except``
-      # cannot catch, so we seed an empty
-      # ``build/tailwind-styles.json`` next to the staged isonim sources
-      # before invoking nim.  The fallback ``{}`` lookup map is enough
-      # for the codetracer UI -- there are no Tailwind utility classes
-      # consumed through this code path; the real CSS comes from
+      # ``staticRead("<isonim-root>/build/tailwind-styles.json")``; the JS-target
+      # branch tries to fall back to ``"{}"`` on failure but ``staticRead``
+      # raises a compile-time Error that ``try/except`` cannot catch, so we seed
+      # an empty ``build/tailwind-styles.json`` next to the staged isonim
+      # sources before invoking nim.  The fallback ``{}`` lookup map is enough
+      # for the codetracer UI -- there are no Tailwind utility classes consumed
+      # through this code path; the real CSS comes from
       # codetracer/src/public/styles.
       prepareIsonimSiblings = ''
         export ISONIM_STAGE="$NIX_BUILD_TOP/isonim-stage"
         mkdir -p "$ISONIM_STAGE"
-        cp -a ${inputs.isonim} "$ISONIM_STAGE/isonim"
-        cp -a ${inputs.isonim-tui} "$ISONIM_STAGE/isonim-tui"
-        cp -a ${inputs.isonim-gpui} "$ISONIM_STAGE/isonim-gpui"
-        cp -a ${inputs.nim-everywhere} "$ISONIM_STAGE/nim-everywhere"
-        cp -a ${inputs.nim-termctl} "$ISONIM_STAGE/nim-termctl"
-        cp -a ${inputs.nim-pty} "$ISONIM_STAGE/nim-pty"
-        cp -a ${inputs.nim-acp} "$ISONIM_STAGE/nim-acp"
-        cp -a ${inputs.nim-agent-harbor} "$ISONIM_STAGE/nim-agent-harbor"
-        cp -a ${inputs.nim-agents} "$ISONIM_STAGE/nim-agents"
+      ''
+      + pkgs.lib.concatMapStrings (name: ''
+        cp -a ${inputs.${name}} "$ISONIM_STAGE/${name}"
+      '') isonimSiblings
+      + ''
         chmod -R u+w "$ISONIM_STAGE"
         mkdir -p "$ISONIM_STAGE/isonim/build"
         [ -f "$ISONIM_STAGE/isonim/build/tailwind-styles.json" ] || \
           echo '{}' > "$ISONIM_STAGE/isonim/build/tailwind-styles.json"
       '';
+
+      # The ``--path:`` flags that make those staged sources importable, as one
+      # space-separated string a call site can drop in front of its own flags.
+      #
+      # This list used to be written out per derivation, four times -- and the
+      # FIFTH site, the ``codetracer`` derivation that compiles ``ct`` itself,
+      # did not have it at all. That is what `nix build
+      # '.?submodules=1#codetracer'` died on:
+      #
+      #   src/ct/review_session.nim(270, 10) Error: cannot open file: nim_everywhere
+      #
+      # ``review_session.nim``'s ``when not defined(js)`` branch imports
+      # ``nim_everywhere`` and ``nim_agents``. In a workspace those resolve
+      # through ``nim.cfg``; inside the sandbox they resolve through these flags
+      # and nothing else. Every derivation that compiles Nim from this tree
+      # needs them, so there is one copy now.
+      isonimNimPaths = pkgs.lib.concatMapStringsSep " " (
+        name: ''--path:"$ISONIM_STAGE/${name}/src"''
+      ) isonimSiblings;
     in
     {
       packages = rec {
@@ -263,29 +294,13 @@
           buildPhase = prepareIsonimSiblings + ''
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
-              --path:"$ISONIM_STAGE/isonim/src" \
-              --path:"$ISONIM_STAGE/isonim-tui/src" \
-              --path:"$ISONIM_STAGE/isonim-gpui/src" \
-              --path:"$ISONIM_STAGE/nim-everywhere/src" \
-              --path:"$ISONIM_STAGE/nim-termctl/src" \
-              --path:"$ISONIM_STAGE/nim-pty/src" \
-              --path:"$ISONIM_STAGE/nim-acp/src" \
-              --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
-              --path:"$ISONIM_STAGE/nim-agents/src" \
+              ${isonimNimPaths} \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
-              --path:"$ISONIM_STAGE/isonim/src" \
-              --path:"$ISONIM_STAGE/isonim-tui/src" \
-              --path:"$ISONIM_STAGE/isonim-gpui/src" \
-              --path:"$ISONIM_STAGE/nim-everywhere/src" \
-              --path:"$ISONIM_STAGE/nim-termctl/src" \
-              --path:"$ISONIM_STAGE/nim-pty/src" \
-              --path:"$ISONIM_STAGE/nim-acp/src" \
-              --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
-              --path:"$ISONIM_STAGE/nim-agents/src" \
+              ${isonimNimPaths} \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
           '';
@@ -313,15 +328,7 @@
 
             ${nim-codetracer}/bin/nim2 \
                 --hints:off --warnings:off \
-                --path:"$ISONIM_STAGE/isonim/src" \
-                --path:"$ISONIM_STAGE/isonim-tui/src" \
-                --path:"$ISONIM_STAGE/isonim-gpui/src" \
-                --path:"$ISONIM_STAGE/nim-everywhere/src" \
-                --path:"$ISONIM_STAGE/nim-termctl/src" \
-                --path:"$ISONIM_STAGE/nim-pty/src" \
-                --path:"$ISONIM_STAGE/nim-acp/src" \
-                --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
-                --path:"$ISONIM_STAGE/nim-agents/src" \
+                ${isonimNimPaths} \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
                 --out:./subwindow.js js src/frontend/subwindow.nim
@@ -353,15 +360,7 @@
           buildPhase = prepareIsonimSiblings + ''
             ${nim-codetracer.out}/bin/nim2 \
               --hints:off --warnings:off \
-              --path:"$ISONIM_STAGE/isonim/src" \
-              --path:"$ISONIM_STAGE/isonim-tui/src" \
-              --path:"$ISONIM_STAGE/isonim-gpui/src" \
-              --path:"$ISONIM_STAGE/nim-everywhere/src" \
-              --path:"$ISONIM_STAGE/nim-termctl/src" \
-              --path:"$ISONIM_STAGE/nim-pty/src" \
-              --path:"$ISONIM_STAGE/nim-acp/src" \
-              --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
-              --path:"$ISONIM_STAGE/nim-agents/src" \
+              ${isonimNimPaths} \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
               --out:./ui.js js src/frontend/ui_js.nim
@@ -1273,7 +1272,7 @@
             # pkgs.zip
           ];
 
-          buildPhase = ''
+          buildPhase = prepareIsonimSiblings + ''
             ls -al ${pkgs.sqlite.out}/lib/
             ls -al ${staticDeps.outPath}/bin
             echo ${runtimeDeps.outPath}/bin
@@ -1294,6 +1293,7 @@
             export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
 
             ${nim-codetracer.out}/bin/nim2 \
+              ${isonimNimPaths} \
               -d:debug -d:asyncBackend=asyncdispatch \
               --mm:refc --hints:off --warnings:off \
               --debugInfo --lineDir:on \
@@ -1312,6 +1312,7 @@
               --out:ct c ./src/ct/codetracer.nim
 
             ${nim-codetracer.out}/bin/nim2 \
+              ${isonimNimPaths} \
               -d:debug -d:asyncBackend=asyncdispatch \
               --mm:refc --hints:off --warnings:off \
               --debugInfo --lineDir:on \
