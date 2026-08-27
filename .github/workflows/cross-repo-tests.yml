@@ -226,56 +226,46 @@ jobs:
           token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
-        # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones codetracer-shell-recorders adjacent to this checkout at the
-        # pinned `dev` ref, replacing the former
-        # Checkout-manifests / Resolve-lock / clone-repo steps. The
-        # shell_recorders_ref workflow_dispatch input overrides the ref
-        # (empty => `dev`).
+        # THE SIBLING SET THIS JOB NEEDS IS NOT THE SHELL RECORDERS' SIBLING
+        # SET. The test command below runs `cargo test` from inside
+        # `src/db-backend`, so this job builds the db-backend crate and needs
+        # every sibling THAT build resolves by relative path -- which is what
+        # `.github/actions/setup-db-backend-siblings` names, in one place, for
+        # the eight jobs that build it.
         #
-        # codetracer-trace-format is listed because the shell recorders' Cargo
-        # workspace path-depends on it:
+        # This job used to call `setup-dev-env` directly with a hand-derived
+        # list, reasoning only about the shell recorders' own path
+        # dependencies. That list was right about those and silently omitted
+        # `codetracer-native-recorder`, which no shell recorder needs but
+        # `src/db-backend/build.rs` requires unconditionally: it compiles and
+        # links the recorder's Nim MCR emulator, and `src/lib.rs` exports
+        # `emulator_ffi` / `emulator_origin` / `emulator_session` / `data_watch`
+        # whether or not anything calls them. The job compiled the whole
+        # tree-sitter tree and then panicked at build.rs:170 --
         #
-        #   error: failed to load manifest for workspace member
-        #     `.../codetracer-shell-recorders/crates/ct-shell-trace-writer`
-        #   Caused by: failed to load manifest for dependency `codetracer_trace_types`
-        #   Caused by: failed to read `.../codetracer-trace-format/codetracer_trace_types/Cargo.toml`
-        #   Caused by: No such file or directory (os error 2)
+        #   db-backend requires the sibling `codetracer-native-recorder`
+        #   checkout, and it was not found.
         #
-        # It was missing from this list, not from the lock — the `rr-backend-tests`
-        # job above already names it for the same reason. The gap was invisible
-        # while this job could not get past `Setup dev env` at all.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        # -- in run 32995543471 and in every run before it back to 2026-08-04.
+        # `ci/test/sibling-provisioning-test.sh` now fails when a job that runs
+        # cargo against `src/db-backend` does not provision it.
+        #
+        # `extra-siblings` carries the ONE sibling that is genuinely this job's
+        # own: the shell recorders under test. codetracer-trace-format /
+        # codetracer-trace-format-nim were in the hand-rolled list for the
+        # shell recorders' sake (`crates/ct-shell-trace-writer` path-depends on
+        # `codetracer_trace_types` and on `codetracer_trace_writer_nim`, whose
+        # build.rs resolves the Nim FFI entry point as a sibling of the Rust
+        # half) and the composite provisions both anyway -- db-backend needs
+        # the same matched pair for the same reason.
+        uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          # codetracer-trace-format-nim is the second half of a MATCHED FFI
-          # PAIR and is required whenever codetracer-trace-format is BUILT, not
-          # only when something imports the Nim library directly.
-          # `crates/ct-shell-trace-writer` path-depends on
-          # `codetracer-trace-format/codetracer_trace_writer_nim`, whose
-          # build.rs resolves the Nim entry point as a SIBLING of
-          # codetracer-trace-format and hard-errors when it is absent:
-          #
-          #   error: failed to run custom build command for
-          #     `codetracer_trace_writer_nim v0.1.0`
-          #   Nim FFI entry point not found at
-          #     .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
-          #     -- is the codetracer-trace-format-nim repo checked out as a
-          #     sibling? (override with CODETRACER_TRACE_FORMAT_NIM_DIR)
-          #
-          # Observed in run 31719867246, job 94513828226, step "Build shell
-          # trace writer" -- reached only because the `=dev` pins here got this
-          # job past `Setup dev env` for the first time since 2026-08-04.
-          # Pinned by the "codetracer-trace-format implies
-          # codetracer-trace-format-nim" assertion in
-          # ci/test/sibling-provisioning-test.sh.
-          siblings: |
+          extra-siblings: |
             codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
 
       - name: Build shell trace writer
         run: |
@@ -283,7 +273,42 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command \
             bash -c "cd '$CLONE_DIR' && cargo build"
 
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # `src/db-backend/build.rs` shells out to ``direnv exec <recorder-root>
+        # bash ct_emulator/build_native_api.sh`` to materialise the generated C
+        # sources before the Rust build. A fresh clone's `.envrc` is in the
+        # "blocked" state, so direnv refuses to run it and build.rs fails with
+        # ``build_native_api.sh exited with status exit status: 1``.
+        # `direnv allow` is idempotent and only writes this runner's local
+        # direnv state dir. Same step, same reason, as the `rr-backend-tests`
+        # job above and the six db-backend jobs in `codetracer.yml`; the
+        # composite action deliberately leaves it to the caller because only
+        # the jobs that actually compile build.rs need it.
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # `build_native_api.sh` runs ``nim c ... ct_emulator.nim``, whose
+        # `.nimble` declares ``requires "results"``. A fresh nim install has no
+        # global `results` package, so the script aborts with ``cannot open
+        # file: results``. Resolve them once, inside the RECORDER's own direnv
+        # environment so nim/nimble come from the recorder's flake.
+        run: |
+          RECORDER_DIR="${{ github.workspace }}/../codetracer-native-recorder"
+          nix develop .#devShells.x86_64-linux.default --command \
+            direnv exec "$RECORDER_DIR" \
+              bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
+
       - name: Run shell-recorder integration tests
+        # CT_EMULATOR_EXTRA_NIM_PATHS: the emulator's `syscall_replay.nim`
+        # imports `stew/endians2`, but `ct_emulator.nimble` does not declare
+        # `stew` as a dependency, so a fresh Nim build cannot resolve the
+        # module. Codetracer ships pinned copies as submodules under
+        # `libs/nim-stew` and `libs/nim-result`; injecting them here is what the
+        # other db-backend jobs in `codetracer.yml` do.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
           BASH_RECORDER="${CLONE_DIR}/bash-recorder/launcher.sh"

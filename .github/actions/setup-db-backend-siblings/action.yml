@@ -42,6 +42,29 @@ inputs:
     description: Optional Nix trusted-public-keys forwarded to setup-dev-env.
     required: false
     default: ""
+  extra-siblings:
+    description: >
+      Additional `siblings:` entries, in `clone-siblings` syntax
+      (`[owner/]name[=ref]`, whitespace- or newline-separated), appended to the
+      three db-backend siblings this action always provisions.
+
+      THIS EXISTS SO THAT A JOB WHICH NEEDS ONE MORE SIBLING DOES NOT HAND-ROLL
+      THE WHOLE LIST. `cross-repo-tests.yml`'s `shell-recorder-tests` did
+      exactly that: it needed `codetracer-shell-recorders`, so it called
+      `setup-dev-env` directly with a three-entry list derived from the shell
+      recorders' own path dependencies -- and omitted
+      `codetracer-native-recorder`, which is not a shell-recorder dependency at
+      all but an unconditional one of `src/db-backend/build.rs`. The job then
+      compiled the entire tree-sitter dependency tree before panicking with
+      "db-backend requires the sibling `codetracer-native-recorder` checkout,
+      and it was not found" (run 32995543471). Composing with this input keeps
+      the db-backend set defined in one place, which is this action's whole
+      reason to exist.
+
+      `ci/test/sibling-provisioning-test.sh` asserts that every job running
+      cargo against `src/db-backend` provisions `codetracer-native-recorder`.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -64,7 +87,11 @@ runs:
         gh-token: ${{ inputs.gh-token }}
         substituters: ${{ inputs.substituters }}
         trusted-public-keys: ${{ inputs.trusted-public-keys }}
+        # `clone-siblings` tokenises this value on whitespace after stripping
+        # `#` comments, so an empty `extra-siblings` contributes nothing and a
+        # multi-line one needs no particular indentation.
         siblings: |
           codetracer-trace-format=dev
           codetracer-trace-format-nim=dev
           codetracer-native-recorder=dev
+          ${{ inputs.extra-siblings }}
