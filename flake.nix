@@ -199,6 +199,17 @@
       #   nix develop '.?submodules=1' <other overrides> --command repro build
       #
       # (`readlink -f "$(command -v repro)"` names which one you actually got.)
+      #
+      # BUMPING THIS ALSO MOVES OUR NIM COMPILER. `nix/packages/default.nix`
+      # takes `nim-fork` from this input's `packages.nim-fork`, and that is the
+      # `nim` first on `$PATH` in every dev shell — so it compiles every Nim
+      # test lane, `just build-storybook-components`, and the `repro.nim`
+      # interface extraction that `just build-once` starts with. A reprobuild
+      # bump therefore carries a compiler bump; re-run `just test-vm-native`,
+      # `just test-vm-js` and `just build-once` after one. (Deliberately a
+      # single pin: a second `nim-fork-src` pin here would be two pins for one
+      # thing with nothing keeping them equal — the failure mode
+      # `scripts/test-flake-pin-alignment.sh` exists to catch for `runquota`.)
       url = "github:metacraft-labs/reprobuild/35c5754a8fd3b9858508d61701199fab8e69ebda";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";

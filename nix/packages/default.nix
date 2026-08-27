@@ -119,6 +119,77 @@
         # Keep backward compat alias for anything that still references this
         upstream-nim-codetracer = nim-codetracer;
 
+        # ── The metacraft-labs/nim fork (codetracer-nim, Nim 2.3.1 devel) ──
+        #
+        # `nim-codetracer` above is stock nixpkgs Nim (2.2.8 at the current
+        # toolchains pin). This is OUR compiler: the `codetracer` branch of
+        # metacraft-labs/nim, which is where the Nim-side fixes CodeTracer
+        # needs actually live. What it carries that stock 2.2.x does not:
+        #
+        #   * `ee749d18a` "unittest: a failing check in a helper proc fails its
+        #     test" — metacraft-labs/codetracer issue #643. On stock Nim,
+        #     `check` inside a helper proc records a failure that the enclosing
+        #     `test` block never notices, so the suite reports [OK] for a test
+        #     whose assertion did not hold. Every ViewModel lane in this repo
+        #     (`just test-vm-native`, `just test-vm-js`, and the recorder-gated
+        #     variants) is std/unittest, and their helper procs are exactly the
+        #     shape that bug swallows. This is a correctness fix, so adopting
+        #     it can turn a green test red; when it does, the test was already
+        #     failing and nobody was being told.
+        #   * `0b5b5ec50` "fix(unittest): support JS hot-code reloading" —
+        #     std/unittest under the JS HCR transform. An initialized local
+        #     could make the transform absorb the following `try` and emit an
+        #     orphaned `finally`, which is reachable from the renderer build.
+        #   * `61765fd66` + `864c36ebc` "render the reported location
+        #     canonically": the source location `check` / `require` / `expect`
+        #     plant into the expanded body is rendered package-anchored
+        #     (`tests/a/t.nim`) rather than absolute. Those literals are hashed
+        #     into every test's `--list-json` `bodyHash`, so before it a catalog
+        #     changed with the checkout directory and two hosts building the
+        #     same commit agreed about nothing. `5c5e55b58` "sighashes: stop a
+        #     body hash from depending on its neighbours" is the other half:
+        #     adding an assertion above a test no longer moves that test's hash.
+        #   * A compiler effect-inference fix that lets `std/streams` and
+        #     `std/json` compile under `--mm:orc -d:useNimRtl` (stock 2.2.x
+        #     rejects them), plus CodeTracer's column-aware tracer.
+        #
+        # PROVENANCE OF THE PIN. We deliberately do NOT re-declare the fork's
+        # source inputs here. `reprobuild` already pins the fork
+        # (`nim-fork-src`) and already builds it koch-boot-free together with
+        # the three deps its compiler imports (trace-writer / stew / results)
+        # in `reprobuild/nix/nim-fork.nix`; it exports the result as
+        # `packages.nim-fork`. Re-deriving that here would mean a second copy
+        # of a five-input pin set with nothing keeping the two in step — the
+        # exact failure mode `scripts/test-flake-pin-alignment.sh` exists to
+        # catch for `runquota`. Consuming reprobuild's package instead means
+        # the Nim that builds CodeTracer and the Nim that builds `repro` are
+        # the same revision by construction, and the pin moves in one place.
+        #
+        # It is built against THIS repo's nixpkgs, not reprobuild's: `flake.nix`
+        # sets `inputs.reprobuild.inputs.nixpkgs.follows = "nixpkgs"`, so the
+        # derivation is instantiated with our pkgs and its zstd / pcre / openssl
+        # come from the same store closure as everything else in our shells.
+        #
+        # The revision reached through the pinned reprobuild (35c5754a, the
+        # pin `flake.nix` carries as of 2026-09-21) is
+        # `0b5b5ec507d2d9c731d222184c625851377a02c8`, the current tip of
+        # `origin/codetracer`.
+        #
+        # TODO(nim-fork pin): the fork carries a further LOCAL, UNPUSHED commit
+        # — `fix(js): give every symbol a unique name under --hotCodeReloading`,
+        # the JS-backend symbol-collision fix, sitting one commit ahead of
+        # `origin/codetracer` in the workspace's `codetracer-nim` checkout. A
+        # flake pin can only name a published revision, so it cannot be
+        # referenced yet. Once it is on `origin/codetracer`, advance
+        # reprobuild's `nim-fork-src` to it and mirror the reprobuild pin here
+        # the usual way (nixos-modules first, then `flake.nix`). Nothing in
+        # this repository depends on it today: the renderer no longer passes
+        # `--hotCodeReloading:on` at all (see `src/Tuprules.tup` and the
+        # `ctNimJs` note in `repro.nim`), so the fix is belt-and-braces.
+        # Deliberately NOT naming a SHA here: the workspace checkout gets
+        # rebased and the SHA in this comment rotted once already.
+        nim-fork = inputs.reprobuild.packages.${system}.nim-fork;
+
         # `nargo` and friends, built HERE from the `noir` source input rather
         # than taken from a `packages.default` that input exports.
         #

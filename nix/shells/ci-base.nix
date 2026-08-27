@@ -176,8 +176,48 @@ with pkgs;
     # Capnp serialisation (db-backend FFI + recorder writers).
     capnproto
 
-    # Nim 2.2.x — primary compiler. `nimble` resolves Nim FFI deps
-    # for codetracer_trace_writer_nim's build.rs.
+    # ── Nim: the fork is the compiler, nixpkgs Nim is the tool bag ──
+    #
+    # `ourPkgs.nim-fork` is the metacraft-labs/nim fork (Nim 2.3.1 devel,
+    # branch `codetracer`) — see the long note beside its definition in
+    # `nix/packages/default.nix` for what it carries and why the pin is
+    # reached through `reprobuild` rather than re-declared here. The one
+    # sentence version: it fixes std/unittest so a failing `check` inside a
+    # HELPER PROC fails its test (codetracer issue #643), and every Nim test
+    # lane in this repo is std/unittest driven through a bare `nim` off PATH
+    # (`ci/lib/run-nim-test-lane.sh` builds `nim c` / `nim js` command
+    # vectors, it does not go through reprobuild's tool provisioning).
+    #
+    # ORDER IS LOAD-BEARING, so do not sort this list. `mkShell` composes
+    # $PATH in package order, so the FIRST entry that ships a given binary
+    # wins. `nim-fork` therefore supplies `nim`, `nimpretty` and `nim-gdb`
+    # (its `bin/` holds exactly those three), and
+    # `nim-codetracer` — kept immediately below — supplies everything the
+    # fork derivation does not build: `nimsuggest` (ci/lint/nim.sh,
+    # ci/test/nimsuggest-check.sh, and the editor LSP path), `nim2`,
+    # `nimgrep`, `testament` and `nim_dbg`.
+    #
+    # `nimpretty` deliberately comes from the fork too, and for the same
+    # reason the compiler does: a formatter rewrites sources IN PLACE, so one
+    # whose parser is a different program from the compiler's parser can
+    # mangle code the compiler accepts. No script in this repo invokes
+    # `nimpretty` today — it is reached by hand and by editors — which is
+    # exactly why the pairing should be right by construction rather than by
+    # a reviewer noticing. The fork builds its own `nimpretty` from the same
+    # lexer/parser/layouter sources as its `nim`, so there is no skew to
+    # notice.
+    #
+    # NOTE the skew this INTRODUCES, and be honest that it is new: before the
+    # fork, `nim` and `nimsuggest` both came from nixpkgs 2.2.8 and agreed.
+    # Now `nim` is 2.3.1 while `nimsuggest`, `nim2`, `nimgrep`, `testament`
+    # and `nim_dbg` are still 2.2.8, so nimsuggest analyses against a 2.2.8
+    # stdlib the compiler no longer uses and can report a diagnostic the build
+    # does not. That is an IDE/lint surface only — none of those five compile
+    # anything that ships — and `nimsuggest` is already quarantined here
+    # against an upstream crash (see the header of ci/test/nimsuggest-check.sh).
+    # Building nimsuggest from the fork is the right follow-up, not a
+    # precondition.
+    ourPkgs.nim-fork
     ourPkgs.nim-codetracer
     nimble
 
