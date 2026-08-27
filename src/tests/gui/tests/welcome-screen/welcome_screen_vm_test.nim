@@ -47,6 +47,19 @@ import store/types
 import store/replay_data_store
 import viewmodels/welcome_screen_vm
 
+# NOTE: this file deliberately does NOT import ``common/trace_index``.
+# It is a headless ViewModel suite and must compile on BOTH the native and
+# the JS backend (``just test-vm-native`` / ``just test-vm-js``).
+# ``trace_index`` is a native-only module — it pulls in ``std/osproc``,
+# ``std/httpclient`` and ``db_connector/db_sqlite`` — so importing it here
+# made the whole file fail to compile under ``nim js`` with
+# ``osproc.nim(24, 8) Error: cannot export: quoteShell``, and none of the
+# cases below ran on the JS backend.  The one case that needed it (issue
+# #575, ``addRecentFolder`` and trailing path separators) was never a
+# ViewModel test; it now lives in ``src/common/trace_index_test.nim``
+# alongside the rest of the trace-index suite, where it runs in an isolated
+# subprocess instead of writing to the shared ``test = true`` index.
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

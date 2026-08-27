@@ -13,6 +13,9 @@
 ## 3. ``newID`` returns canonical UUIDv7 strings, two calls produce
 ##    different ids that sort lex-ascending.
 ##
+## It has since grown the short-recording-id-prefix resolver cases
+## (M-REC-6) and the ``recent_folders`` path-normalization case (#575).
+##
 ## Run with:
 ##   nim c -r --hints:off --warnings:off --mm:refc \
 ##       --nimcache:/tmp/ct-nim-cache/trace_index_test \
@@ -218,6 +221,33 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
     else:
       let (ok, stdoutStr, stderrStr) = runHelperScenario(
         "short-prefix-not-found", "prefnone")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr
+
+  test "addRecentFolder handles paths with trailing slashes/backslashes (#575)":
+    ## Issue #575.  ``addRecentFolder`` strips a trailing ``/`` or ``\``
+    ## before deriving the folder's display name; without that the name is
+    ## empty and the folder is stored twice.
+    ##
+    ## This case previously lived in
+    ## ``src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim``.
+    ## It is not a ViewModel test — it drives ``src/common/trace_index``
+    ## against a real SQLite database — and its presence there forced that
+    ## whole ViewModel suite to import ``trace_index``, which transitively
+    ## imports ``std/osproc`` and ``db_connector/db_sqlite``.  That made the
+    ## entire 44-case file uncompilable under ``nim js`` (``cannot export:
+    ## quoteShell``), so none of its cases ran on the JS backend at all.
+    ## Here it also gains the isolation the rest of this suite has: it runs
+    ## in a subprocess against a throwaway ``$HOME``, instead of writing to
+    ## the shared ``test = true`` index the developer's other runs share.
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "recent-folder-trailing-separators", "recentfolders")
       if not ok or "PASS" notin stdoutStr:
         echo "stdout: ", stdoutStr
         echo "stderr: ", stderrStr

@@ -11,7 +11,9 @@
 ## Usage: ``trace_index_test_helper <scenario>``
 ## Scenarios: ``schema``, ``old-schema``, ``newid-uuidv7``,
 ## ``trace-recording-id``, ``short-prefix-unique``, ``short-prefix-ambiguous``,
-## ``short-prefix-too-short``, ``short-prefix-not-found``.
+## ``short-prefix-too-short``, ``short-prefix-not-found``,
+## ``recent-folder-trailing-separators``, ``lang-name-roundtrip``,
+## ``migrate-legacy-db``.
 
 import std/[algorithm, os, strutils, strformat]
 
@@ -308,6 +310,68 @@ proc scenarioShortPrefixNotFound() =
     fail("expected rieNotFound; got " & $res.error)
   echo "PASS"
 
+proc scenarioRecentFolderTrailingSeparators() =
+  ## Issue #575: ``addRecentFolder`` must strip a trailing path separator —
+  ## POSIX ``/`` or Windows ``\`` — before it derives the folder's display
+  ## name, otherwise the name comes out empty and the same folder is stored
+  ## twice (once with the separator, once without).
+  ##
+  ## The three inputs cover the three shapes a caller can hand in: a POSIX
+  ## path with a trailing slash, a Windows path with a trailing backslash,
+  ## and an already-clean path that must be left alone.
+  ##
+  ## Both the stored ``path`` and the derived ``name`` are asserted.  Only
+  ## checking the name would pass an implementation that derived the name
+  ## correctly while persisting the unnormalized path — which is the half of
+  ## the defect that produces duplicate rows.
+  ##
+  ## ``/tmp/test_dir1`` is then added a SECOND time without the trailing
+  ## slash.  ``recent_folders.path`` is ``UNIQUE`` and the insert is
+  ## ``INSERT OR REPLACE``, so once both spellings normalize to the same
+  ## string the second add replaces the first and the row count stays at 3.
+  ## Without the stripping the two spellings are different keys and the same
+  ## folder occupies two rows — the duplicate half of #575, which the row
+  ## count below is what actually observes.  Adding only the trailing-slash
+  ## spelling could never observe it.
+  discard trace_index.newID(test = false) # materialize the DB
+
+  trace_index.addRecentFolder("/tmp/test_dir1/", test = false)
+  trace_index.addRecentFolder("C:\\tmp\\test_dir2\\", test = false)
+  trace_index.addRecentFolder("/tmp/test_dir3", test = false)
+  trace_index.addRecentFolder("/tmp/test_dir1", test = false)
+
+  let folders = trace_index.findRecentFolders(limit = 10, test = false)
+  var nameByPath: seq[(string, string)] = @[]
+  for f in folders:
+    nameByPath.add((f.path, f.name))
+
+  proc nameFor(path: string): string =
+    for (p, n) in nameByPath:
+      if p == path:
+        return n
+    ""
+
+  for (path, expectedName) in [
+      ("/tmp/test_dir1", "test_dir1"),
+      ("C:\\tmp\\test_dir2", "test_dir2"),
+      ("/tmp/test_dir3", "test_dir3")]:
+    let actual = nameFor(path)
+    if actual.len == 0:
+      fail("recent_folders has no row for the normalized path " & path &
+           "; stored rows: " & $nameByPath)
+    if actual != expectedName:
+      fail("recent_folders row " & path & " has name " & actual.escape() &
+           ", expected " & expectedName.escape())
+
+  # ``/tmp/test_dir1`` was added twice — with and without the trailing
+  # separator.  Normalized, those are one folder and must occupy one row.
+  if folders.len != 3:
+    fail("expected exactly 3 recent folders (the two spellings of " &
+         "/tmp/test_dir1 are one folder), got " & $folders.len &
+         ": " & $nameByPath)
+
+  echo "PASS"
+
 # ---------------------------------------------------------------------------
 # trace_index schema version 1 — recordings.lang stores the Lang enum NAME
 # ---------------------------------------------------------------------------
@@ -472,6 +536,7 @@ when isMainModule:
   of "short-prefix-ambiguous": scenarioShortPrefixAmbiguous()
   of "short-prefix-too-short": scenarioShortPrefixTooShort()
   of "short-prefix-not-found": scenarioShortPrefixNotFound()
+  of "recent-folder-trailing-separators": scenarioRecentFolderTrailingSeparators()
   of "lang-name-roundtrip": scenarioLangNameRoundTrip()
   of "migrate-legacy-db": scenarioMigrateLegacyDb()
   else:
