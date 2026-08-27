@@ -74,6 +74,22 @@ suite "ct test run certificate CLI":
     # believes signing is automatic has a false idea of what they hold.
     check "OFF" in usage
 
+  test "the usage text documents every exit status run can answer with":
+    ## Same argument as the flags above, applied to the surface a script reads
+    ## instead of a human.  `2` is the one a reader cannot guess: a run that
+    ## executed nothing is not a passing run, and before it had its own code it
+    ## was indistinguishable from success.  Someone branching on `$?` has to be
+    ## able to find that out from `--help` rather than by discovering it in
+    ## production.
+    let usage = ctTestUsageMessage()
+    check "exits 0" in usage
+    check "1 when" in usage
+    check "2 when" in usage
+    # The distinction itself, not merely the digits: a usage text that lists
+    # three numbers without saying that nothing-ran differs from all-passed
+    # documents the mechanism and hides the meaning.
+    check "NO test ran" in usage
+
   test "a signing key without a key id is refused before anything runs":
     ## A signed certificate whose ``key_id`` a consumer cannot resolve against
     ## its key store is one nobody can check (Verification.md §3.1), so the

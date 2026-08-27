@@ -66,6 +66,15 @@ proc ctTestUsageMessage*(): string =
   ## ``--unscoped`` decide which files discovery is even allowed to look at,
   ## and a flag with that much authority that appears in no usage text is a
   ## flag nobody finds when they need it.
+  ##
+  ## The same argument covers the exit status, which is why it is listed here.
+  ## ``run`` answers with three of them, and the third is the one a reader has
+  ## no way to guess: ``0`` a test ran and every one passed, ``1`` a test ran
+  ## and one did not, ``2`` **no test ran at all**. Two is not a variant of
+  ## one — a suite that failed told you something, and a suite that never
+  ## executed told you nothing while looking identical to success. That is the
+  ## whole reason it has its own code, so a script branching on ``$?`` can act
+  ## on the difference instead of inferring it from the summary.
   "usage: ct-test test (" &
   "discover (--workspace <path> | --file <path>) [--json] " &
   "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
@@ -80,7 +89,11 @@ proc ctTestUsageMessage*(): string =
   "discovery is scoped to the workspace's own files by default — " &
   "`--scope` (or the CT_TEST_SCOPE environment variable) selects the rule, " &
   "and `--unscoped` is shorthand for `--scope unscoped`, which INCLUDES " &
-  "vendored and ignored trees"
+  "vendored and ignored trees; " &
+  "`run` exits 0 when a test ran and all passed, 1 when a test ran and one " &
+  "did not, and 2 when NO test ran at all — a run that executed nothing is " &
+  "not a passing run, and the stderr verdict says which of the four causes " &
+  "it was"
 
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
