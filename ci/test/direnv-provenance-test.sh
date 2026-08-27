@@ -186,7 +186,11 @@ done
 # stops matching it, "no foreign shells were found" would be true and
 # meaningless. Update it deliberately when a call site is added or removed --
 # that is the moment to confirm the new one names `.`.
-readonly EXPECTED_SITES=11
+# 11 -> 12: #659 added a shell-BUILD probe beside the direnv probe in
+# launcher-recorder-e2e.yml, so that "the shell did not build" and "the shell
+# has no direnv" stop being reported as the same thing. It names `.`, so the
+# rule below still holds; this count is what made the addition visible.
+readonly EXPECTED_SITES=12
 
 if [ "$sites" -eq "$EXPECTED_SITES" ]; then
 	ok "the scanner still matches the direnv call sites ($sites)"
