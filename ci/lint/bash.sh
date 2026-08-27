@@ -91,6 +91,21 @@ lint_step "shellcheck: DeepReview design-review harness" \
 lint_step "contract suite: DeepReview design-review harness" \
 	bash tools/visual-review/deepreview-harness-test.sh
 
+# scripts/test-flake-pin-alignment.sh is the static guard on the `runquota` /
+# `reprobuild` lockstep. It is not under ci/, so the glob at the top does not
+# reach it.
+lint_step "shellcheck: flake pin alignment guard" \
+	shellcheck scripts/test-flake-pin-alignment.sh
+
+# Its contract suite runs here for the same reason the others do -- pure bash
+# and git, no nix, no network, under a second -- and because the thing it
+# actually asserts is that the guard's FAILURE PATHS accuse the right thing.
+# A guard that reports "flake.lock has no locked rev for input 'runquota'"
+# when python3 is merely absent sends the reader to edit a correct pin, and
+# that defect is invisible to shellcheck and to every happy-path run.
+lint_step "contract suite: flake pin alignment guard" \
+	bash ci/test/flake-pin-alignment-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
