@@ -107,6 +107,15 @@ lint_step "shellcheck: flake pin alignment guard" \
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
 
+# ci/unfold-submodules.sh is what makes codetracer-native-backend's `path:`
+# flake inputs resolvable in `Cross-Repo Integration Tests`. Its suite is pure
+# bash + git against repositories it builds under mktemp -- no siblings, no
+# network, seconds -- and the defect it guards (an unfold that is PARTIAL and
+# reports success) is invisible until a Nix evaluation four steps later, so it
+# belongs in the cheapest lane that will run it.
+lint_step "contract suite: submodule unfold for path: flake inputs" \
+	bash ci/test/unfold-submodules-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
