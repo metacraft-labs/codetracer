@@ -123,6 +123,12 @@ lint_step "contract suite: submodule unfold for path: flake inputs" \
 lint_step "contract suite: direnv comes from a dev shell we define" \
 	bash ci/test/direnv-provenance-test.sh
 
+# push-gpg-public-key and push-install-script have failed in every completed
+# `dev` run for weeks with "experimental Nix feature 'nix-command' is disabled",
+# because they run `nix develop` without ever installing Nix. Static, pure bash.
+lint_step "contract suite: a job that runs nix installs Nix first" \
+	bash ci/test/nix-provisioning-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
