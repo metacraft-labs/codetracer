@@ -154,7 +154,23 @@ required_siblings=(
 )
 
 advisory_siblings=(
-	'io-mon|src/io_mon.nim|IO_MON_SRC|`import io_mon` in src/ct_test/incremental/*, reached from `ct` via src/ct_test/incremental_cli:78'
+	# Probe the FORMAT module, not the `io_mon` umbrella -- the umbrella is a
+	# false green. Nothing in this repo imports `io_mon`: the only io-mon
+	# imports are `io_mon/depfile` (io_mon_capture.nim:83 and the two
+	# test_io_mon_* modules beside it), and io_mon_capture.nim:83 says in so
+	# many words why it must stay off the umbrella (fs_snoop's by-value
+	# `=destroy`, which the refc `ct` build rejects).
+	#
+	# The distinction is not cosmetic. `src/io_mon.nim` has existed in io-mon
+	# forever; `src/io_mon/depfile.nim` only since io-mon cfd2514 (2026-08-27).
+	# A pin older than that satisfies the umbrella probe, so this tier stayed
+	# SILENT and the missing module surfaced instead as
+	# `cannot open file: io_mon/depfile` from the Nim compiler, ~2000 lines
+	# into the build -- which is exactly how the published workspace lock for
+	# codetracer 0039436d (io-mon pinned at 8b6d0b9b, 2026-07-31) shipped a
+	# tree that could not build `ct`. Probing the module the source actually
+	# imports turns that into this warning, by name, before any compile.
+	'io-mon|src/io_mon/depfile.nim|IO_MON_SRC|`import io_mon/depfile` in src/ct_test/incremental/{io_mon_capture,test_io_mon_launched_binaries,test_io_mon_readfiles_materialized}.nim, reached from `ct` via src/ct_test/incremental_cli:78'
 	'nim-stackable-hooks|src/stackable_hooks.nim|NIM_STACKABLE_HOOKS_SRC|`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim'
 	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's dependency queue imports \`shm_queue\`"
 	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's writer imports \`shm_gset/transport\` (the symptom config.nims:74-77 documents)"

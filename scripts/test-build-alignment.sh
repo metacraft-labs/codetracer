@@ -796,6 +796,63 @@ run_nim_flag_alignment_check() {
 }
 
 # ---------------------------------------------------------------------------
+# (J) The io-mon sibling probe must name a module this repo actually imports.
+# ---------------------------------------------------------------------------
+#
+# `scripts/require-siblings.sh`'s advisory tier exists to name, BEFORE any
+# compile, the module that would otherwise fail to resolve. That only works if
+# the probe tracks the import. It did not.
+#
+# The entry probed the `io_mon` umbrella (`src/io_mon.nim`), while every io-mon
+# import in this repo is `io_mon/depfile` -- and io_mon_capture.nim:83 states
+# outright that it must NOT import the umbrella. `src/io_mon.nim` has existed
+# in io-mon forever, so an io-mon pinned before `depfile` landed (cfd2514,
+# 2026-08-27) satisfied the probe, the advisory tier printed nothing, and the
+# build died ~2000 lines later with `cannot open file: io_mon/depfile`. That is
+# exactly how the published workspace lock for codetracer 0039436d -- which
+# pins io-mon 8b6d0b9b (2026-07-31) -- shipped a tree that cannot build `ct`.
+#
+# So: derive the io-mon module set from the source, and require the probe to be
+# one of them. A probe naming a module nothing imports cannot warn about the
+# module that does.
+run_sibling_probe_alignment_check() {
+	local probe imported_modules
+
+	# The probe column of the single `io-mon|...` table row. The surrounding
+	# lines are comments, which cannot match the leading-quote anchor.
+	probe="$(sed -n "s/^[[:space:]]*'io-mon|\([^|]*\)|.*/\1/p" \
+		"$REPO_ROOT/scripts/require-siblings.sh")"
+
+	# Every `io_mon/<module>` reached from this repo, rendered as the
+	# repo-relative path shape the probe column uses.
+	imported_modules="$(grep -rhoE '\bimport[[:space:]]+io_mon/[A-Za-z0-9_]+' \
+		--include='*.nim' "$REPO_ROOT/src" 2>/dev/null |
+		sed -E 's#.*import[[:space:]]+io_mon/#src/io_mon/#; s#$#.nim#' |
+		LC_ALL=C sort -u)"
+
+	if [ -z "$imported_modules" ]; then
+		fail "(J) io-mon probe names a module this repo imports" \
+			"no 'import io_mon/<module>' found under src/ -- nothing to align against"
+		return
+	fi
+
+	# Membership by `case`, NOT `printf | grep -qxF`: this file runs under
+	# `set -o pipefail`, and `grep -q` closes the pipe on its first match, so
+	# the producer dies of SIGPIPE and the pipeline reports 141 -- a successful
+	# match would read as a failure. Same trap the (I'') note above documents.
+	case $'\n'"$imported_modules"$'\n' in
+	*$'\n'"$probe"$'\n'*)
+		pass "(J) require-siblings.sh probes an io-mon module this repo imports ($probe)"
+		;;
+	*)
+		fail "(J) require-siblings.sh probes an io-mon module this repo imports" \
+			"$(printf 'probe:    %s\nimported: %s' "$probe" \
+				"$(printf '%s' "$imported_modules" | tr '\n' ' ')")"
+		;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
 
 echo "Build-alignment harness: executing scripts/build.sh and scripts/build-once.sh"
 echo "under recording stubs, and comparing their traces."
@@ -807,6 +864,7 @@ run_scenario darwin Darwin repro src/build-debug-repro
 run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro
 run_port_busy_scenario
 run_nim_flag_alignment_check
+run_sibling_probe_alignment_check
 
 printf '\n%d checks, %d failure(s)\n' "$checks" "$failures"
 if [ "$failures" -ne 0 ]; then
