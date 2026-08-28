@@ -606,6 +606,20 @@ serve-docs hostname="localhost" port="3000":
   cd docs/book/
   mdbook serve --hostname {{hostname}} --port {{port}}
 
+# Live docs.codetracer.com dev server (hot reload) — the isonim-docs book in
+# docs/book-isonim. Runnable from the repo root: it enters that book's dev
+# shell (the isonim-docs framework flake, which brings nim/node/just) and runs
+# its dev-docs recipe. See docs/book-isonim/README.md. Default: http://127.0.0.1:8000
+dev-docs port='8000' host='127.0.0.1':
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd docs/book-isonim
+  # Prefer the live sibling isonim checkout (as docs/book-isonim/.envrc does),
+  # else fall back to the pinned github input in isonim-docs/flake.lock.
+  overrides=()
+  [[ -d ../../../isonim ]] && overrides+=(--override-input isonim path:../../../isonim)
+  exec nix develop path:../../../isonim-docs "${overrides[@]}" -c just dev-docs {{port}} {{host}}
+
 build-deb-package file_sizes_report="false":
   #!/usr/bin/env bash
   # https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-bundle.html
