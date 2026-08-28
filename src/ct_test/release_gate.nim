@@ -43,6 +43,17 @@ const
     "src/tests/gui/tests/editor/editor_vm_test.nim",
     "src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim",
     "src/tests/gui/tests/views/isonim_views_test.nim",
+    # BlockTracer M2b's two named verification tests
+    # (BlockTracer.milestones.org, "The Five Panes BlockTracer Renders").
+    # The `vm-unit` lane already RUNS them — it discovers
+    # `src/frontend/viewmodel/tests/unit/test_*.nim` by glob — so this
+    # registration is not about reaching them.  It is about the other half of
+    # what this array asserts: that the file still exists and has not been
+    # skip-disabled.  A milestone's verification test is exactly the file a
+    # later change is tempted to delete or `skip()` when it goes red, and glob
+    # discovery is silent about both.
+    "src/frontend/viewmodel/tests/unit/test_five_panes_drive_headlessly.nim",
+    "src/frontend/viewmodel/tests/unit/test_cross_pane_composition_needs_no_bridge.nim",
     # RS-M3: the Request Panel's live span-delta path.  Registered here
     # because this array IS the CI gate — a ViewModel test that exists but
     # is not listed runs nowhere (a gap this campaign found repeatedly).
