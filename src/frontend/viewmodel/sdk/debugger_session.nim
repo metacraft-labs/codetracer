@@ -348,11 +348,54 @@ proc launch*(s: DebuggerSession; trace: TraceSource;
   # The drain below is what makes the two backends agree. It is the same
   # primitive `headless_session.drain` already uses, and on native it is a
   # `poll(0)` that costs nothing when there is nothing queued.
+  #
+  # AND THAT IS STILL NOT ENOUGH, on the backend BlockTracer ships. The drain
+  # only reaches futures `async_compat` marked `__syncResolved` — i.e. ones
+  # built by `newCompletedFuture`. A `newPromise` that resolves later takes
+  # the `.then` branch instead, which is a real microtask that no synchronous
+  # drain can pump. `real_backend.nim`'s `send` returns exactly that shape.
+  # So on a real worker transport the three commands went out, the drain saw
+  # nothing, and `markReady` fired on the strength of having sent them — the
+  # §6.3 taxonomy inert for the third time, now for a third reason.
+  #
+  # The fix is to stop treating "sent" as "answered". `markReady` is now
+  # reached only from `settle`, once every command that was actually issued
+  # has had its callback run. On a synchronous transport that still happens
+  # before `launch` returns (the drain runs the callbacks inline), so nothing
+  # observable changes there. On a genuinely async one the session simply
+  # stays `dspLaunching` until the responses arrive and then moves to
+  # `dspReady` or `dspFailed` from the callback — which is what the `phase`
+  # signal is for.
+  #
+  # A session that is still `dspLaunching` after `launch` returns is
+  # therefore a *correct* state, not a lost one, and the one thing that must
+  # never happen — claiming `dspReady` without having seen a single response
+  # — is what `test_sdk_facade`'s deferred-transport cases pin.
   var handshakeFailed = false
+  var issued = 0
+  var settled = 0
+  var allIssued = false
+
+  proc settle() =
+    inc settled
+    if allIssued and settled == issued and not handshakeFailed and
+       s.phase.val == dspLaunching:
+      s.markReady(trace)
+
+  proc noteFailure(kind: DebuggerSessionErrorKind; msg: string) =
+    # First failure wins. With an async transport all three commands are in
+    # flight at once, so without this the reported error would be whichever
+    # response happened to land last rather than the one that broke the
+    # handshake.
+    if handshakeFailed:
+      return
+    handshakeFailed = true
+    s.failWith(kind, msg)
 
   proc step(command: string; args: JsonNode) =
     if handshakeFailed:
       return
+    inc issued
     onComplete(s.backend.send(command, args),
       onSuccess = proc(response: JsonNode) =
         # A DAP response with `success: false` is a failure even though the
@@ -361,12 +404,12 @@ proc launch*(s: DebuggerSession; trace: TraceSource;
         if not response.isNil and response.kind == JObject and
            response.hasKey("success") and
            not response["success"].getBool(false):
-          handshakeFailed = true
-          s.failWith(classifyBackendFailure(response),
-            command & " failed: " & $response),
+          noteFailure(classifyBackendFailure(response),
+            command & " failed: " & $response)
+        settle(),
       onError = proc(msg: string) =
-        handshakeFailed = true
-        s.failWith(dseWorkerFailed, command & " transport error: " & msg))
+        noteFailure(dseWorkerFailed, command & " transport error: " & msg)
+        settle())
     # Drained per step, not once at the end, so the short-circuit above
     # behaves the same on both backends: a queued-callback backend would
     # otherwise send all three commands to a backend that had already
@@ -382,7 +425,11 @@ proc launch*(s: DebuggerSession; trace: TraceSource;
   step("configurationDone", %*{})
   step("launch", trace.toLaunchArgs())
 
-  if not handshakeFailed and s.phase.val == dspLaunching:
+  # Only now can `settle` conclude anything: before the last `step` returns,
+  # `settled == issued` is true after every synchronously-answered command.
+  allIssued = true
+  if issued > 0 and settled == issued and not handshakeFailed and
+     s.phase.val == dspLaunching:
     s.markReady(trace)
 
 proc raiseIfFailed*(s: DebuggerSession) =

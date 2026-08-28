@@ -165,6 +165,54 @@ suite "Embed SDK facade — TraceSource (spec §3.1 row 5)":
     let d = bytesTrace(@[9'u8, 9'u8, 9'u8]).describe()
     check d == "bytes:3B"
 
+  test "the trace-source vocabulary is the one the engine names back":
+    # `TRACE_SOURCE_KINDS` in src/db-backend/src/dap.rs holds the identical
+    # list, and `src/db-backend/tests/launch_trace_source_test.rs` asserts
+    # it. That pairing is what makes the engine able to *name* a source it
+    # cannot open: before it had the field at all,
+    # `#[serde(deny_unknown_fields)]` turned every browser kind into
+    # `unknown field \`traceSource\``, which the §6.3 classifier can only
+    # bucket as the catch-all `BackendError`, and which the native server
+    # loop logs without answering the client at all.
+    var kinds: seq[string] = @[]
+    for k in TraceSourceKind.low .. TraceSourceKind.high:
+      kinds.add($k)
+    check kinds == @["local-folder", "http-range", "opfs", "bytes", "custom"]
+
+  test "every browser kind puts its name in the traceSource envelope":
+    # The engine branches on `kind` alone, so the spelling is the contract;
+    # the payload fields are advisory.
+    for source in [httpRangeTrace("https://e.test/t/"), opfsTrace("t/x.ct"),
+                   bytesTrace(@[1'u8]),
+                   customTrace(newBlockSource("b",
+                     length = proc(): int64 = 0,
+                     readRange = proc(offset: int64; length: int): seq[byte] = @[]))]:
+      let args = source.toLaunchArgs()
+      check args.hasKey("traceSource")
+      check args["traceSource"]["kind"].getStr == $source.kind
+      check not args.hasKey("traceFolder")
+
+  test "a local folder is the one kind that goes as traceFolder":
+    let args = localFolderTrace("/tmp/t").toLaunchArgs()
+    check args.hasKey("traceFolder")
+    check not args.hasKey("traceSource")
+
+  test "an engine refusal of a browser kind is UnsupportedTraceKind":
+    # The exact message shape `TraceSourceArgument::unsupported_reason`
+    # produces. If the engine ever stops saying "unsupported", this lands in
+    # the catch-all bucket and the §6.3 promise — "distinguish this trace
+    # does not exist from the worker died without string matching" — is
+    # quietly broken for the one failure the browser hits most.
+    let refusal = %*{
+      "success": false,
+      "message": "unsupported launch traceSource kind `http-range` " &
+                 "(the replay engine opens a trace that is already in its " &
+                 "virtual file system; push the container's bytes with " &
+                 "`vfs_write_file` and launch with `traceFolder`). " &
+                 "Known kinds: local-folder, http-range, opfs, bytes, custom.",
+    }
+    check classifyBackendFailure(refusal) == dseUnsupportedTraceKind
+
 # ---------------------------------------------------------------------------
 # §3.1 row 4 / §6 — session lifecycle and the error taxonomy
 # ---------------------------------------------------------------------------
@@ -353,6 +401,137 @@ suite "Embed SDK facade — error taxonomy (spec §6.3)":
     except DebuggerSessionError as err:
       kind = err.kind
     check kind == dseTraceUnavailable
+    session.dispose()
+
+# ---------------------------------------------------------------------------
+# §6.3 against a genuinely asynchronous transport
+# ---------------------------------------------------------------------------
+#
+# Every suite above drives a transport that answers before `send` returns.
+# That is not the transport BlockTracer ships. `real_backend.nim` returns a
+# bare `newPromise`, which `async_compat.onComplete` routes through `.then`
+# — a real microtask, invisible to `drainPlatformCallbacks`, which only ever
+# reaches the `__syncResolved` futures `newCompletedFuture` produces.
+#
+# `DebuggerSession.launch` used to call `markReady` on the strength of
+# having *sent* three commands, so against a real worker it reported
+# `dspReady` before a single response existed and the §6.3 taxonomy could
+# never fire. That is the third time this taxonomy has shipped inert, each
+# time for a different underlying reason, and each time no suite could see
+# it because no suite had an asynchronous transport.
+#
+# `MockBackendService.deferResponses` is that transport: it takes exactly
+# the same `onComplete` branch a promise does, while `settleDeferred` lets
+# the test deliver the answers on its own schedule. These cases fail if
+# `launch` ever again concludes anything it has not observed.
+
+suite "Embed SDK facade — §6.3 over an asynchronous transport":
+
+  proc deferredBackend(): MockBackendService =
+    let mock = newMockBackendService(autoRespond = true)
+    mock.deferResponses = true
+    mock
+
+  test "launch never claims ready before a single response has arrived":
+    let mock = deferredBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/trace"))
+
+    # All three commands went out...
+    check mock.receivedCommands.len == 3
+    check mock.pendingDeferredCount == 3
+    # ...and not one of them has been answered, so there is nothing the
+    # session could have concluded.
+    check session.phase.val == dspLaunching
+    check not session.isReady
+    check session.failure.val.isNone
+    session.dispose()
+
+  test "the handshake completes when the last response arrives, not before":
+    let mock = deferredBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/trace"))
+
+    mock.settleDeferred(%*{"success": true})
+    check session.phase.val == dspLaunching
+    mock.settleDeferred(%*{"success": true})
+    check session.phase.val == dspLaunching
+    mock.settleDeferred(%*{"success": true})
+
+    check session.phase.val == dspReady
+    check session.isReady
+    check session.trace.kind == tskLocalFolder
+    session.dispose()
+
+  test "a failure that arrives late is still classified, not swallowed":
+    # The whole point of the taxonomy: this must not read as a ready
+    # session merely because the refusal came back after `launch` returned.
+    let mock = deferredBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/nope"))
+
+    mock.settleDeferred(%*{"success": true})
+    mock.settleDeferred(%*{"success": true})
+    mock.settleDeferred(%*{"success": false,
+                           "message": "trace folder not found: /tmp/nope"})
+
+    check session.phase.val == dspFailed
+    check session.failure.val == some(dseTraceUnavailable)
+    check not session.isReady
+    session.dispose()
+
+  test "every taxonomy value fires over the async transport too":
+    # If any of these regress to `dspReady`, the taxonomy has gone inert
+    # again on the transport that actually ships.
+    let cases = {
+      "trace folder not found: /tmp/nope": dseTraceUnavailable,
+      "malformed CTFS container header": dseTraceCorrupt,
+      "unsupported launch traceSource kind `http-range`": dseUnsupportedTraceKind,
+      "the gremlins ate it": dseBackendError,
+    }
+    for message, expected in cases.items:
+      let mock = deferredBackend()
+      let session = newDebuggerSession(mock.toBackendService())
+      session.launch(localFolderTrace("/tmp/t"))
+      check session.phase.val == dspLaunching
+      mock.settleAllDeferred(%*{"success": false, "message": message})
+      check session.phase.val == dspFailed
+      check session.failure.val == some(expected)
+      session.dispose()
+
+  test "the first refusal wins, not whichever answer lands last":
+    # With an async transport all three commands are in flight at once, so
+    # "report the failure that stopped the handshake" cannot rely on
+    # short-circuiting the sends.
+    let mock = deferredBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/t"))
+    mock.settleDeferred(%*{"success": false,
+                           "message": "malformed CTFS container header"})
+    mock.settleDeferred(%*{"success": false, "message": "the gremlins ate it"})
+    mock.settleDeferred(%*{"success": false, "message": "the gremlins ate it"})
+    check session.failure.val == some(dseTraceCorrupt)
+    session.dispose()
+
+  test "a transport that never answers leaves the session launching, not ready":
+    # The honest end state for a worker that died: still `dspLaunching`,
+    # never `dspReady`. A consumer watches the signal; what it must never
+    # see is a readiness the session cannot justify.
+    let mock = deferredBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/t"))
+    check session.phase.val == dspLaunching
+    check not session.isReady
+    check session.failure.val.isNone
+    session.dispose()
+
+  test "a synchronous transport still settles inside launch":
+    # The fix must not turn every existing consumer asynchronous: with a
+    # transport that answers inline, `launch` still returns ready.
+    let mock = mockBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/trace"))
+    check session.phase.val == dspReady
     session.dispose()
 
 # ---------------------------------------------------------------------------
