@@ -100,6 +100,35 @@ FACADE_MODULE="codetracer_embed"
 # (ci/lib/test-lane-files.sh `test_lane_extra_flags`) plus config.nims.
 SEARCH_ROOTS=("${SDK_SUBTREE}" "src/frontend" "src" ".")
 
+# Sibling PACKAGE roots, searched after SEARCH_ROOTS and resolved to absolute
+# paths so the walk can leave this repository.
+#
+# WHY THIS EXISTS. Until it did, the walk stopped at the repository boundary,
+# so "the facade's graph contains no renderer" meant "contains no renderer *in
+# codetracer*, and none at IsoNim's seven entry points". IsoNim is the UI
+# framework the whole renderer is written against; if `isonim/core/signals`
+# ever grew an import of `isonim/web/dom_api`, the rule below would have had
+# nothing to match and the guard would have gone on printing OK.
+# BlockTracer.milestones.org M2a carried that as a known gap — "the import lint
+# does not walk IsoNim ... benign as measured but unguarded, and IsoNim is on
+# someone else's cadence". The second half of that sentence is the argument for
+# closing it rather than for leaving it: a dependency on someone else's cadence
+# is exactly the one a lint has to hold.
+#
+# Each entry is `<probe-relative-to-root>|<env-override>|<fallback-suffix>`.
+# Both packages are REQUIRED siblings of this repo already
+# (scripts/require-siblings.sh), which is what makes it legitimate for this
+# guard to fail rather than shrug when one is missing — see the
+# `graph-walks-siblings` check below.
+SIBLING_PACKAGES=(
+	"isonim|isonim/core/signals.nim|ISONIM_SRC|../isonim/src"
+	"nim-everywhere|nim_everywhere/async_compat.nim|NIM_EVERYWHERE_SRC|../nim-everywhere/src"
+)
+
+# Filled by resolve_sibling_roots.
+SIBLING_ROOTS=()
+SIBLING_MISSING=()
+
 # How far into a file the `## SDK-CONSUMER:` header marker may appear.
 MARKER_SCAN_LINES=40
 
@@ -232,11 +261,17 @@ CHAIN_TOKENS=(
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 list_graph=0
+# Whether we are checking THIS repository, as opposed to one of the synthetic
+# trees ci/test/sdk-facade-boundary-test.sh builds. A synthetic tree has no
+# sibling packages and needs none; the real repo does, and the difference is
+# what keeps `graph-walks-siblings` from being either vacuous or impossible.
+root_is_repo=1
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--root)
 		shift
 		root="$1"
+		root_is_repo=0
 		;;
 	--list-graph)
 		# Print the facade's transitive import graph and exit. For working out
@@ -403,6 +438,16 @@ nim_imports() {
 # need).
 normpath() {
 	local p="$1" out=() part
+	# An absolute input must stay absolute. The loop below drops empty
+	# components, and the leading empty component of "/a/b" is what makes it
+	# absolute — so without this the sibling-package paths came back relative,
+	# every relative import inside IsoNim (`../core/clock`, `batch`, `graph`)
+	# failed to resolve, and the walk silently entered only the modules that
+	# happened to be reachable by absolute-root lookup.
+	local lead=""
+	case "${p}" in
+	/*) lead="/" ;;
+	esac
 	local IFS='/'
 	for part in $p; do
 		case "${part}" in
@@ -418,7 +463,7 @@ normpath() {
 		esac
 	done
 	local joined="${out[*]}"
-	printf '%s' "${joined}"
+	printf '%s' "${lead}${joined}"
 }
 
 # resolve_module SPEC IMPORTER_PATH — repo-relative path of the module SPEC
@@ -440,14 +485,59 @@ resolve_module() {
 	./* | ../*) return 0 ;;
 	esac
 	local r
-	for r in "${SEARCH_ROOTS[@]}"; do
-		candidate="$(normpath "${r}/${spec}.nim")"
+	# The repo-relative search roots apply ONLY to importers inside this repo.
+	#
+	# Applying them to a sibling package's file is not a nuance, it is a wrong
+	# answer with a worked example: `isonim/viewmodel.nim` imports `vscode`,
+	# and resolving that against `src/frontend/` yields
+	# `src/frontend/vscode.nim` — an Electron/VS Code bridge full of `txHash`.
+	# The walk then reported three chain-token violations in modules the facade
+	# does not depend on at all. A sibling resolves against its own directory
+	# and the sibling roots, exactly as `nim` would with that package's own
+	# `--path` set.
+	if [ "${importer#/}" = "${importer}" ]; then
+		for r in "${SEARCH_ROOTS[@]}"; do
+			candidate="$(normpath "${r}/${spec}.nim")"
+			if [ -f "${candidate}" ]; then
+				printf '%s' "${candidate}"
+				return 0
+			fi
+		done
+	fi
+	# Sibling packages last, and only for specs that actually name one, so a
+	# stdlib or unknown spec is still reported as external rather than being
+	# probed against every sibling on disk.
+	for r in "${SIBLING_ROOTS[@]}"; do
+		candidate="${r}/${spec}.nim"
 		if [ -f "${candidate}" ]; then
 			printf '%s' "${candidate}"
 			return 0
 		fi
 	done
 	return 0
+}
+
+# resolve_sibling_roots — populate SIBLING_ROOTS / SIBLING_MISSING from
+# SIBLING_PACKAGES. Absolute paths, because these are outside the repo.
+resolve_sibling_roots() {
+	SIBLING_ROOTS=()
+	SIBLING_MISSING=()
+	local entry name probe envvar fallback base override
+	for entry in "${SIBLING_PACKAGES[@]}"; do
+		IFS='|' read -r name probe envvar fallback <<<"${entry}"
+		base=""
+		override="${!envvar:-}"
+		if [ -n "${override}" ] && [ -f "${override}/${probe}" ]; then
+			base="${override}"
+		elif [ -f "${fallback}/${probe}" ]; then
+			base="$(cd "${fallback}" && pwd)"
+		fi
+		if [ -n "${base}" ]; then
+			SIBLING_ROOTS+=("${base}")
+		else
+			SIBLING_MISSING+=("${name} (set ${envvar}, or check out beside this repo)")
+		fi
+	done
 }
 
 # closure_of FILE — every repo file reachable from FILE by imports, one per
@@ -545,6 +635,12 @@ consumer_files() {
 # Check 1: the facade exists and knows its own name
 # ---------------------------------------------------------------------------
 
+# Resolved here, after the helpers above are defined and after `cd "${root}"`,
+# because the fallback paths are relative to the tree being checked, and BEFORE
+# the --list-graph early exit so that the printed graph is the same graph the
+# checks below run on.
+resolve_sibling_roots
+
 if [ "${list_graph}" -eq 1 ]; then
 	mapfile -t graph < <(closure_of "${FACADE_REL}" | sort -u)
 	printf '%s\n' "${graph[@]}"
@@ -575,7 +671,40 @@ if [ "${facade_ok}" -eq 1 ]; then
 	mapfile -t sdk_closure < <(closure_of "${FACADE_REL}" | sort -u)
 	mapfile -t sdk_externals < <(external_specs_of "${sdk_closure[@]}")
 
-	echo "  (facade graph: ${#sdk_closure[@]} repo modules, ${#sdk_externals[@]} external specs)"
+	echo "  (facade graph: ${#sdk_closure[@]} modules, ${#sdk_externals[@]} external specs)"
+
+	# The walk must actually have left the repository. A missing sibling would
+	# otherwise silently restore the old, weaker meaning of every rule below —
+	# "no renderer in codetracer" instead of "no renderer anywhere the facade
+	# reaches" — while still printing OK, which is the precise failure mode
+	# this whole file exists to prevent one level down.
+	if [ "${root_is_repo}" -eq 1 ]; then
+		if [ "${#SIBLING_MISSING[@]}" -gt 0 ]; then
+			check_failed "graph-walks-siblings"
+			for miss in "${SIBLING_MISSING[@]}"; do
+				violation_detail "cannot locate sibling package: ${miss}"
+			done
+			violation_detail "Both are REQUIRED siblings (scripts/require-siblings.sh), so this is a"
+			violation_detail "broken workspace rather than an optional extra. Without them the graph"
+			violation_detail "stops at this repo's edge and the rules below assert much less than"
+			violation_detail "they appear to."
+		else
+			sibling_modules=0
+			for item in "${sdk_closure[@]}"; do
+				case "${item}" in
+				/*) sibling_modules=$((sibling_modules + 1)) ;;
+				esac
+			done
+			if [ "${sibling_modules}" -eq 0 ]; then
+				check_failed "graph-walks-siblings"
+				violation_detail "the sibling roots resolved but the walk entered none of them."
+				violation_detail "The facade imports isonim/core/* directly, so zero means the"
+				violation_detail "resolver stopped working, not that the dependency went away."
+			else
+				check_ok "graph-walks-siblings (${sibling_modules} module(s) outside this repo)"
+			fi
+		fi
+	fi
 
 	render_violations=0
 	for entry in "${FORBIDDEN_PATTERNS[@]}"; do

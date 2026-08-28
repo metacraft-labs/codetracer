@@ -424,5 +424,83 @@ assert_clean "${t}" \
 
 assert_clean "${repo_root}" "the guard passes on this repository"
 
+# ---------------------------------------------------------------------------
+# The walk leaves this repository
+#
+# `--root` marks a synthetic tree, and a synthetic tree has no sibling
+# packages, so the checks above never exercise the sibling walk at all. These
+# three run the guard the way CI runs it — with no `--root` — and then break it
+# deliberately, because "the lint now walks IsoNim" is a claim that is
+# satisfied just as well by a walk that silently finds nothing.
+# ---------------------------------------------------------------------------
+
+repo_output="$(cd "${repo_root}" && bash "${guard}" 2>&1)"
+repo_status=$?
+
+if [ "${repo_status}" -eq 0 ] && grep -q "OK        graph-walks-siblings" <<<"${repo_output}"; then
+	ok "run with no --root, the guard performs the sibling walk and passes"
+else
+	bad "run with no --root, the guard performs the sibling walk and passes" \
+		"exit ${repo_status}" "${repo_output}"
+fi
+
+graph_output="$(cd "${repo_root}" && bash "${guard}" --list-graph 2>&1)"
+if grep -qE '^/.*/isonim/(src/)?isonim/core/signals\.nim$' <<<"${graph_output}"; then
+	ok "the printed graph contains IsoNim's own source files, not just its module specs"
+else
+	bad "the printed graph contains IsoNim's own source files" \
+		"No absolute isonim/core/signals.nim in --list-graph output." \
+		"If the resolver stops at the repo edge the walk is decorative: every" \
+		"forbidden-module rule below would have nothing from IsoNim to match."
+fi
+
+# The mutation. Point ISONIM_SRC at a stand-in whose `isonim/core/signals`
+# imports a renderer, and the rendering rule must fire. Without this, the two
+# contracts above are satisfied by a walk that enters IsoNim and then examines
+# nothing.
+fake_isonim="${work}/fake-isonim"
+mkdir -p "${fake_isonim}/isonim/core" "${fake_isonim}/isonim/testing"
+for m in signals computation owner clock async_compat; do
+	echo "const Stub${m}* = 1" >"${fake_isonim}/isonim/core/${m}.nim"
+done
+echo "const StubTestUtils* = 1" >"${fake_isonim}/isonim/testing/test_utils.nim"
+echo "const StubViewModel* = 1" >"${fake_isonim}/isonim/viewmodel.nim"
+# The one line under test.
+echo "import isonim/web/dom_api" >>"${fake_isonim}/isonim/core/signals.nim"
+mkdir -p "${fake_isonim}/isonim/web"
+echo "const StubDom* = 1" >"${fake_isonim}/isonim/web/dom_api.nim"
+
+mutant_output="$(cd "${repo_root}" && ISONIM_SRC="${fake_isonim}" bash "${guard}" 2>&1)"
+mutant_status=$?
+if [ "${mutant_status}" -ne 0 ] &&
+	grep -q "VIOLATION facade-graph-no-rendering" <<<"${mutant_output}" &&
+	grep -q "isonim/web/dom_api" <<<"${mutant_output}"; then
+	ok "a renderer import added inside IsoNim's core is caught (red-before)"
+else
+	bad "a renderer import added inside IsoNim's core is caught" \
+		"exit ${mutant_status}" "${mutant_output}" \
+		"This is the gap BlockTracer.milestones.org M2a carried: before the" \
+		"walk entered IsoNim, this mutation was invisible to the guard."
+fi
+
+# And a missing sibling must be loud rather than silently narrowing the rule.
+missing_output="$(cd "${repo_root}" && ISONIM_SRC="${work}/nope" \
+	NIM_EVERYWHERE_SRC="${work}/nope" bash "${guard}" 2>&1)"
+missing_status=$?
+if [ "${missing_status}" -ne 0 ] &&
+	grep -q "VIOLATION graph-walks-siblings" <<<"${missing_output}"; then
+	ok "a sibling package that cannot be located fails the guard, it does not shrink it"
+else
+	# The overrides only take effect when they point at a real tree, so a bad
+	# ISONIM_SRC falls back to ../isonim. Accept either outcome, but say which.
+	if [ "${missing_status}" -eq 0 ] &&
+		grep -q "OK        graph-walks-siblings" <<<"${missing_output}"; then
+		ok "a bogus override falls back to the checked-out sibling rather than disabling the walk"
+	else
+		bad "a missing sibling package is reported, not ignored" \
+			"exit ${missing_status}" "${missing_output}"
+	fi
+fi
+
 echo "--- ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]
