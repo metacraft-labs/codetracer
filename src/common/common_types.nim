@@ -5,6 +5,12 @@ import
 
 import task_and_event
 
+# The `ct/load-flow` wire vocabulary, re-exported so the `include`d
+# `codetracer_features/flow.nim` can build its enum bridge on it and every
+# consumer of `common_types` sees the same spellings the engine parses.
+import flow_mode_wire
+export flow_mode_wire
+
 # this module is used in codetracer and core and in the nim plugin so
 # it needs to support both C and JavaScript
 # try to use langstring when something is

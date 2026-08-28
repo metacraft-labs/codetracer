@@ -46,9 +46,20 @@ import ../store/[replay_data_store, types]
 # compiles on both backends; see its header.
 import ../../ui/flow_loop_math
 
+# The `ct/load-flow` wire vocabulary, shared with the engine. A leaf module
+# with no imports, exactly so both this layer and `common_types` can hold the
+# same strings; see its header for why the wire form is a name.
+import ../../../common/flow_mode_wire
+export flow_mode_wire
+
 type
   FlowMode* = enum
     ## The three flow visualisation modes.
+    ##
+    ## This is a **view granularity**, local to the panel. It is NOT the
+    ## engine's `ct/load-flow` flow mode, which has two values (`call`,
+    ## `diff`) and selects a different *query*. `engineFlowModeWireName`
+    ## below is the only place the two meet.
     fmCall      ## Show flow at the call level
     fmLine      ## Show flow at the line level
     fmFunction  ## Show flow at the function level
@@ -118,6 +129,44 @@ type
     # -- Derived state --
     isLoading*: Memo[bool]
     totalIterations*: Memo[int]
+
+# ---------------------------------------------------------------------------
+# The engine boundary
+# ---------------------------------------------------------------------------
+
+const
+  UpdatedFlowCommandName* = "ct/updated-flow"
+    ## The DAP event name the engine emits (`src/db-backend/src/dap.rs`).
+  UpdatedFlowEventKind* = "CtUpdatedFlow"
+    ## The same event as the legacy renderer's event-bus spells it, which is
+    ## what `RealBackendService` puts in `kind`. Both are accepted because
+    ## which one arrives depends on whether the backend-manager is in the
+    ## path, and a panel that recognised only one would be silently empty
+    ## against the other.
+
+proc engineFlowModeWireName*(mode: FlowMode): string =
+  ## Translate this panel's view granularity into the engine's `ct/load-flow`
+  ## flow mode.
+  ##
+  ## The two vocabularies are genuinely different and always were: the panel
+  ## has three rendering granularities, the engine has two query modes
+  ## (`call`, `diff`). What made that a defect rather than a design was
+  ## sending `$mode` — `"fmCall"` — at a field the engine reads as a mode
+  ## selector. It rejected the string outright; had the wire form been the
+  ## ordinal the two enums *looked* like they shared, `fmLine` would have
+  ## arrived as `diff` and silently answered a different question.
+  ##
+  ## All three view granularities are call flow as far as the engine is
+  ## concerned — they differ in how the returned steps are laid out, which
+  ## is a rendering decision this panel makes locally. `diff` has no view
+  ## granularity behind it yet and is reached from the legacy Karax editor.
+  ##
+  ## The `case` is exhaustive on purpose: a fourth `fm*` member will not
+  ## compile until someone decides what it means to the engine, which is the
+  ## whole point of routing the translation through one named proc.
+  case mode
+  of fmCall, fmLine, fmFunction:
+    FlowModeWireCall
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -331,6 +380,26 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       disposeProc: dispose,
     )
 
+    # `ct/load-flow` answers with a queued `ct/updated-flow` EVENT
+    # (`src/db-backend/src/dap.rs:329`), not with its reply. A panel that
+    # consumed only the reply would stay empty forever against the real
+    # engine while every mock-driven test passed — the same event-path
+    # hazard the transport adapter hit. Subscribe here, using the same
+    # `data`-or-bare envelope convention `replay_data_store
+    # .installBackendEventHandlers` uses.
+    block installFlowEventHandler:
+      let vmRef = vm
+      store.backend.onEvent proc(event: JsonNode) =
+        if event.isNil or event.kind != JObject or not event.hasKey("kind"):
+          return
+        let kind = event["kind"].getStr
+        if kind != UpdatedFlowEventKind and kind != UpdatedFlowCommandName:
+          return
+        let payload =
+          if event.hasKey("data"): event["data"]
+          else: event
+        vmRef.applyFlowUpdate(payload)
+
     # Auto-load effect: whenever the debugger position or flow mode
     # changes, request fresh flow data from the backend.
     #
@@ -347,16 +416,37 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     createEffect proc() =
       let ticks = store.debugger.val.rrTicks
       let mode = flowMode.val
-      let modeStr = $mode
+      # Two different strings, deliberately.
+      #
+      # `wireMode` is the engine's vocabulary — see
+      # `engineFlowModeWireName`. All three view granularities map to
+      # `call`, because that is genuinely the same query.
+      #
+      # `viewMode` is this panel's, and it is what the dedup keys on. Keying
+      # the dedup on the wire name instead would silently stop re-requesting
+      # when the user switched granularity, which is a behaviour change this
+      # fix has no business making.
+      let wireMode = engineFlowModeWireName(mode)
+      let viewMode = $mode
       if ticks > 0'u64:
-        if hasFired and ticks == lastTicks and modeStr == lastMode:
+        if hasFired and ticks == lastTicks and viewMode == lastMode:
           return
         lastTicks = ticks
-        lastMode = modeStr
+        lastMode = viewMode
         hasFired = true
+        # `CtLoadFlowArguments` (src/db-backend/src/task.rs) requires
+        # `flowMode` and `location`; `rrTicks` is not a field it reads, it
+        # lives inside `location`. Sending the tick at the top level and no
+        # location at all is why this request never once succeeded.
+        let position = store.debugger.val.location
         let args = %*{
-          "rrTicks": ticks,
-          "flowMode": modeStr,
+          "flowMode": wireMode,
+          "location": {
+            "path": position.file,
+            "line": position.line,
+            "rrTicks": ticks,
+            "callstackDepth": position.callstackDepth,
+          },
         }
         loadingState.val = lsLoading
         # Consume the response. Firing the request and dropping the reply is
@@ -366,6 +456,12 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
         let vmRef = vm
         onComplete(future,
           proc(response: JsonNode) =
+            # The reply is only *sometimes* the window. `ct/load-flow`'s real
+            # answer is the queued `ct/updated-flow` event (dap.rs:329); the
+            # backend-manager converts that event into a response for some
+            # deployments (backend_manager.rs:1001), so both paths must feed
+            # the same applier. Consuming only the reply is how a panel ends
+            # up permanently empty against the engine while its tests pass.
             vmRef.applyFlowUpdate(response),
           proc(message: string) =
             # A failed flow load must not leave the panel claiming to still be
