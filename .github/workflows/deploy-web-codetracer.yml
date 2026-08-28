@@ -155,6 +155,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
+          # wrangler 4.62 (pinned in .#ci) expects its build cache dir to exist
+          # in this non-npm tree; pre-create it so `pages deploy` doesn't error
+          # with "Missing file or directory: node_modules/.cache/wrangler".
+          mkdir -p node_modules/.cache/wrangler
+          export WRANGLER_SEND_METRICS=false
           nix develop .#ci --command wrangler pages deploy browser-replay/dist \
             --project-name=web-codetracer \
             --branch=cloud \
