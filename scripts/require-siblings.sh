@@ -159,9 +159,19 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # the set that CI already treats as mandatory -- the repos cloned by
 # `.github/actions/setup-db-backend-siblings` (codetracer-trace-format,
 # codetracer-trace-format-nim, codetracer-native-recorder) and by
-# `.github/actions/setup-isonim-siblings` (isonim, nim-everywhere, nim-acp,
-# nim-agent-harbor, nim-agents) -- intersected with what a build here has
-# actually been observed to need.
+# `.github/actions/provision-repro-lock-siblings` (isonim, nim-everywhere,
+# nim-acp, nim-agent-harbor, nim-agents) -- intersected with what a build here
+# has actually been observed to need.
+#
+# Those five are exactly `repro.lock`'s `depends` list for this repo, and that
+# is not a coincidence any more: the action clones whatever the lock declares,
+# so this tier and CI's provisioning have one source. The four advisory
+# IsoNim-family entries below (isonim-tui, isonim-gpui, nim-termctl, nim-pty)
+# used to be cloned alongside them and are not any more -- nothing declares
+# them, nothing imports them, and the paragraph below already said builds
+# succeed without them. They stay here as warnings so a local workspace that
+# does carry them keeps working and one that does not is told why a
+# `--path` silently went missing.
 #
 # `runquota` was added to that tier after issue #641. `src/ct/codetracer.nim`
 # imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
