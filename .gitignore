@@ -212,6 +212,14 @@ macro_sourcemap*.json
 target/
 src/tests/programs/*.json
 .vscode
+# …except the fixture packages under test-programs/, whose `.vscode/tasks.json`
+# IS the test input.  VN-M3's `test_project_actions.nim` `staticRead`s
+# `test-programs/noir_verification/.vscode/tasks.json`, so without this
+# negation the file is absent from a fresh clone and the `vm-unit` and
+# `vm-unit-js` lanes fail to COMPILE — not to assert.  A parent directory that
+# is excluded cannot have its children re-included, so the directory itself is
+# what has to be named here.
+!test-programs/*/.vscode/
 .idea
 .vs
 src/produced_thread

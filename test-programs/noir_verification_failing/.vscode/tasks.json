@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Verify with Verno",
+      "type": "shell",
+      "command": "verno",
+      "args": ["--program-dir", ".", "formal-verify", "--", "--rlimit", "60"],
+      "group": "test",
+      "detail": "Discharge every proof obligation in this package with Verno. This package's postcondition is false, so on a machine with `venir` this run reports not-proved.",
+      "problemMatcher": []
+    }
+  ]
+}

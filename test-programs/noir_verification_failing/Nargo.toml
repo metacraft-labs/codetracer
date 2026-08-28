@@ -1,0 +1,7 @@
+[package]
+name = "noir_verification_failing"
+type = "bin"
+authors = [""]
+compiler_version = ">=0.34.0"
+
+[dependencies]
