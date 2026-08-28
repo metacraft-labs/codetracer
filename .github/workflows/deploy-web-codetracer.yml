@@ -155,15 +155,25 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          # wrangler 4.62 (pinned in .#ci) expects its build cache dir to exist
-          # in this non-npm tree; pre-create it so `pages deploy` doesn't error
-          # with "Missing file or directory: node_modules/.cache/wrangler".
-          mkdir -p node_modules/.cache/wrangler
+          # wrangler 4.62 (pinned in .#ci) writes its cache to
+          # node_modules/.cache/wrangler via a find-up from cwd. The repo's
+          # node_modules is a READ-ONLY nix-store symlink (yarn-nix), so running
+          # wrangler from the repo root fails ("Read-only file system"). Stage the
+          # bundle into a writable temp dir and run wrangler from $RUNNER_TEMP, so
+          # the cache find-up lands on a writable location. (nix develop .#ci is
+          # still invoked from the repo root so the flake resolves; the inner
+          # shell then cd's out.)
           export WRANGLER_SEND_METRICS=false
-          nix develop .#ci --command wrangler pages deploy browser-replay/dist \
-            --project-name=web-codetracer \
-            --branch=cloud \
-            --commit-dirty=true | tee wrangler-deploy.log
-          url="$(grep -oE 'https://[a-z0-9.-]+\.pages\.dev' wrangler-deploy.log | tail -1 || true)"
+          staged="$RUNNER_TEMP/webct-dist"
+          rm -rf "$staged"; cp -rL browser-replay/dist "$staged"
+          log="$RUNNER_TEMP/wrangler-deploy.log"
+          STAGED="$staged" nix develop .#ci --command bash -c '
+            cd "$RUNNER_TEMP"
+            wrangler pages deploy "$STAGED" \
+              --project-name=web-codetracer \
+              --branch=cloud \
+              --commit-dirty=true
+          ' | tee "$log"
+          url="$(grep -oE 'https://[a-z0-9.-]+\.pages\.dev' "$log" | tail -1 || true)"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to: $url"
