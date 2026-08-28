@@ -56,8 +56,8 @@ type
     ## The set is the panes `SessionViewModel` actually owns, not a wish list:
     ## the eleven mounted by `viewmodel/app/isonim_app.nim` plus the editor
     ## and the debug controls, which that module mounts elsewhere. The five
-    ## BlockTracer renders (BlockTracer.milestones.org M2b) are the first
-    ## five values, and `BlockTracerPanes` below names them.
+    ## that make a replay navigable are the first five values, and
+    ## `ReplayCorePanes` below names them.
     paneEditor = "editor"
     paneCalltrace = "calltrace"
     paneState = "state"
@@ -161,11 +161,17 @@ const
     ## because a `GoldenLayoutResolvedConfig` is whatever GoldenLayout last
     ## wrote.
 
-  BlockTracerPanes* = {
+  ReplayCorePanes* = {
     paneEditor, paneCalltrace, paneState, paneEventLog, paneDebugControls}
-    ## The five panes BlockTracer renders (BlockTracer.milestones.org M2b).
-    ## Named here so `defaultReplayLayout` and a consumer's own assertion
-    ## read the same set rather than two hand-kept copies.
+    ## The minimum set that makes a replay session navigable: source, the call
+    ## structure, variable state, the event stream, and the controls that move
+    ## through time. Named here so `defaultReplayLayout` and a consumer's own
+    ## assertion read the same set rather than two hand-kept copies.
+    ##
+    ## Defined by what a replay needs, deliberately not by who consumes it.
+    ## An earlier name tied this constant to one embedder; an exported symbol
+    ## in this package naming a specific consumer is the boundary eroding from
+    ## the inside, which no import lint would catch. See `.sdk-consumer`.
 
 # ---------------------------------------------------------------------------
 # Construction
@@ -197,7 +203,7 @@ proc stack*(children: openArray[LayoutNode]; activeIndex: int = 0;
 
 proc defaultReplayLayout*(): LayoutNode =
   ## The arrangement a replay session opens with: the five panes of
-  ## `BlockTracerPanes`, with State and Event Log sharing a tabbed region so
+  ## `ReplayCorePanes`, with State and Event Log sharing a tabbed region so
   ## that `visiblePanes` is smaller than `allPanes` in the default case too.
   ##
   ## A default that made every pane visible would let `visiblePanes` be wrong

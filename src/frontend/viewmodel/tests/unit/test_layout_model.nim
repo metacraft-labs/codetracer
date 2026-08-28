@@ -48,12 +48,12 @@ import headless_app/layout_model
 
 suite "Layout model — the default replay layout":
 
-  test "the default places exactly the five panes BlockTracer renders":
+  test "the default places exactly the five panes a replay needs":
     let l = defaultReplayLayout()
     var seen: set[PaneKind] = {}
     for p in l.allPanes():
       seen.incl(p)
-    check seen == BlockTracerPanes
+    check seen == ReplayCorePanes
     # Placed once each: five leaves, no duplicates.
     check l.allPanes().len == 5
 
@@ -72,7 +72,7 @@ suite "Layout model — the default replay layout":
 
   test "a pane is placed, visible, and both are distinguishable":
     let l = defaultReplayLayout()
-    for p in BlockTracerPanes:
+    for p in ReplayCorePanes:
       check l.contains(p)
     check l.isVisible(paneEditor)
     check not l.contains(paneScratchpad)
@@ -331,7 +331,7 @@ suite "Layout model — save and restore":
     # unrecognised componentName becomes an empty tab.
     let doc = %*{
       "version": LayoutSchemaVersion,
-      "layout": {"kind": "pane", "pane": "blockExplorer"}
+      "layout": {"kind": "pane", "pane": "notARealPane"}
     }
     var caught = false
     try:
@@ -339,7 +339,7 @@ suite "Layout model — save and restore":
     except LayoutDecodeError as e:
       caught = true
       check e.kind == ldeUnknownPane
-      check e.detail == "blockExplorer"
+      check e.detail == "notARealPane"
     check caught
 
   test "an unknown node kind is refused by kind":

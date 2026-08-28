@@ -93,7 +93,7 @@ suite "Headless app — construction is passive":
   test "no pane is live before launch, though every one is placed":
     let app = newHeadlessApp()
     let slot = app.openSession(mockBackend().toBackendService())
-    for p in BlockTracerPanes:
+    for p in ReplayCorePanes:
       check slot.layout.contains(p)
       check not slot.paneIsLive(p)
     check slot.livePanes().len == 0
