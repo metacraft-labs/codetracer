@@ -261,8 +261,11 @@ proc safeStr(s: cstring): string =
 
 proc legacyKindToVm(kind: QueryKind): CommandPaletteResultKind =
   ## Map the legacy ``QueryKind`` enum to its VM-side counterpart.
-  ## The mapping is one-to-one — both enums carry the same six
-  ## variants in the same order.
+  ## The mapping is total but no longer onto: ``QueryKind``'s six variants
+  ## map one-to-one onto the first six of ``CommandPaletteResultKind``, and
+  ## ``cprkProjectAction`` has no legacy counterpart by construction — a
+  ## project-declared action (Noir-Studio.md §9.3) is not a member of the
+  ## compiled-in ``ClientAction`` vocabulary the legacy palette searches.
   case kind
   of CommandQuery: cprkCommand
   of FileQuery: cprkFile
