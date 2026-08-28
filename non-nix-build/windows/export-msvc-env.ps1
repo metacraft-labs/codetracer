@@ -45,8 +45,55 @@ if (-not (Test-Path -LiteralPath $vcvarsall -PathType Leaf)) {
 }
 
 $vcArch = if ($isArm64) { "arm64" } else { "amd64" }
-$lines = & cmd.exe /d /s /c "`"$vcvarsall`" $vcArch >nul && set"
-if ($LASTEXITCODE -ne 0) {
+
+# Hand `cmd.exe` a MINIMAL PATH, and splice the caller's real PATH back on
+# afterwards in PowerShell.
+#
+# Why: `cmd.exe` cannot carry an environment variable longer than 8191
+# characters, and this script's whole job is to round-trip the environment
+# through it. A developer PATH above that limit produces two *silent* wrong
+# answers, both measured on this host (parent PATH padded in 1 KB steps,
+# canary entry appended, `vcvarsall amd64 && set` captured each time):
+#
+#     parent PATH 1901 ->  PATH emitted 3369, canary present     (correct)
+#     parent PATH 4025 ->  PATH emitted 5493, canary present     (correct)
+#     parent PATH 7031 ->  "The input line is too long."  NO output at all
+#     parent PATH 8021 ->  "The input line is too long."  NO output at all
+#     parent PATH 8219 ->  PATH emitted 1241, canary LOST        (amputated)
+#
+# The middle band is the nastier of the two: `cmd` fails before `set` runs, so
+# INCLUDE / LIB / LIBPATH / VCToolsInstallDir are all absent and the caller
+# gets a shell with `cl.exe` reachable but no MSVC or Windows SDK headers and
+# libraries -- the exact symptom recorded in
+# codetracer-specs/Planned-Work/Windows-Test-Suite-Health.md:104-108, where it
+# read as product link defects. In the upper band `env.ps1` ASSIGNS the
+# 1241-character remnant as the process PATH, destroying every tool the
+# developer had; the observed consequence was `scripts/build-once.sh` dying
+# with "Error: repro is required for codetracer reprobuild builds on windows"
+# while `repro.exe` sat on the inherited PATH all along.
+#
+# vcvarsall only needs the system directories (cmd built-ins, reg.exe,
+# where.exe), so a minimal PATH costs nothing and keeps the child's
+# environment far below the limit regardless of what the caller carries.
+$callerPath = [Environment]::GetEnvironmentVariable("PATH")
+$systemRoot = [Environment]::GetEnvironmentVariable("SystemRoot")
+if ([string]::IsNullOrWhiteSpace($systemRoot)) { $systemRoot = "C:\Windows" }
+$minimalPath = @(
+  (Join-Path $systemRoot "system32"),
+  $systemRoot,
+  (Join-Path $systemRoot "System32\Wbem"),
+  (Join-Path $systemRoot "System32\WindowsPowerShell\v1.0")
+) -join ";"
+
+$lines = $null
+try {
+  $env:PATH = $minimalPath
+  $lines = & cmd.exe /d /s /c "`"$vcvarsall`" $vcArch >nul && set"
+  $cmdExit = $LASTEXITCODE
+} finally {
+  $env:PATH = $callerPath
+}
+if ($cmdExit -ne 0) {
   exit 0
 }
 
@@ -99,7 +146,44 @@ if (-not [string]::IsNullOrWhiteSpace($msvcToolsRoot)) {
   }
 }
 
-foreach ($key in @("PATH", "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "VCToolsVersion", "VCINSTALLDIR", "WindowsSdkDir", "WindowsSDKVersion", "UCRTVersion", "UniversalCRTSdkDir")) {
+# Splice the caller's PATH back on.
+#
+# The captured PATH is `<what vcvarsall added>;<$minimalPath>` because that is
+# all the child was given. Callers -- `env.ps1:1337-1342` in particular -- take
+# the emitted `PATH=` line and ASSIGN it to the process, so emitting the child's
+# PATH verbatim would silently drop everything the caller had. Re-join here, on
+# the PowerShell side, where no 8191-character limit applies: the vcvarsall
+# additions first (they must win over any older toolset already on PATH),
+# then the caller's own PATH with those additions filtered out so re-sourcing
+# `env.ps1` does not grow PATH without bound.
+if ($capturedEnv.ContainsKey("PATH")) {
+  $minimalSet = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]($minimalPath -split ";"), [StringComparer]::OrdinalIgnoreCase)
+
+  $additions = @()
+  $additionSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($entry in ($capturedEnv["PATH"] -split ";")) {
+    if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+    $trimmed = $entry.TrimEnd('\')
+    if ($minimalSet.Contains($entry) -or $minimalSet.Contains($trimmed)) { continue }
+    if (-not $additionSet.Add($trimmed)) { continue }
+    $additions += $entry
+  }
+
+  $tail = @()
+  foreach ($entry in ($callerPath -split ";")) {
+    if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+    if ($additionSet.Contains($entry.TrimEnd('\'))) { continue }
+    $tail += $entry
+  }
+
+  $capturedEnv["PATH"] = (($additions + $tail) -join ";")
+  # Also publish the additions on their own, so a caller that would rather
+  # PREPEND than replace can do so without re-deriving the delta.
+  $capturedEnv["MSVC_PATH_ADDITIONS"] = ($additions -join ";")
+}
+
+foreach ($key in @("PATH", "MSVC_PATH_ADDITIONS", "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "VCToolsVersion", "VCINSTALLDIR", "WindowsSdkDir", "WindowsSDKVersion", "UCRTVersion", "UniversalCRTSdkDir")) {
   if ($capturedEnv.ContainsKey($key)) {
     [Console]::WriteLine("$key=$($capturedEnv[$key])")
   }

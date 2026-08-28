@@ -620,6 +620,24 @@ function Ensure-NodeTooling {
   # Temporarily put NodeDir on PATH so child processes (yarn -> node) can find node.exe.
   $savedPath = $env:PATH
   $env:PATH = "$NodeDir;$env:PATH"
+  # yarn-plugin-nixify (loaded from node-packages/.yarnrc.yml) hooks
+  # `afterAllInstalled` and REGENERATES the tracked
+  # `node-packages/yarn-project.nix` from scratch on every `yarn install`.
+  # Its generated form carries a single hard-coded `outputHash` for the
+  # cache it just built -- i.e. THIS host's -- which silently discards the
+  # hand-maintained `cacheOutputHashes` table that pins one hash per
+  # platform (`x86_64-linux`, `aarch64-darwin`) and the `throw` that tells
+  # you how to add a new one. `nix/packages/default.nix` callPackage's that
+  # file, so merely *activating the Windows dev shell* would leave the tree
+  # with a Nix build that is broken for Linux and macOS and a tracked-file
+  # modification that blocks the workspace pre-push gate for every repo.
+  # The plugin exposes `enableNixify` ("If false, disables the Nixify plugin
+  # hook that generates Nix expressions"); Yarn maps that setting to the
+  # YARN_ENABLE_NIXIFY environment variable. We only need the plugin when
+  # deliberately re-pinning the Nix inputs, never when bootstrapping a
+  # Windows dev shell, so turn it off for the duration of the install.
+  $savedNixify = [Environment]::GetEnvironmentVariable("YARN_ENABLE_NIXIFY")
+  [Environment]::SetEnvironmentVariable("YARN_ENABLE_NIXIFY", "false", "Process")
   Push-Location $nodePackagesDir
   try {
     $lockFile = Join-Path $nodePackagesDir "yarn.lock"
@@ -630,6 +648,7 @@ function Ensure-NodeTooling {
     }
   } finally {
     Pop-Location
+    [Environment]::SetEnvironmentVariable("YARN_ENABLE_NIXIFY", $savedNixify, "Process")
     $env:PATH = $savedPath
   }
 
