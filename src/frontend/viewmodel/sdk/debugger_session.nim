@@ -328,9 +328,26 @@ proc launch*(s: DebuggerSession; trace: TraceSource;
 
   # Each step is fire-and-inspect: with every transport in this repo the
   # future is already completed by the time `send` returns (the stdio one
-  # blocks; the mock is synchronous), and `onComplete` runs the callback
-  # immediately in that case. A genuinely async transport resolves the same
-  # callbacks later, and the phase signal is what the consumer watches.
+  # blocks; the mock is synchronous). A genuinely async transport resolves
+  # the same callbacks later, and the phase signal is what the consumer
+  # watches.
+  #
+  # WHAT "ALREADY COMPLETED" DOES *NOT* IMPLY, and it cost this proc its
+  # correctness on one backend: that `onComplete` runs the callback inline.
+  # It does on the C backend. On the **JS** backend it does not —
+  # `nim_everywhere/async_compat.onComplete` pushes even a
+  # synchronously-resolved future's callback onto `pendingCallbacks`, to be
+  # run by `drainPlatformCallbacks`. So `handshakeFailed` was still false
+  # when the check below ran, and a launch the backend had answered
+  # `success: false` was reported as `dspReady` with `failure` empty. The
+  # whole §6.3 error taxonomy was inert on the backend BlockTracer ships,
+  # and no suite could see it: `test_sdk_facade.nim` imported `std/osproc`
+  # and therefore could not compile under `nim js` at all
+  # (BlockTracer.milestones.org M2b, "Tier 1 runs on the C backend only").
+  #
+  # The drain below is what makes the two backends agree. It is the same
+  # primitive `headless_session.drain` already uses, and on native it is a
+  # `poll(0)` that costs nothing when there is nothing queued.
   var handshakeFailed = false
 
   proc step(command: string; args: JsonNode) =
@@ -350,6 +367,12 @@ proc launch*(s: DebuggerSession; trace: TraceSource;
       onError = proc(msg: string) =
         handshakeFailed = true
         s.failWith(dseWorkerFailed, command & " transport error: " & msg))
+    # Drained per step, not once at the end, so the short-circuit above
+    # behaves the same on both backends: a queued-callback backend would
+    # otherwise send all three commands to a backend that had already
+    # refused the first, and `failWith` would report the LAST failure rather
+    # than the one that actually stopped the handshake.
+    drainPlatformCallbacks()
 
   step("initialize", %*{
     "clientID": clientId,
