@@ -2643,6 +2643,24 @@ test-vm-unit: vm-test-prereqs
   exec > >(tee test-logs/test-vm-unit.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-unit
 
+# The same Tier-1 ViewModel suites under `nim js` + node.
+#
+# Front-End-Architecture.md §6 asks for the pyramid "run on both the C and JS
+# backends", and `test-vm-unit` is a C lane while `test-vm-js` reaches only
+# `src/tests/gui/tests` — so until this recipe existed every suite under
+# `viewmodel/tests/unit` ran on one backend of the two, including the Embed
+# SDK's own conformance suite.  That is not a rounding error for a web
+# debugger: the first run of this lane found `DebuggerSession.launch`
+# reporting `dspReady` for a launch the backend had refused, because
+# `async_compat.onComplete` queues callbacks on JS and runs them inline on
+# native.  ci/lib/test-lane-files.sh carries the file-by-file reasoning.
+test-vm-unit-js: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-unit-js.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-unit-js
+
 # The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
 # half is pure Nim and cheap; the integration/soak half opens real localhost
 # sockets and links the GPUI shim, so it is a separate recipe rather than a
@@ -2891,14 +2909,23 @@ test-vm-recorder-gated: vm-test-prereqs
   source scripts/detect-siblings.sh
   # Shared classifier: exit status before the [OK]/[FAILED] tally.
   source ci/lib/test-lane-report.sh
+  # The file SET comes from the lane definition, not from a second copy of the
+  # selection rule kept here.  It used to be an inline `find` for
+  # `test_column_*_vm.nim` / `test_formatted_view_step_*_vm.nim` /
+  # `test_statement_step_*_vm.nim`, and when ci/lib/test-lane-files.sh moved
+  # `vm-recorder-gated` to selecting by its `recorder_gate` IMPORT, this loop
+  # went on globbing names — so `test_js_subdir_trace_vm.nim`, which had just
+  # been subtracted from `vm-unit` for depending on a recorder, was run by no
+  # recipe at all.  ci/test/test-lane-coverage.sh could not see it, because
+  # that guard reads lane DEFINITIONS and the definition did claim the file.
+  # A lane whose recipe and whose definition disagree is a lane that reports
+  # on a set nobody chose.
+  source ci/lib/test-lane-files.sh
 
   failed=0
   passed=0
   skipped=0
-  for f in $(find src/frontend/viewmodel/tests/unit \
-      -name 'test_column_*_vm.nim' \
-      -o -name 'test_formatted_view_step_*_vm.nim' \
-      -o -name 'test_statement_step_*_vm.nim' | sort); do
+  for f in $(test_lane_files vm-recorder-gated); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-gated-$name"
     echo -n "  $f ... "
