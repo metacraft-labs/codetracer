@@ -85,6 +85,9 @@ pub mod flow_preloader;
 pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;
+// Mixed-Trace implicit-language-switch: the span-driven active-altitude
+// resolver (spec `Planned-Features/Mixed-Trace-Implicit-Switch.md`, P1/P3).
+pub mod mixed_altitude;
 // RV-4 — the one place that answers "open this materialized recording
 // directory", shared by the DeepReview collector and (for its legacy-stream
 // repair) `dap_server`.
