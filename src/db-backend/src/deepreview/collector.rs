@@ -58,7 +58,6 @@ use std::error::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 
 use codetracer_trace_types::{CallKey, NO_KEY, StepId};
 use log::{info, warn};
@@ -504,7 +503,9 @@ fn build_call_tree(reader: &dyn TraceReader, budget: usize) -> (Vec<CallNodeData
 /// because the third is corrupt.  The caller decides what to do when *every*
 /// recording failed.
 pub fn collect(options: &CollectOptions) -> Result<(DeepReviewData, CollectReport), Box<dyn Error>> {
-    let started = Instant::now();
+    // `crate::wall_clock`, not `Instant::now()` — this module is compiled
+    // into the wasm build, where `Instant::now()` traps.
+    let started_ms = crate::wall_clock::monotonic_ms();
     let mut report = CollectReport {
         files_in_diff: options.diff.files.len(),
         ..CollectReport::default()
@@ -667,7 +668,7 @@ pub fn collect(options: &CollectOptions) -> Result<(DeepReviewData, CollectRepor
         });
     }
 
-    let elapsed = started.elapsed().as_millis() as u64;
+    let elapsed = crate::wall_clock::monotonic_ms().saturating_sub(started_ms);
     emit_progress(
         options.progress,
         serde_json::json!({

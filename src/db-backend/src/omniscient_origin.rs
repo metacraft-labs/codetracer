@@ -75,8 +75,6 @@
 //! M20 verification test `test_origin_mcr_omniscient_cross_checkpoint_chain`
 //! exercises this contract end-to-end against the synthetic fixture.
 
-use std::time::Instant;
-
 use log::debug;
 
 use crate::omniscient_db::OmniscientDb;
@@ -316,7 +314,11 @@ pub fn run_omniscient_origin_chain_with_cross_process(
     budget: &OriginBudget,
     extension: Option<crate::cross_process_origin::CrossProcessExtension<'_>>,
 ) -> McrOmniscientResult {
-    let started_at = Instant::now();
+    // `WallClockDeadline` already reads the wasm-safe clock
+    // (`crate::wall_clock`); `Instant::now()` traps on
+    // wasm32-unknown-unknown and this function is reachable from the
+    // browser build, so measure elapsed time from the deadline rather
+    // than opening a second, trapping clock.
     let deadline = WallClockDeadline::new(budget.wall_clock_ms);
     let mut metrics = OriginMetrics::default();
     let mut hops: Vec<OriginHop> = Vec::new();
@@ -477,7 +479,7 @@ pub fn run_omniscient_origin_chain_with_cross_process(
         terminator.expression = format!("max_hops budget ({}) reached", effective_max_hops);
     }
 
-    metrics.elapsed_ms = started_at.elapsed().as_millis() as u64;
+    metrics.elapsed_ms = deadline.elapsed_ms();
     metrics.steps_scanned = hops.len() as u64;
     let confidence: f32 = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
 

@@ -3,7 +3,6 @@ use core::fmt;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::ops;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use codetracer_trace_types::{CallKey, EventLogKind, StepId, TypeKind};
 use num_derive::FromPrimitive;
@@ -1344,14 +1343,16 @@ impl Stop {
         result_index: usize,
         stop_type: StopType,
     ) -> Stop {
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .expect("expected now is always >= UNIX_EPOCH");
+        // `crate::wall_clock`, never `SystemTime::now()`: `Stop::new` runs on
+        // the tracepoint path, which is reachable from the browser build
+        // where that call traps and kills the worker. The field is a purely
+        // informational stamp — the ordering keys are `event` / `rr_ticks`,
+        // both derived from `step_id`.
+        let time_seconds = crate::wall_clock::unix_seconds();
         let address = format!("{}:{}", path, line);
         Stop {
             tracepoint_id,
-            time: time.as_secs(),
+            time: time_seconds,
             line,
             path,
             address,
@@ -1411,16 +1412,12 @@ pub struct HistoryResult {
 }
 
 impl HistoryResult {
-    #[allow(clippy::expect_used)]
     pub fn new(loc: Location, val: Value, name: String) -> HistoryResult {
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .expect("expect that always now >= UNIX_EPOCH");
+        // See `Stop::new`: informational stamp, wasm-safe clock.
         HistoryResult {
             location: loc,
             value: val,
-            time: time.as_secs(),
+            time: crate::wall_clock::unix_seconds(),
             description: name,
             origin_summary: None,
         }
@@ -1955,18 +1952,18 @@ pub struct Notification {
 }
 
 impl Notification {
-    #[allow(clippy::expect_used)]
     pub fn new(kind: NotificationKind, msg: &str, is_operation_status: bool) -> Notification {
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .expect("expect that always `now` >= UNIX_EPOCH");
+        // `crate::wall_clock`, never `SystemTime::now()`. Every step that
+        // reaches a trace boundary builds one of these ("Beginning of record
+        // reached"), so a trapping clock here meant reverse stepping worked
+        // mid-trace in the browser and killed the worker at the edge. The
+        // field is informational: no consumer in this repo reads it back.
         Notification {
             kind,
             text: msg.to_string(),
             is_operation_status,
             active: true,
-            time: time.as_secs(),
+            time: crate::wall_clock::unix_seconds(),
             ..Default::default()
         }
     }

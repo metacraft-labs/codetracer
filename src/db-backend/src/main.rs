@@ -145,6 +145,10 @@ mod tracepoint_interpreter;
 mod transport;
 mod transport_endpoint;
 mod value;
+// The one clock in this crate; see `wall_clock.rs`. The binary compiles the
+// modules directly rather than through the lib, so it needs its own
+// declaration.
+mod wall_clock;
 
 use crate::paths::{CODETRACER_PATHS, gc_stale_run_dirs, run_dir_for};
 

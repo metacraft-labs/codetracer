@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
 
 use codetracer_trace_types::{
@@ -2516,10 +2515,12 @@ impl ReplaySession for MaterializedReplaySession {
                         &arg.location.global_call_key,
                         arg.location.callstack_depth,
                     );
-                    let now = SystemTime::now();
-                    let time = now
-                        .duration_since(UNIX_EPOCH)
-                        .expect("expect that always now >= UNIX_EPOCH");
+                    // `crate::wall_clock`, never `SystemTime::now()`:
+                    // `load_history` backs `ct/load-history` and runs in the
+                    // browser, where that call traps. The stamp is
+                    // informational — it records when the *query* ran, not
+                    // anything about the recorded program's timeline.
+                    let time_seconds = crate::wall_clock::unix_seconds();
                     let value_with_record = self.to_value_record_with_type(&var.value);
                     if history_results.len() > 1 {
                         if true {
@@ -2527,7 +2528,7 @@ impl ReplaySession for MaterializedReplaySession {
                             history_results.push(HistoryResultWithRecord {
                                 location: step_location.clone(),
                                 value: value_with_record,
-                                time: time.as_secs(),
+                                time: time_seconds,
                                 description: self.id_to_name(var.variable_id).to_string(),
                             });
                         }
@@ -2535,7 +2536,7 @@ impl ReplaySession for MaterializedReplaySession {
                         history_results.push(HistoryResultWithRecord {
                             location: step_location.clone(),
                             value: value_with_record,
-                            time: time.as_secs(),
+                            time: time_seconds,
                             description: self.id_to_name(var.variable_id).to_string(),
                         });
                     }
@@ -3529,10 +3530,7 @@ impl MaterializedReplaySession {
                 max_hops: max_total_hops,
                 patterns_fingerprint: patterns.fingerprint().hex.clone(),
                 source_digests: source_digests.clone(),
-                issued_at: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
+                issued_at: crate::wall_clock::unix_seconds(),
             };
             token.encode().ok()
         } else {
