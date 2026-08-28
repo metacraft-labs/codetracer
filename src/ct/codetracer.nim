@@ -191,6 +191,25 @@ try:
   customValidateConfig(conf)
   runInitial(conf)
 except CatchableError as ex:
-  echo "Error: Unhandled exception"
-  echo getStackTrace(ex)
-  echo "Unhandled " & ex.msg
+  # An unhandled exception is a failure and has to be reported as one.
+  #
+  # This handler is the last statement in the module, so control fell off the
+  # end of it and the process exited **0**. Every consumer that checks `$?`
+  # — the ci/test/*.sh gates, `src/ct_incremental_adapter.nim:61`, and any
+  # shell wrapper — therefore read a crash as success. `ct replay <folder>`
+  # with no recording, for instance, raises IOError from
+  # `src/ct/trace/storage_and_import.nim` and still exited 0.
+  #
+  # The diagnostic also moves to stderr: `ct list --format json`,
+  # `ct install --json` and `ct agent` all have machine-readable stdout, and
+  # echoing a stack trace into it corrupted the payload while claiming
+  # success.
+  #
+  # This is the same idiom already used at :103-104 above, in every handler
+  # in the sibling `db_backend_record.nim`, and described in
+  # `src/ct/trace/record.nim:268-274`, which fixed this exact bug class one
+  # level down for `ct record`.
+  stderr.writeLine("Error: Unhandled exception")
+  stderr.writeLine(getStackTrace(ex))
+  stderr.writeLine("Unhandled " & ex.msg)
+  quit(QuitFailure)
