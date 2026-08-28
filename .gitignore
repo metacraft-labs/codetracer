@@ -166,6 +166,13 @@ format.js
 config/.config.yaml
 /.config.yaml
 src/tests/trace_index.db
+# SQLite's WAL journal and shared-memory index. They are created beside the
+# database whenever a lane run opens it in WAL mode and are removed only on a
+# clean close, so a lane that is interrupted (or that leaves a connection to
+# the OS to reap) leaves them behind. Ignoring the database but not these two
+# left every ViewModel lane run showing two untracked files.
+src/tests/trace_index.db-shm
+src/tests/trace_index.db-wal
 # The lang-name migration writes a backup beside the database before it
 # rewrites it, so a test run leaves one of these behind. The database itself is
 # ignored; its backup is the same thing one step older.
