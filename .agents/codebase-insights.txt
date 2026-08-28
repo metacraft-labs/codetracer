@@ -2575,3 +2575,56 @@ Related, and easy to get wrong:
   own DAP handshake, because it needs `DapStdioBackend.waitForEvent` and
   `BackendService.onEvent` is a registration, not a pump — the stdio
   adapter's `onEventProc` collects handlers and never calls them.
+
+## The degraded-state catalogue is split across two packages (BlockTracer M2b)
+
+`BlockTracer/Page-Descriptions.md` §14 lists thirteen degraded states and ends
+with the rule that each is "a value of an enum on a ViewModel, not a branch in
+a view". The table reads as one list; it is not.
+
+* **Seven of the thirteen rows are chain-level** — pipeline behind the tip,
+  object not found, trace awaiting generation, recorder unavailable for the
+  VM, transaction below the history floor, reorganised away, CDN unreachable.
+  They belong to BlockTracer's own ViewModels (`ChainVM`, `TraceStatusVM`,
+  `GenerationJobVM`, ... — Front-End-Architecture.md §3). Modelling one of
+  them in `src/frontend/viewmodel/` violates CodeTracer-Embed-SDK.md §3.2's
+  last row and trips `ci/test/sdk-facade-boundary.sh`'s chain-token scan.
+* **Six reach a pane** and live in `viewmodel/store/degraded_state.nim`:
+  replay window expired, permanently unreplayable, browser cannot run the
+  debugger, trace truncated, divergence detected, no verified source.
+  That module's header carries the full row-by-row ownership table.
+
+The split is 7-up/6-down for *modelling*, but it is NOT 7-up/6-down for
+ownership, and reading it that way is the trap. Four of the six also have a
+BlockTracer ViewModel named against them in Front-End-Architecture.md §3 —
+`CapabilityVM`, `DivergenceVM`/`TraceStatusVM`, `SourceBundleVM`/`AddressVM`,
+`ArtifactVM`. Those establish the condition from inputs that are chain- or
+delivery-shaped (a capability probe, a manifest verdict, a provider chain, a
+retention policy); the enums here are what a *pane* renders. The seam is
+`ReplayDataStore`'s four setters plus the `CtReplayStatus` event: above
+writes, panes read. Neither layer is redundant, and deleting `CapabilityVM`
+because "the SDK already has `CapabilityRung`" would be the wrong conclusion.
+
+Shape worth keeping if you extend it:
+
+* ONE `PaneDegradation` enum plus a per-pane `set[PaneDegradation]`, not one
+  enum per pane. §14 asks for "one canonical treatment rather than being
+  reinvented per page"; five enums would be five places to re-decide what
+  "truncated" means and to re-derive the precedence between two simultaneous
+  conditions — the branch-in-a-view failure moved up a layer.
+* The precedence is data (`DegradationPrecedence`), not control flow, so a
+  test asserts the ordering directly.
+* `DebugControlsVM.replayUsable` gates every `can*` memo. A step button that
+  is enabled over a replay that cannot run IS the "retry that cannot succeed"
+  §14 forbids, so the gate belongs in the memo and not in the view.
+* Degraded state reaches the store over a `CtReplayStatus` backend event as
+  well as through host-side setters, so `MockBackendService.emitEvent` can
+  drive every §14 row headlessly. Unrecognised wire spellings deliberately
+  leave the signal alone rather than falling back to the healthy default.
+
+## `ci/test/sdk-facade-boundary.sh` needs bash >= 4
+
+It uses `mapfile`, which macOS's /bin/bash 3.2 does not have. Run outside the
+dev shell it prints `mapfile: command not found` plus `unbound variable`
+noise, and `sdk-facade-boundary-test.sh` reports 20 spurious failures. Run
+both through `direnv exec <repo> bash -c '...'`, which supplies bash 5.
