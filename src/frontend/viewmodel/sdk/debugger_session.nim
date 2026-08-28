@@ -391,7 +391,12 @@ proc dispose*(s: DebuggerSession; disconnectBackend: bool = true) =
     return
   s.phase.val = dspDisposed
   if not s.app.isNil:
-    s.app.dispose()
+    # The flag has to be forwarded, not merely honoured on the line below:
+    # `AppViewModel.dispose` reaches `SessionViewModel.dispose`, which used
+    # to disconnect unconditionally. That made this proc's `false` case a
+    # no-op in practice and gave `HeadlessDebugSession.close` the exact
+    # double `DapStdioBackend.close` its own comment says it is avoiding.
+    s.app.dispose(disconnectBackend = disconnectBackend)
   if disconnectBackend and not s.backend.isNil:
     s.backend.disconnect()
   ViewModel(s).dispose()

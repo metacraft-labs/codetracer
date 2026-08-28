@@ -41,9 +41,15 @@ proc createAppViewModel*(backend: BackendService;
     session.initializePanelViewModels()
   AppViewModel(session: session)
 
-proc dispose*(app: AppViewModel) =
-  ## Dispose the owned session graph and disconnect its backend.
+proc dispose*(app: AppViewModel; disconnectBackend: bool = true) =
+  ## Dispose the owned session graph and, unless told otherwise, disconnect
+  ## its backend.
+  ##
+  ## The flag is forwarded rather than absorbed: `sdk.DebuggerSession.dispose`
+  ## takes the same one and calls this proc, so a `false` that stopped here
+  ## would leave the promise "the host owns the transport" unkept two layers
+  ## down. See the note on `session_vm.dispose`.
   if app.isNil:
     return
   if not app.session.isNil:
-    app.session.dispose()
+    app.session.dispose(disconnectBackend = disconnectBackend)
