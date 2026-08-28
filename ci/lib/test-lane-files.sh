@@ -387,7 +387,21 @@ test_lane_files() {
 				'/test_editor_test_controls_m4\.nim$' \
 				'/test_test_explorer_vm\.nim$' \
 				'/test_sdk_facade_boundary\.nim$' \
-				'/test_project_action_runner\.nim$'
+				'/test_project_action_runner\.nim$' \
+				'/test_platform_desktop_native\.nim$'
+		# `test_platform_desktop_native` (NS1) exercises the platform facade's
+		# NATIVE desktop instantiation against the real host — `std/os`,
+		# `std/osproc`, real child processes. Its subject,
+		# `viewmodel/host/desktop_native.nim`, is a hard `{.error.}` on the JS
+		# target by design: the Electron renderer has its own instantiation
+		# (`host/desktop_electron.nim`) reaching node and Electron APIs, and
+		# one module pretending to be both is the drift NS1 exists to prevent.
+		# The BACKEND-INDEPENDENT half of the same milestone —
+		# `test_platform_facade.nim`, which covers the capability model, the
+		# topbar's capability-driven action set, the remote instantiation and
+		# the path arithmetic — carries no host dependency and DOES run here,
+		# on both backends. That split is the same one drawn for
+		# `test_project_action_runner` above, and for the same reason.
 		# `test_project_action_runner` (VN-M3) launches real child processes
 		# through `runquota_process`, a POSIX launcher, and reads a project's
 		# `tasks.json` off disk with `std/os`. Neither has a `nim js`
