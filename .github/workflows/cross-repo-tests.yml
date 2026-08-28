@@ -63,7 +63,7 @@ jobs:
         # lock). The native-backend submodule unfold below is still bespoke
         # because the path:-flake-input visibility fix is specific to this
         # repo's flake.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -210,7 +210,7 @@ jobs:
         # Checkout-manifests / Resolve-lock / clone-repo steps. The
         # shell_recorders_ref workflow_dispatch input overrides the locked
         # revision (empty => lock).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
