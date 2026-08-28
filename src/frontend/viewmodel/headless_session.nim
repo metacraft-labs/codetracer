@@ -33,16 +33,28 @@ import backend/stdio_backend
 import store/[replay_data_store, types]
 import session_vm
 import app/app_vm
+import sdk/[debugger_session, trace_source]
 import viewmodels/[state_vm, calltrace_vm]
 
 type
   HeadlessDebugSession* = ref object
     ## Owns a replay-server process and the full ViewModel layer.
     ## Provides synchronous action methods for integration testing.
+    ##
+    ## Since the Embed SDK facade landed, the ViewModel graph and the session
+    ## lifecycle are NOT built here: they come from `sdk.DebuggerSession`, and
+    ## this type is the native, process-spawning *host* around it. What stays
+    ## here is what the SDK cannot own — spawning `replay-server`, and the
+    ## blocking `waitForEvent` pump that `BackendService` deliberately does
+    ## not expose.
     backend*: DapStdioBackend
       ## The DAP stdio transport to the replay-server child process.
+    sdk*: DebuggerSession
+      ## The Embed SDK session this harness hosts. Owns the ViewModel graph,
+      ## the lifecycle phase and the navigation history.
     app*: AppViewModel
-      ## The app-level ViewModel graph owned by this headless session.
+      ## The app-level ViewModel graph. Alias for `sdk.app`, kept as a field
+      ## so the 25 suites that read it are untouched.
     session*: SessionViewModel
       ## Convenience alias for app.session (all panel VMs + shared store).
     tracePath*: string
@@ -112,6 +124,11 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   var dbg = session.session.store.debugger.val
   dbg.status = dsIdle
   session.session.store.debugger.val = dbg
+  # Tell the SDK session where the move landed. The SDK cannot observe this
+  # itself on the stdio transport — the position arrives on an event this
+  # harness pumps — so the host reports it rather than the session guessing.
+  if not session.sdk.isNil:
+    session.sdk.recordPosition("move")
   drain()
 
 proc consumeCompleteMoveEvent(session: HeadlessDebugSession) =
@@ -188,14 +205,23 @@ proc newHeadlessDebugSession*(tracePath: string;
   # "ct/complete-move" event that carries the actual source location.
   discard backend.waitForEvent("stopped")
 
-  # 6. Create the app ViewModel layer with the stdio backend as the service
+  # 6. Create the ViewModel layer through the Embed SDK session, with the
+  #    stdio backend injected as the BackendService (spec §3.1 — the
+  #    transport is injectable, so the same lifecycle code serves the mock,
+  #    a worker and this spawned process).
+  #
+  #    `attach` rather than `launch`: steps 2-5 above already performed the
+  #    DAP handshake on the raw channel, because they need the blocking
+  #    `waitForEvent` that `BackendService.onEvent` does not provide.
   let backendService = backend.toBackendService()
-  let app = createAppViewModel(backendService)
+  let sdkSession = newDebuggerSession(backendService)
+  sdkSession.attach(localFolderTrace(tracePath))
 
   result = HeadlessDebugSession(
     backend: backend,
-    app: app,
-    session: app.session,
+    sdk: sdkSession,
+    app: sdkSession.app,
+    session: sdkSession.session,
     tracePath: tracePath,
     replayServerBin: replayServerBin,
   )
@@ -964,5 +990,10 @@ proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode] =
 
 proc close*(s: HeadlessDebugSession) =
   ## Shut down the session: dispose VMs, disconnect backend, kill process.
-  s.app.dispose()
+  ##
+  ## `disconnectBackend = false` because this harness owns the child process
+  ## and closes it on the next line; letting the SDK also route a disconnect
+  ## through `toBackendService`'s `disconnectProc` would call
+  ## `DapStdioBackend.close` twice on the same handle.
+  s.sdk.dispose(disconnectBackend = false)
   s.backend.close()

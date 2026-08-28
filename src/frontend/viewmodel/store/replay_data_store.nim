@@ -17,8 +17,10 @@
 ##   store.requestStep(sdForward)
 
 import std/[json, options, tables]
-when defined(js):
-  import ../../lib/logging
+# Diagnostics go through `vm_log`, not the renderer's `lib/logging`: that
+# module reaches `dom`/`kdom` and would put a DOM shim in the Embed SDK's
+# package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
+import ../vm_log
 
 import isonim/core/[signals, owner, async_compat]
 import isonim/viewmodel
@@ -415,7 +417,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
     inc storeIdCounter
     let assignedId = storeIdCounter
     when defined(js):
-      cdebug "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
+      vmDebug "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
     let store = ReplayDataStore(
       storeId: assignedId,
       # -- top-level state --
@@ -606,7 +608,7 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # handled by RequestTracker, not here.
   let current = store.debugger.val
   when defined(js):
-    cdebug "[PIPELINE] updateDebuggerPosition: storeId=" &
+    vmDebug "[PIPELINE] updateDebuggerPosition: storeId=" &
       $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
       $current.rrTicks & ") file=" & file & " line=" & $line
   # Construct a NEW object — on JS backend, var = signal.val gets a
@@ -641,7 +643,7 @@ proc updateLocals*(store: ReplayDataStore;
   ## Used by legacy UI code to mirror locals responses into the
   ## ViewModel layer.
   when defined(js):
-    cdebug "[PIPELINE] updateLocals: setting " & $variables.len & " variables"
+    vmDebug "[PIPELINE] updateLocals: setting " & $variables.len & " variables"
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
 
@@ -659,7 +661,7 @@ proc updateCodeStateLine*(store: ReplayDataStore;
     if sourceCode.len == 0: ""
     else: $line & " | " & sourceCode
   when defined(js):
-    cdebug "[PIPELINE] updateCodeStateLine: storeId=" &
+    vmDebug "[PIPELINE] updateCodeStateLine: storeId=" &
       $store.storeId & " line=" & $line & " has_source=" &
       $(sourceCode.len > 0)
   store.locals.codeStateLine.val = formatted
@@ -693,7 +695,7 @@ proc updateCalltraceSection*(store: ReplayDataStore;
   ## carry args (notably ``syncCalltraceData`` in
   ## ``frontend/ui/calltrace.nim``) pass the parsed map alongside lines.
   when defined(js):
-    cdebug "[PIPELINE] updateCalltraceSection: storeId=" &
+    vmDebug "[PIPELINE] updateCalltraceSection: storeId=" &
       $store.storeId & " setting " & $lines.len & " lines (was " &
       $store.calltrace.lines.val.len & "), startIndex=" & $startIndex &
       " totalCount=" & $totalCount

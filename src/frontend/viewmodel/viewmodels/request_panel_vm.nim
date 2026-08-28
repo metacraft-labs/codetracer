@@ -31,6 +31,18 @@
 ## list into ``requests``.  That is what makes the ``#`` column equal to the
 ## span id and what makes an open row settle in place instead of duplicating.
 ##
+## This module is the Embed SDK's ``SpansVM``
+## -----------------------------------------
+## ``CodeTracer-Embed-SDK.md`` §3.1 lists the seven panel ViewModels the SDK
+## exports and calls this one ``SpansVM``.  There is no ``SpansVM`` type here
+## and there should not be one: the spec's name describes the *data* — the VM
+## over ``ReplayDataStore.requestSpans`` — while this file predates the spec
+## and is named after the *panel* it drives.  Renaming it to match would touch
+## every desktop call site and the IsoNim view for a synonym, so the naming
+## difference is recorded here and in ``codetracer_embed.nim``'s panel-VM
+## section rather than papered over.  A reader looking for §3.1's ``SpansVM``
+## has arrived at it.
+##
 ## Reactive surface:
 ## - ``requests``      — captured ``RequestRecord`` list in insertion
 ##                       order (oldest first; the view renders the

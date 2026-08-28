@@ -36,6 +36,20 @@ lint_step "test-lane coverage guard: contract suite" \
 lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 	bash ci/test/test-lane-coverage.sh
 
+# The Embed SDK's boundary, in both directions: a consumer may reach the SDK
+# only through `codetracer_embed`, and the SDK's own import graph carries no
+# rendering and no chain concept. CodeTracer-Embed-SDK.md §3.2 says in as many
+# words that "enforcement is an import lint, not discipline", and
+# BlockTracer/Client-SDK.md §1.1 asks for the mirror of the same rule.
+#
+# Same order as above and for the same reason: the contract suite runs before
+# the guard it covers, because a guard nobody has watched fail is not evidence.
+lint_step "SDK facade boundary: contract suite" \
+	bash ci/test/sdk-facade-boundary-test.sh
+
+lint_step "SDK facade boundary: no reach past the facade, no chain concept inside it" \
+	bash ci/test/sdk-facade-boundary.sh
+
 # Canary for the chronicles/distinct-type breakage that takes every editor in
 # the project down. Currently QUARANTINED against an upstream nimsuggest crash;
 # ci/test/nimsuggest-check.sh carries the diagnosis, tells a toolchain defect

@@ -2510,3 +2510,68 @@ providers' `TestCapabilities` are compile-time constants, so — unlike
 `smart-*` — recorder availability does not move their catalogs either. The
 blast radius is capability, not attestation: the same workspace could record
 from one shell and refuse from another.
+
+## The Embed SDK facade and its import lint (2026-08-28)
+
+`src/frontend/viewmodel/codetracer_embed.nim` is the CodeTracer Embed SDK's
+entire public surface (CodeTracer-Embed-SDK.md §7: "anything not exported from
+the Nim `codetracer_embed` module is private"). If you are adding something a
+consumer needs, add it there; if you are refactoring something not exported
+there, you are not making a breaking change.
+
+Two things about it that will otherwise surprise you:
+
+* **`ci/test/sdk-facade-boundary.sh` is a build gate**, wired into
+  `ci/lint/nim.sh`. It walks the facade's transitive import graph lexically —
+  and that walk was validated to be *byte-identical* to `nim c --genDeps` for
+  the C backend (32 modules), so treat a disagreement as a bug in the
+  resolver, not in the rule. It fails on rendering/DOM/layout in the graph,
+  on `std/osproc` in the graph, and on any chain concept (`chainId`,
+  `blockNumber`, `txHash`, …) anywhere in it. The chain rule is §3.2's newest
+  row and the one under real pressure, because BlockTracer is the first
+  consumer.
+* **A file becomes a "consumer" only by declaring itself one**, with a
+  `## SDK-CONSUMER: <reason>` header or a `.sdk-consumer` file in an ancestor
+  directory — the same two spellings `ci/test/test-lane-coverage.sh` uses. A
+  declared consumer may import `codetracer_embed` and nothing else from
+  `src/frontend/viewmodel/`. An undeclared file is unconstrained.
+
+Two limits of that guard, both deliberate and both worth knowing before you
+trust it further than it goes:
+
+* **`src/frontend/ui/` is banned by PATH, with a one-entry allowlist**
+  (`UI_PATH_ALLOWLIST`), and the reason is written up at length in the script.
+  The short version: the rule was briefly deleted on the argument that the
+  import graph subsumes it, and that argument is false. `ui/flow_line_styles`,
+  `ui/editor_decoration_layers` and `ui/trace_redraw_policy` have **zero
+  imports** and are presentation policy — the first exports `"line-flow-hit"`
+  and friends — so they present to an import-graph rule exactly as the
+  genuinely-pure `ui/flow_loop_math` does. If the ban fires on you, add your
+  module's exact path to the allowlist with a reason; do not widen the rule.
+* **The graph walk does not enter IsoNim.** It checks this repo's modules plus
+  the *first-level* external specs they name, so "no rendering in the SDK
+  graph" means "none in this repo, and none at IsoNim's entry points". A
+  rendering dependency added inside IsoNim would not move this lint. That is
+  benign today — the compiler's own dep list for the facade reaches only
+  `isonim/core/*`, `isonim/viewmodel` and `isonim/testing/test_utils` — but it
+  is unguarded, and IsoNim is a peer package on someone else's release
+  cadence.
+
+Related, and easy to get wrong:
+
+* `viewmodel/vm_log.nim` exists because `frontend/lib/logging` imports
+  `lib/jslib`, which imports `dom` and `kdom`. Eleven `[PIPELINE]` debug lines
+  in `store/replay_data_store.nim` and `viewmodels/calltrace_vm.nim` were
+  putting the Karax DOM shim into the SDK's `nim js` graph. Use `vmDebug` in
+  the ViewModel layer; `cdebug` is fine everywhere in the renderer.
+* `sdk/debugger_session.nim`'s `newDebuggerSession` builds the store but NOT
+  the panel VMs: `session_vm.initializePanelViewModels` is called by
+  `launch`/`attach`, because several panel VMs own effects that issue backend
+  requests and there is nothing to ask about before a trace is open.
+  `app_vm.createAppViewModel` grew an `initializePanels` parameter for this;
+  it defaults to `true`, so existing call sites are unchanged.
+* `headless_session.HeadlessDebugSession` is now a *host* around a
+  `DebuggerSession` rather than an owner of its own graph. It still does its
+  own DAP handshake, because it needs `DapStdioBackend.waitForEvent` and
+  `BackendService.onEvent` is a registration, not a pump — the stdio
+  adapter's `onEventProc` collects handlers and never calls them.
