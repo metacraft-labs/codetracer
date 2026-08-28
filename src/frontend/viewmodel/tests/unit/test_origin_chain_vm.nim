@@ -32,8 +32,9 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_origin_chain_vm.nim
 
-import std/[asyncdispatch, json, options, sets, strutils, tables, unittest]
+import std/[json, options, sets, strutils, tables, unittest]
 
+import isonim/core/async_compat
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import isonim/testing/mock_dom
@@ -50,10 +51,17 @@ import ../../viewmodels/[
 import ../../views/[state_view, isonim_state_view, isonim_scratchpad_view]
 
 proc drain() =
-  try:
-    poll(0)
-  except ValueError:
-    discard
+  ## Flush whatever the reactive layer resolved synchronously.
+  ##
+  ## `drainPlatformCallbacks` rather than `asyncdispatch.poll(0)`: `poll` is
+  ## only reachable through `std/asyncdispatch`, which drags in
+  ## `std/nativesockets` and fails the JS compile outright
+  ## (`undeclared identifier: 'cstringArrayToSeq'`). This helper is the
+  ## cross-target primitive — a `poll(0)` on native, the pending-callback
+  ## flush on JS — so the suite runs on both backends, which is what
+  ## Front-End-Architecture.md §6 asks for and what the `vm-unit-js` lane
+  ## exists to enforce.
+  drainPlatformCallbacks()
 
 proc tokens(summary: OriginSummary): string =
   ## Helper used by the placeholder-pill assertions to check token
