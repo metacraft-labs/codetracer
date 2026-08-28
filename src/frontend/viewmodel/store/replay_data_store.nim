@@ -26,7 +26,8 @@ import isonim/core/[signals, owner, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
-import types, request_tracker
+import types, request_tracker, degraded_state
+export degraded_state
 
 const
   LiveMcrGetRecordingHeadCommand* = "ct/mcr-get-recording-head"
@@ -51,6 +52,16 @@ const
     ## the response has to be consumed here rather than off the future.
     ## Applying it is harmless when the event already arrived: a delta merge is
     ## idempotent (same ids, same cursor).
+  ReplayStatusEventKind* = "CtReplayStatus"
+    ## The degraded-state channel (Page-Descriptions.md §14).
+    ##
+    ## One event carries all four axes because they are read together —
+    ## `resolveDegradation` takes a snapshot, not four arguments — and
+    ## because a host that knows one of them usually learns the rest at the
+    ## same moment (session start, a validation verdict, a capability
+    ## probe). Every field is optional and an absent field leaves its
+    ## signal alone, so a host that only ever learns about capability can
+    ## send `{"capability": "..."}` and nothing else.
 
 # ---------------------------------------------------------------------------
 # Store identity tracking — unique ID per store instance for diagnostics
@@ -146,6 +157,21 @@ type
       ## rules do not depend on it.
     loadingState*: Signal[LoadingState]
 
+  DegradedStateStore* = object
+    ## The degraded-state catalogue's four axes, as signals
+    ## (`store/degraded_state.nim`, Page-Descriptions.md §14).
+    ##
+    ## They live on the store rather than on a pane because §14's whole
+    ## point is that each condition has *one* canonical treatment: five
+    ## panes reading five copies would be five chances to disagree about
+    ## whether this replay is windowed. The panes differ only in which
+    ## rows they render, which is `store/degraded_state.nim`'s per-pane
+    ## sensitivity sets.
+    availability*: Signal[ReplayAvailability]
+    integrity*: Signal[TraceIntegrity]
+    capability*: Signal[ReplayCapability]
+    sourceAvailability*: Signal[SourceAvailability]
+
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
@@ -157,8 +183,109 @@ type
     calltrace*: CalltraceStore
     locals*: LocalsStore
     requestSpans*: RequestSpansStore
+    degraded*: DegradedStateStore
     backend*: BackendService
     requestTracker*: RequestTracker
+
+# ---------------------------------------------------------------------------
+# Degraded state (Page-Descriptions.md §14)
+# ---------------------------------------------------------------------------
+
+proc degradedSnapshot*(store: ReplayDataStore): DegradedStateSnapshot =
+  ## Read all four axes as one value. Every pane memo calls this, so a
+  ## memo depends on exactly the signals the resolution needs and on all
+  ## of them — a memo that read three would go stale on the fourth.
+  DegradedStateSnapshot(
+    availability: store.degraded.availability.val,
+    integrity: store.degraded.integrity.val,
+    capability: store.degraded.capability.val,
+    sourceAvailability: store.degraded.sourceAvailability.val,
+  )
+
+proc setReplayAvailability*(store: ReplayDataStore;
+                            availability: ReplayAvailability) =
+  ## §14.1a. Set by the host when it learns whether the trace behind this
+  ## session is retained, windowed, expired or terminal.
+  store.degraded.availability.val = availability
+
+proc setTraceIntegrity*(store: ReplayDataStore; integrity: TraceIntegrity) =
+  ## §14's "Trace truncated" / "Divergence detected" rows.
+  store.degraded.integrity.val = integrity
+
+proc setReplayCapability*(store: ReplayDataStore;
+                          capability: ReplayCapability) =
+  ## §14.2. Set from the host's capability probe or from the failure that
+  ## terminated the worker.
+  store.degraded.capability.val = capability
+
+proc setSourceAvailability*(store: ReplayDataStore;
+                            availability: SourceAvailability) =
+  ## §14's "No verified source" row.
+  store.degraded.sourceAvailability.val = availability
+
+proc parseReplayAvailability*(raw: string;
+                              fallback: ReplayAvailability): ReplayAvailability =
+  ## Wire spellings for `ReplayAvailability`, taken from §14.1a's own
+  ## table rows rather than from the Nim identifiers, so the enum can be
+  ## renamed without breaking a host.
+  case raw
+  of "retained": raRetained
+  of "windowed-live": raWindowedLive
+  of "window-expired": raWindowExpired
+  of "never-generated": raNeverGenerated
+  of "unreplayable": raUnreplayable
+  else: fallback
+
+proc parseTraceIntegrity*(raw: string; fallback: TraceIntegrity): TraceIntegrity =
+  case raw
+  of "complete": tiComplete
+  of "truncated": tiTruncated
+  of "divergent": tiDivergent
+  else: fallback
+
+proc parseReplayCapability*(raw: string;
+                            fallback: ReplayCapability): ReplayCapability =
+  ## §14.2's four failure rows, plus the capable case. The names are the
+  ## detections in §14.2's "Detected" column, not generic error codes —
+  ## that distinction is the row's entire point.
+  case raw
+  of "capable": rcCapable
+  of "wasm-compilation-failed": rcWasmCompilationFailed
+  of "insufficient-memory": rcInsufficientMemory
+  of "range-requests-unsupported": rcRangeRequestsUnsupported
+  of "worker-unsupported": rcWorkerUnsupported
+  else: fallback
+
+proc parseSourceAvailability*(raw: string;
+                              fallback: SourceAvailability): SourceAvailability =
+  case raw
+  of "verified": savVerified
+  of "unverified": savUnverified
+  of "absent": savAbsent
+  else: fallback
+
+proc applyReplayStatus*(store: ReplayDataStore; body: JsonNode) =
+  ## Decode a `CtReplayStatus` body into the four axes.
+  ##
+  ## Absent and unrecognised fields leave the corresponding signal
+  ## untouched. An unrecognised value must NOT fall back to the
+  ## undegraded default: a host that starts speaking a spelling this
+  ## build does not know would otherwise silently report a healthy
+  ## replay, which is the failure §14 exists to prevent.
+  if body.isNil or body.kind != JObject:
+    return
+  if body.hasKey("availability") and body["availability"].kind == JString:
+    store.setReplayAvailability(parseReplayAvailability(
+      body["availability"].getStr, store.degraded.availability.val))
+  if body.hasKey("integrity") and body["integrity"].kind == JString:
+    store.setTraceIntegrity(parseTraceIntegrity(
+      body["integrity"].getStr, store.degraded.integrity.val))
+  if body.hasKey("capability") and body["capability"].kind == JString:
+    store.setReplayCapability(parseReplayCapability(
+      body["capability"].getStr, store.degraded.capability.val))
+  if body.hasKey("sourceAvailability") and body["sourceAvailability"].kind == JString:
+    store.setSourceAvailability(parseSourceAvailability(
+      body["sourceAvailability"].getStr, store.degraded.sourceAvailability.val))
 
 proc setDebuggerSnapshot(store: ReplayDataStore; rrTicks: uint64;
                          status: DebuggerStatus) =
@@ -402,6 +529,14 @@ proc installBackendEventHandlers(store: ReplayDataStore) =
         if event.hasKey("data"): event["data"]
         else: event
       s.applyRequestSpanDelta(payload)
+    of ReplayStatusEventKind:
+      # Page-Descriptions.md §14. Same envelope convention as the two
+      # branches above: RealBackendService nests the body under ``data``,
+      # a mock emits the envelope itself.
+      let payload =
+        if event.hasKey("data"): event["data"]
+        else: event
+      s.applyReplayStatus(payload)
     else:
       discard
 
@@ -463,6 +598,19 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         cursor: createSignal(0'i64),
         source: createSignal(""),
         loadingState: createSignal(lsIdle),
+      ),
+
+      # -- degraded state (Page-Descriptions.md §14) --
+      #
+      # Seeded undegraded, deliberately: a session that has learned
+      # nothing yet has not learned that something is wrong. The three
+      # states that would justify refusing to open a debugger all arrive
+      # from the host or the wire.
+      degraded: DegradedStateStore(
+        availability: createSignal(raRetained),
+        integrity: createSignal(tiComplete),
+        capability: createSignal(rcCapable),
+        sourceAvailability: createSignal(savVerified),
       ),
 
       # -- services --

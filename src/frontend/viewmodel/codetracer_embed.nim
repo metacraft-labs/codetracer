@@ -30,7 +30,7 @@
 ##
 ## | §3.1 row            | Exported                                                                 |
 ## | ------------------- | ------------------------------------------------------------------------ |
-## | `ReplayDataStore`   | `store/replay_data_store`, `store/types`, `store/request_tracker`         |
+## | `ReplayDataStore`   | `store/replay_data_store`, `store/types`, `store/request_tracker`, `store/degraded_state` |
 ## | Panel ViewModels    | `CalltraceVM` `EventLogVM` `StateVM` `FlowVM` `EditorVM` `DebugControlsVM` `RequestPanelVM` |
 ## | `BackendService`    | `backend/backend_service`, `backend/mock_backend`, `backend/dap_commands` |
 ## | Session lifecycle   | `DebuggerSession`, `SessionViewModel`, `AppViewModel`                     |
@@ -117,6 +117,15 @@ export types
 
 import store/request_tracker
 export request_tracker
+
+# The degraded-state catalogue (BlockTracer/Page-Descriptions.md §14) — the
+# six rows a debugger over a trace can be in, as enums, plus the per-pane
+# sensitivity sets and the one function that resolves them. Exported by name
+# rather than relied upon through `replay_data_store`'s re-export, because a
+# consumer's view renders these values directly and §7 makes only what is
+# named here public.
+import store/degraded_state
+export degraded_state
 
 import store/replay_data_store
 export replay_data_store
