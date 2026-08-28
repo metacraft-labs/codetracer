@@ -13,9 +13,21 @@ cat >"$MANIFEST" <<'EOF'
 EOF
 
 CT=${CT_BIN:-src/build-debug/bin/ct}
-if [ ! -f "$CT" ]; then
-	echo "SKIP: ct binary not found at $CT"
-	exit 0
+if [ ! -x "$CT" ]; then
+	# A missing prerequisite is a hard failure, not a silent pass: exiting 0
+	# here made "ct print is untested" and "ct print works" indistinguishable
+	# for as long as the binary happened to be absent. Set
+	# CT_PRINT_ALLOW_MISSING=1 for local iteration before a build; it is
+	# never set in a CI gate.
+	if [ "${CT_PRINT_ALLOW_MISSING:-0}" = "1" ]; then
+		echo "SKIP: ct binary not found at $CT (CT_PRINT_ALLOW_MISSING=1)" >&2
+		exit 0
+	fi
+	echo "error: ct binary not found or not executable at $CT" >&2
+	echo "  Build with: just build-once" >&2
+	echo "  Or set CT_BIN to a pre-built binary." >&2
+	echo "  Set CT_PRINT_ALLOW_MISSING=1 to skip locally (never in CI)." >&2
+	exit 1
 fi
 
 echo "=== Test: ct print with span manifest ==="
