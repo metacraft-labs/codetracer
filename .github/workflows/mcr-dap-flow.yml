@@ -101,7 +101,7 @@ jobs:
         # src/db-backend/build.rs canonicalises ../../../codetracer-native-recorder
         # at compile time; ensure-ct-mcr builds ct_cli from it. No .gitmodules
         # in the recorder, so submodules: 'false' avoids clone-repo's sed step.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.refs.outputs.recorder-ref }}
@@ -112,7 +112,7 @@ jobs:
       - name: Clone codetracer-native-backend
         # ensure-ct-native-replay builds ct-native-replay from this sibling;
         # ct-native-replay drives the MCR DAP flow under test.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-native-backend
           ref: ${{ steps.refs.outputs.backend-ref }}
@@ -123,7 +123,7 @@ jobs:
       - name: Clone codetracer-trace-format sibling
         # Required by src/db-backend/Cargo.toml's path deps
         # (../../../codetracer-trace-format/...).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-trace-format
           ref: ${{ steps.refs.outputs.trace-format-ref }}
@@ -134,7 +134,7 @@ jobs:
       - name: Clone codetracer-trace-format-nim sibling
         # codetracer_trace_writer_nim's build.rs reads
         # ../codetracer-trace-format-nim at db-backend cargo build time.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-trace-format-nim
           ref: ${{ steps.refs.outputs.trace-format-nim-ref }}
