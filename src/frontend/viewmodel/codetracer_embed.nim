@@ -157,6 +157,26 @@ export state_vm
 import viewmodels/flow_vm
 export flow_vm
 
+# Omniscience's renderer-neutral layout: where each inline value goes, which
+# expression heads which column, how deep a line is nested, which steps belong
+# to which pass of a loop, and whether a label reads `[x=10]`, `[→230]` or
+# `[x: 10→20]`.
+#
+# It is exported beside `FlowVM` because without it `FlowVM` is not a usable
+# Omniscience surface — it carries the loop selection and the loaded window, but
+# every *placement* decision the spec's "Value Positioning" section names lived
+# in `ui/flow.nim`, which §3.2 excludes from this package twice over (Monaco,
+# and "any rendering"). A consumer given only `FlowVM` would have to
+# reimplement, or copy, the arithmetic that decides which label belongs beside
+# which expression.
+#
+# It is IN this package rather than one layer up because it is a computation
+# over trace data and source text and contains no pixel, no unit, no CSS class
+# and no DOM node — which is also what lets `ci/test/sdk-facade-boundary.sh`
+# keep it here.
+import viewmodels/flow_layout
+export flow_layout
+
 import viewmodels/editor_vm
 export editor_vm
 
