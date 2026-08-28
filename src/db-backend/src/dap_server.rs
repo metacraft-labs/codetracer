@@ -2418,6 +2418,27 @@ impl Ctx {
     }
 }
 
+/// Queue the `disconnect` response. Shared by the native server loop and the
+/// browser handler so the two cannot answer teardown differently.
+fn write_disconnect_response(
+    req: &dap::Request,
+    sender: Sender<DapMessage>,
+    ctx: &mut Ctx,
+) -> Result<(), Box<dyn Error>> {
+    let response = DapMessage::Response(dap::Response {
+        base: dap::ProtocolMessage {
+            seq: ctx.seq,
+            type_: "response".to_string(),
+        },
+        request_seq: req.base.seq,
+        success: true,
+        command: req.command.clone(),
+        message: None,
+        body: serde_json::to_value(dap::DisconnectResponseBody {})?,
+    });
+    ctx.write_dap_messages(sender, &[response])
+}
+
 pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ctx) -> Result<(), Box<dyn Error>> {
     debug!("Handling message: {:?}", msg);
 
@@ -2584,26 +2605,23 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             }
         }
         DapMessage::Request(req) if req.command == "disconnect" => {
-            // let args: dap_types::DisconnectArguments = req.load_args()?;
-            // h.dap_client.seq = ctx.seq;
-            // h.respond_to_disconnect(req.clone(), args)?;
-            let response_body = dap::DisconnectResponseBody {};
-            // copied from `respond_dap` from handler.rs
-            let response = DapMessage::Response(dap::Response {
-                base: dap::ProtocolMessage {
-                    seq: ctx.seq,
-                    type_: "response".to_string(),
-                },
-                request_seq: req.base.seq,
-                success: true,
-                command: req.command.clone(),
-                message: None,
-                body: serde_json::to_value(response_body)?,
-            });
-            ctx.write_dap_messages(sender, &[response])?;
+            write_disconnect_response(req, sender, ctx)?;
 
-            // Wait briefly until the sending thread confirms the framed disconnect
-            // response was written, then terminate the server loop.
+            // Wait briefly until the sending thread confirms the framed
+            // disconnect response was written, then terminate the server loop.
+            //
+            // This wait belongs to the *native* server loop, which hands the
+            // response to a separate writer thread. `handle_message_browser`
+            // deliberately does not reuse it: there is no writer thread in the
+            // browser, so `disconnect_response_written` is never set and the
+            // loop below would spin to its timeout — except that it cannot
+            // even do that, because `thread::sleep` is unimplemented on
+            // wasm32-unknown-unknown and its panic compiles to an
+            // `unreachable` trap that kills the worker. Every session teardown
+            // sends a `disconnect`, so routing the browser through here was a
+            // guaranteed crash on close, masked only because callers terminate
+            // the worker immediately afterwards and never notice the engine
+            // died rather than shut down.
             const DISCONNECT_WRITE_TIMEOUT_MS: usize = 2000;
             let mut waited_ms = 0usize;
             while !ctx.disconnect_response_written.load(Ordering::SeqCst) {
@@ -2661,6 +2679,123 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
     Ok(())
 }
 
+/// Re-run the VFS trace-file auto-detect for the folder `launch` stored.
+///
+/// The native auto-detect uses `Path::is_file()`, which always returns
+/// false under wasm32, so the browser path re-detects against the in-memory
+/// [`crate::vfs`] instead.  Materialized traces are CTFS-only, with the
+/// legacy `runtime_tracing` `trace.json` layout still accepted.
+///
+/// Returns an error when the folder holds a multi-recording session
+/// manifest: `setup_from_vfs` has no session branch, and the probe below
+/// would happily latch onto a `trace.ct`/`trace.json` sitting beside the
+/// manifest and open a fraction of the program with no error at all — the
+/// exact silent failure the native launch path was fixed for.
+#[cfg(feature = "browser-transport")]
+fn browser_detect_trace_file_in_vfs(ctx: &mut Ctx) -> Result<(), Box<dyn Error>> {
+    let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
+
+    let session_vfs_path = if folder.is_empty() {
+        SESSION_MANIFEST_FILE.to_string()
+    } else {
+        format!("{}/{}", folder.trim_end_matches('/'), SESSION_MANIFEST_FILE)
+    };
+    if crate::vfs::vfs_exists(&session_vfs_path) {
+        return Err(format!(
+            "{session_vfs_path} is a multi-recording session manifest; \
+             browser replay opens a single recording only. Launch one \
+             of the manifest's `[[trace]]` paths directly."
+        )
+        .into());
+    }
+
+    // `trace.ct` is the canonical CTFS container; `trace.json` is the
+    // legacy `runtime_tracing` materialized layout still emitted by some
+    // recorders (e.g. `nargo trace`).  Probe both so client-side WASM
+    // replay works for either.
+    let candidates = ["trace.ct", "trace.json"];
+    for name in &candidates {
+        let vfs_path = if folder.is_empty() {
+            (*name).to_string()
+        } else {
+            format!("{}/{}", folder.trim_end_matches('/'), name)
+        };
+        if crate::vfs::vfs_exists(&vfs_path) {
+            ctx.launch_trace_file = PathBuf::from(*name);
+            info!("handle_message_browser: VFS auto-detect found trace file: {vfs_path}");
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Build the [`Handler`] from the VFS once *both* halves of the handshake
+/// have arrived, in whichever order the client chose to send them.
+///
+/// This is the browser counterpart of the native path's order-independence.
+/// Natively, `launch` re-sends itself to the stable thread when
+/// `received_configuration_done` is already set
+/// (`handle_message`'s launch arm), and `configurationDone` replays
+/// `ctx.launch_request` when it arrives second. The browser path used to
+/// have neither fallback: `setup_from_vfs` ran only from the
+/// `configurationDone` arm, so a client that sent
+/// `initialize → configurationDone → launch` (the order
+/// `src/frontend/viewmodel/store/debugger_session.nim` sends) got three
+/// `success: true` responses and then silence — every later request was
+/// dropped by the `no handler yet` arm with no response at all, hanging the
+/// ViewModel's future forever.
+///
+/// Calling this from both arms means the setup fires exactly once, on
+/// whichever of the two requests completes the pair.
+#[cfg(feature = "browser-transport")]
+fn browser_setup_from_vfs_when_ready(
+    sender: Sender<DapMessage>,
+    ctx: &mut Ctx,
+    handler: &mut Option<Handler>,
+) -> Result<(), Box<dyn Error>> {
+    if handler.is_some() {
+        return Ok(());
+    }
+    if !ctx.received_configuration_done {
+        // `launch` arrived first; wait for `configurationDone`.
+        return Ok(());
+    }
+    if ctx.launch_trace_folder.as_os_str().is_empty() {
+        // `configurationDone` arrived first; wait for `launch` to name a
+        // folder. A `launch` with neither `traceFolder` nor `program` also
+        // lands here, exactly as before.
+        return Ok(());
+    }
+
+    let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
+    let file = ctx.launch_trace_file.to_string_lossy().to_string();
+    info!("handle_message_browser: handshake complete — setting up from VFS: folder={folder:?}, file={file:?}");
+
+    match setup_from_vfs(
+        &folder,
+        &file,
+        ctx.launch_raw_diff_index.clone(),
+        ctx.restore_location.clone(),
+        sender,
+        true, // for_launch — run_to_entry
+        "browser-stable",
+    ) {
+        Ok(h) => {
+            info!(
+                "handle_message_browser: VFS setup succeeded — step_count={}, step_id={:?}",
+                h.reader.step_count(),
+                h.step_id
+            );
+            *handler = Some(h);
+            Ok(())
+        }
+        Err(e) => {
+            error!("handle_message_browser: VFS setup failed: {e}");
+            Err(e)
+        }
+    }
+}
+
 /// Browser/WASM message handler that maintains a [`Handler`] inline.
 ///
 /// In the browser build, threads are unavailable and all DAP messages are
@@ -2669,9 +2804,11 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
 /// (request dispatch) into a single entry point.
 ///
 /// The `handler` parameter is an `Option<Handler>` owned by the caller's
-/// closure. It starts as `None` and is populated when `configurationDone`
-/// triggers [`setup_from_vfs`].  Subsequent DAP requests (step, variables,
-/// etc.) are dispatched directly to this handler.
+/// closure. It starts as `None` and is populated by
+/// [`browser_setup_from_vfs_when_ready`] as soon as both `launch` and
+/// `configurationDone` have been seen — in either order, matching what the
+/// native path accepts.  Subsequent DAP requests (step, variables, etc.)
+/// are dispatched directly to this handler.
 #[cfg(feature = "browser-transport")]
 pub fn handle_message_browser(
     msg: &DapMessage,
@@ -2697,116 +2834,114 @@ pub fn handle_message_browser(
             // native auto-detect uses `Path::is_file()` which always returns
             // false in WASM, so we always re-run detection here using
             // VFS-aware lookups. Materialized traces are CTFS-only.
-            {
-                let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
+            browser_detect_trace_file_in_vfs(ctx)?;
 
-                // A multi-recording session must never degrade into one of
-                // its members. `setup_from_vfs` has no session branch, and
-                // the VFS probe below would happily latch onto a
-                // `trace.ct`/`trace.json` sitting beside the manifest and
-                // open a fraction of the program with no error at all —
-                // the exact silent failure the native launch path was
-                // fixed for. Refuse loudly instead.
-                let session_vfs_path = if folder.is_empty() {
-                    SESSION_MANIFEST_FILE.to_string()
-                } else {
-                    format!("{}/{}", folder.trim_end_matches('/'), SESSION_MANIFEST_FILE)
-                };
-                if crate::vfs::vfs_exists(&session_vfs_path) {
-                    return Err(format!(
-                        "{session_vfs_path} is a multi-recording session manifest; \
-                         browser replay opens a single recording only. Launch one \
-                         of the manifest's `[[trace]]` paths directly."
-                    )
-                    .into());
-                }
-
-                // `trace.ct` is the canonical CTFS container; `trace.json`
-                // is the legacy `runtime_tracing` materialized layout still
-                // emitted by some recorders (e.g. `nargo trace`).  Probe
-                // both so client-side WASM replay works for either.
-                let candidates = ["trace.ct", "trace.json"];
-                for name in &candidates {
-                    let vfs_path = if folder.is_empty() {
-                        (*name).to_string()
-                    } else {
-                        format!("{}/{}", folder.trim_end_matches('/'), name)
-                    };
-                    if crate::vfs::vfs_exists(&vfs_path) {
-                        ctx.launch_trace_file = PathBuf::from(*name);
-                        info!("handle_message_browser: VFS auto-detect found trace file: {}", vfs_path);
-                        break;
-                    }
-                }
-            }
+            // `configurationDone` may already have arrived — the SDK's
+            // `DebuggerSession.launch` sends it *before* `launch`. Setting
+            // up here is the browser counterpart of the native launch
+            // arm's `if ctx.received_configuration_done { to_stable_sender
+            // .send(req) }`; without it the handler is never built and
+            // every later request is dropped with no response at all.
+            browser_setup_from_vfs_when_ready(sender, ctx, handler)?;
         }
         DapMessage::Request(req) if req.command == "configurationDone" => {
             // Send the configurationDone response first.
             handle_message(msg, sender.clone(), ctx)?;
 
-            // Now perform the actual trace setup from VFS.
-            if handler.is_none() && !ctx.launch_trace_folder.as_os_str().is_empty() {
-                let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
-                let file = ctx.launch_trace_file.to_string_lossy().to_string();
-                info!(
-                    "handle_message_browser: configurationDone — setting up from VFS: folder={folder:?}, file={file:?}"
-                );
-
-                match setup_from_vfs(
-                    &folder,
-                    &file,
-                    ctx.launch_raw_diff_index.clone(),
-                    ctx.restore_location.clone(),
-                    sender,
-                    true, // for_launch — run_to_entry
-                    "browser-stable",
-                ) {
-                    Ok(h) => {
-                        info!(
-                            "handle_message_browser: VFS setup succeeded — step_count={}, step_id={:?}",
-                            h.reader.step_count(),
-                            h.step_id
-                        );
-                        *handler = Some(h);
-                    }
-                    Err(e) => {
-                        error!("handle_message_browser: VFS setup failed: {e}");
-                        return Err(e);
-                    }
-                }
-            }
+            // Now perform the actual trace setup from VFS, if `launch` has
+            // already named a folder. This is the browser counterpart of
+            // the native configurationDone arm's `to_stable_sender
+            // .send(ctx.launch_request)` replay.
+            browser_setup_from_vfs_when_ready(sender, ctx, handler)?;
         }
         DapMessage::Request(req) if req.command == "disconnect" => {
-            handle_message(msg, sender, ctx)?;
+            // NOT `handle_message`: its disconnect arm waits for a writer
+            // thread that does not exist here, using a `thread::sleep` that
+            // traps on wasm32 and kills the worker on every session close.
+            // The browser transport writes synchronously — the closure in
+            // `dap::setup_onmessage_callback` drains the channel and
+            // `postMessage`s each message as soon as this returns — so the
+            // response is already on its way out and there is nothing to
+            // wait for.
+            write_disconnect_response(req, sender, ctx)?;
+            ctx.should_terminate = true;
+            *handler = None;
         }
         DapMessage::Request(req) => {
-            // All other requests are dispatched to the handler if it is
-            // initialized. If not, the request is dropped with a warning.
-            if let Some(h) = handler {
-                if h.initialized {
-                    if let Err(e) = handle_request(h, req.clone(), sender.clone()) {
-                        warn!("handle_message_browser: request {} error: {e}", req.command);
-                        let error_response = DapMessage::Response(Response {
-                            base: ProtocolMessage {
-                                seq: 0,
-                                type_: "response".to_string(),
-                            },
-                            request_seq: req.base.seq,
-                            success: false,
-                            command: req.command.clone(),
-                            message: Some(format!("{e}")),
-                            body: json!({}),
-                        });
-                        sender.send(error_response)?;
-                    }
-                } else {
-                    warn!(
-                        "handle_message_browser: handler not initialized, dropping {:?}",
-                        req.command
+            // All other requests are dispatched to the handler once it is
+            // initialized.
+            //
+            // When it is not, we must still answer. A dropped request is a
+            // future in the renderer that never settles: the ViewModel waits
+            // forever with nothing in the log but a `warn!` inside the
+            // worker. That is how the handshake-order defect above presented
+            // — three `success: true` responses and then permanent silence —
+            // so the ordering fix ships with the diagnostic that would have
+            // named it in one step.
+            //
+            // The message must also distinguish the two ways to arrive here
+            // with no handler. "Before the handshake" and "after the session
+            // was torn down" are opposite problems with opposite fixes, and
+            // after a `disconnect` the handshake flags are both still set —
+            // so reporting the handshake state alone would tell a caller its
+            // handshake was incomplete when in fact it had completed and
+            // then ended. That is the same kind of misdirection the dropped
+            // request was.
+            let handshake_error = |ctx: &Ctx| -> String {
+                if ctx.should_terminate {
+                    return format!(
+                        "no trace is open: the session was disconnected, so `{}` cannot be \
+                         serviced. Start a new session (`initialize`, `launch` with a \
+                         `traceFolder`, `configurationDone`).",
+                        req.command,
                     );
                 }
-            } else {
-                warn!("handle_message_browser: no handler yet, dropping {:?}", req.command);
+                format!(
+                    "no trace is open: `{}` arrived before the launch handshake completed \
+                     (received launch={}, configurationDone={}). Send `launch` with a \
+                     `traceFolder` and `configurationDone` (in either order) first.",
+                    req.command,
+                    ctx.launch_request.is_some(),
+                    ctx.received_configuration_done,
+                )
+            };
+            let failure: Option<String> = match handler {
+                Some(h) if h.initialized => {
+                    if let Err(e) = handle_request(h, req.clone(), sender.clone()) {
+                        warn!("handle_message_browser: request {} error: {e}", req.command);
+                        Some(format!("{e}"))
+                    } else {
+                        None
+                    }
+                }
+                Some(_) => {
+                    warn!(
+                        "handle_message_browser: handler not initialized, refusing {:?}",
+                        req.command
+                    );
+                    Some(format!(
+                        "the trace handler exists but is not initialized; cannot service `{}`",
+                        req.command
+                    ))
+                }
+                None => {
+                    warn!("handle_message_browser: no handler yet, refusing {:?}", req.command);
+                    Some(handshake_error(ctx))
+                }
+            };
+            if let Some(message) = failure {
+                let error_response = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq: 0,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: false,
+                    command: req.command.clone(),
+                    message: Some(message),
+                    body: json!({}),
+                });
+                sender.send(error_response)?;
             }
         }
         _ => {}
@@ -3651,5 +3786,344 @@ mod tests {
 
         assert_eq!(ctx.launch_trace_file, PathBuf::from("trace.json"));
         assert!(resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_none(),);
+    }
+
+    // ── Browser handshake order-independence ──────────────────────────
+    //
+    // `handle_message_browser` used to build its `Handler` only from the
+    // `configurationDone` arm, which reads the folder that only `launch`
+    // populates.  A client sending `initialize → configurationDone →
+    // launch` (what `src/frontend/viewmodel/sdk/debugger_session.nim`
+    // sends) therefore got three `success: true` responses and then
+    // permanent silence: no handler existed, so every later request was
+    // dropped by the fallthrough arm with no response at all and the
+    // renderer's future never settled.
+    //
+    // The native path tolerates both orders (`handle_message`'s launch arm
+    // checks `received_configuration_done`; its configurationDone arm
+    // replays `ctx.launch_request`).  These tests pin the same property on
+    // the browser path, driving BOTH orders end to end through a real
+    // `setup_from_vfs` against a real trace in the VFS.
+    #[cfg(feature = "browser-transport")]
+    mod browser_handshake {
+        use super::*;
+        use codetracer_trace_types::{
+            CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
+        };
+
+        /// The smallest legacy `runtime_tracing` trace `setup_from_vfs`
+        /// will open: one path, one function, one call, three steps.
+        /// Serialised as `trace.json`, the layout `nargo trace` still
+        /// emits and the browser path explicitly supports.
+        fn minimal_trace_json() -> Vec<u8> {
+            let events: Vec<TraceLowLevelEvent> = vec![
+                TraceLowLevelEvent::Path(PathBuf::from("/browser/handshake/main.nr")),
+                TraceLowLevelEvent::Function(FunctionRecord {
+                    path_id: PathId(0),
+                    line: Line(1),
+                    name: "main".to_string(),
+                }),
+                TraceLowLevelEvent::Call(CallRecord {
+                    function_id: FunctionId(0),
+                    args: vec![],
+                }),
+                TraceLowLevelEvent::Step(StepRecord {
+                    path_id: PathId(0),
+                    line: Line(1),
+                }),
+                TraceLowLevelEvent::Step(StepRecord {
+                    path_id: PathId(0),
+                    line: Line(2),
+                }),
+                TraceLowLevelEvent::Step(StepRecord {
+                    path_id: PathId(0),
+                    line: Line(3),
+                }),
+            ];
+            serde_json::to_vec(&events).unwrap()
+        }
+
+        /// Seed the process-wide VFS with `<folder>/trace.json`.  Each
+        /// test uses its own folder name so the shared static store never
+        /// makes two tests interfere.
+        fn seed_vfs(folder: &str) {
+            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+        }
+
+        fn request(seq: i64, command: &str, arguments: serde_json::Value) -> DapMessage {
+            DapMessage::Request(dap::Request {
+                base: ProtocolMessage {
+                    seq,
+                    type_: "request".to_string(),
+                },
+                command: command.to_string(),
+                arguments,
+            })
+        }
+
+        /// Every response in `received`, as `(command, success)`.
+        fn responses(received: &[DapMessage]) -> Vec<(String, bool)> {
+            received
+                .iter()
+                .filter_map(|m| match m {
+                    DapMessage::Response(r) => Some((r.command.clone(), r.success)),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// Drive a whole session through `handle_message_browser` and
+        /// return the handler plus everything the engine sent back.
+        ///
+        /// `commands` is the ordered handshake; a `stackTrace` is appended
+        /// so the test observes what a *post-handshake* request actually
+        /// gets — the exact place the defect showed up as silence.
+        fn drive(folder: &str, commands: &[(&str, serde_json::Value)]) -> (Option<Handler>, Vec<DapMessage>) {
+            seed_vfs(folder);
+            let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
+            let mut ctx = Ctx::default();
+            let mut handler: Option<Handler> = None;
+            for (i, (command, arguments)) in commands.iter().enumerate() {
+                let msg = request(i as i64 + 1, command, arguments.clone());
+                handle_message_browser(&msg, sender.clone(), &mut ctx, &mut handler)
+                    .unwrap_or_else(|e| panic!("handle_message_browser({command}) failed: {e}"));
+            }
+            drop(sender);
+            (handler, receiver.into_iter().collect())
+        }
+
+        /// The order the engine already accepted. Kept so a "fix" that
+        /// merely moves the setup from one arm to the other fails here.
+        #[test]
+        fn launch_before_configuration_done_opens_the_trace() {
+            let folder = "browser-handshake-launch-first";
+            let (handler, received) = drive(
+                folder,
+                &[
+                    ("initialize", json!({ "clientID": "test", "adapterID": "codetracer" })),
+                    ("launch", json!({ "traceFolder": folder })),
+                    ("configurationDone", json!({})),
+                    ("stackTrace", json!({ "threadId": 1 })),
+                ],
+            );
+
+            let handler = handler.expect("launch → configurationDone must build a Handler");
+            assert!(handler.initialized);
+            assert_eq!(handler.reader.step_count(), 3);
+
+            let stack = responses(&received)
+                .into_iter()
+                .find(|(command, _)| command == "stackTrace")
+                .expect("stackTrace must get a response");
+            assert!(stack.1, "stackTrace after a completed handshake must succeed");
+        }
+
+        /// The order `DebuggerSession.launch` actually sends. Before the
+        /// fix this produced three `success: true` responses and then
+        /// nothing at all.
+        #[test]
+        fn configuration_done_before_launch_opens_the_trace() {
+            let folder = "browser-handshake-config-first";
+            let (handler, received) = drive(
+                folder,
+                &[
+                    ("initialize", json!({ "clientID": "test", "adapterID": "codetracer" })),
+                    ("configurationDone", json!({})),
+                    ("launch", json!({ "traceFolder": folder })),
+                    ("stackTrace", json!({ "threadId": 1 })),
+                ],
+            );
+
+            let handler = handler.expect(
+                "configurationDone → launch must build a Handler too; the SDK sends the \
+                 handshake in this order and the native path accepts it",
+            );
+            assert!(handler.initialized);
+            assert_eq!(handler.reader.step_count(), 3);
+
+            let stack = responses(&received)
+                .into_iter()
+                .find(|(command, _)| command == "stackTrace")
+                .expect(
+                    "stackTrace must get a response — a dropped request is a renderer future \
+                     that never settles",
+                );
+            assert!(stack.1, "stackTrace after a completed handshake must succeed");
+        }
+
+        /// Both orders must produce the same handshake responses, so the
+        /// only observable difference is the order the client chose.
+        #[test]
+        fn both_orders_answer_every_handshake_request_with_success() {
+            for (folder, commands) in [
+                (
+                    "browser-handshake-parity-launch-first",
+                    vec![
+                        ("initialize", json!({})),
+                        (
+                            "launch",
+                            json!({ "traceFolder": "browser-handshake-parity-launch-first" }),
+                        ),
+                        ("configurationDone", json!({})),
+                    ],
+                ),
+                (
+                    "browser-handshake-parity-config-first",
+                    vec![
+                        ("initialize", json!({})),
+                        ("configurationDone", json!({})),
+                        (
+                            "launch",
+                            json!({ "traceFolder": "browser-handshake-parity-config-first" }),
+                        ),
+                    ],
+                ),
+            ] {
+                let (handler, received) = drive(folder, &commands);
+                assert!(handler.is_some(), "{folder}: handshake must open the trace");
+                for (command, _) in &commands {
+                    let hit = responses(&received)
+                        .into_iter()
+                        .find(|(c, _)| c == command)
+                        .unwrap_or_else(|| panic!("{folder}: no response for {command}"));
+                    assert!(hit.1, "{folder}: {command} must succeed");
+                }
+            }
+        }
+
+        /// A request that arrives before the handshake completes must be
+        /// *answered* with a failure, never dropped. A dropped request is
+        /// the failure signature this whole finding is about: the caller
+        /// waits forever with no error anywhere.
+        #[test]
+        fn a_request_before_the_handshake_is_refused_not_dropped() {
+            let folder = "browser-handshake-premature";
+            let (handler, received) = drive(
+                folder,
+                &[("initialize", json!({})), ("stackTrace", json!({ "threadId": 1 }))],
+            );
+            assert!(handler.is_none(), "no launch was sent, so no trace should be open");
+
+            let stack = responses(&received)
+                .into_iter()
+                .find(|(command, _)| command == "stackTrace")
+                .expect("a premature request must still get a response");
+            assert!(!stack.1, "a premature request must be refused, not silently succeed");
+
+            let message = received
+                .iter()
+                .find_map(|m| match m {
+                    DapMessage::Response(r) if r.command == "stackTrace" => r.message.clone(),
+                    _ => None,
+                })
+                .expect("the refusal must carry a message");
+            assert!(
+                message.contains("launch handshake"),
+                "the refusal must name the handshake, got: {message}",
+            );
+        }
+
+        /// Teardown must answer. `WorkerBackendService.disconnect` sends one
+        /// of these on every session close; routing it through
+        /// `handle_message`'s arm made it wait on a writer thread that does
+        /// not exist in the browser, via a `thread::sleep` that traps on
+        /// wasm32 and kills the worker. The failure was invisible because
+        /// callers terminate the worker straight afterwards — so the engine
+        /// dying and the engine shutting down looked identical.
+        #[test]
+        fn disconnect_is_answered_without_waiting_for_a_writer_thread() {
+            let folder = "browser-handshake-disconnect";
+            let started_ms = crate::wall_clock::monotonic_ms();
+            let (handler, received) = drive(
+                folder,
+                &[
+                    ("initialize", json!({})),
+                    ("configurationDone", json!({})),
+                    ("launch", json!({ "traceFolder": folder })),
+                    ("disconnect", json!({})),
+                ],
+            );
+
+            let disconnect = responses(&received)
+                .into_iter()
+                .find(|(command, _)| command == "disconnect")
+                .expect("disconnect must get a response");
+            assert!(disconnect.1, "disconnect must succeed");
+            assert!(handler.is_none(), "disconnect must release the trace handler",);
+            // The native arm's flush wait is a 2s busy-loop that can never be
+            // satisfied on this path. Anything near it means the browser arm
+            // is delegating to `handle_message` again.
+            let elapsed_ms = crate::wall_clock::monotonic_ms().saturating_sub(started_ms);
+            assert!(
+                elapsed_ms < 500,
+                "disconnect took {elapsed_ms}ms — the browser path must not run the \
+                 native writer-thread flush wait",
+            );
+        }
+
+        /// A request after teardown must be refused with the *right*
+        /// reason. Both handshake flags are still set once `disconnect` has
+        /// run, so a refusal that only reports them would tell the caller
+        /// its handshake was incomplete when it had in fact completed and
+        /// then ended — sending them to debug the wrong end of the session.
+        #[test]
+        fn a_request_after_disconnect_names_the_teardown_not_the_handshake() {
+            let folder = "browser-handshake-after-disconnect";
+            let (_handler, received) = drive(
+                folder,
+                &[
+                    ("initialize", json!({})),
+                    ("configurationDone", json!({})),
+                    ("launch", json!({ "traceFolder": folder })),
+                    ("disconnect", json!({})),
+                    ("threads", json!({})),
+                ],
+            );
+
+            let message = received
+                .iter()
+                .find_map(|m| match m {
+                    DapMessage::Response(r) if r.command == "threads" => {
+                        Some((r.success, r.message.clone().unwrap_or_default()))
+                    }
+                    _ => None,
+                })
+                .expect("a post-teardown request must still be answered");
+            assert!(!message.0, "a post-teardown request must be refused");
+            assert!(
+                message.1.contains("disconnected"),
+                "the refusal must name the teardown, got: {}",
+                message.1,
+            );
+            assert!(
+                !message.1.contains("before the launch handshake"),
+                "the refusal must not blame the handshake, got: {}",
+                message.1,
+            );
+        }
+
+        /// The session-manifest refusal must survive the refactor that
+        /// moved the VFS probe into its own function.
+        #[test]
+        fn a_session_manifest_in_the_vfs_is_refused() {
+            let folder = "browser-handshake-session";
+            crate::vfs::vfs_write(&format!("{folder}/{SESSION_MANIFEST_FILE}"), b"version = 1\n".to_vec());
+            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+
+            let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+            let mut ctx = Ctx::default();
+            let mut handler: Option<Handler> = None;
+            let err = handle_message_browser(
+                &request(1, "launch", json!({ "traceFolder": folder })),
+                sender,
+                &mut ctx,
+                &mut handler,
+            )
+            .expect_err("a multi-recording session manifest must be refused, not degraded");
+            assert!(
+                format!("{err}").contains("session manifest"),
+                "the refusal must name the manifest, got: {err}",
+            );
+        }
     }
 }
