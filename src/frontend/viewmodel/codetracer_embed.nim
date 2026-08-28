@@ -95,16 +95,23 @@ import isonim/testing/test_utils
 export test_utils
 
 # ---------------------------------------------------------------------------
-# BackendService (§3.1) — the injectable transport, and the mock every
-# consumer test drives. `WorkerBackendService` (DAP over `postMessage`) is
-# M3's; a consumer supplies its own `BackendService` until then, which is the
-# seam working as designed.
+# BackendService (§3.1) — the injectable transport, the mock every consumer
+# test drives, and `WorkerBackendService`, the DAP-over-`postMessage` driver
+# for the WASM replay worker.
+#
+# `worker_backend` owns the protocol only; the `Worker` itself is injected as
+# a pair of procs. That keeps `std/jsffi` and the §5.1 `assetBase` decision
+# outside this graph — a consumer that already has a worker, and a consumer
+# that wants the SDK to construct one, use the same driver.
 # ---------------------------------------------------------------------------
 import backend/backend_service
 export backend_service
 
 import backend/mock_backend
 export mock_backend
+
+import backend/worker_backend
+export worker_backend
 
 import backend/dap_commands
 export dap_commands
