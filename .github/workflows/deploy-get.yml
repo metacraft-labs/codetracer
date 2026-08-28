@@ -68,15 +68,25 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # Wrangler stores its deploy cache under <cwd>/node_modules/.cache/wrangler
-          # and errors ("A file or directory could not be found. Missing file or
-          # directory: node_modules/.cache/wrangler") when that path's parent does
-          # not exist — which it never does here, since this repo is not a node
-          # project at its root. Pre-create it so the flake-pinned wrangler can
-          # write its cache.
-          mkdir -p node_modules/.cache/wrangler
-          nix develop .#ci --command \
-            wrangler pages deploy get/dist \
+          set -euo pipefail
+          # Wrangler resolves its deploy cache to
+          # <closest node_modules>/.cache/wrangler, falling back to the XDG cache
+          # dir only when no node_modules exists on the cwd's parent chain. At the
+          # repo root that node_modules is a symlink into the read-only Nix store
+          # (the ci shellHook recreates it every shell entry), so the cache write
+          # dies with "Read-only file system". So: enter the devshell at the repo
+          # root (its shellHook needs `git rev-parse --show-toplevel`), then run
+          # wrangler from a node_modules-free scratch dir with a writable
+          # XDG_CACHE_HOME — wrangler then caches under XDG instead of the
+          # read-only symlink. get/dist is passed by absolute path.
+          xdg_cache="$(mktemp -d)"
+          export XDG_CACHE_HOME="$xdg_cache"
+          scratch="$(mktemp -d)"
+          dist="$GITHUB_WORKSPACE/get/dist"
+          nix develop .#ci --command bash -c '
+            set -euo pipefail
+            cd "'"$scratch"'"
+            wrangler pages deploy "'"$dist"'" \
               --project-name=get-codetracer \
               --branch=master \
-              --commit-dirty=true
+              --commit-dirty=true'
