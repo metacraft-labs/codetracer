@@ -1,0 +1,8 @@
+error: assertion failed
+   ┌─ test-programs/noir_verification_failing/src/main.nr:15:12
+   │
+15 │     assert(n == 40);
+   │            -------- assertion failed
+   │
+
+Error: Verification failed due to 1 previous errors!

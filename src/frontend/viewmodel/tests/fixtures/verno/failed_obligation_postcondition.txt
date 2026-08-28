@@ -1,0 +1,8 @@
+error: postcondition not satisfied
+  ┌─ test-programs/noir_verification/src/main.nr:7:1
+  │
+7 │ #['ensures(result == 4 * x1)]
+  │ ----------------------------- failed postcondition
+  │
+
+Error: Verification failed due to 1 previous errors!
