@@ -6,6 +6,13 @@ real `.ct` container
 (`src/db-backend/tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct`).
 Every row below was reproduced by execution, not by reading.
 
+> **Update (2026-08-29).** Rows 1, 3-D1..D4, 4, 5 and 6 have since been fixed
+> and re-measured against a rebuilt engine; the per-row **Status** notes below
+> say how, and where the regression test lives. The measurements in each row —
+> including §4a's — are preserved as written because they are what the fix was
+> verified against, so read them as "what this did", not "what this does".
+> Rows 2, 7 and 8 are untouched, and row 7 is still open.
+
 This file exists because the gap is not one bug. It is a *dialect* difference —
 the ViewModel layer and the replay engine each have a coherent, self-consistent
 view of the protocol, and they disagree in eight places. Fixing them one at a
@@ -85,8 +92,23 @@ the browser: each is `&&`-chained onto `let Some(to_stable_sender)`, and
 `ctx.to_stable_sender` is `None` in the browser — its only assignment is
 `dap_server.rs:3189-3190`, inside the native `handle_client`.
 
-**Fix belongs on the frontend side** (swap the two `step` calls), because the
-native path already accepts that order.
+**Fixed on the engine side**, not the frontend. Swapping the two `step` calls
+would have made this one client work while leaving the engine intolerant of an
+order the native path accepts — the next client to send it would rediscover the
+same silence. `handle_message_browser` now runs the VFS setup from a shared
+`browser_setup_from_vfs_when_ready` called by *both* the `launch` and the
+`configurationDone` arm, firing on whichever completes the pair; this is the
+browser counterpart of the two native fallbacks quoted above.
+
+The `no handler yet, dropping` arm is gone too: a request that arrives before
+the handshake completes is now *answered* `success: false` with a message naming
+which halves have been seen. A dropped request was the whole reason this cost a
+day to find.
+
+**Status: fixed.** `dap_server.rs::browser_setup_from_vfs_when_ready`. Tests:
+`dap_server.rs` `mod browser_handshake` (6 cases, both orders end-to-end through
+a real `setup_from_vfs`), run with
+`cargo test --features browser-transport --lib browser_handshake`.
 
 ---
 
@@ -172,6 +194,51 @@ any consumer that awaits a `disconnect` response hangs.
 — appears at `emulator_origin.rs:283`, `omniscient_origin.rs:319`,
 `recreator_origin.rs:233`/`:345`.
 
+**Status: fixed, as a class rather than four call sites.** `src/db-backend/src/wall_clock.rs`
+is now the crate's only clock, with two functions because there are two needs:
+`monotonic_ms()` for durations (budgets, `elapsed_ms`) and `unix_seconds()` for
+the informational stamps that are serialised and never read back. Native reads
+`std::time`; the browser reads `js_sys::Date::now()`; a wasm build without
+`browser-transport` reads `0`, which makes a wall-clock budget non-binding
+rather than fatal — the right trade, since a budget that never fires costs
+latency and a trap costs the process.
+
+Every reachable site was converted, not just the four observed:
+`WallClockDeadline` (`origin_query.rs`, the funnel behind D1 and D3),
+`Notification::new` and `Stop::new` and `HistoryResult::new` (`task.rs`),
+`Db::load_history` and the continuation-token `issued_at` (`db.rs`), and the
+`Instant::now()` pairs in `emulator_origin.rs`, `omniscient_origin.rs`,
+`recreator_origin.rs`, `deepreview/collector.rs` and `autoformat.rs`.
+`recreator_session.rs`'s four reads are inside `#[cfg(unix)]`/`#[cfg(windows)]`
+items and `ctfs_trace_reader/mod.rs`'s six are inside `#[cfg(test)]`, so neither
+reaches a wasm build.
+
+**D4 is fixed differently**, because the wait itself was wrong and not merely
+unavailable: `handle_message_browser` no longer delegates `disconnect` to
+`handle_message`. The browser transport writes synchronously — `dap.rs`'s
+closure drains the channel and `postMessage`s each message as soon as the
+handler returns — so there is no writer thread to wait for and
+`disconnect_response_written` is never set by anybody. Both arms now share
+`write_disconnect_response`; only the native one keeps the flush wait.
+
+Tests: `src/db-backend/tests/wall_clock_sweep_test.rs` scans every source file
+and fails on any raw `SystemTime::now` / `Instant::now` / `chrono::*::now`
+outside a documented, counted allowlist — the point being that fixing the four
+observed sites is not fixing the class. `dap_server.rs`'s
+`disconnect_is_answered_without_waiting_for_a_writer_thread` covers D4 and
+asserts the call does not take the native path's 2s wait.
+
+Runtime evidence: `probe_engine_defects.mjs` against the stylus-fund `.ct`
+fixture and a rebuilt engine now reports `D1 success=true`, `D2 success=true`,
+`D3 success=true`, `D4 success=true`.
+
+Note for anyone tempted by a stronger check: grepping the linked `.wasm` for
+std's `time not implemented on this platform` string does **not** work. It is
+present before and after the fix, because `std::sync::mpmc::Channel::send` — the
+DAP response channel — contains a guarded `Instant::now()` on its
+`deadline: Some(_)` path. Our sends always pass `None`, so it is unreachable,
+but the string is linked either way.
+
 ---
 
 ## 4. `ct/load-flow`: the ViewModel sends a payload the engine cannot parse
@@ -231,8 +298,53 @@ Measured against the native `replay-server` while capturing
   steps and loops, and it is wrong — a silent wrong answer rather than an error,
   which is why it costs an hour rather than a minute.
 
-The working sequence is therefore: drain, request with `flowMode` as a number,
-then wait for the event.
+The working sequence is therefore: drain, request, then wait for the event.
+(This was measured while `flowMode` was still an ordinal; it is a name now —
+see the Status below, which also records that `flow_vm` consumes the event.)
+
+
+**Status: fixed on both sides, and the ordinal is gone.** Making the ordinal
+work would have left the worse half of the defect in place: two enums of
+different cardinality serialised as a position means a wrong value is
+indistinguishable from a right one — `fmLine` as `1` is `Diff`, a different
+query that answers with a plausible window for the wrong thing. That is a
+silent wrong answer, not a parse error, and no test on either side could see it.
+
+So the wire form is now a **name**:
+
+* `src/common/flow_mode_wire.nim` is the single Nim source of the vocabulary
+  (`"call"`, `"diff"`), a leaf module with no imports so `common_types` and the
+  IsoNim ViewModel layer can both hold it and a Rust test can read it as text.
+* Rust `FlowMode` serialises to that name and parses it, still accepting the
+  legacy ordinal inbound (the Karax renderer serialises the canonical Nim enum
+  through `toJs`, and several Rust suites write `"flowMode": 0`) but rejecting
+  an out-of-range one instead of defaulting.
+* `flow_vm.nim` routes its three-valued view granularity through one named
+  `engineFlowModeWireName`, whose `case` is exhaustive so a fourth `fm*` member
+  will not compile until someone decides what it means to the engine. It sends
+  the required `location` (path, line, `rrTicks`, `callstackDepth`) and no
+  longer sends a top-level `rrTicks` the engine never read.
+* The dedup guard still keys on the *view* mode, so switching granularity keeps
+  re-requesting exactly as before; only the wire field changed.
+
+**And the panel now consumes the event, not just the reply.** `ct/load-flow`'s
+real answer is the queued `ct/updated-flow` event (`dap.rs:329`); the
+backend-manager converts it into a response for some deployments
+(`backend_manager.rs:1001`), so `flow_vm` feeds both paths into
+`applyFlowUpdate`. Consuming only the reply is how a panel stays empty against
+the engine while every mock-driven test passes.
+
+Tests: `src/db-backend/tests/flow_mode_wire_test.rs` **reads
+`src/common/flow_mode_wire.nim`** and fails if the two vocabularies differ, so
+adding a member on one side without the other fails there; it also pins that the
+old `{"rrTicks", "flowMode": "fmCall"}` shape is rejected by name and that
+ordinal `2` is an error. `src/common/common_types/codetracer_features/flow.nim`
+carries a `static: doAssert` tying its enum's cardinality to the same list.
+`tests/flow/flow_vm_test.nim`'s `FlowVM — the ct/load-flow engine boundary`
+suite covers the Nim half including both event spellings.
+
+`ct/flow-jump` is deliberately left on the panel's own vocabulary: it has no
+engine handler at all, so there is no second enum for it to agree with.
 
 ---
 
@@ -268,6 +380,27 @@ production.
 One nuance: `worker_backend.nim:148` returns `newCompletedFuture` on the
 disconnected / worker-failed path, so *that* failure mode is still drainable. It
 is only responses that actually cross the wire that are not.
+
+**Status: fixed by removing the assumption rather than the microtask.** No
+synchronous drain can pump a JS microtask, so `launch` stopped treating "sent"
+as "answered". `markReady` is now reached only from a `settle` that runs when
+every command actually issued has had its callback; on a synchronous transport
+that still happens before `launch` returns (nothing observable changes for the
+mock or stdio), and on a genuinely async one the session stays `dspLaunching`
+until the responses arrive and then moves to `dspReady` or `dspFailed` from the
+callback. A session still `dspLaunching` after `launch` returns is a correct
+state; claiming `dspReady` without having seen a response is the thing that must
+never happen. The first refusal now wins rather than whichever answer lands
+last, which short-circuiting the sends can no longer guarantee.
+
+Tests: `MockBackendService.deferResponses` is a genuinely asynchronous
+transport — on JS a hand-rolled *thenable*, so it takes the same
+`onComplete` branch a real promise does, while `settleDeferred` lets the test
+deliver answers deterministically; on C a `Future` completed later and drained
+through `poll(0)`. `test_sdk_facade.nim`'s
+`§6.3 over an asynchronous transport` suite (7 cases) runs in **both**
+`vm-unit` and `vm-unit-js`; four of them fail against the previous
+optimistic `markReady`.
 
 ---
 
@@ -306,6 +439,38 @@ carrying neither `traceFolder` nor `program` skips both `if let` branches
 
 `tests/unit/test_sdk_facade.nim:160-162` pins the `traceSource` wire form against
 no backend at all, which is why the gap survived.
+
+**Status: the engine now refuses by name.** The browser source kinds are still
+unimplemented — `bytes` never puts its bytes on the wire, `opfs` and `custom`
+are consumer-side handles, and `http-range` needs an async fetch the synchronous
+browser dispatch cannot make — so implementing them was not tractable here. What
+was tractable, and is the required outcome, is that the engine stops answering
+with a serde artefact or with nothing at all.
+
+`LaunchRequestArguments` now declares `traceSource` (keeping
+`deny_unknown_fields`, which is load-bearing and is asserted by a test), and the
+`launch` arm answers a `success: false` **launch response** naming the kind, the
+reason, and the supported alternative. A response, not an `Err`: the native
+server loop only `error!`s an `Err`, so returning one leaves the client with the
+same permanent silence row 1 was about. The message contains the word
+"unsupported", which is what `classifyBackendFailure` keys on to reach
+`dseUnsupportedTraceKind` rather than the catch-all bucket — a coupling now
+asserted from both sides.
+
+An unrecognised sixth kind gets a message naming *it*, not serde's
+`unknown variant`, and the refusal lists the known vocabulary. A refused launch
+leaves no trace folder and is not stored for `configurationDone` to replay.
+
+Tests: `src/db-backend/tests/launch_trace_source_test.rs` (7 cases, including
+that a `local-folder` launch still succeeds so the refusal cannot be "fixed" by
+refusing everything) and, on the Nim side, `test_sdk_facade.nim`'s
+`the trace-source vocabulary is the one the engine names back` and
+`an engine refusal of a browser kind is UnsupportedTraceKind`.
+
+The separate silent-success hazard noted above — a launch carrying neither
+`traceFolder` nor `program` still answering `success: true` — is **not** fixed
+here. It is a native-path behaviour with unknown consumers (`pid` attach,
+`__restart`), and changing it was out of scope for a browser-replay fix.
 
 ---
 
@@ -362,16 +527,16 @@ handler *methods* those arms call.
 
 ## Summary: what blocks a transaction page loading the debugger
 
-| # | gap | side to fix | blocking? |
+| # | gap | side fixed | status |
 | --- | --- | --- | --- |
-| 1 | handshake order | frontend (swap two lines) | **yes — nothing works without it** |
-| 3-D1 | `ct/load-locals` traps | engine | **yes — State pane** |
-| 3-D2 | boundary step traps | engine | degrades stepping |
-| 3-D3 | `ct/originChain` traps | engine | Value-Origin-Tracking only |
-| 3-D4 | `disconnect` traps | engine | teardown; masked by the adapter |
-| 4 | `ct/load-flow` payload | frontend + shared vocabulary | **yes — Flow pane** |
-| 5 | `drainPlatformCallbacks` | `nim-everywhere` or the SDK | error taxonomy inert |
-| 6 | `TraceSource` browser kinds | engine (or drop the kinds) | blocks non-folder loading |
-| 7 | nine unmapped commands | frontend | latent `ValueError` |
+| 1 | handshake order | **engine** (order-independent, as the native path already is) | fixed |
+| 3-D1 | `ct/load-locals` traps | engine | fixed (`wall_clock`) |
+| 3-D2 | boundary step traps | engine | fixed (`wall_clock`) |
+| 3-D3 | `ct/originChain` traps | engine | fixed (`wall_clock`) |
+| 3-D4 | `disconnect` traps | engine | fixed (no writer-thread wait in the browser arm) |
+| 4 | `ct/load-flow` payload | both, via a shared named vocabulary | fixed |
+| 5 | `drainPlatformCallbacks` | the SDK (`launch` no longer assumes) | fixed |
+| 6 | `TraceSource` browser kinds | engine | refused by name; kinds still unimplemented |
+| 7 | nine unmapped commands | frontend | **open** |
 
 §2 and §8 are recorded facts, not defects.
