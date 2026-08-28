@@ -700,10 +700,13 @@ test-rust:
 # Covers the JSONL span-manifest path and, since RS-M2, the CTFS span-stream
 # path: `ct print` reads a recording's HTTP requests out of the container's
 # `spans.dat` and only falls back to a `session_manifest.jsonl` /
-# `codetracer_spans.jsonl` sidecar when the container has no stream.  The
-# script skips (exit 0) when `src/build-debug/bin/ct` has not been built, so it
-# is safe to run in a bare dev shell; run `just build-once` first for real
-# coverage.
+# `codetracer_spans.jsonl` sidecar when the container has no stream.
+#
+# The script FAILS when `src/build-debug/bin/ct` has not been built, so run
+# `just build-once` first.  It is deliberately not safe to run in a bare dev
+# shell: exiting 0 on a missing binary made "ct print is untested" and
+# "ct print works" indistinguishable.  Set CT_PRINT_ALLOW_MISSING=1 to skip it
+# locally before a build; it is never set in a CI gate.
 test-ct-print:
   #!/usr/bin/env bash
   set -e
