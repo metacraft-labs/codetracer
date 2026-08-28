@@ -386,7 +386,18 @@ test_lane_files() {
 			_tlf_reject \
 				'/test_editor_test_controls_m4\.nim$' \
 				'/test_test_explorer_vm\.nim$' \
-				'/test_sdk_facade_boundary\.nim$'
+				'/test_sdk_facade_boundary\.nim$' \
+				'/test_project_action_runner\.nim$'
+		# `test_project_action_runner` (VN-M3) launches real child processes
+		# through `runquota_process`, a POSIX launcher, and reads a project's
+		# `tasks.json` off disk with `std/os`. Neither has a `nim js`
+		# equivalent. The split is deliberate and matches the rejections
+		# above: the *pure* half of the same milestone — the classifier, the
+		# six-outcome vocabulary, the marker builder, the render plan and the
+		# no-replay property — lives in `test_verification_vm.nim` and
+		# `test_project_actions.nim`, which carry no host dependency and DO
+		# run in this lane on both backends.
+		#
 		# `test_editor_test_controls_m4` and `test_test_explorer_vm` call
 		# `os.getCurrentProcessId` to name a per-run temporary directory of real
 		# fixture files, and that proc is an `{.error.}` on the NimScript/JS

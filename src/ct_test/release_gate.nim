@@ -734,6 +734,30 @@ const
     # Runs on BOTH backends: the surface is pure — no filesystem, no HTTP, no
     # `std/times` — for the same reason `artifact_protection.nim` is.
     "src/tests/gui/tests/sharing/artifact_sharing_vm_test.nim",
+    # VN-M3 (Verno-CodeTracer-Integration.milestones.org) — verification as a
+    # project action, at the honest text-fallback tier.  Registered for the
+    # same reason as M2b's pair above: the `vm-unit` glob already RUNS these,
+    # so this is about the other half — that the file still exists and has not
+    # been skip-disabled.
+    #
+    # It matters more than usual here.  The milestone's central deliverable is
+    # a *negative*: an unsupported construct must never render as an unproven
+    # obligation.  A negative property has no user-visible symptom when its
+    # test disappears — the feature keeps working in the common case and the
+    # honesty guarantee is simply gone — so glob discovery alone would be a
+    # weak gate.
+    #
+    # `test_verification_vm.nim` carries all three of the milestone's named
+    # verification tests, and its header states plainly which of them was
+    # reproduced against a live solver on the machine it was written on and
+    # which was not (`venir` is Linux-only).
+    "src/frontend/viewmodel/tests/unit/test_verification_vm.nim",
+    "src/frontend/viewmodel/tests/unit/test_project_actions.nim",
+    # The host half — reading a project's `tasks.json` off disk and running it
+    # as a real, cancellable, poll-driven child process.  Native-only
+    # (`runquota_process` is a POSIX launcher, `std/os` reads files), hence
+    # excluded from `vm-unit-js` and listed here.
+    "src/frontend/viewmodel/tests/unit/test_project_action_runner.nim",
   ]
 
   CliRecordGateTests* = [
