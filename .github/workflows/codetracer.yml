@@ -1309,6 +1309,14 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: "Import GPG key for signing commits"
         id: import-gpg
         uses: crazy-max/ghaction-import-gpg@v6
@@ -1346,6 +1354,14 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Upload script
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
