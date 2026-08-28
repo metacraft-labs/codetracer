@@ -119,6 +119,15 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["locals", "globals", "loadingState", "loadedForRRTicks", "codeStateLine"],
     vscBackendAuthoritative,
     "Variable data and source excerpt are backend-derived for a debugger tick.")
+  # RS-M3 HTTP request tail. The store owns the poll, not the panel: rows,
+  # the opaque poll cursor, the producer label and the load status are all
+  # values the backend-owning peer hands over. The cursor in particular is
+  # protocol state — echoed back verbatim to the same producer — so merging
+  # two peers' cursors would corrupt the stream rather than reconcile it.
+  entries.addMany("RequestSpansStore",
+    ["requests", "cursor", "source", "loadingState"],
+    vscBackendAuthoritative,
+    "Span rows, the opaque poll cursor, the producer label and the load status are backend stream facts.")
 
   # M29 multi-process session surface.
   entries.addEntry("ProcessTreeVM", "entries", vscBackendAuthoritative,
@@ -134,6 +143,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Measured panel height is renderer-local.")
   entries.addEntry("CalltraceVM", "viewportDepth", vscRendererLocal,
     "Render window depth is local virtualization state.")
+  entries.addEntry("CalltraceVM", "rowHeightPx", vscRendererLocal,
+    "Row height measured from the rendered DOM after layout; a per-front-end " &
+    "measurement (font size, em scaling, zoom) that must never travel.")
   entries.addEntry("CalltraceVM", "selectedEntry", vscSharedSessionViewState,
     "Calltrace selection is collaborative session intent.",
     requiresStableId = true,
@@ -163,6 +175,13 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Selected variable path is shared session view state.",
     requiresStableId = true,
     stableIdNote = "String paths are not durable variable identities across backend snapshots.")
+  entries.addEntry("StateVM", "expandedHistories", vscSharedSessionViewState,
+    "Which variables have their value history unfolded is the same kind of " &
+    "expansion intent as `expandedPaths`, and shares its key.",
+    requiresStableId = true,
+    stableIdNote = "Keyed by the dot-separated variable path, which can drift when variable identity/order changes; needs stable variable ids.")
+  entries.addEntry("StateVM", "valueHistory", vscBackendAuthoritative,
+    "Value-history rows are the `ct/load-history` reply, cached under the path they were requested for.")
   # M4 Value Origin Tracking surface mirrored onto the State Pane.
   entries.addEntry("StateVM", "expandedOrigins", vscSharedSessionViewState,
     "Per-row origin-chain expansion set is shared session view state.",
@@ -247,6 +266,17 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("FlowVM", ["iterationCount", "loadingState", "steps"],
     vscBackendAuthoritative,
     "Flow step payloads and loading status are backend-derived.")
+  # The loaded flow window. All three are written together by
+  # `applyFlowUpdate` out of one `ct/load-flow` reply — `loops` is
+  # index-aligned with the backend's own array, `focusedLoop` is
+  # `pickFocusedLoop(loops)` over it, and `windowRRTicks` is the tick the
+  # reply was computed for. They are signals rather than memos only because
+  # the VM owns the window instead of a flow sub-store; nothing here is user
+  # intent, so a peer must receive them from the backend owner as a set and
+  # never merge them.
+  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks"],
+    vscBackendAuthoritative,
+    "The loaded flow window: backend loop array, the loop picked from it, and the tick it was loaded for.")
   entries.addDerived("FlowVM", ["isLoading", "totalIterations"])
 
   entries.addEntry("EditorVM", "activeTabIndex", vscSharedSessionViewState,
@@ -304,6 +334,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["entries", "localsByExpression", "chainEntries"],
     vscSharedSessionViewState,
     "Scratchpad/watch-like entries (including pinned origin-chain entries) are user-authored shared session state.")
+  entries.addEntry("ScratchpadVM", "expandedPaths", vscSharedSessionViewState,
+    "Which scratchpad rows are unfolded is user-authored intent over the same shared entry list.",
+    requiresStableId = true,
+    stableIdNote = "String value paths are not durable identities across backend snapshots; needs stable variable ids.")
   entries.addDerived("ScratchpadVM", ["isEmpty", "rowCount"])
 
   entries.addMany("ShellVM", ["inputBuffer", "scrollPosition", "historyIndex"],
@@ -317,7 +351,15 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Global search results panel query/filter/visibility are shared view state.")
   entries.addEntry("SearchResultsVM", "results", vscBackendAuthoritative,
     "Search result rows are backend/search service output.")
-  entries.addDerived("SearchResultsVM", ["visibleResults", "resultCount"])
+  entries.addEntry("SearchResultsVM", "loading", vscBackendAuthoritative,
+    "In-flight flag for one search request; set on submit and cleared by the first batch of backend results.")
+  entries.addEntry("SearchResultsVM", "recentSearches", vscPresenceAwareness,
+    "A participant's own last ten queries, shown in this panel's empty " &
+    "state. Same call as ShellVM.inputHistory: what one person typed is " &
+    "theirs, not replayable session state, and publishing it would put " &
+    "another participant's search history in front of everyone.")
+  entries.addDerived("SearchResultsVM",
+    ["visibleResults", "resultCount", "fileCount"])
 
   entries.addMany("TraceLogVM", ["entries"], vscBackendAuthoritative,
     "Trace-log entries are backend/session facts.")
@@ -414,6 +456,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Selected request is shared view state.",
     requiresStableId = true,
     stableIdNote = "Current field is an index; needs stable request id.")
+  entries.addEntry("RequestPanelVM", "detailTab", vscSharedSessionViewState,
+    "Which detail tab the selected request is being read through — the same " &
+    "kind of shared pane intent as StateVM.activeTab, and already a stable " &
+    "tab name rather than an index.")
   entries.addDerived("RequestPanelVM", ["filteredRequests"])
 
   entries.addMany("ReplVM", ["history", "replEnabled", "materialized",
@@ -437,10 +483,29 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
                             "hunkToolbarVisible", "hunkCopyFeedback"],
     vscRendererLocal,
     "Dropdowns and copy feedback are local UI state.")
-  entries.addEntry("VCSVM", "selectedCommitIndex", vscRendererLocal,
-    "Current VCS selection uses an index and is not part of replay session sync.",
+  # `selectedCommitIndex` became `selectedCommitIndices` when the commit
+  # accordion gained ctrl/shift multi-select; the classification is unchanged,
+  # for the reason the whole VCS panel is renderer-local — it describes the
+  # *local* repository checkout, which is not the object a replay session is
+  # shared over and need not even be the same tree on another participant's
+  # machine.
+  entries.addEntry("VCSVM", "selectedCommitIndices", vscRendererLocal,
+    "Expanded/selected commit rows are a view of the local repository, outside replay session sync.",
     requiresStableId = true,
-    stableIdNote = "Would need commit hash/id if synchronized.")
+    stableIdNote = "Currently commit row indices; would need commit hashes if synchronized.")
+  entries.addEntry("VCSVM", "lastClickedIndex", vscRendererLocal,
+    "Shift-click anchor for commit range selection; a local pointer gesture.",
+    requiresStableId = true,
+    stableIdNote = "Currently a commit row index; would need a commit hash if synchronized.")
+  entries.addEntry("VCSVM", "commitFilesMap", vscBackendAuthoritative,
+    "Per-commit file rows read from the local repository, alongside `commits` and `changedFiles`.")
+  entries.addEntry("VCSVM", "loadingMore", vscBackendAuthoritative,
+    "In-flight flag for the next commit page; a request-lifecycle fact of the fetch it guards.")
+  entries.addEntry("VCSVM", "viewMode", vscRendererLocal,
+    "What a file click opens in *this* panel instance (`vcs.defaultView`). " &
+    "It never changes what the panel renders, and the docked panel and a " &
+    "diff tab of the same session deliberately hold different values, so it " &
+    "is per-panel local behaviour rather than session intent.")
   entries.addEntry("VCSVM", "selectedHunks", vscRendererLocal,
     "Hunk selection uses local diff coordinates.",
     requiresStableId = true,
@@ -492,6 +557,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["rootEntry", "diffEntries"],
     vscBackendAuthoritative,
     "Filesystem tree/diff contents are local repository facts.")
+  entries.addEntry("FilesystemVM", "loadingState", vscBackendAuthoritative,
+    "Tree/diff load status belongs to the index-process request that fills `rootEntry`.")
   entries.addEntry("FilesystemVM", "expandedPaths", vscSharedSessionViewState,
     "Filesystem expansion can be shared as logical path state.",
     requiresStableId = true,
@@ -503,10 +570,32 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
      "wantsPassword", "wantsPermission", "sessionKey"],
     vscBackendAuthoritative,
     "Agent activity stream/session status is service-owned.")
+  # AA-2/AA-3. `testRuns` and `evidenceCalls` are re-derived from `messages`
+  # on every `setMessages`, and `evidenceDatasets` is what the host found out
+  # by reading each dataset path. All three are signals rather than memos
+  # because a projection cannot read a file and the dataset answers have to
+  # survive a re-sync — but none of them is user intent, so they follow
+  # `messages` and stream from the peer that owns the session.
+  entries.addMany("AgentActivityVM",
+    ["testRuns", "evidenceCalls", "evidenceDatasets"],
+    vscBackendAuthoritative,
+    "Test-run and evidence projections of the session feed, plus the host's answers about each dataset path.")
+  entries.addEntry("AgentActivityVM", "sessionNotice", vscBackendAuthoritative,
+    "RV-6 — why this panel is showing the conversation it is showing; the " &
+    "outcome of the session load, stated by whoever performed it.")
+  # §2.1.2 "the summary is drillable": which cards a reviewer has opened is
+  # ordinary shared expansion intent, the same class as the calltrace and
+  # state-pane expansion sets. Both are already keyed by identities that do
+  # not drift — a run by the id of the message it anchors to, a test row by
+  # `expansionKey(anchorId, testId)` — so neither is stable-id blocked.
+  entries.addMany("AgentActivityVM", ["expandedTestRuns", "expandedTests"],
+    vscSharedSessionViewState,
+    "Drilled-open test-run and test rows are shared review intent, keyed by agent message anchor ids.")
   entries.addEntry("AgentActivityVM", "inputValue", vscRendererLocal,
     "Prompt draft is local typing state.")
   entries.addDerived("AgentActivityVM",
-    ["messageCount", "terminalCount", "hasMessages"])
+    ["messageCount", "terminalCount", "hasMessages", "hasSessionNotice",
+     "testRunCount", "evidenceCallCount"])
 
   entries.addMany("AgentWorkspaceVM",
     ["viewKind", "workspacePath", "sessionId", "summary", "files",
