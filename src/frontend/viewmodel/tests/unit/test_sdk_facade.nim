@@ -26,13 +26,19 @@
 ## The third property — that reaching past the facade *fails* — cannot be
 ## asserted by a Nim compile, because Nim is perfectly happy to import an
 ## internal. It is asserted by running the import lint against a synthetic
-## tree, at the bottom of this file.
+## tree, and that lives in `test_sdk_facade_boundary.nim`: it needs
+## `std/osproc`, which does not compile on the JS target, and keeping it here
+## made this file — the whole of M2a's
+## `test_session_lifecycle_and_error_taxonomy` evidence — C-backend-only. See
+## that file's header for the defect the limit was hiding.
 ##
-## Compile and run:
+## Compile and run, on BOTH backends:
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_sdk_facade.nim
+##   nim js -d:nodejs -r --path:src/frontend/viewmodel \
+##     src/frontend/viewmodel/tests/unit/test_sdk_facade.nim
 
-import std/[json, options, os, osproc, random, strutils, times, unittest]
+import std/[json, options, strutils, unittest]
 
 import codetracer_embed
 
@@ -228,6 +234,46 @@ suite "Embed SDK facade — DebuggerSession lifecycle (spec §3.1 row 4, §6)":
     session.dispose()  # must not fault
     check session.phase.val == dspDisposed
 
+  test "dispose(disconnectBackend = false) really leaves the transport up":
+    # The flag's whole purpose is a host that owns the transport's lifetime:
+    # `HeadlessDebugSession.close` passes `false` and then calls
+    # `DapStdioBackend.close` itself, and its comment says why — routing a
+    # second disconnect through `BackendService` would close the same child
+    # process handle twice.
+    #
+    # It did not work. `DebuggerSession.dispose` honoured the flag on its own
+    # `s.backend.disconnect()` line but called `AppViewModel.dispose` above
+    # it, which reached `SessionViewModel.dispose`, which disconnected
+    # unconditionally. Nothing caught it because no suite had ever asserted
+    # on the flag: the four `vm-gui-headless` suites that exercise this path
+    # against a real `replay-server` had never been run, only compiled
+    # (BlockTracer.milestones.org M2a, item 3).
+    let mock = mockBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/trace"))
+    session.dispose(disconnectBackend = false)
+    check session.isDisposed
+    check not mock.disconnected
+
+  test "dispose(disconnectBackend = false) still ends the session":
+    # The other half of the same flag: it must not become a way to keep a
+    # half-live session. Only the transport is spared — the session itself is
+    # as dead as after an ordinary dispose, which is what stops the fix from
+    # being "skip the teardown".
+    let mock = mockBackend()
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/tmp/trace"))
+    session.dispose(disconnectBackend = false)
+    check session.phase.val == dspDisposed
+    check not mock.disconnected
+    var kind: DebuggerSessionErrorKind
+    try:
+      session.launch(localFolderTrace("/tmp/other"))
+      session.raiseIfFailed()
+    except DebuggerSessionError as e:
+      kind = e.kind
+    check kind == dseCancelled
+
   test "launching a disposed session is Cancelled, not a crash":
     let session = newDebuggerSession(mockBackend().toBackendService())
     session.dispose()
@@ -381,77 +427,3 @@ suite "Embed SDK facade — clock (spec §3.1 row 7)":
     withFakeTime:
       tc.advance(10.0)
       check tc.now() == 10.0
-
-# ---------------------------------------------------------------------------
-# The boundary itself
-# ---------------------------------------------------------------------------
-
-suite "Embed SDK facade — the boundary is enforced, not documented":
-
-  # The guard is a bash script, so these run it. They are the only place in
-  # this file that shells out, and the reason is that the property under test
-  # is "a build fails", which no Nim expression can assert about itself.
-
-  const repoRoot = currentSourcePath().parentDir.parentDir.parentDir
-                     .parentDir.parentDir.parentDir
-    ## src/frontend/viewmodel/tests/unit/<this file> -> six levels to the root.
-
-  proc runGuard(root: string): tuple[output: string, exitCode: int] =
-    execCmdEx("bash " & (repoRoot / "ci/test/sdk-facade-boundary.sh") &
-              " --root " & quoteShell(root))
-
-  proc writeConsumer(dir, name, body: string) =
-    createDir(dir)
-    writeFile(dir / name, body)
-
-  proc syntheticTree(consumerImport: string): string =
-    ## A minimal repo-shaped tree: a facade, one internal, and one declared
-    ## consumer importing whatever the caller asks for.
-    let root = getTempDir() / "ct-sdk-boundary-" & $epochTime().int64 &
-               "-" & $rand(high(int))
-    let vmDir = root / "src/frontend/viewmodel"
-    createDir(vmDir)
-    writeFile(vmDir / "codetracer_embed.nim",
-      "const CodeTracerEmbedFacadeModule* = \"codetracer_embed\"\n")
-    createDir(vmDir / "store")
-    writeFile(vmDir / "store" / "replay_data_store.nim", "const X* = 1\n")
-    writeConsumer(root / "consumer", "pane.nim",
-      "## SDK-CONSUMER: synthetic\nimport " & consumerImport & "\n")
-    # The guard enumerates through git, so the tree has to be a repo.
-    discard execCmdEx("git -C " & quoteShell(root) & " init -q")
-    root
-
-  test "the guard passes on this repository":
-    let (output, exitCode) = runGuard(repoRoot)
-    if exitCode != 0:
-      echo output
-    check exitCode == 0
-    check output.contains("OK        facade-present")
-    check output.contains("OK        consumer-facade-only")
-
-  test "a deliberate reach past the facade fails the check":
-    let root = syntheticTree("../src/frontend/viewmodel/store/replay_data_store")
-    defer: removeDir(root)
-    let (output, exitCode) = runGuard(root)
-    check exitCode != 0
-    check output.contains("VIOLATION consumer-facade-only")
-    check output.contains("That is an SDK internal")
-
-  test "the same consumer importing only the facade passes":
-    let root = syntheticTree("../src/frontend/viewmodel/codetracer_embed")
-    defer: removeDir(root)
-    let (output, exitCode) = runGuard(root)
-    if exitCode != 0:
-      echo output
-    check exitCode == 0
-    check output.contains("OK        consumer-facade-only")
-
-  test "this file is itself a declared consumer":
-    # If the marker at the top of this file were removed, the suite above
-    # would still pass while asserting nothing about a real consumer. This is
-    # the check that notices.
-    let (output, exitCode) = runGuard(repoRoot)
-    check exitCode == 0
-    check not output.contains("consumer-declared: no file declares")
-    let source = readFile(currentSourcePath())
-    check source.contains("## SDK-CONSUMER:")
