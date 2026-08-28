@@ -2656,11 +2656,11 @@
     "io-mon": {
       "flake": false,
       "locked": {
-        "lastModified": 1783196280,
-        "narHash": "sha256-9bO+TbsTWeyAgMIKginK9YANeQOLlpsapMo0xXJRkkA=",
+        "lastModified": 1787917584,
+        "narHash": "sha256-oVj85ukC5bLmegp0gqmY1/HGs5ximDC5tUlBSJN3Pzc=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "dd97afa4feae23025f90b237b6a5e409ca9f5113",
+        "rev": "e2ee15afe8dd7f538ec2ce79af9a1aa512addce2",
         "type": "github"
       },
       "original": {
