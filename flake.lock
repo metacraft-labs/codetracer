@@ -2673,17 +2673,17 @@
     "io-mon-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1787244587,
-        "narHash": "sha256-SrxBD9mnvs+A2OjXLjGN3bRAE+pKEyH5oV/7y9Il6OY=",
+        "lastModified": 1787845469,
+        "narHash": "sha256-Pd0g5lxoNr8vfb+r1j2+ThLLbakb9NPD7xOx4HoPP9c=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "3a7c15cd037dabc4c5dd7f3fe327334ffdaca4b9",
+        "rev": "cb26b626e6642f00818da0f64938e64c7ae0d209",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "3a7c15cd037dabc4c5dd7f3fe327334ffdaca4b9",
+        "rev": "cb26b626e6642f00818da0f64938e64c7ae0d209",
         "type": "github"
       }
     },
@@ -3117,6 +3117,23 @@
         "owner": "metacraft-labs",
         "ref": "dev",
         "repo": "nim-stackable-hooks",
+        "type": "github"
+      }
+    },
+    "nim-stackable-hooks-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787764409,
+        "narHash": "sha256-Lv0i9MBGkwPFfEaOxB7y9ixwt7dOvJIKj3W4R/BpyOY=",
+        "owner": "metacraft-labs",
+        "repo": "nim-stackable-hooks",
+        "rev": "41ab1b987aba67e8bcc34a5945ac33e17b6418ed",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-stackable-hooks",
+        "rev": "41ab1b987aba67e8bcc34a5945ac33e17b6418ed",
         "type": "github"
       }
     },
@@ -5080,6 +5097,7 @@
         "nim-results-src": "nim-results-src",
         "nim-shm-gset-src": "nim-shm-gset-src",
         "nim-shm-queue-src": "nim-shm-queue-src",
+        "nim-stackable-hooks-src": "nim-stackable-hooks-src",
         "nim-stew-src": "nim-stew-src",
         "nimcrypto-src": "nimcrypto-src",
         "nixos-modules": [
@@ -5093,21 +5111,20 @@
         "reprobuild-test-adapters-src": "reprobuild-test-adapters-src",
         "runquota-src": [
           "runquota"
-        ],
-        "stackable-hooks-src": "stackable-hooks-src"
+        ]
       },
       "locked": {
-        "lastModified": 1787673032,
-        "narHash": "sha256-DR1cpkKod/ogdxA029eIMkBxv+TdvwJL7HwJXk3WSJk=",
+        "lastModified": 1787924792,
+        "narHash": "sha256-4Aw0rOiq9xsuJ/gsCa6TA482fKGk7MyfiZwC+euG6Ls=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "b5b88139767d97e96ca646b6f83641d8bb2e69c5",
+        "rev": "2f124aebbc8a9e61e87de1aa13e15298a83f88c6",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "b5b88139767d97e96ca646b6f83641d8bb2e69c5",
+        "rev": "2f124aebbc8a9e61e87de1aa13e15298a83f88c6",
         "type": "github"
       }
     },
@@ -5204,17 +5221,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1787618104,
-        "narHash": "sha256-93KLZF8xbw+MSF8Xxthe20IlZbCQcIpkdyJF/bSESEI=",
+        "lastModified": 1787755082,
+        "narHash": "sha256-/oP/IwHRtjpbjSlj9cq1G/+MvyavhCP28kFUWdE66iw=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "b71e8e9061b479334d9b78638cfb828af2db938d",
+        "rev": "f1ca742d19c7b981eeea0fba8b4e029207f43778",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "b71e8e9061b479334d9b78638cfb828af2db938d",
+        "rev": "f1ca742d19c7b981eeea0fba8b4e029207f43778",
         "type": "github"
       }
     },
@@ -5472,23 +5489,6 @@
       "original": {
         "type": "git",
         "url": "https://spectrum-os.org/git/spectrum"
-      }
-    },
-    "stackable-hooks-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783704961,
-        "narHash": "sha256-h7n3HjLeaa0/VDEO8vtZTvEuNRAJjOSD1ZGJrmW4QRY=",
-        "owner": "metacraft-labs",
-        "repo": "nim-stackable-hooks",
-        "rev": "30f69b6ca69c7f06c9a9946b77a85a09f6e3881d",
-        "type": "github"
-      },
-      "original": {
-        "owner": "metacraft-labs",
-        "repo": "nim-stackable-hooks",
-        "rev": "30f69b6ca69c7f06c9a9946b77a85a09f6e3881d",
-        "type": "github"
       }
     },
     "systems": {
