@@ -676,6 +676,20 @@ func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
   ## `KEYWORDS[lang]` reads carried it: `FLOW_TOKEN_LANGUAGES` is a module-level
   ## `let`, which Nim treats as a side effect to touch, and `ensureTokens` — the
   ## only caller — is itself a `func`.
+  ##
+  ## ONE representational difference from the version that lived here, bounded
+  ## and checked rather than assumed away. The old loop walked the `cstring`
+  ## directly, which on the JS backend indexes UTF-16 code units; `$source` is
+  ## `cstrToNimstr`, so this one indexes UTF-8 bytes. The TOKENS are identical
+  ## either way — every identifier and string-delimiter character in every
+  ## profile is ASCII — but the COLUMN of a token that follows a non-ASCII
+  ## character on the same line differs by that character's encoding delta.
+  ##
+  ## It is unobservable, and that is checkable rather than hopeful:
+  ## `ensureTokens` stores the column as the VALUE of `editorUI.tokens[line]`,
+  ## and both readers (`calculateLayout` and `renderFlow`, below) iterate that
+  ## map for the label and discard the value. Nothing outside this file reads
+  ## `editorUI.tokens` at all.
   result = @[]
   {.noSideEffect.}:
     for token in tokenizeSourceExpressions($source, FLOW_TOKEN_LANGUAGES[lang]):
@@ -2116,12 +2130,31 @@ proc resetColumnsWidth*(self:FlowComponent, deltaWidth: int, loopIndex:int, shri
 # widest value row, and the percentages a heading and a value cell occupy of
 # their rows.
 #
-# NEITHER HAD A CALL SITE. Nothing in the tree invoked either, which is why
-# `makeLegend` — which is called, from `addComplexLoopStepValues` — reads
-# `expressionLegendPercent` and `legendValueGapPercentage` and gets the `0` they
-# were initialised with, and lays every heading out at `0%`. That is a real
-# defect and it is deliberately NOT fixed here: this change is a refactor, and
-# wiring the computation up would change what the desktop draws.
+# NEITHER HAD A CALL SITE. Nothing in the tree invoked either — verified by
+# `git grep` against `dev`: forward declaration, definition, and comments in
+# `review_flow_overlay.nim` describing the algorithm, nothing more.
+#
+# THE CONSEQUENCE IS A LIVE DEFECT, and it is worse than a wrong number.
+# `calculatePositionMaxWidth` was the only writer of `LoopState.positions`,
+# which is otherwise initialised empty (`makeLoopState`) and never filled. Three
+# procs read through it. Two of them — `complexValueStyle` and
+# `legendValueStyle` — have no call site either. The third, `makeLegend`, IS
+# called (`addComplexLoopStepValues` <- `recreateLoopContainerAndSteps`, for
+# both `FlowParallel` and `FlowInline`), and it reads
+#
+#     loopStates[loop].positions[position].positionColumns[iteration]
+#       .valuesExpressions[expression].expressionLegendPercent
+#
+# which the JS backend emits as exactly that chain, unguarded. `positions[...]`
+# is `undefined`, so the next `.positionColumns` raises a TypeError — the
+# heading is not laid out at `0%`, the legend is not built at all. The same
+# dead writer is why `LoopState.defaultIterationWidth` starts at 0 and is
+# thereafter only ever moved by the two keyboard zoom commands in `ui_js.nim`.
+#
+# It is deliberately NOT fixed here: this change is a refactor, and wiring the
+# computation up would change what the desktop draws. It is recorded in
+# `codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md` so that it does
+# not survive only as a comment in the file it was found in.
 #
 # The computation itself now lives as `flow_layout.computeLoopColumnPlan`, in
 # characters and percentages with the two `pixelsPerSymbol` multiplications left

@@ -214,6 +214,26 @@ have no Rust counterpart even once the encoding is fixed.
 emits `ct/updated-flow` as an unsolicited event. The Rust side's own test agrees
 (`src/db-backend/tests/leo_search_calltrace_test.rs:159` sends `"flowMode": 0`).
 
+### 4a. The response is a placeholder; the window is the event, and the event queues
+
+Measured against the native `replay-server` while capturing
+`tests/fixtures/flow/zk_shields_flow_window.json` beside this file
+(`capture_zk_shields_flow.nim`), and it is the half a client gets wrong:
+
+* The **response** to `ct/load-flow` carries a placeholder window, not the
+  loaded one. A client that reads the response and stops has an empty flow pane
+  and no error to explain it.
+* The real window is `ct/updated-flow`'s `body.viewUpdates[0]`.
+* Events **queue**. `ct/load-flow` is sent after a `continue`/breakpoint
+  sequence that has already produced `ct/updated-flow` events for earlier
+  positions, so a `waitForEvent("ct/updated-flow")` issued without draining
+  first returns a window computed for a **previous** location. It parses, it has
+  steps and loops, and it is wrong — a silent wrong answer rather than an error,
+  which is why it costs an hour rather than a minute.
+
+The working sequence is therefore: drain, request with `flowMode` as a number,
+then wait for the event.
+
 ---
 
 ## 5. `drainPlatformCallbacks()` cannot observe a real async transport on JS

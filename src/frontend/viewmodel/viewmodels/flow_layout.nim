@@ -964,13 +964,13 @@ func computeLoopColumnPlan*(window: FlowLayoutWindow; loopIndex: int):
   ##
   ## **Neither original proc had a call site.** `calculatePositionMaxWidth` was
   ## defined at `ui/flow.nim:2150` and `realignPositionWidths` at 2210, and
-  ## nothing in the tree called either. `makeLegend` — which *is* called — reads
-  ## `expressionLegendPercent` and `legendValueGapPercentage`, the two fields
-  ## only those procs write, so on the desktop today it lays every heading out
-  ## at `0%`. That is a real defect and it is deliberately NOT fixed here: this
-  ## change is a refactor, and wiring the computation up would change what the
-  ## desktop draws. It is recorded so the next person does not read the `0%` as
-  ## intended.
+  ## nothing in the tree called either. They were also the only writers of
+  ## `LoopState.positions`, so `makeLegend` — which *is* called — indexes an
+  ## empty map and dereferences the `undefined` it gets back. The desktop's loop
+  ## legend does not render at all; it is not merely laid out at `0%`. That
+  ## defect is deliberately NOT fixed by this extraction — a refactor must not
+  ## change what the desktop draws — and is recorded in
+  ## `Omniscience-Flow.md` and in `ui/flow.nim` where the procs used to be.
   ##
   ## The practical consequence for this extraction is that these percentages are
   ## reaching a renderer for the first time, and the first renderer to draw them

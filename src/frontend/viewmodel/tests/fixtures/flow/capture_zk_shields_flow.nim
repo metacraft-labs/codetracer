@@ -19,17 +19,21 @@
 ## committed output instead of running it.
 ##
 ## Two things about the DAP exchange are worth writing down, because both cost
-## an hour to discover and neither is documented anywhere else:
+## an hour to discover:
 ##
 ##   1. **`FlowMode` goes on the wire as a NUMBER.** It is `Serialize_repr` in
-##      `db-backend/src/task.rs`, so `Call` is `0`. Sending the Nim enum's
-##      spelling is accepted as a request and answered with a window for the
-##      wrong location — which is the arg mismatch `viewmodels/flow_vm.nim`'s
-##      header records the backend rejecting.
+##      `db-backend/src/task.rs`, so `Call` is `0`; the Nim enum's spelling
+##      (`"fmCall"`, which `viewmodels/flow_vm.nim` sends) is not accepted.
+##      `backend/dap_dialect.md` §4 has the full encoding analysis and the
+##      wasm32 measurement.
 ##   2. **The real window arrives as a `ct/updated-flow` EVENT**, not in the
-##      response; the response carries a placeholder. Events queue, so the queue
+##      response; the response carries a placeholder. Events QUEUE, so the queue
 ##      has to be drained before the request or `waitForEvent` hands back a
-##      window computed for an earlier position.
+##      window computed for an EARLIER position — a silent wrong answer rather
+##      than an error, and the reason this generator calls `drainEvents()`
+##      first. That half is not in `dap_dialect.md` §4, which records that the
+##      event is emitted but not that reading it without draining gives you the
+##      previous one; see the note added there.
 ##
 ## Usage:
 ##   nim c -r --path:src/frontend/viewmodel --path:src/frontend --path:src \
