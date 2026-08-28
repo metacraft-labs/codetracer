@@ -2628,3 +2628,42 @@ It uses `mapfile`, which macOS's /bin/bash 3.2 does not have. Run outside the
 dev shell it prints `mapfile: command not found` plus `unbound variable`
 noise, and `sdk-facade-boundary-test.sh` reports 20 spurious failures. Run
 both through `direnv exec <repo> bash -c '...'`, which supplies bash 5.
+
+## The ViewModels and the wasm32 replay engine speak different DAP dialects
+
+`src/frontend/viewmodel/backend/dap_dialect.md` is the measured, reproduced
+record — eight disagreements, four of which trap the WASM worker. Read it
+before wiring any pane to `WorkerBackendService`. The three that bite first:
+
+* **Handshake order.** `sdk/debugger_session.nim:377-383` sends `initialize ->
+  configurationDone -> launch`; the browser engine needs `launch` before
+  `configurationDone`, because `handle_message_browser`'s `configurationDone`
+  arm (`dap_server.rs:2743-2775`) is the only place the `Handler` is ever
+  constructed and it reads a folder only `launch` populates. Get it wrong and
+  all three requests answer `success: true`, then every later request is
+  dropped with a bare `warn!` (`dap_server.rs:2809`) — no response, so the
+  future hangs forever. The NATIVE path tolerates both orders; the browser
+  path's copies of both tolerances are inert because they are `&&`-chained
+  onto `ctx.to_stable_sender`, which is `None` in the browser.
+* **`SystemTime::now()` traps on wasm32.** No cfg guard, no shim; `vfs.rs`
+  works around it for the VFS only. `ct/load-locals` (so the State pane cannot
+  work at all), `ct/originChain`, any step reaching a trace boundary, and
+  `disconnect` all die. `probe_engine_defects.mjs` reproduces all four.
+* **`drainPlatformCallbacks()` cannot see a real transport.** On JS,
+  `onComplete` uses the drainable queue only for `__syncResolved` futures —
+  i.e. `newCompletedFuture`, i.e. `mock_backend`. Anything built with
+  `newPromise` and resolved later (`worker_backend`, `real_backend`) is
+  observed by a `.then` microtask a synchronous drain cannot pump. This site
+  has now been wrong twice for two different reasons; commit `caaea86c` fixed
+  the synchronous half only.
+
+## Two dispatch tables, and neither is in `dap_handler.rs`
+
+`dap_handler.rs` has no `match` on a command string at all — it holds the
+handler methods. The tables are `dap_server.rs:2043` (`handle_request`, the
+full command set) and `dap_server.rs:2676` (`handle_message_browser`, which
+handles only initialize/launch/configurationDone/disconnect and delegates the
+rest to `handle_request`). Grepping `dap_handler.rs` for command-looking
+strings matches filesystem paths (`meta_dat/sources`, `origin-patterns`), a
+replay-task name (`"flow"`) and a default literal (`"source"`) — none of them
+commands.
