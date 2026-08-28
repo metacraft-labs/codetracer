@@ -11,6 +11,9 @@ name: Deploy get.codetracer.com
 # The `get-codetracer` project's production branch is `master`, so we deploy with
 # `--branch master` to publish a PRODUCTION deployment (served on the custom
 # domain) regardless of which repo branch triggered the run.
+#
+# Wrangler is the flake-pinned binary from `devShells.ci` (nix/shells/ci-base.nix),
+# invoked via `nix develop .#ci` — never an ad-hoc npx / nixpkgs# wrangler.
 
 on:
   push:
@@ -29,19 +32,44 @@ concurrency:
 jobs:
   deploy:
     name: Deploy get.codetracer.com
-    runs-on: ubuntu-latest
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     permissions:
       contents: read
       deployments: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Mint installation token for cross-repo sibling access
+        # Same per-run installation-token pattern as the other nix jobs:
+        # the setup-nix composite needs a token that can read the sibling
+        # flakes referenced by this repo's flake inputs.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Assemble get/dist
-        run: bash get/build-get.sh
+        run: nix develop .#ci --command bash get/build-get.sh
 
       - name: Publish to Cloudflare Pages (get-codetracer)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy get/dist --project-name=get-codetracer --branch=master --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          nix develop .#ci --command \
+            wrangler pages deploy get/dist \
+              --project-name=get-codetracer \
+              --branch=master \
+              --commit-dirty=true

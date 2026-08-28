@@ -181,6 +181,12 @@ with pkgs;
     gh
     awscli2
 
+    # Cloudflare Pages publisher for get.codetracer.com. Flake-pinned so
+    # `nix develop .#ci --command wrangler pages deploy …` in
+    # deploy-get.yml runs the exact wrangler locked here (never an
+    # ad-hoc npx / nixpkgs# wrangler). See .github/workflows/deploy-get.yml.
+    wrangler
+
     # Playwright (M5 lane + codetracer's own TS e2e suite).
     playwright-driver.browsers
     playwright
