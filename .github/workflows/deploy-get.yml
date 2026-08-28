@@ -68,6 +68,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          # Wrangler stores its deploy cache under <cwd>/node_modules/.cache/wrangler
+          # and errors ("A file or directory could not be found. Missing file or
+          # directory: node_modules/.cache/wrangler") when that path's parent does
+          # not exist — which it never does here, since this repo is not a node
+          # project at its root. Pre-create it so the flake-pinned wrangler can
+          # write its cache.
+          mkdir -p node_modules/.cache/wrangler
           nix develop .#ci --command \
             wrangler pages deploy get/dist \
               --project-name=get-codetracer \
