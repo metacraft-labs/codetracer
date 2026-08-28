@@ -547,7 +547,7 @@ jobs:
         # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps AND
         # the open-coded toolchain installs (dtolnay rust-toolchain, choco
         # capnproto, choco nim).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -712,7 +712,7 @@ jobs:
         # AND the hand-rolled "Bootstrap Windows dev environment" env-export
         # (the composite captures the full env.ps1 delta, a superset of the
         # vars that step exported by hand).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -908,7 +908,7 @@ jobs:
         # Nix steps. The direnv-allow + ct_emulator nimble steps below remain
         # bespoke because they operate inside the cloned native-recorder
         # sibling's own dev env.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -1247,7 +1247,7 @@ jobs:
         # the workspace-sibling layout the tests resolve
         # (../codetracer-js-recorder/packages/cli/dist/index.js) per
         # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-js-recorder
           # `dev` is that repo's default branch; `main` trails it (15 commits
@@ -2063,7 +2063,7 @@ jobs:
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
           ref: main
@@ -2072,7 +2072,7 @@ jobs:
 
       - name: Clone ruby-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: main
@@ -2098,7 +2098,7 @@ jobs:
       # nixos leg; setup-dev-env's nix install is idempotent.
       - name: Setup dev env (BEAM siblings, nixos)
         if: matrix.platform == 'nixos'
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -2174,7 +2174,7 @@ jobs:
 
       - name: Clone codetracer-beam-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-beam-recorder
           ref: main
@@ -2268,7 +2268,7 @@ jobs:
         # ``./ci/test/ui-tests-db.sh`` invocations run at the top shell (the
         # explicitly *non-nix* macOS build path) and rely on those tools being
         # on the system PATH rather than inside codetracer's nix dev shell.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -2349,7 +2349,7 @@ jobs:
         # ``--path:../codetracer-snapshot-codecs/src`` into the Nim
         # compile.  The build aborts with ``cannot open file:
         # snapshot_codecs`` without this checkout.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-snapshot-codecs
           ref: main
@@ -2362,7 +2362,7 @@ jobs:
         # Companion sibling to codetracer-snapshot-codecs threaded via
         # the same ``config.nims`` --path; without it ST-M3 test
         # imports break the visual-replay build.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-image-diff
           ref: main
@@ -2451,7 +2451,7 @@ jobs:
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
           ref: main
@@ -2460,7 +2460,7 @@ jobs:
 
       - name: Clone ruby-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: main
@@ -2512,7 +2512,7 @@ jobs:
         # The flake build below reads the in-repo path
         # libs/codetracer-trace-format, so the sibling clone is mirrored
         # there by the next step.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -2603,7 +2603,7 @@ jobs:
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
