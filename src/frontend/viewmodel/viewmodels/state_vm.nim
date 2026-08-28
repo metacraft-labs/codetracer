@@ -17,6 +17,11 @@
 ## moves in headless/app-VM sessions must be enough to request fresh locals
 ## without relying on component side effects.
 ##
+## Degraded state (Page-Descriptions.md §14):
+## - `degradedState`: resolved against `StatePaneDegradations`
+## - `hasCodeState`: whether there is source for the current position —
+##   moved here out of the view, where it was an inline length test
+##
 ## Usage:
 ##   let vm = createStateVM(store)
 ##   echo vm.activeTab.val        # stLocals
@@ -109,6 +114,20 @@ type
       ## position — the view renders the ``no-code`` fallback in that
       ## case so the ``#code-state-line-{id}`` element is always
       ## present in the DOM (Playwright tests rely on its presence).
+    degradedState*: Memo[PaneDegradation]
+      ## Page-Descriptions.md §14, resolved against
+      ## `StatePaneDegradations`. `pdTraceTruncated` is the row this pane
+      ## needs most: past the truncation point "no locals here" and "no
+      ## locals were kept" are different answers, and only the second one
+      ## is true.
+    hasCodeState*: Memo[bool]
+      ## Whether `codeStateLine` has content to render.
+      ##
+      ## This memo exists because the desktop view had the decision
+      ## inline — `if vm.codeStateLine.val.len == 0: "code-state-line
+      ## no-code"` in `views/isonim_state_view.nim` — which is precisely
+      ## the "branch in a view" §14 forbids. The view now asks the
+      ## ViewModel, and a second surface cannot answer it differently.
     onToggleHistory*: proc(expression: string)
       ## Optional bridge installed by StateComponent so the IsoNim
       ## value-history button can still enter the legacy history
@@ -522,6 +541,13 @@ proc createStateVM*(store: ReplayDataStore;
     let codeStateLine = createMemo[string] proc(): string =
       store.locals.codeStateLine.val
 
+    let hasCodeState = createMemo[bool] proc(): bool =
+      store.locals.codeStateLine.val.len > 0
+
+    # Derived: the §14 degraded state this pane renders.
+    let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
+      resolveDegradation(store.degradedSnapshot(), StatePaneDegradations)
+
     let vm = StateVM(
       store: store,
       collabCore: collabCore,
@@ -535,6 +561,8 @@ proc createStateVM*(store: ReplayDataStore;
       currentVariables: currentVariables,
       isLoading: isLoading,
       codeStateLine: codeStateLine,
+      hasCodeState: hasCodeState,
+      degradedState: degradedState,
       expandedOrigins: expandedOrigins,
       breadcrumbStack: breadcrumbStack,
       originSummaries: originSummaries,

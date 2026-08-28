@@ -19,6 +19,10 @@
 ## whenever scrollPosition or viewportHeight change, so the panel always
 ## displays data for the current scroll region.
 ##
+## Degraded state (Page-Descriptions.md §14):
+## - `degradedState`: resolved against `CalltracePaneDegradations`; a
+##   truncated trace's call tree ends before the execution did
+##
 ## Usage:
 ##   let vm = createCalltraceVM(store)
 ##   echo vm.scrollPosition.val     # 0
@@ -105,6 +109,14 @@ type
     hasMoreBelow*: Memo[bool]
     highlightedMatches*: Memo[seq[int64]]
     isLoading*: Memo[bool]
+
+    # -- Degraded state (Page-Descriptions.md §14) --
+    degradedState*: Memo[PaneDegradation]
+      ## Resolved against `CalltracePaneDegradations`. The row that
+      ## matters most here is `pdTraceTruncated`: a truncated trace's
+      ## call tree ends before the execution did, and a pane that renders
+      ## it as an ordinary end of trace is making a false claim about the
+      ## program.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -403,6 +415,10 @@ proc createCalltraceVM*(store: ReplayDataStore;
     # em/rem-derived pixel height rather than the compile-time approximation.
     let rowHeightPx = createSignal(24.0)
 
+    # Derived: the §14 degraded state this pane renders.
+    let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
+      resolveDegradation(store.degradedSnapshot(), CalltracePaneDegradations)
+
     let vm = CalltraceVM(
       store: store,
       collabCore: collabCore,
@@ -421,6 +437,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       hasMoreBelow: hasMoreBelow,
       highlightedMatches: highlightedMatches,
       isLoading: isLoading,
+      degradedState: degradedState,
       disposeProc: wrappedDispose,
     )
 

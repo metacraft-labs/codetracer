@@ -17,6 +17,13 @@
 ##   identity for workflows where the same file path has multiple recorded
 ##   contents, such as live HCR
 ##
+## Degraded state (Page-Descriptions.md §14):
+## - `degradedState`: the one §14 row this pane renders, resolved from the
+##   store's four axes against `EditorPaneDegradations`
+## - `sourceAvailability` / `instructionLevelStepping`: §14's "No verified
+##   source" row, which is the editor's alone because it is the only pane
+##   that renders source
+##
 ## Usage:
 ##   let vm = createEditorVM(store)
 ##   echo vm.activeTabIndex.val       # 0
@@ -64,6 +71,24 @@ type
     activeSourceGeneration*: Memo[int]
     activeSourceDigest*: Memo[string]
     executionCursorKind*: Memo[string]
+
+    # -- Degraded state (Page-Descriptions.md §14) --
+    degradedState*: Memo[PaneDegradation]
+      ## The one value the view renders a treatment for, resolved from
+      ## the store's four axes against `EditorPaneDegradations`. §14:
+      ## "Every row above is a value of an enum on a ViewModel, not a
+      ## branch in a view."
+    sourceAvailability*: Memo[SourceAvailability]
+      ## The raw axis behind §14's "No verified source" row, exposed
+      ## alongside `degradedState` because the editor is the pane that
+      ## has to tell `savUnverified` (offer the supply-sources action)
+      ## from `savAbsent` (there is nothing to supply sources *for*).
+    instructionLevelStepping*: Memo[bool]
+      ## §14's canonical treatment for "No verified source":
+      ## "Instruction-level stepping, with the supply-sources action
+      ## prominent." A memo rather than a view-side `if` over
+      ## `sourceAvailability`, so both surfaces agree on when the editor
+      ## stops being a source view.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -142,6 +167,16 @@ proc createEditorVM*(store: ReplayDataStore): EditorVM =
       of completedReplay:
         "replay"
 
+    # Derived: the §14 degraded state this pane renders.
+    let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
+      resolveDegradation(store.degradedSnapshot(), EditorPaneDegradations)
+
+    let sourceAvailability = createMemo[SourceAvailability] proc(): SourceAvailability =
+      store.degraded.sourceAvailability.val
+
+    let instructionLevelStepping = createMemo[bool] proc(): bool =
+      store.degraded.sourceAvailability.val != savVerified
+
     EditorVM(
       store: store,
       activeTabIndex: activeTabIndex,
@@ -154,5 +189,8 @@ proc createEditorVM*(store: ReplayDataStore): EditorVM =
       activeSourceGeneration: activeSourceGeneration,
       activeSourceDigest: activeSourceDigest,
       executionCursorKind: executionCursorKind,
+      degradedState: degradedState,
+      sourceAvailability: sourceAvailability,
+      instructionLevelStepping: instructionLevelStepping,
       disposeProc: dispose,
     )
