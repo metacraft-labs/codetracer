@@ -54,6 +54,20 @@ const
     # discovery is silent about both.
     "src/frontend/viewmodel/tests/unit/test_five_panes_drive_headlessly.nim",
     "src/frontend/viewmodel/tests/unit/test_cross_pane_composition_needs_no_bridge.nim",
+    # BlockTracer M2a's remaining items, registered for the same reason and on
+    # the same precedent.  M2a originally set the WEAKER precedent — it left
+    # `test_sdk_facade.nim` to glob discovery alone — and M2b's own note says
+    # so; these four close that rather than repeat it.
+    #
+    #   * the headless app entrypoint and the session/layout model that is not
+    #     GoldenLayout-typed (item 1);
+    #   * the render tests for the six IsoNim views no headless suite reached
+    #     (item 2).  That file is separate from `isonim_views_test.nim` on
+    #     purpose — see its header — so listing the big file does not cover it.
+    "src/frontend/viewmodel/tests/unit/test_sdk_facade.nim",
+    "src/frontend/viewmodel/tests/unit/test_headless_app_entrypoint.nim",
+    "src/frontend/viewmodel/tests/unit/test_layout_model.nim",
+    "src/tests/gui/tests/views/isonim_uncovered_views_test.nim",
     # RS-M3: the Request Panel's live span-delta path.  Registered here
     # because this array IS the CI gate — a ViewModel test that exists but
     # is not listed runs nowhere (a gap this campaign found repeatedly).
