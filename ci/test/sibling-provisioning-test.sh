@@ -194,16 +194,6 @@ fail() {
 # ---------------------------------------------------------------------------
 echo "siblings: entries pin a reproducible revision"
 
-# The sibling block whose entries are resolved from the workspace lock. Named
-# explicitly rather than inferred, so a rename or a parser regression makes
-# this suite FAIL rather than quietly assert nothing (see the anti-vacuity
-# assertions below -- this area has produced two vacuous greens already).
-readonly LOCK_RESOLVED_BLOCK='setup-isonim-siblings/action.yml'
-# The repos that block provisions, in the order it lists them. Pinned here so
-# that silently dropping one -- which would also silently drop it from the
-# "no branch tips" assertion -- is itself a failure.
-readonly LOCK_RESOLVED_REPOS='isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents'
-
 # Branch-tip entries still outstanding elsewhere in this repo, as a CEILING.
 # `<=`, never `==`: converting more of them must not fail the suite, and adding
 # one must. Lower this number as blocks are converted; there is no legitimate
@@ -232,9 +222,6 @@ sibling_blocks=0
 bad_entries=()
 entry_count=0
 branch_tip_entries=()
-lock_resolved_entries=0
-lock_resolved_repos=""
-lock_resolved_branch_tips=()
 # Per-block record of which repos each `siblings:` block provisions, used by
 # the matched-pair assertion further down. One space-delimited entry per block.
 declare -a BLOCK_REPOS=()
@@ -301,15 +288,8 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 					;;
 				branch)
 					branch_tip_entries+=("$wf_name:$line_no: '$stripped'")
-					if [ "$wf_name" = "$LOCK_RESOLVED_BLOCK" ]; then
-						lock_resolved_branch_tips+=("$wf_name:$line_no: '$stripped'")
-					fi
 					;;
 				esac
-				if [ "$wf_name" = "$LOCK_RESOLVED_BLOCK" ]; then
-					lock_resolved_entries=$((lock_resolved_entries + 1))
-					lock_resolved_repos="$lock_resolved_repos ${stripped%%=*}"
-				fi
 				continue
 			fi
 		fi
@@ -381,61 +361,147 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 1b. The lock-resolved block resolves EVERY revision from the workspace lock.
+# 1b. The from-source DEPENDENCY siblings come from this repo's OWN lock.
 #
-# `.github/actions/setup-isonim-siblings/action.yml` is a wrapper over
-# `clone-siblings`: it contributes nine sibling names and no cloning of its
-# own. Those nine are pinned by the workspace lock published for each commit of
-# this repo to metacraft-labs/metacraft-manifests@latest, so every one of them
-# is a BARE entry and the revision comes from the lock keyed by the commit
-# under test.
+# isonim and the four nim-* libraries codetracer compiles against are not
+# provisioned through `clone-siblings` at all any more, and the reason is the
+# distinction the rest of this file is built on, taken one step further.
 #
-# An `=<branch>` override here would resolve to that branch's tip at clone
-# time instead -- a different sibling revision on every re-run of the same
-# commit, and the coordination the lock exists to provide silently discarded.
-# `clone-siblings` already warns about each one; this makes it a failure.
+# `clone-siblings` resolves a bare name against the per-commit WORKSPACE lock
+# in metacraft-labs/metacraft-manifests. A workspace lock is a `repo manifest
+# -r` snapshot of the repo SET a developer had checked out when they pushed --
+# a convenience for standing a workspace up, and deliberately a superset of
+# what any one build needs. It is not this repo's statement of what this repo
+# depends on, and treating it as one cost this repo two outages:
 #
-# Anti-vacuity: the block must be FOUND, with the repos it is supposed to
-# carry, before "it contains no branch tip" means anything at all.
+#   * four of the nine names the old `.github/actions/setup-isonim-siblings`
+#     carried -- isonim-tui, isonim-gpui, nim-termctl, nim-pty -- belong to the
+#     `isonim` workspace project, not the `codetracer` one. Nothing here
+#     declares them, so no codetracer commit could pin them; the entries failed
+#     resolution and took out every job that reached the action. They appeared
+#     in a codetracer lock at all only when the pusher's workspace happened to
+#     also carry the isonim project.
+#
+#   * the fix for that -- `=dev` on all nine -- silently un-pinned the four the
+#     lock WAS pinning, and made the other five branch tips.
+#
+# `repro.lock` is committed in this repo, next to the source it describes. It
+# names the dependency set and a 40-hex revision for each, and
+# `.github/actions/provision-repro-lock-siblings` clones exactly that with
+# `repro develop --all`. No manifest repo, no publication lag, no branch tip.
+#
+# What is asserted here is that the arrangement stays that way: the action
+# still runs the lock-driven command (anti-vacuity -- everything below is
+# meaningless if it was renamed or rewritten), it hand-writes no sibling list
+# of its own, the lock still declares the dependency set, and every member of
+# that set carries an immutable revision.
 # ---------------------------------------------------------------------------
 echo
-echo "$LOCK_RESOLVED_BLOCK resolves every sibling from the workspace lock"
+echo "the from-source dependency siblings resolve from this repo's repro.lock"
 
-if [ "$lock_resolved_entries" -gt 0 ]; then
-	ok "the scanner reached $LOCK_RESOLVED_BLOCK ($lock_resolved_entries entries)"
+readonly LOCK_ACTION="$ACTIONS_DIR/provision-repro-lock-siblings/action.yml"
+readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
+# The dependency set `repro.lock`'s `codetracer` node declares, in the order it
+# declares them. Pinned here so that a repo silently added to or dropped from
+# the lock is a failure rather than a quiet change of what CI provisions.
+readonly LOCK_DECLARED_DEPS='isonim,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere'
+
+# Anti-vacuity first: the action must exist and must still invoke the command
+# whose behaviour every assertion below describes.
+lock_action_defects=()
+if [ ! -f "$LOCK_ACTION" ]; then
+	lock_action_defects+=("$LOCK_ACTION does not exist")
 else
-	fail "the scanner reached $LOCK_RESOLVED_BLOCK" \
-		"no sibling entry was parsed out of it -- the file was renamed, the" \
-		"'siblings: |' key changed, or the block scanner regressed. The" \
-		"branch-tip assertion below would pass vacuously."
+	grep -q 'repro develop --all' "$LOCK_ACTION" ||
+		lock_action_defects+=("it does not run 'repro develop --all'")
+	# --reset: the self-hosted runners reuse their work tree, so a sibling left
+	# at some other revision by an earlier job would otherwise make `develop
+	# --all` REFUSE rather than reconcile, and the job would fail on a stale
+	# checkout it did not create.
+	grep -q -- '--reset' "$LOCK_ACTION" ||
+		lock_action_defects+=("it does not pass --reset, so a drifted sibling refuses instead of reconciling")
+	# --into: names the `../<name>` adjacency config.nims resolves, rather than
+	# leaving the placement root to be inferred.
+	grep -q -- '--into=' "$LOCK_ACTION" ||
+		lock_action_defects+=("it does not pass --into=, so the sibling placement root is implicit")
 fi
 
-# Order-independent comparison: the block's job is to provision this SET.
-# Both lists are space-delimited repo names, so split on whitespace explicitly
-# rather than relying on an unquoted expansion.
-read -r -a _expected_repos <<<"$LOCK_RESOLVED_REPOS"
-read -r -a _actual_repos <<<"$lock_resolved_repos"
-expected_sorted="$(printf '%s\n' "${_expected_repos[@]}" | LC_ALL=C sort | tr '\n' ' ')"
-actual_sorted="$(printf '%s\n' "${_actual_repos[@]}" | LC_ALL=C sort | tr '\n' ' ')"
-if [ "$actual_sorted" = "$expected_sorted" ]; then
-	ok "it provisions exactly the expected IsoNim-family siblings"
+if [ "${#lock_action_defects[@]}" -eq 0 ]; then
+	ok "provision-repro-lock-siblings still runs 'repro develop --all --reset --into='"
 else
-	fail "it provisions exactly the expected IsoNim-family siblings" \
-		"a repo silently added to or dropped from this block also silently" \
-		"enters or leaves the branch-tip assertion below" \
-		"expected: $expected_sorted" \
-		"actual:   $actual_sorted"
+	fail "provision-repro-lock-siblings still runs 'repro develop --all --reset --into='" \
+		"the assertions below describe what that command does; without it they" \
+		"describe nothing" \
+		"${lock_action_defects[@]}"
 fi
 
-if [ "${#lock_resolved_branch_tips[@]}" -eq 0 ]; then
-	ok "none of its $lock_resolved_entries entries pins a mutable branch tip"
+# It must contribute no sibling NAMES of its own -- the whole point is that the
+# set comes from the lock. A `siblings:` block here would be a second answer to
+# "which repos?", and a hard-coded revision would be a second answer to "which
+# revision?".
+lock_action_handwritten=()
+if [ -f "$LOCK_ACTION" ]; then
+	if grep -q 'siblings: |' "$LOCK_ACTION"; then
+		lock_action_handwritten+=("it declares a 'siblings: |' block")
+	fi
+	# A 40-hex string in the RUNS section would be a pin this action chose
+	# rather than one the lock supplies. (The description may quote SHAs as
+	# prose; only the executable half is scanned.)
+	if sed -n '/^runs:/,$p' "$LOCK_ACTION" | grep -Eq '\b[0-9a-f]{40}\b'; then
+		lock_action_handwritten+=("its runs: section contains a hard-coded 40-hex revision")
+	fi
+fi
+
+if [ "${#lock_action_handwritten[@]}" -eq 0 ]; then
+	ok "it hand-writes neither a sibling set nor a revision"
 else
-	fail "none of its entries pins a mutable branch tip" \
-		"each entry below clones whatever the named branch points at when the" \
-		"job runs, so the same commit of this repo builds against a different" \
-		"sibling on every re-run. The revision must come from the workspace" \
-		"lock: drop the '=<branch>' suffix and leave the bare repo name." \
-		"${lock_resolved_branch_tips[@]}"
+	fail "it hand-writes neither a sibling set nor a revision" \
+		"the dependency set and its revisions come from repro.lock; anything" \
+		"named here is a second source of truth for the same question" \
+		"${lock_action_handwritten[@]}"
+fi
+
+# The lock itself: the `codetracer` node's `depends` field is the declaration
+# `repro develop --all` resolves.
+if [ -f "$REPRO_LOCK" ]; then
+	actual_deps="$(grep -o 'name = "codetracer", path = "\."[^}]*depends = "[^"]*"' "$REPRO_LOCK" |
+		sed 's/.*depends = "//; s/"$//' | head -n 1)"
+else
+	actual_deps="<repro.lock not found>"
+fi
+
+if [ "$actual_deps" = "$LOCK_DECLARED_DEPS" ]; then
+	ok "repro.lock declares the dependency set CI provisions ($actual_deps)"
+else
+	fail "repro.lock declares the dependency set CI provisions" \
+		"this is what 'repro develop --all' clones, so a change here is a change" \
+		"to what every job in this repo builds against" \
+		"expected: $LOCK_DECLARED_DEPS" \
+		"actual:   $actual_deps"
+fi
+
+# ... and each of them at an IMMUTABLE revision. A branch name here would be
+# the same defect the ceiling above exists to prevent, arriving through the
+# other lock.
+unpinned_deps=()
+if [ -f "$REPRO_LOCK" ]; then
+	IFS=',' read -r -a _declared <<<"$LOCK_DECLARED_DEPS"
+	for dep in "${_declared[@]}"; do
+		rev="$(grep -o "name = \"$dep\", path = \"[^\"]*\"[^}]*revision = \"[^\"]*\"" "$REPRO_LOCK" |
+			sed 's/.*revision = "//; s/"$//' | head -n 1)"
+		if [ "${#rev}" -ne 40 ] || [ -n "${rev//[0-9a-f]/}" ]; then
+			unpinned_deps+=("$dep -> '${rev:-<no revision record>}' is not a 40-hex commit SHA")
+		fi
+	done
+fi
+
+if [ "${#unpinned_deps[@]}" -eq 0 ]; then
+	ok "every declared dependency carries a 40-hex commit SHA"
+else
+	fail "every declared dependency carries a 40-hex commit SHA" \
+		"a dependency without an exact revision makes the build depend on when" \
+		"it ran, which is the defect this whole file exists to prevent" \
+		"${unpinned_deps[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -595,11 +661,24 @@ fi
 # -- while every document said this repo's CI builds pinned revisions.
 #
 # The shared action states the rule directly (metacraft-github-actions/
-# clone-siblings/action.yml, "NO SECOND SIBLING-CLONING ACTION"): there is
-# exactly one mechanism for "what revision of sibling repo X does this commit
-# use?", and a per-project action must delegate to it rather than reimplement
-# it. `clone-repo` is the primitive that mechanism is built out of; a composite
-# action reaching for it directly is that action taking over revision selection.
+# clone-siblings/action.yml, "NO SECOND SIBLING-CLONING ACTION"): a per-project
+# action must not answer "what revision of sibling repo X does this commit
+# use?" itself; it must delegate to something that reads a LOCK. `clone-repo`
+# is the primitive those mechanisms are built out of; a composite action
+# reaching for it directly is that action taking over revision selection.
+#
+# There are two delegations that satisfy the rule, and they answer for
+# different sibling sets:
+#
+#   clone-siblings / setup-dev-env  -> the per-commit WORKSPACE lock in
+#                                      metacraft-manifests (the db-backend
+#                                      siblings, the recorder siblings)
+#   repro develop --all             -> this repo's committed `repro.lock`
+#                                      (the from-source dependency siblings;
+#                                      see 1b)
+#
+# Both are locks. Neither is a name-and-branch typed into a composite action,
+# which is the only thing this assertion forbids.
 #
 # Scope is composite actions only. A workflow step may still clone one specific
 # repo for one specific purpose -- that is a checkout, not a sibling set -- and
@@ -637,7 +716,7 @@ for act in "${COMPOSITE_ACTIONS[@]}"; do
 			clone_repo_uses=$((clone_repo_uses + 1))
 			bespoke_cloners+=("$act_name/action.yml:$line_no: $stripped")
 			;;
-		*'clone-siblings@'* | *'setup-dev-env@'*)
+		*'clone-siblings@'* | *'setup-dev-env@'* | *'repro develop --all'*)
 			delegates=$((delegates + 1))
 			;;
 		esac
@@ -651,20 +730,22 @@ if [ "${#bespoke_cloners[@]}" -eq 0 ]; then
 else
 	fail "no composite action clones cross-repo siblings itself" \
 		"each line below selects a sibling revision outside the one approved" \
-		"mechanism, so no workspace lock, no ::warning:: and no audit can see it;" \
-		"delegate to clone-siblings (or setup-dev-env) with a 'siblings:' list" \
-		"instead -- see .github/actions/setup-db-backend-siblings" \
+		"mechanism, so no lock, no ::warning:: and no audit can see it; delegate" \
+		"to clone-siblings/setup-dev-env with a 'siblings:' list (see" \
+		".github/actions/setup-db-backend-siblings), or to 'repro develop --all'" \
+		"against this repo's committed repro.lock (see" \
+		".github/actions/provision-repro-lock-siblings)" \
 		"${bespoke_cloners[@]}"
 fi
 
 if [ "$delegating_actions" -ge 2 ]; then
-	ok "$delegating_actions composite actions provision siblings through the shared action"
+	ok "$delegating_actions composite actions provision siblings through a lock"
 else
-	fail "composite actions provision siblings through the shared action" \
+	fail "composite actions provision siblings through a lock" \
 		"only $delegating_actions of ${#COMPOSITE_ACTIONS[@]} composite actions name" \
-		"clone-siblings or setup-dev-env -- either sibling provisioning moved" \
-		"somewhere this scanner cannot see, or the actions directory was" \
-		"restructured and the assertion above is now vacuous"
+		"clone-siblings, setup-dev-env or 'repro develop --all' -- either sibling" \
+		"provisioning moved somewhere this scanner cannot see, or the actions" \
+		"directory was restructured and the assertion above is now vacuous"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1424,7 +1505,13 @@ echo
 # 23 -> 26: assertion 2b ("db-backend cargo legs provision
 # codetracer-native-recorder") contributes the composite-integrity check, the
 # scanner-anchor check, and the contract itself.
-readonly EXPECTED_ASSERTIONS=26
+# 26 -> 27: assertion 1b was rewritten when the IsoNim-family siblings moved
+# from the workspace lock to this repo's own `repro.lock`. It used to make
+# three checks about a `siblings:` block that no longer exists; it now makes
+# four about the lock and the action that reads it (the action still runs the
+# command, it hand-writes no set or revision, the lock declares the set, and
+# every member is pinned to a 40-hex SHA).
+readonly EXPECTED_ASSERTIONS=27
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

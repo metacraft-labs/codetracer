@@ -77,7 +77,7 @@ for step in \
 	"Generate CI token" \
 	"Checkout" \
 	"Setup db-backend siblings" \
-	"Setup isonim siblings" \
+	"Provision dependency siblings from repro.lock" \
 	"Build frontend (needed by gated Playwright stage)" \
 	"Run cross-process envelope"; do
 	[ "$(printf '%s\n' "$cross_process_job" | grep -cFx -- "      - name: $step")" -eq 1 ] ||
@@ -89,7 +89,7 @@ for step in \
 	"Generate CI token" \
 	"Checkout" \
 	"Setup db-backend siblings" \
-	"Setup isonim siblings" \
+	"Provision dependency siblings from repro.lock" \
 	"Build frontend (needed by gated Playwright stage)" \
 	"Run cross-process envelope"; do
 	line="$(printf '%s\n' "$cross_process_job" | grep -nFx -- "      - name: $step" | cut -d: -f1)"
@@ -104,7 +104,7 @@ if printf '%s\n' "$cross_process_job" | grep -Eq 'continue-on-error:|CT_CROSS_PR
 fi
 for required_line in \
 	"        uses: ./.github/actions/setup-db-backend-siblings" \
-	"        uses: ./.github/actions/setup-isonim-siblings" \
+	"        uses: ./.github/actions/provision-repro-lock-siblings" \
 	"        run: nix develop .#devShells.x86_64-linux.default --command just build-once" \
 	"        run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process"; do
 	[ "$(printf '%s\n' "$cross_process_job" | grep -cFx -- "$required_line")" -eq 1 ] ||

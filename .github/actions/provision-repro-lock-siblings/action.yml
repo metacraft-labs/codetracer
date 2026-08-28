@@ -1,0 +1,151 @@
+name: Provision dependency siblings from repro.lock
+description: |
+  Clone this commit's from-source dependency siblings next to the codetracer
+  checkout, at the revisions THIS REPO'S OWN ``repro.lock`` pins, so the Nim
+  builds resolve
+
+    addPathIfDir(workspaceRoot / "isonim/src")   (et al.)
+
+  as declared in codetracer's top-level ``config.nims``. Also seeds an empty
+  ``build/tailwind-styles.json`` in the isonim checkout so
+  ``isonim/dsl/tailwind.nim``'s compile-time staticRead falls through to its
+  ``{}`` fallback instead of erroring out (its ``try/except`` wrapper cannot
+  catch ``staticRead`` errors).
+
+  In-sandbox Nix derivations stage these inputs through
+  ``prepareIsonimSiblings`` in ``nix/packages/default.nix``, out of flake
+  inputs rather than out of the workspace; this action is for workflow steps
+  that run nim *outside* the Nix sandbox (dev-build, appimage-build, ...) and
+  for the dev-shell test lanes that compile against the sibling sources.
+
+  WHY THE LOCK IN THIS REPO, AND NOT THE WORKSPACE LOCK
+
+  This action replaces ``setup-isonim-siblings``, which hand-wrote NINE repo
+  names and handed them to ``clone-siblings``. That resolves a bare name
+  against the per-commit WORKSPACE lock published to
+  ``metacraft-labs/metacraft-manifests``, and a workspace lock is a snapshot
+  of the repo SET a developer happened to have checked out -- a convenience
+  for standing a workspace up, deliberately a superset of what a build needs.
+  It is not this repo's statement of what this repo depends on.
+
+  Two things followed from asking the wrong lock:
+
+    * Four of the nine -- isonim-tui, isonim-gpui, nim-termctl, nim-pty --
+      are IsoNim's siblings, not codetracer's. They are members of the
+      `isonim` workspace project, not the `codetracer` one
+      (metacraft-manifests/projects/codetracer.toml does not include them),
+      so a codetracer commit could not pin them and the entries failed
+      resolution outright, taking down every job that reached this action.
+      They only ever appeared in a codetracer lock when the pusher's
+      workspace happened to also carry the isonim project -- an accident of
+      someone's checkout, recorded as if it were a dependency.
+
+    * The workaround for that -- pinning the entries to ``=dev`` -- is a
+      branch TIP: re-running last month's job clones this month's sibling,
+      and the same commit builds against different sources on every run.
+
+  ``repro.lock`` is committed HERE, next to the source it describes, and it
+  answers the question the build actually asks. Its ``depends`` field says
+
+      depends = "isonim,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere"
+
+  and it carries a 40-hex revision for each. That is five repos at exact
+  SHAs, resolved offline from a file in this commit -- no manifest repo, no
+  publication lag, no branch tip, and no fifth-hand guess about which four
+  extra checkouts a developer had lying around.
+
+  ``repro develop --all`` is the documented consumer path for exactly this
+  (see the header of ``metacraft-labs/reprobuild``'s
+  ``.github/actions/reprobuild-provision``: "A CONSUMER project's from-source
+  dependency siblings ... `repro develop --all` (run in the project root),
+  which clones/adopts each"). Reprobuild's own CI provisions this repo the
+  same way, with the same flags.
+
+  ``--reset``: the self-hosted runners reuse their work tree, so ``../isonim``
+  may already exist at some other revision from an earlier job. Without
+  ``--reset``, ``develop --all`` REFUSES to overwrite a checkout that drifted
+  off the lock (the fleet-safe default); with it, each drifted sibling is
+  reconciled back to the locked SHA.
+
+  ``--into``: names the ``../<name>`` adjacency ``config.nims`` expects
+  explicitly, rather than leaving it to be inferred.
+
+  THE FOUR REPOS THAT WENT AWAY are not silently dropped -- nothing in this
+  repo compiles against them. ``scripts/require-siblings.sh`` puts all four
+  in its ADVISORY tier with the reason "src/Tuprules.tup puts it on the Nim
+  search path" and says so in as many words: "builds succeed without them".
+  No product target, no CI lane and no module reachable from isonim imports
+  ``isonim_tui``, ``isonim_gpui``, ``nim_termctl`` or ``nim_pty``; the only
+  importers are two files in the ``vm-collab-integration`` lane, which no
+  workflow runs. If one of them ever does become a real dependency, the fix
+  is to declare it in ``repro.nim``/``repro.lock`` so the lock pins it -- not
+  to clone it here off a branch tip.
+
+  WHY NOT ``env-flavor: reprobuild``. ``setup-dev-env`` has a reprobuild
+  flavor, and it is not this. That flavor installs the ``repro`` CLI and a
+  ``dev-exec`` wrapper and provisions REPROBUILD's OWN build inputs; it never
+  runs ``repro develop`` for the calling project, and it does not install Nix
+  (``setup-reprobuild`` pulls Nix in only on its source-build fallback).
+  Every job here needs Nix and drives its work through ``nix develop``, so
+  switching flavor would be a change to those jobs' whole dev env rather than
+  to their sibling provisioning.
+
+  WHERE ``repro`` COMES FROM. codetracer's own flake pins reprobuild
+  (``flake.nix``: ``reprobuild.url = github:metacraft-labs/reprobuild/<sha>``)
+  and ``nix/shells/ci-base.nix`` puts ``reprobuildPkgs.reprobuild`` in both
+  dev shells, so the CLI is already part of the closure these jobs realise.
+  Taking it from there keeps ONE pin for the tool -- the flake's -- and costs
+  no download. ``setup-reprobuild@dev`` would be the other route, but its
+  prebuilt-release path is not usable yet: the latest release publishes no
+  SHA256SUMS (so the default ``require-checksum`` rejects it) and no
+  darwin-aarch64 archive at all, and both misses fall through to building the
+  CLI from source -- "minutes-to-hours slower", in nine jobs.
+
+  ``devShells.ci`` rather than ``devShells.default``: same package closure
+  (both compose ``nix/shells/ci-base.nix``), without ``main.nix``'s
+  interactive shellHook -- which regenerates the tree-sitter grammar, builds
+  a Python venv and probes for siblings that this step has not cloned yet.
+
+  ``ci/test/sibling-provisioning-test.sh`` holds the line that made the old
+  shape possible: no composite action in this repo may clone cross-repo
+  siblings itself.
+
+runs:
+  using: composite
+  steps:
+    # No ``gh-token`` input, and that is deliberate: every repo `repro.lock`
+    # names is public (`visibility = "public"`, and each clones anonymously),
+    # so this step needs no credential and is given none. Reprobuild's own CI
+    # runs the identical command with `GIT_CONFIG_GLOBAL=/dev/null`. A future
+    # private dependency is the moment to add a token, and it will be visible
+    # as a failing clone rather than as a silent widening of what this step can
+    # read.
+    - name: Clone the lock-pinned dependency siblings
+      shell: bash
+      run: |
+        set -euo pipefail
+        root="${GITHUB_WORKSPACE}"
+        siblings_root="$(cd "${root}/.." && pwd)"
+        cd "${root}"
+        nix develop .#ci --command \
+          repro develop --all --reset --into="${siblings_root}"
+
+    - name: Seed isonim tailwind-styles.json placeholder
+      # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES
+      # this file (isonim's tailwind-extract.mjs writes it), and
+      # `scripts/build-once.sh` runs that before it builds -- but the lanes
+      # that compile Nim without going through build-once.sh (the ViewModel
+      # suites, test-nimsuggest) never run the extractor, and a freshly cloned
+      # isonim has no build/ at all. `isonim/dsl/tailwind.nim` reaches the file
+      # with a compile-time staticRead, which its try/except cannot catch, so
+      # absence is a compile ERROR rather than the `{}` fallback. The in-Nix
+      # path seeds the same placeholder for the same reason
+      # (`nix/packages/default.nix`, prepareIsonimSiblings).
+      shell: bash
+      run: |
+        set -euo pipefail
+        isonim_build="${GITHUB_WORKSPACE}/../isonim/build"
+        mkdir -p "${isonim_build}"
+        if [ ! -f "${isonim_build}/tailwind-styles.json" ]; then
+          echo '{}' > "${isonim_build}/tailwind-styles.json"
+        fi
