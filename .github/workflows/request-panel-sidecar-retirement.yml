@@ -91,7 +91,7 @@ jobs:
       # across the six: python is `stable`, beam is `main`, the rest are
       # `dev`. Pinning the wrong one silently tests a stale recorder.
       - name: Clone codetracer-python-recorder sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
           ref: stable
@@ -100,7 +100,7 @@ jobs:
           submodules: 'false'
 
       - name: Clone codetracer-ruby-recorder sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
@@ -109,7 +109,7 @@ jobs:
           submodules: 'false'
 
       - name: Clone codetracer-php-recorder sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-php-recorder
           ref: dev
@@ -118,7 +118,7 @@ jobs:
           submodules: 'false'
 
       - name: Clone codetracer-beam-recorder sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-beam-recorder
           ref: main
@@ -127,7 +127,7 @@ jobs:
           submodules: 'false'
 
       - name: Clone codetracer-js-recorder sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-js-recorder
           ref: dev
@@ -136,7 +136,7 @@ jobs:
           submodules: 'false'
 
       - name: Clone codetracer-native-recorder sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: dev
