@@ -2190,6 +2190,16 @@ jobs:
           if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
             Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
           }
+          # Whatever supplied it, `bash` must resolve now: the build step below
+          # is `shell: bash`, and a missing bash there reads as a build failure
+          # rather than as a missing tool.
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
+                  "should have provisioned Git Bash; every step below this one needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
 
       - name: Build CodeTracer-Setup.exe
         shell: bash
