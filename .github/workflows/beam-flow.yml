@@ -74,7 +74,7 @@ jobs:
         # its workspace-locked SHA is available for the in-repo
         # libs/codetracer-trace-format swap below (the beam recorder reads
         # the in-repo path, not the sibling).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
