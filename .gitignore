@@ -150,6 +150,11 @@ server
 # import paths from RUNQUOTA_SRC when the relative sibling layout is unavailable
 # (git worktrees, CI). It must be tracked despite the blanket *.nims ignore.
 !src/ct_test/config.nims
+# NS1's host-free build gate ships its own NimScript config: it is half of the
+# poison (the `patchFile` bans and the stubs search path), and without it
+# `ci/test/hostfree-build.sh` cannot even find `stubs/no_host_access`. Tracked
+# despite the blanket *.nims ignore, for the same reason as the line above.
+!ci/hostfree/config.nims
 # ct_test C/C++ provider fixtures build into an in-tree build/ directory and the
 # provider suites compile to bare (extension-less) binaries next to their .nim
 # sources; both are reproducible test artifacts that must not be committed.

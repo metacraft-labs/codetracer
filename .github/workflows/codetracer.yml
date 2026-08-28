@@ -1675,6 +1675,19 @@ jobs:
         # knowing before reading the lane's report.
         run: bash ci/test/test-lane-report-test.sh
 
+      - name: Enforce the platform facade's host-free build (NS1)
+        # Noir-Studio.milestones.org NS1: "A build configuration that **does
+        # not link the host modules**, so a direct call fails to compile" and
+        # "That configuration runs in CI, so the property cannot decay
+        # quietly." This step is the second half of that sentence.
+        #
+        # It runs BEFORE `test-vm` deliberately. A `readFile` that has crept
+        # into a ViewModel does not fail any suite — the desktop build links
+        # `std/os` and the call works — so the only signal that the facade has
+        # been bypassed is this gate. Reading it after a green suite would be
+        # reading it too late.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-hostfree
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 

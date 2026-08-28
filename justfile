@@ -2661,6 +2661,30 @@ test-vm-unit-js: vm-test-prereqs
   exec > >(tee test-logs/test-vm-unit-js.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-unit-js
 
+# NS1's compile-time gate: no module of the ViewModel, view, store or platform
+# layer may reach the host except through the platform facade.
+#
+# This is a BUILD property, not a value, so it cannot be a Nim suite: the
+# assertion is that certain source does not compile.  ci/test/hostfree-build.sh
+# compiles all 119 modules of the surface with the host poisoned, then plants a
+# `readFile` and a `startProcess` into a real front-end module and requires each
+# to be rejected — and, crucially, requires the same two plants to COMPILE under
+# the normal build, without which the first two scenarios would score green
+# while the gate did no work at all.
+#
+# Runtime is dominated by scenario 1's 119 compiles (~15 min).  It is a separate
+# recipe rather than a lint step for that reason: ci/lint/nim.sh is the
+# sub-second-answers stage, and burying a quarter-hour compile in it is how a
+# lint stage stops being run.
+#
+# NS1 host-free build gate: front-end code cannot reach the host except through the platform facade.
+test-hostfree:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-hostfree.log) 2>&1
+  bash ci/test/hostfree-build.sh
+
 # The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
 # half is pure Nim and cheap; the integration/soak half opens real localhost
 # sockets and links the GPUI shim, so it is a separate recipe rather than a
