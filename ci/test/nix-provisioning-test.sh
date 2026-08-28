@@ -164,7 +164,7 @@ done
 # in the same spirit as EXPECTED_BUILD_SITES in
 # ci/test/sibling-provisioning-test.sh: "no unprovisioned job was found" is
 # also true of a scanner that has stopped finding jobs at all.
-readonly EXPECTED_NIX_JOBS=28
+readonly EXPECTED_NIX_JOBS=30
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
