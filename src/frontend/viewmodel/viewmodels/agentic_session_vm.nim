@@ -5,13 +5,22 @@
 ## backend protocol details stay in ``agent_service``/``nim-agents`` while this
 ## layer owns the product-visible tab/workspace projection.
 
-import std/[json, os, strutils]
+import std/[json, strutils]
 
 import isonim/core/[computation, owner, signals]
 import isonim/viewmodel
 import nim_agents
 
+import std/options
+
 import ../agent_evidence
+# NS1: `std/os` is gone from this module. `platform/platform` supplies the
+# facade the evidence read now goes through, and `platform/paths` supplies the
+# pure path arithmetic `splitPath` below needs — which reads no filesystem, and
+# which NS1 deliberately keeps rather than banning along with the host access
+# that used to arrive in the same import.
+import ../platform/platform
+import ../platform/paths
 import ../agent_service
 import ../store/[replay_data_store, types]
 import agent_activity_vm, agent_workspace_vm, deepreview_vm, editor_vm, vcs_vm
@@ -491,13 +500,74 @@ proc handleAgentEvidenceRpcPayload*(vm: AgenticSessionVM; payload: string):
   vm.handleAgentEvidenceNotification(
     evidenceNotificationFromJson(parseJson(payload)))
 
-proc handleAgentEvidenceRpcFile*(vm: AgenticSessionVM; path: string): bool =
-  when defined(js):
-    false
-  else:
-    if path.len == 0 or not fileExists(path):
+proc ctAwaitPlatform[T](future: PlatformFuture[PlatformOutcome[T]]
+                       ): PlatformOutcome[T] =
+  ## Settle a facade call from a synchronous caller.
+  ##
+  ## Drains nim-everywhere's callback queue once, which settles anything a
+  ## local instantiation produces. It does NOT spin or sleep: a ViewModel that
+  ## blocked on a network hop would freeze the window, which is the failure
+  ## Noir-Studio.md §9.3 names. An unsettled future is reported as such rather
+  ## than defaulted, so a remote instantiation reaching this call site says
+  ## "convert me" instead of silently reading nothing.
+  var captured: PlatformOutcome[T]
+  var settled = false
+
+  proc onValue(value: PlatformOutcome[T]) =
+    captured = value
+    settled = true
+
+  proc onFailure(message: string) =
+    captured = failed[T](pkTransport, "the platform call failed", message)
+    settled = true
+
+  future.onComplete(onValue, onFailure)
+  drainPlatformCallbacks()
+  if not settled:
+    return failed[T](pkTimeout, "this call site needs an asynchronous caller")
+  captured
+
+proc handleAgentEvidenceRpcFile*(vm: AgenticSessionVM; path: string;
+                                 host: Platform = nil): bool =
+  ## Read an evidence payload from a path and apply it.
+  ##
+  ## Was `fileExists` + `readFile` inline, behind `when not defined(js)` — a
+  ## host call in a ViewModel, and a `when` that made the operation unavailable
+  ## on one *backend* rather than on one *platform*. NS1 removes both.
+  ##
+  ## Two routes, and which one is taken is a platform question rather than a
+  ## build question:
+  ##
+  ## * **A caller with a platform** (the web and container instantiations, and
+  ##   any caller that wants a specific one) passes `host`, and the read goes
+  ##   through `host.fs.readText`. Nothing here knows how that platform stores
+  ##   files.
+  ## * **A caller without one** — the GUI ViewModel suites, which construct
+  ##   ViewModels directly and install no platform — falls back to
+  ##   `agent_evidence.readRpcNotificationFile`, the host-side reader that sits
+  ##   beside the writer (`defaultRpcSender`) in the module that already owns
+  ##   this workflow's host half.
+  ##
+  ## The fallback is what keeps NS1's "the existing product passes its suite
+  ## unchanged" true. Routing the default through a refusing facade would have
+  ## turned two passing GUI suites red for no behavioural reason, which is a
+  ## worse outcome than a named host-side helper in a module documented to have
+  ## one.
+  if path.len == 0:
+    return false
+
+  if not host.isNil:
+    if not host.can(capFilesystemRead):
       return false
-    vm.handleAgentEvidenceRpcPayload(readFile(path))
+    let outcome = ctAwaitPlatform(host.fs.readText(path))
+    if not outcome.ok:
+      return false
+    return vm.handleAgentEvidenceRpcPayload(outcome.value)
+
+  let text = readRpcNotificationFile(path)
+  if text.isNone:
+    return false
+  vm.handleAgentEvidenceRpcPayload(text.get)
 
 proc createAgenticSessionVM*(store: ReplayDataStore;
     service: CodeTracerAgentService; editor: EditorVM;
