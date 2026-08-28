@@ -1,0 +1,15 @@
+# Cloudflare Pages headers for get.codetracer.com
+#
+# The two install surfaces are served as text/plain so `curl … | less` shows the
+# source before `| sh`, with a short TTL so a fixed URL always yields the current
+# bootstrapper (the policy: metacraft-dev-guidelines/policies/product-install-domains.md §3).
+
+/sh
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff
+
+/pwsh
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff

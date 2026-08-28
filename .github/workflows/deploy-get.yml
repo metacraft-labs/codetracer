@@ -1,0 +1,47 @@
+name: Deploy get.codetracer.com
+
+# Publishes the get/ tree (landing + /sh + /pwsh) to the `get-codetracer`
+# Cloudflare Pages project, which serves https://get.codetracer.com.
+#
+# The install scripts are single-sourced from this repo's canonical installers
+# (install-on-distributions.sh -> /sh, install.ps1 -> /pwsh); get/build-get.sh
+# assembles get/dist/. See metacraft-dev-guidelines/policies/product-install-domains.md
+# and get/README.md.
+#
+# The `get-codetracer` project's production branch is `master`, so we deploy with
+# `--branch master` to publish a PRODUCTION deployment (served on the custom
+# domain) regardless of which repo branch triggered the run.
+
+on:
+  push:
+    branches: [stable]
+    paths:
+      - "get/**"
+      - "install-on-distributions.sh"
+      - "install.ps1"
+      - ".github/workflows/deploy-get.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-get-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy get.codetracer.com
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble get/dist
+        run: bash get/build-get.sh
+
+      - name: Publish to Cloudflare Pages (get-codetracer)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy get/dist --project-name=get-codetracer --branch=master --commit-dirty=true
