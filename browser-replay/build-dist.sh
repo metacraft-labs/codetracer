@@ -63,7 +63,7 @@ NGINX_EOF
 
 # Step 6b: Cloudflare Pages `_headers`.
 #
-# web.codetracer.com serves this bundle as a CROSS-ORIGIN engine: the HTML
+# ide.codetracer.com serves this bundle as a CROSS-ORIGIN engine: the HTML
 # page (e.g. blocktracer.org) lives on a different origin and loads worker.js
 # + pkg/*.js + *.wasm from here. Three things must be permitted cross-origin:
 #   * the ES-module `import` of worker.js (blob-bootstrap in gateway-client.js)

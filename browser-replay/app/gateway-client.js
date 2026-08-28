@@ -66,7 +66,7 @@ const authToken = params.get("authToken") || "";
 const traceFolder = params.get("traceFolder") || "trace";
 const testMode = params.get("mode") || "basic";
 // `?trace=<absoluteUrl>` -- open an arbitrary cross-origin `.ct` container by
-// whole-file fetch into the WASM VFS. This is the public web.codetracer.com
+// whole-file fetch into the WASM VFS. This is the public ide.codetracer.com
 // entry point: no gateway, no auth token, no manifest -- just a direct URL to
 // a single CTFS `.ct` file. It is only honoured when the gateway config is
 // absent so it stays backward-compatible with the M40 gateway path.
@@ -89,10 +89,10 @@ appendLog(
 // Create the replay worker. In the same-origin case (traditional deploy,
 // `just test-wasm-replay`) this is a plain module worker pointing at the
 // sibling worker.js. In the CDN-split case -- this driver + the engine
-// assets (worker.js, pkg/*.js, *.wasm) are served from web.codetracer.com
+// assets (worker.js, pkg/*.js, *.wasm) are served from ide.codetracer.com
 // while the HTML page lives on a *different* origin (e.g. blocktracer.org) --
 // a dedicated worker's script URL is required to be same-origin with the
-// document, so `new Worker("https://web.codetracer.com/worker.js")` throws
+// document, so `new Worker("https://ide.codetracer.com/worker.js")` throws
 // even with `type:"module"` and permissive CORS. The workaround: build a tiny
 // *same-origin* blob module worker that statically `import`s the absolute
 // cross-origin worker.js. ES-module imports honour CORS (so the engine origin

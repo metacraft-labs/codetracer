@@ -3,7 +3,12 @@ name: Deploy web.codetracer.com
 # ---------------------------------------------------------------------------
 # Publishes the browser CodeTracer replay bundle (the "Embed SDK": db-backend
 # WASM + JS glue + replay worker) to the `web-codetracer` Cloudflare Pages
-# project, which serves https://web.codetracer.com.
+# project. That project serves the in-browser Cloud IDE at
+# https://ide.codetracer.com (a stable custom domain) and at
+# https://web-codetracer.pages.dev — the identical bundle on both. NOTE:
+# https://web.codetracer.com is a SEPARATE, authenticated application on its own
+# DNS record, NOT this Pages project; the IDE has its own `ide.` name so nothing
+# pointing at web.codetracer.com breaks.
 #
 # WHAT IS PUBLISHED
 #   browser-replay/build-dist.sh assembles browser-replay/dist/ =
@@ -27,7 +32,8 @@ name: Deploy web.codetracer.com
 #
 # ONE ENVIRONMENT / ONE PROJECT
 #   The `web-codetracer` Pages project's PRODUCTION branch is `cloud`. Merging
-#   to `cloud` publishes a production deployment served on web.codetracer.com.
+#   to `cloud` publishes a production deployment served on ide.codetracer.com
+#   (and web-codetracer.pages.dev).
 #   (Cloudflare decides production-vs-preview by comparing the deployed branch
 #   to the project's configured production branch — see metacraft-labs/web-site
 #   DEPLOY.md.) Create the project once with wrangler before the first run; this
@@ -148,7 +154,8 @@ jobs:
         # flake.lock — nix/shells/ci-base.nix). wrangler authenticates from
         # CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the environment.
         # The `web-codetracer` project's production branch is `cloud`, so a push
-        # to `cloud` publishes a production deployment on web.codetracer.com.
+        # to `cloud` publishes a production deployment on ide.codetracer.com
+        # (and web-codetracer.pages.dev).
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
