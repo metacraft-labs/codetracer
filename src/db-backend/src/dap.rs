@@ -71,6 +71,85 @@ pub struct LaunchRequestArguments {
     /// [`crate::rename_list::RenameList`].
     #[serde(rename = "renameList", skip_serializing_if = "Option::is_none")]
     pub rename_list: Option<PathBuf>,
+    /// Browser trace source descriptor, as emitted by the embed SDK's
+    /// `TraceSource.toLaunchArgs`
+    /// (`src/frontend/viewmodel/sdk/trace_source.nim`).
+    ///
+    /// The field exists so the engine can **name** what it cannot honour.
+    /// Before it did, `#[serde(deny_unknown_fields)]` above turned every
+    /// non-`local-folder` launch into `unknown field \`traceSource\``: a
+    /// parse error, which the native server loop only `error!`s (the client
+    /// gets no launch response at all) and which the SDK's §6.3 classifier
+    /// buckets as the least informative `BackendError`. A launch the engine
+    /// cannot serve must fail by name, once, with a message that says what
+    /// to do instead — see [`TraceSourceArgument::unsupported_reason`].
+    #[serde(rename = "traceSource", skip_serializing_if = "Option::is_none")]
+    pub trace_source: Option<TraceSourceArgument>,
+}
+
+/// The trace-source vocabulary shared with the embed SDK.
+///
+/// These strings are the wire contract: `TraceSourceKind` in
+/// `src/frontend/viewmodel/sdk/trace_source.nim` declares the identical set
+/// (`tskLocalFolder = "local-folder"`, …).  `launch_trace_source_test.rs`
+/// and the Nim `test_sdk_facade` suite both pin the list, so the two cannot
+/// drift apart without a test failing.
+pub const TRACE_SOURCE_KINDS: &[&str] = &["local-folder", "http-range", "opfs", "bytes", "custom"];
+
+/// A `traceSource` descriptor.
+///
+/// `kind` is deliberately a `String` rather than an enum: an SDK that grows
+/// a sixth kind must get a message naming *that kind*, not `unknown variant`
+/// from serde. Likewise the payload fields are optional and unknown ones are
+/// tolerated — the engine's answer depends on the kind alone, and a stricter
+/// parse could only degrade the message on a launch it was going to refuse
+/// regardless.
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
+pub struct TraceSourceArgument {
+    pub kind: String,
+    /// `http-range`: the URL the container is served from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// `opfs`: the Origin Private File System path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// `bytes`: the payload length. The bytes themselves are never on the
+    /// wire — which is precisely why this kind cannot be honoured from
+    /// launch arguments alone.
+    #[serde(rename = "byteLength", default, skip_serializing_if = "Option::is_none")]
+    pub byte_length: Option<u64>,
+    /// `custom`: the caller's name for its block source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl TraceSourceArgument {
+    /// Why this source cannot be opened, or `None` when it can.
+    ///
+    /// Every message contains the word "unsupported", which is what the
+    /// SDK's `classifyBackendFailure` keys on to reach
+    /// `dseUnsupportedTraceKind` rather than the catch-all bucket. That
+    /// coupling is asserted from both sides.
+    pub fn unsupported_reason(&self) -> Option<String> {
+        let known = TRACE_SOURCE_KINDS.contains(&self.kind.as_str());
+        if self.kind == "local-folder" {
+            // The SDK never emits a `traceSource` for this kind — it sends
+            // `traceFolder` directly — but accepting it here costs nothing
+            // and keeps the vocabulary honest.
+            return None;
+        }
+        let detail = if known {
+            "the replay engine opens a trace that is already in its virtual file system; \
+             push the container's bytes with `vfs_write_file` and launch with `traceFolder`"
+        } else {
+            "unrecognised kind"
+        };
+        Some(format!(
+            "unsupported launch traceSource kind `{}` ({detail}). Known kinds: {}.",
+            self.kind,
+            TRACE_SOURCE_KINDS.join(", "),
+        ))
+    }
 }
 
 // TODO: for now easier to initialize those, but when we start processing client capabilities or in

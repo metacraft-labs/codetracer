@@ -2496,8 +2496,39 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
         }
         DapMessage::Request(req) if req.command == "launch" => {
             // ctx.received_launch = true;
-            ctx.launch_request = Some(req.clone());
             let args = req.load_args::<dap::LaunchRequestArguments>()?;
+
+            // A `traceSource` the engine cannot open must be refused by name,
+            // with a launch response — not swallowed. Both halves of that
+            // matter: the native loop only `error!`s an `Err` from here, so
+            // returning one leaves the client with no response at all, which
+            // is the same permanent hang the browser handshake bug produced.
+            //
+            // Note this runs *before* `ctx.launch_request` is stored, so a
+            // refused launch cannot later be replayed by the
+            // `configurationDone` arm as though it had been accepted.
+            if let Some(source) = &args.trace_source
+                && args.trace_folder.is_none()
+                && let Some(reason) = source.unsupported_reason()
+            {
+                warn!("refusing launch: {reason}");
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq: ctx.seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: false,
+                    command: "launch".to_string(),
+                    message: Some(reason),
+                    body: json!({}),
+                });
+                ctx.seq += 1;
+                sender.send(resp)?;
+                return Ok(());
+            }
+
+            ctx.launch_request = Some(req.clone());
             if let Some(folder) = &args.trace_folder {
                 ctx.launch_trace_folder = folder.clone();
                 ctx.launch_program = None;
