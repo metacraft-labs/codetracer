@@ -88,12 +88,40 @@ classify_test_run() {
 	echo "ok"
 }
 
-# test_run_headline VERDICT RC OKS FAILS
+# test_run_headline VERDICT RC OKS FAILS [SKIPS]
 #
 # The one line a lane prints per test file. Every non-ok headline names the
 # exit code, so a reader never has to infer it from the shape of the sentence.
+#
+# SKIPS IS OPTIONAL AND IS NOT PART OF THE VERDICT, deliberately.
+#
+# `std/unittest`'s `skip()` prints `[SKIPPED] <name>` and neither `[OK]` nor
+# `[FAILED]`, so a suite that skips every case exits 0 with a tally the
+# classifier above reads as `ok`. Measured on this tree:
+# `src/tests/gui/tests/integration/language_smoke_test.nim` declares 15 cases
+# across three languages and reported
+#
+#     src/tests/gui/tests/integration/language_smoke_test.nim ... OK (5 tests)
+#
+# on a machine with only the Python recorder built. Ten cases had announced
+# `SKIP: Ruby recorder not available` / `SKIP: Noir recorder not available`
+# and the lane's own summary said nothing. That is the same shape as the
+# crash this file exists to catch — a green line that is a prefix of the run —
+# and it is worth naming even though the remedy differs.
+#
+# The remedy differs because a missing cross-repo recorder is a DECLARED,
+# supported condition here (`viewmodel/tests/unit/recorder_gate.nim` exists to
+# make it uniform and greppable), not a defect. Failing the lane on it would
+# make every developer machine without six recorder siblings permanently red,
+# and a lane that is always red is a lane nobody reads. So the count is
+# REPORTED and never scored: `ok` still means `ok`, and the reader is told how
+# much of the file it covers.
 test_run_headline() {
-	local verdict="$1" rc="$2" oks="$3" fails="$4"
+	local verdict="$1" rc="$2" oks="$3" fails="$4" skips="${5:-0}"
+	local skipped_note=""
+	if [ "${skips}" -gt 0 ]; then
+		skipped_note=", ${skips} SKIPPED"
+	fi
 	case "${verdict}" in
 	crashed)
 		# Never the word PARTIAL, and never a bare count: the counts are a
@@ -109,10 +137,10 @@ test_run_headline() {
 		echo "FAILED WITHOUT A [FAILED] LINE (exit ${rc}, ${oks} OK)"
 		;;
 	partial)
-		echo "PARTIAL (${oks} OK, ${fails} FAILED, exit ${rc})"
+		echo "PARTIAL (${oks} OK, ${fails} FAILED${skipped_note}, exit ${rc})"
 		;;
 	ok)
-		echo "OK (${oks} tests)"
+		echo "OK (${oks} tests${skipped_note})"
 		;;
 	*)
 		echo "UNKNOWN VERDICT '${verdict}' (exit ${rc}, ${oks} OK, ${fails} FAILED)"

@@ -5,8 +5,8 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# This is the FOURTH variant of "tests that do not run but look like they pass"
-# found in this repo:
+# This is the FOURTH and FIFTH variant of "tests that do not run but look like
+# they pass" found in this repo:
 #
 #   1. a `check` inside a top-level `proc` printed [OK] while the process
 #      exited 1 (unittest's `fail` only marks the case when it expands inside a
@@ -23,6 +23,12 @@
 #      process at case 216; the remaining 245 never ran. The report said
 #      nothing a reader could distinguish from an ordinary partial run, because
 #      a tally cannot count cases that were never reached.
+#   5. and a lane that reported `OK (5 tests)` for a file declaring fifteen,
+#      because `std/unittest`'s `skip()` prints neither [OK] nor [FAILED] and
+#      exits 0. Measured on `integration/language_smoke_test.nim` with only one
+#      of its three recorders built. Contracts 11-13 cover it; unlike the other
+#      four it is REPORTED rather than scored, and the reason is written up
+#      above `test_run_headline`.
 #
 # The class is recurrent enough to deserve a standing guard, so the contracts
 # below do not grep the classifier — they RUN it, against fixture processes
@@ -53,7 +59,7 @@ JUSTFILE="${REPO_ROOT}/justfile"
 # Every contract below, counted once. The reconciliation at the end fails
 # loudly if this disagrees with what actually ran, so a contract can never go
 # missing silently.
-TOTAL_CONTRACTS=10
+TOTAL_CONTRACTS=13
 
 pass_count=0
 
@@ -130,6 +136,22 @@ echo "could not load: libsqlite3.so(|.0)"
 exit 1
 EOF
 
+# Green, and two thirds of it never ran. This is the fifth variant of "tests
+# that do not run but look like they pass", and it was measured rather than
+# imagined: `src/tests/gui/tests/integration/language_smoke_test.nim` on a
+# machine with only the Python recorder built reported `OK (5 tests)` while ten
+# of its fifteen cases printed `[SKIPPED]` after announcing a missing recorder.
+# `std/unittest`'s `skip()` prints neither [OK] nor [FAILED] and exits 0, so
+# the tally cannot see it at all.
+cat >"${tmp_dir}/skippy.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "[Suite] Language smoke: Python sudoku"
+for i in 1 2 3 4 5; do echo "  [OK] python case ${i}"; done
+echo "[Suite] Language smoke: Ruby sudoku"
+echo "  SKIP: Ruby recorder not available: ct record failed (exit 1)"
+for i in 1 2 3 4 5; do echo "  [SKIPPED] ruby case ${i}"; done
+EOF
+
 chmod +x "${tmp_dir}"/*.sh
 
 # run_fixture NAME — sets the globals a lane would compute, exactly the way the
@@ -143,9 +165,10 @@ run_fixture() {
 	set -e
 	fixture_oks=$(echo "${fixture_output}" | grep -c '\[OK\]' || true)
 	fixture_fails=$(echo "${fixture_output}" | grep -c '\[FAILED\]' || true)
+	fixture_skips=$(echo "${fixture_output}" | grep -c '\[SKIPPED\]' || true)
 	fixture_verdict="$(classify_test_run "${fixture_rc}" "${fixture_oks}" "${fixture_fails}")"
 	fixture_headline="$(test_run_headline "${fixture_verdict}" "${fixture_rc}" \
-		"${fixture_oks}" "${fixture_fails}")"
+		"${fixture_oks}" "${fixture_fails}" "${fixture_skips}")"
 }
 
 echo "test-lane-report contracts"
@@ -271,6 +294,49 @@ else
 		"A build that reports nothing must never be scored 'OK (0 tests)'."
 fi
 
+# --- 11-13. a green run that skipped most of itself must say so -----------
+#
+# Reporting, not scoring: see the note above `test_run_headline`. A missing
+# cross-repo recorder is a declared, supported condition in this repo
+# (`viewmodel/tests/unit/recorder_gate.nim` exists to make it uniform), so
+# failing on it would make every developer machine permanently red. What must
+# never happen is the count being invisible.
+
+run_fixture skippy.sh
+if [ "${fixture_verdict}" = "ok" ] && [ "${fixture_skips}" -eq 5 ]; then
+	ok "a run that skipped 5 of 10 cases is still classified 'ok'"
+else
+	fail "a run that skipped 5 of 10 cases is still classified 'ok'" \
+		"Got '${fixture_verdict}' with ${fixture_skips} skips." \
+		"skip() is a supported outcome here; the verdict must not change."
+fi
+
+if grep -q '5 SKIPPED' <<<"${fixture_headline}"; then
+	ok "the OK headline names the skipped count"
+else
+	fail "the OK headline names the skipped count" \
+		"Got: ${fixture_headline}" \
+		"This is the measured shape: language_smoke_test printed 'OK (5 tests)'" \
+		"while ten of its fifteen cases had been skipped for want of a recorder," \
+		"and nothing in the report said so."
+fi
+
+# The mutation for this contract: the pre-fix headline, which took four
+# arguments and could not have named a skip. It must NOT contain the count —
+# otherwise the two contracts above are satisfied by something other than the
+# change they are guarding.
+legacy_headline="$(test_run_headline "${fixture_verdict}" "${fixture_rc}" \
+	"${fixture_oks}" "${fixture_fails}")"
+if ! grep -q 'SKIPPED' <<<"${legacy_headline}"; then
+	ok "the pre-fix headline is silent about skips (red-before)"
+else
+	fail "the pre-fix headline is silent about skips" \
+		"Got: ${legacy_headline}" \
+		"A four-argument call must keep the old wording, both because that is" \
+		"the compatibility contract for existing callers and because if it did" \
+		"not, the contract above would pass without the fifth argument working."
+fi
+
 # --- 10. every lane actually goes through this classifier -----------------
 #
 # The contracts above are worthless if a lane keeps its own inline copy. Pin
@@ -315,6 +381,7 @@ lane_names=(
 	test-vm-native test-vm-js test-cli-record test-ct-trace-units
 	test-mcr-enrichment-units test-vm-recorder-gated
 	test-common-units test-ct-cli-units test-frontend-units test-vm-unit
+	test-vm-unit-js
 	test-vm-collab-units test-vm-collab-integration test-ct-test-incremental
 	test-ct-test-incremental-e2e test-vm-gui-headless test-online-sharing-compile
 )
