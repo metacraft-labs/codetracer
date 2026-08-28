@@ -25,12 +25,14 @@
 #   container environments do not provide).
 #
 #   The smoke commands escalate from cheapest to most realistic:
-#     1. --version          fast sanity check
-#     2. --help             confirms argument parser loads
-#     3. record /tmp/hello.py and then `replay` for one step
-#        (Python recorder is bundled inside the AppImage as a Nix-built
-#        venv, so this exercises the ruby/python venv path that
-#        end-users actually hit.)
+#     1. --version          fast sanity check (fatal: gates portability)
+#     2. --help             confirms argument parser loads (fatal)
+#     3. record a tiny Noir package and read the recording back
+#        (informational, NON-fatal): nargo / wazero / db-backend-record are
+#        bundled INSIDE the AppImage, so this is the one record->replay we can
+#        run with nothing installed in the container. A failure is reported but
+#        does not fail the distro -- a known recorder bug may ship in an
+#        internal release and be fixed by a follow-up.
 #
 # Usage
 #   bash scripts/test-appimage-cross-distro.sh path/to/CodeTracer.AppImage
@@ -179,15 +181,65 @@ echo "--- $($APPIMAGE --appimage-extract-and-run --version) ---"
 #    Nim runtime than --version does.
 $APPIMAGE --appimage-extract-and-run --help >/dev/null
 
-# Note on `ct record`: we deliberately don't exercise it here.  Recording
-# a real program needs the per-language recorder (Python module, Ruby
-# gem, etc.) installed in the user's environment — those are explicitly
-# out-of-AppImage (see install-on-distributions.sh for how end users are
-# expected to set them up).  A "ct record /tmp/hello.py" smoke would
-# need pip + codetracer_python_recorder in every container, which tests
-# the recorder packaging, not the AppImage portability story.
+# 3. record -> replay a tiny Noir package (INFORMATIONAL, non-fatal).
+#    Unlike Python/Ruby, whose recorders are an explicit out-of-AppImage
+#    install, Noir's whole toolchain (nargo + wazero + db-backend-record) is
+#    bundled inside the AppImage, so this is the record->replay we can run in a
+#    bare container. It catches a bundled recorder that was left out or
+#    mis-linked -- exactly the packaging regression --version cannot see. It is
+#    deliberately NOT allowed to fail the distro: a known recorder bug may ship
+#    in an internal release and be fixed by a follow-up.
+if record_replay_smoke; then
+	echo "record->replay smoke: OK"
+else
+	echo "record->replay smoke: FAILED (informational, not failing this distro)" >&2
+fi
 
 echo "OK"
+EOF
+}
+
+# Emitted into the container ahead of smoke_commands(): defines the
+# record->replay helper so the escalation block above stays readable. Returns
+# non-zero on failure; the caller decides it is non-fatal.
+record_replay_helper() {
+	cat <<'EOF'
+record_replay_smoke() {
+	local proj trace
+	proj="$(mktemp -d)"
+	trace="$(mktemp -d)"
+	mkdir -p "$proj/src"
+	cat >"$proj/Nargo.toml" <<'NARGO'
+[package]
+name = "ct_smoke"
+type = "bin"
+authors = [""]
+
+[dependencies]
+NARGO
+	cat >"$proj/Prover.toml" <<'PROVER'
+x = "0"
+y = "1"
+PROVER
+	cat >"$proj/src/main.nr" <<'NR'
+fn main(x: Field, y: pub Field) {
+    let mut acc = x;
+    for _ in 0..3 {
+        acc = acc + y;
+    }
+    assert(acc != x);
+}
+NR
+	echo "--- recording a Noir package with the packaged AppImage ---"
+	$APPIMAGE --appimage-extract-and-run record --output-folder "$trace" "$proj/src/main.nr" || return 1
+	if [ -z "$(ls -A "$trace" 2>/dev/null)" ]; then
+		echo "no trace written to $trace" >&2
+		return 1
+	fi
+	echo "--- reading the recording back (ct print) ---"
+	$APPIMAGE --appimage-extract-and-run print "$trace" || return 1
+	return 0
+}
 EOF
 }
 
@@ -197,6 +249,7 @@ for distro in "${REQUESTED_DISTROS[@]}"; do
 	echo "[appimage-cross-distro] $distro"
 	log="$(mktemp)"
 	script="$(deps_for "$distro")
+$(record_replay_helper)
 $(smoke_commands)"
 	if "$CONTAINER_RUNTIME" run --rm \
 		-v "$APPIMAGE_PATH:/work/AppImage:ro" \

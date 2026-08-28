@@ -1328,7 +1328,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
 
   reprobuild-macos-smoke:
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1413,7 +1413,7 @@ jobs:
   # target as a comma-separated allowlist (default 'all').
   origin-dap-macos:
     name: origin-DAP (materialized Python, macOS)
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1468,7 +1468,7 @@ jobs:
   # is added deliberately.
   origin-dap-macos-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -2040,7 +2040,7 @@ jobs:
     # same `non-nix-build/CodeTracer.dmg` path the sign + upload steps consume.
     # `aws` comes from `nixpkgs#awscli2`, provisioned per-command via `nix
     # shell`.
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     needs:
       - lint-bash
       - lint-nim
@@ -2109,7 +2109,7 @@ jobs:
     # binary), both provisioned per-command via `nix shell`. This job only
     # downloads + extracts + smoke-runs the release dmg, so it needs no
     # Homebrew build toolchain.
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     needs:
       - dmg-build
     steps:
@@ -2148,6 +2148,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc ./CodeTracer.dmg.asc
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc ./CodeTracer.pub.asc
+
+      - name: Verify GPG signature
+        # A signed release is only worth signing if we check the signature on
+        # the exact bytes we ship. The detached .asc and the published public
+        # key come from the same bucket the dmg does; import the key and verify
+        # before we run the binary, so a broken/absent signature fails loudly
+        # here rather than being discovered by a user with `gpg --verify`.
+        run: |
+          nix shell nixpkgs#gnupg --command gpg --import ./CodeTracer.pub.asc
+          nix shell nixpkgs#gnupg --command gpg --verify ./CodeTracer.dmg.asc ./CodeTracer.dmg
 
       - name: Extract dmg
         env:
@@ -2162,6 +2174,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
+
+      - name: Record -> replay smoke on the packaged dmg
+        # Informational, NOT a gate (continue-on-error): records a tiny Noir
+        # package and reads it back with the SHIPPED ct + bundled recorder
+        # (nargo / wazero / db-backend-record). Catches packaging regressions
+        # that `--version` cannot -- a missing or mis-linked bundled recorder.
+        # A known bug here may ship in an internal release and be fixed by a
+        # follow-up; it must not block the release from cutting.
+        continue-on-error: true
+        env:
+          CT: ${{ github.workspace }}/CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct
+        run: bash scripts/test-packaged-record-replay.sh
 
   appimage-lib-check:
     # CIP-5 Wave 4: migrated to the self-hosted NixOS runner. The DIY
@@ -2210,6 +2234,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc ./CodeTracer.AppImage.asc
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc ./CodeTracer.pub.asc
+
+      - name: Verify GPG signature
+        # A signed release is only worth signing if we check the signature on
+        # the exact bytes we ship. The detached .asc and the published public
+        # key come from the same bucket the AppImage does; import the key and
+        # verify before we run the binary, so a broken/absent signature fails
+        # loudly here rather than being discovered by a user with `gpg --verify`.
+        run: |
+          nix shell nixpkgs#gnupg --command gpg --import ./CodeTracer.pub.asc
+          nix shell nixpkgs#gnupg --command gpg --verify ./CodeTracer.AppImage.asc ./CodeTracer.AppImage
 
       - name: Check if ct starts
         env:
@@ -2219,6 +2255,19 @@ jobs:
         run: |
           chmod +x ./CodeTracer.AppImage
           ./CodeTracer.AppImage --version
+
+      - name: Record -> replay smoke on the packaged AppImage
+        # Informational, NOT a gate (continue-on-error): records a tiny Noir
+        # package and reads it back with the SHIPPED ct + bundled recorder
+        # (nargo / wazero / db-backend-record). Catches packaging regressions
+        # that `--version` cannot -- a missing or mis-linked bundled recorder.
+        # A known bug here may ship in an internal release and be fixed by a
+        # follow-up; it must not block the release from cutting.
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          CT: ${{ github.workspace }}/CodeTracer.AppImage --appimage-extract-and-run
+        run: bash scripts/test-packaged-record-replay.sh
 
   # Cross-distro AppImage smoke.  ubuntu-latest (the appimage-lib-check
   # runner above) shares too many runtime libs with the build host to
@@ -2311,7 +2360,7 @@ jobs:
           # install just / setup-python / dtolnay rust-toolchain) is gone; nim /
           # cargo / cargo-nextest / nimsuggest all come from the dev shell.
           - platform: macos
-            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+            runner: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2362,7 +2411,7 @@ jobs:
 
       - name: Install Nix
         # Both legs drive the tests through ``nix develop`` now. On the
-        # self-hosted eph-linux-x64 / eph-macos-arm64 runners nix is already
+        # self-hosted eph-linux-x64 / aarch64-darwin runners nix is already
         # on PATH, so setup-nix is a fast no-op; it stays for hosted-runner
         # portability.
         uses: ./.github/actions/setup-nix
@@ -2599,7 +2648,7 @@ jobs:
           # ``./non-nix-build/build.sh`` toolchain (brew install just /
           # setup-python / dtolnay rust-toolchain).
           - platform: macos
-            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+            runner: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2625,7 +2674,7 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env (nix) installs Nix via the shared setup-nix (a fast
-        # no-op on the self-hosted eph-linux-x64 / eph-macos-arm64 runners,
+        # no-op on the self-hosted eph-linux-x64 / aarch64-darwin runners,
         # where nix is already on PATH) and clones the cross-repo siblings
         # adjacent to this checkout (``../<name>``) at their pinned `dev` refs.
         # This replaces the former Checkout-manifests / Resolve-lock /
@@ -2763,7 +2812,7 @@ jobs:
           submodules: 'false'
 
       # NOTE: Nix is installed by the ``Setup dev env`` step above (a fast
-      # no-op on the self-hosted eph-macos-arm64 runner, where nix is already
+      # no-op on the self-hosted aarch64-darwin runner, where nix is already
       # on PATH). The former bespoke ``Install Nix (macOS, for ct_cli build)``
       # step is therefore no longer needed; the visual-replay sibling builds
       # below still drive each sibling's own ``nix develop`` flake.
@@ -3845,13 +3894,16 @@ jobs:
           # enabled on the checkout above: here the persisted header is
           # load-bearing, which is the opposite of the situation in most jobs.
           #
-          # STILL UNVERIFIED, for whoever runs the next release. Whether the App
-          # installation has `contents: write` on this repo has never been
-          # exercised: the last tag (25.11.1) predates the switch to App tokens,
-          # and no `main` run has reached this job since. If the tag push fails
-          # with 403, that is the App's permission set, NOT this change -- the
-          # PAT was already inert and restoring it would not help. Grant the
-          # installation contents:write rather than reintroducing a PAT.
+          # VERIFIED 2026-08, for whoever runs the next release. The
+          # metacraft-labs-ci-token-provider App installation (app id 3115338)
+          # carries `contents: write` at the org level -- confirmed against
+          # `GET /orgs/metacraft-labs/installations`. `create-github-app-token`
+          # is called above with no `permissions:` input, so the minted token
+          # inherits the installation's full permission set, contents:write
+          # included, and the persisted `extraheader` push below authenticates
+          # with it. If the tag push nonetheless 403s, re-check that permission
+          # set (it may have been narrowed) rather than reintroducing a PAT --
+          # the old PAT was already inert and restoring it would not help.
           git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
@@ -3906,25 +3958,54 @@ jobs:
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
           nix develop .#devShells.x86_64-linux.default --command bash -c "gpg --detach-sign resources.tar.xz"
-      - name: Upload latest
+      - name: Promote the just-built artifacts to the release tag
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          ENDPOINT: ${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }}
+          BUCKET: ${{ vars.R2_CODETRACER_BUCKET_NAME }}
+          TAG: ${{ needs.push-tag.outputs.tag }}
         run: |
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-arm64.dmg"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-arm64.dmg.asc"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-amd64.AppImage"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-amd64.AppImage.asc"
+          set -euo pipefail
 
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc --checksum-algorithm CRC32
+          # PROVENANCE: promote the exact bytes this run's appimage-build and
+          # dmg-build just wrote to R2 under the CodeTracer-main-* keys. Earlier
+          # this step re-fetched them from the downloads.codetracer.com CDN with
+          # wget -- but that CDN is a public cache in front of the bucket: it can
+          # still be serving a previous build's bytes when this job runs, or a
+          # neighbouring push to `main` can have overwritten the pointer, so the
+          # tag could be cut from artifacts that were never built for it. Reading
+          # straight from the authenticated bucket removes that gap: the source
+          # of truth, not a cache of it.
+          aws_cmd() {
+            nix develop .#devShells.x86_64-linux.default --command \
+              aws --endpoint-url="$ENDPOINT" "$@"
+          }
 
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc --checksum-algorithm CRC32
+          for f in CodeTracer-main-arm64.dmg CodeTracer-main-arm64.dmg.asc \
+                   CodeTracer-main-amd64.AppImage CodeTracer-main-amd64.AppImage.asc; do
+            aws_cmd s3 cp "s3://$BUCKET/$f" "$f"
+          done
+
+          # A tag artifact must be the SIGNED artifact. The release GPG key was
+          # imported above (import-gpg), so its public half is in the keyring;
+          # verify each detached signature against the bytes we are about to
+          # publish before we publish them. A bad or missing signature fails the
+          # release rather than shipping unverifiable bytes under a version tag.
+          nix develop .#devShells.x86_64-linux.default --command \
+            gpg --verify CodeTracer-main-arm64.dmg.asc CodeTracer-main-arm64.dmg
+          nix develop .#devShells.x86_64-linux.default --command \
+            gpg --verify CodeTracer-main-amd64.AppImage.asc CodeTracer-main-amd64.AppImage
+
+          promote() { # promote <local-file> <dest-suffix>
+            aws_cmd s3 cp "$1" "s3://$BUCKET/CodeTracer-$2" --checksum-algorithm CRC32
+          }
+          for slot in "$TAG" latest; do
+            promote CodeTracer-main-arm64.dmg          "$slot-arm64.dmg"
+            promote CodeTracer-main-arm64.dmg.asc      "$slot-arm64.dmg.asc"
+            promote CodeTracer-main-amd64.AppImage     "$slot-amd64.AppImage"
+            promote CodeTracer-main-amd64.AppImage.asc "$slot-amd64.AppImage.asc"
+          done
 
       - name: Get changelog text
         id: changelog
@@ -4080,20 +4161,20 @@ jobs:
     # the failure mode it is watching for; if this job needed the dev env,
     # the very outage it reports would take it down too.
     #
-    # KNOWN LATENCY — read before trusting the absence of a verdict.
-    # Two jobs in the needs: list below, `reprobuild-macos-smoke` and
-    # `origin-dap-macos`, request `runs-on: eph-macos-arm64`, and no
-    # registered runner carries that label (the org's darwin runners
-    # expose aarch64-darwin / nix-darwin / darwin instead). Those jobs
-    # therefore never get scheduled: they sit queued until GitHub's
-    # 24-hour ceiling cancels them. Because this gate waits on them, its
-    # verdict cannot be published until ~24h after the push. It is
-    # correct when it arrives, but it is NOT prompt, and a run that is
-    # still in progress has simply not been judged yet — do not read a
-    # missing verdict as a passing one. Fixing the runner labels removes
-    # the delay; dropping those jobs from needs: would remove the delay
-    # by giving up the coverage, which is the trade this gate exists to
-    # refuse.
+    # RESOLVED LATENCY — historical note, kept so the failure mode stays
+    # recognizable. Two jobs in the needs: list below, `reprobuild-macos-smoke`
+    # and `origin-dap-macos`, used to request `runs-on: eph-macos-arm64`, a
+    # label no registered runner carried (the org's darwin runners expose
+    # `self-hosted`/`macOS`/`ARM64`/`darwin`/`nix-darwin`/`aarch64-darwin`).
+    # Those jobs never got scheduled: they sat queued until GitHub's 24-hour
+    # ceiling cancelled them, and because this gate waits on them its verdict
+    # could not be published until ~24h after the push. They now request
+    # `aarch64-darwin`, which the m3-mcl-* runners carry, so the verdict is
+    # prompt again. If a macOS job ever queues indefinitely once more, the
+    # requested label has drifted from what the darwin runners advertise — do
+    # not read a missing verdict as a passing one while that is true, and do
+    # not "fix" it by dropping those jobs from needs:, which would remove the
+    # delay only by giving up the coverage this gate exists to protect.
     needs:
       - lint-bash
       - lint-nim
