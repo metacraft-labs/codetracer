@@ -146,9 +146,16 @@ fi
 for lang in "${SELECTED[@]}"; do
 	program="${LANG_TESTS[$lang]:-}"
 	if [[ -z $program ]]; then
-		echo "  SKIP $lang — no test definition"
-		((SKIPPED++)) || true
-		continue
+		# A language named on the command line that has no definition is a
+		# caller error (a typo, or a language removed from LANG_TESTS), not
+		# something to skip: skipping it is how `cli-record-smoke.sh ruby`
+		# misspelled as `rubby` reports success having recorded nothing.
+		# Only the no-argument form enumerates LANG_TESTS itself, and every
+		# key it yields is defined by construction, so this can only be hit
+		# by an explicit argument.
+		echo "error: unknown language '$lang' — no test definition"
+		echo "  Known languages: ${!LANG_TESTS[*]}"
+		exit 1
 	fi
 
 	# Check if the recorder is available on PATH before attempting.
@@ -211,5 +218,20 @@ if [[ $FAILED -gt 0 ]]; then
 	echo ""
 	echo "Failures:"
 	echo -e "$FAILURES"
+	exit 1
+fi
+
+# Zero-test guard: an all-skipped run is how a broken dispatch hides. Without
+# this, every language skipping its prerequisite check leaves
+# "0 passed, 0 failed" and exit 0 — a gate reporting success having recorded
+# nothing. Mirrors the guard in
+# src/tests/cli/record_dispatch_e2e_test.nim:188-195.
+if [[ $PASSED -eq 0 ]]; then
+	echo ""
+	echo "error: no language was recorded end-to-end ($SKIPPED skipped)."
+	echo "  A run in which every language skips is not a passing smoke test."
+	echo "  The Ruby and JavaScript recorders are expected to be built in the"
+	echo "  CodeTracer dev shell — see scripts/detect-siblings.sh and"
+	echo "  codetracer-specs/Testing/Cross-Repo-CI-Integration.md."
 	exit 1
 fi

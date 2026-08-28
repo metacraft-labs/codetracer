@@ -758,8 +758,31 @@ resolve_runtimes() {
 		hash -r 2>/dev/null || true
 		resolved="$(command -v "$rt" 2>/dev/null || true)"
 		echo "  runtime $rt: $rt_path"
-		assert_eq "the '$rt' runtime on PATH is the flake-pinned one from $RECORDER_REPO's dev shell" \
-			"$rt_path" "$resolved"
+		# NOT `assert_eq "$rt_path" "$resolved"`: that assertion could never
+		# fail. `rt_dir` is `dirname "$rt_path"` and was just prepended to
+		# PATH with the hash cache cleared, and `basename "$rt_path" == $rt`
+		# because `$rt_path` came from `command -v -- "$rt"` at :733 — so
+		# `command -v "$rt"` necessarily reproduced `$rt_path`. It compared a
+		# value to itself while its description claimed to be checking
+		# flake-pinning, a property it never looked at.
+		#
+		# Re-assert the property that description names, against the PATH the
+		# rest of the gate will actually use. This fails if the effective
+		# resolution is ever an ambient host runtime rather than a pinned one
+		# — the ABI mismatch the case arm at :743 exists to prevent.
+		[[ -n $resolved && -x $resolved ]] ||
+			die "the '$rt' runtime disappeared from PATH after pinning $rt_dir.
+  command -v $rt found '${resolved:-nothing}'."
+		case "$resolved" in
+		/nix/store/* | "$RECORDER_DIR"/*) ;;
+		*)
+			die "after pinning, the '$rt' runtime on PATH resolves to
+      $resolved
+  which is neither pinned by $RECORDER_REPO's flake (/nix/store) nor built
+  inside its checkout.  The $LANG_KEY edge would record against an ambient
+  host runtime the recorder was not built for."
+			;;
+		esac
 	done < <(fx_list discovery.runtime)
 }
 
