@@ -177,6 +177,36 @@ export flow_vm
 import viewmodels/flow_layout
 export flow_layout
 
+# Value Origin Tracking's ViewModel (Value-Origin-Tracking.milestones.org M4).
+#
+# The capability — `ct/originChain`, the chain model, the breadcrumb stack, the
+# pinned chains, the batched placeholder fill — has been built, tested and
+# shipped on the desktop since the campaign closed
+# (Value-Origin-Campaign-Closeout.md, 2026-06-18). It was simply not reachable
+# from an embedder, because this facade did not name it: §7 makes anything not
+# exported here private.
+#
+# Exporting it adds NOTHING to the facade's import graph, and not as an
+# estimate: `session_vm` already imports `origin_chain_vm`, and `state_vm` and
+# `scratchpad_vm` already import `origin_chain_types`, so both modules have been
+# inside the graph `ci/test/sdk-facade-boundary.sh` walks all along —
+# unreachable only because this file did not name them. The measured count is
+# 49 modules with and without these four lines.
+#
+# In particular it introduces no chain concept, and that is
+# checkable by reading `origin_chain_types.nim` rather than by taking this
+# comment's word: `OriginChain` is `queryVariable`, `queryStepId`, a `seq` of
+# `OriginHop` and a `Terminator`; a hop carries a source expression, an
+# `OriginLocation` of `path`/`line`/`rrTicks`, and operand snapshots. There is
+# no block, no transaction, no address and no chain id anywhere in the type —
+# an origin CHAIN is a chain of causes, which value came from which earlier
+# value. `ci/test/sdk-facade-boundary.sh` is the enforcement.
+import viewmodels/origin_chain_types
+export origin_chain_types
+
+import viewmodels/origin_chain_vm
+export origin_chain_vm
+
 import viewmodels/editor_vm
 export editor_vm
 
