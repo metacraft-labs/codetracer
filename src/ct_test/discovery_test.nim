@@ -588,8 +588,10 @@ suite "ct-test workspace scoping guards":
 
   test "execCaptured reports truncation instead of hiding it":
     ## The guard above is only possible because `CapturedRun` surfaces the
-    ## truth. Pin the primitive too: `output` is a prefix, `outputBytes` is the
-    ## real length, and `truncated` says which.
+    ## truth. Pin the primitive too: `output` is the retained TAIL (runquota
+    ## keeps the newest bytes so a failed command's terminal diagnostic
+    ## survives the bound), `outputBytes` is the real length, and `truncated`
+    ## says which.
     const payload = "0123456789"
     let full = execCaptured(@["printf", "%s", payload])
     if full.exitCode != 0:
@@ -600,7 +602,10 @@ suite "ct-test workspace scoping guards":
       check not full.truncated
 
       let cut = execCaptured(@["printf", "%s", payload], captureLimit = 4)
-      check cut.output == payload[0 ..< 4]
+      # runquota's bounded capture retains the NEWEST bytes (the tail), not the
+      # prefix, so a truncated diagnostic keeps its terminal line. For a 10-byte
+      # payload bounded to 4 the retained bytes are the last four, "6789".
+      check cut.output == payload[payload.len - 4 ..< payload.len]
       check cut.outputBytes == uint64(payload.len)
       check cut.truncated
 

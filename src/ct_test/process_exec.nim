@@ -33,7 +33,8 @@ type
     ## accounting ``runquota_process`` captures for free, so callers that want
     ## per-test wall time (e.g. for the CI-sharding cost model) or memory
     ## telemetry no longer have to time the call by hand.
-    output*: string                    ## combined stdout+stderr, possibly cut
+    output*: string                    ## combined stdout+stderr; when the bound
+                                       ## cut it, this is the retained TAIL
     exitCode*: int
     timedOut*: bool
     durationMs*: int
