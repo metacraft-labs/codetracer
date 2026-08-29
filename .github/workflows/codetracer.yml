@@ -1196,6 +1196,19 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # ci/lint/nim.sh runs the SDK-facade-boundary guard, which since
+      # ada0a7ee walks the import graph INTO the `isonim` and `nim-everywhere`
+      # sibling packages (both REQUIRED siblings per scripts/require-siblings.sh)
+      # and fails `graph-walks-siblings` if it cannot resolve them. That commit
+      # added the sibling requirement to the guard but not to this job, so
+      # lint-nim went red with `cannot locate sibling package: isonim /
+      # nim-everywhere`. Provision the IsoNim-family siblings next to this
+      # checkout through the shared action, the same way the build/test jobs do.
+      - name: Setup isonim siblings
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
 
   lint-nix:
