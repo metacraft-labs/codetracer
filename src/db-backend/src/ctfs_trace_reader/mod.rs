@@ -4,22 +4,39 @@
 //! rationale and the two-format approach.
 
 pub mod block_overlay;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod call_stream_source;
-#[cfg(target_arch = "wasm32")]
-#[path = "call_stream_source_wasm.rs"]
+// M0/2 (BlockTracer "Browser Replay Gate") — the seekable `calls.dat` source is
+// built for BOTH native and wasm32. It used to be replaced by a stub on wasm32
+// (`open_from_ctfs` returned `Ok(None)`, `call()` returned `None`), which meant
+// a browser-loaded `.ct` could never serve its call tree on demand and always
+// fell back to the fully-materialized `db.calls`.
+//
+// Nothing in this module is host-specific: the whole wire format lives in
+// `codetracer_trace_reader::call_stream_reader`, which already compiles to
+// wasm32 (its Zstd chunk decompression selects the pure-Rust `ruzstd` decoder
+// under `cfg(target_arch = "wasm32")` — see that module's `decode_zstd_chunk`).
+// The only filesystem entry point, `SeekableCallStream::open(path)`, is a
+// convenience used by native tests; the browser reaches the stream through
+// `open_from_ctfs`, which reads through the caller's already-open
+// `CtfsReader` (VFS bytes in the browser) and never touches a path.
 pub mod call_stream_source;
 pub mod collapse;
 pub mod coverage_namespace;
 pub mod cow_namespace_reader;
 pub mod cow_namespace_writer;
 pub mod ctfs_container;
+// M0/4 — the seekable `events.dat` source. Built for both targets, like the
+// call/step/value sources above.
+pub mod event_stream_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod follow_stream_source;
 #[cfg(target_arch = "wasm32")]
 #[path = "follow_stream_source_wasm.rs"]
 pub mod follow_stream_source;
 pub mod http_range_source;
+// M0/1 — the WASM-safe, path-free reader for the binary interning tables. Like
+// `meta_dat` below, it exists so a new-format container's vocabulary can be
+// read from in-memory bytes without the Nim FFI reader.
+pub mod interning_tables;
 pub mod interval_tagged_map;
 pub mod lazy_population_store;
 pub mod linehits_namespace;
@@ -29,10 +46,14 @@ pub mod meta_dat;
 pub mod server_prep_encoding;
 pub mod span_stream;
 pub mod step_map_namespace;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod step_value_stream_source;
-#[cfg(target_arch = "wasm32")]
-#[path = "step_value_stream_source_wasm.rs"]
+// M0/2 — as with `call_stream_source` above, the seekable `steps.dat` /
+// `values.dat` sources are now built for BOTH native and wasm32 rather than
+// being stubbed out in the browser. The format-level readers
+// (`codetracer_trace_reader::{step_stream_reader, value_stream_reader}`)
+// already compile to wasm32 with the `ruzstd` decoder. The ONE genuinely
+// host-specific part is the parallel whole-table build, which uses
+// `std::thread::scope`; that is `cfg`-gated inside the module down to the
+// sequential build (which produces a byte-identical table) on wasm32.
 pub mod step_value_stream_source;
 
 use std::collections::HashMap;
@@ -156,6 +177,24 @@ pub struct CTFSTraceReader {
     /// rather than from the materialized `db.variables`. Always `None` for
     /// legacy (flag-off) traces.
     value_stream: Option<std::sync::Arc<step_value_stream_source::SeekableValueStream>>,
+    /// M0/4 — the SEEKABLE `events.dat` I/O-event stream.
+    ///
+    /// `Some` only when the container advertises `has_io_event_stream`
+    /// (bit 11) AND ships `events.dat`/`events.idx`. When present,
+    /// `event_count()` is answered from the stream's index without decoding a
+    /// single event, and `seekable_event_page` reads a bounded page,
+    /// decompressing only the chunks that page spans.
+    event_stream: Option<std::sync::Arc<event_stream_source::SeekableEventStream>>,
+    /// M0/4 — memoized whole-event materialization for the BORROWING
+    /// [`TraceReader::events`] accessor.
+    ///
+    /// `events()` hands out `&[DbRecordEvent]`, which a seekable stream cannot
+    /// synthesize, so the first caller that really wants the whole vector gets
+    /// it built once here. `Some` ONLY when `event_stream` is attached AND
+    /// `db.events` is empty (i.e. nothing materialized the events at open);
+    /// a legacy `events.log` bundle keeps its eagerly-built `db.events` and
+    /// leaves this `None`, so that path is bit-for-bit unchanged.
+    lazy_events_full: Option<std::sync::OnceLock<Vec<DbRecordEvent>>>,
     /// M24c — the LAZY per-step value cache backing the borrowing
     /// `variables_at()` accessor on a PRODUCTION split bundle.
     ///
@@ -627,6 +666,8 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            event_stream: None,
+            lazy_events_full: None,
             lazy_values: None,
             lazy_steps: None,
             lazy_steps_full: None,
@@ -786,13 +827,37 @@ impl CTFSTraceReader {
             return Ok(reader);
         }
 
-        let mut reader = if is_new_format(ctfs) {
+        let reader = if is_new_format(ctfs) {
             info!("CTFS new format detected — skipping postprocessing");
             Self::open_new_format(ctfs, path, follow)?
         } else {
             info!("CTFS old format detected — running postprocessing");
             Self::open_old_format(ctfs)?
         };
+
+        Self::attach_seekable_sources(reader, ctfs, Some(path), follow)
+    }
+
+    /// Attach every SEEKABLE source the container advertises to an
+    /// already-constructed reader.
+    ///
+    /// M0/1 — this used to be inlined in [`open_with_ctfs`], which is why
+    /// [`from_bytes`](Self::from_bytes) — the ONLY browser-reachable
+    /// constructor — hard-coded `call_stream` / `step_stream` / `value_stream`
+    /// to `None`: a `.ct` opened in a browser tab could never serve anything
+    /// on demand, no matter what streams it carried. Splitting it out lets both
+    /// constructors share it, and makes `path` OPTIONAL: everything here reads
+    /// through the caller's already-open [`CtfsReader`] (a file, an overlay, or
+    /// the browser's in-memory VFS), and the path is consulted for exactly one
+    /// thing — the `<ct>.step-map.ns` SIDECAR, which is a filesystem-only
+    /// convenience. A path-less caller still gets the CONTAINER-INTERNAL
+    /// `step-map.ns`.
+    fn attach_seekable_sources(
+        mut reader: Self,
+        ctfs: &mut CtfsReader,
+        path: Option<&Path>,
+        follow: bool,
+    ) -> Result<Self, Box<dyn Error>> {
 
         // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
         // container advertises one. This is the path that lets a network-loaded
@@ -866,19 +931,51 @@ impl CTFSTraceReader {
             }
         };
 
+        // M0/4 — attach the SEEKABLE `events.dat` I/O-event stream when the
+        // container advertises one (`has_io_event_stream`). When present,
+        // `event_count()` is answered from the stream's index WITHOUT decoding
+        // any event, and a bounded page can be read through
+        // `seekable_event_page`. `events()` — which must hand out a borrowed
+        // slice — still materialises, but only on FIRST DEMAND rather than at
+        // open. Same fall-back discipline as the streams above.
+        reader.event_stream = match event_stream_source::SeekableEventStream::open_from_ctfs(ctfs) {
+            Ok(Some(stream)) => {
+                info!(
+                    "CTFS: seekable events.dat attached ({} events, chunk_size {}) — events served on-demand",
+                    stream.event_count(),
+                    stream.chunk_size(),
+                );
+                Some(std::sync::Arc::new(stream))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                info!("CTFS: events.dat present but unreadable ({e}); falling back to materialized events");
+                None
+            }
+        };
+        // Only take the lazy events path when the eager `db.events` is EMPTY.
+        // A legacy `events.log` bundle materialises its events during
+        // postprocessing AND may additively ship `events.dat`; serving the same
+        // events twice from two sources would be a behaviour change, so the
+        // materialised vector keeps priority there.
+        reader.lazy_events_full = if reader.event_stream.is_some() && reader.db.events.is_empty() {
+            Some(std::sync::OnceLock::new())
+        } else {
+            None
+        };
+
         // M26 — attach the prepopulated `step-map.ns` BREAKPOINT INDEX when the
         // bundle carries one. When present, breakpoint line→step resolution
         // (`step_ids_on_line`) is an O(unique-lines) index lookup that does NOT
-        // trigger the M24c lazy / M25b whole-table build. When absent — the
-        // common case today, since no production writer emits the namespace yet
-        // (see `step_map_namespace`'s module docs) — the resolver falls back to
-        // the whole-table build, byte-identically.
+        // trigger the M24c lazy / M25b whole-table build. When absent the
+        // resolver falls back to the whole-table build, byte-identically.
         //
         // We look for the table in two places, in order:
         //   1. a container-internal `step-map.ns` file (the spec's layout), and
         //   2. a `<ct>.step-map.ns` SIDECAR next to the `.ct` (the path a
         //      writer-side toggle / external tool can drop the index at without
-        //      rewriting the container).
+        //      rewriting the container). A PATH-LESS caller (the browser) has no
+        //      sidecar to look at and uses the container-internal file only.
         // A present-but-unparseable table is logged and ignored (we keep the
         // whole-table fallback) rather than failing the open — opening the trace
         // is strictly more useful than refusing it, and the fallback always
@@ -907,7 +1004,10 @@ impl CTFSTraceReader {
     /// falling back to a `<ct>.step-map.ns` sidecar. Returns `None` (the
     /// whole-table fallback) when neither is present or the bytes are
     /// unparseable.
-    fn load_step_map_namespace(ctfs: &mut CtfsReader, path: &Path) -> Option<step_map_namespace::StepMapNamespace> {
+    fn load_step_map_namespace(
+        ctfs: &mut CtfsReader,
+        path: Option<&Path>,
+    ) -> Option<step_map_namespace::StepMapNamespace> {
         // 1. Container-internal `step-map.ns`.
         let internal = if ctfs.has_file(step_map_namespace::STEP_MAP_FILE) {
             match ctfs.read_file(step_map_namespace::STEP_MAP_FILE) {
@@ -923,12 +1023,14 @@ impl CTFSTraceReader {
             None
         };
 
-        // 2. Sidecar `<ct>.step-map.ns`.
+        // 2. Sidecar `<ct>.step-map.ns` — filesystem-backed callers only. A
+        //    path-less caller (the browser, via `from_bytes`) has no filesystem
+        //    to look in, so it keeps whatever the container itself carried.
         let bytes = internal.or_else(|| {
             // A missing sidecar is the normal case — not an error — so any read
             // failure (absent file, permission, etc.) collapses to `None` and we
             // stay on the whole-table fallback.
-            let sidecar = sidecar_step_map_path(path);
+            let sidecar = sidecar_step_map_path(path?);
             std::fs::read(&sidecar).ok()
         });
 
@@ -971,23 +1073,319 @@ impl CTFSTraceReader {
     /// Construct a [`CTFSTraceReader`] from raw bytes already in memory.
     ///
     /// This is the VFS-friendly counterpart of [`open`](Self::open): the
-    /// caller supplies the complete `.ct` file contents (e.g. read from
-    /// the in-memory VFS in WASM builds) and the reader parses them
-    /// without touching the filesystem.
+    /// caller supplies the complete `.ct` file contents (e.g. read from the
+    /// in-memory VFS in WASM builds) and the reader parses them without
+    /// touching the filesystem. It is the ONLY browser-reachable constructor.
     ///
-    /// Only the **old format** (events-based) is supported here because
-    /// the new format requires the Nim FFI reader which needs a real file
-    /// path.  If the container uses the new format, an error is returned.
+    /// # M0/1 — new-format seekable containers
+    ///
+    /// This used to reject new-format (split-stream) containers outright and
+    /// to hard-code every seekable stream to `None`, which meant a browser tab
+    /// could open ONLY legacy `events.log` bundles — whole-file postprocessed
+    /// by construction — and could never serve anything on demand. Both holes
+    /// are closed:
+    ///
+    /// * a new-format container is opened by
+    ///   [`open_new_format_rust`](Self::open_new_format_rust), a pure-Rust path
+    ///   that needs neither the Nim FFI nor a filesystem path, and
+    /// * both formats then run through
+    ///   [`attach_seekable_sources`](Self::attach_seekable_sources), exactly as
+    ///   [`open`](Self::open) does, so the `calls.dat` / `steps.dat` /
+    ///   `values.dat` / `events.dat` streams and the container-internal
+    ///   `step-map.ns` attach here too.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::from_bytes(data)?;
 
-        if is_new_format(&ctfs) {
-            Err("CTFS new format (nim-reader) is not supported via from_bytes; \
-                 only old-format containers can be loaded from in-memory data"
-                .into())
+        let reader = if is_new_format(&ctfs) {
+            info!("CTFS from_bytes: new (split-stream) format detected — opening via the pure-Rust reader");
+            Self::open_new_format_rust(&mut ctfs)?
         } else {
             info!("CTFS from_bytes: old format detected — running postprocessing");
-            Self::open_old_format(&mut ctfs)
+            Self::open_old_format(&mut ctfs)?
+        };
+
+        Self::attach_seekable_sources(reader, &mut ctfs, None, false)
+    }
+
+    /// Open a new-format (split-stream) CTFS container **in pure Rust**, with
+    /// no Nim FFI and no filesystem path.
+    ///
+    /// M0/1. [`open_new_format_nim`](Self::open_new_format_nim) is the native
+    /// production path, but it is unreachable in the browser twice over: the
+    /// `nim-reader` feature is not in the wasm feature set, and
+    /// `NimTraceReaderHandle::open` takes a path to a real file. This
+    /// constructor reads the same container through pieces that are already
+    /// wasm32-clean:
+    ///
+    /// | data | source |
+    /// | --- | --- |
+    /// | program / args / workdir / paths | [`meta_dat::parse_meta_dat`] |
+    /// | paths, functions, types, varnames | [`interning_tables::InterningTables`] |
+    /// | call tree + entry/exit step ranges | [`call_stream_source::SeekableCallStream`] |
+    /// | steps | [`step_value_stream_source::LazyStepCache`] over `steps.dat` |
+    /// | per-step values | [`step_value_stream_source::LazyValueCache`] over `values.dat` |
+    /// | I/O events | the seekable `events.dat` stream, attached by the caller |
+    ///
+    /// # What is materialized at open, and what is not
+    ///
+    /// NOT materialized: steps, per-step values, and I/O events — the three
+    /// quantities that scale with trace LENGTH. Those stay behind their lazy
+    /// caches, so opening a container is bounded by its vocabulary and its call
+    /// tree rather than by how long the program ran. That is the property M0
+    /// exists to establish.
+    ///
+    /// Materialized: the interning tables (proportional to the program's
+    /// SOURCE, not its execution) and the call tree. The call tree is the one
+    /// remaining O(trace) build on this path; the seekable `calls.dat` source
+    /// attached afterwards already serves `seekable_call`, so retiring the
+    /// eager build is a follow-up rather than a blocker (see M0 deliverable 4).
+    ///
+    /// # Differences from the Nim path, and why they are improvements
+    ///
+    /// The Nim FFI exposes only a function's NAME, so `open_new_format_nim`
+    /// stubs every `FunctionRecord`'s `path_id`/`line` to zero. The `funcs.dat`
+    /// record carries a packed `global_line_index`, so this path recovers the
+    /// real definition site.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `meta.dat` is missing or malformed, or when the container
+    /// advertises `has_step_stream` but the stream cannot be read — a container
+    /// that claims to be new-format and then cannot produce its steps is a
+    /// corrupt container, and reporting that is better than opening an empty
+    /// trace that looks like a program which did nothing.
+    fn open_new_format_rust(ctfs: &mut CtfsReader) -> Result<Self, Box<dyn Error>> {
+        let meta_bytes = ctfs
+            .read_file("meta.dat")
+            .map_err(|e| format!("new-format container has no readable meta.dat: {e}"))?;
+        let meta = meta_dat::parse_meta_dat(&meta_bytes).map_err(|e| format!("meta.dat is malformed: {e}"))?;
+
+        // An MCR (live-recording) container carries checkpoint streams rather
+        // than a materialized execution, and needs the emulator rather than
+        // this reader. `setup_from_vfs` routes those away before reaching here;
+        // refusing by name is still better than silently producing a trace with
+        // zero steps, which reads to a user as "the program did nothing".
+        if meta.flags & meta_dat::FLAG_HAS_MCR_FIELDS != 0 {
+            return Err("this is an MCR (live-recording) container; it needs the emulator replay session, \
+                        not the materialized CTFS reader"
+                .into());
+        }
+
+        let workdir = if meta.workdir.is_empty() {
+            PathBuf::from(".")
+        } else {
+            PathBuf::from(&meta.workdir)
+        };
+        let mut db = Db::new(&workdir);
+
+        // ── Vocabulary ─────────────────────────────────────────────────
+        //
+        // `paths` appear in BOTH `meta.dat` and `paths.dat`. Prefer the
+        // interning table: it is the table the step / function records index
+        // into, so using it keeps every `PathId` consistent by construction.
+        // `meta.dat`'s copy is the fallback for a container that predates the
+        // binary tables.
+        let tables = interning_tables::InterningTables::open_from_ctfs(ctfs)
+            .map_err(|e| format!("interning tables unreadable: {e}"))?;
+
+        match tables {
+            Some(tables) => {
+                info!(
+                    "CTFS pure-Rust reader: interning tables loaded — {} paths, {} functions, {} types, {} varnames",
+                    tables.paths.len(),
+                    tables.functions.len(),
+                    tables.types.len(),
+                    tables.variable_names.len(),
+                );
+                for path in tables.paths {
+                    db.paths.push(path.clone());
+                    db.path_map.insert(path, PathId(db.paths.len() - 1));
+                    db.step_map.push(HashMap::new());
+                }
+                for function in tables.functions {
+                    db.functions.push(function);
+                }
+                for type_record in tables.types {
+                    db.types.push(type_record);
+                }
+                for name in tables.variable_names {
+                    db.variable_names.push(name);
+                }
+            }
+            None => {
+                info!(
+                    "CTFS pure-Rust reader: no binary interning tables — falling back to meta.dat's {} paths",
+                    meta.paths.len()
+                );
+                for path in &meta.paths {
+                    db.paths.push(path.clone());
+                    db.path_map.insert(path.clone(), PathId(db.paths.len() - 1));
+                    db.step_map.push(HashMap::new());
+                }
+            }
+        }
+
+        // ── Calls ──────────────────────────────────────────────────────
+        //
+        // The call records' entry/exit step ranges are what turn a step index
+        // into a call key, so the lazy step cache needs them before it can hand
+        // out a `DbStep`.
+        let call_source = call_stream_source::SeekableCallStream::open_from_ctfs(ctfs)
+            .map_err(|e| format!("calls.dat unreadable: {e}"))?;
+        let mut call_ranges: Vec<CallRange> = Vec::new();
+        if let Some(source) = call_source.as_ref() {
+            let calls = source
+                .calls_and_ranges()
+                .map_err(|e| format!("calls.dat could not be decoded: {e}"))?;
+            call_ranges.reserve(calls.len());
+            for (call, entry_step, exit_step) in calls {
+                db.calls.push(call);
+                call_ranges.push(CallRange { entry_step, exit_step });
+            }
+            info!("CTFS pure-Rust reader: {} calls loaded", db.calls.len());
+        } else {
+            info!("CTFS pure-Rust reader: container carries no calls.dat — call tree is empty");
+        }
+
+        // ── Steps (LAZY) ───────────────────────────────────────────────
+        let step_source = step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs)
+            .map_err(|e| format!("steps.dat unreadable: {e}"))?;
+        let Some(step_source) = step_source else {
+            // `is_new_format` keyed off `steps.dat` being present, so a
+            // container that reaches here without a readable step stream is
+            // internally inconsistent.
+            return Err("new-format container advertises steps.dat but no seekable step stream could be opened; \
+                        the container is inconsistent"
+                .into());
+        };
+        let step_count = step_source.step_count();
+        let (step_to_call_key, step_to_global_call_key) = build_step_call_maps(&call_ranges, step_count);
+        info!(
+            "CTFS pure-Rust reader: steps served LAZILY from seekable steps.dat ({step_count} records, \
+             chunk_size {}) — step table NOT materialized at open",
+            step_source.chunk_size(),
+        );
+        let lazy_steps = step_value_stream_source::LazyStepCache::new(
+            std::sync::Arc::new(step_source),
+            step_to_call_key,
+            step_to_global_call_key,
+        );
+
+        // The per-step parallel scaffolding the eager path pushes. These are
+        // EMPTY maps — no decode, no decompression — so they keep the borrowing
+        // `compound_at` / `cells_at` / `variable_cells_at` accessors returning
+        // `Some(empty)` rather than `None` per step, which the split-bundle
+        // full-DB contract asserts (a production split bundle carries inline
+        // full values, never `Cell`/`Assign` references).
+        for _ in 0..step_count {
+            db.instructions.push(vec![]);
+            db.compound.push(HashMap::new());
+            db.cells.push(HashMap::new());
+            db.variable_cells.push(HashMap::new());
+        }
+
+        // ── Values (LAZY) ──────────────────────────────────────────────
+        //
+        // JS/TS traces are excluded from the seekable value path for the same
+        // reason `open_with_ctfs` excludes them: their recorder's value stream
+        // is not equivalent to the materialized table. A value stream that
+        // cannot be opened is logged, not fatal — the trace still steps, it
+        // just shows no locals, which beats refusing to open it.
+        let is_js = db.paths.iter().any(|p| {
+            p.ends_with(".js")
+                || p.ends_with(".ts")
+                || p.ends_with(".jsx")
+                || p.ends_with(".tsx")
+                || p.ends_with(".mjs")
+                || p.ends_with(".cjs")
+        });
+        let lazy_values = if is_js {
+            None
+        } else {
+            match step_value_stream_source::SeekableValueStream::open_from_ctfs(ctfs) {
+                Ok(Some(stream)) => {
+                    let stream = std::sync::Arc::new(stream);
+                    info!(
+                        "CTFS pure-Rust reader: values served LAZILY from seekable values.dat ({} records) — \
+                         value table NOT materialized at open",
+                        stream.value_count(),
+                    );
+                    Some(step_value_stream_source::LazyValueCache::new(stream, step_count))
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    info!("CTFS pure-Rust reader: values.dat present but unreadable ({e}); locals will be empty");
+                    None
+                }
+            }
+        };
+
+        // Events are attached by `attach_seekable_sources` from `events.dat`
+        // and stay behind the seekable stream, so `end_of_program` cannot be
+        // derived from the last event here without materializing them all. The
+        // eager paths only ever promote it to `Error` when the LAST event is an
+        // error on the LAST step, so reading a single event — the last one —
+        // answers it exactly, without decoding the rest.
+        db.end_of_program = Self::end_of_program_from_last_event(ctfs, step_count);
+
+        Ok(CTFSTraceReader {
+            db,
+            // The column-aware capability bits come from `meta.dat`'s flags.
+            column_capabilities: ColumnAwareCapabilities {
+                supports_column_breakpoints: meta.flags & meta_dat::FLAG_SUPPORTS_COLUMN_BREAKPOINTS != 0,
+                supports_column_motions: meta.flags & meta_dat::FLAG_SUPPORTS_COLUMN_MOTIONS != 0,
+            },
+            // Every seekable source is attached by `attach_seekable_sources`
+            // immediately after this returns, so they are left unset here
+            // exactly as the other constructors leave them.
+            call_stream: None,
+            step_stream: None,
+            value_stream: None,
+            event_stream: None,
+            lazy_events_full: None,
+            lazy_values,
+            lazy_steps_full: Some(std::sync::OnceLock::new()),
+            lazy_steps: Some(lazy_steps),
+            // There are no threads in the browser, and this reader's whole
+            // point is that it may be running there; the strategy's own
+            // wasm32 arm resolves to a single-threaded (sequential) build.
+            step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            step_map: None,
+            linehits_db: None,
+            follow_ctfs: None,
+            follow_path: None,
+            #[cfg(feature = "nim-reader")]
+            nim_reader: None,
+            call_ranges,
+        })
+    }
+
+    /// Decide `end_of_program` by reading ONLY the last I/O event.
+    ///
+    /// The eager paths scan nothing either — they just happen to already hold
+    /// every event — and their rule is: the program terminated with an error
+    /// iff the LAST event is an `Error` recorded on the LAST step. Reading one
+    /// event from the seekable stream answers that with a single chunk
+    /// decompression instead of a whole-stream decode.
+    fn end_of_program_from_last_event(ctfs: &mut CtfsReader, step_count: usize) -> EndOfProgram {
+        if step_count == 0 {
+            return EndOfProgram::Normal;
+        }
+        let stream = match event_stream_source::SeekableEventStream::open_from_ctfs(ctfs) {
+            Ok(Some(stream)) => stream,
+            _ => return EndOfProgram::Normal,
+        };
+        let count = stream.event_count();
+        if count == 0 {
+            return EndOfProgram::Normal;
+        }
+        match stream.event(count - 1) {
+            Some(last) if last.kind == EventLogKind::Error && last.step_id.0 as usize == step_count - 1 => {
+                EndOfProgram::Error {
+                    reason: format!("error: {}", last.content),
+                }
+            }
+            _ => EndOfProgram::Normal,
         }
     }
 
@@ -1277,6 +1675,8 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            event_stream: None,
+            lazy_events_full: None,
             lazy_values: None,
             lazy_steps: None,
             lazy_steps_full: None,
@@ -2071,6 +2471,8 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            event_stream: None,
+            lazy_events_full: None,
             // M24c — when set, `db.variables` is empty and step values are served
             // LAZILY from the seekable `values.dat` stream (built above). The
             // `value_stream` overlay itself is attached centrally by `open()`.
@@ -2206,6 +2608,8 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            event_stream: None,
+            lazy_events_full: None,
             lazy_values: None,
             lazy_steps: None,
             lazy_steps_full: None,
@@ -2654,11 +3058,48 @@ impl TraceReader for CTFSTraceReader {
     // ── Events ──────────────────────────────────────────────────────
 
     fn events(&self) -> &[DbRecordEvent] {
+        // M0/4 — on a split bundle whose events live in the seekable
+        // `events.dat` stream, `db.events` is EMPTY at open. This borrowing
+        // accessor cannot hand out a slice of something that has not been
+        // decoded, so the first caller that genuinely wants the whole vector
+        // materializes it ONCE here and every later borrow is served from the
+        // memo. Callers that only need a count or a page should use
+        // `event_count` / `seekable_event_page`, which never reach this.
+        if let Some(memo) = self.lazy_events_full.as_ref() {
+            return memo.get_or_init(|| match self.event_stream.as_ref() {
+                Some(stream) => {
+                    info!(
+                        "CTFS: materializing all {} events from seekable events.dat on first events() borrow",
+                        stream.event_count()
+                    );
+                    stream.all_events()
+                }
+                None => Vec::new(),
+            });
+        }
         &self.db.events
     }
 
     fn event_count(&self) -> usize {
+        // Answered from the stream's INDEX when one is attached: the count is
+        // derived from the chunk table and the last chunk alone, so asking how
+        // many events a trace has never decodes the events.
+        if let Some(stream) = self.event_stream.as_ref()
+            && self.db.events.is_empty()
+        {
+            return stream.event_count();
+        }
         self.db.events.len()
+    }
+
+    // ── Seekable I/O events (M0/4) ───────────────────────────────────
+
+    fn seekable_event_count(&self) -> Option<usize> {
+        self.event_stream.as_ref().map(|s| s.event_count())
+    }
+
+    fn seekable_event_page(&self, start: usize, len: usize) -> Option<Vec<DbRecordEvent>> {
+        self.event_stream.as_ref().map(|s| s.page(start, len))
     }
 
     // ── Secondary indices ───────────────────────────────────────────

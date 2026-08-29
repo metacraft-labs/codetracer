@@ -736,12 +736,25 @@ impl Default for StepBuildStrategy {
 /// build from oversubscribing on very large machines (the work is I/O- and
 /// decompression-bound; past a handful of disjoint readers there is no further
 /// win and each extra reader re-opens the container).
+#[cfg(not(target_arch = "wasm32"))]
 fn default_build_threads() -> usize {
     const MAX_BUILD_THREADS: usize = 8;
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
         .clamp(1, MAX_BUILD_THREADS)
+}
+
+/// M0/2 — wasm32 counterpart. `wasm32-unknown-unknown` has no thread support at
+/// all (`std::thread::available_parallelism` returns `Unsupported`, and
+/// `std::thread::scope` traps), so the browser build always takes the
+/// SEQUENTIAL build path. That is a scheduling difference only: the sequential
+/// and parallel builds are asserted byte-identical by
+/// `tests/m25b_parallel_step_build_test.rs`, so a wasm reader sees exactly the
+/// table a native reader would.
+#[cfg(target_arch = "wasm32")]
+fn default_build_threads() -> usize {
+    1
 }
 
 /// Split `[0, count)` into at most `threads` DISJOINT, contiguous, ascending
@@ -817,11 +830,16 @@ pub fn build_whole_step_table(
     // Parallel path requires (a) more than one shard and (b) the ability to open
     // independent per-thread readers so threads don't serialize on the shared
     // `stream`'s `Mutex`. If either is unavailable, fall back to sequential.
+    // On wasm32 there is no (b) at all — no threads — so the parallel path is
+    // compiled out and control always reaches the sequential build.
+    #[cfg(not(target_arch = "wasm32"))]
     if ranges.len() > 1
         && let Some(partials) = build_partials_parallel(stream, call_keys, global_call_keys, path_count, &ranges)
     {
         return merge_partials(path_count, count, partials);
     }
+    #[cfg(target_arch = "wasm32")]
+    let _ = &ranges;
 
     // ── Sequential fallback (M25a behaviour, unchanged) ──
     let mut sink = WholeStepTableSink::new(path_count, count);
@@ -840,6 +858,11 @@ pub fn build_whole_step_table(
 /// build thread is otherwise idle while workers run). We use [`std::thread::scope`]
 /// so the borrowed `call_keys` / `global_call_keys` slices can be shared by
 /// reference without `'static` bounds or extra allocation.
+///
+/// M0/2 — on `wasm32-unknown-unknown` there are no threads, so this function is
+/// compiled out entirely and `build_whole_step_table` always falls through to
+/// the sequential path below. See `default_build_threads`.
+#[cfg(not(target_arch = "wasm32"))]
 fn build_partials_parallel(
     stream: &SeekableStepStream,
     call_keys: &[CallKey],
@@ -896,6 +919,7 @@ fn build_partials_parallel(
 ///   in ascending step order within the partial) is appended in range order, so
 ///   the final per-line list is in global ascending step order — IDENTICAL to the
 ///   sequential build's single ascending append.
+#[cfg(not(target_arch = "wasm32"))]
 fn merge_partials(
     path_count: usize,
     count: usize,
