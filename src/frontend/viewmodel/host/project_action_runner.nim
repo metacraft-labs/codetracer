@@ -43,6 +43,7 @@ import std/[options, os, strutils, times]
 import runquota_process
 
 import ../viewmodels/project_actions
+import ../viewmodels/verification_payload
 import ../viewmodels/verification_vm
 
 type
@@ -61,10 +62,36 @@ type
       ## has one — `timed-out`, which is a legitimate member of Verno's six and
       ## still not a failed proof.
     timeoutMs*: int
+    action*: ProjectAction
+      ## Kept so `settle` can find this action's structured report without the
+      ## caller having to hand it back.
+    projectRoot*: string
+    startedAtUnixMs*: int64
+      ## When *this* run started, in the units the payload states its own start
+      ## in. It is what lets a report left behind by an earlier run be told
+      ## from this one's, which is the difference between showing a
+      ## counterexample for the code on screen and one for the code that was
+      ## there last week.
 
 const
   TasksJsonNames* = [".vscode/tasks.json", "tasks.json"]
   PackageJsonName* = "package.json"
+
+const PayloadDirectoryNames* = ["target"]
+  ## Where a verifier is expected to have left its structured report, relative
+  ## to the project root.
+  ##
+  ## A **convention**, and that is the point rather than a shortcut.
+  ## Noir-Studio.md §9.3 has CodeTracer surface the actions a project declares
+  ## and "invent no manifest of our own", so we launch the project's own
+  ## `tasks.json` command verbatim — we cannot append `--report-json <path>` to
+  ## it and we cannot ask the project to add one. The producer writes the file
+  ## where the consumer will look, or there is no payload and VN-M3's text tier
+  ## stands, which is a supported outcome rather than a failure.
+  ##
+  ## A list rather than a single name because a second producer will want its
+  ## own build directory, and a list of *stated* places is honest where a
+  ## search of the tree would not be.
 
 # ---------------------------------------------------------------------------
 # Reading what the project declared
@@ -112,6 +139,30 @@ proc workingDirectory*(action: ProjectAction; projectRoot: string): string =
     return action.cwd
   projectRoot / action.cwd
 
+proc payloadPath*(action: ProjectAction; projectRoot: string): string =
+  ## Where this action's structured report would be, or "" if there is none.
+  ##
+  ## Resolved against the action's own working directory rather than the
+  ## project root: a task declaring `"cwd": "packages/a"` runs the verifier
+  ## there, so that is where the verifier's `target/` is. Getting this wrong
+  ## would not be a crash — it would be a silent, permanent `psAbsent`, which
+  ## is the failure mode hardest to notice.
+  let base = workingDirectory(action, projectRoot)
+  for directory in PayloadDirectoryNames:
+    let candidate = base / directory / PayloadFileName
+    if fileExists(candidate):
+      return candidate
+  ""
+
+proc readPayload*(action: ProjectAction; projectRoot: string): string =
+  ## The report's bytes, or "".
+  ##
+  ## An unreadable file is treated as an absent one, and that is deliberate:
+  ## the decoder's job is to refuse a document that says the wrong thing, and a
+  ## file we could not open says nothing at all. The text tier stands, which is
+  ## what it is for.
+  readIfPresent(payloadPath(action, projectRoot))
+
 proc launchSpec*(action: ProjectAction; projectRoot: string): CommandSpec =
   ## The argv this action becomes.
   ##
@@ -140,6 +191,12 @@ proc startAction*(vm: VerificationVM; action: ProjectAction;
   ## and says nothing about the program.
   vm.start(action, projectRoot = projectRoot)
   result.timeoutMs = timeoutMs
+  result.action = action
+  result.projectRoot = projectRoot
+  # Recorded *before* the launch, so it can only be earlier than the producer's
+  # own start, never later. `attachPayload` allows a small tolerance in that
+  # direction and none in the other.
+  result.startedAtUnixMs = int64(epochTime() * 1000.0)
   try:
     result.child = launchProcess(launchSpec(action, projectRoot))
     result.active = true
@@ -184,10 +241,16 @@ proc settle(vm: VerificationVM; run: var ProjectActionRun) =
   if run.cancelling:
     vm.noteCancelled()
   else:
+    # VN-M4: the structured report, read only now. Reading it earlier would
+    # pick up whatever an *earlier* run left at the same path, and a report
+    # that arrives before the run that wrote it is exactly the stale artifact
+    # `attachPayload` exists to refuse.
     vm.finish(
       output,
       if completion.exited: some(completion.exitCode) else: none(int),
-      timedOut = completion.timedOut or run.timedOut)
+      timedOut = completion.timedOut or run.timedOut,
+      payloadText = readPayload(run.action, run.projectRoot),
+      runStartedAtUnixMs = run.startedAtUnixMs)
   run.active = false
   close(run.child)
 

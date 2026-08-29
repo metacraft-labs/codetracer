@@ -37,6 +37,7 @@ import isonim/viewmodel
 
 import ./project_actions
 import ./verification_report
+import ./verification_payload
 
 type
   VerificationPhase* = enum
@@ -66,6 +67,26 @@ type
       ## shown next to it rather than instead of it.
     startFailure*: Signal[string]
     report*: Signal[Option[VerificationReport]]
+
+    payloadStatus*: Signal[PayloadStatus]
+      ## VN-M4. Whether this run's structured artifact was found, refused, or
+      ## believed. `psAbsent` is the ordinary case for a producer that emits
+      ## none, and is **not** a fault — the text tier is a supported tier.
+    payload*: Signal[Option[VerificationPayload]]
+      ## The structured artifact, when there was one and it was believed.
+      ##
+      ## Nothing renders it yet. VN-M4 is the contract; VN-M5 is the view. A
+      ## payload that is loaded and validated but not yet drawn is exactly the
+      ## state this milestone is meant to leave behind, and
+      ## `ReplayIsNotOfferedHere` below stays true because of it.
+    payloadProblems*: Signal[seq[string]]
+      ## Why a payload that was present was refused. Never empty when
+      ## `payloadStatus` is `psRejected`, and never populated silently: a
+      ## refused artifact is a thing the developer should be able to find out
+      ## about, because it usually means the two sides have drifted.
+    payloadNotes*: Signal[seq[string]]
+      ## Accepted, but disagreeing with the text tier in a way that did not
+      ## force a refusal.
 
     isRunning*: Memo[bool]
     isCancellable*: Memo[bool]
@@ -178,6 +199,10 @@ proc createVerificationVM*(): VerificationVM =
     let lastOutputLine = createSignal("")
     let startFailure = createSignal("")
     let report = createSignal(none(VerificationReport))
+    let payloadStatus = createSignal(psAbsent)
+    let payload = createSignal(none(VerificationPayload))
+    let payloadProblems = createSignal(newSeq[string]())
+    let payloadNotes = createSignal(newSeq[string]())
 
     let isRunning = createMemo[bool] proc(): bool =
       phase.val in {vpStarting, vpRunning, vpCancelling}
@@ -226,6 +251,10 @@ proc createVerificationVM*(): VerificationVM =
       lastOutputLine: lastOutputLine,
       startFailure: startFailure,
       report: report,
+      payloadStatus: payloadStatus,
+      payload: payload,
+      payloadProblems: payloadProblems,
+      payloadNotes: payloadNotes,
       isRunning: isRunning,
       isCancellable: isCancellable,
       hasReport: hasReport,
@@ -255,6 +284,10 @@ proc start*(vm: VerificationVM; action: ProjectAction; projectRoot = "") =
   vm.lastOutputLine.val = ""
   vm.startFailure.val = ""
   vm.report.val = none(VerificationReport)
+  vm.payloadStatus.val = psAbsent
+  vm.payload.val = none(VerificationPayload)
+  vm.payloadProblems.val = @[]
+  vm.payloadNotes.val = @[]
   vm.phase.val = vpStarting
 
 proc noteRunning*(vm: VerificationVM) =
@@ -286,25 +319,56 @@ proc noteCancelled*(vm: VerificationVM) =
   ## classifying its partial output would manufacture one.
   vm.phase.val = vpCancelled
   vm.report.val = none(VerificationReport)
+  # And no payload either. A killed run's report file, if one exists, was
+  # written by an *earlier* run — the staleness rule would refuse it anyway,
+  # but a cancelled run must not even look.
+  vm.payloadStatus.val = psAbsent
+  vm.payload.val = none(VerificationPayload)
+  vm.payloadProblems.val = @[]
+  vm.payloadNotes.val = @[]
 
 proc noteFailedToStart*(vm: VerificationVM; reason: string) =
   vm.startFailure.val = reason
   vm.phase.val = vpFailedToStart
 
 proc finish*(vm: VerificationVM; output: string; exitCode: Option[int];
-             timedOut = false) =
+             timedOut = false; payloadText = "";
+             runStartedAtUnixMs: int64 = 0) =
   ## The run ended. Classify, assemble, and settle into `vpFinished`.
   ##
   ## A run cancelled by the user is not classified even if output arrived,
   ## for the reason in `noteCancelled`.
+  ##
+  ## VN-M4 adds `payloadText`: the structured artifact the verifier wrote, or
+  ## `""` when it wrote none. The order below is the whole design in three
+  ## lines — **the report is built first, from the text, and only then is the
+  ## payload offered to it.** A payload never contributes to the verdict; it is
+  ## measured against one that already exists. `runStartedAtUnixMs` is what
+  ## lets `attachPayload` tell this run's artifact from one left behind by an
+  ## earlier one, and it defaults to 0 only so that the many callers with no
+  ## payload need not supply it. A caller that passes `payloadText` and leaves
+  ## it 0 gets its payload **rejected** — `attachPayload` treats a missing
+  ## start time as a rejection rather than as a skipped check, so forgetting
+  ## the argument cannot quietly disable the one rule that keeps last week's
+  ## counterexample off this week's code.
   if vm.phase.val == vpCancelling:
     vm.noteCancelled()
     return
-  vm.report.val = some(reportForRun(
+  let report = reportForRun(
     output, exitCode, timedOut,
     commandLine = vm.commandLine.val,
-    projectRoot = vm.projectRoot.val))
+    projectRoot = vm.projectRoot.val)
+  vm.report.val = some(report)
+
+  let attachment = attachPayload(report, payloadText, runStartedAtUnixMs)
+  vm.payloadStatus.val = attachment.status
+  vm.payload.val = attachment.payload
+  vm.payloadProblems.val = attachment.problems
+  vm.payloadNotes.val = attachment.notes
   vm.phase.val = vpFinished
+
+proc currentPayload*(vm: VerificationVM): Option[VerificationPayload] =
+  vm.payload.val
 
 proc currentMarkers*(vm: VerificationVM): seq[VerificationMarker] =
   vm.markers.val

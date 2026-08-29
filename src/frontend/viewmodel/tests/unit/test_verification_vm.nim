@@ -49,6 +49,7 @@ import isonim/testing/mock_dom
 import ../../../../ct_test/contracts
 import ../../viewmodels/project_actions
 import ../../viewmodels/verification_report
+import ../../viewmodels/verification_payload
 import ../../viewmodels/verification_vm
 import ../../viewmodels/test_run_summary_vm
 import ../../views/isonim_verification_view
@@ -517,3 +518,121 @@ Error: Verification failed due to 1 previous errors!
     check report.outcome == voNotProved
     check failedObligationMarkers(report).len == 2
     check projectTestRun(toTestEvents(report, "run-1")).failed == 2
+
+# ---------------------------------------------------------------------------
+# VN-M4 landed while this file was green, and this suite is what keeps it that
+# way. See ../fixtures/verno/payload/PROVENANCE.md for the documents used.
+# ---------------------------------------------------------------------------
+
+const NoSolverPayloadJson = staticRead("../fixtures/verno/payload/no_solver.json")
+const NotProvedWithModelJson =
+  staticRead("../fixtures/verno/payload/not_proved_with_model.json")
+
+suite "VN-M4 a payload changes what is known, not what is promised":
+  ## STATUS ON THIS MACHINE: fully reproduced. It needs no verifier.
+  ##
+  ## VN-M4 adds the structured artifact. VN-M5 adds the affordance. The gap
+  ## between those two sentences is a place a milestone can quietly overrun, so
+  ## it is asserted rather than intended.
+
+  test "a payload is attached without touching the report, the markers or the panel":
+    let withoutPayload = finishedVM(NoSolverOutput, 1)
+    let withPayload = createVerificationVM()
+    withPayload.start(verificationAction(),
+                      projectRoot = "test-programs/noir_verification")
+    withPayload.noteOutput("…")
+    withPayload.finish(NoSolverOutput, some(1),
+                       payloadText = NoSolverPayloadJson,
+                       runStartedAtUnixMs = 1_787_970_124_574'i64)
+
+    check withPayload.payloadStatus.val == psAttached
+    check withPayload.currentPayload().isSome
+    check withPayload.currentPayload().get.outcome == voNoSolver
+
+    # Everything VN-M3 asserts is unchanged, item by item rather than in
+    # aggregate: an aggregate comparison would pass if two errors cancelled.
+    check withPayload.currentReport().get.outcome ==
+      withoutPayload.currentReport().get.outcome
+    check withPayload.currentReport().get.findings.len ==
+      withoutPayload.currentReport().get.findings.len
+    check withPayload.currentMarkers().len == withoutPayload.currentMarkers().len
+    check withPayload.statusText.val == withoutPayload.statusText.val
+    check withPayload.outcomeText.val == withoutPayload.outcomeText.val
+    check panelModel(withPayload).rows.len == panelModel(withoutPayload).rows.len
+
+  test "even a payload carrying a full counterexample promises no replay":
+    # `not_proved_with_model.json` has model values, forced branches, a
+    # violated obligation and a proof-goal tree — everything VN-M5 will draw.
+    # None of it may reach the rendered panel yet, because nothing in VN-M4
+    # draws it, and a disabled affordance is still a promise.
+    const replayVocabulary = [
+      "replay", "step through", "step-through", "stepthrough",
+      "counterexample", "open trace", "open-trace", "opentrace",
+      "trace-id", "traceid", "debug session", "session-tab",
+    ]
+    let vm = createVerificationVM()
+    vm.start(verificationAction(),
+             projectRoot = "test-programs/noir_verification_failing")
+    vm.finish(FailedAssertionOutput, some(1),
+              payloadText = NotProvedWithModelJson,
+              runStartedAtUnixMs = 1_787_970_124_574'i64)
+    check vm.payloadStatus.val == psAttached
+    check vm.currentPayload().get.counterexampleTraces.len == 1
+    check vm.currentPayload().get.counterexampleTraces[0].steps.len == 4
+
+    var renderer: MockRenderer
+    let node = renderVerificationPanel(renderer, panelModel(vm))
+    let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
+    for word in replayVocabulary:
+      check(not haystack.contains(word))
+      if haystack.contains(word):
+        echo "replay vocabulary \"", word, "\" leaked into the panel with a payload attached"
+
+    # And the tripwire VN-M5 has to remove is still standing.
+    check ReplayIsNotOfferedHere
+
+  test "the results pane still cannot offer a trace, with a payload attached":
+    # `toTestEvents` is built from the report, which the payload never enters —
+    # so the AA-2 gate that refuses the drill-down still refuses it. Asserted
+    # rather than reasoned about, because "the payload never enters" is a
+    # property of code that could change.
+    let vm = createVerificationVM()
+    vm.start(verificationAction(),
+             projectRoot = "test-programs/noir_verification_failing")
+    vm.finish(FailedAssertionOutput, some(1),
+              payloadText = NotProvedWithModelJson,
+              runStartedAtUnixMs = 1_787_970_124_574'i64)
+    let events = toTestEvents(vm.currentReport().get, "run-1")
+    for event in events:
+      check event.kind != tekRecordingCreated
+      check event.trace.isNone
+    for row in projectTestRun(events).rows:
+      check not row.hasRecording()
+
+  test "a refused payload leaves the text tier exactly as it was, and says why":
+    let baseline = finishedVM(NoSolverOutput, 1)
+    let vm = createVerificationVM()
+    vm.start(verificationAction(),
+             projectRoot = "test-programs/noir_verification")
+    vm.finish(NoSolverOutput, some(1),
+              payloadText = "{ not a payload",
+              runStartedAtUnixMs = 1_787_970_124_574'i64)
+    check vm.payloadStatus.val == psRejected
+    check vm.currentPayload().isNone
+    check vm.payloadProblems.val.len > 0
+    check vm.currentReport().get.outcome == baseline.currentReport().get.outcome
+    check vm.statusText.val == baseline.statusText.val
+
+  test "starting a second run clears the first run's payload too":
+    # The same reason `start` clears the report: a stale artifact shown next to
+    # a fresh spinner reads as this run's.
+    let vm = createVerificationVM()
+    vm.start(verificationAction(), projectRoot = "test-programs/noir_verification")
+    vm.finish(NoSolverOutput, some(1),
+              payloadText = NoSolverPayloadJson,
+              runStartedAtUnixMs = 1_787_970_124_574'i64)
+    check vm.payloadStatus.val == psAttached
+    vm.start(verificationAction(), projectRoot = "test-programs/noir_verification")
+    check vm.payloadStatus.val == psAbsent
+    check vm.currentPayload().isNone
+    check vm.payloadProblems.val.len == 0

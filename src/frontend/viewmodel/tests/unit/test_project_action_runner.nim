@@ -32,6 +32,7 @@ import isonim/core/[signals, computation]
 
 import ../../viewmodels/project_actions
 import ../../viewmodels/verification_report
+import ../../viewmodels/verification_payload
 import ../../viewmodels/verification_vm
 import ../../host/project_action_runner
 
@@ -41,6 +42,9 @@ const
   UnsupportedFixture =
     RepoRoot / "src" / "frontend" / "viewmodel" / "tests" / "fixtures" /
     "verno" / "unsupported_lambda.txt"
+  PayloadFixtures =
+    RepoRoot / "src" / "frontend" / "viewmodel" / "tests" / "fixtures" /
+    "verno" / "payload"
 
 proc tempProject(name: string): string =
   result = getTempDir() / ("ct-vnm3-" & name & "-" & $getCurrentProcessId())
@@ -213,3 +217,131 @@ suite "VN-M3 a declared action runs as a real process":
       # that must not happen is a `not-proved`.
       check vm.currentReport().get.outcome != voNotProved
     check vm.failedObligationCount.val == 0
+
+suite "VN-M4 the structured report is picked up off disk, or honestly is not":
+  ## STATUS ON THIS MACHINE: fully reproduced. These drive real children that
+  ## write real files; the *contents* of the payloads are the shared
+  ## conformance fixtures, whose provenance is in
+  ## `../fixtures/verno/payload/PROVENANCE.md`.
+
+  test "a report the run wrote is found and attached":
+    # The convention end to end: the action's own working directory, `target/`,
+    # `verno-report.json`. Nothing was appended to the project's command line
+    # to make this happen, which is the whole point — §9.3 does not let us.
+    let root = tempProject("payload-found")
+    defer: removeDir(root)
+    let payload = readFile(PayloadFixtures / "no_solver.json")
+    createDir(root / "target")
+    writeTasks(root, """
+      {"tasks": [{"label": "Verify", "command": "/bin/sh", "args":
+        ["-c", "printf 'Failed to start the Venir binary\\n'; exit 1"]}]}""")
+    let vm = createVerificationVM()
+    # The fixture's own timestamp is from the day it was recorded, so it is
+    # restamped here to what a producer launched *now* would write. Leaving the
+    # recorded value would make this test pass for the wrong reason — as a
+    # staleness rejection rather than as an attachment.
+    let stamped = payload.replace("\"started_at_unix_ms\": 1787970124574",
+                                  "\"started_at_unix_ms\": " &
+                                    $(int64(epochTime() * 1000.0) + 500))
+    writeFile(root / "target" / "verno-report.json", stamped)
+    check payloadPath(onlyAction(root), root) ==
+      root / "target" / "verno-report.json"
+    runAction(vm, onlyAction(root), root)
+    check vm.phase.val == vpFinished
+    check vm.currentReport().get.outcome == voNoSolver
+    check vm.payloadStatus.val == psAttached
+    check vm.currentPayload().isSome
+    check vm.currentPayload().get.outcome == voNoSolver
+    check vm.payloadProblems.val.len == 0
+
+  test "no report is not a fault; the text tier stands":
+    let root = tempProject("payload-absent")
+    defer: removeDir(root)
+    writeTasks(root, """
+      {"tasks": [{"label": "Verify", "command": "/bin/sh", "args":
+        ["-c", "printf 'Failed to start the Venir binary\\n'; exit 1"]}]}""")
+    let vm = createVerificationVM()
+    check payloadPath(onlyAction(root), root) == ""
+    runAction(vm, onlyAction(root), root)
+    check vm.phase.val == vpFinished
+    check vm.currentReport().get.outcome == voNoSolver
+    check vm.payloadStatus.val == psAbsent
+    check vm.currentPayload().isNone
+    check vm.payloadProblems.val.len == 0
+
+  test "a report left behind by an earlier run is refused, not shown":
+    # The dangerous case, and the reason the runner records its own start time
+    # before it launches anything. The file below is a *valid* payload; the
+    # only thing wrong with it is that it describes a run that finished before
+    # this one began.
+    let root = tempProject("payload-stale")
+    defer: removeDir(root)
+    createDir(root / "target")
+    writeFile(root / "target" / "verno-report.json",
+              readFile(PayloadFixtures / "no_solver.json"))
+    writeTasks(root, """
+      {"tasks": [{"label": "Verify", "command": "/bin/sh", "args":
+        ["-c", "printf 'Failed to start the Venir binary\\n'; exit 1"]}]}""")
+    let vm = createVerificationVM()
+    runAction(vm, onlyAction(root), root)
+    check vm.phase.val == vpFinished
+    # The text tier is unaffected — which is the whole of "graceful
+    # degradation": the developer still gets an honest answer.
+    check vm.currentReport().get.outcome == voNoSolver
+    check vm.payloadStatus.val == psRejected
+    check vm.currentPayload().isNone
+    check vm.payloadProblems.val.len == 1
+    check vm.payloadProblems.val[0].contains("left over from an earlier run")
+
+  test "a corrupt report is refused with a reason, and never crashes the run":
+    let root = tempProject("payload-corrupt")
+    defer: removeDir(root)
+    createDir(root / "target")
+    writeFile(root / "target" / "verno-report.json", "{ this is not json")
+    writeTasks(root, """
+      {"tasks": [{"label": "Verify", "command": "/bin/sh", "args":
+        ["-c", "printf 'Failed to start the Venir binary\\n'; exit 1"]}]}""")
+    let vm = createVerificationVM()
+    runAction(vm, onlyAction(root), root)
+    check vm.phase.val == vpFinished
+    check vm.currentReport().get.outcome == voNoSolver
+    check vm.payloadStatus.val == psRejected
+    check vm.payloadProblems.val.len > 0
+
+  test "a cancelled run reads no report at all":
+    # A cancelled run has no outcome, so it may not have a payload either —
+    # and any file at that path was written by an earlier run.
+    let root = tempProject("payload-cancelled")
+    defer: removeDir(root)
+    createDir(root / "target")
+    writeFile(root / "target" / "verno-report.json",
+              readFile(PayloadFixtures / "no_solver.json"))
+    writeTasks(root, """
+      {"tasks": [{"label": "Verify", "command": "sleep", "args": ["30"]}]}""")
+    let vm = createVerificationVM()
+    var run = startAction(vm, onlyAction(root), root)
+    discard pump(vm, run)
+    cancelAction(vm, run)
+    let deadline = epochTime() + 15.0
+    while epochTime() < deadline and not pump(vm, run):
+      sleep(20)
+    check vm.phase.val == vpCancelled
+    check vm.currentReport().isNone
+    check vm.payloadStatus.val == psAbsent
+    check vm.currentPayload().isNone
+
+  test "the report is looked for in the action's own working directory":
+    # A task with `"cwd": "packages/a"` runs the verifier there, so that is
+    # where its `target/` is. Looking in the project root instead would be a
+    # permanent, silent `psAbsent` — the failure mode hardest to notice.
+    let root = tempProject("payload-cwd")
+    defer: removeDir(root)
+    createDir(root / "packages" / "a" / "target")
+    writeFile(root / "packages" / "a" / "target" / "verno-report.json",
+              readFile(PayloadFixtures / "no_solver.json"))
+    writeTasks(root, """
+      {"tasks": [{"label": "Verify", "command": "true",
+                  "options": {"cwd": "packages/a"}}]}""")
+    check payloadPath(onlyAction(root), root) ==
+      root / "packages" / "a" / "target" / "verno-report.json"
+    check readPayload(onlyAction(root), root).len > 0
