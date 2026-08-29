@@ -48,6 +48,19 @@
 ## and `ci/test/hostfree-build.sh` scenario 6 covers the first with a source
 ## check that has its own mutation test. No mechanism in Nim closes the second,
 ## and claiming otherwise would be the kind of check that cannot fail.
+##
+## A review pass planted ten evasions and got eight through. The full list, and
+## which of them are cheap to close, is in `ci/test/hostfree-build.sh`'s header
+## under "WHAT THIS DOES NOT CATCH". Two of them are worth naming here because
+## they are about this file rather than about the probe:
+##
+## * **An alias defeats the ambiguity.** `import std/os as hostos` then
+##   `hostos.fileExists(p)` is a qualified call whose qualifier no source check
+##   can predict. Same mechanism as `os.fileExists(p)`, no fixed name to match.
+## * **`staticRead` and `staticExec`** reach the host at compile time and are
+##   not declared below. They are `system` magics rather than `std/os` procs, so
+##   an overload here would not shadow them; the source check is the only place
+##   they can be caught.
 
 {.push warning[UnusedImport]: off, hint[XDeclaredButNotUsed]: off.}
 

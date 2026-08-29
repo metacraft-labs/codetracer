@@ -53,6 +53,44 @@
 #   Every prerequisite is a hard failure with a remedy. An empty surface is a
 #   failure, not a vacuous pass — a glob that silently matches nothing is the
 #   invisible-coverage defect this repository has found repeatedly.
+#
+# WHAT THIS DOES NOT CATCH
+# ------------------------
+# A review pass planted ten evasions into the same victim module the scenarios
+# below use. Eight got through. Recorded here rather than in a report, because
+# the milestone's headline is "a compile error, not discipline" and for these
+# shapes it is still discipline:
+#
+#   1. An ALIASED import. `import std/os as hostos` then `hostos.fileExists(p)`
+#      defeats the ambiguity and defeats scenario 6, whose HOST_MODULES list
+#      cannot know the alias. (`from std/os import nil` then `os.fileExists(p)`
+#      defeats the compiler but IS caught by scenario 6.)
+#      CHEAP TO CLOSE: reject `import std/(os|osproc|posix|...) as` outright in
+#      the surface, in the same source pass as scenario 6.
+#   2. `when defined(js):`. This is a `nim c` compile, so no JS branch in the
+#      surface is ever type-checked — and JS is the backend the renderer ships.
+#      53 of the 121 surface modules contain such a block.
+#      CHEAP TO CLOSE: a second pass with `nim js`, which needs a JS-side poison
+#      list (node's `require('fs')`, not `std/os`).
+#   3. A host call inside a GENERIC PROC or a TEMPLATE declared in the surface
+#      module. Nim semchecks those bodies at instantiation, and nothing here
+#      instantiates them. This is an `include`-scoping false pass, not a hole in
+#      the poison list, and closing it would mean forcing instantiation.
+#   4. A host call reached through a PROC or TEMPLATE in any module outside the
+#      four surface directories, since dependencies compile in their own
+#      unpoisoned scope. That is the same property that makes this mechanism
+#      usable at all (see the header above), so it is a limit rather than a bug.
+#   5. `staticRead` / `staticExec` — the host at compile time, in neither the
+#      poison list nor scenario 6's proc list.
+#   6. `{.emit.}` raw C, and an own `{.importc.}` binding to a libc symbol. The
+#      second is documented in no_host_access.nim as an unclosable residual; the
+#      first has the same character.
+#
+# What DOES hold: a bare `readFile`, a bare or qualified `startProcess`, a bare
+# `p.fileExists()` in method-call syntax, `import std/osproc as anything`, a
+# raw `std/posix` `fork()`, and a qualified `os.fileExists(p)`. Those are the
+# shapes a developer reaches for without meaning to bypass anything, which is
+# the population this gate exists to police.
 
 set -uo pipefail
 
