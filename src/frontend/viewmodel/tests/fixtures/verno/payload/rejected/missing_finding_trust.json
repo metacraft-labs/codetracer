@@ -1,0 +1,51 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1787970124574,
+    "finished_at_unix_ms": 1787970125376,
+    "workspace_root": "<recorded: the package directory on the machine named in PROVENANCE.md>",
+    "package": "noir_verification",
+    "argv": [
+      "<recorded: the absolute path of the verno binary>",
+      "--program-dir",
+      ".",
+      "formal-verify",
+      "--",
+      "--rlimit",
+      "60"
+    ],
+    "solver": {
+      "invoked": false,
+      "name": "venir",
+      "unavailable_reason": "could not start `venir`: No such file or directory (os error 2)"
+    }
+  },
+  "outcome": "no-solver",
+  "outcome_detail": "Noir -> VIR pipeline completed; `venir` not available",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the run reports on the verifier rather than on the program; nothing was established either way"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "solver-unavailable",
+      "message": "The Noir to VIR pipeline completed; the solver was not started.",
+      "detail": "Verno's solver back end (`venir`) is not available on this machine, so no proof was attempted. Nothing was established either way.",
+      "location_absent_reason": "no obligation was attempted, so there is nothing to point at",
+      "excerpt": "Failed to start the Venir binary with the following error message\nNo such file or directory (os error 2)\nTo fix this issue you can run the command nix develop"
+    }
+  ],
+  "counterexample_traces": [],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": []
+  }
+}

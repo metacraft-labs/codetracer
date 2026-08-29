@@ -1,0 +1,56 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1787970132632,
+    "finished_at_unix_ms": 1787970133362,
+    "workspace_root": "<recorded: the package directory on the machine named in PROVENANCE.md>",
+    "package": "noir_verification_unsupported",
+    "argv": [
+      "<recorded: the absolute path of the verno binary>",
+      "--program-dir",
+      ".",
+      "formal-verify",
+      "--",
+      "--rlimit",
+      "60"
+    ],
+    "solver": {
+      "invoked": false,
+      "name": "venir",
+      "unavailable_reason": "the run ended before the solver was started"
+    }
+  },
+  "outcome": "unsupported",
+  "outcome_detail": "not yet implemented: UNSUPPORTED: function types (lambdas, function values)",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the run reports on the verifier rather than on the program; nothing was established either way"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "limitation",
+      "message": "Verno does not support function types (lambdas, function values)",
+      "detail": "This is a limitation of the verifier, not a failed proof. The program may well be correct; Verno cannot say either way.",
+      "construct": "function types (lambdas, function values)",
+      "location_absent_reason": "Verno's `todo!()` panics carry a Rust source position, never a Noir one, so there is no line in the program to point at",
+      "excerpt": "not yet implemented: UNSUPPORTED: function types (lambdas, function values)",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the verifier stopped before the solver; nothing was proved or disproved"
+      }
+    }
+  ],
+  "counterexample_traces": [],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": []
+  }
+}

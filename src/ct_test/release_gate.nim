@@ -758,6 +758,24 @@ const
     # (`runquota_process` is a POSIX launcher, `std/os` reads files), hence
     # excluded from `vm-unit-js` and listed here.
     "src/frontend/viewmodel/tests/unit/test_project_action_runner.nim",
+    # VN-M4 — the structured payload contract.  Registered for a reason that is
+    # sharper than VN-M3's and is worth stating separately: almost every
+    # assertion in this suite is about something the decoder must *refuse*.
+    #
+    # A rejection has no user-visible symptom when its test disappears.  The
+    # product keeps working — better, even, because a document that used to be
+    # refused now gets displayed — and the thing that is gone is the guarantee
+    # that a diagnostic cannot be read as proof evidence, that a payload cannot
+    # turn a failed run green, and that a report left behind by last week's run
+    # cannot be shown as this one's.  Glob discovery cannot notice any of that.
+    #
+    # It is also the consumer half of a corpus shared with another repository:
+    # this suite checks every conformance fixture against a `manifest.json`
+    # that `blocksense-network/verno` holds a byte-identical copy of.  If this
+    # file stops running, the two sides can drift apart with both staying
+    # green, which is precisely the failure the shared corpus exists to
+    # prevent.
+    "src/frontend/viewmodel/tests/unit/test_verification_payload.nim",
   ]
 
   CliRecordGateTests* = [
