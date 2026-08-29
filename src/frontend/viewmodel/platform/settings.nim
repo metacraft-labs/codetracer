@@ -40,7 +40,11 @@ type
       ## Discarded when the session ends. The only scope guaranteed to exist
       ## on every platform, because it needs no durability.
 
-  SettingsFacade* = ref object
+  SettingsFacade* {.requiresInit.} = ref object
+    ## `{.requiresInit.}` for the reason spelled out on `FileSystemFacade` in
+    ## `fs.nim`: without it, an unassigned field is `nil` rather than a compile
+    ## error, and an operation that only makes sense in-process could be added
+    ## without `host/remote_stub.nim` noticing.
     profile*: PlatformProfile
 
     get*: proc(scope: SettingsScope;

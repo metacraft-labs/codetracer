@@ -63,12 +63,28 @@ type
     ## its side and the front end can cancel it by name. An `int` would have
     ## worked in-process and would have had to change the day it did not.
 
-  FileSystemFacade* = ref object
+  FileSystemFacade* {.requiresInit.} = ref object
     ## A vtable rather than a typeclass or a method-dispatch hierarchy: the
     ## instantiation is chosen at run time (a test installs a fake; `ct host`
     ## installs a remote one), and every field is independently satisfiable —
     ## which is what makes `test_a_remote_instantiation_needs_no_signature_change`
     ## a cheap check rather than a rewrite.
+    ##
+    ## ## Why `{.requiresInit.}`, on this and on the other six facades
+    ##
+    ## Without it that check does not hold, and the failure is silent. Nim's
+    ## named object construction leaves an unassigned field `nil`, so adding
+    ## `openHandle*: proc(path: string): File` here compiles cleanly — every
+    ## instantiation, `host/remote_stub.nim` included, simply grows a nil field,
+    ## and the suite still reports green because it only asserts the facades are
+    ## not nil. The stub's completeness would then be maintained by discipline,
+    ## which is the thing this milestone exists to stop relying on.
+    ##
+    ## `{.requiresInit.}` makes an unassigned field a compile error at every
+    ## construction site. So an operation whose signature only makes sense
+    ## in-process now fails the build on the day it is added — which is what
+    ## `test_a_remote_instantiation_needs_no_signature_change` claims and what,
+    ## before this pragma, it did not actually enforce.
     profile*: PlatformProfile
 
     readText*: proc(path: string): PlatformFuture[PlatformOutcome[string]]

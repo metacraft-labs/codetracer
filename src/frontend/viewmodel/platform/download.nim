@@ -46,7 +46,11 @@ type
       ## name so ignoring it costs the caller nothing.
     filters*: seq[FileFilter]
 
-  DownloadFacade* = ref object
+  DownloadFacade* {.requiresInit.} = ref object
+    ## `{.requiresInit.}` for the reason spelled out on `FileSystemFacade` in
+    ## `fs.nim`: without it, an unassigned field is `nil` rather than a compile
+    ## error, and an operation that only makes sense in-process could be added
+    ## without `host/remote_stub.nim` noticing.
     profile*: PlatformProfile
 
     offerFile*: proc(suggestedName: string; content: seq[byte];

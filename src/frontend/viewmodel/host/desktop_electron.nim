@@ -32,6 +32,7 @@ import std/asyncjs
 
 import ../platform/outcome
 import ../platform/capabilities
+import ./electron_profile
 import ../platform/fs
 import ../platform/process
 import ../platform/vcs
@@ -633,47 +634,7 @@ proc newDesktopElectronPlatform*(): Platform =
     # have become `true` in the dev server.
     return newPlatform(webProfile)
 
-  var capabilities = desktopCapabilities
-  if onMacOS:
-    # The only desktop with an OS menu bar we mirror into. See the note on
-    # `desktopCapabilities` for why this is added here rather than there.
-    capabilities.incl capNativeMenuBar
-  # The renderer supervises no long-running children of its own — those live in
-  # the Electron main process behind IPC — so the watchable half of process
-  # execution is not claimed here. Claiming it and then refusing at run time is
-  # exactly the "shows a button that cannot work" failure capabilities exist to
-  # prevent.
-  capabilities.excl capProcessSignal
-  capabilities.excl capProcessInteractiveStdin
-  capabilities.excl capProcessTerminal
-  capabilities.excl capSecretStore
-  capabilities.excl capFilesystemWatch
-
-  let profile = PlatformProfile(
-    kind: pkDesktop,
-    displayName: "desktop (Electron)",
-    capabilities: capabilities,
-    overlaysCaptionBar: onMacOS,
-    degradations: @[
-      DegradationRule(capability: capProcessSignal, behaviour:
-        "long-running children are supervised by the Electron main process; " &
-        "cancel through the process pane rather than from the renderer"),
-      DegradationRule(capability: capProcessInteractiveStdin, behaviour:
-        "input must be supplied before a command starts; interactive " &
-        "sessions belong to the terminal pane"),
-      DegradationRule(capability: capProcessTerminal, behaviour:
-        "the renderer captures output through pipes; the pty is the terminal " &
-        "pane's"),
-      DegradationRule(capability: capSecretStore, behaviour:
-        "no keychain binding exists in this tree yet, so nothing is stored " &
-        "rather than something being stored badly"),
-      DegradationRule(capability: capFilesystemWatch, behaviour:
-        "the tree watcher runs in the Electron main process and reaches the " &
-        "renderer as an IPC message, so the renderer registers no watch of " &
-        "its own"),
-      DegradationRule(capability: capShareLink, behaviour:
-        "a desktop project is a directory; the equivalent is an archive export"),
-    ])
+  let profile = electronDesktopProfile(onMacOS)
 
   Platform(
     profile: profile,

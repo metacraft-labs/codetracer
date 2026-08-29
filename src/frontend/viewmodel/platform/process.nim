@@ -89,7 +89,11 @@ type
     timeoutMs*: int
       ## 0 means no wall-clock backstop.
 
-  ProcessFacade* = ref object
+  ProcessFacade* {.requiresInit.} = ref object
+    ## `{.requiresInit.}` for the reason spelled out on `FileSystemFacade` in
+    ## `fs.nim`: without it, an unassigned field is `nil` rather than a compile
+    ## error, and an operation that only makes sense in-process could be added
+    ## without `host/remote_stub.nim` noticing.
     profile*: PlatformProfile
 
     run*: proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]]

@@ -31,7 +31,11 @@ type
     fullscreen*: bool
     focused*: bool
 
-  ShellFacade* = ref object
+  ShellFacade* {.requiresInit.} = ref object
+    ## `{.requiresInit.}` for the reason spelled out on `FileSystemFacade` in
+    ## `fs.nim`: without it, an unassigned field is `nil` rather than a compile
+    ## error, and an operation that only makes sense in-process could be added
+    ## without `host/remote_stub.nim` noticing.
     profile*: PlatformProfile
 
     # -- external targets ---------------------------------------------------

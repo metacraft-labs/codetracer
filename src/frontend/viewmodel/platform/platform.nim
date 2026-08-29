@@ -87,12 +87,26 @@ proc newPlatform*(profile: PlatformProfile): Platform =
 
 var installedPlatform: Platform = nil
 
+const noPlatformInstalled =
+  "no platform has been installed in this process yet, so nothing can be " &
+  "done through the facade; whichever build this is must call " &
+  "installPlatform at start-up"
+
+let uninstalledProfile* = headlessProfile.withNoCapabilities(noPlatformInstalled)
+  ## The profile of the platform `platform()` hands back before
+  ## `installPlatform` has run. Deliberately NOT `headlessProfile`: every
+  ## operation of that default refuses, so a profile that declared the headless
+  ## capability set would say `can(capFilesystemRead)` and then refuse the read
+  ## — the disagreement between "may I" and "did it work" that capabilities
+  ## exist to remove. `test_the_default_platform_promises_nothing_it_refuses`
+  ## in `test_platform_facade.nim` pins it.
+
 proc installPlatform*(newPlatform: Platform) =
   installedPlatform = newPlatform
 
 proc platform*(): Platform =
   if installedPlatform.isNil:
-    installedPlatform = newPlatform(headlessProfile)
+    installedPlatform = newPlatform(uninstalledProfile)
   installedPlatform
 
 proc platformInstalled*(): bool =

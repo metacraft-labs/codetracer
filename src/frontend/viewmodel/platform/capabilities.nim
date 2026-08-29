@@ -403,6 +403,24 @@ proc withCapabilities*(profile: PlatformProfile;
   result.capabilities = capabilities
   result.degradations = degradations
 
+proc withNoCapabilities*(profile: PlatformProfile;
+                         because: string): PlatformProfile =
+  ## Every capability absent, and every absence explained by the same sentence.
+  ##
+  ## For the platform a build has before `installPlatform` has run. Review found
+  ## the alternative — handing back `headlessProfile` — actively misleading:
+  ## `newPlatform` builds every facade as a refusal, so the default answered
+  ## `can(capFilesystemRead)` with `true` and `fs.readText` with
+  ## `pkNotSupported` in the same process. A caller who does the capability
+  ## check first and the call second, which is the shape this whole module asks
+  ## for, got the one answer the model promises cannot happen.
+  result = profile
+  result.capabilities = {}
+  result.degradations = @[]
+  for capability in allCapabilities:
+    result.degradations.add DegradationRule(
+      capability: capability, behaviour: because)
+
 proc profileFor*(kind: PlatformKind): PlatformProfile =
   case kind
   of pkDesktop: desktopProfile

@@ -29,6 +29,7 @@ import ../../platform/platform
 import ../../platform/paths
 import ../../viewmodels/topbar_actions
 import ../../host/remote_stub
+import ../../host/electron_profile
 
 proc awaitOutcome[T](future: PlatformFuture[PlatformOutcome[T]]
                     ): PlatformOutcome[T] =
@@ -84,6 +85,58 @@ suite "NS1 capabilities are data, and every absence is explained":
       check stale.len == 0
       if stale.len > 0:
         echo "  ", profile.displayName, " has stale rules for: ", $stale
+
+  test "the profiles the INSTANTIATIONS build satisfy the table, in both directions":
+    ## The two tests above run over `profileFor(kind)` — the four *reference*
+    ## profiles. Those are not what the product installs. Review found the gap
+    ## by checking the shipped shapes directly: the Linux/Windows Electron
+    ## profile lacked `capNativeMenuBar` and explained nothing about it, so the
+    ## deliverable "each absence with its degraded behaviour" was already untrue
+    ## of a profile a user runs, while the suite reported green.
+    ##
+    ## `desktop_electron.nim` cannot be imported here — it is `{.error.}` on the
+    ## native target — which is exactly why the profile now lives in the pure
+    ## `host/electron_profile.nim` and can be asserted on both backends.
+    for onMacOS in [false, true]:
+      let profile = electronDesktopProfile(onMacOS)
+      let undeclared = profile.undeclaredDegradations()
+      let stale = profile.staleDegradations()
+      check undeclared.len == 0
+      check stale.len == 0
+      if undeclared.len > 0:
+        echo "  electron(onMacOS=", onMacOS, ") does not explain: ", $undeclared
+      if stale.len > 0:
+        echo "  electron(onMacOS=", onMacOS, ") has stale rules for: ", $stale
+
+    # The macOS window is the one with a menu bar; nobody else has one. Named
+    # rather than derived, because the conditional degradation above is only
+    # correct if this is.
+    check electronDesktopProfile(true).has(capNativeMenuBar)
+    check not electronDesktopProfile(false).has(capNativeMenuBar)
+    check electronDesktopProfile(true).overlaysCaptionBar
+    check not electronDesktopProfile(false).overlaysCaptionBar
+
+  test "the default platform promises nothing it will refuse":
+    ## Before `installPlatform`, `newPlatform` builds every facade as a refusal.
+    ## The profile must therefore declare no capability at all: a default that
+    ## answered `can(capFilesystemRead)` with `true` and then refused the read
+    ## is the disagreement between "may I" and "did it work" that the whole
+    ## capability model exists to remove — and it was live, in the platform
+    ## every caller gets before start-up finishes.
+    resetPlatformForTesting()
+    let default = platform()
+    check default.profile.capabilities == {}
+    for capability in default.profile.missing:
+      check default.degradedBehaviour(capability).len > 20
+    check default.profile.undeclaredDegradations().len == 0
+    check default.profile.staleDegradations().len == 0
+
+    # And the two answers agree, which is the point.
+    check not default.can(capFilesystemRead)
+    let outcome = awaitOutcome(default.fs.readText("/etc/hosts"))
+    check not outcome.ok
+    check outcome.error.kind == pkNotSupported
+    resetPlatformForTesting()
 
   test "the web genuinely lacks the capabilities Noir-Studio.md says it lacks":
     ## Named one by one rather than by set difference: a set comparison passes
@@ -289,6 +342,15 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
     ## of all seven facades; if any operation had a signature that only made
     ## sense in-process — returning a `File`, a `Process`, a pointer or an
     ## iterator — this suite would not build.
+    ##
+    ## What makes that true is `{.requiresInit.}` on the seven facade types, not
+    ## the four `isNil` checks below. Review established the difference by
+    ## adding `openHandle*: proc(path: string): File` to `FileSystemFacade`:
+    ## without the pragma it compiled cleanly on both backends, every
+    ## instantiation quietly grew a nil field, and this suite still reported
+    ## green. With it, the same edit fails the build at every construction site.
+    ## The `isNil` checks stay because they are what fails if a *constructor* is
+    ## ever replaced by something that hands back a nil facade.
     check not remote.fs.isNil
     check not remote.process.isNil
     check not remote.vcs.isNil
