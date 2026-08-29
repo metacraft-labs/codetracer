@@ -268,3 +268,9 @@ serde
 drainable
 microtask
 opfs
+smtlib
+unsat
+subgoal
+subgoals
+counterexample
+counterexamples

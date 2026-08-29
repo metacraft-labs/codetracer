@@ -49,6 +49,23 @@
 ## `toTestEvents` below carries no `recording-created` event and so fails
 ## `test_run_summary_vm.hasRecording` by construction.
 ##
+## **VN-M4 landed and this paragraph still holds, which is worth saying
+## explicitly rather than leaving a reader to notice.** The structured payload
+## now exists, in the sibling module `verification_payload.nim`, and it is
+## deliberately *not* wired into anything here: a `VerificationReport` has no
+## payload field, the marker builder and `toTestEvents` below are unchanged,
+## and `attachPayload` produces a separate value rather than mutating a report.
+##
+## The reason is the asymmetry VN-M4 rests on. **This module keeps the
+## verdict; the payload supplies the structure.** `classifyVernoRun` has been
+## attacked and has held; a JSON document arriving from a process CodeTracer
+## does not control has not. So a payload is measured against the report this
+## module already built, and the two disagreements that could do harm — a
+## payload claiming `proved` where this tier did not, or one failing to claim a
+## failed proof where this tier found one — are refusals rather than
+## reconciliations. Everything VN-M3 asserts about a report therefore still
+## holds with a payload present, by construction rather than by re-checking.
+##
 ## Pure and plain-valued throughout — no `cstring`, no filesystem, no process —
 ## so it is asserted on both the C (`vm-unit`) and JS (`vm-unit-js`) backends.
 
