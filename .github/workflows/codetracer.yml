@@ -2127,13 +2127,14 @@ jobs:
   dmg-build:
     # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
     # `dtolnay/rust-toolchain` + `./ci/build/dmg.sh` (-> Homebrew-native
-    # `./non-nix-build/build.sh`) and `brew install awscli` steps are gone. The
-    # dmg is now produced toolchain-free by reprobuild
-    # (`repro build .#dmg --tool-provisioning=nix`, driven by
-    # `ci/reprobuild/macos-daemon-build.sh`), which lands the artifact at the
-    # same `non-nix-build/CodeTracer.dmg` path the sign + upload steps consume.
-    # `aws` comes from `nixpkgs#awscli2`, provisioned per-command via `nix
-    # shell`.
+    # `./non-nix-build/build.sh`) and `brew install awscli` steps are gone.
+    # reprobuild builds the app bundle hermetically (`repro build .#macos-app
+    # --tool-provisioning=nix`, driven by `ci/reprobuild/macos-daemon-build.sh`);
+    # the dmg itself is packaged from that bundle in a plain devShell (see the
+    # "Package DMG" step for why `.#dmg` cannot run hermetically on macOS), and
+    # lands at the same `non-nix-build/CodeTracer.dmg` path the sign + upload
+    # steps consume. `aws` comes from `nixpkgs#awscli2`, provisioned per-command
+    # via `nix shell`.
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     needs:
       - lint-bash
@@ -2178,12 +2179,58 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
-      - name: Build DMG via reprobuild
-        # Toolchain-free reprobuild macOS build: starts runquotad, runs
-        # `repro build .#dmg --tool-provisioning=nix`, and asserts the artifact
-        # at `non-nix-build/CodeTracer.dmg` — the exact path the sign + upload
-        # steps below consume.
+      - name: Build CodeTracer.app via reprobuild
+        # Toolchain-free reprobuild macOS build of the *app bundle*: starts
+        # runquotad, runs `repro build .#macos-app --tool-provisioning=nix`,
+        # and lands `non-nix-build/CodeTracer.app` (which the packaging step
+        # below turns into the dmg).
+        #
+        # WHY NOT `.#dmg`: reprobuild's `.#dmg` target invokes the nixpkgs
+        # `create-dmg`, a shell script that shells out to macOS system tools
+        # (`sw_vers`, then `hdiutil` / `SetFile`). None of those have a nixpkgs
+        # package, and reprobuild runs every tool action with a scrubbed PATH =
+        # the tool's own nix closure only (the sanctioned `CT_SANDBOX_TOOLS_DIR`
+        # escape hatch is not populated anywhere), so `.#dmg` dies with
+        # `create-dmg: line 16: sw_vers: command not found` (exit 127). A fully
+        # hermetic dmg is not achievable on macOS — hdiutil is the only tool
+        # that writes the format and it is macOS-system-only. So we keep the
+        # reproducible half (the .app, built hermetically by reprobuild) and
+        # package the inherently-non-hermetic dmg in the step below, where the
+        # devShell provides create-dmg and the runner's /usr/bin provides the
+        # macOS system tools it needs.
+        env:
+          CODETRACER_REPROBUILD_TARGET: .#macos-app
         run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
+
+      - name: Package DMG
+        # Package `non-nix-build/CodeTracer.app` into `CodeTracer.dmg` using the
+        # devShell's create-dmg. This runs in a plain `nix develop .` shell (NOT
+        # a reprobuild action), so it inherits the runner's /usr/bin and the
+        # macOS system tools create-dmg needs (sw_vers, hdiutil, SetFile). The
+        # create-dmg flags mirror non-nix-build/build_dmg.sh (the pre-CIP-5
+        # path) and repro.nim's create_dmg action, so the produced dmg is the
+        # same shape the sign + upload steps below expect.
+        run: |
+          nix develop . --command bash -c '
+            set -eu
+            cd non-nix-build
+            rm -f CodeTracer.dmg
+            staging="$(mktemp -d)"
+            trap "rm -rf \"$staging\"" EXIT
+            cp -R CodeTracer.app "$staging/"
+            create-dmg \
+              --volname CodeTracer \
+              --background dmg_background.png \
+              --window-pos 200 120 \
+              --window-size 600 400 \
+              --icon-size 100 \
+              --icon CodeTracer.app 150 200 \
+              --app-drop-link 450 200 \
+              --sandbox-safe \
+              --hdiutil-retries 15 \
+              CodeTracer.dmg \
+              "$staging"
+          '
 
       - name: Upload artifact
         env:
