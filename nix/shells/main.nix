@@ -199,26 +199,27 @@ mkShell {
     # with `cannot open file: codetracer_trace_writer/span_stream`.
     #
     # Mirror the proven-good nix-sandbox package path (nix/packages/default.nix
-    # exports CODETRACER_TRACE_FORMAT_NIM_SRC from the flake input) so the
-    # devShell always resolves the module even without a sibling checkout.
-    # This is additive: a real adjacent sibling still wins because
-    # detect-siblings.sh sets the var first; only lanes without the sibling
-    # reach this fallback.
+    # exports these SRC vars from the flake inputs) so the devShell always
+    # resolves the modules even without sibling checkouts. This is additive: a
+    # real adjacent sibling still wins because detect-siblings.sh /
+    # config.nims's workspaceRoot lookups take precedence; only lanes without
+    # the siblings reach these fallbacks.
+    #
+    # The set here matches nix/packages/default.nix:1300-1303 (minus RUNQUOTA_SRC,
+    # already exported by ci-base.nix, and CODETRACER_RESULTS_SRC, resolved from
+    # the libs/nim-stew submodule by config.nims:29). Beyond print_trace.nim's
+    # `codetracer_trace_writer/span_stream`, the `-d:ctTest` build compiles
+    # src/ct_test/incremental, which imports `io_mon/depfile` (needs io-mon) and
+    # the stackable-hooks propagation helpers.
     if [ -z "''${CODETRACER_TRACE_FORMAT_NIM_SRC:-}" ]; then
       export CODETRACER_TRACE_FORMAT_NIM_SRC="${inputs.codetracer-trace-format-nim}/src"
     fi
-
-    # Take the direnv-free path in src/db-backend/build.rs.
-    #
-    # build.rs invokes the native-recorder C-regen script; by default it wraps
-    # that in `direnv exec <recorder>` to load the recorder's Nim toolchain
-    # onto PATH. On CI runners the recorder's `.envrc` is not `direnv allow`ed,
-    # so that wrapper fails and build.rs panics
-    # (`build_native_api.sh exited with status 1`). This devShell always puts
-    # nim/nimble on PATH, which is exactly the precondition build.rs documents
-    # for the direct-`bash` escape hatch (build.rs:945-948), so opt into it for
-    # every devShell consumer (dev-build, appimage-build, local dev).
-    export CODETRACER_DB_BACKEND_SKIP_DIRENV=1
+    if [ -z "''${IO_MON_SRC:-}" ]; then
+      export IO_MON_SRC="${inputs.io-mon}/src"
+    fi
+    if [ -z "''${NIM_STACKABLE_HOOKS_SRC:-}" ]; then
+      export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
+    fi
 
     RECORDER_SRC="''${CODETRACER_PYTHON_RECORDER_SRC:-}"
 

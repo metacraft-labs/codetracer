@@ -1951,7 +1951,40 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
+        # ``direnv exec <recorder-root> bash ct_emulator/build_native_api.sh``
+        # to materialise the recorder's generated C before the Rust build. A
+        # fresh clone has its .envrc "blocked", so direnv refuses and build.rs
+        # panics with ``build_native_api.sh exited with status 1``. Mirror the
+        # proven lint-rust pattern: ``direnv allow`` is idempotent and persists
+        # only in the local direnv state dir on this self-hosted runner.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh runs ``nim c ... ct_emulator.nim`` whose .nimble
+        # declares ``requires "results"``. A fresh nim install has no global
+        # ``results`` package, so the script aborts with
+        # ``cannot open file: results``. ``nimble install --depsOnly`` once in
+        # ct_emulator (inside the recorder's direnv env so nim/nimble resolve
+        # from the recorder's flake) is idempotent -- same fixup lint-rust does.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
+
+      # The emulator's ``syscall_replay.nim`` imports ``stew/endians2`` but
+      # ``ct_emulator.nimble`` doesn't list ``stew`` as a dep, so a fresh Nim
+      # build cannot resolve the module. Codetracer ships its own pinned copy as
+      # a submodule under ``libs/nim-stew``; inject it via
+      # ``CT_EMULATOR_EXTRA_NIM_PATHS`` so build_native_api.sh's ``--path:``
+      # flags pick it up -- same env-var lint-rust uses.
+      - name: Build
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
 
   nix-build:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -2027,12 +2060,41 @@ jobs:
         with:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Setup db-backend siblings
+        # ``./ci/build/appimage.sh`` -> ``build_db_backend.sh`` runs
+        # ``cargo build`` in src/db-backend, whose build.rs needs the
+        # codetracer-native-recorder sibling checkout (and its trace-format
+        # siblings) to regenerate the recorder's native C. Clone them adjacent
+        # to the checkout, exactly as dev-build does.
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
+        # ct_emulator/build_native_api.sh``; a fresh clone has its .envrc
+        # "blocked", so direnv refuses and build.rs panics. ``direnv allow`` is
+        # idempotent -- mirror the proven lint-rust / dev-build pattern.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh's ``nim c ... ct_emulator.nim`` requires the
+        # ``results`` package (ct_emulator.nimble ``requires "results"``);
+        # install it once inside the recorder's direnv env, same as lint-rust.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
@@ -2044,7 +2106,13 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
+      # ``CT_EMULATOR_EXTRA_NIM_PATHS`` injects codetracer's pinned nim-stew /
+      # nim-result submodules so build_native_api.sh's ``--path:`` flags resolve
+      # ``stew/endians2`` (not a declared ct_emulator.nimble dep) -- same
+      # env-var lint-rust and dev-build use.
       - name: Build
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh"
 
       - name: Upload artifact
