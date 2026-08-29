@@ -145,3 +145,173 @@ proc resolvedErr*[T](kind: PlatformErrorKind; message: string;
 
 proc resolvedUnsupported*[T](what: string): PlatformFuture[PlatformOutcome[T]] =
   resolved(unsupported[T](what))
+
+# ---------------------------------------------------------------------------
+# Composition
+# ---------------------------------------------------------------------------
+#
+# NS1 shipped the vocabulary and no way to sequence it, which was fine while
+# every caller performed exactly one facade operation. NS2's project store is
+# the first consumer that cannot: "write this file atomically" is a lock read,
+# a temp write, a replace and a temp removal, and an OPFS volume makes every
+# one of those a genuine promise.
+#
+# There is no portable `then`. `std/asyncjs.then` exists only on the JS target;
+# `std/asyncdispatch` has `addCallback` and no `then`. `async_compat` unifies
+# `onComplete`, which is a subscription rather than a combinator — it returns
+# nothing, so it cannot express "and then do this, yielding a new future". So
+# the combinators live here, once, rather than in each caller's `when defined(js)`.
+#
+# ## The property that makes them testable, and why it is not an optimisation
+#
+# Each combinator checks whether its input has ALREADY settled and, if so, runs
+# the continuation INLINE and hands back the continuation's own future.
+#
+# That is not about speed. `outcome.resolved` uses `newCompletedFuture` so a
+# settled facade result is observable synchronously (see its comment; NS1
+# records that a bare `newPromise` made every JS assertion a silent no-op). If
+# these combinators dropped to a promise the moment they were used, that
+# property would end at the first composition — every store operation would be
+# a real microtask on JS, `drainPlatformCallbacks` could not pump it, and the
+# whole store suite would assert nothing under `vm-unit-js`. Preserving settled-
+# ness through composition is what keeps the store testable on the backend it
+# ships on; the async path underneath is exercised unchanged by the OPFS volume,
+# which never settles synchronously.
+
+proc thenOutcome*[A, B](future: PlatformFuture[PlatformOutcome[A]];
+                        step: proc(value: A): PlatformFuture[PlatformOutcome[B]]
+                       ): PlatformFuture[PlatformOutcome[B]] =
+  ## Run `step` on success; propagate the error otherwise. The error is
+  ## propagated as a *value*, so a failure short-circuits the chain without any
+  ## backend's exception machinery being involved — the reason
+  ## `PlatformOutcome` exists at all.
+  when defined(js):
+    if isSyncResolved(future):
+      let settled = getSyncValue[PlatformOutcome[A]](future)
+      if settled.ok: return step(settled.value)
+      return newCompletedFuture(failed[B](settled.error))
+    if isSyncFailed(future):
+      return newCompletedFuture(failed[B](
+        pkTransport, "the operation failed", getSyncError(future)))
+    var capturedStep = step
+    result = newPromise(proc(resolve: proc(value: PlatformOutcome[B])) =
+      discard future.then(proc(settled: PlatformOutcome[A]) =
+        if not settled.ok:
+          resolve(failed[B](settled.error))
+        else:
+          let next = capturedStep(settled.value)
+          discard next.then(proc(final: PlatformOutcome[B]) = resolve(final))))
+  else:
+    if future.finished and not future.failed:
+      let settled = future.read()
+      if settled.ok: return step(settled.value)
+      return newCompletedFuture(failed[B](settled.error))
+    let promise = newFuture[PlatformOutcome[B]]("thenOutcome")
+    var capturedStep = step
+    # `addCallback` wants `proc() {.closure, gcsafe.}` and the captured `step`
+    # carries no such annotation. The cast is the bridge `remote_stub.nim`
+    # already uses, and is safe for the same reason: nothing captured crosses a
+    # thread.
+    future.addCallback(proc() {.gcsafe.} =
+      {.cast(gcsafe).}:
+        if future.failed:
+          promise.complete(failed[B](
+            pkTransport, "the operation failed", future.readError.msg))
+        else:
+          let settled = future.read()
+          if not settled.ok:
+            promise.complete(failed[B](settled.error))
+          else:
+            let next = capturedStep(settled.value)
+            next.addCallback(proc() {.gcsafe.} =
+              {.cast(gcsafe).}:
+                if next.failed:
+                  promise.complete(failed[B](
+                    pkTransport, "the operation failed", next.readError.msg))
+                else:
+                  promise.complete(next.read())))
+    result = promise
+
+proc mapOutcome*[A, B](future: PlatformFuture[PlatformOutcome[A]];
+                       transform: proc(value: A): B
+                      ): PlatformFuture[PlatformOutcome[B]] =
+  ## `thenOutcome` for a step that cannot itself fail.
+  var capturedTransform = transform
+  thenOutcome(future, proc(value: A): PlatformFuture[PlatformOutcome[B]] =
+    resolvedOk(capturedTransform(value)))
+
+proc discardOutcome*[A](future: PlatformFuture[PlatformOutcome[A]]
+                       ): PlatformFuture[PlatformOutcome[Nothing]] =
+  mapOutcome(future, proc(value: A): Nothing = nothing)
+
+proc recoverOutcome*[A](future: PlatformFuture[PlatformOutcome[A]];
+                        recover: proc(error: PlatformError
+                                     ): PlatformFuture[PlatformOutcome[A]]
+                       ): PlatformFuture[PlatformOutcome[A]] =
+  ## The mirror of `thenOutcome`: run `recover` on failure and pass success
+  ## through. The store needs this for the shapes where a failure is expected
+  ## and meaningful — "no lock file yet" is `pkNotFound` and is the normal
+  ## first-open case, not an error to report.
+  when defined(js):
+    if isSyncResolved(future):
+      let settled = getSyncValue[PlatformOutcome[A]](future)
+      if settled.ok: return future
+      return recover(settled.error)
+    if isSyncFailed(future):
+      return recover(platformError(
+        pkTransport, "the operation failed", getSyncError(future)))
+    var capturedRecover = recover
+    result = newPromise(proc(resolve: proc(value: PlatformOutcome[A])) =
+      discard future.then(proc(settled: PlatformOutcome[A]) =
+        if settled.ok:
+          resolve(settled)
+        else:
+          let next = capturedRecover(settled.error)
+          discard next.then(proc(final: PlatformOutcome[A]) = resolve(final))))
+  else:
+    if future.finished and not future.failed:
+      let settled = future.read()
+      if settled.ok: return future
+      return recover(settled.error)
+    let promise = newFuture[PlatformOutcome[A]]("recoverOutcome")
+    var capturedRecover = recover
+    future.addCallback(proc() {.gcsafe.} =
+      {.cast(gcsafe).}:
+        var error: PlatformError
+        if future.failed:
+          error = platformError(
+            pkTransport, "the operation failed", future.readError.msg)
+        else:
+          let settled = future.read()
+          if settled.ok:
+            promise.complete(settled)
+            return
+          error = settled.error
+        let next = capturedRecover(error)
+        next.addCallback(proc() {.gcsafe.} =
+          {.cast(gcsafe).}:
+            if next.failed:
+              promise.complete(failed[A](
+                pkTransport, "the operation failed", next.readError.msg))
+            else:
+              promise.complete(next.read())))
+    result = promise
+
+proc foldOutcome*[A](items: seq[A];
+                     step: proc(item: A): PlatformFuture[PlatformOutcome[Nothing]]
+                    ): PlatformFuture[PlatformOutcome[Nothing]] =
+  ## Run `step` over every item, in order, stopping at the first failure.
+  ##
+  ## Sequential rather than concurrent, deliberately. The store's multi-file
+  ## operations write into one tree under one lock, and a concurrent fan-out
+  ## over OPFS would interleave `createWritable` calls on sibling paths whose
+  ## ordering the atomic-replace argument depends on. There is no throughput
+  ## case here worth that.
+  var accumulated = resolvedOk()
+  var capturedStep = step
+  for item in items:
+    let current = item
+    accumulated = thenOutcome(accumulated,
+      proc(ignored: Nothing): PlatformFuture[PlatformOutcome[Nothing]] =
+        capturedStep(current))
+  accumulated

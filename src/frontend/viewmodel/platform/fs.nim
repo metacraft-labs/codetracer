@@ -122,23 +122,31 @@ proc exists*(facade: FileSystemFacade; path: string
   ## Convenience over `stat`, because "does it exist" is the question callers
   ## actually ask and re-deriving it from `fekMissing` at every site is how the
   ## missing-file case gets handled three different ways.
-  let statFuture = facade.stat(path)
-  when defined(js):
-    result = newPromise(proc(resolve: proc(v: PlatformOutcome[bool])) =
-      discard statFuture.then(proc(s: PlatformOutcome[FsStat]) =
-        if s.ok: resolve(succeeded(s.value.kind != fekMissing))
-        else: resolve(failed[bool](s.error))))
-  else:
-    let promise = newFuture[PlatformOutcome[bool]]("fs.exists")
-    statFuture.addCallback(proc() =
-      if statFuture.failed:
-        promise.complete(failed[bool](
-          pkFailed, "stat failed", statFuture.readError.msg))
-      else:
-        let s = statFuture.read()
-        if s.ok: promise.complete(succeeded(s.value.kind != fekMissing))
-        else: promise.complete(failed[bool](s.error)))
-    result = promise
+  ##
+  ## ## This was written twice, and the first version was a case that could not
+  ## ## fail
+  ##
+  ## NS1 wrote the composition by hand: a `when defined(js)` branch building a
+  ## bare `newPromise` around `statFuture.then`, and a native branch using
+  ## `addCallback`. Both were correct about *values* and the JS one was wrong
+  ## about *observability* — a plain promise carries no `__syncResolved` stamp,
+  ## so `async_compat.onComplete` takes its `.then` branch and delivers on V8's
+  ## microtask queue, which `drainPlatformCallbacks` does not pump. On the JS
+  ## backend, every synchronous caller of `exists` — which is every headless
+  ## ViewModel test — silently never ran its continuation.
+  ##
+  ## That is the exact defect `outcome.resolved`'s own comment warns about
+  ## twelve lines from here, in the module this one imports, and it survived
+  ## because nothing composed a facade operation until NS2's project store did.
+  ## It was found by `vm-unit-js` failing `test_platform_web.nim` with "a
+  ## facade future never settled".
+  ##
+  ## `mapOutcome` is the fix and is not merely tidier: it preserves synchronous
+  ## settledness when its input had it, which is the property the whole
+  ## headless-test story rests on. There is now one implementation of this
+  ## composition rather than one per call site.
+  mapOutcome(facade.stat(path),
+             proc(s: FsStat): bool = s.kind != fekMissing)
 
 proc unavailableFileSystem*(profile: PlatformProfile): FileSystemFacade =
   ## Every operation refuses, naming the capability. Used as the base for

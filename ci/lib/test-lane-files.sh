@@ -355,9 +355,18 @@ test_lane_files() {
 		# case for want of a recorder, produced no `[OK]` line, and the runner
 		# scored the whole file `DID NOT RUN`. That is the one red in `vm-unit`
 		# on `dev`: a suite in a lane that does not provide what it needs.
+		#
+		# `test_opfs_volume` (NS2) is the one rejection that runs in the JS
+		# lane and NOT here — the mirror image of `test_platform_desktop_native`
+		# below. Its subject, `viewmodel/host/opfs_volume.nim`, is the browser's
+		# origin-private filesystem and is a hard `{.error.}` on the C target,
+		# exactly as the native desktop instantiation is on the JS one. So it is
+		# subtracted here and ADDED to `vm-unit-js`, which is the only lane that
+		# can run it.
 		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
 			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+recorder_gate([[:space:],]|$)' |
-			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$'
+			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
+				'/test_opfs_volume\.nim$'
 		;;
 
 	vm-unit-js)
@@ -432,6 +441,17 @@ test_lane_files() {
 		# compile on JS. That was a test-harness import, not a subject
 		# limitation, and rejecting the four would have been recording the
 		# harness's habit as a fact about the product.
+		#
+		# And ONE file this lane has that `vm-unit` does not. `test_opfs_volume`
+		# (NS2) drives `viewmodel/host/opfs_volume.nim` — the browser's
+		# origin-private filesystem — against a fake `navigator.storage`
+		# installed into the global object, so every `{.importjs.}` body in that
+		# module runs unmodified under node. Its subject is a hard `{.error.}`
+		# on the C target, so it is subtracted from `vm-unit` above and added
+		# here rather than being derived. This is the only lane that can run it,
+		# and the only place in the tree where the WEB instantiation's
+		# browser-facing half is exercised at all.
+		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
 		;;
 
 	vm-collab-units)
