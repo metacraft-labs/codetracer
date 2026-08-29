@@ -439,7 +439,7 @@ jobs:
         # one recorder per matrix row and because the triggering repo cannot be
         # its own sibling.  See "SIBLING PINNING" in this file's header, and
         # metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}

@@ -81,7 +81,7 @@ runs:
       # no-op for them. The bespoke "direnv allow" fixup that used to live
       # here is left to the calling jobs (only the db-backend build.rs path
       # needs it, and those jobs already perform it).
-      uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+      uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
       with:
         env-flavor: ${{ inputs.env-flavor }}
         gh-token: ${{ inputs.gh-token }}
