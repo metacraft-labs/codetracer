@@ -199,7 +199,12 @@ done
 # backslash-continued `nix develop` line -- and counting the workflows with
 # only that one file removed still yields exactly 12. It names `.#ci`, a dev
 # shell this repo defines, so the foreign-shell rule below still holds.
-readonly EXPECTED_SITES=13
+# 13 -> 17: dev-build and appimage-build each gained a `direnv allow` and a
+# `direnv exec ... nimble install --depsOnly` site (four total), replicating
+# lint-rust's native-recorder setup so their db-backend build.rs takes the
+# direnv path. All four run `nix develop .#devShells.x86_64-linux.default -c
+# direnv ...`, naming `.`'s dev shell, so the foreign-shell rule below holds.
+readonly EXPECTED_SITES=17
 
 if [ "$sites" -eq "$EXPECTED_SITES" ]; then
 	ok "the scanner still matches the direnv call sites ($sites)"
