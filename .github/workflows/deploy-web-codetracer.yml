@@ -91,7 +91,7 @@ jobs:
         #   * codetracer-trace-format-nim  — build_wasm_api.sh's `nim c` adds
         #     ../codetracer-trace-format-nim/src to its --path search,
         #   * codetracer-trace-format      — the matched half of that FFI pair.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}

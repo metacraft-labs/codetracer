@@ -69,7 +69,7 @@ runs:
   using: composite
   steps:
     - name: Clone isonim siblings
-      uses: metacraft-labs/metacraft-github-actions/clone-siblings@main
+      uses: metacraft-labs/metacraft-github-actions/clone-siblings@dev
       with:
         gh-token: ${{ inputs.gh-token }}
         # A BARE entry resolves its revision from the workspace lock. An entry

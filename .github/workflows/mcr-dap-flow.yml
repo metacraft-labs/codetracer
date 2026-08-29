@@ -109,7 +109,7 @@ jobs:
         # job. Every job that left it bare died in this step. When lock
         # publication resumes, dropping the `=dev` suffixes restores
         # per-commit pinning here along with everywhere else.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}

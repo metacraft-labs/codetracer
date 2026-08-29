@@ -90,7 +90,7 @@ jobs:
         # The native-backend submodule unfold below is still bespoke
         # because the path:-flake-input visibility fix is specific to this
         # repo's flake.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
