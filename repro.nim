@@ -948,18 +948,28 @@ package codeTracer:
 
     var codetracerActions: seq[BuildActionDef] = @[]
 
+    # The files `ct` READS ON STARTUP, as opposed to the ones the product
+    # merely ships. `ct` resolves them under `<prefix>/config/` (`configDir`
+    # in src/common/config.nim), and on a profile with no
+    # `~/.config/codetracer/.config.yaml` yet, `loadConfig` COPIES
+    # `default_config.yaml` there before doing anything else — so a tree
+    # without them does not degrade, it dies with an uncaught OSError on the
+    # first command that loads config. They are collected here so the `ct`
+    # target below can name them; see the comment at that call.
+    var ctStartupAssets: seq[BuildTargetDef] = @[]
+
     if fileExists("src/config/default_layout.json"):
       let defaultLayout = fs.copyFile(
         source = "src/config/default_layout.json",
         output = buildDebugPath("config/default_layout.json"))
-      target("config-default-layout-json", defaultLayout)
+      ctStartupAssets.add(target("config-default-layout-json", defaultLayout))
       codetracerActions.add(defaultLayout)
 
     if fileExists("src/config/default_config.yaml"):
       let defaultConfig = fs.copyFile(
         source = "src/config/default_config.yaml",
         output = buildDebugPath("config/default_config.yaml"))
-      target("config-default-config-yaml", defaultConfig)
+      ctStartupAssets.add(target("config-default-config-yaml", defaultConfig))
       codetracerActions.add(defaultConfig)
 
     let hasFrontendInputs =
@@ -1051,7 +1061,27 @@ package codeTracer:
         nimcachePath = ctNimCacheRoot & "/codetracer_codetracer_binary",
         outputPath = buildDebugPath("bin/ct"),
         sourcePath = "src/ct/codetracer.nim")
-      target("ct", ct)
+      # `ct` names a ct THAT STARTS: the binary plus the startup assets it
+      # reads out of `<prefix>/config/`. The name used to be attached to the
+      # compile alone, so `repro build ct` scheduled exactly one action and
+      # produced a `bin/ct` with no `config/` beside it. That is how
+      # reprobuild's Test job — `CODETRACER_REPROBUILD_TARGET=ct`, then
+      # `$CT_BIN test --incremental` — kept turning its mainline red on
+      # scripts/require-runtime-assets.sh, which runs at the end of EVERY
+      # build-once.sh build and is right to: the tree it was handed could not
+      # run `ct`.
+      #
+      # Fixed here rather than by letting callers name the three targets
+      # themselves. The guard applies to every build regardless of target, so
+      # "ask for `ct`, get something that cannot start" is a trap for the next
+      # caller as much as it was for this one, and the composition it would
+      # have to spell is not discoverable from the target list.
+      #
+      # `ct-binary` keeps a handle on the compile alone — for "relink the
+      # binary, skip the copies" — and is the id the build progress line
+      # shows for that action.
+      target("ct-binary", ct)
+      aggregate("ct", actions = @[ct], targets = ctStartupAssets)
       codetracerActions.add(ct)
 
     var auxiliaryActionIds: seq[string] = @[]
