@@ -1720,6 +1720,19 @@ jobs:
         # worth learning after twenty minutes of suites.
         run: nix develop .#devShells.x86_64-linux.default --command just test-host-instantiations
 
+      - name: Build and boot the web bundle
+        # NS2's second build. The lane above proves the web instantiation's
+        # modules compile; this proves they LINK into a bundle that contains no
+        # node module loader and that `boot()` actually completes — the
+        # sequence §4.2 and §4.5 specify, which until now nothing executed
+        # because nothing called it.
+        #
+        # Runs under node rather than a browser deliberately: with no OPFS the
+        # boot takes the in-memory path, which is a real product state (a user
+        # with storage disabled) and is asserted to announce the coming loss
+        # before editing is possible.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 

@@ -2797,6 +2797,38 @@ test-host-instantiations:
   exec > >(tee test-logs/test-host-instantiations.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh host-instantiations --compile-only
 
+# THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
+# which said in its own words: "no CI recipe produces a web bundle, so
+# `test_one_codebase_two_platforms` is unasserted, and nothing calls the web
+# instantiation's boot()".  This is that recipe, and `src/frontend/web_main.nim`
+# is the entry point that calls it.
+#
+# Three things are checked, and the middle one is the reason the other two are
+# worth anything:
+#
+#   1. the bundle BUILDS with `nim js`;
+#   2. it links NO host bindings — zero `require(`, no `child_process`, no
+#      `ipcRenderer`.  `web_main.nim` deliberately does not import
+#      `platform_host`, because that module imports `host/desktop_electron` on
+#      the JS backend; measured, importing and using it puts 43 `require(`
+#      calls into the bundle, so this check fails on the real regression rather
+#      than in principle;
+#   3. it BOOTS.  Under node there is no OPFS, so the run takes §4.2's third
+#      row — the in-memory volume — and the gate asserts that the session
+#      announces the coming loss before editing is possible, which is the
+#      product requirement rather than merely "it didn't crash".
+#
+# It does NOT satisfy `test_one_codebase_two_platforms` in full: that test also
+# wants a pane added to one platform to appear in the other, and rendering panes
+# means the renderer, which is still Electron-coupled through `platform_host`.
+# This is the build half.
+test-web-bundle:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-bundle.log) 2>&1
+  bash ci/test/web-bundle-smoke.sh
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when
