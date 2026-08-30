@@ -2232,7 +2232,6 @@ jobs:
               --icon CodeTracer.app 150 200 \
               --app-drop-link 450 200 \
               --sandbox-safe \
-              --hdiutil-retries 15 \
               CodeTracer.dmg \
               "$staging"
           '
