@@ -19,7 +19,10 @@ use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::in_memory_trace_reader::InMemoryTraceReader;
 use crate::lang::{Lang, lang_from_context};
+use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
+use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::macro_sourcemap::{self, MacroSourceMapCollection, UpdateExpansionArgs};
+use crate::mixed_altitude::{active_altitude, is_vm_crossing_span, Altitude, AltitudeState};
 use crate::program_search_tool::ProgramSearchTool;
 use crate::recreator_session::{RecreatorArgs, RecreatorReplaySession};
 use crate::replay::ReplaySession;
@@ -313,6 +316,28 @@ pub struct Handler {
     /// which case the resolver falls back to the recorded-workdir probe /
     /// on-disk source files exactly as before.
     pub bundled_sources_root: Option<std::path::PathBuf>,
+
+    /// IS-M2 — the container's **VM crossing spans**, cached once at trace open.
+    ///
+    /// Loaded by [`Handler::load_crossing_spans`] (filtered to
+    /// [`crate::mixed_altitude::is_vm_crossing_span`]) from the CTFS span stream
+    /// so the per-move active-altitude computation in [`Handler::complete_move`]
+    /// is a pure, allocation-free scan over an already-settled `Vec` rather than
+    /// a fresh reader open on every step. A container with **no** span stream
+    /// (every standalone materialized trace) leaves this empty, so
+    /// [`crate::mixed_altitude::active_altitude`] reports `Native` for every
+    /// step and standalone behaviour is unchanged.
+    ///
+    /// Spec: `codetracer-specs/Planned-Features/Mixed-Trace-Implicit-Switch.md` §2.
+    pub crossing_spans: Vec<SpanRecord>,
+
+    /// IS-M2 — the deliberate-descent override carried across moves (spec §2, P3).
+    ///
+    /// Default (no override) for now: the deliberate-descent gesture is the
+    /// deferred IS-M2 frontend half. Kept on the session so the P1 rule in
+    /// [`Handler::complete_move`] already consults it and the P3 wiring lands
+    /// additively later.
+    pub altitude_state: AltitudeState,
 }
 
 /// M25b — Event-Log marker row returned by `ct/event-load`. The
@@ -548,6 +573,8 @@ impl Handler {
             trace_folder: None,
             request_span_tail: None,
             bundled_sources_root: None,
+            crossing_spans: Vec::new(),
+            altitude_state: AltitudeState::default(),
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -856,6 +883,42 @@ impl Handler {
             }
         };
 
+        // IS-M2 — surface the ACTIVE ALTITUDE for the landing step so the
+        // frontend can auto-switch between the VM (GDScript) and native views
+        // (spec `Mixed-Trace-Implicit-Switch.md` §2, P1). This is the real-move
+        // application of the pure IS-M1 resolver: a scan over the container's
+        // cached VM crossing spans ([`Handler::crossing_spans`]), honouring any
+        // deliberate-descent override ([`Handler::altitude_state`], P3 — no
+        // override yet; that gesture is the deferred frontend half).
+        //
+        // Additive and self-effacing: a trace with no crossing spans (every
+        // standalone materialized trace leaves `crossing_spans` empty) yields
+        // `Native` here, and the optional wire fields serialize as absent, so no
+        // existing `MoveState` consumer is affected.
+        let step = self.step_id.0.max(0) as u64;
+        let (active_altitude_field, active_crossing_span_id) = if self.crossing_spans.is_empty() {
+            // Fast path for the overwhelmingly common standalone trace: no VM
+            // altitude exists, so the fields stay absent on the wire.
+            (None, None)
+        } else {
+            let altitude = active_altitude(&self.altitude_state, &self.crossing_spans, step);
+            let span_id = crate::mixed_altitude::innermost_crossing_span(&self.crossing_spans, step)
+                .map(|s| s.span_id);
+            let label = match altitude {
+                Altitude::Vm => "vm",
+                Altitude::Native => "native",
+            };
+            // The innermost covering span is meaningful only while attention is
+            // at the VM altitude; a deliberate descent (native inside a span)
+            // reports `native` and no span id, matching the frontend's "which
+            // frame did we auto-switch into?" question.
+            let span_id = match altitude {
+                Altitude::Vm => span_id,
+                Altitude::Native => None,
+            };
+            (Some(label.to_string()), span_id)
+        };
+
         let move_state = MoveState {
             status: "".to_string(),
             location,
@@ -865,6 +928,8 @@ impl Handler {
             stop_signal: RRGDBStopSignal::OtherStopSignal,
             frame_info: FrameInfo::default(),
             event_log_index,
+            active_altitude: active_altitude_field,
+            active_crossing_span_id,
         };
 
         let stopped_event = self.prepare_stopped_event(is_main)?;
@@ -2200,6 +2265,70 @@ impl Handler {
     /// majority of recordings, which have no spans at all.
     pub fn set_trace_folder(&mut self, trace_dir: &Path) {
         self.trace_folder = Some(trace_dir.to_path_buf());
+    }
+
+    /// IS-M2 — load and cache the container's **VM crossing spans** at trace open.
+    ///
+    /// Mirrors `request_spans::load_request_spans`' reader stack
+    /// (`CtfsReader::open` + [`SpanStreamReader::open_from_ctfs`] +
+    /// `settled_spans`) and the way `mixed_altitude_test.rs` reads the fixture,
+    /// then filters to [`crate::mixed_altitude::is_vm_crossing_span`] so
+    /// [`Handler::complete_move`] can compute the active altitude on every move
+    /// as a pure scan over an already-settled `Vec` (see [`Handler::crossing_spans`]).
+    ///
+    /// This is deliberately additive and best-effort:
+    ///
+    /// * A trace with **no** `.ct` container, **no** span stream, or a span
+    ///   stream carrying only non-VM spans (`web-request`, …) leaves
+    ///   [`Handler::crossing_spans`] empty. Every altitude is then `Native`, so a
+    ///   standalone materialized trace is completely unaffected — the whole point
+    ///   of the additive surface (spec §2, P1).
+    /// * A read error is logged and swallowed rather than failing trace open; a
+    ///   crossing-span read must never break navigation on a trace that would
+    ///   otherwise replay fine.
+    ///
+    /// Spec: `codetracer-specs/Planned-Features/Mixed-Trace-Implicit-Switch.md` §2.
+    pub fn load_crossing_spans(&mut self, trace_dir: &Path) {
+        let Some(ct_path) = find_ct_container(trace_dir) else {
+            // No container (in-memory / VFS replay, or a bare directory) — a
+            // standalone trace with no span stream: leave the cache empty.
+            debug!(
+                "crossing-spans: no .ct container under {} — no VM spans to cache",
+                trace_dir.display()
+            );
+            return;
+        };
+        let mut ctfs = match CtfsReader::open(&ct_path) {
+            Ok(ctfs) => ctfs,
+            Err(e) => {
+                warn!("crossing-spans: failed to open {}: {e}", ct_path.display());
+                return;
+            }
+        };
+        let reader = match SpanStreamReader::open_from_ctfs(&mut ctfs) {
+            // The container declares a span stream — settle its records once.
+            Ok(Some(reader)) => reader,
+            // No span stream (the ordinary case for a standalone trace).
+            Ok(None) => return,
+            Err(e) => {
+                warn!("crossing-spans: span stream read failed for {}: {e}", ct_path.display());
+                return;
+            }
+        };
+        let mut reader = reader;
+        match reader.settled_spans() {
+            Ok(spans) => {
+                self.crossing_spans = spans.into_iter().filter(is_vm_crossing_span).collect();
+                debug!(
+                    "crossing-spans: cached {} VM crossing span(s) from {}",
+                    self.crossing_spans.len(),
+                    ct_path.display()
+                );
+            }
+            Err(e) => {
+                warn!("crossing-spans: settling spans failed for {}: {e}", ct_path.display());
+            }
+        }
     }
 
     /// RS-M2 — dispatch handler for `ct/load-request-spans`.

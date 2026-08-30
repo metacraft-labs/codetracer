@@ -455,6 +455,11 @@ fn setup(
                 // project). Additive to the srcviews path above; only raw
                 // (kind 0) views are materialised.
                 handler.load_bundled_sources(trace_folder);
+                // IS-M2 — cache the container's VM crossing spans so each move's
+                // active-altitude computation (Mixed-Trace-Implicit-Switch §2) is
+                // a pure scan. Additive: a trace with no span stream leaves the
+                // cache empty and every altitude is native.
+                handler.load_crossing_spans(trace_folder);
                 // §P5 — user-provided variable rename list.
                 handler.load_rename_list(trace_folder, rename_list_path);
                 if for_launch {

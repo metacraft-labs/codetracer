@@ -619,6 +619,30 @@ pub struct MoveState {
     pub stop_signal: RRGDBStopSignal,
     pub frame_info: FrameInfo,
     pub event_log_index: i64,
+
+    /// IS-M2 — the **active altitude** the debugger's attention belongs at for
+    /// this landing step in a mixed native + VM (GDScript) trace: `"vm"` inside
+    /// a covering crossing span, `"native"` otherwise (spec
+    /// `Mixed-Trace-Implicit-Switch.md` §2, P1). Computed on every move by
+    /// [`crate::dap_handler::Handler::complete_move`] via
+    /// [`crate::mixed_altitude::active_altitude`] over the container's cached
+    /// crossing spans. The frontend auto-switch that consumes this is the
+    /// deferred IS-M2 half.
+    ///
+    /// **Additive and optional.** `None` (skipped on the wire) for every trace
+    /// that carries no VM crossing spans — i.e. every standalone materialized
+    /// trace — so the existing Nim `MoveState` consumer parses unchanged and no
+    /// existing field meaning is touched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_altitude: Option<String>,
+
+    /// IS-M2 — `span_id` of the **innermost** VM crossing span covering this
+    /// landing step, or `None` when the altitude is native / no span covers
+    /// (spec §2's `containingSpan`). Lets the frontend name the exact frame it
+    /// auto-switched into. Additive and optional, exactly like
+    /// [`MoveState::active_altitude`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_crossing_span_id: Option<u64>,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
