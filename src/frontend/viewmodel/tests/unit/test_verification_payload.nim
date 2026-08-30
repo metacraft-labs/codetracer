@@ -989,6 +989,7 @@ suite "VN-M5 the solver's model survives the producer boundary":
     # `~` or an `@` here would mean the producer handed the encoding's
     # vocabulary to a developer.
     let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    # Positive control on the set before asserting a property of every member.
     check trace.model.bindings.len == 5
     for binding in trace.model.bindings:
       check '~' notin binding.name
@@ -1009,6 +1010,7 @@ suite "VN-M5 the solver's model survives the producer boundary":
 
   test "the first violated obligation is marked exactly once":
     let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    check trace.steps.len == 4
     var violations = 0
     for step in trace.steps:
       if step.kind == cskViolation:
@@ -1047,6 +1049,12 @@ suite "VN-M5 the solver's model survives the producer boundary":
     # and does not cross the `venir` boundary, so a program point has values and
     # no position. A renderer must be able to tell that from "position 1:1".
     let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    # Positive control first. "every step has no location" is a universal
+    # quantification, and it is satisfied by a trace with no steps — see
+    # `Testing/Verification-Harness-Traps.md` trap 4. Without these two lines
+    # this check would stay green over a decoder that dropped every step.
+    check trace.steps.len == 4
+    check trace.model.bindings.len == 5
     for step in trace.steps:
       check not step.hasLocation
     for binding in trace.model.bindings:
