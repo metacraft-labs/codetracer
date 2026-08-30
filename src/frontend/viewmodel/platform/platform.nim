@@ -101,8 +101,21 @@ let uninstalledProfile* = headlessProfile.withNoCapabilities(noPlatformInstalled
   ## exist to remove. `test_the_default_platform_promises_nothing_it_refuses`
   ## in `test_platform_facade.nim` pins it.
 
+var platformWasChosen = false
+  ## Whether an instantiation was *chosen*, as opposed to the lazy default
+  ## below having been materialised.
+  ##
+  ## `installedPlatform.isNil` cannot answer that question, and the difference
+  ## is not academic: `platform()` fills the field in with
+  ## `newPlatform(uninstalledProfile)` on its first call, so after any bare
+  ## read `platformInstalled()` is true while nothing has been installed at
+  ## all. A caller asking "has a real platform been chosen yet" — and
+  ## `platform_host.ctPlatform()` is exactly such a caller — needs the other
+  ## answer, so it gets its own flag rather than a heuristic over the profile.
+
 proc installPlatform*(newPlatform: Platform) =
   installedPlatform = newPlatform
+  platformWasChosen = true
 
 proc platform*(): Platform =
   if installedPlatform.isNil:
@@ -112,6 +125,12 @@ proc platform*(): Platform =
 proc platformInstalled*(): bool =
   not installedPlatform.isNil
 
+proc platformWasExplicitlyChosen*(): bool =
+  ## True once `installPlatform` has run, and **not** made true by `platform()`
+  ## materialising its default. See `platformWasChosen`.
+  platformWasChosen
+
 proc resetPlatformForTesting*() =
   ## Only tests call this. Named so that a production caller reads as wrong.
   installedPlatform = nil
+  platformWasChosen = false
