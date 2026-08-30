@@ -1262,6 +1262,10 @@ pub struct LazyStepCache {
     /// memory, no stream access) so [`Self::call_run_end`] is a binary search
     /// instead of a walk.
     call_run_starts: OnceCell<Vec<usize>>,
+    /// Number of times [`Self::fill_range_for`] has actually driven a range
+    /// replay. A read that the memo answers must not add to this — see
+    /// [`Self::range_fills`].
+    range_fills: AtomicU64,
 }
 
 impl std::fmt::Debug for LazyStepCache {
@@ -1301,7 +1305,20 @@ impl LazyStepCache {
             slots,
             chunk_size,
             call_run_starts: OnceCell::new(),
+            range_fills: AtomicU64::new(0),
         }
+    }
+
+    /// Number of chunk-aligned RANGE FILLS this cache has actually driven.
+    ///
+    /// One per distinct chunk touched, for as long as the memo holds: a read of
+    /// an already-populated slot must not add to it. Lets a test prove the
+    /// per-slot memo is CONSULTED, which the stream's own
+    /// [`chunk_decompressions`](SeekableStepStream::chunk_decompressions) cannot
+    /// — a re-fill of the same chunk hits the stream's one-chunk cache, so it
+    /// costs a full re-decode while decompressing nothing.
+    pub fn range_fills(&self) -> u64 {
+        self.range_fills.load(Ordering::Relaxed)
     }
 
     /// M0/3 — the exclusive END of the maximal run of steps that starts at
@@ -1378,6 +1395,7 @@ impl LazyStepCache {
     /// for a single decompression. Range awareness: a point lookup populates
     /// exactly its chunk's slots, never the whole array.
     fn fill_range_for(&self, index: usize) {
+        self.range_fills.fetch_add(1, Ordering::Relaxed);
         let lo = (index / self.chunk_size) * self.chunk_size;
         let hi = std::cmp::min(lo + self.chunk_size, self.slots.len());
         let mut sink = SlotFillSink { slots: &self.slots };
@@ -1469,6 +1487,16 @@ impl LazyStepCache {
         let index = step_id.0 as usize;
         if index >= self.slots.len() {
             return None;
+        }
+        // A populated slot IS the memo — serve it. Without this the fill below
+        // ran on EVERY read, re-decoding the whole chunk (4096 records) to
+        // rediscover steps `get_or_init` then threw away, which made a point
+        // lookup O(chunk size) rather than O(1) and left the doc comment's
+        // "then memoized" untrue. Slots are only ever populated by
+        // `fill_range_for` over a whole chunk-aligned range, so a populated slot
+        // also means its neighbours are already free, exactly as before.
+        if let Some(step) = self.slots[index].get() {
+            return Some(step);
         }
         // Fill the whole range so neighbours are free; then borrow this slot.
         self.fill_range_for(index);

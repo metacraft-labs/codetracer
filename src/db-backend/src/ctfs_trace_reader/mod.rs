@@ -423,6 +423,16 @@ impl CTFSTraceReader {
         self.lazy_steps.as_ref().map(|c| c.chunk_decompressions())
     }
 
+    /// Number of chunk-aligned RANGE FILLS the lazy step cache has driven, or
+    /// `None` when not on the lazy step path. Counter-proof that the per-slot
+    /// memo is actually CONSULTED: repeated reads of a populated slot must not
+    /// raise it. `lazy_steps_chunk_decompressions` cannot show this, because a
+    /// re-fill of the same chunk is served from the stream's one-chunk cache —
+    /// it re-decodes every record in the chunk while decompressing nothing.
+    pub fn lazy_steps_range_fills(&self) -> Option<u64> {
+        self.lazy_steps.as_ref().map(|c| c.range_fills())
+    }
+
     /// M24c-steps — `true` when the whole-table step view has already been
     /// materialized (a slice / line-map accessor was invoked). Lets a test prove
     /// that pure point-lookup navigation never triggers the full materialization.

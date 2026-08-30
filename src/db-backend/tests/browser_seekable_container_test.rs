@@ -361,6 +361,59 @@ fn a_browser_step_read_inflates_at_most_one_chunk() {
     );
 }
 
+/// A step read that the per-slot MEMO can answer must not re-drive the chunk
+/// fill.
+///
+/// `lazy_steps_chunk_decompressions` cannot see this: a re-fill of a chunk that
+/// is already the stream's one cached chunk decompresses nothing while still
+/// re-decoding all 4096 of its records, so the decompression counter stays flat
+/// whether or not the memo is consulted. The range-fill counter is what tells
+/// the two apart, and it is the difference between a point lookup costing
+/// O(chunk size) and O(1).
+#[test]
+fn a_memoized_step_read_does_not_re_drive_the_chunk_fill() {
+    let f = fixture();
+    assert_eq!(
+        f.browser.lazy_steps_range_fills(),
+        Some(0),
+        "nothing may be filled at open"
+    );
+
+    f.browser.step(StepId(0)).expect("step 0");
+    assert_eq!(
+        f.browser.lazy_steps_range_fills(),
+        Some(1),
+        "the first read of a chunk drives exactly one range fill"
+    );
+
+    // Every remaining read inside that same chunk is now memoized.
+    for _ in 0..3 {
+        for i in 0..64 {
+            f.browser.step(StepId(i)).expect("memoized step");
+        }
+    }
+    assert_eq!(
+        f.browser.lazy_steps_range_fills(),
+        Some(1),
+        "reads the memo can answer must not re-drive the fill"
+    );
+
+    // A step in a DIFFERENT chunk is a genuine miss and must still fill.
+    let far = StepId(f.browser.step_count() as i64 - 1);
+    f.browser.step(far).expect("far step");
+    assert_eq!(
+        f.browser.lazy_steps_range_fills(),
+        Some(2),
+        "a read outside every populated chunk must drive a fill"
+    );
+    f.browser.step(far).expect("far step again");
+    assert_eq!(
+        f.browser.lazy_steps_range_fills(),
+        Some(2),
+        "and the second read of it must not"
+    );
+}
+
 /// M0/1 — per-step VALUES are served from the seekable `values.dat` stream and
 /// match the native reader's, so the locals pane is not silently empty on the
 /// browser path.
