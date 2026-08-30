@@ -276,7 +276,25 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
         window.addEventListener('blur', function () { `deliver`(); });
       }
       """.},
-    shareLinkOrigin: $jsShareOrigin())
+    shareLinkOrigin: $jsShareOrigin(),
+    wasm: noWasmModules())
+      ## NS3's seam, deliberately supplied EMPTY here rather than populated
+      ## with the modules that exist.
+      ##
+      ## The Noir tracer's wasm module is real and is now reproducible from
+      ## published refs — `noir` `codetracer`, `tooling/tracer_wasm`, built
+      ## `--no-default-features` and driven through its `ct_*` C ABI from a
+      ## bare `WebAssembly.instantiate`. What it consumes is an *already
+      ## compiled* debug artifact, and the compiler half that would produce
+      ## one in the tab (`compiler/wasm`'s VFS entry points) is on the `noir`
+      ## fork's `blocktracer` branch and not on its `codetracer` mainline.
+      ##
+      ## So a registry declaring `nargo trace` today would claim a loop the
+      ## product cannot close, and `capProcessSpawn` would come back on a
+      ## profile whose every run fails. An empty registry is the true
+      ## statement: `webNoModulesLoaded` is what a user reads, the capability
+      ## is absent, and populating this is one call — which is the point of
+      ## the seam.
 
 # ---------------------------------------------------------------------------
 # Boot

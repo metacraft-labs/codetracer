@@ -25,8 +25,13 @@ const electronDesktopCapabilities*: CapabilitySet =
     # execution is not claimed here. Claiming it and then refusing at run time
     # is exactly the "shows a button that cannot work" failure capabilities
     # exist to prevent.
-    capProcessSignal, capProcessInteractiveStdin, capProcessTerminal,
+    capProcessSignal, capProcessGracefulSignal,
+    capProcessInteractiveStdin, capProcessTerminal,
     capSecretStore, capFilesystemWatch}
+    ## `capProcessGracefulSignal` goes with `capProcessSignal` and not on its
+    ## own: a renderer that cannot stop a child at all certainly cannot ask it
+    ## politely, and a profile claiming the second without the first would
+    ## describe a platform that does not exist.
 
 proc electronDesktopProfile*(onMacOS: bool): PlatformProfile =
   ## The profile `newDesktopElectronPlatform` installs, given the window system
@@ -43,6 +48,9 @@ proc electronDesktopProfile*(onMacOS: bool): PlatformProfile =
     DegradationRule(capability: capProcessSignal, behaviour:
       "long-running children are supervised by the Electron main process; " &
       "cancel through the process pane rather than from the renderer"),
+    DegradationRule(capability: capProcessGracefulSignal, behaviour:
+      "the renderer signals no child at all, politely or otherwise; the " &
+      "process pane in the main process is where a run is interrupted"),
     DegradationRule(capability: capProcessInteractiveStdin, behaviour:
       "input must be supplied before a command starts; interactive " &
       "sessions belong to the terminal pane"),

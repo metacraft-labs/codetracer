@@ -141,7 +141,10 @@ suite "NS1 capabilities are data, and every absence is explained":
   test "the web genuinely lacks the capabilities Noir-Studio.md says it lacks":
     ## Named one by one rather than by set difference: a set comparison passes
     ## when both sides are wrong in the same way.
-    check not webProfile.has(capProcessSpawn)      # §3.1 — wasm, not binaries
+    check not webProfile.has(capProcessArbitraryPrograms)
+                                                   # §3.1 — wasm, not binaries
+    check not webProfile.has(capProcessGracefulSignal)
+                                                   # a worker cannot be asked
     check not webProfile.has(capSecretStore)       # §3.1, §8 — "no secrets"
     check not webProfile.has(capVcsRemote)         # §6.2a — CORS
     check not webProfile.has(capWindowControls)    # §1a.2 — the tab owns the frame
@@ -152,6 +155,8 @@ suite "NS1 capabilities are data, and every absence is explained":
 
     check webProfile.has(capFilesystemRead)        # §4 — the project store
     check webProfile.has(capFilesystemWrite)
+    check webProfile.has(capProcessSpawn)          # NS3 §3.1 — declared modules
+    check webProfile.has(capProcessSignal)         # worker.terminate()
     check webProfile.has(capVcsRead)               # §6.2a — local history
     check webProfile.has(capVcsWrite)
     check webProfile.has(capShareLink)             # §6.1 — the artifact is the link

@@ -92,7 +92,13 @@ proc newFakeBridge(volume: StoreVolume; log: BridgeLog;
       resolvedOk(WindowState(maximized: false, minimized: false,
                              fullscreen: false, focused: true)),
     onWindowStateChanged: proc(handler: proc(state: WindowState)) = discard,
-    shareLinkOrigin: shareOrigin)
+    shareLinkOrigin: shareOrigin,
+    wasm: noWasmModules())
+      # This suite's subject is the store, the entry layer and the shell
+      # facades, none of which run a command. NS3's registry and its four
+      # answers have their own suite — `test_platform_wasm_modules.nim` —
+      # which builds bridges with populated hosts. An empty host here keeps
+      # this suite asserting what it is about.
 
 proc bytesOf(text: string): seq[byte] =
   result = newSeq[byte](text.len)

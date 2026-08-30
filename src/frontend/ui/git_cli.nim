@@ -18,9 +18,9 @@ import ui_imports
 # what makes `ui/vcs.nim` and `ui/unified_diff.nim` host-free too: they reach
 # the host only through this file.
 from ../platform_host import
-  ctPlatform, ctAwaitSync, can, capFilesystemRead, capProcessSpawn,
-  capVcsWrite, ProcessSpec, Platform, PlatformOutcome, process, fs, vcs,
-  succeededExit, `$`
+  ctPlatform, ctAwaitSync, can, canAll, capFilesystemRead, capProcessSpawn,
+  capProcessArbitraryPrograms, capVcsWrite, ProcessSpec, Platform,
+  PlatformOutcome, process, fs, vcs, succeededExit, `$`
 
 const gitTimeoutMs = 5000
 
@@ -38,13 +38,27 @@ proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
   ## removes the direct host call and is what makes `ui/vcs.nim` and
   ## `ui/unified_diff.nim` host-free for free — they only ever reached the host
   ## through this function. It does not yet make the web instantiation work:
-  ## a tab has no git binary, so `capProcessSpawn` is absent there and every
-  ## call below degrades to "". The remaining work is mapping `ui/vcs.nim`'s
-  ## fifteen git invocations onto `VcsFacade`'s operations, which is what lets
-  ## the browser serve them from a real object store (Noir-Studio.md §6.2a).
-  ## `viewmodel/platform/vcs.nim` already defines every operation that mapping
-  ## needs.
-  if not ctPlatform().can(capProcessSpawn):
+  ## a tab has no git binary, so every call below degrades to "". The
+  ## remaining work is mapping `ui/vcs.nim`'s fifteen git invocations onto
+  ## `VcsFacade`'s operations, which is what lets the browser serve them from a
+  ## real object store (Noir-Studio.md §6.2a). `viewmodel/platform/vcs.nim`
+  ## already defines every operation that mapping needs.
+  ##
+  ## ## Why the guard names TWO capabilities
+  ##
+  ## It used to be `capProcessSpawn` alone, with "a tab has no git binary" as
+  ## its stated meaning. NS3 made that stop being true without changing a type:
+  ## §3.1's web column is "wasm modules in the tab", so a web platform with a
+  ## populated module registry genuinely HAS `capProcessSpawn` — and this guard
+  ## would have opened, sent `git` to a registry that has no such module, and
+  ## turned a capability check into a per-call refusal. The sentence in the
+  ## comment would have been false while every signature still lined up.
+  ##
+  ## `capProcessArbitraryPrograms` is the one that carries the old meaning:
+  ## can this platform run a program it was not built knowing about? Both are
+  ## named rather than only the second, because "spawn at all" and "spawn
+  ## anything" are the two separate questions this call needs answered yes.
+  if not ctPlatform().canAll({capProcessSpawn, capProcessArbitraryPrograms}):
     return ("", false)
   var argv: seq[string] = @[]
   for arg in args:
