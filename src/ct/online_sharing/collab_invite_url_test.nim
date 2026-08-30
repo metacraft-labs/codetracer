@@ -11,12 +11,12 @@ suite "online sharing collaboration invite URLs":
 
   test "collab invite URL parser returns exchange base and token":
     let parsed = parseCollabInviteUrl(
-      "https://web.codetracer.com/collab/join/native-token")
+      "https://ide.codetracer.com/collab/join/native-token")
 
-    check parsed.baseUrl == "https://web.codetracer.com"
+    check parsed.baseUrl == "https://ide.codetracer.com"
     check parsed.inviteToken == "native-token"
-    check buildCollabInviteExchangePath("https://web.codetracer.com/api/v1/") ==
-      "https://web.codetracer.com/api/v1/collab/invites/exchange"
+    check buildCollabInviteExchangePath("https://ide.codetracer.com/api/v1/") ==
+      "https://ide.codetracer.com/api/v1/collab/invites/exchange"
 
   test "native load-trace invite starts active collaboration runtime":
     let runtime = startNativeCollabRuntime(NativeCollabBootstrap(
@@ -25,9 +25,9 @@ suite "online sharing collaboration invite URLs":
       traceIdentity: "trace-native",
       roomId: "room-native",
       initialGrants: @["observe", "publishAwareness", "mutateSharedViewState"],
-      webUiUrl: "https://web.codetracer.com/collab/join/native-token",
-      nativeJoinUrl: "https://web.codetracer.com/collab/join/native-token",
-      rendezvousUrl: "https://web.codetracer.com/api/v1/collab/rooms/room-native/rendezvous",
+      webUiUrl: "https://ide.codetracer.com/collab/join/native-token",
+      nativeJoinUrl: "https://ide.codetracer.com/collab/join/native-token",
+      rendezvousUrl: "https://ide.codetracer.com/api/v1/collab/rooms/room-native/rendezvous",
       transportHints: @[
         "control-plane-only",
         "control-plane-rendezvous",

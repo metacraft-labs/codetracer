@@ -16,7 +16,7 @@ const
   BearerTokenKey* = "CodeTracer-Remote-BearerToken"
   DefaultOrganizationKey* = "CodeTracer-Default-Organization"
   RemoteUrlKey* = "CodeTracer-Base-Remote-Url"
-  DefaultBaseRemoteUrl* = "https://web.codetracer.com"
+  DefaultBaseRemoteUrl* = "https://ide.codetracer.com"
   ConfigFileName = "remote.config"
 
 type
@@ -119,7 +119,7 @@ proc resolveBaseRemoteUrl*(config: RemoteConfig, cliBaseUrl = ""): string =
   ## 1. CLI-provided ``--base-url``
   ## 2. Environment variable ``CODETRACER_REMOTE_BASE_URL``
   ## 3. Stored config value
-  ## 4. Default (https://web.codetracer.com)
+  ## 4. Default (https://ide.codetracer.com)
   if cliBaseUrl.len > 0:
     return cliBaseUrl
   let envUrl = getEnv("CODETRACER_REMOTE_BASE_URL", "")

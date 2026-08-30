@@ -45,7 +45,7 @@ const
   SampleRecordingId = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
   SampleDatasetId = "0194a000-1111-7abc-8def-000000000001"
   SampleTenantId = "0194a000-2222-7abc-8def-000000000002"
-  SampleLink = "https://web.codetracer.com/acme/" & SampleDatasetId &
+  SampleLink = "https://ide.codetracer.com/acme/" & SampleDatasetId &
     "/download"
 
 proc sampleArtifact(kind: ArtifactKind,

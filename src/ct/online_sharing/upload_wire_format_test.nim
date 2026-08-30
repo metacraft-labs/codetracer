@@ -30,7 +30,7 @@ import ./api_client
 
 const
   SampleRecordingId = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
-  SampleBaseApiUrl = "https://web.codetracer.com/api/v1/"
+  SampleBaseApiUrl = "https://ide.codetracer.com/api/v1/"
   SampleTenantId = "tenant-123"
 
 suite "M-REC-8 — online-sharing client wire format":
@@ -75,14 +75,14 @@ suite "M-REC-8 — online-sharing client wire format":
     # surrounding URL grammar.
     let path = buildUploadUrlPath(SampleBaseApiUrl, SampleTenantId)
     check path ==
-      "https://web.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
+      "https://ide.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
 
   test "confirm-upload path embeds the UUIDv7 recordingId":
     let path = buildConfirmUploadPath(SampleBaseApiUrl, SampleRecordingId)
     # Path component is the bare UUIDv7 — no `trace-` prefix, no integer
     # encoding.
     check path ==
-      "https://web.codetracer.com/api/v1/traces/" &
+      "https://ide.codetracer.com/api/v1/traces/" &
         SampleRecordingId & "/confirm-upload"
     check SampleRecordingId in path
     # Pre-M-REC-8 the path had `/traces/<int>/...`; an integer-shaped
@@ -93,7 +93,7 @@ suite "M-REC-8 — online-sharing client wire format":
   test "download-url path embeds the UUIDv7 recordingId":
     let path = buildDownloadUrlPath(SampleBaseApiUrl, SampleRecordingId)
     check path ==
-      "https://web.codetracer.com/api/v1/traces/" &
+      "https://ide.codetracer.com/api/v1/traces/" &
         SampleRecordingId & "/download-url"
     check SampleRecordingId in path
 
@@ -103,14 +103,14 @@ suite "M-REC-8 — online-sharing client wire format":
     # returns the second-to-last component as ``recordingId``.  The
     # field name on the returned tuple is the M-REC-8 invariant; the
     # legacy ``traceId`` field was renamed.
-    let url = "https://web.codetracer.com/acme/" &
+    let url = "https://ide.codetracer.com/acme/" &
       SampleRecordingId & "/download"
     let parsed = parseDownloadShareUrl(url)
     check parsed.orgSlug == "acme"
     check parsed.recordingId == SampleRecordingId
 
   test "parseDownloadShareUrl accepts URL without trailing /download":
-    let url = "https://web.codetracer.com/acme/" & SampleRecordingId
+    let url = "https://ide.codetracer.com/acme/" & SampleRecordingId
     let parsed = parseDownloadShareUrl(url)
     check parsed.orgSlug == "acme"
     check parsed.recordingId == SampleRecordingId
@@ -181,5 +181,5 @@ suite "M31 — client-controlled omniscient-DB upload mode":
     # while the body extension is in flight.
     let path = buildFinalizePath(SampleBaseApiUrl, SampleSessionId)
     check path ==
-      "https://web.codetracer.com/api/v1/traces/" &
+      "https://ide.codetracer.com/api/v1/traces/" &
         SampleSessionId & "/finalize"

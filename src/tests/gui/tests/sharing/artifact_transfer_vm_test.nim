@@ -40,7 +40,7 @@ import ../../../../ct/online_sharing/artifact_transfer
 const
   SampleRecordingId = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
   SampleDatasetId = "0194a000-1111-7abc-8def-000000000001"
-  SampleBaseApiUrl = "https://web.codetracer.com/api/v1/"
+  SampleBaseApiUrl = "https://ide.codetracer.com/api/v1/"
   SampleTenantId = "tenant-123"
   SampleSessionId = "01949fcc-7d92-7e9c-bbbb-cccccccccccc"
   SamplePlatform = "linux-x86_64"
@@ -443,7 +443,7 @@ suite "AS-2 — the recording kind's conversation is character-identical":
     let steps = uploadSteps(plan, recordingSession())
 
     check steps[0].urlPath ==
-      "https://web.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
+      "https://ide.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
     check steps[0].body["recordingId"].getStr == SampleRecordingId
     check steps[0].body["fileName"].getStr == "tmp.zip"
     check steps[0].body["contentType"].getStr == "application/zip"
@@ -454,7 +454,7 @@ suite "AS-2 — the recording kind's conversation is character-identical":
     check steps[1].urlPath == ""   # presigned; issued by the step before it
 
     check steps[2].urlPath ==
-      "https://web.codetracer.com/api/v1/traces/" & SampleRecordingId &
+      "https://ide.codetracer.com/api/v1/traces/" & SampleRecordingId &
       "/confirm-upload"
     check $buildArtifactConfirmUploadBody("abc") == """{"etag":"abc"}"""
 
@@ -469,7 +469,7 @@ suite "AS-2 — the recording kind's conversation is character-identical":
     let steps = uploadSteps(plan, recordingSession())
 
     check steps[0].urlPath ==
-      "https://web.codetracer.com/api/v1/tenants/tenant-123/traces/upload-session"
+      "https://ide.codetracer.com/api/v1/tenants/tenant-123/traces/upload-session"
     check steps[0].body["platform"].getStr == "linux-x86_64"
     check steps[0].body["recordingMode"].getStr == "hook"
 
@@ -477,10 +477,10 @@ suite "AS-2 — the recording kind's conversation is character-identical":
     # SESSION's collection rather than from a literal `traces/`. For the
     # recording kind that derivation reproduces the literal exactly.
     check steps[1].urlPath ==
-      "https://web.codetracer.com/api/v1/traces/" & SampleSessionId &
+      "https://ide.codetracer.com/api/v1/traces/" & SampleSessionId &
       "/slice-upload-url"
     check steps[^1].urlPath ==
-      "https://web.codetracer.com/api/v1/traces/" & SampleSessionId &
+      "https://ide.codetracer.com/api/v1/traces/" & SampleSessionId &
       "/finalize"
 
     # THE number. For this directory the pre-AS-2 client sent 3 — the `.ct`
@@ -532,10 +532,10 @@ suite "AS-2 — the recording kind's conversation is character-identical":
     let session = ArtifactUploadSession(
       sessionId: SampleSessionId, kind: akReviewDataset)
     check artifactSliceUploadUrlPath(SampleBaseApiUrl, session) ==
-      "https://web.codetracer.com/api/v1/review-datasets/" & SampleSessionId &
+      "https://ide.codetracer.com/api/v1/review-datasets/" & SampleSessionId &
       "/slice-upload-url"
     check artifactFinalizePath(SampleBaseApiUrl, session) ==
-      "https://web.codetracer.com/api/v1/review-datasets/" & SampleSessionId &
+      "https://ide.codetracer.com/api/v1/review-datasets/" & SampleSessionId &
       "/finalize"
 
 suite "AS-3 — the plan refuses what would make encryption unsafe or a lie":

@@ -32,7 +32,7 @@ type
 
   CollabInviteExchange* = proc(inviteToken: string): CollabJoinBootstrap
 
-const CanonicalCollabWebBaseUrl* = "https://web.codetracer.com"
+const CanonicalCollabWebBaseUrl* = "https://ide.codetracer.com"
 
 proc presetName*(preset: CollabGrantPreset): string =
   case preset

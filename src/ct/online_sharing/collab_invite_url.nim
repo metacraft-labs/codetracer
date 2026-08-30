@@ -4,7 +4,7 @@ import std/[strutils, uri]
 
 proc parseCollabInviteUrl*(url: string): tuple[baseUrl: string, inviteToken: string] =
   ## Parses M6 collaboration invite URLs:
-  ## ``https://web.codetracer.com/collab/join/{inviteToken}``.
+  ## ``https://ide.codetracer.com/collab/join/{inviteToken}``.
   let parsed = parseUri(url)
   let parts = parsed.path.strip(chars = {'/'}).split('/')
   if parsed.scheme.len == 0 or parsed.hostname.len == 0:

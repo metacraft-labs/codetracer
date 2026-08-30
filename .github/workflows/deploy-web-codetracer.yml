@@ -1,14 +1,22 @@
-name: Deploy web.codetracer.com
+name: Deploy ide.codetracer.com
 
 # ---------------------------------------------------------------------------
 # Publishes the browser CodeTracer replay bundle (the "Embed SDK": db-backend
 # WASM + JS glue + replay worker) to the `web-codetracer` Cloudflare Pages
 # project. That project serves the in-browser Cloud IDE at
 # https://ide.codetracer.com (a stable custom domain) and at
-# https://web-codetracer.pages.dev — the identical bundle on both. NOTE:
-# https://web.codetracer.com is a SEPARATE, authenticated application on its own
-# DNS record, NOT this Pages project; the IDE has its own `ide.` name so nothing
-# pointing at web.codetracer.com breaks.
+# https://web-codetracer.pages.dev — the identical bundle on both.
+#
+# NAMES (2026-08-29): the hosted CodeTracer web product's domain is
+# https://ide.codetracer.com. An earlier plan put it on `web.codetracer.com` and
+# a later note here described `web.` as a separate authenticated application that
+# had to keep working; both are superseded — `ide.` is the product's one domain,
+# and `web.codetracer.com` is not a name this repo targets any more. Unchanged by
+# that decision: the Cloudflare Pages PROJECT is still named `web-codetracer`,
+# this workflow file is still `deploy-web-codetracer.yml`, and the preview host is
+# still `web-codetracer.pages.dev` — those are infrastructure identifiers, not the
+# hostname, and renaming them is an infrastructure change, not a docs change.
+# codetracer-ci is moving separately to https://ci.codetracer.com.
 #
 # WHAT IS PUBLISHED
 #   browser-replay/build-dist.sh assembles browser-replay/dist/ =
