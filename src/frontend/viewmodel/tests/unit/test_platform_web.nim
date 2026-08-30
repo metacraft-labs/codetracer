@@ -793,3 +793,90 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
   test "the pointer object sits under the project's own address":
     check pointerPath("hello-world", "3f9a2c") ==
       "/p/hello-world-3f9a2c/current.json"
+
+# ---------------------------------------------------------------------------
+# The delivery manifest — NS3's residual, which is DELIVERY and not loading.
+#
+# `host/web_browser.nim` says it plainly: the registry, the protocol, the
+# transport and `newBrowserWasmHost` are all present and tested, and none of it
+# is reachable because the worker script "is not in the bundle". These cases
+# pin the manifest that says what a bundle must carry, so the assembly step and
+# the gate read one declaration instead of three hand-written lists.
+# ---------------------------------------------------------------------------
+
+  test "the manifest carries the renderer, the entry and the worker as REQUIRED":
+    # The renderer is the whole point of this milestone: a bundle that does not
+    # carry it cannot show a pane, which is the half of
+    # `test_one_codebase_two_platforms` NS2 left unasserted.
+    let required = requiredRuntimeAssets()
+    var ids: seq[string]
+    for asset in required: ids.add asset.id
+    check "renderer" in ids
+    check "web-entry" in ids
+    check "wasm-worker" in ids
+    # Counted, so an asset silently losing `required` is caught. Asserting only
+    # membership would pass over a manifest that had gained three more.
+    check required.len == 3
+
+  test "the renderer is BUNDLED and the worker is a separate ASSET":
+    # Not a stylistic distinction. `new Worker(url)` takes a URL and
+    # `newBrowserWasmHost(registry, scriptUrl)` already has the parameter, so
+    # an inlined worker would have to be revived as a `blob:` URL — which a
+    # real Content-Security-Policy rejects.
+    var byId: seq[tuple[id: string, mode: DeliveryMode]]
+    for asset in webRuntimeAssets(): byId.add (asset.id, asset.mode)
+    check (id: "renderer", mode: damBundled) in byId
+    check (id: "wasm-worker", mode: damAsset) in byId
+
+  test "the two Noir modules are FETCHED, never bundled":
+    # ~16 MB and ~4.6 MB. Bundling them inflates by a third as base64 and puts
+    # the result in front of first paint, for a capability most sessions never
+    # invoke.
+    let fetched = fetchedRuntimeAssets()
+    var ids: seq[string]
+    for asset in fetched: ids.add asset.id
+    check ids.sorted == @[noirCompilerModuleId, noirTracerModuleId].sorted
+    for asset in fetched:
+      check asset.mode == damFetched
+      check asset.mode != damBundled
+
+  test "a fetched module's id is the id the worker resolves":
+    # `wasm_worker_browser.js` looks its URLs up by these exact strings
+    # (`load('noir-compiler')`, `load('noir-tracer')`), so a rename here that
+    # did not reach the worker would produce "no url declared for wasm module"
+    # at run time and nowhere earlier.
+    check noirCompilerModuleId == "noir-compiler"
+    check noirTracerModuleId == "noir-tracer"
+
+  test "every OPTIONAL asset says what its absence costs":
+    # The same rule `capabilities.undeclaredDegradations` enforces one layer
+    # up. A deployment shipping no wasm modules is a legitimate configuration —
+    # `noWasmModules()` models exactly that — so the absence must be a
+    # sentence a user can read, not a silent capability hole.
+    check undeclaredAbsences().len == 0
+
+  test "and a REQUIRED asset does not carry an absence story":
+    # The mirror check, and it is not symmetry for its own sake: a required
+    # asset with a degradation sentence is one somebody is about to make
+    # optional. `staleDegradations` exists for the same reason.
+    for asset in webRuntimeAssets():
+      if asset.required:
+        check asset.absenceBehaviour.len == 0
+
+  test "the fetched modules and the worker are served as static assets":
+    # They must land under the prefix whose cache rule is `immutable`, or a CDN
+    # serves a 16 MB module with the entry document's 60-second TTL.
+    for asset in webRuntimeAssets():
+      if asset.mode != damBundled:
+        check asset.path.startsWith(staticAssetPrefix[1 .. ^1])
+        check cacheClassFor("/" & asset.path) == ccStaticAsset
+        check headerFor(cacheClassFor("/" & asset.path)) == immutableHeader
+
+  test "no two assets claim the same path":
+    # A duplicate path is a build step that overwrites its own output, and it
+    # would be invisible: the last writer wins and the bundle looks complete.
+    var seen: seq[string]
+    for asset in webRuntimeAssets():
+      check asset.path notin seen
+      check asset.path.len > 0
+      seen.add asset.path

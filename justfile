@@ -2831,6 +2831,29 @@ test-renderer-browser:
   bash ci/lib/run-nim-test-lane.sh renderer-web
   bash ci/test/renderer-browser-build.sh
 
+# THE BUNDLE CARRIES THE RENDERER, THE WORKER AND THE MODULES — NS3's residual.
+#
+# `test-web-bundle` builds and boots the web INSTANTIATION. This assembles the
+# whole deployment: the renderer (newly possible), the entry point, the browser
+# wasm worker script, and the two Noir wasm modules when they are supplied.
+#
+# NS3 was never short of a loader. `host/web_browser.nim` has the registry, the
+# transport and `newBrowserWasmHost(registry, scriptUrl)`, all tested, and says
+# in its own doc comment that nothing calls them because "the worker script ...
+# is not in the bundle". The gap was DELIVERY, and this is the step that closes
+# it.
+#
+# The two modules are ~16 MB and ~4.6 MB and are not in the repo. Set
+# CT_NOIR_WASM_COMPILER and CT_NOIR_WASM_TRACER to include them; without them
+# the gate SKIPS those two loudly, prints the deployment consequence the
+# manifest declares for each, and still checks everything else.
+test-web-bundle-assets:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
+  bash ci/test/web-bundle-assets.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web

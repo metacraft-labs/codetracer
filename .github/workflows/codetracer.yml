@@ -1758,6 +1758,26 @@ jobs:
         # wants to learn after twenty minutes of suites.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
 
+      - name: Assemble the web bundle's runtime assets (NS3 delivery)
+        # NS3 was never short of a LOADER. `host/web_browser.nim` carries the
+        # registry, the worker transport and `newBrowserWasmHost`, all tested,
+        # and its own doc comment says nothing calls them because "the worker
+        # script that instantiates the Noir modules ... is not in the bundle".
+        # The gap was delivery, and this step is what closes it: the renderer
+        # (newly buildable, see the step above), the web entry point and the
+        # browser worker script are assembled and checked.
+        #
+        # The asset list is NOT in the shell script. `webRuntimeAssets()` in
+        # `platform/web_deployment.nim` is the one declaration, compiled on both
+        # backends and asserted by `test_platform_web.nim`; the gate reads it
+        # through a small Nim program so a third hand-written copy cannot drift.
+        #
+        # The two Noir wasm modules are ~16 MB and ~4.6 MB and are not in the
+        # repo, so their placement SKIPS LOUDLY here — printing the deployment
+        # consequence the manifest declares for each — rather than passing
+        # silently. Everything else is assembled and asserted.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle-assets
+
       - name: Renderer host-reach budget (NS1 residual 1)
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host

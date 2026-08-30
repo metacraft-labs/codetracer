@@ -144,6 +144,123 @@ proc pointerPath*(slug, projectId: string): string =
   ## §1b.1's `current.json`.
   projectPath(slug, projectId) & pointerObjectSuffix
 
+# ---------------------------------------------------------------------------
+# What the bundle must actually CARRY
+#
+# NS3's residual, in one sentence from `host/web_browser.nim`: the registry,
+# the protocol, the transport and `newBrowserWasmHost` all exist and are
+# tested, and none of it is reachable, because "the worker script that
+# instantiates the Noir modules and drives their `nv_*` / `ct_*` ABIs is not in
+# the bundle". NS3 moved from *nothing loads a module* to *nothing delivers
+# one*. This is the delivery manifest.
+#
+# WHY IT IS A VALUE HERE RATHER THAN A LIST IN A SHELL SCRIPT. The same
+# argument the header makes for `rewritePrefixes`: a hand-written list in the
+# assembly step cannot be made to agree with the product. `web_deployment.nim`
+# is compiled by `vm-unit` (C) and `vm-unit-js` (JS), so an asset added here is
+# type-checked on both backends and read by ONE assembly step and ONE gate,
+# rather than being spelled three times and drifting twice.
+#
+# THE THREE DELIVERY MODES ARE DIFFERENT DECISIONS AND ARE MODELLED AS SUCH.
+# "Bundle it, emit it, or fetch it" is not a matter of taste per asset:
+#
+#   damBundled   it is Nim compiled to JS and linked into an entry point. The
+#                renderer is this, and could not be anything else.
+#   damAsset     a file the deployment serves, loaded by URL at run time. The
+#                worker script is this BECAUSE `new Worker(url)` takes a URL
+#                and `newBrowserWasmHost(registry, scriptUrl)` already has the
+#                parameter. Inlining it and building a `blob:` URL would be
+#                rejected by any `Content-Security-Policy` worth setting and
+#                would be uncacheable besides.
+#   damFetched   a file fetched on first use and never at load. The two Noir
+#                wasm modules are this because they are ~16 MB and ~4.6 MB: a
+#                bundled copy inflates by a third as base64 AND must be parsed
+#                as JavaScript source before the first paint, for a capability
+#                most sessions never invoke. Fetched, they are `ccImmutable`
+#                and cached indefinitely.
+# ---------------------------------------------------------------------------
+
+type
+  DeliveryMode* = enum
+    damBundled
+    damAsset
+    damFetched
+
+  RuntimeAsset* = object
+    ## One file a web deployment must carry for the product to work.
+    id*: string
+      ## Stable name. For a wasm module this is the registry id the worker
+      ## receives in its `configure` message, so the two cannot drift.
+    path*: string
+      ## Where the assembly step places it, relative to the bundle root.
+    mode*: DeliveryMode
+    required*: bool
+      ## False for an asset whose absence degrades rather than breaks. The two
+      ## wasm modules are optional in exactly the sense
+      ## `wasm_registry.noWasmModules()` already models: a deployment that
+      ## ships none is a TRUE statement about that deployment, and the user
+      ## reads `webNoModulesLoaded` rather than meeting a run that fails.
+    absenceBehaviour*: string
+      ## What a user gets when an optional asset is not shipped. Same rule as
+      ## `capabilities.degradedBehaviour`: an absence without a stated
+      ## consequence is a gap in the product, not a gap in the docs.
+
+const
+  rendererBundlePath* = "ui.js"
+  webEntryBundlePath* = "web.js"
+  wasmWorkerScriptPath* = staticAssetPrefix[1 .. ^1] & "wasm-worker.js"
+  noirCompilerModuleId* = "noir-compiler"
+  noirTracerModuleId* = "noir-tracer"
+  noirCompilerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_wasm.wasm"
+  noirTracerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_tracer_wasm.wasm"
+
+proc webRuntimeAssets*(): seq[RuntimeAsset] =
+  ## Everything a web deployment serves, in delivery order.
+  @[
+    RuntimeAsset(
+      id: "renderer", path: rendererBundlePath, mode: damBundled,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "web-entry", path: webEntryBundlePath, mode: damBundled,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "wasm-worker", path: wasmWorkerScriptPath, mode: damAsset,
+      required: true,
+      absenceBehaviour: ""),
+    RuntimeAsset(
+      id: noirCompilerModuleId, path: noirCompilerWasmPath, mode: damFetched,
+      required: false,
+      absenceBehaviour:
+        "Noir compilation is unavailable and `nargo compile` is reported as " &
+        "having no wasm build in this deployment, by name, rather than " &
+        "failing part-way through a run"),
+    RuntimeAsset(
+      id: noirTracerModuleId, path: noirTracerWasmPath, mode: damFetched,
+      required: false,
+      absenceBehaviour:
+        "a compiled Noir program cannot be traced in the tab, so replay is " &
+        "offered only for recordings produced elsewhere")]
+
+proc requiredRuntimeAssets*(): seq[RuntimeAsset] =
+  for asset in webRuntimeAssets():
+    if asset.required: result.add asset
+
+proc fetchedRuntimeAssets*(): seq[RuntimeAsset] =
+  ## The assets the worker resolves by URL. `wasm_worker_browser.js` receives
+  ## exactly these ids in its `configure` message.
+  for asset in webRuntimeAssets():
+    if asset.mode == damFetched: result.add asset
+
+proc undeclaredAbsences*(): seq[string] =
+  ## Every optional asset that does not say what its absence costs. The
+  ## assertion is `.len == 0` over this, mirroring
+  ## `capabilities.undeclaredDegradations` — a manifest that lets an optional
+  ## asset in without a consequence is a table that has stopped describing the
+  ## product.
+  for asset in webRuntimeAssets():
+    if not asset.required and asset.absenceBehaviour.len == 0:
+      result.add asset.id
+
 proc headerFor*(class: CacheClass): string =
   case class
   of ccEntryDocument: entryDocumentHeader
