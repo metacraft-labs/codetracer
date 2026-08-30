@@ -42,6 +42,7 @@ import ../platform/memory_volume
 import ../platform/project_store
 import ../platform/web_platform
 import ../platform/web_entry
+import ../platform/wasm_worker
 import ./opfs_volume
 
 export web_platform, web_entry
@@ -294,6 +295,78 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
     # a true statement about this deployment, `webNoModulesLoaded` is what a
     # user reads, and populating it is one call once the Worker lands.
     wasm: noWasmModules())
+
+# ---------------------------------------------------------------------------
+# The wasm worker's transport
+# ---------------------------------------------------------------------------
+#
+# THE THIN HALF, deliberately. `platform/wasm_worker.nim` owns the protocol —
+# sequence allocation, correlation, output routing, teardown — and is tested on
+# both backends against a fake transport. What is left here is the part that
+# genuinely needs a browser: constructing a `Worker`, posting text to it, and
+# handing text back. That split is `backend/worker_backend.nim`'s, for its
+# reasons.
+#
+# TEXT IN BOTH DIRECTIONS, and the `String(...)` below is why this is written
+# out rather than assumed. `worker_backend.nim`'s header records an engine that
+# sent objects one way and JSON strings the other, with bare strings for
+# bootstrap, and a reader that classified by message type reporting a timeout
+# over an engine that had answered. The coercion makes the asymmetry
+# impossible to reintroduce from the worker's side: whatever the worker posts
+# arrives here as text, and `deliver` rejects anything that is not JSON by
+# name. That rejection is itself tested, and on the JS backend it was a real
+# defect — V8's `JSON.parse` throws a `SyntaxError` that `except
+# CatchableError` does not catch, so the narrow form crashed the tab.
+
+proc jsNewWorker(url: cstring): JsObject
+  {.importjs: "new Worker(#, { type: 'module' })".}
+proc jsWorkerPost(worker: JsObject; message: cstring)
+  {.importjs: "#.postMessage(#)".}
+proc jsWorkerTerminate(worker: JsObject)
+  {.importjs: "#.terminate()".}
+
+proc newWorkerTransport(scriptUrl: string;
+                        onText: proc(message: string)): WasmWorkerTransport =
+  ## A transport over a real `Worker`.
+  let worker = jsNewWorker(scriptUrl.cstring)
+  var deliverText = onText
+  proc receive(raw: cstring) =
+    deliverText($raw)
+  {.emit: """
+  `worker`.onmessage = function (event) {
+    `receive`(String(event.data));
+  };
+  `worker`.onerror = function (event) {
+    // An error event is not a message, and must not be silently dropped: the
+    // protocol's own failure path is the thing that stops a caller waiting
+    // forever, so a worker-level error is reported THROUGH it.
+    `receive`(JSON.stringify({
+      seq: 0, kind: "failed",
+      message: "the wasm worker failed: " + String(event.message || event)
+    }));
+  };
+  """.}
+  proc send(message: string) =
+    jsWorkerPost(worker, message.cstring)
+  proc terminateWorker() =
+    jsWorkerTerminate(worker)
+  WasmWorkerTransport(send: send, terminateWorker: terminateWorker)
+
+proc newBrowserWasmHost*(registry: WasmRegistry; scriptUrl: string): WasmHost =
+  ## A `WasmHost` backed by a real `Worker` running `scriptUrl`.
+  ##
+  ## Not called by `newBrowserBridge` yet, and that is the honest state: the
+  ## worker script that instantiates the Noir modules and drives their `nv_*` /
+  ## `ct_*` ABIs is not in the bundle, and a registry declaring `nargo` over a
+  ## worker that cannot load it would put `capProcessSpawn` back on a profile
+  ## whose every run fails — the exact thing `wasm_registry.nim` exists to
+  ## prevent. The seam is here, tested, and one call from being used.
+  var worker: WasmWorker
+  proc onText(message: string) =
+    if not worker.isNil: worker.deliver(message)
+  let transport = newWorkerTransport(scriptUrl, onText)
+  worker = newWasmWorker(registry, transport)
+  worker.asWasmHost()
 
 # ---------------------------------------------------------------------------
 # Boot

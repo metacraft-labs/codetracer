@@ -2843,6 +2843,28 @@ test-web-bundle:
 # It fails in BOTH directions: up, because a new host call in a migrated module
 # is a regression; and down, because a migration whose budget was not lowered
 # is work that has not been recorded and can be silently re-grown.
+# NS3's loop across the worker boundary, compared BY DIGEST against the same
+# loop run directly.  A Noir package held only as an in-memory path->source map
+# is compiled by `noir_wasm.wasm` and traced by `noir_tracer_wasm.wasm`, twice:
+# once in-process, once through `worker_threads` and the JSON protocol
+# `platform/wasm_worker.nim` speaks.  The two traces must hash the same.
+#
+# TWO ASSERTIONS, because the digest alone is not enough and that is measured
+# rather than argued: compiling without instrumentation yields a trace of ONE
+# event and ZERO steps, and the digests STILL MATCH, because both paths agree
+# on nothing.  So the trace is also asserted non-trivial, and the two catch
+# different failures -- drop one event in the worker and the digest fails while
+# the non-trivial check passes.
+#
+# SKIPS LOUDLY without the modules; the two .wasm files are 16 MB and 4.6 MB
+# and are not in the repo.  Set CT_NOIR_WASM_COMPILER and CT_NOIR_WASM_TRACER.
+test-noir-wasm-worker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-wasm-worker.log) 2>&1
+  bash ci/test/noir-wasm-worker-e2e.sh
+
 test-renderer-host-budget:
   #!/usr/bin/env bash
   set -euo pipefail
