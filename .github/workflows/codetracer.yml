@@ -1733,6 +1733,13 @@ jobs:
         # before editing is possible.
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle
 
+      - name: Renderer host-reach budget (NS1 residual 1)
+        # The migration that stands between the web bundle and a rendered pane,
+        # as a ratchet rather than a plan. Fails when a module gains a host
+        # call, and equally when one loses a host call without the budget being
+        # lowered — an unrecorded migration is one that can be silently undone.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-host-budget
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 

@@ -2829,6 +2829,27 @@ test-web-bundle:
   exec > >(tee test-logs/test-web-bundle.log) 2>&1
   bash ci/test/web-bundle-smoke.sh
 
+# NS1's residual 1 as a ratchet: how many places in the renderer region still
+# reach node or Electron directly, per module, against a checked-in budget.
+#
+# THE SCRIPT IS THE COUNTING RULE, which is the point of it.  The rule used to
+# live in prose in the milestone file, and a looser grep over the same region
+# returns nearly half again as many hits — `require("tippy.js")`,
+# `require("js-yaml")` and an already-guarded `globalThis.process`, none of
+# which is host access.  Someone re-deriving the number from a plausible grep
+# chases modules that are already fine.  Now the rule runs, and the milestone
+# file points here instead of restating it.
+#
+# It fails in BOTH directions: up, because a new host call in a migrated module
+# is a regression; and down, because a migration whose budget was not lowered
+# is work that has not been recorded and can be silently re-grown.
+test-renderer-host-budget:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-host-budget.log) 2>&1
+  bash ci/test/renderer-host-reach-budget.sh
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when

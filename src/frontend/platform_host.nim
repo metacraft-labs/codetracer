@@ -166,6 +166,44 @@ proc ctAwaitSync*[T](future: PlatformFuture[PlatformOutcome[T]]
       "continuation (NS1)")
   captured
 
+type PlatformCallError* = object of CatchableError
+  ## What `ctOrRaise` raises. A distinct type so a caller that wants to
+  ## distinguish "the facade refused" from any other failure can, without
+  ## parsing a message.
+  kind*: PlatformErrorKind
+
+proc ctOrRaise*[T](outcome: PlatformOutcome[T]): T =
+  ## The value, or an exception — for migrating a call site whose existing
+  ## error handling is `try` / `except` around a rejecting promise.
+  ##
+  ## ## Why this exists rather than `valueOr(default)` at the call site
+  ##
+  ## Because `valueOr` at the call site is a defect, and it is one this tree
+  ## nearly shipped. `renderer.nim`'s `readFileUtf8` was a rejecting
+  ## `require('fs').promises.readFile`, and all five of its callers wrap it in
+  ## `except:` and log a warning naming the file. Converting it to return `""`
+  ## on failure type-checks, compiles, and satisfies four of those five — but
+  ## the fifth guards only on `isNil`:
+  ##
+  ##     let diskContent = await readFileUtf8(targetPath)
+  ##     if not diskContent.isNil:
+  ##       ...pendingDiskSourceByPath[targetSourcePath] = diskContent
+  ##
+  ## An empty string is not nil, so an unreadable file would be cached as the
+  ## file's contents and the editor would show it as blank — silently, with the
+  ## warning that used to name the file no longer printed, because nothing
+  ## raised. A facade migration must preserve the ERROR CONTRACT and not only
+  ## the type, and this is the shape that does.
+  ##
+  ## Paired with `ctAwaitSync` rather than duplicating it: that one bridges
+  ## latency, this one bridges failure representation, and a call site being
+  ## migrated usually needs exactly one of them.
+  if outcome.ok:
+    return outcome.value
+  var err = newException(PlatformCallError, $outcome.error)
+  err.kind = outcome.error.kind
+  raise err
+
 proc ctTopbar*(fullscreen = false): TopbarModel =
   ## The topbar's action set for the running platform.
   ##

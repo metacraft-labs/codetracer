@@ -176,7 +176,7 @@ test_lane_description() {
 	ct-trace-units) echo "ct trace-layer unit suites" ;;
 	mcr-enrichment-units) echo "ct upload / MCR-enrichment unit suites" ;;
 	online-sharing-live) echo "live sharing round-trip (compile-checked only, never executed)" ;;
-	host-instantiations) echo "the platform facade's host instantiations, compiled on the backend they ship on (compile-checked only)" ;;
+	host-instantiations) echo "JS-backend modules no other lane compiles: the facade's host instantiations and platform_host's Electron arm (compile-checked only)" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
@@ -343,6 +343,24 @@ test_lane_files() {
 		# its Electron arm. That is deliberate and is the arm with no other
 		# gate; do not add the define to this lane without giving the Electron
 		# arm one somewhere else.
+		# `renderer.nim` IS NOT HERE, and the reason is worth recording because
+		# it was tried. No lane compiles it either — a third instance of this
+		# same hole, found while migrating its facade call sites — but it
+		# CANNOT go in this lane: `run-nim-test-lane.sh` passes `-d:nodejs` to
+		# every JS lane, which is load-bearing there (without it
+		# `std/exitprocs.setProgramResult` is undeclared and node exits 0 even
+		# when a case fails), and under `-d:nodejs` the renderer does not
+		# compile at all — `kdom`'s `createElementNS` is absent, because the
+		# renderer is a BROWSER module and node is not a browser. Forcing it in
+		# would compile it in a configuration nothing ships, which is exactly
+		# what the note below warns against.
+		#
+		# What DOES compile it is the tup product build, transitively through
+		# `ui_js.nim`. So it is better covered than `web_browser.nim` ever was
+		# — but not by this CI job, and a change to its facade call sites is
+		# therefore checked at package time rather than on push. That gap is
+		# real and is recorded in the milestone file rather than papered over
+		# with a lane that would lie.
 		echo src/frontend/platform_host.nim
 		echo src/frontend/viewmodel/host/desktop_electron.nim
 		echo src/frontend/viewmodel/host/opfs_volume.nim
