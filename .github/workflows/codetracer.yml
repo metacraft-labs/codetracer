@@ -1785,6 +1785,16 @@ jobs:
         # lowered — an unrecorded migration is one that can be silently undone.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-host-budget
 
+      - name: Renderer pane parity (NS2's second half)
+        # "A pane added to one platform appears in the other" — the half of
+        # `test_one_codebase_two_platforms` that had no gate, because comparing
+        # two pane sets needs two bundles and until this week there was one.
+        # The registry is read from `makeComponent`, presence is measured in the
+        # two BUILT bundles, and the kinds are a budget that fails both ways: a
+        # new pane nobody decided about, and a budget entry the product no
+        # longer dispatches.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 

@@ -2929,6 +2929,30 @@ test-renderer-host-budget:
   exec > >(tee test-logs/test-renderer-host-budget.log) 2>&1
   bash ci/test/renderer-host-reach-budget.sh
 
+# NS2's SECOND half — "a pane added to one platform appears in the other".
+#
+# The first half ("CI fails if either build breaks") has been covered since
+# `test-host-instantiations` and `test-web-bundle`.  This is the other one, and
+# it was unassertable until the renderer built for a browser: you cannot compare
+# two pane sets with only one bundle.
+#
+# `renderer-browser-build.sh` already checks the NEGATIVE half — that
+# `panel_transfer` and `agentic_worktree_test_hooks` are absent from the web
+# bundle, by name.  Nothing checked the panes that are supposed to be on BOTH,
+# which is what the milestone actually claims.
+#
+# The registry is `makeComponent`'s arms, read from `src/frontend/utils.nim`;
+# presence is measured in the two BUILT bundles, because a pane whose arm exists
+# but whose module left the web import graph is exactly the failure this is for;
+# and the kinds are a checked-in budget that fails in both directions.  Three
+# independent sources, so no assertion compares a list against itself.
+test-renderer-pane-parity:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
+  bash ci/test/renderer-pane-parity.sh
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when
