@@ -2953,6 +2953,22 @@ test-renderer-pane-parity:
   exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
   bash ci/test/renderer-pane-parity.sh
 
+# NS7a's first verification: the development loop has no network surface, so
+# there is no request for a token to ride on. Runs the gate through its own
+# build path FIRST (no bundle variables set, so it compiles both arms exactly
+# as CI would), then hands those artifacts to the mutation proof rather than
+# rebuilding them twelve times.
+test-noir-studio-signed-out:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-studio-signed-out.log) 2>&1
+  bash ci/test/noir-studio-signed-out.sh
+  cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+  CT_WEB_ENTRY_BUNDLE="${cache}/nsso-loop/web.js" \
+  CT_RENDERER_WEB_BUNDLE="${cache}/nsso-renderer/ui.js" \
+    bash ci/test/noir-studio-signed-out-test.sh
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when

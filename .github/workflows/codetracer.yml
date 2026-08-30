@@ -1795,6 +1795,21 @@ jobs:
         # longer dispatches.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
 
+      - name: Noir Studio signed out (NS7a / Identity ID3)
+        # `test_development_loop_needs_no_account`, as a property of the built
+        # product: the arm that carries write, compile, run, record and export
+        # reaches NO network primitive, so there is no request for a token to
+        # ride on. The renderer arm's egress is budgeted per surface — lsp,
+        # visual-replay, agentic, collab — and fails in both directions, which
+        # is what catches ID3's named erosion ("one personalisation, one
+        # counter"; a counter is a fetch).
+        #
+        # This step runs the gate AND its mutation proof: eleven mutations,
+        # each verified to redden the assertion written for it. It lives in
+        # `viewmodel-tests`, which ci/verdict/required-jobs.txt already
+        # requires, rather than in a new job that file does not know about.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-noir-studio-signed-out
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
