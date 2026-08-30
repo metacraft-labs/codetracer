@@ -60,8 +60,11 @@ command -v node >/dev/null 2>&1 || {
 
 mkdir -p "${out_dir}" "${cache}"
 
-echo "Step 1: the web entry point builds with nim js"
-build_log="$(nim js -d:nodejs --hints:off --warnings:off \
+echo "Step 1: the web entry point builds with nim js -d:ctWeb"
+echo "    -d:ctWeb selects platform_host's third arm. Without it this is an"
+echo "    ELECTRON build of the same sources and step 2 below fails, which is"
+echo "    how the define earns its place rather than being a spelling."
+build_log="$(nim js -d:nodejs -d:ctWeb --hints:off --warnings:off \
 	--path:src/frontend/viewmodel \
 	--nimcache:"${cache}" -o:"${bundle}" src/frontend/web_main.nim 2>&1)"
 build_status=$?
@@ -78,9 +81,11 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "Step 2: the bundle links NO host bindings"
-echo "    web_main.nim deliberately does not import platform_host, because that"
-echo "    module imports host/desktop_electron on the JS backend. The absence is"
-echo "    the design decision; this is the check that it holds."
+echo "    web_main.nim DOES import platform_host, like every other module in"
+echo "    src/frontend/. That is the point of the three-way switch: under"
+echo "    -d:ctWeb its arm imports no host module, so the front end's own"
+echo "    platform accessor is usable from a web build. This step is the check"
+echo "    on the SWITCH -- before it, the same import put 43 require() calls in."
 # The positive control FIRST. Without it every negative grep below would also
 # pass over a truncated or empty file, and "found nothing" would mean "looked at
 # nothing" — the shape of check this repository keeps finding.
@@ -111,9 +116,10 @@ for forbidden in child_process ipcRenderer; do
 		bad "the bundle mentions ${forbidden} ${hits} time(s)"
 	fi
 done
-note "measured: importing and USING platform_host from web_main.nim puts 43"
-note "require() calls and 4 child_process mentions into this file, so these"
-note "checks fail on the regression they exist for rather than only in theory."
+note "measured against the two-arm platform_host that preceded the three-way"
+note "switch: the same sources built with -d:ctWeb produced 43 require() calls"
+note "and 4 child_process mentions, so these checks fail on the real previous"
+note "state rather than on a synthetic mutation."
 echo
 
 # ---------------------------------------------------------------------------
@@ -138,6 +144,38 @@ else
 		;;
 	*)
 		bad "boot() did not complete: ${boot_line}"
+		;;
+	esac
+
+	# THE FRONT END'S OWN ACCESSOR, not the boot result. `web_main.nim` reports
+	# `ctPlatform()`, which is what every pane in `src/frontend/` uses; reading
+	# `boot.web.platform` instead would say `pkWeb` even on a build where the
+	# rest of the front end could not see it.
+	#
+	# NOTE THAT THIS CHECK AND THE require() CHECK CATCH DIFFERENT FAILURES, and
+	# neither substitutes for the other. Measured against the two-arm
+	# `platform_host` that preceded the switch: built with -d:ctWeb it produced
+	# 43 require() calls AND `platform=pkWeb`, because the bootstrap fix already
+	# stops `ctPlatform()` overwriting the installed web platform. So the
+	# behaviour was right while the bundle linked Electron. Keeping only this
+	# assertion would have shipped that bundle.
+	case "${boot_line}" in
+	*"platform=pkWeb"*)
+		ok "ctPlatform() hands back the WEB platform, so the front end at large is on it"
+		;;
+	*)
+		bad "the front end's own accessor did not return the web platform: ${boot_line}"
+		;;
+	esac
+
+	# The capability the desktop has and the web must not: if the Electron
+	# platform had been installed, this would be true.
+	case "${boot_line}" in
+	*"spawn=false"*)
+		ok "and it does not claim capProcessSpawn, which an Electron platform would"
+		;;
+	*)
+		bad "the running platform claims capProcessSpawn; a tab with no wasm module registry must not: ${boot_line}"
 		;;
 	esac
 

@@ -323,6 +323,27 @@ test_lane_files() {
 		# pull in `desktop_native.nim` and `remote_stub.nim`, which are C-backend
 		# modules `vm-unit` already compiles, and a lane that compiles a module
 		# on the wrong backend reports a green that means nothing.
+		# `platform_host.nim` is here for its ELECTRON arm specifically. It is
+		# a three-way switch (`js`+`ctWeb`, `js`, native) and each arm needs a
+		# gate, or the switch acquires a hole the shape of whichever arm is
+		# newest — which is exactly how `web_browser.nim` came to sit
+		# unparseable on `dev` for days. The three arms and their gates:
+		#
+		#   native            frontend-native-units, via
+		#                     tests/platform_bootstrap_test.nim, which imports
+		#                     platform_host and runs on the C backend
+		#   js (Electron)     THIS LANE — nothing else compiles it. The
+		#                     renderer entry `ui_js.nim` does, but only in the
+		#                     tup build, which CI does not run for this job
+		#   js + ctWeb        ci/test/web-bundle-smoke.sh, which builds
+		#                     web_main.nim with -d:ctWeb and additionally
+		#                     asserts the bundle links no host bindings
+		#
+		# The lane's flags carry no `-d:ctWeb`, so the file compiles here on
+		# its Electron arm. That is deliberate and is the arm with no other
+		# gate; do not add the define to this lane without giving the Electron
+		# arm one somewhere else.
+		echo src/frontend/platform_host.nim
 		echo src/frontend/viewmodel/host/desktop_electron.nim
 		echo src/frontend/viewmodel/host/opfs_volume.nim
 		echo src/frontend/viewmodel/host/web_browser.nim

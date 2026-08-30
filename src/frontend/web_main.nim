@@ -24,16 +24,26 @@
 ## can honestly mean today, and it is a bundle that a CI recipe produces and a
 ## smoke test executes.
 ##
-## ## Why this module does not import `platform_host`
+## ## Why this module DOES import `platform_host`, and why that was once wrong
 ##
-## It would be the natural way to install the platform, and it is the one thing
-## that must not happen here: `platform_host` imports `desktop_electron` on the
-## JS backend, so importing it would pull Electron's host bindings into the web
-## bundle. `boot()` installs through `platform.installPlatform` instead, and
-## `ctPlatform()` was taught not to overwrite that
-## (`tests/platform_bootstrap_test.nim`). The absence of the import is
-## load-bearing, which is why it is written down rather than left to look like
-## an oversight.
+## The first version of this file deliberately avoided `platform_host`, because
+## that module's `when defined(js)` arm imported `host/desktop_electron` — so
+## importing it pulled `require('fs')` and `require('child_process')` into the
+## web bundle. Measured: 43 `require(` calls. The web build therefore had to
+## route around the front end's own platform accessor, which is not something a
+## second platform instantiation should ever have to do; every other module in
+## `src/frontend/` reaches the platform through `ctPlatform()`, and a web build
+## that could not was a web build no pane could ever be shared with.
+##
+## `platform_host` is a three-way switch now (`js` + `ctWeb`, `js`, native), and
+## its web arm imports no host module at all. So this module imports it like
+## anything else, and the bundle still contains zero `require(` — which
+## `ci/test/web-bundle-smoke.sh` measures rather than assumes, and which is now
+## a check on the SWITCH rather than on this file's import list.
+##
+## The assertion below is the point: after `boot()`, `ctPlatform()` must hand
+## back the web platform. That is one call, and it is the difference between
+## "the web instantiation exists" and "the front end is running on it".
 ##
 ## ## Why the outcome is reported twice
 ##
@@ -45,6 +55,7 @@
 import std/[asyncjs, jsffi]
 
 import viewmodel/host/web_browser
+import platform_host
 
 const bootLinePrefix* = "codetracer-web-boot:"
   ## The smoke test greps for this. A stable prefix rather than a parsed
@@ -77,7 +88,16 @@ proc describe(boot: WebBoot): string =
   if not boot.ok:
     return bootLinePrefix & " refused condition=" & $boot.condition &
            " reason=" & boot.refusal
+  # `ctPlatform()` is asked here rather than `boot.web.platform`, and the
+  # difference is the whole assertion: the first goes through the front end's
+  # own accessor, which every pane uses, and is what would have handed back the
+  # ELECTRON platform on this build until the switch and the bootstrap fix.
+  # Reporting `boot.web.platform.profile.kind` instead would say `web` even
+  # when the front end at large could not see it.
+  let running = ctPlatform()
   bootLinePrefix & " ok condition=" & $boot.condition &
+    " platform=" & $running.profile.kind &
+    " spawn=" & $running.can(capProcessSpawn) &
     " announcement=" & (if boot.announcement.len > 0: boot.announcement
                         else: "(none)")
 
