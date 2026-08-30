@@ -533,6 +533,180 @@ fn browser_and_native_readers_agree_on_the_function_table() {
     );
 }
 
+/// M0/3 — the LINE-MAP accessors answer exactly what the step-by-step walk
+/// they replace would have answered.
+///
+/// This is the acceptance condition for routing `load_location` through them.
+/// The walk is `max(step.line)` over the steps from `start` up to the first one
+/// whose `call_key` differs; the accessors get the run's end from the resident
+/// call-key array and the run's greatest line from `step-map.ns`. Here the two
+/// are computed independently over the whole trace and compared at every step —
+/// including the leading steps that sit outside the recorded call, where the run
+/// is EMPTY and the walk stops on its first iteration.
+#[test]
+fn line_map_accessors_agree_with_the_walk_they_replace() {
+    let f = fixture();
+    let steps_len = f.browser.step_count() as i64;
+    assert!(steps_len > 0, "the fixture must record steps");
+
+    // The walk, verbatim from the pre-M0/3 `use_trace_function_boundaries`.
+    let walk = |start: i64, call_key: CallKey| -> (i64, i64) {
+        let mut max_line = 0i64;
+        let mut end = steps_len;
+        for i in start..steps_len {
+            let step = f.browser.step(StepId(i)).expect("step in range");
+            if step.call_key == call_key {
+                if step.line.0 > max_line {
+                    max_line = step.line.0;
+                }
+            } else {
+                end = i;
+                break;
+            }
+        }
+        (end, max_line)
+    };
+
+    // Every step, against its OWN call key — the case `load_location` hits on
+    // the browser path — sampled densely enough to cross the run boundaries and
+    // cheaply enough that the O(n^2) reference walk stays a test.
+    let stride = std::cmp::max(1, steps_len / 400);
+    let mut checked_empty_runs = 0;
+    let mut checked_nonempty_runs = 0;
+    for start in (0..steps_len).step_by(stride as usize) {
+        let own_key = f.browser.step(StepId(start)).expect("step in range").call_key;
+        for call_key in [own_key, CallKey(own_key.0 + 1)] {
+            let (want_end, want_max) = walk(start, call_key);
+            let got_end = f
+                .browser
+                .call_run_end(StepId(start), call_key)
+                .expect("the browser reader must serve the call-run end from its call-key index");
+            assert_eq!(
+                got_end,
+                StepId(want_end),
+                "call-run end disagrees at step {start} for call key {call_key:?}"
+            );
+            let got_max = f
+                .browser
+                .max_line_over_steps(StepId(start), got_end)
+                .expect("the browser reader must serve the range maximum from step-map.ns");
+            assert_eq!(
+                got_max, want_max,
+                "range maximum disagrees over [{start}, {want_end}) for call key {call_key:?}"
+            );
+            if want_end == start {
+                checked_empty_runs += 1;
+            } else {
+                checked_nonempty_runs += 1;
+            }
+        }
+    }
+    assert!(
+        checked_empty_runs > 0 && checked_nonempty_runs > 0,
+        "the case must exercise both an empty run and a real one \
+         (saw {checked_empty_runs} empty / {checked_nonempty_runs} non-empty)"
+    );
+}
+
+/// M0/3 — the accessors are served from the INDICES, not from the step stream:
+/// answering them neither materializes the whole step table nor inflates a
+/// single `steps.dat` chunk.
+///
+/// This is the property that removes the cubic. If either assertion fails the
+/// accessors are reading steps after all, and `load_location` is back to paying
+/// per-step costs on every call.
+#[test]
+fn line_map_accessors_do_not_touch_the_step_stream() {
+    let f = fixture();
+    let before = f
+        .browser
+        .lazy_steps_chunk_decompressions()
+        .expect("the browser reader must be on the lazy step path");
+
+    let steps_len = f.browser.step_count() as i64;
+    for start in (0..steps_len).step_by(97) {
+        let end = f
+            .browser
+            .call_run_end(StepId(start), CallKey(0))
+            .expect("call-run end must be served");
+        f.browser
+            .max_line_over_steps(StepId(start), end)
+            .expect("range maximum must be served");
+    }
+
+    assert_eq!(
+        f.browser.lazy_steps_chunk_decompressions(),
+        Some(before),
+        "the line-map accessors must not inflate a steps.dat chunk"
+    );
+    assert_eq!(
+        f.browser.lazy_full_steps_materialized(),
+        Some(false),
+        "the line-map accessors must not trigger the whole-table build"
+    );
+}
+
+/// M0/3 — the NATIVE reader answers the accessors identically to the browser
+/// reader.
+///
+/// The native path normally never reaches this code (tree-sitter supplies the
+/// boundaries from the readable source), but it does for languages with no
+/// grammar and for BEAM traces, and the two readers are independent decoders of
+/// the same bytes. If they ever disagree, `load_location` would return a
+/// different `function_last` depending on which constructor opened the trace.
+#[test]
+fn native_and_browser_readers_agree_on_the_line_map_accessors() {
+    let f = fixture();
+    let steps_len = f.browser.step_count() as i64;
+    for start in (0..steps_len).step_by(89) {
+        for call_key in [CallKey(0), CallKey(-1), CallKey(1)] {
+            let browser_end = f.browser.call_run_end(StepId(start), call_key);
+            assert_eq!(
+                f.native.call_run_end(StepId(start), call_key),
+                browser_end,
+                "readers disagree on the call-run end at step {start} for {call_key:?}"
+            );
+            let end = browser_end.expect("call-run end must be served");
+            assert_eq!(
+                f.native.max_line_over_steps(StepId(start), end),
+                f.browser.max_line_over_steps(StepId(start), end),
+                "readers disagree on the range maximum over [{start}, {end:?})"
+            );
+        }
+    }
+}
+
+/// M0/3 — a reader with NO prepopulated line index refuses the range maximum
+/// rather than answering from a partial table, so its caller keeps the walk.
+///
+/// The guard is `covers_all_steps`: only a table that records every step id
+/// exactly once can serve a range maximum, because a table missing a step would
+/// silently drop that step's line out of the maximum — a wrong answer, not a
+/// slow one.
+#[test]
+fn an_incomplete_line_index_refuses_to_serve_the_range_maximum() {
+    let f = fixture();
+    let step_map = f
+        .browser
+        .step_map()
+        .expect("the fixture's container carries step-map.ns");
+    assert!(
+        step_map.covers_all_steps(f.browser.step_count()),
+        "the fixture's table records every step, which is why the accessor may serve it \
+         ({} ids for {} steps)",
+        step_map.total_step_ids(),
+        f.browser.step_count()
+    );
+    assert!(
+        !step_map.covers_all_steps(f.browser.step_count() + 1),
+        "a table that does not account for every step must be refused"
+    );
+    assert!(
+        !step_map.covers_all_steps(0),
+        "a non-empty table cannot cover an empty trace"
+    );
+}
+
 /// A container that is NOT a CTFS bundle still fails with a typed, named error
 /// rather than opening an empty trace — the failure mode `setup_from_vfs`'s
 /// comment calls out as worse than an error, because a user reads it as "the

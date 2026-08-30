@@ -285,6 +285,41 @@ pub trait TraceReader: std::fmt::Debug + Send {
             .map(|records| records.iter().map(|s| s.step_id).collect())
     }
 
+    /// M0/3 — the exclusive END of the maximal run of steps that begins at
+    /// `start` and carries `call_key`: the first step at-or-after `start` whose
+    /// own `call_key` differs, or the step count when the run reaches the end of
+    /// the trace. `start` itself when the step at `start` does not carry
+    /// `call_key` (an empty run).
+    ///
+    /// `None` means "this reader has no call-key index and would have to walk
+    /// the step stream to answer" — the caller then walks it itself, exactly as
+    /// it always did. The default is `None` for every reader; the CTFS reader
+    /// overrides it against the RESIDENT per-step call-key array its lazy step
+    /// cache already builds at open.
+    fn call_run_end(&self, start: StepId, call_key: CallKey) -> Option<StepId> {
+        let _ = (start, call_key);
+        None
+    }
+
+    /// M0/3 — the LINE-MAP accessor: the greatest source line carrying a step in
+    /// the half-open range `[start, end)`, or `0` when the range holds no steps
+    /// (`0` is the neutral element for a maximum over recorded lines, which are
+    /// never negative).
+    ///
+    /// `None` means "this reader has no line index that covers every step and
+    /// would have to walk the step stream to answer" — the caller then walks it
+    /// itself. The CTFS reader overrides it against the prepopulated
+    /// `step-map.ns`, and only when that table is a COMPLETE index over the
+    /// trace's steps, which is what makes the answer identical to the walk.
+    ///
+    /// Together with [`call_run_end`](Self::call_run_end) this is what lets
+    /// `load_location` obtain a function's last line from the container's own
+    /// index instead of scanning from the current step to the end of the call.
+    fn max_line_over_steps(&self, start: StepId, end: StepId) -> Option<i64> {
+        let _ = (start, end);
+        None
+    }
+
     // ── Iteration helpers ────────────────────────────────────────────
 
     /// Iterate over all functions with their ids.
@@ -674,15 +709,43 @@ pub trait TraceReader: std::fmt::Debug + Send {
                     location.function_first = function_record.line.0;
 
                     let mut last_line = function_record.line.0;
-                    let steps_len = self.step_count() as i64;
-                    for i in step_id_int..steps_len {
-                        let step = self.step(StepId(i)).expect("load_location: invalid step in range");
-                        if step.call_key == CallKey(call_key_int) {
-                            if step.line.0 > last_line {
-                                last_line = step.line.0;
+                    // M0/3 — the function's last line is the greatest line over
+                    // the SUFFIX of this call's step run that begins at the
+                    // current step. Ask the reader's indices for it first: the
+                    // run's end from the resident call-key array, and the run's
+                    // greatest line from the prepopulated `step-map.ns`. Both
+                    // answers are exact — `max_line_over_steps` only answers at
+                    // all when its table covers every step — so this is the same
+                    // number the walk below produces.
+                    //
+                    // This is the browser path's whole cost. The walk is O(run
+                    // length) point lookups into `steps.dat`, and on the browser
+                    // there is no filesystem, so `expr_loader.load_file` always
+                    // fails and EVERY `load_location` reached it; a trace that is
+                    // one long call therefore walked to the end of the trace
+                    // every time. Readers with neither index return `None` and
+                    // keep the walk, unchanged.
+                    let indexed = self
+                        .call_run_end(StepId(step_id_int), CallKey(call_key_int))
+                        .and_then(|run_end| self.max_line_over_steps(StepId(step_id_int), run_end));
+                    match indexed {
+                        Some(indexed_last) => {
+                            if indexed_last > last_line {
+                                last_line = indexed_last;
                             }
-                        } else {
-                            break;
+                        }
+                        None => {
+                            let steps_len = self.step_count() as i64;
+                            for i in step_id_int..steps_len {
+                                let step = self.step(StepId(i)).expect("load_location: invalid step in range");
+                                if step.call_key == CallKey(call_key_int) {
+                                    if step.line.0 > last_line {
+                                        last_line = step.line.0;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
                         }
                     }
                     location.function_last = last_line;
