@@ -24,6 +24,37 @@ We have a `cargo clippy` check in our CI, but one can also run it locally.
 For Nim, we still haven't written down a guide or list of rules and principles that we agree on, so this is something that we hope to do.
 We might also link to an existing document.
 
+### Code compiled for both backends
+
+Nim compiles this front end to C and to JavaScript, and a handler that is
+correct on one backend can be **absent** on the other while the code reads
+identically. That is a whole class, not an incident:
+
+> **`except CatchableError` is not portable.** On the C backend `parseJson`
+> raises `JsonParsingError`, a `CatchableError`. On the JS backend it defers to
+> V8's `JSON.parse`, which throws a raw `SyntaxError` that no Nim exception
+> type matches — so the narrow form catches nothing and the exception escapes.
+
+The guard in `platform/wasm_worker.nim` that exists to stop a malformed worker
+payload hanging a caller did exactly this: it handled the case correctly under
+`nim c` and **crashed the process** under `nim js`, which is the backend the
+renderer ships on. Use a bare `except:` where the failure can originate outside
+Nim, and say in a comment why the narrow form is wrong there.
+
+Two habits that catch the rest of the class:
+
+1. **Run both lanes.** `just test-vm` runs `vm-unit` and `vm-unit-js`; a suite
+   that only appears in one of them cannot see this. `vm-unit` passed over the
+   defect above.
+2. **Be suspicious of anything that crosses into a host primitive** — parsing,
+   time, randomness, string encoding, number formatting, exceptions. The two
+   standard libraries agree on the signature and not always on the behaviour.
+
+The same asymmetry appears in the *shape* of data across a boundary rather than
+in errors: see `backend/worker_backend.nim`'s header for an engine that sent
+objects one way and JSON strings the other, and a reader that reported a
+timeout over an engine that had answered.
+
 ### Migrating an API that carries errors
 
 One rule, because it has cost us three separate defects in three campaigns:
