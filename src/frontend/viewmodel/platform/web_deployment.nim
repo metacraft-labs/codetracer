@@ -19,11 +19,13 @@
 ##
 ## ## The origin is a parameter with no default
 ##
-## `ide.codetracer.com` is where the product is going; `web.codetracer.com` is
-## where an earlier draft put it and where `src/ct/online_sharing/remote_config.nim`
-## still points. That disagreement is exactly why no default exists here: a
-## default is a constant with a friendly face, and the last two moves each
-## found one. Every proc that needs a host takes it.
+## `ide.codetracer.com` is the product's host, and as of the 2026-08-29 rename
+## `src/ct/online_sharing/remote_config.nim` agrees — the disagreement this
+## paragraph used to record is resolved. No default appears here anyway, and
+## the resolution is the reason rather than a reason against: the host has now
+## moved twice (`cloud` → `web` → `ide`) and each move found a constant
+## somebody had to hunt for. A default is a constant with a friendly face, so
+## every proc that needs a host takes it.
 
 import ./web_entry
 

@@ -169,11 +169,12 @@ proc jsShareOrigin(): cstring {.importjs: """
 })()""".}
   ## The sharing origin is read from the page, never compiled in.
   ##
-  ## `ide.codetracer.com` is where the hosted product is going and
-  ## `web.codetracer.com` is where `src/ct/online_sharing/remote_config.nim`
-  ## still points. Both are deployment facts. A build that hard-coded either
-  ## would need a rebuild to move, and the last two moves each found a constant
-  ## somebody had to hunt for — so this build has none, and a deployment that
+  ## `ide.codetracer.com` is the hosted product's host, and since the
+  ## 2026-08-29 rename `src/ct/online_sharing/remote_config.nim` names it too.
+  ## That is a deployment fact, and deployment facts move: the host has gone
+  ## `cloud` → `web` → `ide`, and each move found a constant somebody had to
+  ## hunt for. A build that hard-coded even the current one would need a
+  ## rebuild to follow the next — so this build has none, and a deployment that
   ## sets nothing gets `capShareLink` absent with the sentence
   ## `web_platform.webInstantiationProfile` supplies.
 
