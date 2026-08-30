@@ -1,3 +1,14 @@
+when defined(ctWeb):
+  {.error: "subwindow.nim drives a SECOND APPLICATION WINDOW over Electron's " &
+           "inter-process channel. " &
+           "It is absent from a web build because the capability is absent: " &
+           "`capMultiWindow` is not in `capabilities.webCapabilities`, and the " &
+           "web profile's degradation for it already says a second window is a " &
+           "second tab against the same session. This is a capability the " &
+           "platform does not have, not a call site awaiting migration — a " &
+           "facade arm here would promise a window a tab cannot open. Ask " &
+           "`ctPlatform().can(capMultiWindow)` before offering the action." .}
+
 import
   std/[ jsffi, strformat, strutils ],
   kdom, paths

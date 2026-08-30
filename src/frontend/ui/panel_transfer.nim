@@ -8,6 +8,17 @@
 ## The panel carries its `sessionId` so that mixed-session windows (M22) route
 ## DAP events through the correct ReplaySession.
 
+when defined(ctWeb):
+  {.error: "ui/panel_transfer.nim moves a pane BETWEEN APPLICATION WINDOWS over " &
+           "Electron's inter-process channel. It is absent from a web build " &
+           "because the capability is absent — `capMultiWindow` is not in " &
+           "`capabilities.webCapabilities` — and not because its seven IPC call " &
+           "sites are awaiting migration. There is no second window to send a " &
+           "pane to, so a facade " &
+           "arm would be an action that can only ever refuse. The web's answer to " &
+           "'open this elsewhere' is a second tab on the same session, which is " &
+           "what the web profile's `capMultiWindow` degradation already says." .}
+
 import
   std / [ jsffi, jsconsole, strformat, asyncjs ],
   kdom,

@@ -108,6 +108,45 @@ proc isOk*[T](outcome: PlatformOutcome[T]): bool = outcome.ok
 proc isErr*[T](outcome: PlatformOutcome[T]): bool = not outcome.ok
 
 proc valueOr*[T](outcome: PlatformOutcome[T]; fallback: T): T =
+  ## The value, or `fallback`. Correct when the caller genuinely has no use for
+  ## the failure — and **the wrong tool for migrating a call site that used to
+  ## get an exception or a rejected promise.**
+  ##
+  ## ## The shape this repository keeps getting wrong
+  ##
+  ## *An error-carrying API migrated to a defaulting one satisfies most callers
+  ## and silently breaks the one that guards on a different signal.*
+  ##
+  ## It has now bitten three times in different campaigns — a `valueOr` here, a
+  ## `frames[0].costUnit`, and a hydration script tag — so it is written down at
+  ## the place the mistake is made rather than in a document.
+  ##
+  ## The concrete case: `renderer.nim`'s `readFileUtf8` was a **rejecting**
+  ## `require('fs').promises.readFile`. All five callers wrap it in `except:`
+  ## and log a warning naming the file. Migrating it with `valueOr("")`
+  ## type-checks, compiles, and is correct for four of the five, because they
+  ## guard on `len > 0` or `isNil or len == 0`. The fifth guards only on
+  ## `isNil`:
+  ##
+  ##     let diskContent = await readFileUtf8(targetPath)
+  ##     if not diskContent.isNil:
+  ##       ...pendingDiskSourceByPath[targetSourcePath] = diskContent
+  ##
+  ## An empty string is not nil. An unreadable file would be cached as that
+  ## file's contents, the editor would show it blank, and the warning that used
+  ## to name the file would no longer print — because nothing raised.
+  ##
+  ## ## What to do instead
+  ##
+  ## Before converting an error-carrying call site, **read what every caller
+  ## branches on**, not how many of them compile. If any distinguishes failure
+  ## from a legitimate empty/zero/absent value, the migration must preserve the
+  ## error contract: `platform_host.ctOrRaise` for callers that already handle
+  ## an exception, or reshape the caller to take the `PlatformOutcome`.
+  ##
+  ## And test the failing direction by asserting it RAISES or that `ok` is
+  ## false — never by asserting the result differs from the fallback.
+  ## `check migrated(bad) != ""` passes against the defect.
   if outcome.ok: outcome.value else: fallback
 
 proc `$`*(error: PlatformError): string =

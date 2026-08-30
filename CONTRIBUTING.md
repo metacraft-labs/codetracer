@@ -24,6 +24,33 @@ We have a `cargo clippy` check in our CI, but one can also run it locally.
 For Nim, we still haven't written down a guide or list of rules and principles that we agree on, so this is something that we hope to do.
 We might also link to an existing document.
 
+### Migrating an API that carries errors
+
+One rule, because it has cost us three separate defects in three campaigns:
+
+> **An error-carrying API migrated to a defaulting one satisfies most callers
+> and silently breaks the one that guards on a different signal.**
+
+If the old call raised, rejected, or returned an error value, and the new one
+returns a default instead, then every caller that checked `len > 0` keeps
+working and the caller that checked `isNil` — or `== 0`, or "is the field
+present" — silently starts treating a failure as real data. It compiles, the
+types line up, and most of the tests pass.
+
+So, before converting such a call site:
+
+1. **Read what every caller branches on**, not how many still compile. If any
+   of them distinguishes failure from a legitimate empty / zero / absent value,
+   the migration has to preserve the error contract, not just the return type.
+2. Preserve it explicitly — `platform_host.ctOrRaise` for callers that already
+   handle an exception, or reshape the caller to take the outcome.
+3. **Test the failing direction by asserting that it raises or that `ok` is
+   false** — never by asserting the result differs from the fallback.
+   `check migrated(bad) != ""` passes against the defect it is meant to catch.
+
+`src/frontend/viewmodel/platform/outcome.nim`'s `valueOr` carries the worked
+example, at the place the mistake gets made.
+
 ### Commits/Pull Requests
 
 We are using [the "Conventional Commits" strategy](https://www.conventionalcommits.org/).

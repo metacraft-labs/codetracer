@@ -87,27 +87,39 @@ count_in() {
 # THE BUDGET. One line per module that still reaches the host, with what it
 # needs. Lowering a number here is how a migration is recorded.
 #
-# `facade`  — a consumer reaching past its platform. The facade already has the
-#             operation; the call site should be `ctPlatform()`. These are the
-#             ones that make the renderer buildable for a browser.
-# `exclude` — a module that SHOULD NOT be migrated. Either it exists to wrap
-#             the host (lib/electron_lib.nim), or it is desktop-test machinery
-#             (ui/agentic_worktree_test_hooks.nim), or it implements a
-#             capability the web profile does not have at all
-#             (subwindow.nim and ui/panel_transfer.nim are multi-window IPC,
-#             and `capMultiWindow` is absent on web). The right treatment is a
-#             `when` that keeps them out of a web build, not a facade arm that
-#             would promise what a tab cannot do.
+# `facade`      a consumer reaching past its platform. The facade already has
+#               the operation; the call site should be `ctPlatform()`. These
+#               are the only ones that are REMAINING WORK.
+# `guarded`     the module IS in a web build, and this reach is unreachable
+#               there at run time (renderer.nim's `ipc = electron.ipcRenderer`
+#               under `if inElectron:`). Counted, because it is still an
+#               Electron symbol in a web bundle, but not migration work.
+# `webexcluded` the whole MODULE is absent from a web build, enforced by a
+#               `when defined(ctWeb): {.error.}` guard that names the capability
+#               it needs. Not "not done yet": either it exists to wrap the host
+#               (lib/electron_lib.nim), or it is desktop-test machinery
+#               (ui/agentic_worktree_test_hooks.nim), or it needs a capability
+#               the web profile does not have (subwindow.nim and
+#               ui/panel_transfer.nim are multi-window IPC and `capMultiWindow`
+#               is absent on web). A facade arm for these would promise what a
+#               tab cannot do.
+#
+# THE THREE KINDS ARE REPORTED SEPARATELY, ON PURPOSE. Sixteen of the nineteen
+# reaches below are in `webexcluded` modules. That is NOT the same fact as
+# sixteen having been migrated, and a single shrinking total would let the two
+# read alike — the exclusion removed them from one CONFIGURATION, it did not
+# remove a single call. Step 3 checks the guards actually exist, so the
+# classification is enforced rather than asserted.
 # ---------------------------------------------------------------------------
 budget_for() {
 	case "$1" in
-	src/frontend/lib/electron_lib.nim) echo "5 exclude" ;;
+	src/frontend/lib/electron_lib.nim) echo "5 webexcluded" ;;
 	# 3 -> 1. `readFileUtf8` now goes through `ctPlatform().fs.readText` and the
 	# dead `loadFileDialog` is gone. What remains is `ipc = electron.ipcRenderer`
 	# inside `if inElectron:` — the IPC transport to the Electron main process,
 	# which the web has no counterpart to and must not pretend to have.
-	src/frontend/renderer.nim) echo "1 exclude" ;;
-	src/frontend/subwindow.nim) echo "1 exclude" ;;
+	src/frontend/renderer.nim) echo "1 guarded" ;;
+	src/frontend/subwindow.nim) echo "1 webexcluded" ;;
 	# STILL `facade`, and deliberately not migrated in the same pass:
 	# `ui_js.nim` does not compile standalone in the dev shell (it needs the tup
 	# build's generated sources; on `dev` it fails at `resolvePendingDapResponse`
@@ -117,8 +129,8 @@ budget_for() {
 	# least urgent two of the set. They want `fs.exists` / `fs.readText` through
 	# `ctAwaitSync`, since both callers are synchronous.
 	src/frontend/ui_js.nim) echo "2 facade" ;;
-	src/frontend/ui/agentic_worktree_test_hooks.nim) echo "3 exclude" ;;
-	src/frontend/ui/panel_transfer.nim) echo "7 exclude" ;;
+	src/frontend/ui/agentic_worktree_test_hooks.nim) echo "3 webexcluded" ;;
+	src/frontend/ui/panel_transfer.nim) echo "7 webexcluded" ;;
 	*) echo "0 none" ;;
 	esac
 }
@@ -159,6 +171,9 @@ echo
 echo "Step 2: no module reaches the host more than its budget"
 total=0
 budget_total=0
+excluded_total=0
+web_reachable=0
+excluded_files=""
 while IFS= read -r file; do
 	n="$(count_in "${file}")"
 	[ "${n}" = "0" ] && continue
@@ -173,6 +188,13 @@ while IFS= read -r file; do
 	else
 		note "${file}: ${n} (${kind})"
 	fi
+	case "${kind}" in
+	webexcluded)
+		excluded_total=$((excluded_total + n))
+		excluded_files="${excluded_files} ${file}"
+		;;
+	*) web_reachable=$((web_reachable + n)) ;;
+	esac
 done < <(renderer_region)
 
 if [ "${total}" = "${budget_total}" ]; then
@@ -182,8 +204,28 @@ else
 fi
 echo
 
+# ---------------------------------------------------------------------------
+echo "Step 3: every 'webexcluded' module actually refuses a web build"
+echo "    Otherwise the classification is a comment. A module marked excluded"
+echo "    without the guard would be counted as handled while still compiling"
+echo "    into a web bundle -- the same silent-success shape this whole gate"
+echo "    exists to catch."
+for file in ${excluded_files}; do
+	if grep -q "defined(ctWeb)" "${file}" && grep -q "{.error:" "${file}"; then
+		ok "$(basename "${file}"): guarded, and the guard names why"
+	else
+		bad "${file} is marked webexcluded but carries no 'when defined(ctWeb): {.error.}' guard — mark it correctly or add the guard"
+	fi
+done
+echo
+
 if [ "${failures}" -eq 0 ]; then
-	echo "RESULT: OK — ${total} host reaches in the renderer region, none new"
+	echo "RESULT: OK — ${total} host reaches in the desktop build."
+	echo "  ${excluded_total} of them are in modules a WEB build cannot compile at all"
+	echo "  (guarded and verified above). That is a different fact from ${excluded_total}"
+	echo "  having been migrated: the exclusion removed them from one configuration,"
+	echo "  it did not remove a call. ${web_reachable} reach the host from a module a"
+	echo "  web build DOES compile, and those are the remaining work."
 	exit 0
 fi
 echo "RESULT: FAILED — ${failures} check(s)"
