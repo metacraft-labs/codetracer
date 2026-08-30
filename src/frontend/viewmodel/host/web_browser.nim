@@ -43,6 +43,8 @@ import ../platform/project_store
 import ../platform/web_platform
 import ../platform/web_entry
 import ../platform/wasm_worker
+import ../platform/noir_wasm_modules
+import ../platform/web_deployment
 import ./opfs_volume
 
 export web_platform, web_entry
@@ -214,8 +216,14 @@ proc toJsBytes(content: seq[byte]): JsObject =
 # The bridge
 # ---------------------------------------------------------------------------
 
+proc browserWasmHost(delivered: seq[DeliveredWasmModule]): WasmHost
+  ## Forward-declared because the bridge is built above the Worker transport
+  ## it may need. Defined with `newBrowserWasmHost`, whose reasons it shares.
+
 proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
-                       persistenceAnswered: bool): BrowserBridge =
+                       persistenceAnswered: bool;
+                       deliveredWasmModules: seq[DeliveredWasmModule] = @[]
+                      ): BrowserBridge =
   BrowserBridge(
     volume: volume,
     persistenceGranted: persistenceGranted,
@@ -278,23 +286,32 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
       }
       """.},
     shareLinkOrigin: $jsShareOrigin(),
-    # NS3's seam, deliberately supplied EMPTY rather than populated with the
-    # modules that now exist.
+    # NS3's seam, now DERIVED FROM THE DELIVERY rather than asserted empty.
     #
-    # Both halves of the Noir toolchain are real and are reproducible from
-    # published refs: `noir` `codetracer` carries `tooling/tracer_wasm` and,
-    # since 61960c8eec, `compiler/wasm`'s VFS resolver with its `debug` mode.
-    # Driven from a bare `WebAssembly.instantiate` they compile a package held
-    # only in memory and trace it — measured at 27 events, 8 steps, 3 calls.
+    # The old constant here said the registry was empty because "the worker
+    # script ... is not in the bundle". That reason expired at `dev` 07926277,
+    # which places the worker script as a required asset and the two Noir
+    # modules as optional fetched ones. The RULE underneath it did not expire:
+    # declaring `nargo` over modules that were never placed would put
+    # `capProcessSpawn` back on a profile whose every run fails, which is the
+    # exact thing `platform/wasm_registry.nim` exists to prevent.
     #
-    # What does not exist is anything in a TAB that loads them: `WasmHost`'s
-    # four procs have no Worker behind them and no bundle to be fetched with.
-    # Declaring `nargo` here before that would put `capProcessSpawn` back on a
-    # profile whose every run fails, which is the exact thing
-    # `platform/wasm_registry.nim` exists to prevent. So the empty registry is
-    # a true statement about this deployment, `webNoModulesLoaded` is what a
-    # user reads, and populating it is one call once the Worker lands.
-    wasm: noWasmModules())
+    # So the answer is computed from what a caller says was delivered.
+    # `deliveredWasmModules` defaults to `@[]`, and an empty delivery yields an
+    # empty registry — the same answer as before, reached by ASKING rather than
+    # by asserting, and one that changes on its own when a deployment starts
+    # placing the modules. A partial delivery is honoured too: the compiler
+    # alone declares `compile` and refuses `trace` by name, because
+    # `wasm_worker_browser.js` routes by subcommand and both modules are
+    # `required: false` in the manifest with their own absence sentences.
+    #
+    # WHAT IS STILL MISSING, precisely: nothing yet PROBES the deployment. The
+    # caller that can answer "were `assets/noir_wasm.wasm` and
+    # `assets/noir_tracer_wasm.wasm` actually served, and what were they built
+    # from?" does not exist, so every current call passes the default and this
+    # tab still ships no toolchain. That is a true statement about this
+    # deployment rather than a placeholder.
+    wasm: browserWasmHost(deliveredWasmModules))
 
 # ---------------------------------------------------------------------------
 # The wasm worker's transport
@@ -355,18 +372,30 @@ proc newWorkerTransport(scriptUrl: string;
 proc newBrowserWasmHost*(registry: WasmRegistry; scriptUrl: string): WasmHost =
   ## A `WasmHost` backed by a real `Worker` running `scriptUrl`.
   ##
-  ## Not called by `newBrowserBridge` yet, and that is the honest state: the
-  ## worker script that instantiates the Noir modules and drives their `nv_*` /
-  ## `ct_*` ABIs is not in the bundle, and a registry declaring `nargo` over a
-  ## worker that cannot load it would put `capProcessSpawn` back on a profile
-  ## whose every run fails — the exact thing `wasm_registry.nim` exists to
-  ## prevent. The seam is here, tested, and one call from being used.
+  ## Called by `browserWasmHost` below whenever a delivery produced a non-empty
+  ## registry. The worker script IS in the bundle as of `dev` 07926277 —
+  ## `webRuntimeAssets()` declares it a REQUIRED asset at
+  ## `wasmWorkerScriptPath` — so the reason this used to go uncalled is gone.
   var worker: WasmWorker
   proc onText(message: string) =
     if not worker.isNil: worker.deliver(message)
   let transport = newWorkerTransport(scriptUrl, onText)
   worker = newWasmWorker(registry, transport)
   worker.asWasmHost()
+
+proc browserWasmHost(delivered: seq[DeliveredWasmModule]): WasmHost =
+  ## The registry a delivery implies, behind a real Worker when there is
+  ## anything to run.
+  ##
+  ## An empty delivery keeps `noWasmModules()` rather than starting a Worker
+  ## over an empty registry: the two answer identically — `resolve` returns
+  ## `wrNoModulesLoaded` for every command either way — and spawning a worker
+  ## thread to host nothing is cost with no capability behind it. The choice is
+  ## therefore an optimisation over an equivalence, not a second behaviour.
+  let registry = noirWasmRegistry(delivered)
+  if registry.modules.len == 0:
+    return noWasmModules()
+  newBrowserWasmHost(registry, "/" & wasmWorkerScriptPath)
 
 # ---------------------------------------------------------------------------
 # Boot
