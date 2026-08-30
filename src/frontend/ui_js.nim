@@ -9,9 +9,19 @@ import
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
       pixel_history, shader_debug, video_player, agentic_session_launcher],
-  lib/[ jslib, logging ],
+  # `electron_presence` supplies `inElectron`, which the two `if inElectron:`
+  # blocks at the bottom of this file read to choose an IPC transport.
+  #
+  # THIS IMPORT IS NOT DECORATION AND ITS ABSENCE WAS A BUILD BREAK. Until now
+  # the symbol arrived here by accident, through `ui/ui_imports`' blanket
+  # re-export of `electron_lib`. NS1 residual 1 removed that re-export after
+  # auditing electron_lib's 14 exported symbols for uses "anywhere under
+  # `ui/`" — and this file is `src/frontend/ui_js.nim`, which is not under
+  # `ui/`. The audit's scope had a hole exactly the shape of the renderer
+  # entry point, and because no CI lane compiled it, `dev` carried a renderer
+  # that did not build. Naming the dependency is what stops it recurring.
+  lib/[ jslib, logging, electron_presence ],
   types, lang, utils, renderer, config, dap, edit_mode,
-  ui/agentic_worktree_test_hooks,
   viewmodel/store/replay_data_store,
   viewmodel/viewmodels/video_player_vm,
   ../common/ct_logging,
@@ -21,6 +31,13 @@ import
 
 when defined(ctInExtension):
   import vscode
+
+# Desktop-test machinery: it drives an agentic worktree by running arbitrary
+# programs, and its own guard declares it absent from a web build because
+# `capProcessArbitraryPrograms` is absent there. A tab can run the declared
+# wasm modules and nothing else, so there is no web arm to write.
+when not defined(ctWeb):
+  import ui/agentic_worktree_test_hooks
 
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
@@ -1990,9 +2007,10 @@ when not defined(ctInExtension):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentWorkspaceVMWithStore"):
         agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-      initPanelVM("installAgenticWorktreeTestHooks"):
-        agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
-          activeSessionVM.store)
+      when not defined(ctWeb):
+        initPanelVM("installAgenticWorktreeTestHooks"):
+          agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
+            activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

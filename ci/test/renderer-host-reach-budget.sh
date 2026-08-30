@@ -120,6 +120,21 @@ budget_for() {
 	# which the web has no counterpart to and must not pretend to have.
 	src/frontend/renderer.nim) echo "1 guarded" ;;
 	src/frontend/subwindow.nim) echo "1 webexcluded" ;;
+	# `guarded`, and it is the module that MAKES the others guardable. Its one
+	# reach is `require('electron').ipcRenderer` inside
+	# `(typeof require === 'function')`, which is the whole body of the probe
+	# that answers "am I in an Electron renderer?" for a build that may have no
+	# Electron to ask.
+	#
+	# It is counted rather than excused, because the definition above is
+	# deliberate: this IS an Electron symbol in a web bundle. What it is not is
+	# migration work — there is no facade operation for "which host am I", and
+	# a facade that could answer it would have to be constructed by the very
+	# code that needs the answer. The alternative it replaced was worse on both
+	# counts: reading `electron_lib.inElectron` cost the same symbol AND put
+	# Electron's entire `fs`/`child_process`/`path` binding layer into the
+	# renderer's import graph, which is what kept `-d:ctWeb` impossible.
+	src/frontend/lib/electron_presence.nim) echo "1 guarded" ;;
 	# STILL `facade`, and deliberately not migrated in the same pass:
 	# `ui_js.nim` does not compile standalone in the dev shell (it needs the tup
 	# build's generated sources; on `dev` it fails at `resolvePendingDapResponse`

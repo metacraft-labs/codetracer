@@ -17,7 +17,14 @@ import
     event_log_service, debugger_service, editor_service,
     flow_service, search_service, shell_service
   ],
-  lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ],
+  # `electron_lib` is NOT here, and its absence is what makes this module
+  # web-buildable. It was imported for exactly one symbol — `inElectron`, read
+  # by the two `if inElectron:` blocks below — and pulling Electron's whole
+  # `fs` / `child_process` / `path` binding layer in to read one bool is what
+  # made `-d:ctWeb` builds of the renderer impossible: `electron_lib` is
+  # `{.error.}` on that arm by design. `lib/electron_presence` answers the same
+  # question by probing the runtime, and imports nothing.
+  lib/[ logging, monaco_lib, jslib, misc_lib, electron_presence ],
   platform_host,
   lsp_client, lsp_controller
 

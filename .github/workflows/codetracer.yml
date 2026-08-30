@@ -1733,6 +1733,31 @@ jobs:
         # before editing is possible.
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle
 
+      - name: Compile the renderer for a browser (both arms)
+        # THE THING NOTHING IN CI COMPILED. The two steps above cover the web
+        # instantiation's modules and its bundle; neither touches the renderer,
+        # and until now nothing else did either. `ci/lib/test-lane-files.sh`
+        # recorded why: every JS lane passes `-d:nodejs`, and the renderer does
+        # not compile under it — `kdom`'s `createElementNS` is a browser
+        # binding. The only gate was the tup product build, at package time.
+        #
+        # `dev` duly carried a renderer entry point that did not compile.
+        # Commit 333ec709 removed `ui_imports`' `electron_lib` re-export after
+        # auditing its symbols for uses "anywhere under `ui/`"; `ui_js.nim` is
+        # not under `ui/` and read `inElectron` from it. Every suite stayed
+        # green — the `web_browser.nim` shape again, one directory over.
+        #
+        # This step runs both arms on the `js-browser` backend (`nim js`, no
+        # `-d:nodejs`, compile-only) and then the property gate, which proves
+        # the arms are genuinely different builds and that the web one links no
+        # Electron. It needs the isonim tailwind placeholder this job's
+        # `setup-isonim-siblings` step already seeds.
+        #
+        # Before `test-vm` for the same reason the two steps above are: it
+        # answers "does the product's front end build at all", which nobody
+        # wants to learn after twenty minutes of suites.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
+
       - name: Renderer host-reach budget (NS1 residual 1)
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host

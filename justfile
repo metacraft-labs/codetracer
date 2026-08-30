@@ -2797,6 +2797,40 @@ test-host-instantiations:
   exec > >(tee test-logs/test-host-instantiations.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh host-instantiations --compile-only
 
+# THE RENDERER, COMPILED BY CI AT LAST — both arms.
+#
+# The lane note in `host-instantiations` above recorded, honestly, that nothing
+# in CI compiled `renderer.nim`: the JS lane family passes `-d:nodejs`, under
+# which the renderer does not build at all (`kdom`'s `createElementNS` is a
+# browser binding and node is not a browser), so forcing it in would have gated
+# it in a configuration nothing ships. The only thing compiling the renderer
+# was the tup product build, at package time.
+#
+# THAT GAP COST A WORKING RENDERER ON `dev`. Commit 333ec709 removed
+# `ui/ui_imports.nim`'s blanket re-export of `electron_lib` after auditing its
+# exported symbols for uses "anywhere under `ui/`" — and `src/frontend/
+# ui_js.nim`, the renderer ENTRY POINT, is not under `ui/`. It read
+# `inElectron` from that re-export, stopped compiling, and no suite could see
+# it. Same shape as `web_browser.nim`, same week.
+#
+# The fix is a third backend rather than an exception: `js-browser` is `nim js`
+# with no `-d:nodejs`, compile-only by construction. See `test_lane_backend` in
+# ci/lib/test-lane-files.sh, and `ci/test/renderer-browser-build.sh` for the
+# property gate that proves the two arms are genuinely different builds.
+#
+# NEEDS isonim's `build/tailwind-styles.json`: `ui_js.nim` reaches
+# `isonim/dsl/tailwind`, which `staticRead`s it at compile time, and a missing
+# file is an uncatchable Nim error minutes in. `just build-tailwind` generates
+# it; CI seeds a `{}` placeholder in `.github/actions/setup-isonim-siblings`.
+test-renderer-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-browser.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh renderer-electron
+  bash ci/lib/run-nim-test-lane.sh renderer-web
+  bash ci/test/renderer-browser-build.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web

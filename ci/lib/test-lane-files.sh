@@ -144,6 +144,8 @@ ct-trace-units
 mcr-enrichment-units
 online-sharing-live
 host-instantiations
+renderer-electron
+renderer-web
 frontend-native-units
 frontend-js
 vm-unit
@@ -177,6 +179,8 @@ test_lane_description() {
 	mcr-enrichment-units) echo "ct upload / MCR-enrichment unit suites" ;;
 	online-sharing-live) echo "live sharing round-trip (compile-checked only, never executed)" ;;
 	host-instantiations) echo "JS-backend modules no other lane compiles: the facade's host instantiations and platform_host's Electron arm (compile-checked only)" ;;
+	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
+	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
@@ -206,11 +210,32 @@ test_lane_description() {
 	esac
 }
 
-# test_lane_backend ID — "c" (compile a binary and run it) or "js" (compile
-# with `nim js -d:nodejs` and run under node).
+# test_lane_backend ID — "c" (compile a binary and run it), "js" (compile with
+# `nim js -d:nodejs` and run under node), or "js-browser".
+#
+# `js-browser` EXISTS BECAUSE `-d:nodejs` IS NOT A NEUTRAL FLAG. The `js`
+# backend above passes it, and must: without it `std/exitprocs
+# .setProgramResult` is undeclared on the JS target, `std/unittest` substitutes
+# a no-op, and node exits 0 even when a case fails (`vm-js-lane-test.sh` proves
+# that against the real toolchain rather than asserting it).
+#
+# But the renderer is a BROWSER module, and under `-d:nodejs` it does not
+# compile at all — `kdom`'s `createElementNS` is absent, because node is not a
+# browser. That is why the earlier attempt to put `renderer.nim` in
+# `host-instantiations` failed, and the note there correctly refused to force
+# it: compiling the renderer under `-d:nodejs` would gate it in a configuration
+# nothing ships.
+#
+# The resolution is a third backend rather than an exception inside the second.
+# `js-browser` is `nim js` with no `-d:nodejs`, and it is ALWAYS compile-only —
+# see run-nim-test-lane.sh, which forces that rather than trusting a caller to
+# pass `--compile-only`. There is nothing to run: a browser bundle needs a
+# browser, and running it under node would either crash on `document` or, worse,
+# appear to pass while executing none of it.
 test_lane_backend() {
 	case "$1" in
 	frontend-js | vm-js | vm-unit-js | host-instantiations) echo "js" ;;
+	renderer-electron | renderer-web) echo "js-browser" ;;
 	*) echo "c" ;;
 	esac
 }
@@ -241,6 +266,32 @@ test_lane_extra_flags() {
 	vm-unit | vm-unit-js | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated | host-instantiations)
 		# The ViewModel suites import their subjects by bare module name.
 		echo "--path:src/frontend/viewmodel"
+		;;
+	renderer-electron)
+		# The product's own renderer defines, from `RendererDefines` in
+		# repro.nim (the tup `!nim_js` macro carries the same pair). They are
+		# load-bearing, not decoration:
+		#
+		#   -d:ctRenderer            selects the browser/renderer arm in
+		#                            `lib/misc_lib.nim`, `lib/electron_lib.nim`
+		#                            and `ui/menu.nim`. Without it this compiles
+		#                            the module set the Electron MAIN process
+		#                            uses, which is a different product.
+		#   -d:chronicles_enabled=off the renderer does not link the logging
+		#                            sinks; with them on, chronicles pulls
+		#                            `std/os` file sinks into a browser bundle.
+		#
+		# Deliberately NOT `-d:ctInExtension`: that is the VS Code extension
+		# build, a third product, and it is currently broken for an unrelated
+		# reason (see this lane's file list).
+		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
+	renderer-web)
+		# The same renderer, plus `-d:ctWeb` — the define `platform_host.nim`'s
+		# three-way switch reads. This arm must link NO Electron host module,
+		# which is what `ci/test/renderer-browser-build.sh` goes on to assert
+		# about the bundle this lane compiles.
+		echo "-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb"
 		;;
 	*) echo "" ;;
 	esac
@@ -365,6 +416,81 @@ test_lane_files() {
 		echo src/frontend/viewmodel/host/desktop_electron.nim
 		echo src/frontend/viewmodel/host/opfs_volume.nim
 		echo src/frontend/viewmodel/host/web_browser.nim
+		;;
+
+	renderer-electron)
+		# THE RENDERER ENTRY POINTS, on the backend and in the configuration
+		# they actually ship on. This lane and `renderer-web` below are what
+		# close the hole the note in `host-instantiations` describes: until
+		# they existed, NOTHING IN CI COMPILED THE RENDERER, and the only gate
+		# was the tup product build at package time.
+		#
+		# THAT HOLE WAS NOT HYPOTHETICAL, and the cost is the reason these
+		# lanes are worth their minutes. Commit 333ec709 removed
+		# `ui_imports`' blanket re-export of `electron_lib` after auditing its
+		# 14 exported symbols for uses "anywhere under `ui/`". `ui_js.nim` is
+		# at `src/frontend/`, not under `ui/`, and it read `inElectron` from
+		# that re-export. The renderer entry point stopped compiling, `dev`
+		# carried it that way, and every suite stayed green — the same shape
+		# as `web_browser.nim` sitting unparseable for days, one directory
+		# over, in the same week.
+		#
+		# WHY THE ENTRY POINT AND NOT THE MODULES UNDER IT. `renderer.nim` and
+		# `ui/menu.nim` are the two modules people reach for when they think of
+		# "the renderer", and neither belongs here AS ITS OWN SUBJECT:
+		#
+		#   * both are compiled transitively by `ui_js.nim`, which imports
+		#     `renderer` directly and `menu` through its `ui/[...]` list, so
+		#     this lane already type-checks every line of them;
+		#   * `menu.nim` does not compile STANDALONE, and did not before any of
+		#     this work — it fails in `session_switch.nim` at an undeclared
+		#     `rewireDebugControlsBridgeForActiveSession`. That is an artefact
+		#     of the entry module, not a gap: `debug.nim` exports the proc,
+		#     `session_switch.nim` imports `debug`, and the two sit in an
+		#     import cycle with `menu` that Nim resolves in a different order
+		#     when `menu.nim` is itself the main module. Compiled from
+		#     `ui_js.nim` — the way the product builds it — it resolves and the
+		#     whole graph type-checks.
+		#
+		# So listing `menu.nim` here would gate it in a configuration nothing
+		# ships and fail red on unmodified `dev`, which is the exact mistake
+		# the `-d:nodejs` note in `host-instantiations` warns against. The
+		# entry point is the honest subject.
+		#
+		# `subwindow.nim` is the second renderer entry point (Electron's
+		# install subwindow) and is Electron-only by its own `{.error.}` guard,
+		# so it appears in this lane and NOT in `renderer-web`.
+		#
+		# PREREQUISITE, and it fails opaquely without it: `ui_js.nim` reaches
+		# `isonim/dsl/tailwind`, which `staticRead`s
+		# `<isonim>/build/tailwind-styles.json` at compile time. A missing file
+		# is an UNCATCHABLE Nim compile error several minutes in, naming
+		# neither this lane nor the file's purpose. CI seeds a `{}` placeholder
+		# in `.github/actions/setup-isonim-siblings`; locally
+		# `scripts/build-tailwind.sh` (or `just build-tailwind`) generates the
+		# real one. `ci/test/renderer-browser-build.sh` checks for it up front
+		# and says so by name.
+		echo src/frontend/subwindow.nim
+		echo src/frontend/ui_js.nim
+		;;
+
+	renderer-web)
+		# The same entry point with `-d:ctWeb`. NS2's
+		# `test_one_codebase_two_platforms` asks that one codebase produce two
+		# builds; `ci/test/web-bundle-smoke.sh` covers the web INSTANTIATION
+		# (`web_main.nim`) and explicitly disclaims the renderer, because at the
+		# time the renderer's import graph still reached `electron_lib`
+		# through `lib/misc_lib.nim`. That edge is cut, so the renderer now has
+		# a web arm and this lane is what keeps it.
+		#
+		# ONE FILE, and the omissions are the point rather than an oversight:
+		# `subwindow.nim`, `ui/panel_transfer.nim`,
+		# `ui/agentic_worktree_test_hooks.nim` and `lib/electron_lib.nim` each
+		# carry a `when defined(ctWeb): {.error: ...}` naming the capability
+		# they need and the web profile lacks. They are ABSENT from this arm by
+		# design. Adding one here would not test the web build; it would
+		# assert that a module which declares itself impossible is possible.
+		echo src/frontend/ui_js.nim
 		;;
 
 	frontend-native-units)
