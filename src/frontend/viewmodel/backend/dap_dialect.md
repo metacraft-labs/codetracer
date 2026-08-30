@@ -12,10 +12,15 @@ Every row below was reproduced by execution, not by reading.
 > including §4a's — are preserved as written because they are what the fix was
 > verified against, so read them as "what this did", not "what this does".
 > Rows 2, 7 and 8 are untouched, and row 7 is still open.
+>
+> **Added 2026-08-30.** §9 records the **reverse-step-in / reverse-step-out**
+> extension, measured the same way. It is not a defect and never was — it is
+> the one place the dialect *deliberately* exceeds DAP, and it was the only such
+> place with nothing written down.
 
 This file exists because the gap is not one bug. It is a *dialect* difference —
 the ViewModel layer and the replay engine each have a coherent, self-consistent
-view of the protocol, and they disagree in eight places. Fixing them one at a
+view of the protocol, and they disagree in nine places. Fixing them one at a
 time from a bug tracker loses the shape. `backend/dap_commands.nim`'s header
 already promises to keep the frontend's command set in sync with
 `EVENT_KIND_TO_DAP_MAPPING`; this document is the same promise extended across
@@ -24,6 +29,7 @@ the language boundary, to the engine that actually answers.
 Reproducers live in `src/db-backend/wasm-testing/node-host/`:
 
 * `probe_engine_defects.mjs` — the four wasm32 traps (§3).
+* `probe_reverse_step_in.mjs` — the reverse-direction step vocabulary (§9).
 * `worker_backend_wasm_e2e.nim` + `ci/test/worker-backend-wasm-e2e.sh` — the
   19-check end-to-end proof that the transport itself is sound.
 
@@ -302,7 +308,6 @@ The working sequence is therefore: drain, request, then wait for the event.
 (This was measured while `flowMode` was still an ordinal; it is a name now —
 see the Status below, which also records that `flow_vm` consumes the event.)
 
-
 **Status: fixed on both sides, and the ordinal is gone.** Making the ordinal
 work would have left the worse half of the defect in place: two enums of
 different cardinality serialised as a position means a wrong value is
@@ -525,6 +530,129 @@ handler *methods* those arms call.
 
 ---
 
+## 9. `reverse-step-in` / `reverse-step-out` — the dialect's own extension
+
+Every other row here is a place the two sides disagree. This one is a place they
+agree, on a vocabulary **DAP does not have**, and it is recorded because it had
+never been written down: the desktop toolbar renders eight buttons and two of
+them cannot be expressed in the standard protocol at all.
+
+**DAP's reverse vocabulary is two commands.** `stepBack` and `reverseContinue`
+are the whole of it. `stepIn` and `stepOut` take a `granularity`
+(`statement` | `line` | `instruction`) and **no direction**, and there is no
+granularity that means "into the callee". So the honest model of this toolbar is
+**granularity × direction**, and DAP supplies only three of the eight cells.
+CodeTracer fills the missing two with `ct/reverseStepIn` and
+`ct/reverseStepOut`.
+
+**Where each side spells it:**
+
+| layer | spelling | site |
+| --- | --- | --- |
+| toolbar action id | `reverse-step-in` | `views/isonim_debug_controls_view.nim:211-213`, `ui_js.nim:4110` |
+| ViewModel | `DebugControlsVM.reverseStepIn` | `viewmodels/debug_controls_vm.nim:143`, dispatched from `:188` |
+| store → wire | `ct/reverseStepIn` | `store/replay_data_store.nim:915` (`sdReverseStepIn`) |
+| command set | `ct/reverseStepIn`, `ct/reverseStepOut` | `backend/dap_commands.nim:43-44` |
+| event kind | `CtReverseStepIn` → `CtReverseStepInResponse` | `src/frontend/dap.nim:101`, `:299` |
+| engine | `(Action::StepIn, is_reverse = true)` | `src/db-backend/src/dap_server.rs:2037-2038`, in `dap_command_to_step_action` |
+| Python bridge | `reverse_step_in` → `ct/reverseStepIn` | `src/backend-manager/src/python_bridge.rs:1123` |
+
+The engine's mapping is where the semantics live, and it is worth quoting
+because the pairing is not obvious from the names:
+
+    "stepBack"          => (Action::Next,    reverse)
+    "ct/reverseStepIn"  => (Action::StepIn,  reverse)
+    "ct/reverseStepOut" => (Action::StepOut, reverse)
+
+So `stepBack` is a **reverse next**, not a reverse step-in. A client that
+reached for DAP's reverse command expecting to enter the callee gets the
+sibling-level move instead — silently, because both succeed.
+
+**Measured**, against the real wasm32 engine
+(`probe_reverse_step_in.mjs`, stylus-fund fixture, 14 steps / 7 calls):
+
+    command                                ok     from -> to    fn
+    stepIn                                 true     49 -> 60    fund
+    stepOut                                true     49 -> 60    fund
+    stepBack                               true     49 -> 38    new
+    stepBack {"granularity":"statement"}   true     49 -> 38    new
+    stepBack {"granularity":"instruction"} true     49 -> 38    new
+    reverseStepIn                          false    49 -> 49    new
+        message: command reverseStepIn not supported here
+    reverseStepOut                         false    49 -> 49    new
+        message: command reverseStepOut not supported here
+    ct/reverseStepIn                       true     49 -> 38    new
+    ct/reverseStepOut                      true     49 -> 59    fund
+
+Three things in that table, in descending order of how much they cost to
+rediscover:
+
+1. **`granularity` is not direction.** `stepBack` lands on the same step with
+   `statement`, with `instruction`, and with no granularity at all. There is no
+   argument that turns DAP's reverse step into a reverse step-in.
+2. **The DAP-shaped guesses are refused BY NAME.** `reverseStepIn` and
+   `reverseStepOut` — the spellings a client writes first, because every other
+   reverse command in this dialect is `ct/`-prefixed and these two look like
+   they should not be — return `success: false` with
+   `command <name> not supported here`. That is the *good* outcome and the same
+   standard §6 sets: a legible refusal rather than a serde artefact or silence.
+
+   The refusal originates in `dap_command_to_step_action`'s `_` arm, but the
+   message does not: that arm builds `not a recognized dap step action:
+   <command>`, and its caller (`dap_server.rs:2327-2332`) matches `Err(_e)`,
+   drops it, and substitutes the generic sentence. So the text a client reads
+   names the command but not the reason, and the more specific string never
+   leaves the engine. Worth knowing before grepping the sources for a message
+   that is only ever constructed at the call site.
+3. **`ct/reverseStepIn` is a distinct move, not an alias of `stepBack`.** A
+   single anchor cannot show this, because a reverse-next and a reverse-step-in
+   agree everywhere except at a call boundary — from line 49 both land on 38.
+   So the probe sweeps every anchor in the trace and reports where they part:
+
+       ticks  from        stepBack    ct/reverseStepIn  ct/reverseStepOut
+           8  49:new      38:new      38:new            59:fund
+           9  60:fund     59:fund     49:new            49:new     <- IN differs
+          10  61:fund     60:fund     60:fund           49:new
+
+   At tick 9 the cursor is on line 60 of `fund`, immediately after the call to
+   `new` returned. `stepBack` goes to the previous statement of `fund`;
+   `ct/reverseStepIn` goes to **line 49 of `new`** — the last step of the call
+   that just returned. That is the move, and it is the move no DAP command
+   makes.
+
+   Over the whole 14-step trace: `ct/reverseStepIn` differs from `stepBack` at
+   2 of 16 anchors and `ct/reverseStepOut` at 11 of 16. The first number is
+   small because the fixture is shallow, not because the commands are close;
+   it is reported rather than rounded away, and the probe says so explicitly
+   when a fixture produces zero.
+
+**Status: recorded, not a defect, and nothing to fix.** Both commands are in
+`dap_commands.nim`'s `VALID_DAP_COMMANDS_SEQ`, both have a `CtEventKind` and a
+response kind in `src/frontend/dap.nim`, both are in `collab/authority.nim`'s
+authoritative set, and both are dispatched by the engine. This is the one
+extension in the dialect that is *complete on both sides* — which is precisely
+why it was invisible and why it went eight rows without an entry.
+
+What made it worth writing down is a second consumer. BlockTracer renders this
+toolbar on the web (`Debugger-Integration.md` §3 in `codetracer-specs`), whose
+own note reads: *"The eighth control, `reverse-step-in`, is already a CodeTracer
+dialect extension … §2 commits to 'no new protocol', so the honest model for
+this set is granularity × direction and the extension has to be recorded in the
+dialect diff rather than only rendered as a button here."* An extension that
+exists only as a button is an extension the next client has to rediscover — by
+sending `reverseStepIn` and reading a refusal.
+
+Tests: `src/tests/gui/tests/debug-controls/debug_controls_vm_test.nim:38-40`
+pins the eight step commands the VM may emit — six DAP spellings plus the two
+`ct/`-prefixed extensions — and
+`viewmodel/tests/unit/test_sync.nim:688-692` asserts that the `reverseStepIn`
+action reaches the backend as `ct/reverseStepIn`. Both drive
+`MockBackendService`, which is why the ENGINE half needed the probe: a mock
+accepts any string, so no existing test could have told `ct/reverseStepIn` from
+`reverseStepIn`.
+
+---
+
 ## Summary: what blocks a transaction page loading the debugger
 
 | # | gap | side fixed | status |
@@ -538,5 +666,6 @@ handler *methods* those arms call.
 | 5 | `drainPlatformCallbacks` | the SDK (`launch` no longer assumes) | fixed |
 | 6 | `TraceSource` browser kinds | engine | refused by name; kinds still unimplemented |
 | 7 | nine unmapped commands | frontend | **open** |
+| 9 | reverse step-in / step-out | neither — it is the dialect's own extension | recorded; complete on both sides |
 
-§2 and §8 are recorded facts, not defects.
+§2, §8 and §9 are recorded facts, not defects.
