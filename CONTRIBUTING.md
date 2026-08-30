@@ -55,6 +55,41 @@ in errors: see `backend/worker_backend.nim`'s header for an engine that sent
 objects one way and JSON strings the other, and a reader that reported a
 timeout over an engine that had answered.
 
+### Shell: the formatter can change what a script means
+
+`shfmt` is a pre-commit hook (`-w -l -ln auto -s`), so it **rewrites** the files
+in a commit rather than merely reporting on them. It is a Bash parser, and where
+its parse differs from Bash's it silently rewrites working code:
+
+> **An associative-array subscript containing a hyphen is parsed as
+> ARITHMETIC.** `${bundle[renderer-electron]}` becomes
+> `${bundle[renderer - electron]}` — subtraction, not the key you wrote. Bash
+> looks up a key named `renderer - electron`, finds nothing, and yields the
+> empty string.
+
+Bash itself is fine with the original: for an array declared `declare -A` the
+subscript is a *string*, so the hyphen is just a character. Nothing is wrong
+until the formatter touches the file — which means the breakage arrives in
+whatever commit next edits the script, attributed to whoever made that edit,
+with no relation to what they changed.
+
+`ci/test/renderer-pane-parity.sh` hit this while being written. It is caught
+only by **diffing the formatter's output instead of accepting it**; running
+`shfmt -w` and committing the result looks identical to a no-op.
+
+`ci/test/renderer-browser-build.sh` still carries the pattern at its
+`electron_js=` / `web_js=` assignments. It is not currently broken, and if the
+formatter ever rewrites it the gate fails *loudly* — `-z` on the empty value
+hits its "an arm did not build" exit. Note what that costs anyway: a confusing
+red that blames the build for a formatting change. **A false green is the worse
+version of this**, and it is available to any script whose empty-key value flows
+into a comparison rather than a guard.
+
+**Rule: keep array subscripts alphanumeric-and-underscore.** Where the natural
+key has a hyphen (lane ids like `renderer-electron` do), pass a separate
+hyphen-free key alongside it rather than renaming the lane, and say why in a
+comment so the next reader does not "tidy" it back.
+
 ### Migrating an API that carries errors
 
 One rule, because it has cost us three separate defects in three campaigns:
