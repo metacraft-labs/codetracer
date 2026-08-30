@@ -190,7 +190,21 @@ done
 # launcher-recorder-e2e.yml, so that "the shell did not build" and "the shell
 # has no direnv" stop being reported as the same thing. It names `.`, so the
 # rule below still holds; this count is what made the addition visible.
-readonly EXPECTED_SITES=12
+# 12 -> 13: `5103105f` added .github/workflows/deploy-web-codetracer.yml, whose
+# `deploy` job drives the recorder sibling's wasm build through
+#     nix develop .#ci --command \
+#       direnv exec "$RECORDER_DIR" \
+# (:117-118). That is the only site in that file this scanner matches -- its
+# other `direnv` uses sit inside `bash -c '...'` strings rather than on a
+# backslash-continued `nix develop` line -- and counting the workflows with
+# only that one file removed still yields exactly 12. It names `.#ci`, a dev
+# shell this repo defines, so the foreign-shell rule below still holds.
+# 13 -> 17: dev-build and appimage-build each gained a `direnv allow` and a
+# `direnv exec ... nimble install --depsOnly` site (four total), replicating
+# lint-rust's native-recorder setup so their db-backend build.rs takes the
+# direnv path. All four run `nix develop .#devShells.x86_64-linux.default -c
+# direnv ...`, naming `.`'s dev shell, so the foreign-shell rule below holds.
+readonly EXPECTED_SITES=17
 
 if [ "$sites" -eq "$EXPECTED_SITES" ]; then
 	ok "the scanner still matches the direnv call sites ($sites)"

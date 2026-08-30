@@ -20,6 +20,13 @@
         fenix = inputs.fenix;
       };
 
+      # The Python interpreter, forwarded from `codetracer-python-recorder`'s
+      # own `.python-version` through ../python.nix — the same file
+      # `nix/shells/ci-base.nix` reads, so the package set and the dev shells
+      # cannot pick different interpreters, and neither can pick one the
+      # recorder does not build for.
+      pythonEnv = import ../python.nix { inherit pkgs inputs; };
+
       # The sibling checkouts a workspace reaches through codetracer's
       # ``nim.cfg`` ``path:"../isonim/src"`` directives, named ONCE. The staging
       # commands and the ``--path:`` flags below are both derived from this
@@ -1031,10 +1038,13 @@
           '';
         };
 
-        # yarn-python3 = pkgs.python311;
-
-        # those are needed for python312 and later probably
-        yarn-python3 = pkgs.python312.withPackages (p: [
+        # node-gyp (lzma-native) needs setuptools + distutils, which stopped
+        # being bundled with CPython in 3.12. The interpreter itself is NOT
+        # chosen here — it comes from ../python.nix, which forwards the
+        # recorder repo's declaration. (The commented-out `pkgs.python311`
+        # line that used to sit above this was a stale fourth opinion about
+        # the version and is gone with it.)
+        yarn-python3 = pythonEnv.package.withPackages (p: [
           p.setuptools
           p.distutils
         ]);

@@ -1,0 +1,15 @@
+The headless application entrypoint: a debugger shell — session set, active
+session, and each session's pane layout — for a host with no DOM.
+
+This whole tree is a declared Embed SDK consumer, which is the directory-marker
+spelling ci/test/sdk-facade-boundary.sh documents for exactly this case ("a
+whole tree of consumer code — BlockTracer's debugger panes, a headless app
+entrypoint — where marking each file would be noise").
+
+Being a consumer is the point, not an accident of where the code landed.
+BlockTracer.milestones.org M2a item 1 asks for a headless entrypoint and a
+session/layout model that is not GoldenLayout-typed; building it strictly on
+`codetracer_embed` is what turns "the facade is sufficient" from a claim into a
+build failure when it stops being true. It is also what makes the outward half
+of the boundary guard non-vacuous with something other than the SDK's own
+conformance suite.

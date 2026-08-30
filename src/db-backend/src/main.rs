@@ -74,6 +74,11 @@ mod flow_preloader;
 mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
+// IS-M2 — mixed native + VM (GDScript) active-altitude resolver. Mirrors the
+// lib.rs declaration; the bin needs its own copy because
+// `dap_handler::Handler::complete_move` / `load_crossing_spans` reach for the
+// resolver via the `crate::mixed_altitude` path.
+mod mixed_altitude;
 mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. Mirrors the
 // lib.rs declaration above; the bin needs its own copy because
@@ -145,6 +150,10 @@ mod tracepoint_interpreter;
 mod transport;
 mod transport_endpoint;
 mod value;
+// The one clock in this crate; see `wall_clock.rs`. The binary compiles the
+// modules directly rather than through the lib, so it needs its own
+// declaration.
+mod wall_clock;
 
 use crate::paths::{CODETRACER_PATHS, gc_stale_run_dirs, run_dir_for};
 

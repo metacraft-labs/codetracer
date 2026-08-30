@@ -3287,7 +3287,12 @@ suite "IsoNim Flow Panel — active line sync":
       var foundLoadFlow = false
       for cmd in mock.receivedCommands:
         if cmd.command == "ct/load-flow":
-          check cmd.args["rrTicks"].getBiggestInt == 100
+          # The tick lives inside `location`: `CtLoadFlowArguments`
+          # (src/db-backend/src/task.rs) has exactly `flowMode` and
+          # `location`, both required. See the boundary suite in
+          # `tests/flow/flow_vm_test.nim`.
+          check cmd.args["location"]["rrTicks"].getBiggestInt == 100
+          check cmd.args["location"]["path"].getStr == "test.js"
           foundLoadFlow = true
           break
       check foundLoadFlow

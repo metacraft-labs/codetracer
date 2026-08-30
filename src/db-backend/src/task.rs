@@ -3,7 +3,6 @@ use core::fmt;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::ops;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use codetracer_trace_types::{CallKey, EventLogKind, StepId, TypeKind};
 use num_derive::FromPrimitive;
@@ -46,13 +45,116 @@ pub struct CtLoadLocalsResponseBody {
     pub locals: Vec<Variable>,
 }
 
-/// flow mode for flow preloader
-#[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq, JsonSchema)]
+/// The wire spellings of [`FlowMode`], in variant order.
+///
+/// These strings are the cross-language contract for `ct/load-flow`.
+/// `src/common/common_types/codetracer_features/flow.nim` declares the
+/// identical list next to its own `FlowMode`, and
+/// `tests/flow_mode_wire_test.rs` reads that file and fails if the two ever
+/// disagree — the drift this constant exists to prevent was silent for as
+/// long as the wire form was an ordinal.
+pub const FLOW_MODE_WIRE_NAMES: &[&str] = &["call", "diff"];
+
+/// Flow mode for the flow preloader.
+///
+/// # Why the wire form is a string
+///
+/// This used to serialise as a bare `u8` (`serde_repr`), which made the
+/// protocol depend on two enums in two languages agreeing about *declaration
+/// order*. They did not: the ViewModel's `FlowMode` is a three-valued view
+/// granularity (`fmCall | fmLine | fmFunction`) while this one is a
+/// two-valued query mode (`Call | Diff`). An ordinal crossing that boundary
+/// does not fail — it silently means something else, and `fmLine` would have
+/// arrived as `Diff`. A name cannot do that: it either matches a variant or
+/// it is rejected by name.
+///
+/// The legacy numeric form is still *accepted* on the way in, because the
+/// Karax renderer serialises this enum through `toJs` (an ordinal) and the
+/// Rust integration suites write `"flowMode": 0` directly. New senders
+/// should write the string.
+#[derive(Debug, Default, Copy, Clone, FromPrimitive, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 #[repr(u8)]
 pub enum FlowMode {
     #[default]
     Call,
     Diff,
+}
+
+impl FlowMode {
+    /// The stable wire spelling.
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            FlowMode::Call => "call",
+            FlowMode::Diff => "diff",
+        }
+    }
+
+    /// Parse a wire spelling. Exact match only: accepting near-misses is how
+    /// a typo becomes a silently different query.
+    pub fn from_wire_name(name: &str) -> Option<Self> {
+        match name {
+            "call" => Some(FlowMode::Call),
+            "diff" => Some(FlowMode::Diff),
+            _ => None,
+        }
+    }
+
+    /// Parse the legacy ordinal form.
+    pub fn from_ordinal(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(FlowMode::Call),
+            1 => Some(FlowMode::Diff),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for FlowMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.wire_name())
+    }
+}
+
+impl<'de> Deserialize<'de> for FlowMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct FlowModeVisitor;
+
+        impl serde::de::Visitor<'_> for FlowModeVisitor {
+            type Value = FlowMode;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "one of {:?}, or the legacy ordinal 0/1", FLOW_MODE_WIRE_NAMES)
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<FlowMode, E> {
+                FlowMode::from_wire_name(value).ok_or_else(|| {
+                    E::custom(format!(
+                        "unknown flowMode `{value}`; expected one of {}",
+                        FLOW_MODE_WIRE_NAMES.join(", "),
+                    ))
+                })
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<FlowMode, E> {
+                FlowMode::from_ordinal(value).ok_or_else(|| {
+                    E::custom(format!(
+                        "flowMode ordinal {value} is out of range; prefer the stable names {}",
+                        FLOW_MODE_WIRE_NAMES.join(", "),
+                    ))
+                })
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<FlowMode, E> {
+                if value < 0 {
+                    return Err(E::custom(format!("flowMode ordinal {value} is negative")));
+                }
+                self.visit_u64(value as u64)
+            }
+        }
+
+        deserializer.deserialize_any(FlowModeVisitor)
+    }
 }
 
 /// args for `ct/load-locals`
@@ -517,6 +619,30 @@ pub struct MoveState {
     pub stop_signal: RRGDBStopSignal,
     pub frame_info: FrameInfo,
     pub event_log_index: i64,
+
+    /// IS-M2 — the **active altitude** the debugger's attention belongs at for
+    /// this landing step in a mixed native + VM (GDScript) trace: `"vm"` inside
+    /// a covering crossing span, `"native"` otherwise (spec
+    /// `Mixed-Trace-Implicit-Switch.md` §2, P1). Computed on every move by
+    /// [`crate::dap_handler::Handler::complete_move`] via
+    /// [`crate::mixed_altitude::active_altitude`] over the container's cached
+    /// crossing spans. The frontend auto-switch that consumes this is the
+    /// deferred IS-M2 half.
+    ///
+    /// **Additive and optional.** `None` (skipped on the wire) for every trace
+    /// that carries no VM crossing spans — i.e. every standalone materialized
+    /// trace — so the existing Nim `MoveState` consumer parses unchanged and no
+    /// existing field meaning is touched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_altitude: Option<String>,
+
+    /// IS-M2 — `span_id` of the **innermost** VM crossing span covering this
+    /// landing step, or `None` when the altitude is native / no span covers
+    /// (spec §2's `containingSpan`). Lets the frontend name the exact frame it
+    /// auto-switched into. Additive and optional, exactly like
+    /// [`MoveState::active_altitude`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_crossing_span_id: Option<u64>,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
@@ -1344,14 +1470,16 @@ impl Stop {
         result_index: usize,
         stop_type: StopType,
     ) -> Stop {
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .expect("expected now is always >= UNIX_EPOCH");
+        // `crate::wall_clock`, never `SystemTime::now()`: `Stop::new` runs on
+        // the tracepoint path, which is reachable from the browser build
+        // where that call traps and kills the worker. The field is a purely
+        // informational stamp — the ordering keys are `event` / `rr_ticks`,
+        // both derived from `step_id`.
+        let time_seconds = crate::wall_clock::unix_seconds();
         let address = format!("{}:{}", path, line);
         Stop {
             tracepoint_id,
-            time: time.as_secs(),
+            time: time_seconds,
             line,
             path,
             address,
@@ -1411,16 +1539,12 @@ pub struct HistoryResult {
 }
 
 impl HistoryResult {
-    #[allow(clippy::expect_used)]
     pub fn new(loc: Location, val: Value, name: String) -> HistoryResult {
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .expect("expect that always now >= UNIX_EPOCH");
+        // See `Stop::new`: informational stamp, wasm-safe clock.
         HistoryResult {
             location: loc,
             value: val,
-            time: time.as_secs(),
+            time: crate::wall_clock::unix_seconds(),
             description: name,
             origin_summary: None,
         }
@@ -1955,18 +2079,18 @@ pub struct Notification {
 }
 
 impl Notification {
-    #[allow(clippy::expect_used)]
     pub fn new(kind: NotificationKind, msg: &str, is_operation_status: bool) -> Notification {
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .expect("expect that always `now` >= UNIX_EPOCH");
+        // `crate::wall_clock`, never `SystemTime::now()`. Every step that
+        // reaches a trace boundary builds one of these ("Beginning of record
+        // reached"), so a trapping clock here meant reverse stepping worked
+        // mid-trace in the browser and killed the worker at the edge. The
+        // field is informational: no consumer in this repo reads it back.
         Notification {
             kind,
             text: msg.to_string(),
             is_operation_status,
             active: true,
-            time: time.as_secs(),
+            time: crate::wall_clock::unix_seconds(),
             ..Default::default()
         }
     }

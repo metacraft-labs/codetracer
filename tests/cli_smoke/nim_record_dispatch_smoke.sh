@@ -20,9 +20,19 @@
 set -u
 
 CT=${CT_BIN:-src/build-debug/bin/ct}
-if [ ! -f "$CT" ]; then
-	echo "SKIP: ct binary not found at $CT"
-	exit 0
+if [ ! -x "$CT" ]; then
+	# A missing prerequisite is a hard failure, not a silent pass.
+	# CT_SMOKE_ALLOW_MISSING=1 is the local-iteration escape hatch; it is
+	# never set in a CI gate.
+	if [ "${CT_SMOKE_ALLOW_MISSING:-0}" = "1" ]; then
+		echo "SKIP: ct binary not found at $CT (CT_SMOKE_ALLOW_MISSING=1)" >&2
+		exit 0
+	fi
+	echo "error: ct binary not found or not executable at $CT" >&2
+	echo "  Build with: just build-once" >&2
+	echo "  Or set CT_BIN to a pre-built binary." >&2
+	echo "  Set CT_SMOKE_ALLOW_MISSING=1 to skip locally (never in CI)." >&2
+	exit 1
 fi
 
 CT_NIM="${CT_NIM_EXE:-}"

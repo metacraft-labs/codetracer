@@ -2,6 +2,15 @@ from std / dom import Document
 import
   ui_imports, debug, command
 
+# NS1 / Noir-Studio.md §1a.2. Three decisions below used to be build checks
+# (`defined(ctmacos)`, `electron_lib.inElectron`); they are now capability
+# queries against the running platform, so an action is absent because its
+# capability is rather than because the code asked which build it was.
+# `topbar_actions.nim` is pure and its decisions are asserted headlessly in
+# `viewmodel/tests/unit/test_platform_facade.nim`, on both backends.
+from ../platform_host import
+  TopbarAction, TopbarModel, ctTopbar, has, tbaInPageMenu, tbaWindowControls
+
 proc closeMenu(self: MenuComponent)
 
 when defined(js):
@@ -34,12 +43,19 @@ when defined(js):
     if host.isNil:
       return
     let existing = $host.getAttribute(cstring"class")
+    # `reserveWindowControls = defined(ctmacos)` until NS1. The reservation is
+    # a fact about the *window system* — macOS paints traffic lights over the
+    # caption bar — not about the build, and the same bundle rendering into a
+    # browser tab has no lights to avoid. `TopbarModel` derives both this and
+    # the fullscreen release from the platform profile.
+    let bar = ctTopbar(fullscreen = captionBarFullscreen)
     host.setAttribute(
       cstring"class",
       cstring(captionBarHostClasses(
         existing,
-        reserveWindowControls = defined(ctmacos),
-        fullscreen = captionBarFullscreen)))
+        reserveWindowControls =
+          bar.reserveWindowControlSpace or bar.captionBarFullscreen,
+        fullscreen = bar.captionBarFullscreen)))
 
   proc setCaptionBarFullscreen*(fullscreen: bool) =
     ## Called from the `window-fullscreen-changed` IPC message that
@@ -466,12 +482,20 @@ when defined(js):
       self.prepared = prepareSearch(self.data.ui.menuNode)
       self.nameMap = generateNameMap(self.data.ui.menuNode)
 
-    result.showNavigation = not self.data.ui.menuNode.isNil and not defined(ctmacos)
+    # NS1: the in-page menu appears when the platform does NOT supply a native
+    # menu bar to put it in — which on the desktop is "not macOS", and on the
+    # web is "always", and neither is a `defined()`.
+    let topbar = ctTopbar()
+    result.showNavigation =
+      not self.data.ui.menuNode.isNil and topbar.has(tbaInPageMenu)
     result.active = self.active
     result.searchQuery =
       if self.searchQuery.isNil: ""
       else: $self.searchQuery
-    result.showWindowMenu = ui_imports.electron_lib.inElectron and not defined(ctmacos)
+    # NS1: we draw the window buttons when the platform hands us the frame and
+    # paints nothing over it. Was `inElectron and not defined(ctmacos)` — one
+    # runtime check and one build check answering one question between them.
+    result.showWindowMenu = topbar.has(tbaWindowControls)
     result.maximized = isWindowMaximizedForMenu()
 
     if self.data.ui.menuNode.isNil:

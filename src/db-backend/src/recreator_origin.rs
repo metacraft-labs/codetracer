@@ -50,7 +50,6 @@
 //! and the frontend renders the "coming soon" affordance.
 
 use std::path::PathBuf;
-use std::time::Instant;
 
 use log::{debug, info, warn};
 use serde::Deserialize;
@@ -230,7 +229,11 @@ pub fn run_rr_origin_chain(
     patterns: &PatternSet,
     meta_dat_sources_root: Option<&std::path::Path>,
 ) -> RrOriginResult {
-    let started_at = Instant::now();
+    // `WallClockDeadline` already reads the wasm-safe clock
+    // (`crate::wall_clock`); `Instant::now()` traps on
+    // wasm32-unknown-unknown and this function is reachable from the
+    // browser build, so measure elapsed time from the deadline rather
+    // than opening a second, trapping clock.
     let deadline = WallClockDeadline::new(budget.wall_clock_ms);
     let mut metrics = OriginMetrics::default();
     let mut hops: Vec<OriginHop> = Vec::new();
@@ -342,7 +345,7 @@ pub fn run_rr_origin_chain(
         // The guard re-issues reverse-continue when the writing
         // instruction's source line does not target `current_var_name`
         // (spec §6.3 "stack-slot reuse / aliasing guard").
-        let hop_started = Instant::now();
+        let hop_started = WallClockDeadline::new(per_hop_cap_ms);
         let validated = loop {
             let raw = match wp_guard
                 .session
@@ -367,13 +370,13 @@ pub fn run_rr_origin_chain(
                     "origin_chain: reverse-continue stopped for non-watchpoint reason `{}`; re-issuing until watchpoint, recording start, or cap",
                     rc.reason
                 );
-                if (hop_started.elapsed().as_millis() as u32) >= per_hop_cap_ms {
+                if hop_started.exceeded() {
                     break ValidatedHop::OutOfBudget;
                 }
                 continue;
             }
             // Per-hop wall-clock cap.
-            if (hop_started.elapsed().as_millis() as u32) >= per_hop_cap_ms {
+            if hop_started.exceeded() {
                 break ValidatedHop::OutOfBudget;
             }
 
@@ -647,7 +650,7 @@ pub fn run_rr_origin_chain(
         }
     }
 
-    metrics.elapsed_ms = started_at.elapsed().as_millis() as u64;
+    metrics.elapsed_ms = deadline.elapsed_ms();
     metrics.steps_scanned = hops.len() as u64;
 
     let confidence: f32 = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
@@ -941,10 +944,7 @@ fn build_continuation_token(
         max_hops,
         patterns_fingerprint: patterns.fingerprint().hex.clone(),
         source_digests,
-        issued_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        issued_at: crate::wall_clock::unix_seconds(),
     };
     token.encode()
 }

@@ -97,8 +97,13 @@ proc displayFlexIf(cond: bool): string =
 # matching the legacy behaviour.
 
 proc codeStateLineClass(vm: StateVM): string =
-  if vm.codeStateLine.val.len == 0: "code-state-line no-code"
-  else: "code-state-line"
+  ## The class name only. Whether there *is* source for this position is
+  ## `StateVM.hasCodeState`, not a length test written here:
+  ## Page-Descriptions.md §14 requires every degraded state to be a value
+  ## on a ViewModel rather than a branch in a view, and this branch was
+  ## one of them.
+  if vm.hasCodeState.val: "code-state-line"
+  else: "code-state-line no-code"
 
 proc codeStateLineText(vm: StateVM): string =
   ## The formatted text rendered inside the inner ``<span>``. Empty

@@ -904,10 +904,14 @@ suite "Scenario 8: Cross-VM consistency after move":
       check eventLogCmd.isSome
       check eventLogCmd.get.args["rrTicks"].getBiggestInt == 500
 
-      # FlowVM: flow data request was sent.
+      # FlowVM: flow data request was sent. The tick travels inside
+      # `location`, which is a required field of the engine's
+      # `CtLoadFlowArguments` (src/db-backend/src/task.rs) — a top-level
+      # `rrTicks` is a key the engine never reads. See the boundary suite in
+      # `tests/flow/flow_vm_test.nim`.
       let flowCmd = mock.findCommand("ct/load-flow")
       check flowCmd.isSome
-      check flowCmd.get.args["rrTicks"].getBiggestInt == 500
+      check flowCmd.get.args["location"]["rrTicks"].getBiggestInt == 500
 
       dispose()
 

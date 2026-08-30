@@ -400,8 +400,17 @@ suite "FlowVM auto-load effect":
       var found = false
       for cmd in mock.receivedCommands:
         if cmd.command == "ct/load-flow":
-          check cmd.args["rrTicks"].getBiggestInt == 200
-          check cmd.args["flowMode"].getStr == "fmCall"
+          # The engine's `CtLoadFlowArguments` (src/db-backend/src/task.rs)
+          # has exactly two fields, `flowMode` and `location`, and the tick
+          # lives INSIDE the location. The old shape — a top-level `rrTicks`
+          # and `"flowMode": "fmCall"` — named a rendering granularity the
+          # engine has never heard of and omitted the required location.
+          check cmd.args.hasKey("location")
+          check cmd.args["location"]["rrTicks"].getBiggestInt == 200
+          check not cmd.args.hasKey("rrTicks")
+          # A stable name, not an ordinal: see common/flow_mode_wire.nim.
+          check cmd.args["flowMode"].getStr == FlowModeWireCall
+          check cmd.args["flowMode"].kind == JString
           found = true
           break
       check found
@@ -430,7 +439,13 @@ suite "FlowVM auto-load effect":
       for i in countBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
         if cmd.command == "ct/load-flow":
-          check cmd.args["flowMode"].getStr == "fmFunction"
+          # Every view granularity is `call` to the engine — they differ in
+          # how this panel lays the returned steps out, not in what it asks
+          # for. Sending `"fmFunction"` was a category error; sending the
+          # ordinal `2` would have been worse, because the engine's enum has
+          # no third member and an out-of-range-but-plausible ordinal is
+          # indistinguishable from a correct one at the call site.
+          check cmd.args["flowMode"].getStr == FlowModeWireCall
           found = true
           break
       check found
@@ -669,5 +684,137 @@ suite "FlowVM loop control arrows":
       check vm.selectedIteration.val == 0
       vm.stepIterationBackward()
       check vm.selectedIteration.val == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# The `ct/load-flow` boundary: vocabulary, request shape, and the event path
+# ---------------------------------------------------------------------------
+#
+# `ct/load-flow` had two `FlowMode` enums that did not agree — the engine's
+# two-valued query mode (`Call | Diff`, src/db-backend/src/task.rs) and this
+# panel's three-valued view granularity (`fmCall | fmLine | fmFunction`) —
+# and the panel sent `$mode` at a field the engine read as an ordinal.
+#
+# The visible symptom was a rejected request. The dangerous one was not: an
+# ordinal that crosses a boundary where the two sides have different
+# cardinality does not fail, it silently means something else, and a window
+# for the wrong location looks exactly like a window for the right one.
+#
+# So the wire form is a name, `common/flow_mode_wire.nim` is the single Nim
+# source of it, and `src/db-backend/tests/flow_mode_wire_test.rs` reads that
+# file so the two languages cannot drift apart without a test failing. These
+# cases pin the Nim half.
+
+suite "FlowVM — the ct/load-flow engine boundary":
+
+  test "the wire vocabulary is exactly what the engine parses":
+    # The Rust half asserts the same two strings against `FLOW_MODE_WIRE_NAMES`
+    # in src/db-backend/src/task.rs, and reads this vocabulary out of
+    # common/flow_mode_wire.nim to prove they are the same list.
+    check FlowModeWireNames == ["call", "diff"]
+    check FlowModeWireCall == "call"
+    check FlowModeWireDiff == "diff"
+    check flowModeWireOrdinal("call") == 0
+    check flowModeWireOrdinal("diff") == 1
+    # An unknown spelling must be reportable, never silently defaulted.
+    check flowModeWireOrdinal("fmCall") == -1
+    check flowModeWireOrdinal("") == -1
+
+  test "every view granularity maps to a name the engine knows":
+    # Totality is the property: a fourth `fm*` member cannot compile without
+    # someone deciding what it means to the engine, and no granularity may
+    # map to a string outside the shared vocabulary.
+    for mode in FlowMode.low .. FlowMode.high:
+      let wire = engineFlowModeWireName(mode)
+      check flowModeWireOrdinal(wire) >= 0
+      check wire != $mode
+
+  test "the request carries flowMode and location, and nothing else":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      discard createFlowVM(store)
+      drain()
+
+      var dbg = store.debugger.val
+      dbg.rrTicks = 314'u64
+      dbg.location = Location(file: "main.nr", line: 9, callstackDepth: 2)
+      store.debugger.val = dbg
+      drain()
+
+      var found = false
+      for cmd in mock.receivedCommands:
+        if cmd.command == "ct/load-flow":
+          found = true
+          # `CtLoadFlowArguments` has exactly these two fields and both are
+          # required — no `#[serde(default)]` on the container.
+          check cmd.args.kind == JObject
+          check cmd.args.hasKey("flowMode")
+          check cmd.args.hasKey("location")
+          check cmd.args.len == 2
+          check cmd.args["flowMode"].kind == JString
+          check cmd.args["location"]["path"].getStr == "main.nr"
+          check cmd.args["location"]["line"].getInt == 9
+          check cmd.args["location"]["rrTicks"].getBiggestInt == 314
+          check cmd.args["location"]["callstackDepth"].getInt == 2
+      check found
+
+      dispose()
+
+  test "the window arrives on the ct/updated-flow event, not the reply":
+    # `ct/load-flow`'s real answer is a queued event
+    # (`src/db-backend/src/dap.rs`). A panel that consumed only the reply
+    # would be permanently empty against the engine while every mock-driven
+    # test passed — the request/response half of this boundary is not the
+    # whole boundary.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      drain()
+      check vm.loops.val.len == 0
+
+      mock.emitEvent(%*{
+        "kind": UpdatedFlowEventKind,
+        "data": loopFlowResponse(LoopHeaderTicks, LoopHeaderTicks[0]),
+      })
+      drain()
+
+      check vm.loops.val.len > 0
+      check vm.totalIterations.val == LoopHeaderTicks.len
+
+      dispose()
+
+  test "the event is recognised under the DAP name too":
+    # Which spelling arrives depends on whether the backend-manager is in
+    # the path. Recognising only one is a silent empty panel on the other.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      drain()
+
+      mock.emitEvent(%*{
+        "kind": UpdatedFlowCommandName,
+        "data": loopFlowResponse(LoopHeaderTicks, LoopHeaderTicks[0]),
+      })
+      drain()
+
+      check vm.loops.val.len > 0
+
+      dispose()
+
+  test "an unrelated event never disturbs the flow window":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      drain()
+
+      vm.applyFlowUpdate(loopFlowResponse(LoopHeaderTicks, LoopHeaderTicks[0]))
+      let before = vm.loops.val.len
+      check before > 0
+
+      mock.emitEvent(%*{"kind": "CtUpdatedTable", "data": %*{}})
+      drain()
+
+      check vm.loops.val.len == before
 
       dispose()

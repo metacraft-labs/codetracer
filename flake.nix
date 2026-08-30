@@ -86,7 +86,18 @@
     };
 
     codetracer-python-recorder = {
-      url = "github:metacraft-labs/codetracer-python-recorder";
+      # `/dev`, not the bare URL.  A bare `github:owner/repo` resolves the
+      # repo's DEFAULT branch, and this repo's default is `stable` -- the last
+      # released recorder snapshot, the same distinction spelled out for
+      # `codetracer-native-recorder` below.  `nix/python.nix` reads
+      # `inputs."codetracer-python-recorder".lib.python`, the single
+      # declaration of the interpreter version that repo now owns
+      # (`.python-version`); that output exists on `dev` and not on `stable`,
+      # so the bare URL made `nix develop` fail outright with
+      # `error: attribute 'python' missing`.  Every lane other than the Nix
+      # lane took the recorder from a local checkout or a workspace override
+      # and so never saw the disagreement.
+      url = "github:metacraft-labs/codetracer-python-recorder/dev";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
@@ -128,7 +139,7 @@
       # reprobuild revision's own flake.lock and mirror its `runquota-src`.
       # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
       # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/b71e8e9061b479334d9b78638cfb828af2db938d";
+      url = "github:metacraft-labs/runquota/f1ca742d19c7b981eeea0fba8b4e029207f43778";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
@@ -148,7 +159,7 @@
       # against a different nixpkgs and against its own runquota /
       # native-recorder pins, producing a different `repro` binary than the one
       # this repo's shells are meant to ship.
-      url = "github:metacraft-labs/reprobuild/b5b88139767d97e96ca646b6f83641d8bb2e69c5";
+      url = "github:metacraft-labs/reprobuild/2f124aebbc8a9e61e87de1aa13e15298a83f88c6";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";

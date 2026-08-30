@@ -48,6 +48,39 @@
 name: publish workspace lock
 
 on:
+  # POST-MERGE ON THE REAL MAINLINE HEAD. This is the trigger that actually
+  # keeps `dev` locked, and it exists because `pull_request_target` alone never
+  # did.
+  #
+  # WHY pull_request_target was insufficient. `dev`'s history is LINEAR: its
+  # commits arrive by direct push from a workspace or by rebase-merge, not as
+  # GitHub-created merge commits, and many arrive with no pull request at all.
+  # `pull_request_target: closed` fires for none of those — a direct push is not
+  # a pull-request event, and a rebase-merge's mainline SHAs are not the PR head
+  # this workflow re-anchors from. Measured: since this workflow landed on
+  # `dev`, `pull_request_target` produced ZERO runs, and every mainline commit
+  # had its lock published by hand. A `push` to `dev` is the ONE event that
+  # fires for every way a commit reaches the branch, on the real post-merge
+  # HEAD, in the repo's own write context.
+  #
+  # WHAT IT RE-ANCHORS. On push, `github.sha` is the new mainline HEAD (target)
+  # and `github.event.before` is the branch's PREVIOUS tip — the commit the
+  # prior push run already published a lock for. So each push re-anchors the
+  # previous HEAD's lock onto the new HEAD: the same forward carry the operator
+  # was doing by hand, now automatic. The chain is self-sustaining as long as
+  # the current HEAD is locked; a one-time re-anchor of the last published lock
+  # onto HEAD bootstraps it. Note the DELIBERATE limitation shared with any
+  # ancestry-based carry: if a pushed commit BUMPED a sibling, the carried set
+  # predates that bump. The `pull_request_target` path below stays for exactly
+  # that case (it reads the PR HEAD's own lock, which carries the bump); when a
+  # bump PR is merged through the GitHub UI both fire, the concurrency queue
+  # serialises them, and the immutability check keeps the PR-HEAD answer.
+  #
+  # This runs with the repository's own `GITHUB_TOKEN`-equivalent write context,
+  # then mints the CI App token below exactly as the PR path does.
+  push:
+    branches: [dev]
+
   # `pull_request_target`, not `pull_request`: this repo is public, so a fork's
   # pull request would otherwise run without the credential this job needs, and
   # a merged fork PR is precisely a mainline commit that nothing locked. The
@@ -56,6 +89,11 @@ on:
   # from the event payload and calls a pinned action from the base branch; the
   # workflow definition itself also comes from the base branch, so a fork
   # cannot alter it.
+  #
+  # It is kept ALONGSIDE `push` for the one case `push` carries wrong: a merged
+  # pull request that bumped a sibling, where the PR HEAD's lock is the correct
+  # source and the branch's previous tip is not. For a fork PR it is also the
+  # only path that runs with a credential at all.
   pull_request_target:
     types: [closed]
     branches: [dev, stable]
@@ -94,10 +132,14 @@ jobs:
   publish:
     # A pull request that was CLOSED without merging created no mainline
     # commit, and `merge_commit_sha` on such a payload names nothing that
-    # landed.
+    # landed. A push whose `before` is the all-zero SHA is a branch CREATION —
+    # there is no previous tip to re-anchor a lock from, so there is nothing to
+    # carry forward.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.merged == true
+      github.event.pull_request.merged == true ||
+      (github.event_name == 'push' &&
+       github.event.before != '0000000000000000000000000000000000000000')
     runs-on: ubuntu-latest
     steps:
       - name: Generate CI token
@@ -109,14 +151,29 @@ jobs:
           owner: metacraft-labs
 
       - name: Publish the workspace lock
-        uses: metacraft-labs/metacraft-github-actions/publish-workspace-lock@main
+        uses: metacraft-labs/metacraft-github-actions/publish-workspace-lock@dev
         with:
           gh-token: ${{ steps.ci_token.outputs.token }}
           repo: metacraft-labs/codetracer
-          source-sha: ${{ github.event.inputs.source-sha || github.event.pull_request.head.sha }}
-          target-sha: ${{ github.event.inputs.target-sha || github.event.pull_request.merge_commit_sha }}
-          base-ref: ${{ github.event.inputs.base-ref || github.event.pull_request.base.ref }}
+          # On push the sibling set is carried from the branch's PREVIOUS tip
+          # (`github.event.before`, already locked by the prior run) onto the
+          # new HEAD (`github.sha`); on a merged PR it comes from the PR HEAD's
+          # own lock onto the merge commit; workflow_dispatch states both SHAs.
+          source-sha: >-
+            ${{ github.event.inputs.source-sha
+                || (github.event_name == 'push' && github.event.before)
+                || github.event.pull_request.head.sha }}
+          target-sha: >-
+            ${{ github.event.inputs.target-sha
+                || (github.event_name == 'push' && github.sha)
+                || github.event.pull_request.merge_commit_sha }}
+          base-ref: >-
+            ${{ github.event.inputs.base-ref
+                || (github.event_name == 'push' && github.ref_name)
+                || github.event.pull_request.base.ref }}
           provenance: >-
             ${{ github.event_name == 'workflow_dispatch'
                 && 'a manual backfill'
+                || (github.event_name == 'push'
+                    && format('a push to {0}', github.ref_name))
                 || format('pull request #{0}', github.event.pull_request.number) }}

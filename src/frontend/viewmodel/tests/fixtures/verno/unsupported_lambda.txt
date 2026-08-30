@@ -1,0 +1,4 @@
+
+thread 'main' panicked at formal_verification/src/vir_backend/vir_gen/expr_to_vir/types.rs:56:13:
+not yet implemented: UNSUPPORTED: function types (lambdas, function values)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

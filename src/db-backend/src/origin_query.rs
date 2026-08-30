@@ -16,7 +16,6 @@
 //! transport-agnostic.
 
 use std::fmt;
-use std::time::SystemTime;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL;
@@ -248,25 +247,31 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// Wall-clock cancellation helper used by the materialized scan loop.
+///
+/// The clock comes from [`crate::wall_clock`], not `std::time`: every
+/// origin-chain entry point (`ct/load-locals`, `ct/originChain`,
+/// `ct/load-history` in eager mode) constructs one of these, and
+/// `SystemTime::now()` traps on `wasm32-unknown-unknown` — which made the
+/// State pane unusable in the browser by killing the worker on the first
+/// local it tried to summarise.
 #[derive(Debug, Clone, Copy)]
 pub struct WallClockDeadline {
-    pub started_at: SystemTime,
+    /// Reading of [`crate::wall_clock::monotonic_ms`] at construction.
+    /// Only differences against it are meaningful.
+    pub started_at_ms: u64,
     pub budget_ms: u32,
 }
 
 impl WallClockDeadline {
     pub fn new(budget_ms: u32) -> Self {
         WallClockDeadline {
-            started_at: SystemTime::now(),
+            started_at_ms: crate::wall_clock::monotonic_ms(),
             budget_ms,
         }
     }
 
     pub fn elapsed_ms(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(self.started_at)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
+        crate::wall_clock::monotonic_ms().saturating_sub(self.started_at_ms)
     }
 
     pub fn exceeded(&self) -> bool {

@@ -24,6 +24,21 @@ if [[ ! -x ${CT_BIN} ]]; then
 	exit 1
 fi
 
+# The interpreter both venvs below are built from. NOT a bare `python3`: that
+# resolves from PATH, and a dev shell can carry more than one Python (it
+# carried two, 3.12 and 3.13, until nix/python.nix collapsed the choice), so
+# the version this lane tested was decided by package ordering rather than by
+# anything anyone wrote down. $CODETRACER_PYTHON_CMD is exported by
+# nix/shells/ci-base.nix from that single pin. The fallback keeps the script
+# runnable outside the dev shell, where there is no pin to honour.
+#
+# Deliberately WITHOUT --system-site-packages: the second venv below must NOT
+# be able to import codetracer_python_recorder — that is the whole point of the
+# "recorder module is missing" case — and inheriting the pinned environment's
+# site-packages would hand it the module and make that check vacuous.
+SMOKE_PYTHON="${CODETRACER_PYTHON_CMD:-python3}"
+echo "smoke venvs will be built from: ${SMOKE_PYTHON} ($("${SMOKE_PYTHON}" -V 2>&1))"
+
 VENV_DIR=$(mktemp -d -t codetracer-python-recorder-smoke-venv-XXXXXX)
 TRACE_DIR=$(mktemp -d -t codetracer-python-recorder-smoke-trace-XXXXXX)
 MISSING_VENV_DIR=""
@@ -51,7 +66,7 @@ echo '##########################################################################
 echo "Preparing virtual environment with codetracer-python-recorder"
 echo '###############################################################################'
 
-python3 -m venv "${VENV_DIR}"
+"${SMOKE_PYTHON}" -m venv "${VENV_DIR}"
 # shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip
@@ -105,7 +120,7 @@ echo '##########################################################################
 deactivate
 
 MISSING_VENV_DIR=$(mktemp -d -t codetracer-python-recorder-missing-venv-XXXXXX)
-python3 -m venv "${MISSING_VENV_DIR}"
+"${SMOKE_PYTHON}" -m venv "${MISSING_VENV_DIR}"
 
 MISSING_TRACE_DIR=$(mktemp -d -t codetracer-python-recorder-missing-trace-XXXXXX)
 

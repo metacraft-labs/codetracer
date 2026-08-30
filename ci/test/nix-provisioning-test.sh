@@ -164,7 +164,12 @@ done
 # in the same spirit as EXPECTED_BUILD_SITES in
 # ci/test/sibling-provisioning-test.sh: "no unprovisioned job was found" is
 # also true of a scanner that has stopped finding jobs at all.
-readonly EXPECTED_NIX_JOBS=28
+# 30 -> 31: dev-build gained a multi-line `nix develop ... -c direnv allow`
+# step (its native-recorder setup). Its pre-existing build step spelled nix as
+# a single-line quoted `- run: "nix develop ..."`, which this scanner does not
+# match, so dev-build only now classifies as nix-using. It provisions Nix
+# (Install Nix + setup-db-backend-siblings), so the "provisions first" rule holds.
+readonly EXPECTED_NIX_JOBS=31
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

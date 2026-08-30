@@ -63,8 +63,6 @@
 //! [`MCR_DEFAULT_MAX_HOPS`] = 32 (per spec §12) because Tier 1 dominates
 //! within-window scans and each hop is microsecond-cheap.
 
-use std::time::Instant;
-
 use log::debug;
 
 use crate::data_watch;
@@ -280,7 +278,11 @@ pub fn run_mcr_origin_chain(
     args: &CtOriginChainArguments,
     budget: &OriginBudget,
 ) -> McrOriginResult {
-    let started_at = Instant::now();
+    // `WallClockDeadline` already reads the wasm-safe clock
+    // (`crate::wall_clock`); `Instant::now()` traps on
+    // wasm32-unknown-unknown and this function is reachable from the
+    // browser build, so measure elapsed time from the deadline rather
+    // than opening a second, trapping clock.
     let deadline = WallClockDeadline::new(budget.wall_clock_ms);
     let mut metrics = OriginMetrics::default();
     let mut hops: Vec<OriginHop> = Vec::new();
@@ -383,7 +385,7 @@ pub fn run_mcr_origin_chain(
         terminator.expression = format!("max_hops budget ({}) reached", effective_max_hops);
     }
 
-    metrics.elapsed_ms = started_at.elapsed().as_millis() as u64;
+    metrics.elapsed_ms = deadline.elapsed_ms();
     metrics.steps_scanned = hops.len() as u64;
     let confidence: f32 = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
 

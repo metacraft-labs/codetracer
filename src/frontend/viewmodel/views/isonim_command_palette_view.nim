@@ -124,6 +124,7 @@ proc resultKindClass*(kind: CommandPaletteResultKind): string =
   of cprkTextSearch: "command-text-search"
   of cprkSymbol: "command-symbol"
   of cprkAgent: "command-agent"
+  of cprkProjectAction: "command-project-action"
 
 proc resultLevelClass*(level: CommandPaletteNotificationLevel): string =
   ## Map a ``CommandPaletteNotificationLevel`` enum to the CSS

@@ -630,10 +630,26 @@ ensure_node_tooling() {
 	fi
 	local _saved_path="$PATH"
 	export PATH="$NODE_DIR:$PATH"
+	# See the matching comment in env.ps1's Ensure-NodeTooling.
+	# yarn-plugin-nixify regenerates the tracked node-packages/yarn-project.nix
+	# on every `yarn install`, replacing the hand-maintained per-platform
+	# `cacheOutputHashes` table with a single hash for whichever host just ran.
+	# That breaks `nix/packages/default.nix` for the other platforms and dirties
+	# a tracked file merely by activating the dev shell. `enableNixify` is the
+	# plugin's own opt-out; Yarn reads it from YARN_ENABLE_NIXIFY.
+	local _saved_nixify="${YARN_ENABLE_NIXIFY-}"
+	local _had_nixify=0
+	[[ -n ${YARN_ENABLE_NIXIFY+x} ]] && _had_nixify=1
+	export YARN_ENABLE_NIXIFY=false
 	if [[ -f yarn.lock ]]; then
 		"$npx_cmd" yarn install --frozen-lockfile
 	else
 		"$npx_cmd" yarn install
+	fi
+	if [[ $_had_nixify -eq 1 ]]; then
+		export YARN_ENABLE_NIXIFY="$_saved_nixify"
+	else
+		unset YARN_ENABLE_NIXIFY
 	fi
 	export PATH="$_saved_path"
 	popd >/dev/null

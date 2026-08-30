@@ -23,6 +23,7 @@
 
 import std/[sets, tables, unittest, strutils]
 
+import isonim/core/async_compat
 import isonim/core/signals
 import isonim/core/owner
 import isonim/testing/mock_dom
@@ -33,13 +34,19 @@ import ../../views/isonim_state_view
 
 import ../../backend/mock_backend
 import ../../store/replay_data_store
-import std/asyncdispatch
 
 proc drain() =
-  try:
-    poll(0)
-  except ValueError:
-    discard
+  ## Flush whatever the reactive layer resolved synchronously.
+  ##
+  ## `drainPlatformCallbacks` rather than `asyncdispatch.poll(0)`: `poll` is
+  ## only reachable through `std/asyncdispatch`, which drags in
+  ## `std/nativesockets` and fails the JS compile outright
+  ## (`undeclared identifier: 'cstringArrayToSeq'`). This helper is the
+  ## cross-target primitive — a `poll(0)` on native, the pending-callback
+  ## flush on JS — so the suite runs on both backends, which is what
+  ## Front-End-Architecture.md §6 asks for and what the `vm-unit-js` lane
+  ## exists to enforce.
+  drainPlatformCallbacks()
 
 proc findById*(node: MockNode; id: string): MockNode =
   if node.kind == mnkElement and node.attributes.getOrDefault("id", "") == id:

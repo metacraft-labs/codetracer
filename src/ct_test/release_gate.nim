@@ -43,6 +43,31 @@ const
     "src/tests/gui/tests/editor/editor_vm_test.nim",
     "src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim",
     "src/tests/gui/tests/views/isonim_views_test.nim",
+    # BlockTracer M2b's two named verification tests
+    # (BlockTracer.milestones.org, "The Five Panes BlockTracer Renders").
+    # The `vm-unit` lane already RUNS them — it discovers
+    # `src/frontend/viewmodel/tests/unit/test_*.nim` by glob — so this
+    # registration is not about reaching them.  It is about the other half of
+    # what this array asserts: that the file still exists and has not been
+    # skip-disabled.  A milestone's verification test is exactly the file a
+    # later change is tempted to delete or `skip()` when it goes red, and glob
+    # discovery is silent about both.
+    "src/frontend/viewmodel/tests/unit/test_five_panes_drive_headlessly.nim",
+    "src/frontend/viewmodel/tests/unit/test_cross_pane_composition_needs_no_bridge.nim",
+    # BlockTracer M2a's remaining items, registered for the same reason and on
+    # the same precedent.  M2a originally set the WEAKER precedent — it left
+    # `test_sdk_facade.nim` to glob discovery alone — and M2b's own note says
+    # so; these four close that rather than repeat it.
+    #
+    #   * the headless app entrypoint and the session/layout model that is not
+    #     GoldenLayout-typed (item 1);
+    #   * the render tests for the six IsoNim views no headless suite reached
+    #     (item 2).  That file is separate from `isonim_views_test.nim` on
+    #     purpose — see its header — so listing the big file does not cover it.
+    "src/frontend/viewmodel/tests/unit/test_sdk_facade.nim",
+    "src/frontend/viewmodel/tests/unit/test_headless_app_entrypoint.nim",
+    "src/frontend/viewmodel/tests/unit/test_layout_model.nim",
+    "src/tests/gui/tests/views/isonim_uncovered_views_test.nim",
     # RS-M3: the Request Panel's live span-delta path.  Registered here
     # because this array IS the CI gate — a ViewModel test that exists but
     # is not listed runs nowhere (a gap this campaign found repeatedly).
@@ -709,6 +734,48 @@ const
     # Runs on BOTH backends: the surface is pure — no filesystem, no HTTP, no
     # `std/times` — for the same reason `artifact_protection.nim` is.
     "src/tests/gui/tests/sharing/artifact_sharing_vm_test.nim",
+    # VN-M3 (Verno-CodeTracer-Integration.milestones.org) — verification as a
+    # project action, at the honest text-fallback tier.  Registered for the
+    # same reason as M2b's pair above: the `vm-unit` glob already RUNS these,
+    # so this is about the other half — that the file still exists and has not
+    # been skip-disabled.
+    #
+    # It matters more than usual here.  The milestone's central deliverable is
+    # a *negative*: an unsupported construct must never render as an unproven
+    # obligation.  A negative property has no user-visible symptom when its
+    # test disappears — the feature keeps working in the common case and the
+    # honesty guarantee is simply gone — so glob discovery alone would be a
+    # weak gate.
+    #
+    # `test_verification_vm.nim` carries all three of the milestone's named
+    # verification tests, and its header states plainly which of them was
+    # reproduced against a live solver on the machine it was written on and
+    # which was not (`venir` is Linux-only).
+    "src/frontend/viewmodel/tests/unit/test_verification_vm.nim",
+    "src/frontend/viewmodel/tests/unit/test_project_actions.nim",
+    # The host half — reading a project's `tasks.json` off disk and running it
+    # as a real, cancellable, poll-driven child process.  Native-only
+    # (`runquota_process` is a POSIX launcher, `std/os` reads files), hence
+    # excluded from `vm-unit-js` and listed here.
+    "src/frontend/viewmodel/tests/unit/test_project_action_runner.nim",
+    # VN-M4 — the structured payload contract.  Registered for a reason that is
+    # sharper than VN-M3's and is worth stating separately: almost every
+    # assertion in this suite is about something the decoder must *refuse*.
+    #
+    # A rejection has no user-visible symptom when its test disappears.  The
+    # product keeps working — better, even, because a document that used to be
+    # refused now gets displayed — and the thing that is gone is the guarantee
+    # that a diagnostic cannot be read as proof evidence, that a payload cannot
+    # turn a failed run green, and that a report left behind by last week's run
+    # cannot be shown as this one's.  Glob discovery cannot notice any of that.
+    #
+    # It is also the consumer half of a corpus shared with another repository:
+    # this suite checks every conformance fixture against a `manifest.json`
+    # that `blocksense-network/verno` holds a byte-identical copy of.  If this
+    # file stops running, the two sides can drift apart with both staying
+    # green, which is precisely the failure the shared corpus exists to
+    # prevent.
+    "src/frontend/viewmodel/tests/unit/test_verification_payload.nim",
   ]
 
   CliRecordGateTests* = [

@@ -16,6 +16,15 @@
 ## - `isRunning`: whether the debugger is currently stepping or running
 ## - `statusText`: human-readable debugger status string
 ##
+## Degraded state (Page-Descriptions.md §14) — this pane is the debugger's
+## chrome, so it owns the rows that are about the debugger as a whole:
+## - `degradedState`: resolved against `DebugControlsPaneDegradations`
+## - `replayUsable`: gates every `can*` memo, so a replay that cannot run
+##   never offers a button that cannot succeed
+## - `capabilityRung`: §14.2's ladder as a value
+## - `divergenceDetected` / `traceTruncated`: the two §14 banners, readable
+##   even when a more severe row resolved ahead of them
+##
 ## Usage:
 ##   let vm = createDebugControlsVM(store)
 ##   echo vm.statusText.val      # "Idle"
@@ -54,6 +63,34 @@ type
     showRecordingHead*: Memo[bool]
     showJumpToLive*: Memo[bool]
     canJumpToLive*: Memo[bool]
+
+    # -- Degraded state (Page-Descriptions.md §14) --
+    degradedState*: Memo[PaneDegradation]
+      ## Resolved against `DebugControlsPaneDegradations`. This pane is
+      ## the debugger's chrome, so it owns both of §14's banners — the
+      ## truncation banner "in the debugger" and the divergence banner
+      ## "above the debugger" — and it is the pane that has to refuse to
+      ## step when there is nothing to step through.
+    replayUsable*: Memo[bool]
+      ## Whether a replay engine can actually move this session. False
+      ## for §14.1a's expired window, for its terminal unreplayable
+      ## state, and for every §14.2 capability failure.
+      ##
+      ## Every `can*` memo below is gated on it. §14's rule that a
+      ## terminal state must never be "a retry that cannot succeed" is
+      ## a statement about buttons: a step button that is enabled over a
+      ## replay that cannot run *is* that retry.
+    capabilityRung*: Memo[CapabilityRung]
+      ## §14.2's ladder as a value — which fallback the consumer should
+      ## offer instead of the debugger. `crFullDebugger` means none.
+    divergenceDetected*: Memo[bool]
+      ## §14's divergence row is non-dismissible and must be visible even
+      ## when a more severe degradation resolved ahead of it, so it is
+      ## exposed alongside `degradedState` rather than only through it.
+    traceTruncated*: Memo[bool]
+      ## Likewise: §14's truncation banner offers "the option to request
+      ## a deeper profile", which stays meaningful under a divergence
+      ## banner that outranks it in `degradedState`.
 
     # -- Legacy bridge callbacks --
     # These are set by the Karax debug component to delegate stepping
@@ -165,11 +202,32 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
   ## current status text should be.
   withViewModel proc(dispose: proc()): DebugControlsVM =
 
+    # Derived: the §14 degraded state this pane renders, and the three
+    # projections of it the toolbar needs. Declared first because every
+    # `can*` memo below reads `replayUsable`.
+    let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
+      resolveDegradation(store.degradedSnapshot(), DebugControlsPaneDegradations)
+
+    let replayUsable = createMemo[bool] proc(): bool =
+      let snapshot = store.degradedSnapshot()
+      not (snapshot.degradationPresent(pdPermanentlyUnreplayable) or
+           snapshot.degradationPresent(pdReplayWindowExpired) or
+           snapshot.degradationPresent(pdEngineUnavailable))
+
+    let capabilityRung = createMemo[CapabilityRung] proc(): CapabilityRung =
+      capabilityRung(store.degraded.capability.val)
+
+    let divergenceDetected = createMemo[bool] proc(): bool =
+      store.degraded.integrity.val == tiDivergent
+
+    let traceTruncated = createMemo[bool] proc(): bool =
+      store.degraded.integrity.val == tiTruncated
+
     # Derived: the debugger can step forward when it is idle and has
     # not finished the recording.
     let canStepForward = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
-      dbg.status in {dsIdle}
+      replayUsable.val and dbg.status in {dsIdle}
 
     # Derived: whether this session can navigate backward at all. The
     # debugger must be idle, the session must not be tracking a live
@@ -208,7 +266,8 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       let dbg = store.debugger.val
       let tl = store.timeline.val
       let session = store.session.val
-      session.debugSessionMode notin {liveMcr, liveMaterialized} and
+      replayUsable.val and
+        session.debugSessionMode notin {liveMcr, liveMaterialized} and
         dbg.status == dsIdle and
         (session.supportsStepBack or
           session.debugSessionMode == completedReplay or
@@ -220,7 +279,7 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
     # Derived: continue is possible when the debugger is idle.
     let canContinue = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
-      dbg.status == dsIdle
+      replayUsable.val and dbg.status == dsIdle
 
     let canReverseContinue = createMemo[bool] proc(): bool =
       backwardNavigationAvailable.val
@@ -269,7 +328,8 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
     let canJumpToLive = createMemo[bool] proc(): bool =
       let session = store.session.val
       let dbg = store.debugger.val
-      session.debugSessionMode == historicalFromLive and
+      replayUsable.val and
+        session.debugSessionMode == historicalFromLive and
         session.recordingHeadLoadingState != lsLoading and
         session.recordingHeadLoadingState != lsError and
         session.recordingHeadRRTicks > 0'u64 and
@@ -288,5 +348,10 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       showRecordingHead: showRecordingHead,
       showJumpToLive: showJumpToLive,
       canJumpToLive: canJumpToLive,
+      degradedState: degradedState,
+      replayUsable: replayUsable,
+      capabilityRung: capabilityRung,
+      divergenceDetected: divergenceDetected,
+      traceTruncated: traceTruncated,
       disposeProc: dispose,
     )

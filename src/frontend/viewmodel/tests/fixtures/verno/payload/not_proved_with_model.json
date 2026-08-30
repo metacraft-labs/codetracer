@@ -1,0 +1,251 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.0.0-hypothetical",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1787970124574,
+    "finished_at_unix_ms": 1787970201555,
+    "workspace_root": "<authored: NOT A RECORDING — see PROVENANCE.md>",
+    "package": "noir_verification_failing",
+    "argv": [
+      "verno",
+      "--program-dir",
+      ".",
+      "formal-verify",
+      "--",
+      "--rlimit",
+      "60"
+    ],
+    "solver": {
+      "invoked": true,
+      "name": "venir"
+    }
+  },
+  "outcome": "not-proved",
+  "outcome_detail": "assertion failed",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the solver did not discharge an obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "failed-obligation",
+      "message": "assertion failed",
+      "detail": "assertion failed",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 15,
+        "start_column": 12,
+        "end_line": 15,
+        "end_column": 20,
+        "byte_start": 411,
+        "byte_end": 419
+      },
+      "excerpt": "error: assertion failed\n  ┌─ src/main.nr:15:12\n  = assertion failed",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver did not discharge this obligation"
+      }
+    }
+  ],
+  "counterexample_traces": [
+    {
+      "id": "cex0",
+      "finding_id": "f0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "a solver model is a diagnostic artifact and never a recorded execution"
+      },
+      "model": {
+        "status": "partial",
+        "absent_reason": "values are given for the parameters and the asserted local; intermediate temporaries introduced by lowering have no Noir name to report",
+        "bindings": [
+          {
+            "name": "x1",
+            "local_id": 0,
+            "value": "10",
+            "type_name": "i8",
+            "location": {
+              "file": "src/main.nr",
+              "file_index": 0,
+              "start_line": 7,
+              "start_column": 15,
+              "end_line": 7,
+              "end_column": 17,
+              "byte_start": 210,
+              "byte_end": 212
+            }
+          },
+          {
+            "name": "n",
+            "local_id": 4,
+            "value": "40",
+            "type_name": "i8"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "index": 0,
+          "kind": "assumption",
+          "description": "-32 <= x1 & x1 < 32",
+          "bindings": [],
+          "path_condition": "-32 <= x1 && x1 < 32",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 6,
+            "end_column": 31,
+            "byte_start": 178,
+            "byte_end": 208
+          }
+        },
+        {
+          "index": 1,
+          "kind": "assignment",
+          "description": "x2 = x1 + x1",
+          "bindings": [
+            {
+              "name": "x2",
+              "local_id": 1,
+              "value": "20",
+              "type_name": "i8"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "kind": "call",
+          "description": "n = quadruple(10)",
+          "bindings": [
+            {
+              "name": "n",
+              "local_id": 4,
+              "value": "40",
+              "type_name": "i8"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "kind": "violation",
+          "description": "assert(n == 40) does not hold under this model",
+          "bindings": [],
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 15,
+            "start_column": 12,
+            "end_line": 15,
+            "end_column": 20,
+            "byte_start": 411,
+            "byte_end": 419
+          }
+        }
+      ],
+      "violated_obligation": {
+        "kind": "assertion",
+        "raw_kind": "assertion failed",
+        "message": "assertion failed",
+        "location": {
+          "file": "src/main.nr",
+          "file_index": 0,
+          "start_line": 15,
+          "start_column": 12,
+          "end_line": 15,
+          "end_column": 20,
+          "byte_start": 411,
+          "byte_end": 419
+        }
+      },
+      "solver_query_id": "q0",
+      "is_recorded_execution": false
+    }
+  ],
+  "goal_trees": [
+    {
+      "id": "g0",
+      "finding_id": "f0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "an inspection tree, not proof authority"
+      },
+      "root": {
+        "id": "g0/root",
+        "kind": "source-obligation",
+        "goal": "assert(n == 40)",
+        "hypotheses": [
+          {
+            "name": "h0",
+            "statement": "-32 <= x1 & x1 < 32"
+          }
+        ],
+        "location": {
+          "file": "src/main.nr",
+          "file_index": 0,
+          "start_line": 15,
+          "start_column": 12,
+          "end_line": 15,
+          "end_column": 20,
+          "byte_start": 411,
+          "byte_end": 419
+        },
+        "produced_by": "vcg: assertion in `main`",
+        "children": [
+          {
+            "id": "g0/root/query",
+            "kind": "smt-query",
+            "goal": "n == 40",
+            "hypotheses": [],
+            "produced_by": "sst_to_air",
+            "solver_query_id": "q0",
+            "children": [
+              {
+                "id": "g0/root/query/result",
+                "kind": "solver-result",
+                "goal": "sat",
+                "hypotheses": [],
+                "produced_by": "venir",
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "solver_queries": [
+    {
+      "id": "q0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "a record of what was asked, not of what was proved"
+      },
+      "smtlib": "(assert (not (= n 40)))",
+      "options": ["--rlimit", "60"],
+      "rlimit": 60,
+      "unsat_core_absent_reason": "the query was satisfiable, so there is no unsat core",
+      "statistics": {
+        "rlimit_count": "3",
+        "time_smt_run_ms": "41"
+      },
+      "replay_status": "not-attempted"
+    }
+  ],
+  "source_map": {
+    "files": [
+      {
+        "index": 0,
+        "path": "src/main.nr"
+      }
+    ]
+  }
+}

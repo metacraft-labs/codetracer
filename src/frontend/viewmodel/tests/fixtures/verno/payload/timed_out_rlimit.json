@@ -1,0 +1,54 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1787970124574,
+    "finished_at_unix_ms": 1787970244574,
+    "workspace_root": "<authored: the noir_verification package>",
+    "package": "noir_verification",
+    "argv": [
+      "verno",
+      "--program-dir",
+      ".",
+      "formal-verify",
+      "--",
+      "--rlimit",
+      "1"
+    ],
+    "solver": {
+      "invoked": true,
+      "name": "venir"
+    }
+  },
+  "outcome": "timed-out",
+  "outcome_detail": "solver rlimit exhausted",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the run reports on the verifier rather than on the program; nothing was established either way"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "budget-exhausted",
+      "message": "The solver ran out of budget before it could answer.",
+      "detail": "Not a failed proof: nothing was established either way. Re-run with a larger `--rlimit` to get an answer.",
+      "location_absent_reason": "an exhausted budget is a property of the run, not of one line",
+      "excerpt": "solver rlimit exhausted",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver exhausted its resource limit; nothing was established"
+      }
+    }
+  ],
+  "counterexample_traces": [],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": []
+  }
+}

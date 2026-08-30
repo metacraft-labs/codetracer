@@ -17,11 +17,23 @@ use crate::dap::setup_onmessage_callback;
 
 pub mod async_continuation;
 
-#[cfg(feature = "browser-transport")]
+// `c_compat` exports `#[no_mangle]` C symbols (`malloc`, `free`, `errno`, …)
+// so the wasm-targeted tree-sitter/Nim C objects can link. Those definitions
+// must NOT exist on a native target: they override the platform allocator
+// with a wasm-shaped one, and the very first C allocation segfaults. Gating
+// only on the feature made `cargo test --features browser-transport` on the
+// host crash before it reached a single test, which is why the browser DAP
+// path had no host-runnable unit tests at all. Gate on the target too.
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
 pub mod c_compat;
 
 #[cfg(feature = "browser-transport")]
 pub mod vfs;
+
+// The one clock in this crate. `std::time::{SystemTime, Instant}::now()`
+// trap on `wasm32-unknown-unknown`, so nothing outside this module may call
+// them; see the module header and `tests/wall_clock_sweep_test.rs`.
+pub mod wall_clock;
 
 pub mod bench_matrix_report;
 pub mod calltrace;
@@ -85,6 +97,9 @@ pub mod flow_preloader;
 pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;
+// Mixed-Trace implicit-language-switch: the span-driven active-altitude
+// resolver (spec `Planned-Features/Mixed-Trace-Implicit-Switch.md`, P1/P3).
+pub mod mixed_altitude;
 // RV-4 — the one place that answers "open this materialized recording
 // directory", shared by the DeepReview collector and (for its legacy-stream
 // repair) `dap_server`.

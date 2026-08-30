@@ -150,6 +150,11 @@ server
 # import paths from RUNQUOTA_SRC when the relative sibling layout is unavailable
 # (git worktrees, CI). It must be tracked despite the blanket *.nims ignore.
 !src/ct_test/config.nims
+# NS1's host-free build gate ships its own NimScript config: it is half of the
+# poison (the `patchFile` bans and the stubs search path), and without it
+# `ci/test/hostfree-build.sh` cannot even find `stubs/no_host_access`. Tracked
+# despite the blanket *.nims ignore, for the same reason as the line above.
+!ci/hostfree/config.nims
 # ct_test C/C++ provider fixtures build into an in-tree build/ directory and the
 # provider suites compile to bare (extension-less) binaries next to their .nim
 # sources; both are reproducible test artifacts that must not be committed.
@@ -166,6 +171,13 @@ format.js
 config/.config.yaml
 /.config.yaml
 src/tests/trace_index.db
+# SQLite's WAL journal and shared-memory index. They are created beside the
+# database whenever a lane run opens it in WAL mode and are removed only on a
+# clean close, so a lane that is interrupted (or that leaves a connection to
+# the OS to reap) leaves them behind. Ignoring the database but not these two
+# left every ViewModel lane run showing two untracked files.
+src/tests/trace_index.db-shm
+src/tests/trace_index.db-wal
 # The lang-name migration writes a backup beside the database before it
 # rewrites it, so a test run leaves one of these behind. The database itself is
 # ignored; its backup is the same thing one step older.
@@ -205,6 +217,14 @@ macro_sourcemap*.json
 target/
 src/tests/programs/*.json
 .vscode
+# …except the fixture packages under test-programs/, whose `.vscode/tasks.json`
+# IS the test input.  VN-M3's `test_project_actions.nim` `staticRead`s
+# `test-programs/noir_verification/.vscode/tasks.json`, so without this
+# negation the file is absent from a fresh clone and the `vm-unit` and
+# `vm-unit-js` lanes fail to COMPILE — not to assert.  A parent directory that
+# is excluded cannot have its children re-included, so the directory itself is
+# what has to be named here.
+!test-programs/*/.vscode/
 .idea
 .vs
 src/produced_thread

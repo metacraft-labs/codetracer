@@ -45,6 +45,10 @@
 ##   workspace-scoped discovery toast; `dismissToast` flips the
 ##   workspace flag through the store.
 ##
+## Degraded state (Page-Descriptions.md §14):
+## - `degradedState`: resolved against `EventLogPaneDegradations`; the last
+##   row of a truncated log is not the last event of the execution
+##
 ## Usage:
 ##   let vm = createEventLogVM(store)
 ##   echo vm.currentPage.val      # 0
@@ -214,6 +218,12 @@ type
     # -- Derived state --
     totalPages*: Memo[int]
     isLoading*: Memo[bool]
+    degradedState*: Memo[PaneDegradation]
+      ## Page-Descriptions.md §14, resolved against
+      ## `EventLogPaneDegradations`. `pdTraceTruncated` is the row this
+      ## pane owes the user: the last row of a truncated log is not the
+      ## last event of the execution, and an event log that does not say
+      ## so is the most quietly misleading pane in the debugger.
     visibleMarkerRows*: Memo[seq[MarkerEventRow]]
       ## §5.4 filter result. Computed reactively from `markerRows` +
       ## `filterBar` + `counterpartCache`.
@@ -758,6 +768,10 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           visible.add(row)
       visible
 
+    # Derived: the §14 degraded state this pane renders.
+    let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
+      resolveDegradation(store.degradedSnapshot(), EventLogPaneDegradations)
+
     let vm = EventLogVM(
       store: store,
       selectedRow: selectedRow,
@@ -778,6 +792,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       dismissedWorkspaces: dismissedWorkspaces,
       totalPages: totalPages,
       isLoading: isLoading,
+      degradedState: degradedState,
       visibleMarkerRows: visibleMarkerRows,
       disposeProc: dispose,
     )

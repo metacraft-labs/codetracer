@@ -26,6 +26,22 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that every place a Python version can be observed still agrees with
+# the one place it is CHOSEN (nix/python.nix): the dev shell's exports and its
+# first `python3` on PATH, `.python-recorder-venv`'s interpreter, the ABI tag
+# of the recorder sibling's compiled extension, and the `requires-python`
+# windows the recorder declares. A CPython extension is ABI-locked to its
+# minor version, so a disagreement here is not a style problem — it is
+# `ct record x.py` refusing to run and the `record-python-happy-path` E2E edge
+# going red. Every figure it compares is derived from an artifact or from the
+# pin; nothing is restated as a literal, so bumping nix/python.nix keeps this
+# green while choosing a version anywhere else does not. Reads files and runs
+# interpreters; no build, seconds. Conditions it cannot observe (no venv, an
+# unbuilt sibling) are printed as `n/a` and counted separately — never as
+# passes. See the header of scripts/test-python-version-alignment.sh.
+test-python-version-alignment:
+  bash scripts/test-python-version-alignment.sh
+
 # Assert that detect-siblings.sh can actually satisfy the prerequisite the
 # RR-based backend-manager integration tests demand. Those 48 tests gate on
 # CODETRACER_RR_BACKEND_PATH and tell the operator to run detect-siblings.sh
@@ -590,6 +606,20 @@ serve-docs hostname="localhost" port="3000":
   cd docs/book/
   mdbook serve --hostname {{hostname}} --port {{port}}
 
+# Live docs.codetracer.com dev server (hot reload) — the isonim-docs book in
+# docs/book-isonim. Runnable from the repo root: it enters that book's dev
+# shell (the isonim-docs framework flake, which brings nim/node/just) and runs
+# its dev-docs recipe. See docs/book-isonim/README.md. Default: http://127.0.0.1:8000
+dev-docs port='8000' host='127.0.0.1':
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd docs/book-isonim
+  # Prefer the live sibling isonim checkout (as docs/book-isonim/.envrc does),
+  # else fall back to the pinned github input in isonim-docs/flake.lock.
+  overrides=()
+  [[ -d ../../../isonim ]] && overrides+=(--override-input isonim path:../../../isonim)
+  exec nix develop path:../../../isonim-docs "${overrides[@]}" -c just dev-docs {{port}} {{host}}
+
 build-deb-package file_sizes_report="false":
   #!/usr/bin/env bash
   # https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-bundle.html
@@ -670,10 +700,13 @@ test-rust:
 # Covers the JSONL span-manifest path and, since RS-M2, the CTFS span-stream
 # path: `ct print` reads a recording's HTTP requests out of the container's
 # `spans.dat` and only falls back to a `session_manifest.jsonl` /
-# `codetracer_spans.jsonl` sidecar when the container has no stream.  The
-# script skips (exit 0) when `src/build-debug/bin/ct` has not been built, so it
-# is safe to run in a bare dev shell; run `just build-once` first for real
-# coverage.
+# `codetracer_spans.jsonl` sidecar when the container has no stream.
+#
+# The script FAILS when `src/build-debug/bin/ct` has not been built, so run
+# `just build-once` first.  It is deliberately not safe to run in a bare dev
+# shell: exiting 0 on a missing binary made "ct print is untested" and
+# "ct print works" indistinguishable.  Set CT_PRINT_ALLOW_MISSING=1 to skip it
+# locally before a build; it is never set in a CI gate.
 test-ct-print:
   #!/usr/bin/env bash
   set -e
@@ -688,6 +721,7 @@ test:
   set -e
   just test-build-alignment
   just test-flake-pin-alignment
+  just test-python-version-alignment
   just test-sibling-backend-path
   just test-agent-api-contract
   just test-rust
@@ -2609,6 +2643,48 @@ test-vm-unit: vm-test-prereqs
   exec > >(tee test-logs/test-vm-unit.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-unit
 
+# The same Tier-1 ViewModel suites under `nim js` + node.
+#
+# Front-End-Architecture.md §6 asks for the pyramid "run on both the C and JS
+# backends", and `test-vm-unit` is a C lane while `test-vm-js` reaches only
+# `src/tests/gui/tests` — so until this recipe existed every suite under
+# `viewmodel/tests/unit` ran on one backend of the two, including the Embed
+# SDK's own conformance suite.  That is not a rounding error for a web
+# debugger: the first run of this lane found `DebuggerSession.launch`
+# reporting `dspReady` for a launch the backend had refused, because
+# `async_compat.onComplete` queues callbacks on JS and runs them inline on
+# native.  ci/lib/test-lane-files.sh carries the file-by-file reasoning.
+test-vm-unit-js: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-unit-js.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-unit-js
+
+# NS1's compile-time gate: no module of the ViewModel, view, store or platform
+# layer may reach the host except through the platform facade.
+#
+# This is a BUILD property, not a value, so it cannot be a Nim suite: the
+# assertion is that certain source does not compile.  ci/test/hostfree-build.sh
+# compiles all 119 modules of the surface with the host poisoned, then plants a
+# `readFile` and a `startProcess` into a real front-end module and requires each
+# to be rejected — and, crucially, requires the same two plants to COMPILE under
+# the normal build, without which the first two scenarios would score green
+# while the gate did no work at all.
+#
+# Runtime is dominated by scenario 1's 119 compiles (~15 min).  It is a separate
+# recipe rather than a lint step for that reason: ci/lint/nim.sh is the
+# sub-second-answers stage, and burying a quarter-hour compile in it is how a
+# lint stage stops being run.
+#
+# NS1 host-free build gate: front-end code cannot reach the host except through the platform facade.
+test-hostfree:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-hostfree.log) 2>&1
+  bash ci/test/hostfree-build.sh
+
 # The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
 # half is pure Nim and cheap; the integration/soak half opens real localhost
 # sockets and links the GPUI shim, so it is a separate recipe rather than a
@@ -2857,14 +2933,23 @@ test-vm-recorder-gated: vm-test-prereqs
   source scripts/detect-siblings.sh
   # Shared classifier: exit status before the [OK]/[FAILED] tally.
   source ci/lib/test-lane-report.sh
+  # The file SET comes from the lane definition, not from a second copy of the
+  # selection rule kept here.  It used to be an inline `find` for
+  # `test_column_*_vm.nim` / `test_formatted_view_step_*_vm.nim` /
+  # `test_statement_step_*_vm.nim`, and when ci/lib/test-lane-files.sh moved
+  # `vm-recorder-gated` to selecting by its `recorder_gate` IMPORT, this loop
+  # went on globbing names — so `test_js_subdir_trace_vm.nim`, which had just
+  # been subtracted from `vm-unit` for depending on a recorder, was run by no
+  # recipe at all.  ci/test/test-lane-coverage.sh could not see it, because
+  # that guard reads lane DEFINITIONS and the definition did claim the file.
+  # A lane whose recipe and whose definition disagree is a lane that reports
+  # on a set nobody chose.
+  source ci/lib/test-lane-files.sh
 
   failed=0
   passed=0
   skipped=0
-  for f in $(find src/frontend/viewmodel/tests/unit \
-      -name 'test_column_*_vm.nim' \
-      -o -name 'test_formatted_view_step_*_vm.nim' \
-      -o -name 'test_statement_step_*_vm.nim' | sort); do
+  for f in $(test_lane_files vm-recorder-gated); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-gated-$name"
     echo -n "  $f ... "

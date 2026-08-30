@@ -1,0 +1,92 @@
+{
+  "schema": "codetracer.verification/v1",
+  "corpus": "vn-m4-conformance",
+  "note": "Byte-identical copies of this file live in blocksense-network/verno at conformance/codetracer-payload/manifest.json and in metacraft-labs/codetracer at src/frontend/viewmodel/tests/fixtures/verno/payload/manifest.json. Both sides check every digest below against their own copy of the fixtures, so a change made on one side and not the other fails on both.",
+  "fixtures": [
+    {
+      "path": "no_solver.json",
+      "sha256": "4d72cf6062c1aa8fb8aca1d8a113487e14ca23048431b969dce6ecc86235ab9b",
+      "bytes": 1863
+    },
+    {
+      "path": "not_proved_assertion.json",
+      "sha256": "8f4ec07f9ecf786f1950bc47d1dd62dfcfad414f35729096e771f1498722bc68",
+      "bytes": 2823
+    },
+    {
+      "path": "not_proved_with_model.json",
+      "sha256": "0ecffb98e83aa5c66215dddad5e7c28327fed4c187c428099d860f69f074e413",
+      "bytes": 6521
+    },
+    {
+      "path": "pipeline_error_type_mismatch.json",
+      "sha256": "2034d60cdf5840fde516c704d7facd44ec4f45223a6294a9abe218c03b9e175f",
+      "bytes": 2665
+    },
+    {
+      "path": "proved.json",
+      "sha256": "2feb4df302f94194ebd10db0c3492f859fd98bbe37d41e695a8fb8beb646a692",
+      "bytes": 1752
+    },
+    {
+      "path": "timed_out_rlimit.json",
+      "sha256": "cb13a3611c85e6c963d3942b4368bd3e6d04e0587e8586373a570dbbf63671af",
+      "bytes": 1503
+    },
+    {
+      "path": "unsupported_lambda.json",
+      "sha256": "408cf374be91aca886d2bc8ddadfd38051f97afe35e0e5592eb0ec5664733d34",
+      "bytes": 1921
+    },
+    {
+      "path": "rejected/counterexample_claims_recording.json",
+      "sha256": "38e898458f5cc8ce59e918d77a2a66a877a65291d40976122127305676162af5",
+      "bytes": 2846
+    },
+    {
+      "path": "rejected/counterexample_without_a_rejection.json",
+      "sha256": "a411d39160ef34eb60bb9c72c5501ebc67e3b8a6dc2cb2753f2df91c7946dff9",
+      "bytes": 2847
+    },
+    {
+      "path": "rejected/finding_without_location_or_reason.json",
+      "sha256": "5e5343236f8e3494146e908d29d09067cfa7d643baac4beec13350218881b1fe",
+      "bytes": 1767
+    },
+    {
+      "path": "rejected/limitation_answers_correctness.json",
+      "sha256": "e71c85836ae06b476ae162f445b4114573744ba986db7a2a091887adec43b737",
+      "bytes": 1920
+    },
+    {
+      "path": "rejected/missing_finding_trust.json",
+      "sha256": "fe141560ea0932dd983101728b391a7ef23bef1deff5b8260cfec8432a770f12",
+      "bytes": 1731
+    },
+    {
+      "path": "rejected/missing_run_trust.json",
+      "sha256": "ba869960551b3e562ae04da4f57a8010c71d9884439708f754e26599a3c6ef07",
+      "bytes": 1702
+    },
+    {
+      "path": "rejected/model_unavailable_with_bindings.json",
+      "sha256": "6cb2dc06d7b110b04f1c201a73167276be595d3782a6979a84bd9d84e773f891",
+      "bytes": 2932
+    },
+    {
+      "path": "rejected/proved_without_solver_oracle.json",
+      "sha256": "a5b4010221a0d61c2cd8999109cc3c0221a7f465fa8cb04dfa67698a95b6ee81",
+      "bytes": 1848
+    },
+    {
+      "path": "rejected/unknown_outcome.json",
+      "sha256": "c6e7ab0486386ac5a5905c0e453939d1fbbe62ba3445732ffea47e03099a458a",
+      "bytes": 1859
+    },
+    {
+      "path": "rejected/unknown_schema.json",
+      "sha256": "ab287a775e90b6f0371d3751475068cca31d4db67e3e391f98dcbae2625fb039",
+      "bytes": 1863
+    }
+  ]
+}

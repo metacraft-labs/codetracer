@@ -1,0 +1,106 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1787970124574,
+    "finished_at_unix_ms": 1787970199001,
+    "workspace_root": "<authored: the noir_verification_failing package>",
+    "package": "noir_verification_failing",
+    "argv": [
+      "verno",
+      "--program-dir",
+      ".",
+      "formal-verify",
+      "--",
+      "--rlimit",
+      "60"
+    ],
+    "solver": {
+      "invoked": true,
+      "name": "venir"
+    }
+  },
+  "outcome": "not-proved",
+  "outcome_detail": "assertion failed",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the solver did not discharge an obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "failed-obligation",
+      "message": "assertion failed",
+      "detail": "assertion failed",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 15,
+        "start_column": 12,
+        "end_line": 15,
+        "end_column": 20,
+        "byte_start": 411,
+        "byte_end": 419
+      },
+      "excerpt": "error: assertion failed\n  ┌─ src/main.nr:15:12\n  = assertion failed",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver did not discharge this obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+      }
+    }
+  ],
+  "counterexample_traces": [
+    {
+      "id": "cex0",
+      "finding_id": "f0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "a solver model is not proof evidence, and this one has no values in it"
+      },
+      "model": {
+        "status": "unavailable",
+        "absent_reason": "`venir` discards the `Option<Model>` that `air::context::ValidityResult::Invalid` hands it, so no model reaches Verno; see PROVENANCE.md",
+        "bindings": [
+          {
+            "name": "x1",
+            "value": "10"
+          }
+        ]
+      },
+      "steps": [],
+      "is_recorded_execution": false
+    }
+  ],
+  "goal_trees": [],
+  "solver_queries": [
+    {
+      "id": "q0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "a record of what was asked, not of what was proved"
+      },
+      "smtlib_absent_reason": "`venir` does not return the SMT-LIB text of the query it built",
+      "options": [
+        "--rlimit",
+        "60"
+      ],
+      "rlimit": 60,
+      "unsat_core_absent_reason": "the query was satisfiable, so there is no unsat core",
+      "statistics_absent_reason": "`venir` computes per-bucket timings and rlimit counts and reports none of them",
+      "replay_status": "not-attempted"
+    }
+  ],
+  "source_map": {
+    "files": [
+      {
+        "index": 0,
+        "path": "src/main.nr"
+      }
+    ]
+  }
+}

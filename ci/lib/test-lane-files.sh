@@ -86,6 +86,37 @@ _tlf_glob() {
 	done | sort -u
 }
 
+# _tlf_keep_matching_file PATTERN — filter stdin (a list of paths), keeping only
+# files whose CONTENTS match the `grep -E` PATTERN.
+#
+# Selecting a lane's set by what a file DEPENDS ON rather than by what it is
+# NAMED is the stronger rule wherever the dependency is what the lane is about.
+# The whole point of this file is that a lane discovers its files; a filename
+# convention is a discovery rule that silently stops working the moment someone
+# names a file reasonably and differently.
+_tlf_keep_matching_file() {
+	local pat="$1" f
+	while read -r f; do
+		[ -n "${f}" ] || continue
+		[ -f "${f}" ] || continue
+		if grep -qE -- "${pat}" "${f}"; then
+			printf '%s\n' "${f}"
+		fi
+	done
+}
+
+# _tlf_reject_matching_file PATTERN — the complement of the above.
+_tlf_reject_matching_file() {
+	local pat="$1" f
+	while read -r f; do
+		[ -n "${f}" ] || continue
+		[ -f "${f}" ] || continue
+		if ! grep -qE -- "${pat}" "${f}"; then
+			printf '%s\n' "${f}"
+		fi
+	done
+}
+
 # _tlf_reject PATTERN... — filter stdin, dropping any line matching any of the
 # given `grep -E` patterns. Every call site must say WHY each pattern is there;
 # an unexplained exclusion is the defect this whole file is about.
@@ -115,6 +146,7 @@ online-sharing-live
 frontend-native-units
 frontend-js
 vm-unit
+vm-unit-js
 vm-collab-units
 vm-collab-integration
 vm-native
@@ -146,6 +178,7 @@ test_lane_description() {
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
+	vm-unit-js) echo "the same ViewModel unit suites, JS backend via node" ;;
 	vm-collab-units) echo "collaboration ViewModel unit suites" ;;
 	vm-collab-integration) echo "collaboration integration + soak suites" ;;
 	vm-native) echo "GUI ViewModel headless suites, native (C) backend" ;;
@@ -175,7 +208,7 @@ test_lane_description() {
 # with `nim js -d:nodejs` and run under node).
 test_lane_backend() {
 	case "$1" in
-	frontend-js | vm-js) echo "js" ;;
+	frontend-js | vm-js | vm-unit-js) echo "js" ;;
 	*) echo "c" ;;
 	esac
 }
@@ -203,7 +236,7 @@ test_lane_extra_flags() {
 		# process seam).
 		echo "--path:src"
 		;;
-	vm-unit | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated)
+	vm-unit | vm-unit-js | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated)
 		# The ViewModel suites import their subjects by bare module name.
 		echo "--path:src/frontend/viewmodel"
 		;;
@@ -306,16 +339,119 @@ test_lane_files() {
 	vm-unit)
 		# Discovery over the ViewModel unit directory, minus the two families
 		# that have their own lanes for their own reasons:
-		#   * the recorder-gated column / formatted-view / statement-step
-		#     suites, which need a built JS recorder sibling;
+		#   * the recorder-gated suites, which need a built recorder sibling
+		#     (`vm-recorder-gated`);
 		#   * the collab suites, which need the collab signalling stack.
 		# Anything else added to this directory lands here automatically.
+		#
+		# The recorder-gated set is subtracted BY DEPENDENCY, not by filename
+		# family, and the difference was a live defect rather than a
+		# refinement. The rejections here used to be three filename globs
+		# (`test_column_*_vm`, `test_formatted_view_step_*_vm`,
+		# `test_statement_step_*_vm`), and
+		# `test_js_subdir_trace_vm.nim` — which imports `recorder_gate`, drives
+		# the real `codetracer-js-recorder` sibling and skips without it —
+		# matches none of the three. So it ran in THIS lane, skipped its only
+		# case for want of a recorder, produced no `[OK]` line, and the runner
+		# scored the whole file `DID NOT RUN`. That is the one red in `vm-unit`
+		# on `dev`: a suite in a lane that does not provide what it needs.
+		#
+		# `test_opfs_volume` (NS2) is the one rejection that runs in the JS
+		# lane and NOT here — the mirror image of `test_platform_desktop_native`
+		# below. Its subject, `viewmodel/host/opfs_volume.nim`, is the browser's
+		# origin-private filesystem and is a hard `{.error.}` on the C target,
+		# exactly as the native desktop instantiation is on the JS one. So it is
+		# subtracted here and ADDED to `vm-unit-js`, which is the only lane that
+		# can run it.
 		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
+			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+recorder_gate([[:space:],]|$)' |
+			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
+				'/test_opfs_volume\.nim$'
+		;;
+
+	vm-unit-js)
+		# The Tier-1 ViewModel suites, on the backend BlockTracer actually
+		# ships.
+		#
+		# WHY THIS LANE EXISTS. Front-End-Architecture.md §6 asks for the test
+		# pyramid "run on both the C and JS backends", and until this lane
+		# existed Tier 1 ran on C only: `vm-unit` is a C lane, and `vm-js`
+		# reaches `src/tests/gui/tests` and nothing else, so every suite under
+		# `viewmodel/tests/unit` — including the Embed SDK's own conformance
+		# suite and M2b's §14 degraded-state assertions — was exercised on one
+		# backend of the two.
+		#
+		# It was not a theoretical gap. Adding this lane immediately failed:
+		# `DebuggerSession.launch` reported `dspReady` for a launch the backend
+		# had answered `success: false`, because
+		# `nim_everywhere/async_compat.onComplete` queues even a synchronously
+		# resolved future's callback on the JS target while running it inline on
+		# native. CodeTracer-Embed-SDK.md §6.3's whole error taxonomy was inert
+		# on the backend the web debugger runs on.
+		#
+		# The set is `vm-unit` minus what cannot compile under `nim js`, and
+		# each rejection says what breaks:
+		test_lane_files vm-unit |
 			_tlf_reject \
-				'/test_column_[a-z0-9_]*_vm\.nim$' \
-				'/test_formatted_view_step_[a-z0-9_]*_vm\.nim$' \
-				'/test_statement_step_[a-z0-9_]*_vm\.nim$' \
-				'/test_collab_[a-z0-9_]*\.nim$'
+				'/test_editor_test_controls_m4\.nim$' \
+				'/test_test_explorer_vm\.nim$' \
+				'/test_sdk_facade_boundary\.nim$' \
+				'/test_project_action_runner\.nim$' \
+				'/test_platform_desktop_native\.nim$'
+		# `test_platform_desktop_native` (NS1) exercises the platform facade's
+		# NATIVE desktop instantiation against the real host — `std/os`,
+		# `std/osproc`, real child processes. Its subject,
+		# `viewmodel/host/desktop_native.nim`, is a hard `{.error.}` on the JS
+		# target by design: the Electron renderer has its own instantiation
+		# (`host/desktop_electron.nim`) reaching node and Electron APIs, and
+		# one module pretending to be both is the drift NS1 exists to prevent.
+		# The BACKEND-INDEPENDENT half of the same milestone —
+		# `test_platform_facade.nim`, which covers the capability model, the
+		# topbar's capability-driven action set, the remote instantiation and
+		# the path arithmetic — carries no host dependency and DOES run here,
+		# on both backends. That split is the same one drawn for
+		# `test_project_action_runner` above, and for the same reason.
+		# `test_project_action_runner` (VN-M3) launches real child processes
+		# through `runquota_process`, a POSIX launcher, and reads a project's
+		# `tasks.json` off disk with `std/os`. Neither has a `nim js`
+		# equivalent. The split is deliberate and matches the rejections
+		# above: the *pure* half of the same milestone — the classifier, the
+		# six-outcome vocabulary, the marker builder, the render plan and the
+		# no-replay property — lives in `test_verification_vm.nim` and
+		# `test_project_actions.nim`, which carry no host dependency and DO
+		# run in this lane on both backends.
+		#
+		# `test_editor_test_controls_m4` and `test_test_explorer_vm` call
+		# `os.getCurrentProcessId` to name a per-run temporary directory of real
+		# fixture files, and that proc is an `{.error.}` on the NimScript/JS
+		# target. They are filesystem-fixture suites rather than pure ViewModel
+		# ones; they run in `vm-unit`.
+		#
+		# `test_sdk_facade_boundary` runs `ci/test/sdk-facade-boundary.sh`
+		# through `std/osproc` (`cannot export: quoteShell` on JS). It exists as
+		# a file at all because splitting it out of `test_sdk_facade.nim` is
+		# what let the SDK's conformance suite into this lane — which is where
+		# the `launch` defect above was found.
+		#
+		# Every OTHER suite in the directory runs here. Four of them
+		# (`test_sync`, `test_event_log_marker_vm`, `test_origin_chain_vm`,
+		# `test_state_value_history_toggle`) could not, until each swapped a
+		# private `poll(0)` for `async_compat.drainPlatformCallbacks`:
+		# `std/asyncdispatch` pulls in `std/nativesockets`, which does not
+		# compile on JS. That was a test-harness import, not a subject
+		# limitation, and rejecting the four would have been recording the
+		# harness's habit as a fact about the product.
+		#
+		# And ONE file this lane has that `vm-unit` does not. `test_opfs_volume`
+		# (NS2) drives `viewmodel/host/opfs_volume.nim` — the browser's
+		# origin-private filesystem — against a fake `navigator.storage`
+		# installed into the global object, so every `{.importjs.}` body in that
+		# module runs unmodified under node. Its subject is a hard `{.error.}`
+		# on the C target, so it is subtracted from `vm-unit` above and added
+		# here rather than being derived. This is the only lane that can run it,
+		# and the only place in the tree where the WEB instantiation's
+		# browser-facing half is exercised at all.
+		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
 		;;
 
 	vm-collab-units)
@@ -355,6 +491,7 @@ test_lane_files() {
 		test_lane_files vm-native |
 			_tlf_reject \
 				'/agentic-coding/' \
+				'/welcome-screen/welcome_screen_recent_folders_test\.nim$' \
 				'/request-panel/demo_recipe_vm_test\.nim$' \
 				'/request-panel/python_request_panel_vm_test\.nim$' \
 				'/request-panel/ruby_request_panel_vm_test\.nim$' \
@@ -365,7 +502,12 @@ test_lane_files() {
 				'/request-panel/remote_request_panel_vm_test\.nim$' \
 				'/request-panel/request_span_conformance_test\.nim$'
 		# agentic-coding/* import std/osproc, whose `quoteShell` does not exist
-		# on the JS target. The request-panel suites read real `.ct` container
+		# on the JS target. `welcome_screen_recent_folders_test.nim` is the same
+		# error through `src/common/trace_index` (osproc + db_sqlite), and it
+		# exists as a separate file precisely so this rejection costs one
+		# genuinely-native case instead of the 44 headless `WelcomeScreenVM`
+		# cases that used to share its binary — see that file's header.
+		# The request-panel suites read real `.ct` container
 		# bytes through a zstd C FFI (and, for the remote one, `std/os` file
 		# reads) that `nim js` has no equivalent for. All of them run in
 		# `vm-native` and are registered in release_gate.nim's
@@ -422,10 +564,15 @@ test_lane_files() {
 		;;
 
 	vm-recorder-gated)
-		_tlf_find src/frontend/viewmodel/tests/unit \
-			'test_column_*_vm.nim' \
-			'test_formatted_view_step_*_vm.nim' \
-			'test_statement_step_*_vm.nim'
+		# The mirror image of `vm-unit`'s subtraction, and expressed the same
+		# way so the two cannot disagree: a suite is recorder-gated iff it
+		# imports `recorder_gate`, which is the module that exists to make the
+		# missing-recorder outcome uniform and greppable. Selecting on the
+		# dependency rather than on three filename families is what puts
+		# `test_js_subdir_trace_vm.nim` in the lane whose runner builds a
+		# recorder — see the note in `vm-unit`.
+		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
+			_tlf_keep_matching_file '^[[:space:]]*import[[:space:]]+recorder_gate([[:space:],]|$)'
 		;;
 
 	m16-release-gate)

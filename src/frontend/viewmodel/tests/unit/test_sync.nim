@@ -15,7 +15,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_sync.nim
 
-import std/[json, unittest, asyncdispatch]
+import std/[json, unittest]
+import isonim/core/async_compat
 import isonim/core/[signals, computation, owner, batch]
 import isonim/viewmodel
 import ../../backend/backend_service
@@ -39,12 +40,17 @@ import ../../viewmodels/[
 # ---------------------------------------------------------------------------
 
 proc drain() =
-  ## Drain the async event loop so that all synchronously-completed
-  ## futures fire their callbacks.
-  try:
-    poll(0)
-  except ValueError:
-    discard
+  ## Flush whatever the reactive layer resolved synchronously.
+  ##
+  ## `drainPlatformCallbacks` rather than `asyncdispatch.poll(0)`: `poll` is
+  ## only reachable through `std/asyncdispatch`, which drags in
+  ## `std/nativesockets` and fails the JS compile outright
+  ## (`undeclared identifier: 'cstringArrayToSeq'`). This helper is the
+  ## cross-target primitive — a `poll(0)` on native, the pending-callback
+  ## flush on JS — so the suite runs on both backends, which is what
+  ## Front-End-Architecture.md §6 asks for and what the `vm-unit-js` lane
+  ## exists to enforce.
+  drainPlatformCallbacks()
 
 proc makeSessionVM(): tuple[session: SessionViewModel,
                             store: ReplayDataStore,

@@ -18,6 +18,7 @@ import
     flow_service, search_service, shell_service
   ],
   lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ],
+  platform_host,
   lsp_client, lsp_controller
 
 # (alexander): if i remember correctly: to prevent clashes with other dom-related modules
@@ -1100,12 +1101,33 @@ proc insertTextAtCurrentPosition*(monaco: MonacoEditor, text: cstring) =
       text: text)])
 
 proc clipboardCopy*(text: cstring) =
-  electron.clipboard.writeText(text)
+  ## Through the facade rather than through `electron.clipboard` directly
+  ## (NS1). The refusal path matters as much as the success one: on a platform
+  ## without `capClipboardWrite` this is a named `pkNotSupported` outcome
+  ## instead of a `TypeError` on an undefined `electron`.
+  discard ctPlatform().clipboard.writeText($text)
 
 proc clipboardPaste*(data: Data) =
   data.ui.menu.activeDomElement.toJs.focus()
   let activeElement = cast[dom.Node](dom.window.document.activeElement)
-  let clipboardText = electron.clipboard.readText().to(cstring)
+
+  # Reading the clipboard is a separate capability from writing it, because the
+  # two fail separately: a browser grants `writeText` on a user gesture and
+  # gates `readText` behind a permission prompt. `capClipboardRead` is what the
+  # menu consults before offering Paste at all — this is the backstop.
+  if not ctPlatform().can(capClipboardRead):
+    return
+
+  var clipboardText = cstring""
+  let pending = ctPlatform().clipboard.readText()
+
+  proc onText(outcome: PlatformOutcome[string]) =
+    if outcome.ok: clipboardText = outcome.value.cstring
+
+  proc onFailure(message: string) = discard
+
+  pending.onComplete(onText, onFailure)
+  drainPlatformCallbacks()
 
   if activeElement.isNil or clipboardText == cstring"":
     return

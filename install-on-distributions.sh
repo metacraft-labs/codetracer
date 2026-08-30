@@ -18,6 +18,30 @@ eprint_warning() {
 	sleep 1
 }
 
+# Called when the bundle's integrity could not be established at all -- as
+# distinct from a signature that was checked and did NOT match, which is always
+# fatal and has no opt-out.
+#
+# Installing an unverified bundle is a decision for the person running the
+# installer, not a default: this is a curl-to-shell path, so silently
+# proceeding is how an unsigned or substituted download gets executed. It
+# therefore refuses unless CODETRACER_INSTALL_ALLOW_UNVERIFIED=1 is set
+# explicitly.
+unverified_bundle() {
+	if [ "${CODETRACER_INSTALL_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+		eprint_warning "Installing CodeTracer.$1 WITHOUT verifying its integrity: $2.
+  Proceeding because CODETRACER_INSTALL_ALLOW_UNVERIFIED=1 is set."
+		return 0
+	fi
+	# Only removed on the refusing path: with the hatch set the caller still
+	# needs the bundle it is about to install.
+	rm -f CodeTracer.*.asc "CodeTracer.$1"
+	eprint_error "Cannot verify the integrity of CodeTracer.$1: $2.
+  Refusing to install an unverified bundle, and the download has been deleted.
+  Install gnupg and retry, or re-run with CODETRACER_INSTALL_ALLOW_UNVERIFIED=1
+  if you accept the risk."
+}
+
 eprint_success() {
 	echo -e "\x1b[32mSuccessfully installed CodeTracer. You can start CodeTracer by opening it through your app drawer or by running 'ct' in a terminal!\x1b[0m"
 	exit 0
@@ -193,24 +217,34 @@ download_and_verify() {
 	curl -fL --output "CodeTracer.$1.asc" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1.asc" || eprint_error "Couldn't download gpg signature!"
 	curl -fL --output "CodeTracer.$1" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1" || eprint_error "Couldn't download $1"
 
+	# Integrity verification is a security control, so "could not verify" and
+	# "verification FAILED" are kept apart and neither is a warning any more.
+	#
+	# This block used to run inside a `while true` whose every arm was
+	# `eprint_warning` + `break`. eprint_warning only prints and sleeps, so a
+	# bundle whose signature did NOT match printed "Aborting!" and then fell
+	# straight through to the installation. This file is published as the
+	# public install.sh, so that was a download-and-execute path that announced
+	# a failed signature check and installed the bundle regardless.
 	if [ "$(which gpg 2>/dev/null)" != "" ]; then
-		while true; do
-			if ! gpg --import CodeTracer.pub.asc; then
-				eprint_warning "Couldn't import gpg key. Probably caused by an inactive gpg agent"
-				break
-			fi
-
+		if ! gpg --import CodeTracer.pub.asc; then
+			unverified_bundle "$1" "the CodeTracer signing key could not be imported (often an inactive gpg agent)"
+		else
 			if ! gpg --verify CodeTracer."$1".asc CodeTracer."$1"; then
-				eprint_warning "Couldn't verify bundle integrity. Aborting!"
-				break
+				# A signature that is present and does NOT match is never
+				# tolerated, with or without the escape hatch below: it means
+				# the bytes are not the ones CodeTracer signed.
+				rm -f CodeTracer.*.asc "CodeTracer.$1"
+				eprint_error "SIGNATURE VERIFICATION FAILED for CodeTracer.$1.
+  The download does not match the CodeTracer signing key. It may be corrupt or
+  tampered with. Refusing to install, and the download has been deleted."
 			fi
 			eprint_note "Successfully verified $1 signature"
-			break
-		done
+		fi
 	else
-		eprint_warning "Couldn't verify bundle integrity because gpg is not installed."
+		unverified_bundle "$1" "gpg is not installed"
 	fi
-	rm CodeTracer.*.asc
+	rm -f CodeTracer.*.asc
 }
 
 install_dmg() {

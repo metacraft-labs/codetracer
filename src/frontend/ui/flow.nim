@@ -29,6 +29,22 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/flow_vm import
   FlowVM, createFlowVM
+# The renderer-neutral half of Omniscience's layout — expression columns,
+# legend columns, indentation, per-line grouping, loop iteration windowing and
+# the before/after value modes. It was extracted OUT of this file so that a
+# renderer which is not Monaco can drive the feature from `FlowVM` alone
+# (CodeTracer-Embed-SDK.md §3.2 excludes Monaco and "any rendering"); what is
+# left here is view-zone lifecycle, noUiSlider, Karax and Monaco decorations.
+# This file now CALLS that module rather than carrying a second copy, which is
+# what keeps the desktop and any other surface from drifting apart.
+from ../viewmodel/viewmodels/flow_layout import
+  FlowValueMode, fvmBefore, fvmAfter, fvmBeforeAndAfter, resolveFlowValueMode,
+  FlowExpressionColumn, findExpressionColumn, fallbackExpressionColumn,
+  orderExpressionsByColumn, inlineLabelAnchorColumn,
+  FlowTokenLanguage, flowTokenLanguage, nimFlowTokenLanguage,
+  FlowSourceToken, tokenizeSourceExpressions,
+  stepIndexForTicks, orderIterationSteps, firstBodyStepIn,
+  closestIterationStepCount, FlowLayoutLoop
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_flow_view import
   mountIsoNimFlow
@@ -209,7 +225,6 @@ proc resizeLineSlider(self: FlowComponent, position: int)
 proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int)
 proc createLoopViewZones(self: FlowComponent, loopIndex:int)
 proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, isLoop: bool = false): Node
-proc calculateLineIndentations(self: FlowComponent, position: int): int
 proc positionRRTicksToStepCount*(self: FlowComponent, position: int, rrTicks: int): int
 proc updateIterationStepCount*(self: FlowComponent, line: int, stepCount: int, loopId: int, iteration: int): int
 proc reloadFlow*(self:FlowComponent)
@@ -256,15 +271,19 @@ proc adjustEditorWidth*(self: EditorViewComponent) =
   self.monacoEditor.updateOptions(options)
 
 proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value): ValueMode =
-  if testEq(beforeValue, afterValue):
-    return BeforeValueMode
-  else:
-    if afterValue.isNil and not beforeValue.isNil:
-      return BeforeValueMode
-    elif beforeValue.isNil and not afterValue.isNil:
-      return AfterValueMode
-    else:
-      return BeforeAndAfterValueMode
+  ## Which of the step's two values this label shows.
+  ##
+  ## The decision itself now lives in `viewmodel/viewmodels/flow_layout`, which
+  ## has no `Value` and no DOM; what stays here is the three bits it needs and
+  ## the mapping back onto the desktop's `ValueMode`. The branch order and the
+  ## precedence of `testEq` over the nil checks are unchanged.
+  case resolveFlowValueMode(
+      hasBefore = not beforeValue.isNil,
+      hasAfter = not afterValue.isNil,
+      valuesEqual = testEq(beforeValue, afterValue))
+  of fvmBefore: BeforeValueMode
+  of fvmAfter: AfterValueMode
+  of fvmBeforeAndAfter: BeforeAndAfterValueMode
 
 when defined(ctInExtension):
   var flowComponentForExtension* {.exportc.}: FlowComponent = makeFlowComponent(data, 13, inExtension = true)
@@ -623,101 +642,58 @@ proc calculateMaxFlowLineWidth*(self: FlowComponent): int =
 
   return length
 
-type
-  TokenState* = enum TAny, TExpression, TString
-
-let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = block:
-  ## Built at module init from `flowKeywords` in `common_lang.nim`, which is the
-  ## exhaustive `case` holding the data.  The container is assembled here
-  ## because `JsAssoc` is a JS-backend type.  Existing `KEYWORDS[lang]` call
-  ## sites are unaffected.
+let FLOW_TOKEN_LANGUAGES: array[Lang, FlowTokenLanguage] = block:
+  ## One `FlowTokenLanguage` profile per language, built at module init from
+  ## `flowKeywords` in `common_lang.nim` — which remains the exhaustive `case`
+  ## holding the data.
   ##
-  ## Note what disappeared with the positional literal: 39 of its 40 rows were
-  ## the SAME shared `emptyKeywords` object, so every row that could have
-  ## revealed a positional shift looked identical to every other.
-  var table: array[Lang, JsAssoc[cstring, bool]]
+  ## The tokenizer itself moved to `viewmodel/viewmodels/flow_layout`
+  ## (`tokenizeSourceExpressions`): source text in, `(expression, column)` out,
+  ## which is a fact about a line of code and not about an editor. What stays
+  ## here is the mapping from CodeTracer's `Lang` enum onto that profile, and
+  ## `common_lang` stays out of the SDK's import graph as a result.
+  ##
+  ## `isSymbol` / `isStringSymbol` answered for `LangNim` only and `false` for
+  ## every other language, so every other language gets EMPTY character sets and
+  ## therefore an empty token list — exactly as before. That is a real
+  ## limitation of the tokenizer and it is preserved rather than quietly widened
+  ## by this refactor.
+  var table: array[Lang, FlowTokenLanguage]
   for lang in Lang:
-    var entry = JsAssoc[cstring, bool]{}
-    for keyword in flowKeywords(lang):
-      entry[cstring(keyword)] = true
-    table[lang] = entry
+    if lang == LangNim:
+      table[lang] = nimFlowTokenLanguage(flowKeywords(lang))
+    else:
+      table[lang] = flowTokenLanguage({}, {}, flowKeywords(lang))
   table
 
-func isSymbol(c: char, lang: Lang): bool =
-  if lang == LangNim:
-    c.isAlphaAscii or c == '_'
-  else:
-    false
-
-func isStringSymbol(c: char, lang: Lang): bool =
-  if lang == LangNim:
-    c == '"'
-  else:
-    false
-
 func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
+  ## Every expression in one source line, with its column, last first.
+  ##
+  ## The tokenizer is `flow_layout.tokenizeSourceExpressions`; this is the
+  ## `cstring`/tuple shape `ensureTokens` reads.
+  ##
+  ## `{.noSideEffect.}` around the table read for the same reason the previous
+  ## `KEYWORDS[lang]` reads carried it: `FLOW_TOKEN_LANGUAGES` is a module-level
+  ## `let`, which Nim treats as a side effect to touch, and `ensureTokens` — the
+  ## only caller — is itself a `func`.
+  ##
+  ## ONE representational difference from the version that lived here, bounded
+  ## and checked rather than assumed away. The old loop walked the `cstring`
+  ## directly, which on the JS backend indexes UTF-16 code units; `$source` is
+  ## `cstrToNimstr`, so this one indexes UTF-8 bytes. The TOKENS are identical
+  ## either way — every identifier and string-delimiter character in every
+  ## profile is ASCII — but the COLUMN of a token that follows a non-ASCII
+  ## character on the same line differs by that character's encoding delta.
+  ##
+  ## It is unobservable, and that is checkable rather than hopeful:
+  ## `ensureTokens` stores the column as the VALUE of `editorUI.tokens[line]`,
+  ## and both readers (`calculateLayout` and `renderFlow`, below) iterate that
+  ## map for the label and discard the value. Nothing outside this file reads
+  ## `editorUI.tokens` at all.
   result = @[]
-  var state: TokenState
-  var token = cstring""
-
-  for i in 0 ..< source.len:
-    let c = source[i]
-    if c.isSymbol(lang):
-      case state:
-      of TAny:
-        state = TExpression
-        token = cstring($c)
-        result.add((cstring"", i))
-      of TExpression:
-        token = token & cstring($c)
-      else:
-        discard
-    # Faith
-    elif c.isStringSymbol(lang):
-      case state:
-      of TExpression:
-        {.noSideEffect.}:
-          if not KEYWORDS[lang].hasKey(token):
-            result[^1] = (token, result[^1][1])
-          else:
-            discard result.pop
-        token = cstring""
-        state = TString
-
-      of TAny:
-        state = TString
-
-      of TString:
-        state = TAny
-    else:
-      case state:
-      of TExpression:
-        {.noSideEffect.}:
-          if not KEYWORDS[lang].hasKey(token):
-            result[^1] = (token, result[^1][1])
-          else:
-            discard result.pop
-        token = cstring""
-        state = TAny
-
-      else:
-        discard
-
-  case state:
-  of TExpression:
-    {.noSideEffect.}:
-      if not KEYWORDS[lang].hasKey(token):
-        result[^1] = (token, result[^1][1])
-      else:
-        discard result.pop
-
-  else:
-    discard
-
-  var res = result
-  result = @[]
-  for i in countdown(res.len - 1, 0):
-    result.add(res[i])
+  {.noSideEffect.}:
+    for token in tokenizeSourceExpressions($source, FLOW_TOKEN_LANGUAGES[lang]):
+      result.add((cstring(token.expression), token.column))
 
 proc removeExpandedFlow(self: FlowComponent, line: int) =
   if self.multilineZones.hasKey(line):
@@ -1465,14 +1441,15 @@ proc firstLoopBodyStepForIteration(
 
   let loop = self.flow.loops[loopIndex]
   let table = self.flow.loopIterationSteps[loopIndex][iteration].table
-  var selectedLine = int.high
-  var selectedStepCount = NO_STEP_COUNT
-
+  # The "lowest body line of this pass" search is
+  # `flow_layout.firstBodyStepIn`; flattening the `JsAssoc` table is this
+  # file's, because the table type differs between the two worlds.
+  var entries: seq[tuple[line: int, stepCount: int]] = @[]
   for line, stepCount in table:
-    if line > loop.first and line <= loop.last and self.validFlowStepCount(stepCount):
-      if line < selectedLine:
-        selectedLine = line
-        selectedStepCount = stepCount
+    entries.add((line: line, stepCount: stepCount))
+
+  let selectedStepCount =
+    firstBodyStepIn(entries, loop.first, loop.last, self.flow.steps.len)
 
   if selectedStepCount == NO_STEP_COUNT:
     return self.loopIterationStepAt(loopIndex, iteration, loop.first)
@@ -2147,74 +2124,42 @@ proc resetColumnsWidth*(self:FlowComponent, deltaWidth: int, loopIndex:int, shri
             ) & "px"
           )
 
-proc calculatePositionMaxWidth(self: FlowComponent, step: FlowStep) =
-  let loop = self.flow.loops[step.loop]
-  var loopState = self.loopStates[step.loop]
-
-  if not loopState.positions.hasKey(step.position):
-    loopState.positions[step.position] = LoopPosition(
-      positionColumns: JsAssoc[int, PositionColumn]{},
-      loopIndex: step.loop)
-
-  let loopPosition = loopState.positions[step.position]
-  let loopPositionStepCounts =
-    self.flow.steps.filterIt(
-      it.loop == step.loop and
-      it.position == step.position).mapIt(it.stepCount)
-  var positionValueMaxChars = 0
-
-  for stepCount in loopPositionStepCounts:
-    let step = self.flow.steps[stepCount]
-
-    if not loopPosition.positionColumns.hasKey(step.iteration):
-      loopPosition.positionColumns[step.iteration] =
-        PositionColumn(
-          iteration: step.iteration,
-          valuesExpressions: JsAssoc[cstring, ExpressionColumn]{}
-        )
-
-    let positionColumn = loopPosition.positionColumns[step.iteration]
-    var stepValuesChars = 0
-    var stepExpressionsChars = 0
-
-    for expression, value in step.beforeValues:
-      var expressionWidth = expression.len
-      if expressionWidth < 3: expressionWidth = 3
-      var valueWidth = value.textRepr(compact=true).len
-      if valueWidth < 3: valueWidth = 3
-      if valueWidth > 7: valueWidth = 7
-      if not positionColumn.valuesExpressions.hasKey(expression):
-        positionColumn.valuesExpressions[expression] =
-          ExpressionColumn(
-            valueCharsCount: valueWidth,
-            expressionCharacters: expressionWidth
-          )
-      stepExpressionsChars += expressionWidth + 1
-      stepValuesChars += valueWidth + 1
-    stepExpressionsChars -= 1
-    stepValuesChars -= 1
-
-    if loopPosition.expressionsChars == 0:
-      loopPosition.expressionsChars = stepExpressionsChars
-      loopPosition.legendValueGapPercentage = 100 / stepExpressionsChars
-      if loopState.legendWidth < stepExpressionsChars*self.pixelsPerSymbol:
-        loopState.legendWidth = stepExpressionsChars*self.pixelsPerSymbol
-
-    if stepValuesChars > positionColumn.positionMaxValuesChars:
-      positionColumn.positionMaxValuesChars = stepValuesChars
-
-    if stepValuesChars*self.pixelsPerSymbol > loopState.defaultIterationWidth:
-      loopState.defaultIterationWidth = stepValuesChars*self.pixelsPerSymbol
-      loopState.maxPositionValuesChars = stepValuesChars
-
-proc realignPositionWidths(self: FlowComponent, loopPosition: LoopPosition) =
-  for iteration, positionColumn in loopPosition.positionColumns:
-    positionColumn.valueGapPercentage = 100 / positionColumn.positionMaxValuesChars
-    for expressionColumn in positionColumn.valuesExpressions:
-      expressionColumn.valuePercent =
-        expressionColumn.valueCharsCount * 100 / positionColumn.positionMaxValuesChars
-      expressionColumn.expressionLegendPercent =
-        expressionColumn.expressionCharacters * 100 / loopPosition.expressionsChars
+# `calculatePositionMaxWidth` and `realignPositionWidths` used to be here.
+# Between them they were the spec's "Expression Columns" and "Legend Columns":
+# each variable's character budget at a line inside a loop, each iteration's
+# widest value row, and the percentages a heading and a value cell occupy of
+# their rows.
+#
+# NEITHER HAD A CALL SITE. Nothing in the tree invoked either — verified by
+# `git grep` against `dev`: forward declaration, definition, and comments in
+# `review_flow_overlay.nim` describing the algorithm, nothing more.
+#
+# THE CONSEQUENCE IS A LIVE DEFECT, and it is worse than a wrong number.
+# `calculatePositionMaxWidth` was the only writer of `LoopState.positions`,
+# which is otherwise initialised empty (`makeLoopState`) and never filled. Three
+# procs read through it. Two of them — `complexValueStyle` and
+# `legendValueStyle` — have no call site either. The third, `makeLegend`, IS
+# called (`addComplexLoopStepValues` <- `recreateLoopContainerAndSteps`, for
+# both `FlowParallel` and `FlowInline`), and it reads
+#
+#     loopStates[loop].positions[position].positionColumns[iteration]
+#       .valuesExpressions[expression].expressionLegendPercent
+#
+# which the JS backend emits as exactly that chain, unguarded. `positions[...]`
+# is `undefined`, so the next `.positionColumns` raises a TypeError — the
+# heading is not laid out at `0%`, the legend is not built at all. The same
+# dead writer is why `LoopState.defaultIterationWidth` starts at 0 and is
+# thereafter only ever moved by the two keyboard zoom commands in `ui_js.nim`.
+#
+# It is deliberately NOT fixed here: this change is a refactor, and wiring the
+# computation up would change what the desktop draws. It is recorded in
+# `codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md` so that it does
+# not survive only as a comment in the file it was found in.
+#
+# The computation itself now lives as `flow_layout.computeLoopColumnPlan`, in
+# characters and percentages with the two `pixelsPerSymbol` multiplications left
+# behind for a renderer to apply. It is exercised headlessly for the first time
+# by `viewmodel/tests/unit/test_flow_layout.nim`.
 
 proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
   let flowMode =
@@ -2275,9 +2220,6 @@ proc getEditorFirstLineNumber(self: FlowComponent): int =
       .innerText
   )
 
-proc isFlowIdentifierChar(ch: char): bool =
-  ch in {'a'..'z', 'A'..'Z', '0'..'9', '_', '\'', '"'}
-
 proc flowLineSourceText(self: FlowComponent, position: int): string =
   if position <= 0:
     return ""
@@ -2296,39 +2238,27 @@ proc flowLineSourceText(self: FlowComponent, position: int): string =
 
   return ""
 
-proc findFlowExpressionPosition(text: string, expression: cstring): int =
-  let expressionText = $expression
-  if expressionText.len == 0:
-    return -1
-
-  var start = 0
-  while start < text.len:
-    let index = text.find(expressionText, start)
-    if index < 0:
-      return -1
-
-    let beforeOk = index == 0 or not isFlowIdentifierChar(text[index - 1])
-    let afterIndex = index + expressionText.len
-    let afterOk = afterIndex >= text.len or not isFlowIdentifierChar(text[afterIndex])
-    if beforeOk and afterOk:
-      return index
-
-    start = index + 1
-
-  return -1
-
 proc fallbackFlowExpressionPosition(self: FlowComponent, position: int): int =
+  ## Where a label goes when its expression is nowhere in the line's text.
+  ##
+  ## The MEASUREMENT is Monaco's and stays here; the arithmetic over it is
+  ## `flow_layout.fallbackExpressionColumn`. `getLineMaxColumn` is 1-based, so
+  ## `- 1` is the line's length, which is exactly what the `except` branch
+  ## reaches for when there is no model.
+  let placed = self.flowLines[position].variablesPositions.len
   try:
     let model = self.editorUI.monacoEditor.getModel()
-    return max(0, model.getLineMaxColumn(position) - 1) +
-      2 + self.flowLines[position].variablesPositions.len * 2
+    return fallbackExpressionColumn(model.getLineMaxColumn(position) - 1, placed)
   except:
-    let text = self.flowLineSourceText(position)
-    return text.len + 2 + self.flowLines[position].variablesPositions.len * 2
+    return fallbackExpressionColumn(self.flowLineSourceText(position).len, placed)
 
 proc calculateVariablePosition(self: FlowComponent, position: int, expression: cstring): int =
+  ## The source column this expression's label attaches at.
+  ##
+  ## `findExpressionColumn` (`flow_layout`) is the standalone-occurrence search
+  ## that used to be `findFlowExpressionPosition` here.
   let text = self.flowLineSourceText(position)
-  var variablePosition = findFlowExpressionPosition(text, expression)
+  var variablePosition = findExpressionColumn(text, $expression)
 
   if variablePosition < 0:
     variablePosition = self.fallbackFlowExpressionPosition(position)
@@ -2383,14 +2313,23 @@ proc makeflowValue(
   result.appendChild(valueNode)
 
 proc sortVariablesPositions(self: FlowComponent, step: FlowStep, ascending: bool = true) =
-  var direction: int  = 1;
+  ## Order this line's labels and copy the matching values into
+  ## `flowLines[..].sortedVariables`.
+  ##
+  ## The ordering is `flow_layout.orderExpressionsByColumn`. Note the flag flip:
+  ## this proc's `ascending` is inverted with respect to its name — it set
+  ## `direction = -1` for `ascending = true` and so sorted DESCENDING — and its
+  ## only call site passes `false`, i.e. left to right by source column. The SDK
+  ## function is named for what it does, so the inversion is confined to this
+  ## line instead of travelling.
+  var placed: seq[FlowExpressionColumn] = @[]
+  for expression, column in self.flowLines[step.position].variablesPositions:
+    placed.add(FlowExpressionColumn(
+      expression: $expression, column: column, found: true))
 
-  if ascending: direction = -1
-
-  var sortedVariablesExpressions =
-    toSeq(self.flowLines[step.position].variablesPositions.pairs())
-      .sorted((x,y) => direction*x[1]-direction*y[1])
-      .mapIt(it[0])
+  var sortedVariablesExpressions: seq[cstring] = @[]
+  for entry in orderExpressionsByColumn(placed, ascending = not ascending):
+    sortedVariablesExpressions.add(cstring(entry.expression))
 
   for expression in sortedVariablesExpressions:
     if step.beforeValues.hasKey(expression):
@@ -2436,9 +2375,12 @@ proc insertInlineDecorations(self: FlowComponent, step: FlowStep) =
   let monacoEditor = self.editorUI.monacoEditor
 
   for expression, variable in step.beforeValues:
-    let position =
-      self.flowLines[step.position].variablesPositions[expression] + 1 +
-      expression.len
+    # "Immediately after the expression" is the layout decision and lives in
+    # `flow_layout.inlineLabelAnchorColumn`; "and Monaco expresses that as a
+    # zero-width decoration range" is this file's and stays.
+    let position = inlineLabelAnchorColumn(
+      self.flowLines[step.position].variablesPositions[expression],
+      expression.len)
 
     if self.flowLines[step.position].variablesPositions.hasKey(expression):
       let decorationRange: MonacoRange = newMonacoRange(
@@ -3426,20 +3368,18 @@ proc positionRRTicksToStepCount*(self: FlowComponent, position: int, rrTicks: in
       cdebug cstring(fmt"flow: no step recorded at line {position} in this flow window")
       return NO_STEP_COUNT
 
-    let firstStepCount = flow.positionStepCounts[position][0]
-    let lastStepCount = flow.positionStepCounts[position][^1]
+    # The interval search is `flow_layout.stepIndexForTicks`; the lookup of the
+    # line's step counts stays here because it reads the desktop's `JsAssoc`
+    # window directly and this runs on every debugger move.
+    let stepCounts = flow.positionStepCounts[position]
+    var ticks: seq[int] = @[]
+    for stepCount in stepCounts:
+      ticks.add(flow.steps[stepCount].rrTicks)
 
-    if rrTicks < flow.steps[firstStepCount].rrTicks:
-      return firstStepCount
-    elif rrTicks > flow.steps[lastStepCount].rrTicks:
-      return lastStepCount
-
-    for i, stepCount in flow.positionStepCounts[position]:
-      let nextStepCount = flow.positionStepCounts[position][min(i + 1, len(flow.positionStepCounts[position]) - 1)]
-      if rrTicks >= flow.steps[stepCount].rrTicks and rrTicks <= flow.steps[nextStepCount].rrTicks:
-        return stepCount
-
-    return lastStepCount
+    let chosen = stepIndexForTicks(ticks, rrTicks)
+    if chosen < 0:
+      return NO_STEP_COUNT
+    return stepCounts[chosen]
   except IndexDefect as e:
     cerror(&"flow: We don't have a position step count or steps for that position {e.msg}")
 
@@ -3739,36 +3679,33 @@ proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   self.flowLoops[step.position].flowDom = dom
   self.makeSlider(step.position)
 
-proc addUniqueStepCount(stepCounts: var seq[int], stepCount: int) =
-  for existing in stepCounts:
-    if existing == stepCount:
-      return
-  stepCounts.add(stepCount)
-
 proc activeLoopIterationStepCounts(self: FlowComponent, loopIndex: int, iteration: int): seq[int] =
+  ## Every step of one pass through one loop, in reading order.
+  ##
+  ## The two sources (the iteration's own line→step table, and a scan of the
+  ## loop's steps for ones tagged with this iteration) are read here because
+  ## they are the desktop's `JsAssoc` window; the deduplication and the
+  ## (line, stepCount) ordering are `flow_layout.orderIterationSteps`.
   if loopIndex < 0 or loopIndex >= self.flow.loops.len:
     return
+
+  var candidates: seq[tuple[stepCount: int, line: int]] = @[]
 
   if loopIndex < self.flow.loopIterationSteps.len and
      iteration >= 0 and iteration < self.flow.loopIterationSteps[loopIndex].len:
     for _, stepCount in self.flow.loopIterationSteps[loopIndex][iteration].table:
       if stepCount >= 0 and stepCount < self.flow.steps.len:
-        result.addUniqueStepCount(stepCount)
+        candidates.add(
+          (stepCount: stepCount, line: self.flow.steps[stepCount].position))
 
   for stepCount in self.flow.loops[loopIndex].stepCounts:
     if stepCount < 0 or stepCount >= self.flow.steps.len:
       continue
     let step = self.flow.steps[stepCount]
     if step.loop == loopIndex and step.iteration == iteration:
-      result.addUniqueStepCount(stepCount)
+      candidates.add((stepCount: stepCount, line: step.position))
 
-  result.sort(proc(a, b: int): int =
-    let lineA = self.flow.steps[a].position
-    let lineB = self.flow.steps[b].position
-    if lineA == lineB:
-      system.cmp(a, b)
-    else:
-      system.cmp(lineA, lineB))
+  result = orderIterationSteps(candidates)
 
 proc ensureFlowLineForStep(self: FlowComponent, step: FlowStep) =
   if not self.flowLines.hasKey(step.position):
@@ -3829,16 +3766,15 @@ proc addLoopInfo(self: FlowComponent, step: FlowStep) =
       self.renderLoopIterationStepValue(step.loop, self.flow.steps[stepCount])
 
 proc getClosestIterationStepCount*(self: FlowComponent, loop: Loop, stepCount: int): int =
-  var steps = self.flow.steps
-  let firstStepCount = loop.stepCounts[0]
-  let lastStepCount = loop.stepCounts[^1]
-
-  if firstStepCount < stepCount and stepCount < lastStepCount:
-    return stepCount
-  elif stepCount <= firstStepCount:
-    return firstStepCount
-  elif lastStepCount <= stepCount:
-    return lastStepCount
+  ## `stepCount` clamped into the loop's recorded span.
+  ##
+  ## Delegates to `flow_layout.closestIterationStepCount`, which is the same
+  ## clamp verbatim. One difference, in an error path: the version here indexed
+  ## `loop.stepCounts[0]` unguarded, so a loop with no recorded steps raised an
+  ## `IndexDefect` through `ui/editor.nim`'s caller; the SDK version answers
+  ## `NO_STEP_COUNT` instead. No working case changes.
+  closestIterationStepCount(
+    FlowLayoutLoop(stepCounts: loop.stepCounts), stepCount)
 
 proc updateIterationStepCount*(self: FlowComponent, line: int, stepCount: int, loopId: int, iteration: int): int =
   var table = self.flow.loopIterationSteps[loopId][iteration].table
@@ -3913,7 +3849,13 @@ proc prepareFlowLineVariables(self: FlowComponent, step: FlowStep) =
   self.sortVariablesPositions(step, false)
 
 proc renderActiveLoopIterationValues(self: FlowComponent) =
-  var stepCounts: seq[int]
+  ## Repaint the values of whichever pass each on-screen loop is showing.
+  ##
+  ## The selection is this file's (it reads the live `flowLoops` DOM registry);
+  ## the deduplication and reading order are `flow_layout.orderIterationSteps`,
+  ## the same ordering `activeLoopIterationStepCounts` uses — which is the point
+  ## of sharing it, since the two used to carry identical copies.
+  var candidates: seq[tuple[stepCount: int, line: int]] = @[]
 
   for stepCount in 0 ..< self.flow.steps.len:
     let step = self.flow.steps[stepCount]
@@ -3926,15 +3868,9 @@ proc renderActiveLoopIterationValues(self: FlowComponent) =
 
     let loopStep = self.flowLoops[registeredLine].loopStep
     if loopStep.loop == step.loop and loopStep.iteration == step.iteration:
-      stepCounts.addUniqueStepCount(stepCount)
+      candidates.add((stepCount: stepCount, line: step.position))
 
-  stepCounts.sort(proc(a, b: int): int =
-    let lineA = self.flow.steps[a].position
-    let lineB = self.flow.steps[b].position
-    if lineA == lineB:
-      system.cmp(a, b)
-    else:
-      system.cmp(lineA, lineB))
+  let stepCounts = orderIterationSteps(candidates)
 
   for stepCount in stepCounts:
     let step = self.flow.steps[stepCount]
@@ -4355,17 +4291,15 @@ proc setEditorResizeObserver(self: FLowComponent, position: int) =
 
   resizeObserver.observe(cast[Node](editorDom))
 
-proc calculateLineIndentations(self: FlowComponent, position: int) : int =
-  let previousLineOverlaysDom =
-    jq(&"#editorComponent-{self.editorUI.id} .monaco-editor .view-overlays")
-      .children[self.getSourceLineDomIndex(position)]
-  var indents = 0
-
-  for child in previousLineOverlaysDom.children:
-    if getAttribute(cast[Node](child), cstring"class") == cstring"cigr":
-      indents += 1
-
-  return indents
+# `calculateLineIndentations` used to be here: the spec's "Indentation
+# Tracking" positioning rule, answered by counting Monaco's rendered `.cigr`
+# indent-guide elements in a line's view overlay. It had NO CALL SITE — it was
+# forward-declared, defined, and invoked from nowhere in the tree, and
+# `FlowLine.indentationsCount` was never read — so the rule was, on the desktop,
+# computed by nothing. It now lives as `flow_layout.sourceIndentLevel`, which
+# counts leading whitespace instead of rendered guides and is therefore
+# available to a renderer that has no Monaco. Removing the DOM version cannot
+# change what the desktop draws, because nothing drew from it.
 
 proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, isLoop: bool = false): Node =
   #create viewZone

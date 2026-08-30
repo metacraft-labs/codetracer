@@ -1,0 +1,91 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1787970141648,
+    "finished_at_unix_ms": 1787970142389,
+    "workspace_root": "<recorded: the package directory on the machine named in PROVENANCE.md>",
+    "package": "typeerr",
+    "argv": [
+      "<recorded: the absolute path of the verno binary>",
+      "--program-dir",
+      ".",
+      "formal-verify",
+      "--",
+      "--rlimit",
+      "60"
+    ],
+    "solver": {
+      "invoked": false,
+      "name": "venir",
+      "unavailable_reason": "the run ended before the solver was started"
+    }
+  },
+  "outcome": "pipeline-error",
+  "outcome_detail": "the Noir front end rejected the program",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the run reports on the verifier rather than on the program; nothing was established either way"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "pipeline-error",
+      "message": "Expected type Field, found type u32",
+      "detail": "",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 2,
+        "start_column": 20,
+        "end_line": 2,
+        "end_column": 21,
+        "byte_start": 48,
+        "byte_end": 49
+      },
+      "excerpt": "error: Expected type Field, found type u32\n  \u250c\u2500 src/main.nr:2:20",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "a front-end error: Verno never reached the solver, so nothing was established about the program"
+      }
+    },
+    {
+      "id": "f1",
+      "kind": "pipeline-error",
+      "message": "expected type u32, found type Field",
+      "detail": "expected u32 because of return type",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 1,
+        "start_column": 24,
+        "end_line": 1,
+        "end_column": 27,
+        "byte_start": 23,
+        "byte_end": 26
+      },
+      "excerpt": "error: expected type u32, found type Field\n  \u250c\u2500 src/main.nr:1:24\n  = expected u32 because of return type\n  = Field returned here",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "a front-end error: Verno never reached the solver, so nothing was established about the program"
+      }
+    }
+  ],
+  "counterexample_traces": [],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": [
+      {
+        "index": 0,
+        "path": "src/main.nr",
+        "absolute_path": "<recorded: an absolute path on the recording machine>"
+      }
+    ]
+  }
+}

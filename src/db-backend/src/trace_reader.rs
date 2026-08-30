@@ -213,10 +213,43 @@ pub trait TraceReader: std::fmt::Debug + Send {
     // ── Events ──────────────────────────────────────────────────────
 
     /// All recorded events, in order.
+    ///
+    /// This is the MATERIALIZING accessor: it hands out a borrowed slice, so a
+    /// reader backed by a seekable `events.dat` stream has to decode the whole
+    /// stream to answer it. Prefer [`event_count`](Self::event_count) when only
+    /// the total is wanted, and
+    /// [`seekable_event_page`](Self::seekable_event_page) when only a window is.
     fn events(&self) -> &[DbRecordEvent];
 
     /// Total number of recorded events.
+    ///
+    /// Readers backed by a seekable `events.dat` answer this from the stream's
+    /// chunk index without decoding any event.
     fn event_count(&self) -> usize;
+
+    /// M0/4 — the number of events available through the SEEKABLE `events.dat`
+    /// stream, or `None` when this reader has no such stream.
+    ///
+    /// `Some(_)` is the caller's signal that
+    /// [`seekable_event_page`](Self::seekable_event_page) is worth using
+    /// instead of [`events`](Self::events) — the same shape as
+    /// [`seekable_call_count`](Self::seekable_call_count) and
+    /// [`seekable_step_count`](Self::seekable_step_count).
+    fn seekable_event_count(&self) -> Option<usize> {
+        None
+    }
+
+    /// M0/4 — read a contiguous page of `len` events starting at `start` from
+    /// the seekable `events.dat` stream, decompressing only the chunks the page
+    /// spans. `None` when this reader has no seekable event stream; an empty
+    /// vector when `start` is past the end.
+    ///
+    /// This is what lets an event-log pane paginate a trace whose event stream
+    /// does not fit in a browser tab's memory budget.
+    fn seekable_event_page(&self, start: usize, len: usize) -> Option<Vec<DbRecordEvent>> {
+        let _ = (start, len);
+        None
+    }
 
     // ── Secondary indices ───────────────────────────────────────────
 

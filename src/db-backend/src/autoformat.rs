@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Default minified-source heuristic threshold: when the average line
 /// length over non-empty lines exceeds this many characters, we suspect
@@ -510,12 +510,15 @@ fn run_with_stdin(cmd: &mut Command, input: &str) -> Result<String, AutoFormatEr
 /// * `Err(_)` on a `try_wait` syscall error.
 fn wait_with_timeout(child: &mut Child, timeout: Duration) -> std::io::Result<Option<std::process::ExitStatus>> {
     let poll = Duration::from_millis(25);
-    let started = Instant::now();
+    // `crate::wall_clock`, not `Instant::now()` — this module is compiled
+    // into the wasm build, where `Instant::now()` traps.
+    let started_ms = crate::wall_clock::monotonic_ms();
+    let timeout_ms = timeout.as_millis() as u64;
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(Some(status));
         }
-        if started.elapsed() >= timeout {
+        if crate::wall_clock::monotonic_ms().saturating_sub(started_ms) >= timeout_ms {
             return Ok(None);
         }
         std::thread::sleep(poll);

@@ -92,6 +92,7 @@ fi
 failed=0
 passed=0
 total_oks=0
+total_skips=0
 files=0
 
 while read -r f; do
@@ -137,13 +138,28 @@ while read -r f; do
 
 	oks="$(printf '%s\n' "${output}" | grep -c '\[OK\]' || true)"
 	fails="$(printf '%s\n' "${output}" | grep -c '\[FAILED\]' || true)"
+	skips="$(printf '%s\n' "${output}" | grep -c '\[SKIPPED\]' || true)"
 	total_oks=$((total_oks + oks))
+	total_skips=$((total_skips + skips))
 	verdict="$(classify_test_run "${rc}" "${oks}" "${fails}")"
-	test_run_headline "${verdict}" "${rc}" "${oks}" "${fails}"
+	test_run_headline "${verdict}" "${rc}" "${oks}" "${fails}" "${skips}"
 
 	case "${verdict}" in
 	ok)
 		passed=$((passed + 1))
+		# A green file that skipped cases has to say WHY, on the spot. The
+		# reasons are already printed by the suites themselves — the repo's
+		# `MISSING-RECORDER SKIP:` convention and `language_smoke_test`'s
+		# `SKIP: <lang> recorder not available` — but the runner used to show
+		# a file's output only when it FAILED, so on a green file those lines
+		# went into the log and never into the report. Surfacing them here is
+		# what turns "OK (5 tests, 10 SKIPPED)" from a number into something a
+		# reader can act on.
+		if [ "${skips}" -gt 0 ]; then
+			printf '%s\n' "${output}" |
+				grep -E 'MISSING-RECORDER SKIP:|^[[:space:]]*SKIP:' |
+				sort -u | head -10 | sed 's/^/      /'
+		fi
 		;;
 	no-results)
 		# It BUILT, so this is not a compile error: the binary could not start,
@@ -189,7 +205,12 @@ while read -r f; do
 done < <(test_lane_files "${lane}")
 
 echo ""
-echo "${lane}: ${passed} file(s) passed, ${failed} failed, ${total_oks} case(s)"
+if [ "${total_skips}" -gt 0 ]; then
+	echo "${lane}: ${passed} file(s) passed, ${failed} failed, ${total_oks} case(s)," \
+		"${total_skips} SKIPPED"
+else
+	echo "${lane}: ${passed} file(s) passed, ${failed} failed, ${total_oks} case(s)"
+fi
 
 # Vacuous-pass guards. A lane whose file list is empty, or whose files all
 # compiled and asserted nothing, must not read as green: that is the same

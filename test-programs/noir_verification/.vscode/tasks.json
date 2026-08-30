@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Verify with Verno",
+      "type": "shell",
+      "command": "verno",
+      "args": ["--program-dir", ".", "formal-verify", "--", "--rlimit", "60"],
+      "group": "test",
+      "detail": "Discharge every proof obligation in this package with Verno.",
+      "isBackground": false,
+      "problemMatcher": []
+    },
+    {
+      "label": "Verify with Verno (generous budget)",
+      "type": "shell",
+      "command": "verno",
+      "args": ["--program-dir", ".", "formal-verify", "--", "--rlimit", "600"],
+      "group": "test",
+      "detail": "The same proof attempt with ten times the solver resource budget.",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Record with nargo",
+      "type": "shell",
+      "command": "nargo",
+      "args": ["trace", "--out-dir", "trace"],
+      "group": "build",
+      "detail": "Record an execution of this package for replay.",
+      "problemMatcher": []
+    }
+  ]
+}

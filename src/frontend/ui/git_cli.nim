@@ -12,43 +12,74 @@
 
 import ui_imports
 
-type
-  ExecSyncOptions* = ref object
-    cwd*: cstring
-    encoding*: cstring
-    timeout*: int
+# NS1 (Noir-Studio.milestones.org, the platform facade). Every host call this
+# module used to make inline — `require('child_process')`, `require('fs')`,
+# `require('os')`, `require('path')` — now goes through the facade, which is
+# what makes `ui/vcs.nim` and `ui/unified_diff.nim` host-free too: they reach
+# the host only through this file.
+from ../platform_host import
+  ctPlatform, ctAwaitSync, can, capFilesystemRead, capProcessSpawn,
+  capVcsWrite, ProcessSpec, Platform, PlatformOutcome, process, fs, vcs,
+  succeededExit, `$`
 
-proc execFileSyncRaw*(program: cstring, args: seq[cstring],
-                      opts: ExecSyncOptions): cstring
-  {.importjs: "require('child_process').execFileSync(#, #, #).toString()".}
-proc fsWriteFileSync*(path, content: cstring)
-  {.importjs: "require('fs').writeFileSync(#, #)".}
-proc fsUnlinkSync*(path: cstring) {.importjs: "require('fs').unlinkSync(#)".}
-proc osTmpdir*(): cstring {.importjs: "require('os').tmpdir()".}
-proc pathJoin*(a, b: cstring): cstring {.importjs: "require('path').join(#, #)".}
-proc dateNow*(): int {.importjs: "Date.now()".}
+const gitTimeoutMs = 5000
+
+proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
+  ## One git invocation, through the platform facade.
+  ##
+  ## NS1: this used to be `require('child_process').execFileSync` inline, which
+  ## works on exactly one of the three platforms the facade serves. It is now a
+  ## `ProcessSpec` — argv, never a shell string, so no caller needs `quoteShell`
+  ## and no platform needs a shell.
+  ##
+  ## ## What is still to do here, stated rather than hidden
+  ##
+  ## This routes git through the PROCESS facade, not the VCS facade. That
+  ## removes the direct host call and is what makes `ui/vcs.nim` and
+  ## `ui/unified_diff.nim` host-free for free — they only ever reached the host
+  ## through this function. It does not yet make the web instantiation work:
+  ## a tab has no git binary, so `capProcessSpawn` is absent there and every
+  ## call below degrades to "". The remaining work is mapping `ui/vcs.nim`'s
+  ## fifteen git invocations onto `VcsFacade`'s operations, which is what lets
+  ## the browser serve them from a real object store (Noir-Studio.md §6.2a).
+  ## `viewmodel/platform/vcs.nim` already defines every operation that mapping
+  ## needs.
+  if not ctPlatform().can(capProcessSpawn):
+    return ("", false)
+  var argv: seq[string] = @[]
+  for arg in args:
+    argv.add $arg
+  let outcome = ctAwaitSync(ctPlatform().process.run(ProcessSpec(
+    command: "git",
+    args: argv,
+    workingDir: (if cwd.isNil: "" else: $cwd),
+    timeoutMs: gitTimeoutMs)))
+  if not outcome.ok:
+    return ("", false)
+  (outcome.value.stdout, outcome.value.exit.succeededExit)
 
 proc gitExec*(args: seq[cstring], cwd: cstring): cstring =
   ## Run a git command in the given working directory.
   ## Returns the trimmed stdout output, or an empty string on error.
-  try:
-    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
-    let raw = execFileSyncRaw(cstring"git", args, opts)
-    if raw.isNil:
-      return cstring""
-    # Trim trailing whitespace / newlines.
-    return ($raw).strip().cstring
-  except:
+  let (output, ok) = runGit(args, cwd)
+  if not ok:
     return cstring""
+  output.strip().cstring
 
-proc fsReadTextFile*(path: cstring): cstring
-  {.importjs: """(function(p) {
-    try { return require('fs').readFileSync(p, 'utf8'); } catch (e) { return ''; }
-  })(#)""".}
-  ## A file's text, or "" when it cannot be read.  The guard is on the JS side
-  ## because a missing file is an ordinary outcome here — the working tree of a
-  ## diff can legitimately no longer contain the path — and must not surface as
-  ## an exception in the middle of a render.
+proc fsReadTextFile*(path: cstring): cstring =
+  ## A file's text, or "" when it cannot be read.
+  ##
+  ## The empty-on-missing behaviour is deliberate and predates NS1: the working
+  ## tree of a diff can legitimately no longer contain the path, so a missing
+  ## file is an ordinary outcome here and must not surface as an exception in
+  ## the middle of a render. What changed is where the guard lives — it was an
+  ## inline `try/catch` in the JS binding, and it is now the facade's outcome,
+  ## which distinguishes `pkNotFound` from `pkAccessDenied` for any caller that
+  ## later wants to.
+  if not ctPlatform().can(capFilesystemRead):
+    return cstring""
+  let outcome = ctAwaitSync(ctPlatform().fs.readText($path))
+  if outcome.ok: outcome.value.cstring else: cstring""
 
 proc stripTrailingNewline(text: string): string =
   ## Drop the one line terminator a file ends with.
@@ -83,33 +114,32 @@ proc gitFileText*(revision, path, cwd: cstring): cstring =
   ## both mean the same thing for an expand control.
   if revision.isNil or ($revision).len == 0:
     let full = if cwd.isNil or ($cwd).len == 0: $path
-               else: $pathJoin(cwd, path)
+               else: ($cwd) / ($path)
     return cstring(stripTrailingNewline($fsReadTextFile(cstring(full))))
-  try:
-    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
-    let raw = execFileSyncRaw(cstring"git",
-      @[cstring"show", cstring($revision & ":" & $path)], opts)
-    if raw.isNil:
-      return cstring""
-    return cstring(stripTrailingNewline($raw))
-  except:
+  # Deliberately not `gitExec`: that one strips ALL trailing whitespace, and a
+  # file's content is not a command's output — a blob whose last line is blank
+  # must come back with it.
+  let (output, ok) = runGit(
+    @[cstring"show", cstring($revision & ":" & $path)], cwd)
+  if not ok:
     return cstring""
+  cstring(stripTrailingNewline(output))
 
 proc applyPatchToIndex*(patch, cwd: cstring) =
   ## Stage a patch with ``git apply --cached``, through a temporary file
   ## because git reads the patch from a path rather than from argv.
-  let tmpFile = pathJoin(osTmpdir(), cstring("ct-hunk-stage-" & $dateNow() & ".patch"))
-  fsWriteFileSync(tmpFile, patch)
-  try:
-    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
-    discard execFileSyncRaw(cstring"git", @[cstring"apply", cstring"--cached", tmpFile], opts)
-  except:
-    cerror "Failed to stage hunks: " & getCurrentExceptionMsg()
-  finally:
-    try:
-      fsUnlinkSync(tmpFile)
-    except:
-      discard
+  # NS1: `applyPatch` is a first-class VCS-facade operation precisely because
+  # "write a temp file and shell out" is the desktop's implementation detail
+  # rather than the intent — a browser has no temp directory to write to and no
+  # git to point at it. The facade takes the patch text and lets each
+  # instantiation decide how to feed it to git.
+  if not ctPlatform().can(capVcsWrite):
+    cerror "Failed to stage hunks: version control is not available here"
+    return
+  let outcome = ctAwaitSync(ctPlatform().vcs.applyPatch(
+    (if cwd.isNil: "" else: $cwd), $patch, reverse = false))
+  if not outcome.ok:
+    cerror "Failed to stage hunks: " & $outcome.error
 
 proc isGitRepository*(cwd: cstring): bool =
   ## Check whether `cwd` is inside a git working tree.

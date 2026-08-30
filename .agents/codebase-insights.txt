@@ -2510,3 +2510,160 @@ providers' `TestCapabilities` are compile-time constants, so — unlike
 `smart-*` — recorder availability does not move their catalogs either. The
 blast radius is capability, not attestation: the same workspace could record
 from one shell and refuse from another.
+
+## The Embed SDK facade and its import lint (2026-08-28)
+
+`src/frontend/viewmodel/codetracer_embed.nim` is the CodeTracer Embed SDK's
+entire public surface (CodeTracer-Embed-SDK.md §7: "anything not exported from
+the Nim `codetracer_embed` module is private"). If you are adding something a
+consumer needs, add it there; if you are refactoring something not exported
+there, you are not making a breaking change.
+
+Two things about it that will otherwise surprise you:
+
+* **`ci/test/sdk-facade-boundary.sh` is a build gate**, wired into
+  `ci/lint/nim.sh`. It walks the facade's transitive import graph lexically —
+  and that walk was validated to be *byte-identical* to `nim c --genDeps` for
+  the C backend (32 modules), so treat a disagreement as a bug in the
+  resolver, not in the rule. It fails on rendering/DOM/layout in the graph,
+  on `std/osproc` in the graph, and on any chain concept (`chainId`,
+  `blockNumber`, `txHash`, …) anywhere in it. The chain rule is §3.2's newest
+  row and the one under real pressure, because BlockTracer is the first
+  consumer.
+* **A file becomes a "consumer" only by declaring itself one**, with a
+  `## SDK-CONSUMER: <reason>` header or a `.sdk-consumer` file in an ancestor
+  directory — the same two spellings `ci/test/test-lane-coverage.sh` uses. A
+  declared consumer may import `codetracer_embed` and nothing else from
+  `src/frontend/viewmodel/`. An undeclared file is unconstrained.
+
+Two limits of that guard, both deliberate and both worth knowing before you
+trust it further than it goes:
+
+* **`src/frontend/ui/` is banned by PATH, with a one-entry allowlist**
+  (`UI_PATH_ALLOWLIST`), and the reason is written up at length in the script.
+  The short version: the rule was briefly deleted on the argument that the
+  import graph subsumes it, and that argument is false. `ui/flow_line_styles`,
+  `ui/editor_decoration_layers` and `ui/trace_redraw_policy` have **zero
+  imports** and are presentation policy — the first exports `"line-flow-hit"`
+  and friends — so they present to an import-graph rule exactly as the
+  genuinely-pure `ui/flow_loop_math` does. If the ban fires on you, add your
+  module's exact path to the allowlist with a reason; do not widen the rule.
+* **The graph walk does not enter IsoNim.** It checks this repo's modules plus
+  the *first-level* external specs they name, so "no rendering in the SDK
+  graph" means "none in this repo, and none at IsoNim's entry points". A
+  rendering dependency added inside IsoNim would not move this lint. That is
+  benign today — the compiler's own dep list for the facade reaches only
+  `isonim/core/*`, `isonim/viewmodel` and `isonim/testing/test_utils` — but it
+  is unguarded, and IsoNim is a peer package on someone else's release
+  cadence.
+
+Related, and easy to get wrong:
+
+* `viewmodel/vm_log.nim` exists because `frontend/lib/logging` imports
+  `lib/jslib`, which imports `dom` and `kdom`. Eleven `[PIPELINE]` debug lines
+  in `store/replay_data_store.nim` and `viewmodels/calltrace_vm.nim` were
+  putting the Karax DOM shim into the SDK's `nim js` graph. Use `vmDebug` in
+  the ViewModel layer; `cdebug` is fine everywhere in the renderer.
+* `sdk/debugger_session.nim`'s `newDebuggerSession` builds the store but NOT
+  the panel VMs: `session_vm.initializePanelViewModels` is called by
+  `launch`/`attach`, because several panel VMs own effects that issue backend
+  requests and there is nothing to ask about before a trace is open.
+  `app_vm.createAppViewModel` grew an `initializePanels` parameter for this;
+  it defaults to `true`, so existing call sites are unchanged.
+* `headless_session.HeadlessDebugSession` is now a *host* around a
+  `DebuggerSession` rather than an owner of its own graph. It still does its
+  own DAP handshake, because it needs `DapStdioBackend.waitForEvent` and
+  `BackendService.onEvent` is a registration, not a pump — the stdio
+  adapter's `onEventProc` collects handlers and never calls them.
+
+## The degraded-state catalogue is split across two packages (BlockTracer M2b)
+
+`BlockTracer/Page-Descriptions.md` §14 lists thirteen degraded states and ends
+with the rule that each is "a value of an enum on a ViewModel, not a branch in
+a view". The table reads as one list; it is not.
+
+* **Seven of the thirteen rows are chain-level** — pipeline behind the tip,
+  object not found, trace awaiting generation, recorder unavailable for the
+  VM, transaction below the history floor, reorganised away, CDN unreachable.
+  They belong to BlockTracer's own ViewModels (`ChainVM`, `TraceStatusVM`,
+  `GenerationJobVM`, ... — Front-End-Architecture.md §3). Modelling one of
+  them in `src/frontend/viewmodel/` violates CodeTracer-Embed-SDK.md §3.2's
+  last row and trips `ci/test/sdk-facade-boundary.sh`'s chain-token scan.
+* **Six reach a pane** and live in `viewmodel/store/degraded_state.nim`:
+  replay window expired, permanently unreplayable, browser cannot run the
+  debugger, trace truncated, divergence detected, no verified source.
+  That module's header carries the full row-by-row ownership table.
+
+The split is 7-up/6-down for *modelling*, but it is NOT 7-up/6-down for
+ownership, and reading it that way is the trap. Four of the six also have a
+BlockTracer ViewModel named against them in Front-End-Architecture.md §3 —
+`CapabilityVM`, `DivergenceVM`/`TraceStatusVM`, `SourceBundleVM`/`AddressVM`,
+`ArtifactVM`. Those establish the condition from inputs that are chain- or
+delivery-shaped (a capability probe, a manifest verdict, a provider chain, a
+retention policy); the enums here are what a *pane* renders. The seam is
+`ReplayDataStore`'s four setters plus the `CtReplayStatus` event: above
+writes, panes read. Neither layer is redundant, and deleting `CapabilityVM`
+because "the SDK already has `CapabilityRung`" would be the wrong conclusion.
+
+Shape worth keeping if you extend it:
+
+* ONE `PaneDegradation` enum plus a per-pane `set[PaneDegradation]`, not one
+  enum per pane. §14 asks for "one canonical treatment rather than being
+  reinvented per page"; five enums would be five places to re-decide what
+  "truncated" means and to re-derive the precedence between two simultaneous
+  conditions — the branch-in-a-view failure moved up a layer.
+* The precedence is data (`DegradationPrecedence`), not control flow, so a
+  test asserts the ordering directly.
+* `DebugControlsVM.replayUsable` gates every `can*` memo. A step button that
+  is enabled over a replay that cannot run IS the "retry that cannot succeed"
+  §14 forbids, so the gate belongs in the memo and not in the view.
+* Degraded state reaches the store over a `CtReplayStatus` backend event as
+  well as through host-side setters, so `MockBackendService.emitEvent` can
+  drive every §14 row headlessly. Unrecognised wire spellings deliberately
+  leave the signal alone rather than falling back to the healthy default.
+
+## `ci/test/sdk-facade-boundary.sh` needs bash >= 4
+
+It uses `mapfile`, which macOS's /bin/bash 3.2 does not have. Run outside the
+dev shell it prints `mapfile: command not found` plus `unbound variable`
+noise, and `sdk-facade-boundary-test.sh` reports 20 spurious failures. Run
+both through `direnv exec <repo> bash -c '...'`, which supplies bash 5.
+
+## The ViewModels and the wasm32 replay engine speak different DAP dialects
+
+`src/frontend/viewmodel/backend/dap_dialect.md` is the measured, reproduced
+record — eight disagreements, four of which trap the WASM worker. Read it
+before wiring any pane to `WorkerBackendService`. The three that bite first:
+
+* **Handshake order.** `sdk/debugger_session.nim:377-383` sends `initialize ->
+  configurationDone -> launch`; the browser engine needs `launch` before
+  `configurationDone`, because `handle_message_browser`'s `configurationDone`
+  arm (`dap_server.rs:2743-2775`) is the only place the `Handler` is ever
+  constructed and it reads a folder only `launch` populates. Get it wrong and
+  all three requests answer `success: true`, then every later request is
+  dropped with a bare `warn!` (`dap_server.rs:2809`) — no response, so the
+  future hangs forever. The NATIVE path tolerates both orders; the browser
+  path's copies of both tolerances are inert because they are `&&`-chained
+  onto `ctx.to_stable_sender`, which is `None` in the browser.
+* **`SystemTime::now()` traps on wasm32.** No cfg guard, no shim; `vfs.rs`
+  works around it for the VFS only. `ct/load-locals` (so the State pane cannot
+  work at all), `ct/originChain`, any step reaching a trace boundary, and
+  `disconnect` all die. `probe_engine_defects.mjs` reproduces all four.
+* **`drainPlatformCallbacks()` cannot see a real transport.** On JS,
+  `onComplete` uses the drainable queue only for `__syncResolved` futures —
+  i.e. `newCompletedFuture`, i.e. `mock_backend`. Anything built with
+  `newPromise` and resolved later (`worker_backend`, `real_backend`) is
+  observed by a `.then` microtask a synchronous drain cannot pump. This site
+  has now been wrong twice for two different reasons; commit `caaea86c` fixed
+  the synchronous half only.
+
+## Two dispatch tables, and neither is in `dap_handler.rs`
+
+`dap_handler.rs` has no `match` on a command string at all — it holds the
+handler methods. The tables are `dap_server.rs:2043` (`handle_request`, the
+full command set) and `dap_server.rs:2676` (`handle_message_browser`, which
+handles only initialize/launch/configurationDone/disconnect and delegates the
+rest to `handle_request`). Grepping `dap_handler.rs` for command-looking
+strings matches filesystem paths (`meta_dat/sources`, `origin-patterns`), a
+replay-task name (`"flow"`) and a default literal (`"source"`) — none of them
+commands.

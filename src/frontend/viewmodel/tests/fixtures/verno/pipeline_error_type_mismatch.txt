@@ -1,0 +1,18 @@
+error: Expected type Field, found type u32
+  ┌─ typeerr/src/main.nr:2:20
+  │
+2 │     let y: Field = x;
+  │                    -
+  │
+
+error: expected type u32, found type Field
+  ┌─ typeerr/src/main.nr:1:24
+  │
+1 │ fn main(x: u32) -> pub u32 {
+  │                        --- expected u32 because of return type
+2 │     let y: Field = x;
+3 │     y
+  │     - Field returned here
+  │
+
+Aborting due to 2 previous errors

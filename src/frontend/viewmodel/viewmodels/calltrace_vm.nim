@@ -19,6 +19,10 @@
 ## whenever scrollPosition or viewportHeight change, so the panel always
 ## displays data for the current scroll region.
 ##
+## Degraded state (Page-Descriptions.md §14):
+## - `degradedState`: resolved against `CalltracePaneDegradations`; a
+##   truncated trace's call tree ends before the execution did
+##
 ## Usage:
 ##   let vm = createCalltraceVM(store)
 ##   echo vm.scrollPosition.val     # 0
@@ -26,8 +30,10 @@
 ##   echo vm.visibleLines.val       # lines around index 100
 
 import std/[json, sets, options, strutils]
-when defined(js):
-  import ../../lib/logging
+# Diagnostics go through `vm_log`, not the renderer's `lib/logging`: that
+# module reaches `dom`/`kdom` and would put a DOM shim in the Embed SDK's
+# package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
+import ../vm_log
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -103,6 +109,14 @@ type
     hasMoreBelow*: Memo[bool]
     highlightedMatches*: Memo[seq[int64]]
     isLoading*: Memo[bool]
+
+    # -- Degraded state (Page-Descriptions.md §14) --
+    degradedState*: Memo[PaneDegradation]
+      ## Resolved against `CalltracePaneDegradations`. The row that
+      ## matters most here is `pdTraceTruncated`: a truncated trace's
+      ## call tree ends before the execution did, and a pane that renders
+      ## it as an ordinary end of trace is making a false claim about the
+      ## program.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -295,7 +309,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
   ## 2. Derived memos for visibleLines, hasMore*, highlightedMatches, isLoading
   ## 3. An auto-load effect that requests calltrace data when scroll/viewport changes
   when defined(js):
-    cdebug "[PIPELINE] createCalltraceVM: using store id=" & $store.storeId
+    vmDebug "[PIPELINE] createCalltraceVM: using store id=" & $store.storeId
   withViewModel proc(dispose: proc()): CalltraceVM =
     let wrappedDispose = proc() =
       when defined(js):
@@ -305,7 +319,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
         # Both are ordinary lifecycle events.  The shouting was a leftover
         # from debugging an unexpected early disposal; the fact that
         # disposal happened is worth tracing, but it is not an error.
-        cdebug "[PIPELINE] CalltraceVM disposed (session teardown or " &
+        vmDebug "[PIPELINE] CalltraceVM disposed (session teardown or " &
           "stub-to-real-backend VM replacement)"
       dispose()
 
@@ -327,14 +341,14 @@ proc createCalltraceVM*(store: ReplayDataStore;
       let vpHeight = viewportHeight.val
 
       when defined(js):
-        cdebug "[PIPELINE] visibleLines memo: storeId=" &
+        vmDebug "[PIPELINE] visibleLines memo: storeId=" &
           $store.storeId & " lines.len=" & $lines.len & " storeStart=" &
           $storeStart & " scrollPos=" & $scrollPos & " vpHeight=" &
           $vpHeight
 
       if lines.len == 0:
         when defined(js):
-          cdebug "[PIPELINE] visibleLines memo: returning empty (no lines in store)"
+          vmDebug "[PIPELINE] visibleLines memo: returning empty (no lines in store)"
         return newSeq[CallLine]()
 
       # When viewport height is not yet known (e.g. before the resize
@@ -360,7 +374,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       for index in sliceStart .. sliceEnd:
         result.add(lines[index])
       when defined(js):
-        cdebug "[PIPELINE] visibleLines memo: returning " &
+        vmDebug "[PIPELINE] visibleLines memo: returning " &
           $result.len & " lines (slice " & $sliceStart & ".." &
           $sliceEnd & ")"
 
@@ -401,6 +415,10 @@ proc createCalltraceVM*(store: ReplayDataStore;
     # em/rem-derived pixel height rather than the compile-time approximation.
     let rowHeightPx = createSignal(24.0)
 
+    # Derived: the §14 degraded state this pane renders.
+    let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
+      resolveDegradation(store.degradedSnapshot(), CalltracePaneDegradations)
+
     let vm = CalltraceVM(
       store: store,
       collabCore: collabCore,
@@ -419,6 +437,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       hasMoreBelow: hasMoreBelow,
       highlightedMatches: highlightedMatches,
       isLoading: isLoading,
+      degradedState: degradedState,
       disposeProc: wrappedDispose,
     )
 
@@ -436,7 +455,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       let dbg = store.debugger.val
       let patterns = rawIgnorePatterns.val
       when defined(js):
-        cdebug "[PIPELINE] CalltraceVM.autoLoad: storeId=" &
+        vmDebug "[PIPELINE] CalltraceVM.autoLoad: storeId=" &
           $store.storeId & " rrTicks=" & $dbg.rrTicks & " vpHeight=" &
           $vpHeight & " scrollPos=" & $scrollPos & " depth=" & $depth
       # No rrTicks guard — DB-based traces always have rrTicks=0.

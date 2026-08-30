@@ -833,7 +833,7 @@ jobs:
         # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps AND
         # the open-coded toolchain installs (dtolnay rust-toolchain, choco
         # capnproto, choco nim).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -1057,7 +1057,7 @@ jobs:
         # AND the hand-rolled "Bootstrap Windows dev environment" env-export
         # (the composite captures the full env.ps1 delta, a superset of the
         # vars that step exported by hand).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -1196,6 +1196,19 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # ci/lint/nim.sh runs the SDK-facade-boundary guard, which since
+      # ada0a7ee walks the import graph INTO the `isonim` and `nim-everywhere`
+      # sibling packages (both REQUIRED siblings per scripts/require-siblings.sh)
+      # and fails `graph-walks-siblings` if it cannot resolve them. That commit
+      # added the sibling requirement to the guard but not to this job, so
+      # lint-nim went red with `cannot locate sibling package: isonim /
+      # nim-everywhere`. Provision the IsoNim-family siblings next to this
+      # checkout through the shared action, the same way the build/test jobs do.
+      - name: Setup isonim siblings
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
 
   lint-nix:
@@ -1273,7 +1286,7 @@ jobs:
         # Nix steps. The direnv-allow + ct_emulator nimble steps below remain
         # bespoke because they operate inside the cloned native-recorder
         # sibling's own dev env.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -1328,7 +1341,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
 
   reprobuild-macos-smoke:
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1413,7 +1426,7 @@ jobs:
   # target as a comma-separated allowlist (default 'all').
   origin-dap-macos:
     name: origin-DAP (materialized Python, macOS)
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1468,7 +1481,7 @@ jobs:
   # is added deliberately.
   origin-dap-macos-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1562,7 +1575,7 @@ jobs:
         # same file omits RUNQUOTA_SRC, so the dev shell export cannot stand in
         # for it. Cloned here rather than via the two composite actions above
         # because neither owns this dependency (issue #641).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/runquota
           ref: dev
@@ -1624,7 +1637,7 @@ jobs:
         # ``setup-dev-env`` -- that route additionally requires a published
         # workspace lock, which is a separate unresolved problem and
         # would make this job depend on it for no benefit.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-trace-format-nim
           # That repo's default branch is `dev` (confirmed against the API);
@@ -1675,6 +1688,19 @@ jobs:
         # knowing before reading the lane's report.
         run: bash ci/test/test-lane-report-test.sh
 
+      - name: Enforce the platform facade's host-free build (NS1)
+        # Noir-Studio.milestones.org NS1: "A build configuration that **does
+        # not link the host modules**, so a direct call fails to compile" and
+        # "That configuration runs in CI, so the property cannot decay
+        # quietly." This step is the second half of that sentence.
+        #
+        # It runs BEFORE `test-vm` deliberately. A `readFile` that has crept
+        # into a ViewModel does not fail any suite — the desktop build links
+        # `std/os` and the call works — so the only signal that the facade has
+        # been bypassed is this gate. Reading it after a green suite would be
+        # reading it too late.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-hostfree
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
@@ -1706,7 +1732,7 @@ jobs:
         # the workspace-sibling layout the tests resolve
         # (../codetracer-js-recorder/packages/cli/dist/index.js) per
         # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-js-recorder
           # `dev` is that repo's default branch; `main` trails it (15 commits
@@ -1732,7 +1758,7 @@ jobs:
         # Under tup the checkout is the only way those modules resolve --
         # NIM_REPO_PATH_FLAGS points at `$(ROOT)/../runquota/...` and tup's
         # environment allowlist omits RUNQUOTA_SRC (issue #641).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/runquota
           ref: dev
@@ -1925,7 +1951,40 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
+        # ``direnv exec <recorder-root> bash ct_emulator/build_native_api.sh``
+        # to materialise the recorder's generated C before the Rust build. A
+        # fresh clone has its .envrc "blocked", so direnv refuses and build.rs
+        # panics with ``build_native_api.sh exited with status 1``. Mirror the
+        # proven lint-rust pattern: ``direnv allow`` is idempotent and persists
+        # only in the local direnv state dir on this self-hosted runner.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh runs ``nim c ... ct_emulator.nim`` whose .nimble
+        # declares ``requires "results"``. A fresh nim install has no global
+        # ``results`` package, so the script aborts with
+        # ``cannot open file: results``. ``nimble install --depsOnly`` once in
+        # ct_emulator (inside the recorder's direnv env so nim/nimble resolve
+        # from the recorder's flake) is idempotent -- same fixup lint-rust does.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
+
+      # The emulator's ``syscall_replay.nim`` imports ``stew/endians2`` but
+      # ``ct_emulator.nimble`` doesn't list ``stew`` as a dep, so a fresh Nim
+      # build cannot resolve the module. Codetracer ships its own pinned copy as
+      # a submodule under ``libs/nim-stew``; inject it via
+      # ``CT_EMULATOR_EXTRA_NIM_PATHS`` so build_native_api.sh's ``--path:``
+      # flags pick it up -- same env-var lint-rust uses.
+      - name: Build
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
 
   nix-build:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -2001,12 +2060,41 @@ jobs:
         with:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Setup db-backend siblings
+        # ``./ci/build/appimage.sh`` -> ``build_db_backend.sh`` runs
+        # ``cargo build`` in src/db-backend, whose build.rs needs the
+        # codetracer-native-recorder sibling checkout (and its trace-format
+        # siblings) to regenerate the recorder's native C. Clone them adjacent
+        # to the checkout, exactly as dev-build does.
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
+        # ct_emulator/build_native_api.sh``; a fresh clone has its .envrc
+        # "blocked", so direnv refuses and build.rs panics. ``direnv allow`` is
+        # idempotent -- mirror the proven lint-rust / dev-build pattern.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh's ``nim c ... ct_emulator.nim`` requires the
+        # ``results`` package (ct_emulator.nimble ``requires "results"``);
+        # install it once inside the recorder's direnv env, same as lint-rust.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
@@ -2018,7 +2106,13 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
+      # ``CT_EMULATOR_EXTRA_NIM_PATHS`` injects codetracer's pinned nim-stew /
+      # nim-result submodules so build_native_api.sh's ``--path:`` flags resolve
+      # ``stew/endians2`` (not a declared ct_emulator.nimble dep) -- same
+      # env-var lint-rust and dev-build use.
       - name: Build
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh"
 
       - name: Upload artifact
@@ -2033,14 +2127,15 @@ jobs:
   dmg-build:
     # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
     # `dtolnay/rust-toolchain` + `./ci/build/dmg.sh` (-> Homebrew-native
-    # `./non-nix-build/build.sh`) and `brew install awscli` steps are gone. The
-    # dmg is now produced toolchain-free by reprobuild
-    # (`repro build .#dmg --tool-provisioning=nix`, driven by
-    # `ci/reprobuild/macos-daemon-build.sh`), which lands the artifact at the
-    # same `non-nix-build/CodeTracer.dmg` path the sign + upload steps consume.
-    # `aws` comes from `nixpkgs#awscli2`, provisioned per-command via `nix
-    # shell`.
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    # `./non-nix-build/build.sh`) and `brew install awscli` steps are gone.
+    # reprobuild builds the app bundle hermetically (`repro build .#macos-app
+    # --tool-provisioning=nix`, driven by `ci/reprobuild/macos-daemon-build.sh`);
+    # the dmg itself is packaged from that bundle in a plain devShell (see the
+    # "Package DMG" step for why `.#dmg` cannot run hermetically on macOS), and
+    # lands at the same `non-nix-build/CodeTracer.dmg` path the sign + upload
+    # steps consume. `aws` comes from `nixpkgs#awscli2`, provisioned per-command
+    # via `nix shell`.
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     needs:
       - lint-bash
       - lint-nim
@@ -2084,12 +2179,63 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
-      - name: Build DMG via reprobuild
-        # Toolchain-free reprobuild macOS build: starts runquotad, runs
-        # `repro build .#dmg --tool-provisioning=nix`, and asserts the artifact
-        # at `non-nix-build/CodeTracer.dmg` — the exact path the sign + upload
-        # steps below consume.
+      - name: Build CodeTracer.app via reprobuild
+        # Toolchain-free reprobuild macOS build of the *app bundle*: starts
+        # runquotad, runs `repro build .#macos-app --tool-provisioning=nix`,
+        # and lands `non-nix-build/CodeTracer.app` (which the packaging step
+        # below turns into the dmg).
+        #
+        # WHY NOT `.#dmg`: reprobuild's `.#dmg` target invokes the nixpkgs
+        # `create-dmg`, a shell script that shells out to macOS system tools
+        # (`sw_vers`, then `hdiutil` / `SetFile`). None of those have a nixpkgs
+        # package, and reprobuild runs every tool action with a scrubbed PATH =
+        # the tool's own nix closure only (the sanctioned `CT_SANDBOX_TOOLS_DIR`
+        # escape hatch is not populated anywhere), so `.#dmg` dies with
+        # `create-dmg: line 16: sw_vers: command not found` (exit 127). A fully
+        # hermetic dmg is not achievable on macOS — hdiutil is the only tool
+        # that writes the format and it is macOS-system-only. So we keep the
+        # reproducible half (the .app, built hermetically by reprobuild) and
+        # package the inherently-non-hermetic dmg in the step below, where the
+        # devShell provides create-dmg and the runner's /usr/bin provides the
+        # macOS system tools it needs.
+        env:
+          CODETRACER_REPROBUILD_TARGET: .#macos-app
         run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
+
+      - name: Package DMG
+        # Package `non-nix-build/CodeTracer.app` into `CodeTracer.dmg` using the
+        # devShell's create-dmg. This runs in a plain `nix develop .` shell (NOT
+        # a reprobuild action), so the devShell provides create-dmg. create-dmg
+        # itself shells out to macOS system tools (sw_vers, hdiutil, SetFile);
+        # this self-hosted nix-darwin runner's inherited PATH is nix-store-only,
+        # so /usr/bin is not present and create-dmg dies with
+        # `sw_vers: command not found`. Append the macOS system dirs (kept AFTER
+        # the devShell entries so the nix create-dmg still wins) to resolve them.
+        # The create-dmg flags mirror non-nix-build/build_dmg.sh (the pre-CIP-5
+        # path) and repro.nim's create_dmg action, so the produced dmg is the
+        # same shape the sign + upload steps below expect.
+        run: |
+          nix develop . --command bash -c '
+            set -eu
+            export PATH="$PATH:/usr/bin:/usr/sbin"
+            cd non-nix-build
+            rm -f CodeTracer.dmg
+            staging="$(mktemp -d)"
+            trap "rm -rf \"$staging\"" EXIT
+            cp -R CodeTracer.app "$staging/"
+            create-dmg \
+              --volname CodeTracer \
+              --background dmg_background.png \
+              --window-pos 200 120 \
+              --window-size 600 400 \
+              --icon-size 100 \
+              --icon CodeTracer.app 150 200 \
+              --app-drop-link 450 200 \
+              --sandbox-safe \
+              --hdiutil-retries 15 \
+              CodeTracer.dmg \
+              "$staging"
+          '
 
       - name: Upload artifact
         env:
@@ -2102,6 +2248,187 @@ jobs:
           nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
           nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
 
+  windows-installer-build:
+    # Builds the NSIS installer (non-nix-build/CodeTracer-Setup.exe) and hands
+    # it to windows-installer-publish (Linux) for signing + R2 upload. Split in
+    # two so all GPG/aws work stays on the proven Linux path; the Windows leg
+    # only produces the artifact.
+    #
+    # Gated to `main` (the release branch) because the -win-x64 artifact is a
+    # RELEASE artifact promoted to `-latest-` by create-release, exactly like the
+    # AppImage/dmg. Keeping it off PRs / `dev` also means the eph-win-x64 GARM
+    # outage cannot turn PR runs red. This job is NOT in push-tag's `needs`, so
+    # while GARM is down it can hang/fail without ever blocking a release —
+    # create-release simply skips the (absent) win artifact (see below).
+    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      # See the eph-win-x64 note at the top of this file: actions/checkout needs
+      # a real git for `submodules: recursive`, provisioned by this bootstrap.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        # windows-diy provisions the DIY Windows toolchain via env.ps1's
+        # ensure-* helpers (nim / rust / capnp / clingo / repro …) and clones the
+        # recorder/trace siblings, persisting PATH to GITHUB_ENV/GITHUB_PATH.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: windows-diy
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          siblings: |
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
+
+      - name: Remove WSL bash stub from System32
+        # As in the other eph-win-x64 jobs: let CreateProcessW fall through to
+        # Git Bash instead of the WSL launcher stub.
+        shell: pwsh
+        run: |
+          $wslStub = "$env:SystemRoot\System32\bash.exe"
+          if (Test-Path $wslStub) {
+            takeown /f $wslStub | Out-Null
+            icacls $wslStub /grant "Administrators:(F)" | Out-Null
+            Remove-Item -Force $wslStub
+          }
+          $gitForWindowsBin = "C:\Program Files\Git\bin"
+          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
+          }
+          # Whatever supplied it, `bash` must resolve now: the build step below
+          # is `shell: bash`, and a missing bash there reads as a build failure
+          # rather than as a missing tool.
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
+                  "should have provisioned Git Bash; every step below this one needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
+
+      - name: Build CodeTracer-Setup.exe
+        shell: bash
+        env:
+          CODETRACER_REPROBUILD_TOOL_PROVISIONING: scoop
+          CODETRACER_REPROBUILD_LOG: quiet
+        run: |
+          set -euo pipefail
+          # Canonical installer build, mirroring the `test-windows-installer`
+          # justfile recipe: build the app once, then the NSIS `windows-installer`
+          # reprobuild target. build-once.sh resolves repro/repro.exe from the
+          # sibling checkout or PATH (env.ps1 puts it there).
+          bash scripts/build-once.sh
+          repro build windows-installer \
+            --tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING}" \
+            --log="${CODETRACER_REPROBUILD_LOG}"
+          test -f non-nix-build/CodeTracer-Setup.exe \
+            || { echo "non-nix-build/CodeTracer-Setup.exe was not produced" >&2; exit 1; }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codetracer-setup-exe
+          path: non-nix-build/CodeTracer-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-installer-publish:
+    # Signs the Windows installer with the release key and publishes it to R2 as
+    # CodeTracer-main-win-x64.exe(.asc), the per-`main`-build key that
+    # create-release promotes to `-latest-`/`-<tag>-` — the exact shape as the
+    # AppImage/dmg (CodeTracer-main-amd64.AppImage etc.). Runs on Linux so gpg,
+    # aws and the imported release key all come from the proven nix path.
+    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [ windows-installer-build ]
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: "Import GPG key for signing"
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codetracer-setup-exe
+          path: .
+
+      - name: Sign and upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          nix develop .#devShells.x86_64-linux.default --command gpg --armor --detach-sign CodeTracer-Setup.exe
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-Setup.exe s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-win-x64.exe --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-Setup.exe.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-win-x64.exe.asc --checksum-algorithm CRC32
+
   dmg-lib-check:
     # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
     # `brew install awscli` / `brew install sevenzip` steps are gone; `aws`
@@ -2109,7 +2436,7 @@ jobs:
     # binary), both provisioned per-command via `nix shell`. This job only
     # downloads + extracts + smoke-runs the release dmg, so it needs no
     # Homebrew build toolchain.
-    runs-on: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     needs:
       - dmg-build
     steps:
@@ -2148,6 +2475,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc ./CodeTracer.dmg.asc
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc ./CodeTracer.pub.asc
+
+      - name: Verify GPG signature
+        # A signed release is only worth signing if we check the signature on
+        # the exact bytes we ship. The detached .asc and the published public
+        # key come from the same bucket the dmg does; import the key and verify
+        # before we run the binary, so a broken/absent signature fails loudly
+        # here rather than being discovered by a user with `gpg --verify`.
+        run: |
+          nix shell nixpkgs#gnupg --command gpg --import ./CodeTracer.pub.asc
+          nix shell nixpkgs#gnupg --command gpg --verify ./CodeTracer.dmg.asc ./CodeTracer.dmg
 
       - name: Extract dmg
         env:
@@ -2162,6 +2501,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
+
+      - name: Record -> replay smoke on the packaged dmg
+        # Informational, NOT a gate (continue-on-error): records a tiny Noir
+        # package and reads it back with the SHIPPED ct + bundled recorder
+        # (nargo / wazero / db-backend-record). Catches packaging regressions
+        # that `--version` cannot -- a missing or mis-linked bundled recorder.
+        # A known bug here may ship in an internal release and be fixed by a
+        # follow-up; it must not block the release from cutting.
+        continue-on-error: true
+        env:
+          CT: ${{ github.workspace }}/CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct
+        run: bash scripts/test-packaged-record-replay.sh
 
   appimage-lib-check:
     # CIP-5 Wave 4: migrated to the self-hosted NixOS runner. The DIY
@@ -2210,6 +2561,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc ./CodeTracer.AppImage.asc
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc ./CodeTracer.pub.asc
+
+      - name: Verify GPG signature
+        # A signed release is only worth signing if we check the signature on
+        # the exact bytes we ship. The detached .asc and the published public
+        # key come from the same bucket the AppImage does; import the key and
+        # verify before we run the binary, so a broken/absent signature fails
+        # loudly here rather than being discovered by a user with `gpg --verify`.
+        run: |
+          nix shell nixpkgs#gnupg --command gpg --import ./CodeTracer.pub.asc
+          nix shell nixpkgs#gnupg --command gpg --verify ./CodeTracer.AppImage.asc ./CodeTracer.AppImage
 
       - name: Check if ct starts
         env:
@@ -2219,6 +2582,19 @@ jobs:
         run: |
           chmod +x ./CodeTracer.AppImage
           ./CodeTracer.AppImage --version
+
+      - name: Record -> replay smoke on the packaged AppImage
+        # Informational, NOT a gate (continue-on-error): records a tiny Noir
+        # package and reads it back with the SHIPPED ct + bundled recorder
+        # (nargo / wazero / db-backend-record). Catches packaging regressions
+        # that `--version` cannot -- a missing or mis-linked bundled recorder.
+        # A known bug here may ship in an internal release and be fixed by a
+        # follow-up; it must not block the release from cutting.
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          CT: ${{ github.workspace }}/CodeTracer.AppImage --appimage-extract-and-run
+        run: bash scripts/test-packaged-record-replay.sh
 
   # Cross-distro AppImage smoke.  ubuntu-latest (the appimage-lib-check
   # runner above) shares too many runtime libs with the build host to
@@ -2311,7 +2687,7 @@ jobs:
           # install just / setup-python / dtolnay rust-toolchain) is gone; nim /
           # cargo / cargo-nextest / nimsuggest all come from the dev shell.
           - platform: macos
-            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+            runner: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2362,7 +2738,7 @@ jobs:
 
       - name: Install Nix
         # Both legs drive the tests through ``nix develop`` now. On the
-        # self-hosted eph-linux-x64 / eph-macos-arm64 runners nix is already
+        # self-hosted eph-linux-x64 / aarch64-darwin runners nix is already
         # on PATH, so setup-nix is a fast no-op; it stays for hosted-runner
         # portability.
         uses: ./.github/actions/setup-nix
@@ -2388,7 +2764,7 @@ jobs:
         # ``clone-repo`` + ``ref: dev`` pattern the nixos leg's setup-dev-env
         # uses.
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-trace-format
           # `dev` is where this repo's work lands; its default branch is
@@ -2405,7 +2781,7 @@ jobs:
         # without this sibling. Same pairing the nixos leg's setup-dev-env
         # ``siblings:`` list encodes.
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-trace-format-nim
           ref: dev
@@ -2414,7 +2790,7 @@ jobs:
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
           ref: main
@@ -2423,7 +2799,7 @@ jobs:
 
       - name: Clone ruby-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: main
@@ -2449,7 +2825,7 @@ jobs:
       # nixos leg; setup-dev-env's nix install is idempotent.
       - name: Setup dev env (BEAM siblings, nixos)
         if: matrix.platform == 'nixos'
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -2539,7 +2915,7 @@ jobs:
 
       - name: Clone codetracer-beam-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-beam-recorder
           ref: main
@@ -2599,7 +2975,7 @@ jobs:
           # ``./non-nix-build/build.sh`` toolchain (brew install just /
           # setup-python / dtolnay rust-toolchain).
           - platform: macos
-            runner: eph-macos-arm64  # CIP-5: nix macOS job -> eph-macos-arm64
+            runner: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     runs-on: ${{ matrix.runner }}
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -2625,7 +3001,7 @@ jobs:
 
       - name: Setup dev env
         # setup-dev-env (nix) installs Nix via the shared setup-nix (a fast
-        # no-op on the self-hosted eph-linux-x64 / eph-macos-arm64 runners,
+        # no-op on the self-hosted eph-linux-x64 / aarch64-darwin runners,
         # where nix is already on PATH) and clones the cross-repo siblings
         # adjacent to this checkout (``../<name>``) at their pinned `dev` refs.
         # This replaces the former Checkout-manifests / Resolve-lock /
@@ -2641,7 +3017,7 @@ jobs:
         # input alone -- but scripts/require-siblings.sh requires the checkout
         # on every driver so there is a single workspace-completeness rule (the
         # tup driver has no other way in; see the notes in that script).
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -2741,7 +3117,7 @@ jobs:
         # ``--path:../codetracer-snapshot-codecs/src`` into the Nim
         # compile.  The build aborts with ``cannot open file:
         # snapshot_codecs`` without this checkout.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-snapshot-codecs
           ref: main
@@ -2754,7 +3130,7 @@ jobs:
         # Companion sibling to codetracer-snapshot-codecs threaded via
         # the same ``config.nims`` --path; without it ST-M3 test
         # imports break the visual-replay build.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-image-diff
           ref: main
@@ -2763,7 +3139,7 @@ jobs:
           submodules: 'false'
 
       # NOTE: Nix is installed by the ``Setup dev env`` step above (a fast
-      # no-op on the self-hosted eph-macos-arm64 runner, where nix is already
+      # no-op on the self-hosted aarch64-darwin runner, where nix is already
       # on PATH). The former bespoke ``Install Nix (macOS, for ct_cli build)``
       # step is therefore no longer needed; the visual-replay sibling builds
       # below still drive each sibling's own ``nix develop`` flake.
@@ -2856,7 +3232,7 @@ jobs:
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
           ref: main
@@ -2865,7 +3241,7 @@ jobs:
 
       - name: Clone ruby-recorder (macOS)
         if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: main
@@ -2942,7 +3318,7 @@ jobs:
         # The flake build below reads the in-repo path
         # libs/codetracer-trace-format, so the sibling clone is mirrored
         # there by the next step.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -3109,7 +3485,7 @@ jobs:
         # export of it never reaches `nim`. Its absence is what made this job
         # die on `cannot open file: runquota_process` (issue #641), fifteen
         # minutes into the Nim compile rather than here.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -3403,7 +3779,7 @@ jobs:
         # `visual-replay-regression-gate` already lists it. Same missing-sibling
         # class as the backend above, uncovered only because fixing the first
         # one let the build run far enough to hit the second.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -3845,13 +4221,16 @@ jobs:
           # enabled on the checkout above: here the persisted header is
           # load-bearing, which is the opposite of the situation in most jobs.
           #
-          # STILL UNVERIFIED, for whoever runs the next release. Whether the App
-          # installation has `contents: write` on this repo has never been
-          # exercised: the last tag (25.11.1) predates the switch to App tokens,
-          # and no `main` run has reached this job since. If the tag push fails
-          # with 403, that is the App's permission set, NOT this change -- the
-          # PAT was already inert and restoring it would not help. Grant the
-          # installation contents:write rather than reintroducing a PAT.
+          # VERIFIED 2026-08, for whoever runs the next release. The
+          # metacraft-labs-ci-token-provider App installation (app id 3115338)
+          # carries `contents: write` at the org level -- confirmed against
+          # `GET /orgs/metacraft-labs/installations`. `create-github-app-token`
+          # is called above with no `permissions:` input, so the minted token
+          # inherits the installation's full permission set, contents:write
+          # included, and the persisted `extraheader` push below authenticates
+          # with it. If the tag push nonetheless 403s, re-check that permission
+          # set (it may have been narrowed) rather than reintroducing a PAT --
+          # the old PAT was already inert and restoring it would not help.
           git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
@@ -3906,25 +4285,75 @@ jobs:
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
           nix develop .#devShells.x86_64-linux.default --command bash -c "gpg --detach-sign resources.tar.xz"
-      - name: Upload latest
+      - name: Promote the just-built artifacts to the release tag
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          ENDPOINT: ${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }}
+          BUCKET: ${{ vars.R2_CODETRACER_BUCKET_NAME }}
+          TAG: ${{ needs.push-tag.outputs.tag }}
         run: |
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-arm64.dmg"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-arm64.dmg.asc"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-amd64.AppImage"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-amd64.AppImage.asc"
+          set -euo pipefail
 
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc --checksum-algorithm CRC32
+          # PROVENANCE: promote the exact bytes this run's appimage-build and
+          # dmg-build just wrote to R2 under the CodeTracer-main-* keys. Earlier
+          # this step re-fetched them from the downloads.codetracer.com CDN with
+          # wget -- but that CDN is a public cache in front of the bucket: it can
+          # still be serving a previous build's bytes when this job runs, or a
+          # neighbouring push to `main` can have overwritten the pointer, so the
+          # tag could be cut from artifacts that were never built for it. Reading
+          # straight from the authenticated bucket removes that gap: the source
+          # of truth, not a cache of it.
+          aws_cmd() {
+            nix develop .#devShells.x86_64-linux.default --command \
+              aws --endpoint-url="$ENDPOINT" "$@"
+          }
 
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc --checksum-algorithm CRC32
+          for f in CodeTracer-main-arm64.dmg CodeTracer-main-arm64.dmg.asc \
+                   CodeTracer-main-amd64.AppImage CodeTracer-main-amd64.AppImage.asc; do
+            aws_cmd s3 cp "s3://$BUCKET/$f" "$f"
+          done
+
+          # A tag artifact must be the SIGNED artifact. The release GPG key was
+          # imported above (import-gpg), so its public half is in the keyring;
+          # verify each detached signature against the bytes we are about to
+          # publish before we publish them. A bad or missing signature fails the
+          # release rather than shipping unverifiable bytes under a version tag.
+          nix develop .#devShells.x86_64-linux.default --command \
+            gpg --verify CodeTracer-main-arm64.dmg.asc CodeTracer-main-arm64.dmg
+          nix develop .#devShells.x86_64-linux.default --command \
+            gpg --verify CodeTracer-main-amd64.AppImage.asc CodeTracer-main-amd64.AppImage
+
+          promote() { # promote <local-file> <dest-suffix>
+            aws_cmd s3 cp "$1" "s3://$BUCKET/CodeTracer-$2" --checksum-algorithm CRC32
+          }
+          for slot in "$TAG" latest; do
+            promote CodeTracer-main-arm64.dmg          "$slot-arm64.dmg"
+            promote CodeTracer-main-arm64.dmg.asc      "$slot-arm64.dmg.asc"
+            promote CodeTracer-main-amd64.AppImage     "$slot-amd64.AppImage"
+            promote CodeTracer-main-amd64.AppImage.asc "$slot-amd64.AppImage.asc"
+          done
+
+          # Windows installer (CodeTracer-latest-win-x64.exe, consumed by
+          # https://get.codetracer.com/pwsh). windows-installer-build /
+          # windows-installer-publish upload CodeTracer-main-win-x64.exe(.asc)
+          # when they run on `main`. That leg needs the eph-win-x64 GARM runner;
+          # while that fleet is down the key is simply absent, so this promotion
+          # is TOLERANT: it publishes the win artifact when present and skips it
+          # (without failing the release) when it is not. The moment a Windows
+          # build lands the key, the next release promotes it with zero further
+          # changes.
+          if aws_cmd s3 cp "s3://$BUCKET/CodeTracer-main-win-x64.exe" CodeTracer-main-win-x64.exe \
+             && aws_cmd s3 cp "s3://$BUCKET/CodeTracer-main-win-x64.exe.asc" CodeTracer-main-win-x64.exe.asc; then
+            nix develop .#devShells.x86_64-linux.default --command \
+              gpg --verify CodeTracer-main-win-x64.exe.asc CodeTracer-main-win-x64.exe
+            for slot in "$TAG" latest; do
+              promote CodeTracer-main-win-x64.exe     "$slot-win-x64.exe"
+              promote CodeTracer-main-win-x64.exe.asc "$slot-win-x64.exe.asc"
+            done
+          else
+            echo "::warning::CodeTracer-main-win-x64.exe not found in R2 — skipping the Windows installer for this release (eph-win-x64 build not yet published)."
+          fi
 
       - name: Get changelog text
         id: changelog
@@ -4080,20 +4509,20 @@ jobs:
     # the failure mode it is watching for; if this job needed the dev env,
     # the very outage it reports would take it down too.
     #
-    # KNOWN LATENCY — read before trusting the absence of a verdict.
-    # Two jobs in the needs: list below, `reprobuild-macos-smoke` and
-    # `origin-dap-macos`, request `runs-on: eph-macos-arm64`, and no
-    # registered runner carries that label (the org's darwin runners
-    # expose aarch64-darwin / nix-darwin / darwin instead). Those jobs
-    # therefore never get scheduled: they sit queued until GitHub's
-    # 24-hour ceiling cancels them. Because this gate waits on them, its
-    # verdict cannot be published until ~24h after the push. It is
-    # correct when it arrives, but it is NOT prompt, and a run that is
-    # still in progress has simply not been judged yet — do not read a
-    # missing verdict as a passing one. Fixing the runner labels removes
-    # the delay; dropping those jobs from needs: would remove the delay
-    # by giving up the coverage, which is the trade this gate exists to
-    # refuse.
+    # RESOLVED LATENCY — historical note, kept so the failure mode stays
+    # recognizable. Two jobs in the needs: list below, `reprobuild-macos-smoke`
+    # and `origin-dap-macos`, used to request `runs-on: eph-macos-arm64`, a
+    # label no registered runner carried (the org's darwin runners expose
+    # `self-hosted`/`macOS`/`ARM64`/`darwin`/`nix-darwin`/`aarch64-darwin`).
+    # Those jobs never got scheduled: they sat queued until GitHub's 24-hour
+    # ceiling cancelled them, and because this gate waits on them its verdict
+    # could not be published until ~24h after the push. They now request
+    # `aarch64-darwin`, which the m3-mcl-* runners carry, so the verdict is
+    # prompt again. If a macOS job ever queues indefinitely once more, the
+    # requested label has drifted from what the darwin runners advertise — do
+    # not read a missing verdict as a passing one while that is true, and do
+    # not "fix" it by dropping those jobs from needs:, which would remove the
+    # delay only by giving up the coverage this gate exists to protect.
     needs:
       - lint-bash
       - lint-nim

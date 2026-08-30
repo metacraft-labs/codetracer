@@ -33,6 +33,8 @@ import std/json
 when not defined(js):
   import std/[os]
 
+import std/options
+
 type
   AgentEvidenceStatus* = enum
     aesReady
@@ -181,3 +183,49 @@ when not defined(js):
       return
     createDir(path.parentDir)
     writeFile(path, $(%notification))
+
+  proc readRpcNotificationFile*(path: string): Option[string] =
+    ## The RPC file's text, or `none` when there is nothing to read.
+    ##
+    ## ## Why this is here rather than in the ViewModel that wants it
+    ##
+    ## `AgenticSessionVM.handleAgentEvidenceRpcFile` used to call `fileExists`
+    ## and `readFile` itself, which is a host call in a ViewModel and exactly
+    ## what NS1's facade exists to remove. It cannot simply become
+    ## `platform().fs.readText` either: the caller is a ViewModel with no
+    ## platform installed — the GUI ViewModel suites construct one directly —
+    ## and a facade call there would refuse, which is a behaviour change to a
+    ## suite NS1 requires to pass unchanged.
+    ##
+    ## So the host half moves to the module that already owns the host half of
+    ## this workflow. This file's own header states the split — "what keeps
+    ## this file importable from the JavaScript backend: the renderer decodes
+    ## an RPC payload, and a renderer must not need `std/osproc` to do it" —
+    ## and the write side (`defaultRpcSender`, immediately above) has always
+    ## lived here. The read side belongs beside it.
+    ##
+    ## A caller that DOES have a platform passes it and gets the facade path
+    ## instead; see `handleAgentEvidenceRpcFile`. That is the route the web and
+    ## container instantiations take, and it needs no signature change here.
+    if path.len == 0 or not fileExists(path):
+      none(string)
+    else:
+      try:
+        some(readFile(path))
+      except CatchableError:
+        none(string)
+
+else:
+  proc readRpcNotificationFile*(path: string): Option[string] =
+    ## The JS counterpart, and it is a refusal rather than an oversight.
+    ##
+    ## A renderer has no path-addressed filesystem of its own — the desktop
+    ## renderer reads through the Electron main process, and a browser tab
+    ## reads through the project store (Noir-Studio.md §4). Neither is
+    ## reachable from a plain `readFile`, and neither should be reached from a
+    ## ViewModel. A caller on those platforms passes a `Platform` to
+    ## `handleAgentEvidenceRpcFile` and gets the facade path.
+    ##
+    ## This reproduces the pre-NS1 behaviour exactly: the old code was
+    ## `when defined(js): false`.
+    none(string)

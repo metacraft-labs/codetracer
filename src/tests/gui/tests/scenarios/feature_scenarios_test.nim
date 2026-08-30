@@ -395,12 +395,16 @@ suite "Flow: mode switching and iteration control":
       vm.setMode(fmLine)
       drain()
 
-      # A new request with fmLine should have been sent.
+      # A new request should have been sent. Its `flowMode` is the ENGINE's
+      # vocabulary (`common/flow_mode_wire.nim`), not this panel's: the
+      # engine has two query modes and no notion of a line granularity, so
+      # `"fmLine"` named nothing it could honour. See the boundary suite in
+      # `tests/flow/flow_vm_test.nim`.
       var found = false
       for i in countBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
         if cmd.command == "ct/load-flow":
-          check cmd.args["flowMode"].getStr == "fmLine"
+          check cmd.args["flowMode"].getStr == FlowModeWireCall
           found = true
           break
       check found
@@ -494,7 +498,11 @@ suite "Flow: mode switching and iteration control":
 
       let cmd = mock.findCommand("ct/load-flow")
       check cmd.isSome
-      check cmd.get.args["rrTicks"].getBiggestInt == 1000
+      # The tick belongs inside `location`, which is a required field of the
+      # engine's `CtLoadFlowArguments`. A top-level `rrTicks` is a key the
+      # engine never reads.
+      check cmd.get.args["location"]["rrTicks"].getBiggestInt == 1000
+      check not cmd.get.args.hasKey("rrTicks")
 
       dispose()
 
@@ -521,6 +529,11 @@ suite "Flow: mode switching and iteration control":
       let cmd = mock.findCommand("ct/flow-jump")
       check cmd.isSome
       check cmd.get.args["step"].getInt == 7
+      # `ct/flow-jump` is deliberately left on the panel's own vocabulary:
+      # the engine has no handler for that command at all (grep
+      # `flow-jump` under src/db-backend — nothing), so there is no second
+      # enum for it to agree with. Changing it would be churn against a
+      # contract that does not exist.
       check cmd.get.args["flowMode"].getStr == "fmLine"
       check cmd.get.args["iteration"].getInt == 3
 

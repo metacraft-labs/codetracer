@@ -956,6 +956,13 @@ type
     cprkTextSearch
     cprkSymbol
     cprkAgent
+    cprkProjectAction
+      ## A row the *project* declared, not one CodeTracer compiled in
+      ## (Noir-Studio.md §9.3: "Actions are the project's, not ours").  It has
+      ## no counterpart in the legacy ``QueryKind`` enum because the legacy
+      ## palette's vocabulary is the closed ``ClientAction`` set; these rows
+      ## come from a `tasks.json` or a `package.json` read at runtime, and the
+      ## row's ``value`` is the label the developer wrote.
 
   CommandPaletteNotificationLevel* = enum
     ## Mirrors ``NotificationKind`` (``frontend/types.nim``) but only

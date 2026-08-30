@@ -710,6 +710,7 @@ impl DapTestClient {
             recreator_exe: Some(ct_native_replay.to_path_buf()),
             restore_location: None,
             rename_list: None,
+            trace_source: None,
         };
         let launch = self
             .client
@@ -952,6 +953,7 @@ impl DapStdioTestClient {
             recreator_exe: Some(ct_native_replay.to_path_buf()),
             restore_location: None,
             rename_list: None,
+            trace_source: None,
         };
         let launch = self
             .client
@@ -1004,6 +1006,7 @@ impl DapStdioTestClient {
             recreator_exe: None,
             restore_location: None,
             rename_list: None,
+            trace_source: None,
         };
         let launch = self
             .client
@@ -1062,6 +1065,7 @@ impl DapStdioTestClient {
             recreator_exe: None,
             restore_location: None,
             rename_list: None,
+            trace_source: None,
         };
         let launch = self
             .client

@@ -387,12 +387,25 @@ proc attachOriginChainVM*(session: SessionViewModel;
     originVM.onSwitchProcessProc = proc(recordingId: string) =
       session.onSwitchProcess(recordingId)
 
-proc dispose*(session: SessionViewModel) =
+proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
   ## Tear down all reactive roots.  Call this when the replay session
   ## ends to free signal graph resources.
   ##
   ## Each ViewModel's dispose proc cleans up its own reactive root.
   ## The store's dispose is called last since VMs hold references to it.
+  ##
+  ## `disconnectBackend = false` is for a host that owns the transport's
+  ## lifetime itself, and it has to be threaded all the way down here rather
+  ## than handled one layer up.  `sdk.DebuggerSession.dispose` accepts the
+  ## same flag and documents that it exists so the native harness does not
+  ## close its `replay-server` pipe twice — but until this parameter existed
+  ## that promise was false: `DebuggerSession.dispose` called
+  ## `AppViewModel.dispose`, which called this proc, which disconnected
+  ## unconditionally before the flag was ever consulted.  So
+  ## `HeadlessDebugSession.close`, whose whole comment is about avoiding a
+  ## double `DapStdioBackend.close`, performed exactly that double close.
+  ## The default stays `true` so every existing call site keeps the
+  ## behaviour it was written against.
   # Dispose per-recording StateVMs first. The legacy `stateVM` alias
   # always points at one of the entries in this table once
   # `setProcessTree` / `onSwitchProcess` has run; only fall back to
@@ -430,5 +443,5 @@ proc dispose*(session: SessionViewModel) =
     session.processTree.dispose()
   if not session.store.isNil:
     session.store.dispose()
-  if not session.backend.isNil:
+  if disconnectBackend and not session.backend.isNil:
     session.backend.disconnect()
