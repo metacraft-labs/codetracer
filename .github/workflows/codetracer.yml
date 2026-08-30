@@ -2205,14 +2205,19 @@ jobs:
       - name: Package DMG
         # Package `non-nix-build/CodeTracer.app` into `CodeTracer.dmg` using the
         # devShell's create-dmg. This runs in a plain `nix develop .` shell (NOT
-        # a reprobuild action), so it inherits the runner's /usr/bin and the
-        # macOS system tools create-dmg needs (sw_vers, hdiutil, SetFile). The
-        # create-dmg flags mirror non-nix-build/build_dmg.sh (the pre-CIP-5
+        # a reprobuild action), so the devShell provides create-dmg. create-dmg
+        # itself shells out to macOS system tools (sw_vers, hdiutil, SetFile);
+        # this self-hosted nix-darwin runner's inherited PATH is nix-store-only,
+        # so /usr/bin is not present and create-dmg dies with
+        # `sw_vers: command not found`. Append the macOS system dirs (kept AFTER
+        # the devShell entries so the nix create-dmg still wins) to resolve them.
+        # The create-dmg flags mirror non-nix-build/build_dmg.sh (the pre-CIP-5
         # path) and repro.nim's create_dmg action, so the produced dmg is the
         # same shape the sign + upload steps below expect.
         run: |
           nix develop . --command bash -c '
             set -eu
+            export PATH="$PATH:/usr/bin:/usr/sbin"
             cd non-nix-build
             rm -f CodeTracer.dmg
             staging="$(mktemp -d)"
