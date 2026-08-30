@@ -9,7 +9,8 @@ import
 # `topbar_actions.nim` is pure and its decisions are asserted headlessly in
 # `viewmodel/tests/unit/test_platform_facade.nim`, on both backends.
 from ../platform_host import
-  TopbarAction, TopbarModel, ctTopbar, has, tbaInPageMenu, tbaWindowControls
+  TopbarAction, TopbarModel, ctTopbar, has, tbaInPageMenu, tbaWindowControls,
+  ctPlatform, can, capWindowControls
 
 proc closeMenu(self: MenuComponent)
 
@@ -377,7 +378,29 @@ proc generateNameMap*(node: MenuNode, res: JsAssoc[cstring, ClientAction] = nil)
 
 when defined(js):
   proc shouldRenderMenuNode(node: MenuNode): bool =
-    if ui_imports.electron_lib.inElectron:
+    ## Whether a menu node belongs on this platform.
+    ##
+    ## The condition was `ui_imports.electron_lib.inElectron` — the last
+    ## `inElectron` decision in this file, and the last thing keeping
+    ## `ui_imports`' `electron_lib` re-export alive for 46 modules. NS1's own
+    ## table in `viewmodel/viewmodels/topbar_actions.nim` maps `inElectron` to
+    ## `capWindowControls` for `MenuShellModel.showWindowMenu`; the same
+    ## mapping is used here rather than a freshly invented one, because "the
+    ## platform owns the window frame" is the distinction both sites are
+    ## actually drawing.
+    ##
+    ## **Currently this decides nothing, and that is stated rather than
+    ## discovered later.** The `Host` / `NonHost` dimension exists in the menu
+    ## DSL (`hostfolder`, `hostelement`, `hostexclude_*` in `ui_js.nim`) and
+    ## **no menu node in the tree uses any of them** — so `menuOs` never
+    ## carries either flag and both branches below reduce to the same
+    ## `not (menuOs and MacOS)` for every node that exists. The change is
+    ## therefore behaviour-preserving by construction, and the capability
+    ## mapping is justified by the table above rather than by observed
+    ## rendering. If someone gives the dimension its first user, that is when
+    ## the mapping gets exercised — and `capWindowControls` is then the thing
+    ## to argue with, not `inElectron`.
+    if ctPlatform().can(capWindowControls):
       not cast[bool]((node.menuOs and ord(MenuNodeOSHost)) or
         (node.menuOs and ord(MenuNodeOSMacOS)))
     else:

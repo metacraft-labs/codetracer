@@ -253,6 +253,48 @@ suite "the desktop instantiation runs real processes":
     check exited
     check observedCode == 0
 
+suite "an empty workingDir means the platform's default, and the platform supplies it":
+
+  test "test_empty_working_dir_is_the_platforms_default_not_the_callers_cwd":
+    ## `ProcessSpec.workingDir`'s contract, asserted because a caller was
+    ## removed on the strength of it — NS1's call-site migration.
+    ##
+    ## `ui/git_cli.nim` computed its own fallback: when no project folder was
+    ## open it passed `electronProcess.cwd()` as the working directory. The
+    ## facade's own documentation says that is wrong on every platform, not
+    ## just the web: "Empty means the platform's default, which on the web is
+    ## the project store root and in a container is the workspace root. **Never
+    ## the front end's own cwd — a front end has no business having one.**"
+    ##
+    ## Removing that fallback is only safe if the platform really does supply a
+    ## default, so that is what this asserts rather than trusting the sentence.
+    ## Both desktop instantiations happen to inherit the process's directory —
+    ## `osproc.startProcess` with an empty `workingDir`, and node's
+    ## `execFileSync` with `cwd: undefined` — which is exactly what the deleted
+    ## fallback was computing by hand.
+    let host = newDesktopNativePlatform()
+    if not host.can(capProcessSpawn):
+      skip()
+    else:
+      let here = getCurrentDir()
+
+      let default = awaitOutcome(host.process.run(processSpec("pwd")))
+      check default.ok
+      check default.value.stdout.strip() == here
+
+      # THE COUNTER-CHECK, and it is the half that can fail. "Empty means the
+      # platform's default" is also satisfied by an instantiation that ignores
+      # `workingDir` entirely — it would pass the assertion above for every
+      # input. So an explicit directory must actually be honoured, and it is
+      # checked against a directory that is NOT the one above.
+      let elsewhere = "/"
+      check elsewhere != here
+      var spec = processSpec("pwd")
+      spec.workingDir = elsewhere
+      let explicitRun = awaitOutcome(host.process.run(spec))
+      check explicitRun.ok
+      check explicitRun.value.stdout.strip() == elsewhere
+
 suite "the desktop instantiation declares no capability it cannot serve":
 
   test "every capability the profile claims has a working operation behind it":

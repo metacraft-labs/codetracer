@@ -161,12 +161,36 @@ proc isGitRepository*(cwd: cstring): bool =
   return result_str == cstring"true"
 
 proc gitWorkingDirectory*(data: Data): cstring =
-  ## Working directory for git commands: the opened project folder, falling
-  ## back to the process's own.
+  ## Working directory for git commands: the opened project folder, or empty to
+  ## mean **the platform's default**.
+  ##
+  ## ## This is a behaviour fix, not only a migration
+  ##
+  ## The fallback used to be `electronProcess.cwd()`, and `ProcessSpec.workingDir`
+  ## says that is wrong on every platform rather than merely unavailable on the
+  ## web: "Empty means the platform's default, which on the web is the project
+  ## store root and in a container is the workspace root. **Never the front
+  ## end's own cwd — a front end has no business having one.**" A renderer
+  ## reading `process.cwd()` is asserting that the process's directory is the
+  ## right place to run a user's git command, which is a fact about how the app
+  ## was launched, not about the project.
+  ##
+  ## **On the desktop the observable behaviour is unchanged**, and that is
+  ## checked rather than assumed: every consumer passes this value into a git
+  ## command's `cwd` and none of them branches on its emptiness or displays it,
+  ## `runGit` turns it into `ProcessSpec.workingDir`, and both desktop
+  ## instantiations resolve an empty one to the process's own directory —
+  ## `osproc.startProcess` by definition, and node's `execFileSync` through
+  ## `cwd: (# || undefined)`. So the deleted line was computing by hand exactly
+  ## what the platform already does. `test_empty_working_dir_is_the_platforms_default_not_the_callers_cwd`
+  ## in `test_platform_desktop_native.nim` pins that, in both directions.
+  ##
+  ## What changes is the web, where there is no process directory to read and
+  ## the store root is the right answer — and which platform decides.
   let folder = data.startOptions.folder
   if not folder.isNil and folder.len > 0:
     return folder
-  electronProcess.cwd()
+  cstring""
 
 proc gitRepositoryRoot*(data: Data): cstring =
   ## Absolute path of the git work tree root.
