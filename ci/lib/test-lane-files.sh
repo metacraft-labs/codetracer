@@ -143,6 +143,7 @@ ct-cli-units
 ct-trace-units
 mcr-enrichment-units
 online-sharing-live
+host-instantiations
 frontend-native-units
 frontend-js
 vm-unit
@@ -175,6 +176,7 @@ test_lane_description() {
 	ct-trace-units) echo "ct trace-layer unit suites" ;;
 	mcr-enrichment-units) echo "ct upload / MCR-enrichment unit suites" ;;
 	online-sharing-live) echo "live sharing round-trip (compile-checked only, never executed)" ;;
+	host-instantiations) echo "the platform facade's host instantiations, compiled on the backend they ship on (compile-checked only)" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
@@ -208,7 +210,7 @@ test_lane_description() {
 # with `nim js -d:nodejs` and run under node).
 test_lane_backend() {
 	case "$1" in
-	frontend-js | vm-js | vm-unit-js) echo "js" ;;
+	frontend-js | vm-js | vm-unit-js | host-instantiations) echo "js" ;;
 	*) echo "c" ;;
 	esac
 }
@@ -236,7 +238,7 @@ test_lane_extra_flags() {
 		# process seam).
 		echo "--path:src"
 		;;
-	vm-unit | vm-unit-js | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated)
+	vm-unit | vm-unit-js | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated | host-instantiations)
 		# The ViewModel suites import their subjects by bare module name.
 		echo "--path:src/frontend/viewmodel"
 		;;
@@ -290,6 +292,40 @@ test_lane_files() {
 		# a lane — the file rotted into a non-compiling state precisely
 		# because nothing ever looked at it.
 		echo src/ct/online_sharing/online_sharing_test.nim
+		;;
+
+	host-instantiations)
+		# NOT test files. The platform facade's two host instantiations —
+		# production modules — compiled on the backend they actually ship on.
+		#
+		# WHY THIS LANE EXISTS, and it is not a hypothetical. Both of these
+		# modules are `{.error.}` on the C backend by design, so `vm-unit`
+		# cannot see them; and neither is imported by any suite in `vm-unit-js`,
+		# because the whole point of `platform/web_platform.nim` is that it
+		# reaches no browser API and can therefore be tested without these.
+		# The result was a hole exactly the shape of these two files: NOTHING
+		# IN CI COMPILED THEM AT ALL.
+		#
+		# It was not theoretical for long. `web_browser.nim` reached `dev` at
+		# ed9d6021 with a doc comment after the closing paren of an object
+		# constructor — `Error: invalid indentation`, the module would not
+		# build for anyone — and every lane stayed green, because every lane
+		# was looking somewhere else. That is the same failure
+		# `online-sharing-live` above was created for, in the same week, one
+		# directory over.
+		#
+		# Compile-only, like that lane: `web_browser.nim` needs a browser and
+		# `desktop_electron.nim` needs Electron, so neither can RUN here. A
+		# compile is the weakest check that catches what actually broke, and
+		# it costs seconds.
+		#
+		# Listed explicitly rather than discovered. A glob over `host/` would
+		# pull in `desktop_native.nim` and `remote_stub.nim`, which are C-backend
+		# modules `vm-unit` already compiles, and a lane that compiles a module
+		# on the wrong backend reports a green that means nothing.
+		echo src/frontend/viewmodel/host/desktop_electron.nim
+		echo src/frontend/viewmodel/host/opfs_volume.nim
+		echo src/frontend/viewmodel/host/web_browser.nim
 		;;
 
 	frontend-native-units)

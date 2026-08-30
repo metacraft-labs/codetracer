@@ -2765,6 +2765,38 @@ test-online-sharing-compile:
   exec > >(tee test-logs/test-online-sharing-compile.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh online-sharing-live --compile-only
 
+# The platform facade's two host instantiations, compiled on the backend they
+# ship on — Noir-Studio.milestones.org NS2, the first half of
+# `test_one_codebase_two_platforms` ("CI fails if either build breaks").
+#
+# THE HOLE THIS FILLS was measured, not predicted.  `host/web_browser.nim` and
+# `host/desktop_electron.nim` are `{.error.}` on the C backend, so `test-vm-unit`
+# cannot compile them; and no suite in `test-vm-unit-js` imports either, because
+# `platform/web_platform.nim` was deliberately built to reach no browser API and
+# therefore needs neither in order to be tested.  Both properties are correct on
+# their own and together they left the two most platform-specific modules in the
+# product compiled by NOTHING.
+#
+# `web_browser.nim` then landed on `dev` at ed9d6021 in a state that does not
+# compile at all — a doc comment after an object constructor's closing paren,
+# `Error: invalid indentation` — and the whole suite stayed green.  This lane
+# fails on exactly that, by file and line.
+#
+# Compile-only, for the same reason `test-online-sharing-compile` is: one module
+# needs a browser and the other needs Electron, so neither can run in CI.  The
+# weakest check that would have caught the defect costs seconds.
+#
+# It does NOT yet satisfy `test_one_codebase_two_platforms` in full.  That test
+# also asks that a pane added to one platform appear in the other, which needs a
+# web BUNDLE — an entry point that calls `boot()` — and there is still none.
+# This is the "either build breaks" half, and it is the half that was on fire.
+test-host-instantiations:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-host-instantiations.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh host-instantiations --compile-only
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when

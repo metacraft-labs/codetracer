@@ -384,6 +384,7 @@ lane_names=(
 	test-vm-unit-js
 	test-vm-collab-units test-vm-collab-integration test-ct-test-incremental
 	test-ct-test-incremental-e2e test-vm-gui-headless test-online-sharing-compile
+	test-host-instantiations
 )
 missing_lanes=()
 delegating=0

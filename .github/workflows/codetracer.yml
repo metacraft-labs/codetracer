@@ -1701,6 +1701,25 @@ jobs:
         # reading it too late.
         run: nix develop .#devShells.x86_64-linux.default --command just test-hostfree
 
+      - name: Compile the platform facade's host instantiations
+        # Noir-Studio.milestones.org NS2. The sibling of the gate above, and
+        # for a hole the gate above cannot see: `test-hostfree` proves that
+        # front-end code does not REACH the host, and this proves that the two
+        # modules whose whole job is reaching the host still BUILD.
+        #
+        # Nothing compiled them. `host/web_browser.nim` and
+        # `host/desktop_electron.nim` are `{.error.}` on the C backend so
+        # `test-vm` cannot, and no JS suite imports either, because
+        # `platform/web_platform.nim` was built to need neither. Both facts are
+        # correct; together they left these two uncompiled by any lane, and
+        # `web_browser.nim` duly reached `dev` in a state that does not compile
+        # at all while every suite stayed green.
+        #
+        # Placed before `test-vm` for the same reason `test-hostfree` is: this
+        # takes seconds and answers "does it build for anyone", which is not
+        # worth learning after twenty minutes of suites.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-host-instantiations
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 

@@ -277,24 +277,23 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
       }
       """.},
     shareLinkOrigin: $jsShareOrigin(),
+    # NS3's seam, deliberately supplied EMPTY rather than populated with the
+    # modules that now exist.
+    #
+    # Both halves of the Noir toolchain are real and are reproducible from
+    # published refs: `noir` `codetracer` carries `tooling/tracer_wasm` and,
+    # since 61960c8eec, `compiler/wasm`'s VFS resolver with its `debug` mode.
+    # Driven from a bare `WebAssembly.instantiate` they compile a package held
+    # only in memory and trace it — measured at 27 events, 8 steps, 3 calls.
+    #
+    # What does not exist is anything in a TAB that loads them: `WasmHost`'s
+    # four procs have no Worker behind them and no bundle to be fetched with.
+    # Declaring `nargo` here before that would put `capProcessSpawn` back on a
+    # profile whose every run fails, which is the exact thing
+    # `platform/wasm_registry.nim` exists to prevent. So the empty registry is
+    # a true statement about this deployment, `webNoModulesLoaded` is what a
+    # user reads, and populating it is one call once the Worker lands.
     wasm: noWasmModules())
-      ## NS3's seam, deliberately supplied EMPTY here rather than populated
-      ## with the modules that exist.
-      ##
-      ## The Noir tracer's wasm module is real and is now reproducible from
-      ## published refs — `noir` `codetracer`, `tooling/tracer_wasm`, built
-      ## `--no-default-features` and driven through its `ct_*` C ABI from a
-      ## bare `WebAssembly.instantiate`. What it consumes is an *already
-      ## compiled* debug artifact, and the compiler half that would produce
-      ## one in the tab (`compiler/wasm`'s VFS entry points) is on the `noir`
-      ## fork's `blocktracer` branch and not on its `codetracer` mainline.
-      ##
-      ## So a registry declaring `nargo trace` today would claim a loop the
-      ## product cannot close, and `capProcessSpawn` would come back on a
-      ## profile whose every run fails. An empty registry is the true
-      ## statement: `webNoModulesLoaded` is what a user reads, the capability
-      ## is absent, and populating this is one call — which is the point of
-      ## the seam.
 
 # ---------------------------------------------------------------------------
 # Boot
