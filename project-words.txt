@@ -274,6 +274,7 @@ subgoal
 subgoals
 counterexample
 counterexamples
+steppable
 viewmodel
 serialising
 verus

@@ -1,0 +1,169 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1788000000000,
+    "finished_at_unix_ms": 1788000000001,
+    "workspace_root": "<synthetic envelope: NOT A RECORDING; only the model inside is a solver result>",
+    "argv": [
+      "verno",
+      "formal-verify"
+    ],
+    "solver": {
+      "invoked": true,
+      "name": "venir"
+    }
+  },
+  "outcome": "not-proved",
+  "outcome_detail": "assertion failed",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the solver did not discharge an obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "failed-obligation",
+      "message": "precondition not satisfied",
+      "detail": "precondition not satisfied",
+      "location_absent_reason": "recorded without a span for this check",
+      "excerpt": "error: precondition not satisfied",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver did not discharge this obligation"
+      }
+    },
+    {
+      "id": "f1",
+      "kind": "failed-obligation",
+      "message": "assertion failed",
+      "detail": "assertion failed",
+      "location_absent_reason": "recorded without a span for this check",
+      "excerpt": "error: assertion failed",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver did not discharge this obligation"
+      }
+    }
+  ],
+  "counterexample_traces": [
+    {
+      "id": "cx0",
+      "finding_id": "f1",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the values are the SMT solver's own model of the query, carried across unchanged; that the solver could not discharge the obligation is not a proof the program is wrong"
+      },
+      "model": {
+        "status": "complete",
+        "bindings": [
+          {
+            "name": "n",
+            "local_id": 1,
+            "value": "42",
+            "type_name": "Int"
+          },
+          {
+            "name": "total",
+            "local_id": 2,
+            "value": "43",
+            "type_name": "Int"
+          },
+          {
+            "name": "doubled",
+            "local_id": 3,
+            "value": "0",
+            "type_name": "Int"
+          },
+          {
+            "name": "total",
+            "local_id": 2,
+            "value": "43",
+            "type_name": "Int"
+          },
+          {
+            "name": "doubled",
+            "local_id": 3,
+            "value": "86",
+            "type_name": "Int"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "index": 0,
+          "kind": "assumption",
+          "description": "the inputs the solver chose",
+          "bindings": [
+            {
+              "name": "n",
+              "local_id": 1,
+              "value": "42",
+              "type_name": "Int"
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "kind": "assignment",
+          "description": "at program point `after_total`",
+          "bindings": [
+            {
+              "name": "total",
+              "local_id": 2,
+              "value": "43",
+              "type_name": "Int"
+            },
+            {
+              "name": "doubled",
+              "local_id": 3,
+              "value": "0",
+              "type_name": "Int"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "kind": "assignment",
+          "description": "at program point `after_doubled`",
+          "bindings": [
+            {
+              "name": "total",
+              "local_id": 2,
+              "value": "43",
+              "type_name": "Int"
+            },
+            {
+              "name": "doubled",
+              "local_id": 3,
+              "value": "86",
+              "type_name": "Int"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "kind": "violation",
+          "description": "assertion failed",
+          "bindings": []
+        }
+      ],
+      "violated_obligation": {
+        "kind": "assertion",
+        "raw_kind": "assertion failed",
+        "message": "assertion failed"
+      },
+      "is_recorded_execution": false
+    }
+  ],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": []
+  }
+}
