@@ -21,6 +21,7 @@ import frameworks/js_vitest
 import frameworks/julia_fallback
 import frameworks/lean_fallback
 import frameworks/nim_unittest
+import frameworks/noir_nargo
 import frameworks/odin_fallback
 import frameworks/pascal_fallback
 import frameworks/python_pytest
@@ -37,6 +38,7 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newPythonPytestM1Provider(),
     newPythonUnittestM1Provider(),
     newRustLibtestM1Provider(),
+    newNoirNargoM1Provider(),
     newCppGTestM1Provider(),
     newCppCatch2M1Provider(),
     newCppCTestM1Provider(),

@@ -682,6 +682,7 @@ test_lane_files() {
 			src/ct_test/cpp_providers_test.nim \
 			src/ct_test/m11_native_languages_test.nim \
 			src/ct_test/m12_fallback_languages_test.nim \
+			src/ct_test/noir_providers_test.nim \
 			src/ct_test/js_providers_test.nim \
 			src/ct_test/ruby_providers_test.nim \
 			src/ct_test/contracts_test.nim \

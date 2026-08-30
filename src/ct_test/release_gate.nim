@@ -944,7 +944,7 @@ const
       unsupportedDiagnostic: ""),
   ]
 
-const ProviderGateEntries*: array[38, ProviderGateEntry] = [
+const ProviderGateEntries*: array[39, ProviderGateEntry] = [
   ProviderGateEntry(providerId: "ada-fallback",
     fixturePath: "src/ct_test/fixtures/m12_ada_project",
     researchDoc: "src/ct_test/framework_research/ada-aunit-fallback.md",
@@ -1042,6 +1042,12 @@ const ProviderGateEntries*: array[38, ProviderGateEntry] = [
     providerTest: "src/ct_test/nim_unittest_provider_test.nim",
     sourceFiles: @["src/ct_test/frameworks/nim_unittest.nim",
       "src/ct_test/nim_lexer.nim"]),
+  ProviderGateEntry(providerId: "noir-nargo",
+    fixturePath: "src/ct_test/fixtures/noir_nargo_project",
+    researchDoc: "src/ct_test/framework_research/noir-nargo.md",
+    providerTest: "src/ct_test/noir_providers_test.nim",
+    sourceFiles: @["src/ct_test/frameworks/noir_nargo.nim",
+      "src/ct_test/frameworks/native_m11_common.nim"]),
   ProviderGateEntry(providerId: "odin-fallback",
     fixturePath: "src/ct_test/fixtures/m12_odin_project",
     researchDoc: "src/ct_test/framework_research/odin-fixture-fallback.md",
