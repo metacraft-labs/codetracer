@@ -55,6 +55,48 @@ in errors: see `backend/worker_backend.nim`'s header for an engine that sent
 objects one way and JSON strings the other, and a reader that reported a
 timeout over an engine that had answered.
 
+### `ui:` views: a template parameter's name leaks into your attribute names
+
+Nim substitutes an `untyped` template argument **wherever the parameter's
+identifier appears** — and an accent-quoted attribute name in a `ui:` tree is
+made of identifiers. So a parameter whose name is also a token of an attribute,
+a class or a `data-` key silently rewrites that name, differently at every call
+site.
+
+> **`template renderPanelImpl(r, model, handlers: untyped)` renders
+> `` `data-ct-verification-no-model` `` as `data-ct-verification-no-**model**`
+> when the caller passes something called `model`, and as
+> `data-ct-verification-no-**m**` when the caller passes a local called `m`.**
+
+That is the whole defect. It was found in `isonim_verification_view.nim` and
+`isonim_counterexample_view.nim`, whose templates also carried
+`` `data-ct-counterexample-model-status` `` and
+`` `data-ct-counterexample-model-bindings` ``.
+
+**Nothing failed.** Both expansions compiled. Both rendered a complete tree.
+Both carried the *right text*, so every text assertion stayed green — and so did
+every attribute assertion, because they all ran against the expansion whose
+argument happened to be called `model`.
+
+Two rules, and the second is the one that actually catches it:
+
+1. **Name template parameters so they cannot be tokens of markup.** `mdl`, `hnd`
+   — not `model`, `handlers`, `state`, `row`, `item`, `kind`, `id`, `value`,
+   `name`, `label`, `index`. Anything you would plausibly write between two
+   hyphens in a `data-` key is a live hazard.
+2. **Assert attribute names on the *live* tree, not only the pure one.** A view
+   that has both a `render*(r, model)` and a `render*Live(r, vm)` entry point
+   has two expansions of one template, and **a pure-tree-only assertion cannot
+   see this class at all** — it is green by construction, because the pure
+   caller's argument is the one named after the parameter. Compare the two
+   trees' attribute-name sets and require them equal; that is four lines and it
+   is the only thing that fails.
+
+`viewmodel/tests/unit/test_counterexample_session.nim` has that comparison
+(`the live tree carries the same attribute NAMES as the pure one`), and
+`run-vnm5-render-mutations.py` arm `R19` reproduces the defect in one line so
+the naming convention is enforced rather than remembered.
+
 ### Shell: the formatter can change what a script means
 
 `shfmt` is a pre-commit hook (`-w -l -ln auto -s`), so it **rewrites** the files
