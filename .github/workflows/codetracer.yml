@@ -1778,6 +1778,33 @@ jobs:
         # silently. Everything else is assembled and asserted.
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle-assets
 
+      - name: The web bundle mounts a product
+        # THE CHECK THIS REPOSITORY DID NOT HAVE, and the reason a blank page
+        # reached production with a green pipeline.
+        #
+        # Every gate above asserts a STEP: the renderer compiled, the manifest
+        # named it, the assembly placed it, the guard matched the document to
+        # the tree, the loop arm booted. All five were true of
+        # `ide.codetracer.com` on 2026-08-31, which served a boot diagnostic
+        # and an empty `#dom-root` and nothing else. `ui.js` was throwing
+        # `ReferenceError: monaco is not defined` during module init and no
+        # check in the repository was listening for an uncaught exception.
+        #
+        # Verification-Harness-Traps.md trap 2 names the shape — "a chain of
+        # `success: true` is not a result; assert the artefact" — and the
+        # artefact is a DOM. This step loads the assembled bundle in headless
+        # Chromium and asserts what a user would see.
+        #
+        # It carries its own mutation proof: three arms beside the control,
+        # each verified to redden the assertion written for it, and a counted
+        # assertion total so an arm that silently did not run is a failure
+        # rather than a shorter green summary.
+        #
+        # Placed here, immediately after the assembly step, so the two read the
+        # same bundle and a delivery regression and a rendering regression are
+        # attributable to different steps.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-renderer-mounts
+
       - name: Renderer host-reach budget (NS1 residual 1)
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host

@@ -4403,7 +4403,164 @@ var actions*: array[ClientAction, ClientActionHandler] = [
 
 data.actions = actions
 
-when not defined(ctInExtension):
+when defined(ctWeb):
+  # -------------------------------------------------------------------------
+  # THE WEB BUILD'S ENTRY POINT — the call that was missing.
+  #
+  # ## The defect this replaces, measured on the deployed page
+  #
+  # `ide.codetracer.com` served `web.js` and `ui.js`, both correct and both
+  # 200, and painted nothing: `#dom-root` was empty and the only text on the
+  # page was the boot arm's diagnostic line. Every deploy check was green,
+  # because each one asserted a step rather than the artefact — the shape
+  # Verification-Harness-Traps.md calls trap 2.
+  #
+  # What a browser said, and no check did, was:
+  #
+  #     Uncaught ReferenceError: monaco is not defined
+  #       at ui.js:65313            (ui/agent_activity.nim:46)
+  #
+  # `ui.js` died during module initialisation, roughly a quarter of the way in,
+  # on a module-level `monaco.editor.createModel` — because the generated entry
+  # document shipped none of the third-party bundle the renderer has always been
+  # loaded beside. That is fixed in `platform/web_deployment.nim`, which now
+  # renders the renderer's real document.
+  #
+  # Past that, the tail of this file was the second wall and this block is it.
+  # The old code was a two-way gate — Electron, or "not Electron", where "not
+  # Electron" meant the browsersync DEV SERVER:
+  #
+  #     if not inElectron:
+  #       var io {.importc.}: ...            # socket.io, from a <script> tag
+  #       var frontendSocketPort {.importc.} # injected by views/server_index.ejs
+  #       startIPC()                          # opens a websocket, and ONLY the
+  #                                           # socket's 'connect' handler calls
+  #                                           # configure(data)
+  #
+  # A statically hosted tab is neither arm. It has no `io` and no injected
+  # globals, so `startIPC()` throws `ReferenceError: frontendSocketParameters is
+  # not defined` on its first line (confirmed by serving this exact `ui.js`
+  # beside the third-party bundle); and even had it not thrown, `configure(data)`
+  # sits inside a `connect` callback for a websocket server that does not exist
+  # on a CDN and is not going to. The web build could not mount by construction.
+  #
+  # ## Why an in-page transport rather than no transport
+  #
+  # `configureIPC(data)` registers ~99 handlers through `data.ipc.on`, and forty
+  # call sites across the renderer do `data.ipc.send`. Leaving `data.ipc` nil
+  # would move the failure from module init to the first click, which is worse:
+  # it is the same blank page, later, and attributable to nothing.
+  #
+  # So the web arm installs a real object with the same two methods. `on`
+  # records; `send` has nowhere to go and SAYS SO on the console rather than
+  # failing silently, which is what makes an unported feature legible when
+  # someone clicks it. `deliver` is the third method and is the point: it lets
+  # the page hand the renderer an event locally, on the same path a host would.
+  proc newWebIpc(): js {.importjs: """
+(function () {
+  var handlers = {};
+  return {
+    handlers: handlers,
+    on: function (id, code) {
+      (handlers[id] = handlers[id] || []).push(code);
+    },
+    send: function (id, payload) {
+      console.warn('codetracer-web: no host for ' + id +
+                   ' — this surface is not ported to the browser yet', payload);
+    },
+    deliver: function (id, payload) {
+      var hs = handlers[id] || [];
+      for (var i = 0; i < hs.length; i++) {
+        try { hs[i].call(hs[i], undefined, payload); }
+        catch (e) { console.error('codetracer-web: handler for ' + id +
+                                  ' threw', e); }
+      }
+      return hs.length;
+    }
+  };
+})()""".}
+
+  proc reportWebRenderer(line: cstring) {.importjs: """
+(function (s) {
+  try { if (typeof console !== 'undefined') { console.log(s); } } catch (e) {}
+  try {
+    if (typeof document !== 'undefined') {
+      var el = document.getElementById('codetracer-renderer');
+      if (el) { el.textContent = s; }
+    }
+  } catch (e) {}
+})(#)""".}
+    ## Reported the same way `web_main.nim` reports the boot line, and for the
+    ## reason its header gives: a page wants it in the DOM, a headless check
+    ## wants it on the console, and both must be the same fact. The prefix is
+    ## what `ci/test/web-renderer-mounts.sh` reads.
+    ##
+    ## Deliberately a SEPARATE element from `#codetracer-boot`: the two arms
+    ## report independently, and a renderer that failed while the loop arm
+    ## succeeded is exactly the state that shipped. Writing both into one
+    ## element would let the later one erase the evidence of the earlier.
+
+  proc hideWebRendererStatus() {.importjs: """
+(function () {
+  try {
+    if (typeof document !== 'undefined') {
+      var el = document.getElementById('codetracer-renderer');
+      if (el) { el.hidden = true; }
+    }
+  } catch (e) {}
+})()""".}
+
+  const webRendererLinePrefix* = "codetracer-web-renderer:"
+
+  proc startWebRenderer() =
+    ## Install the transport, configure the renderer, mount the first surface.
+    ##
+    ## The three steps are the desktop's three steps in the desktop's order —
+    ## `configureIPC`, `configure`, then a surface — and that ordering is not
+    ## cosmetic: `configure` binds shortcuts and installs the panel services
+    ## that a mounted surface goes on to use.
+    ##
+    ## EVERY STEP IS INSIDE THE REPORT. An exception here used to be an
+    ## uncaught error in a tab, invisible to every check that ran against this
+    ## deployment — traps doc, trap 3: "a module that fails to load leaves no
+    ## in-page error". Now a failure names itself in the DOM and on the console,
+    ## in the same sentence shape as a success, so the CI assertion can tell
+    ## "did not mount" from "mounted" instead of finding an absence either way.
+    try:
+      ipc = newWebIpc()
+      data.ipc = ipc
+      configureIPC(data)
+      configure(data)
+      let mounted = welcome_screen.mountWebWelcomeScreen()
+      if mounted:
+        reportWebRenderer(cstring(
+          webRendererLinePrefix & " ok surface=welcome-screen"))
+        # The page belongs to the product now. The line stays on the console —
+        # which is what `ci/test/web-renderer-mounts.sh` reads — and leaves the
+        # document, because a diagnostic a user has to look at is a diagnostic
+        # the product has not replaced. Only the FAILING states stay visible,
+        # which is the one time a user needs to be told something.
+        hideWebRendererStatus()
+      else:
+        # Not an exception, and not a success either. The panel declined to
+        # mount — its container is missing from the document, which is a
+        # deployment fault and not a code fault, and it must not be reported
+        # with the same word as a mount.
+        reportWebRenderer(cstring(
+          webRendererLinePrefix &
+          " refused surface=welcome-screen reason=no-container"))
+    except CatchableError:
+      reportWebRenderer(cstring(
+        webRendererLinePrefix & " failed reason=" & getCurrentExceptionMsg()))
+
+  startWebRenderer()
+
+# The DEV-SERVER arm, unchanged, and now guarded against the web build rather
+# than serving as its accidental default. `not defined(ctWeb)` is the whole of
+# the change here: everything below assumes a page that loaded socket.io and
+# had `frontendSocketPort` / `frontendSocketParameters` injected into it by
+# `views/server_index.ejs`, which is true of `just serve` and false of a CDN.
+when not defined(ctInExtension) and not defined(ctWeb):
   if not inElectron:
     var io {.importc.}: proc(address: cstring, options: JsObject): js
     var frontendSocketPort {.importc.}: int

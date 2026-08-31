@@ -2876,6 +2876,30 @@ test-web-bundle-assets:
   exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
   bash ci/test/web-bundle-assets.sh
 
+# THE PAGE PAINTS — the assertion whose absence let a blank product reach
+# production with every check green.
+#
+# `test-web-bundle-assets` above proves the bundle CARRIES the renderer.  That
+# is not the same claim as the renderer RUNNING, and the difference was a week
+# of `ide.codetracer.com` serving a boot diagnostic and an empty `#dom-root`.
+# This loads the assembled bundle in a real headless browser and asserts the
+# DOM: the renderer's own `.welcome-screen-root`, its start options, its
+# panels, and zero uncaught page errors.
+#
+# It runs three mutation arms beside the control, each verified to redden the
+# assertion written for it — including the exact defect that shipped (publish
+# the bundle without the third-party bundle and the renderer dies on
+# `ReferenceError: monaco is not defined`).
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise.
+test-web-renderer-mounts:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-renderer-mounts.log) 2>&1
+  bash ci/test/web-renderer-mounts.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web

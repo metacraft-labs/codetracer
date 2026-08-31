@@ -104,6 +104,14 @@ styles/codetracer.css
 styles/*_theme.css
 styles/defaults.css
 
+# The same generated stylesheets, at the path they are ACTUALLY generated at.
+# The three rules above contain a slash, so git anchors them to the repository
+# root and they have never matched `src/frontend/styles/` — where tup writes
+# them and where `ci/test/web-bundle-assets.sh` now compiles them from stylus.
+# A developer who has run `just build` has carried these as untracked files
+# ever since, one `git add -A` away from committing a build artefact.
+src/frontend/styles/*.css
+
 src/db-backend/test-traces
 
 # TTD trace output

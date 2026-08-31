@@ -852,9 +852,20 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # every prefix while nothing produced such a file, so a deployment would
     # have served the rewrites and 404'd every one of them.
     check "entry-document" in ids
+    # THE THREE THE RENDERER CANNOT RUN WITHOUT, and the reason they are
+    # `required` rather than `optional` with a degradation sentence: there is
+    # no degraded product without them, only a blank page. `ui.js` reads
+    # `monaco` at module scope, so a deployment missing the third-party bundle
+    # does not lose a feature — the renderer throws `ReferenceError` during
+    # module initialisation and mounts nothing at all. That is what
+    # `ide.codetracer.com` served for a week.
+    check "third-party-bundle" in ids
+    check "renderer-theme" in ids
+    check "renderer-loader-styles" in ids
     # Counted, so an asset silently losing `required` is caught. Asserting only
-    # membership would pass over a manifest that had gained three more.
-    check required.len == 4
+    # membership would pass over a manifest that had gained three more —
+    # which is exactly what happened here, and this line is what said so.
+    check required.len == 7
 
   test "the renderer is BUNDLED and the worker is a separate ASSET":
     # Not a stylistic distinction. `new Worker(url)` takes a URL and

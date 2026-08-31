@@ -161,6 +161,174 @@ build renderer src/frontend/ui_js.nim "${out_dir}/ui.js" \
 # `js-browser`; this makes the pair agree.
 build web-entry src/frontend/web_main.nim "${out_dir}/web.js" \
 	-d:ctWeb --path:src/frontend/viewmodel
+
+# -----------------------------------------------------------------------
+# SCOPE THE TWO NIM BUNDLES. They share a page, and until this step they
+# shared its GLOBAL SCOPE, which is not a style question.
+#
+# `nim js` emits its whole program as top-level `var`s and `function`
+# declarations. Two independently compiled bundles therefore collide on
+# every runtime symbol they have in common. Counted on the deployed pair:
+#
+#     196 top-level function names   (parseJson__pureZjson_*, nimCopy,
+#                                     raiseException, chckIndx, ...)
+#      85 top-level var names        (NTI* type tables, ConstSet*)
+#
+# `ui.js` loads second, so it redefined `web.js`'s runtime under it. The
+# loop arm's `boot()` is async and continues AFTER that point, so it
+# resumed into a foreign runtime and died:
+#
+#     field 'elems' is not accessible for type 'JsonNodeObj' using
+#     'kind = JArray'   at web_browser.deploymentDescriptor
+#
+# This was latent, not absent, on the deployed page: `ui.js` was throwing
+# during module init before it reached the declarations that clobbered the
+# type tables, so the loop arm survived by being lucky about WHERE the
+# renderer crashed. Fixing the renderer is what would have exposed it, and
+# it reproduces exactly that way — the mutation arm in
+# `ci/test/web-renderer-mounts.sh` is this, unwrapped.
+#
+# An IIFE is the whole fix and is applied here rather than in the compiler
+# invocation because `nim js` has no option for it. `type="module"` in the
+# document was measured as the alternative and is NOT usable: module code
+# is strict, and `ui.js` is then a `SyntaxError` ("Identifier 'debugRepl'
+# has already been declared").
+#
+# WHAT IT COSTS, stated because it is a real loss: `{.exportc.}` procs meant
+# to be called from a devtools console (`debugCT`, `debugRepl`, `readLog`)
+# are no longer reachable from the global scope in the WEB build. The
+# desktop and dev-server builds are untouched — they load one Nim bundle and
+# this step does not run for them.
+#
+# WHAT IT DOES NOT FIX: the two arms still cannot share Nim state, so the
+# renderer cannot see the platform, project store or wasm registry that
+# `web.js` booted. That is one bundle's worth of work and it is NS9's, not
+# this script's. What changes here is that they no longer corrupt each
+# other, which they did.
+scope_bundle() {
+	local label="$1" file="$2"
+	if head -c 12 "${file}" | grep -q '^(function()'; then
+		ok "${label}: already scoped"
+		return
+	fi
+	local tmp="${cache}/$(basename "${file}").scoped"
+	{
+		printf '(function(){\n'
+		cat "${file}"
+		printf '\n})();\n'
+	} >"${tmp}"
+	mv "${tmp}" "${file}"
+	# PARSED, not just written. A wrapper that unbalanced the file would
+	# produce a bundle that is 40 bytes larger and completely dead, and
+	# every size check in this script would still pass it.
+	if node --check "${file}" 2>/dev/null; then
+		ok "${label}: scoped in an IIFE and still parses"
+	else
+		bad "${label}: the IIFE wrapper left a file that does not parse"
+	fi
+}
+scope_bundle renderer "${out_dir}/ui.js"
+scope_bundle web-entry "${out_dir}/web.js"
+echo
+
+# ---------------------------------------------------------------------------
+echo "Step 2b: the third-party bundle, the theme, and the renderer's own tree"
+echo "    The assets whose ABSENCE is why a correct-looking deployment painted"
+echo "    nothing. \`ui.js\` reads \`monaco\` at module scope; without the webpack"
+echo "    bundle it raises ReferenceError during module init and stops."
+# ---------------------------------------------------------------------------
+# PRODUCTION MODE, and the reason is a hard limit rather than a preference.
+# `webpack.config.js` is `mode: 'development'` for the desktop, which is right
+# there — it keeps the build at ~9s and the debugger useful. It emits a 48 MB
+# `frontend_bundle.js`, and Cloudflare Pages refuses any file over 25 MB, so
+# the development bundle CANNOT be deployed at all. Production mode is 13.1 MB
+# (27 MB for the whole output tree, 247 files) and costs ~67s.
+#
+# The overrides are passed on the command line rather than written into
+# `webpack.config.js`, so the desktop build this script does not own keeps the
+# devtool decision its own header spends forty lines justifying.
+if [ ! -x node_modules/.bin/webpack ]; then
+	bad "node_modules/.bin/webpack is missing; the third-party bundle cannot be built"
+else
+	dist_dir="${cache}/third-party-dist"
+	rm -rf "${dist_dir}"
+	if node node_modules/.bin/webpack --mode production --devtool false \
+		--output-path "${dist_dir}" >"${cache}/webpack.log" 2>&1 &&
+		[ -s "${dist_dir}/frontend_bundle.js" ]; then
+		# Removed WHOLE, not overwritten. Webpack names its chunks by content
+		# hash, so a rebuild leaves the previous run's chunks in place and the
+		# directory grows a set of files no document references — the same
+		# "an asset nothing can reach" state the deploy guard exists to catch,
+		# manufactured by the assembly step itself.
+		rm -rf "${out_dir}/public/dist"
+		mkdir -p "${out_dir}/public/dist"
+		cp -R "${dist_dir}/." "${out_dir}/public/dist/"
+		ok "third-party bundle built ($(wc -c <"${dist_dir}/frontend_bundle.js" | tr -d ' ') bytes)"
+	else
+		bad "the third-party bundle did not build"
+		tail -5 "${cache}/webpack.log" | sed 's/^/      /'
+	fi
+fi
+
+# THE THEME IS COMPILED, NOT COPIED. `src/frontend/styles/*.css` is generated
+# from stylus by tup and is gitignored, so a checkout has the `.styl` and not
+# the `.css`. A deployment step that copied would work on a developer's tree
+# with a stale build directory and fail in CI, which is the worse of the two
+# orders to discover it in.
+if [ ! -x node_modules/.bin/stylus ]; then
+	bad "node_modules/.bin/stylus is missing; the theme cannot be compiled"
+else
+	mkdir -p "${out_dir}/frontend/styles"
+	for sheet in default_dark_theme_electron loader; do
+		if node node_modules/.bin/stylus -p "src/frontend/styles/${sheet}.styl" \
+			>"${out_dir}/frontend/styles/${sheet}.css" 2>"${cache}/stylus-${sheet}.log" &&
+			[ -s "${out_dir}/frontend/styles/${sheet}.css" ]; then
+			ok "compiled ${sheet}.css ($(wc -c <"${out_dir}/frontend/styles/${sheet}.css" | tr -d ' ') bytes)"
+		else
+			bad "${sheet}.styl did not compile"
+			head -3 "${cache}/stylus-${sheet}.log" | sed 's/^/      /'
+		fi
+	done
+fi
+
+# The trees the compiled theme and the renderer resolve BY RELATIVE PATH.
+# Each one was a 404 on the first assembled page, found by loading it rather
+# than by reading it: the theme's `@font-face` rules reach
+# `../../libs/codetracer-design-system/...`, and the welcome screen requests
+# `public/resources/shared/codetracer_welcome_logo.svg`. A page that renders
+# with no fonts and no logo is not a mounted product.
+#
+# golden-layout's CSS comes from `node_modules` because
+# `src/public/third_party/golden-layout/dist` is an EMPTY directory in a
+# checkout — tup populates it for the desktop build and this script cannot
+# assume tup ran.
+place_tree() {
+	local label="$1" src="$2" dst="$3"
+	if [ ! -e "${src}" ]; then
+		bad "${label}: ${src} is not in the checkout"
+		return
+	fi
+	mkdir -p "$(dirname "${dst}")"
+	rm -rf "${dst}"
+	cp -RL "${src}" "${dst}" 2>/dev/null || cp -R "${src}" "${dst}"
+	ok "${label}: placed $(find "${dst}" -type f | wc -l | tr -d ' ') file(s)"
+}
+place_tree design-system libs/codetracer-design-system \
+	"${out_dir}/libs/codetracer-design-system"
+place_tree renderer-resources src/public/resources "${out_dir}/public/resources"
+place_tree golden-layout-css node_modules/golden-layout/dist/css \
+	"${out_dir}/public/third_party/golden-layout/dist/css"
+mkdir -p "${out_dir}/public/third_party"
+for f in font-awesome.min.css vex.css vex-theme-os.css jstree_default.css \
+	nouislider.css devicon-base.css jstree.min.js; do
+	if cp "src/public/third_party/${f}" "${out_dir}/public/third_party/${f}" 2>/dev/null; then
+		ok "third-party: ${f}"
+	else
+		bad "third-party: src/public/third_party/${f} is missing"
+	fi
+done
+place_tree bootstrap src/public/third_party/bootstrap-4.3.1-dist \
+	"${out_dir}/public/third_party/bootstrap-4.3.1-dist"
 echo
 
 # ---------------------------------------------------------------------------
