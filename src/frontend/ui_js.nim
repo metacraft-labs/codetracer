@@ -4403,7 +4403,14 @@ var actions*: array[ClientAction, ClientActionHandler] = [
 
 data.actions = actions
 
-when defined(ctWeb):
+when defined(ctWeb) and not defined(ctInExtension):
+  # `not defined(ctInExtension)` for the same reason the other two arms carry
+  # it, and it is the structural point of this whole change rather than a
+  # tidy-up: the three entry arms must be MUTUALLY EXCLUSIVE. The defect being
+  # fixed here is precisely what happens when they are not — "not Electron" was
+  # written as if it meant "the dev server", the web build fell into it by
+  # default, and the result was a page that could not start. An arm that can
+  # co-fire with another is the same mistake with the sign flipped.
   # -------------------------------------------------------------------------
   # THE WEB BUILD'S ENTRY POINT — the call that was missing.
   #
