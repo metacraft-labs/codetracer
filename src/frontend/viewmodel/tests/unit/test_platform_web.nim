@@ -229,6 +229,39 @@ suite "the web instantiation satisfies every facade — NS2, §3.1":
     check awaitOutcome(
       web.platform.shell.openExternalUrl("https://example.test/")).ok
     check log.openedUrls == @["https://example.test/"]
+
+  test "the web arm refuses every scheme that is not http, https or mailto":
+    ## `ShellFacade.openExternalUrl`'s contract says implementations must
+    ## refuse anything else.  It said so only in a doc comment, and this arm
+    ## did not: the URL went straight to `window.open`.  The three allowed
+    ## schemes are asserted alongside the refusals so a guard that refused
+    ## EVERYTHING would fail here rather than pass as "secure".
+    var refused = 0
+    for hostile in [
+        "javascript:alert(1)",
+        "JavaScript:alert(1)",              # the check is case-insensitive
+        "data:text/html,<script>alert(1)</script>",
+        "file:///etc/passwd",
+        "vscode://file/etc/passwd",         # an OS-registered handler scheme
+        "  javascript:alert(1)"]:           # no trimming: still not allowed
+      let outcome = awaitOutcome(web.platform.shell.openExternalUrl(hostile))
+      check not outcome.ok
+      check outcome.error.kind == pkInvalidArgument
+      inc refused
+    check refused == 6
+    # The refusals must not have reached the tab at all.  `setup:` gives each
+    # test a fresh bridge, so this is the whole log.
+    check log.openedUrls.len == 0
+
+    var allowed = 0
+    for benign in ["http://example.test/a", "https://example.test/b",
+                   "mailto:someone@example.test"]:
+      check awaitOutcome(web.platform.shell.openExternalUrl(benign)).ok
+      inc allowed
+    check allowed == 3
+    check log.openedUrls == @["http://example.test/a",
+                              "https://example.test/b",
+                              "mailto:someone@example.test"]
     check not awaitOutcome(web.platform.shell.minimizeWindow()).ok
     check not awaitOutcome(web.platform.shell.closeWindow()).ok
     check not awaitOutcome(web.platform.shell.revealInFileManager("a.nr")).ok

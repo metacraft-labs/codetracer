@@ -264,7 +264,15 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
       resolvedOk(options.suggestedName),
     openExternalUrl: proc(url: string
                          ): PlatformFuture[PlatformOutcome[Nothing]] =
-      settleSync(jsOpenExternal(url.cstring), "opening the link"),
+      # The same allow-list `desktop_electron` applies, from the same place.
+      # This arm did NOT have it: the string went straight to `window.open`,
+      # and `javascript:` and `data:text/html` are not uniformly refused there
+      # across browsers.  The rule was written on the facade field as prose and
+      # honoured by one of the two implementations that can open anything.
+      if not allowedExternalUrlScheme(url):
+        refuseExternalUrl(url)
+      else:
+        settleSync(jsOpenExternal(url.cstring), "opening the link"),
     setFullscreen: proc(fullscreen: bool
                        ): PlatformFuture[PlatformOutcome[Nothing]] =
       settleVoid(jsSetFullscreen(fullscreen), "changing full screen"),

@@ -1,9 +1,12 @@
 /**
- * Three `innerHTML` sinks in the Electron renderer, and what keeps them text.
+ * Every way markup or code can enter this renderer's DOM, and what keeps each
+ * one shut.
  *
  * CodeTracer's whole purpose is replaying UNTRUSTED programs, and its renderer
- * is an Electron renderer — markup that executes there is not a defaced page.
- * Three sinks put strings that are not markup into `innerHTML`:
+ * is an Electron renderer running with `nodeIntegration: true` — markup that
+ * executes there is not a defaced page.  Eight sinks put strings that are not
+ * markup into `innerHTML`; the first three are the ones a triage trail led to,
+ * and the rest were found by pinning the population rather than by looking:
  *
  *  1. `renderer.nim`'s file-conflict dialog interpolated a workspace `path`
  *     into `overlay.innerHTML`.  `<`, `>`, `"` and `'` are all legal POSIX
@@ -33,6 +36,16 @@
  *     native absolute path.  None of them was on the list this file was
  *     written for — arm S found them.
  *
+ *  5. `ui/low_level_code.nim` wrote A LINE OF THE RECORDED PROGRAM'S OWN
+ *     SOURCE into `innerHTML`, and `ui/shell.nim` wrote a summary built from
+ *     a recorded command line, a binary path and a linker error message.
+ *     `ui/auto_hide_overlay.nim` exported a caller-less proc whose whole body
+ *     was `contentEl.innerHTML = html`.  Arm S3 found all three by counting.
+ *
+ *  6. `ShellFacade.openExternalUrl`'s "implementations must refuse anything
+ *     but http/https/mailto" was a DOC COMMENT, honoured by one of the two
+ *     implementations that can open anything.  Arm S5.
+ *
  * The fixes are `textContent` at 1, 2 and 4, `createElement` + `setAttribute`
  * for the `id=`, and an explicit `escape_html = true` in `lib/ansi_html.nim`
  * at 3.  This file is what keeps them.
@@ -41,6 +54,14 @@
  * asserts the thing that makes it so — an `int` field type, a literal frame
  * list, a closed set of call sites over four `const`s.  "It is a literal
  * today" is exactly the reasoning that missed 4.
+ *
+ * Arms S3-S5 are the bounded negative.  S3 pins the WHOLE `innerHTML`
+ * population — 48 writes, 14 of them non-clearing, every one triaged — so a
+ * forty-ninth is a red run.  S4 sweeps the other ways in (`outerHTML`,
+ * `insertAdjacentHTML`, `document.write`, `srcdoc`, `<webview>`, `eval`,
+ * `new Function`, string-bodied timers, karax's `verbatim`) and finds none,
+ * with each pattern proved against a sample so an empty result cannot be an
+ * empty pattern.  S5 pins the URL and code-execution reach that does exist.
  *
  * EVERY negative below has a positive twin through the same code path: for
  * each hostile value, the PRE-FIX sink is exercised on the same DOM and MUST
@@ -412,6 +433,53 @@ function matchesAcross(pattern) {
   return out.sort().join(' | ');
 }
 
+const FRONTEND = path.join(REPO, 'src/frontend');
+const isComment = (line) => /^\s*(#|\/\/)/.test(line);
+const isClear = (rhs) => rhs.trim() === 'cstring""' || rhs.trim() === '""';
+
+/**
+ * The shipped front end, with whole-line comments removed.
+ *
+ * Two scoping decisions, both learned the hard way in this file:
+ *
+ *  * **Comments are stripped**, because trap 4d is not a one-off.  Scanning
+ *    the raw text for `verbatim(` matched five doc comments that mention
+ *    karax's `verbatim`, and `setOverlayContent` matched the comment recording
+ *    its own deletion.  A scan asserting a property of code must read code.
+ *  * **`src/frontend`, excluding `/tests/`**, because the claim being made is
+ *    about the renderer that ships.  Test harnesses legitimately use
+ *    `new Function` (the startup benchmark compiles generated source on
+ *    purpose) and `$eval` (Playwright), and `src/public/third_party` carries
+ *    vendored `window.open` and `setAttribute("href", …)` that CodeTracer
+ *    does not author.
+ */
+const shipped = new Map();
+for (const [rel, text] of sources) {
+  if (!path.join(REPO, rel).startsWith(FRONTEND)) continue;
+  if (rel.includes('/tests/')) continue;
+  shipped.set(rel, text.split('\n').filter((l) => !isComment(l)).join('\n'));
+}
+
+function shippedMatching(pattern) {
+  return [...shipped.entries()]
+    .filter(([, text]) => pattern.test(text)).map(([rel]) => rel).sort().join(',');
+}
+
+function shippedMatchesAcross(pattern) {
+  const out = [];
+  for (const [rel, text] of shipped) {
+    for (const m of text.matchAll(pattern)) out.push(`${rel}:${m[0]}`);
+  }
+  return out.sort().join(' | ');
+}
+
+// Trap 4 for the narrower scan too: it has its own population, so assert it
+// reached one before asserting what is not in it.
+console.log(`  \x1b[2mshipped front-end files scanned: ${shipped.size}\x1b[0m`);
+assert(shipped.size >= 250,
+  `the shipped-front-end scan reached the tree (${shipped.size} files)`);
+
+
 // --- site 2: BOTH copies of the menu renderer -------------------------------
 //
 // The behavioural arm above drives the `context_menu_bridge` copy.  The
@@ -500,6 +568,30 @@ assert(/let text = tab\.titleElement\.textContent/.test(
   sources.get('src/frontend/ui/auto_hide.nim')),
   'pinPanel still takes that title from the GoldenLayout tab, which carries a path');
 
+// --- ui/low_level_code.nim: A LINE OF THE RECORDED PROGRAM'S SOURCE --------
+//
+// Found by pinning the population, not by following a trail.  `sourceCode` is
+// `tabInfo.sourceLines[highLevelLine-1]` — the program's own bytes.  For an
+// HTML, JSX, Vue, PHP or template file it is markup by construction, and for
+// anything else a string literal will do.  Scan-only coverage: the module
+// reaches `ui_imports` and, through it, isonim.
+assertEqual(shippedMatching(/textDom\.textContent = cstring\(fmt"\{highLevelLine\}\| \{sourceCode\}"\)/),
+  'src/frontend/ui/low_level_code.nim',
+  "the low-level view writes the program's source line as text");
+assertEqual(shippedMatching(/textDom\.innerHTML/), '',
+  'and never as markup');
+
+// --- ui/shell.nim: a command line, a binary path, a linker error -----------
+//
+// `eventSummary` interpolates `event.program`, `event.binary`, `event.command`,
+// `event.errorMessage` and a `recordingId`.  A recorded build controls all of
+// them.  Scan-only, same reason.
+assertEqual(shippedMatching(/eventSummary\.textContent = cstring\(event\.eventSummary\(\)\)/),
+  'src/frontend/ui/shell.nim',
+  'the shell event summary is written as text');
+assertEqual(shippedMatching(/eventSummary\.innerHTML/), '',
+  'and never as markup');
+
 // --- ui/datatable.nim: two integers.  Enforced by the TYPE. ----------------
 assertEqual(matchesAcross(/innerHTML = cstring\(\$\(self\.[A-Za-z]+\)\)/g),
   'src/frontend/ui/datatable.nim:innerHTML = cstring($(self.endRow)) | '
@@ -538,9 +630,167 @@ assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:const chevronUpSvg',
   'and chevronSvg is one of four compile-time `const`s, so it cannot vary');
 
+describe('S3. The whole innerHTML population, pinned');
+
+// Six sites were fixed by looking at the ones a trail led to.  That is not the
+// same as knowing how many there are.  This counts every `innerHTML` write in
+// the shipped front end and pins the number, so a seventh is a red run rather
+// than an unnoticed addition.
+//
+// Comment lines are excluded deliberately: `ui/trace.nim` carries two
+// commented-out writes, and counting those would mean un-commenting one moved
+// nothing.
+
+let innerHtmlTotal = 0;
+const innerHtmlLive = new Map();
+for (const [rel, text] of sources) {
+  if (!path.join(REPO, rel).startsWith(FRONTEND)) continue;
+  if (rel.includes('/tests/')) continue;
+  for (const line of text.split('\n')) {
+    if (isComment(line)) continue;
+    const m = /\.innerHTML\s*=(.*)$/.exec(line);
+    if (!m) continue;
+    innerHtmlTotal++;
+    if (isClear(m[1])) continue;
+    innerHtmlLive.set(rel, (innerHtmlLive.get(rel) ?? 0) + 1);
+  }
+}
+
+assertEqual(innerHtmlTotal, 48,
+  'the shipped front end performs exactly this many innerHTML writes');
+assertEqual(
+  [...innerHtmlLive.entries()].sort(([a], [b]) => a.localeCompare(b))
+    .map(([rel, n]) => `${rel}=${n}`).join(' '),
+  'src/frontend/storybook_components.nim=2 '
+  + 'src/frontend/ui/auto_hide.nim=1 '
+  + 'src/frontend/ui/datatable.nim=2 '
+  + 'src/frontend/ui/editor.nim=1 '
+  + 'src/frontend/ui/file_conflict_dialog.nim=1 '
+  + 'src/frontend/ui/trace.nim=3 '
+  + 'src/frontend/viewmodel/views/isonim_build_view.nim=1 '
+  + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim=1 '
+  + 'src/frontend/viewmodel/views/isonim_terminal_output_view.nim=1 '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim=1',
+  'and every non-clearing one is in a file this suite has triaged');
+
+// The four that arm S/S2 do not already name, so all fourteen are accounted
+// for rather than merely counted.
+{
+  const traceNim = sources.get('src/frontend/ui/trace.nim');
+  assert(/RUN_TRACE_MESSAGE: cstring = "[^"<>]*"/.test(traceNim)
+      && /NO_RESULTS_MESSAGE: cstring = "[^"<>]*"/.test(traceNim),
+    'trace.nim\'s two overlay messages are markup-free string constants');
+  assert(/innerHTML =\s*\n?\s*\(\$self\.chart\.viewKind\)\[4\.\.\^1\]/.test(traceNim),
+    'and its third write is an enum name, which the type keeps markup-free');
+  assert(/innerHTML = cstring"&#x2715;"/.test(
+    sources.get('src/frontend/ui/auto_hide.nim')),
+    'auto_hide\'s remaining write is a literal HTML entity — markup on purpose');
+  assert(/htmlEscape\(/.test(sources.get('src/frontend/storybook_components.nim')),
+    'the storybook table builder escapes the values it interpolates');
+}
+
+// The sink deleted rather than fixed: an exported proc whose whole body was
+// `contentEl.innerHTML = html`, with no callers.
+assertEqual(shippedMatching(/setOverlayContent/), '',
+  'the caller-less setOverlayContent markup sink is gone, name and all');
+
+describe('S4. The other ways markup or code enters a DOM — a counted negative');
+
+// Trap 4a: a lone "must not contain" has nothing to fail.  Each row below
+// asserts BOTH that the pattern can see a real instance (against a sample
+// string) and that the tree contains none.  A pattern broken by an escaping
+// slip fails the first half instead of passing the second for free.
+const FORBIDDEN = [
+  ['outerHTML assignment', /\.outerHTML\s*=/, 'el.outerHTML = x'],
+  ['insertAdjacentHTML', /insertAdjacentHTML/, "el.insertAdjacentHTML('beforeend', x)"],
+  ['document.write', /document\s*\.\s*write(ln)?\s*\(/, 'document.write(x)'],
+  ['an iframe srcdoc', /srcdoc/, 'frame.srcdoc = x'],
+  ['an Electron <webview>', /<webview|createElement\((cstring)?"webview"/, '<webview src="x">'],
+  ['eval', /(^|[^\w.])eval\s*\(/, 'eval(userInput)'],
+  ['new Function', /new Function\s*\(/, 'new Function(src)'],
+  ['a string-bodied timer', /set(Timeout|Interval)\s*\(\s*["'`]/, 'setTimeout("alert(1)", 0)'],
+  ["karax's verbatim", /\bverbatim\s*\(/, 'verbatim(html)'],
+];
+let forbiddenChecked = 0;
+for (const [name, pattern, sample] of FORBIDDEN) {
+  assert(pattern.test(sample), `the ${name} pattern matches a known instance`);
+  assertEqual(shippedMatching(pattern), '', `the shipped front end never uses ${name}`);
+  forbiddenChecked++;
+}
+assertEqual(forbiddenChecked, FORBIDDEN.length,
+  `every one of the ${FORBIDDEN.length} forbidden sinks was scanned`);
+
+// The URL-bearing sinks that DO exist, pinned to their exact population.
+assertEqual(shippedMatchesAcross(/setAttribute\((cstring)?"(href|src|srcdoc|action|formaction)"[^)]*\)/g),
+  'src/frontend/browsersync_serv.nim:setAttribute("src", scriptTagSrc) | '
+  + 'src/frontend/subwindow.nim:setAttribute(cstring"src", cstring"./public/resources/shared/codetracer_welcome_logo.svg")',
+  'exactly two URL attributes are ever set');
+// One is a literal asset path.  The other re-creates a <script> during
+// browser-sync hot reload with the `src` READ BACK OFF a script tag already in
+// the page — it introduces no new value — and `src/Tupfile`'s rule for
+// `browsersync_serv.js` is commented out, so it is not even built.
+assert(/scriptTagSrc = existingScript\.getAttribute\("src"\)/.test(
+  shipped.get('src/frontend/browsersync_serv.nim')),
+  "and browser-sync's copies a src off an existing tag rather than minting one");
+assert(/^# : frontend\/browsersync_serv\.nim/m.test(
+  fs.readFileSync(path.join(REPO, 'src/Tupfile'), 'utf8')),
+  'and that dev-only module has no build rule at all');
+assertEqual(shippedMatchesAcross(/executeJavaScript\("[^"]*"\)/g),
+  'src/frontend/index/window.nim:executeJavaScript("document.body.style.backgroundColor = \'black\';") | '
+  + 'src/frontend/index/window.nim:executeJavaScript("document.body.style.backgroundColor = \'transparent\';")',
+  'both executeJavaScript calls take a string literal');
+assertEqual(shippedMatchesAcross(/let url = "file:\/\/" & \$?codetracerExeDir & "[^"]*"/g),
+  'src/frontend/index/install.nim:let url = "file://" & $codetracerExeDir & "/subwindow.html" | '
+  + 'src/frontend/index/window.nim:let url = "file://" & $codetracerExeDir & "/index.html"',
+  'both loadURL targets are the install directory, not a caller-supplied URL');
+assertEqual(shippedMatchesAcross(/win\.loadURL\(cstring\(url\)\)/g),
+  'src/frontend/index/install.nim:win.loadURL(cstring(url)) | '
+  + 'src/frontend/index/window.nim:win.loadURL(cstring(url))',
+  'and those are the only two loadURL calls');
+
+describe('S5. openExternalUrl — the contract was prose, and one arm did not read it');
+
+// `ShellFacade.openExternalUrl`'s doc comment says implementations must refuse
+// anything but http/https/mailto.  `desktop_electron` checked; `web_browser`
+// handed the string to `window.open`.  Trap 4d at the level of a contract: a
+// rule stated in a comment has a population of one enforcement site.
+assertEqual(shippedMatching(/proc allowedExternalUrlScheme\*/),
+  'src/frontend/viewmodel/platform/shell.nim',
+  'the allow-list is one predicate, in the facade that declares the rule');
+assertEqual(shippedMatchesAcross(/if not allowedExternalUrlScheme\(url\):/g),
+  'src/frontend/viewmodel/host/desktop_electron.nim:if not allowedExternalUrlScheme(url): | '
+  + 'src/frontend/viewmodel/host/web_browser.nim:if not allowedExternalUrlScheme(url): | '
+  + 'src/frontend/viewmodel/platform/web_platform.nim:if not allowedExternalUrlScheme(url):',
+  'and all THREE constructions that can reach an opener call it');
+// Three and not two, and the third is the one that matters: `web_platform`'s
+// bridge is PLUGGABLE, so a guard living only in `host/web_browser.nim` is a
+// guard one bridge implementation happens to have.  The fake bridge in
+// `test_platform_web.nim` proved it by accepting `javascript:` straight
+// through the real one.
+// The population itself: every place the field is given a body.  Three of the
+// five hand the request somewhere else; the two that act on it are above.
+assertEqual(shippedMatching(/openExternalUrl\*?\s*[:=]\s*proc/),
+  'src/frontend/viewmodel/host/desktop_electron.nim,'
+  + 'src/frontend/viewmodel/host/remote_stub.nim,'
+  + 'src/frontend/viewmodel/host/web_browser.nim,'
+  + 'src/frontend/viewmodel/platform/shell.nim,'
+  + 'src/frontend/viewmodel/platform/web_platform.nim',
+  'and the set of files that implement the field has not grown');
+assertEqual(shippedMatchesAcross(/window\.open\([^)]*\)/g),
+  "src/frontend/viewmodel/host/web_browser.nim:window.open(u, '_blank', 'noopener,noreferrer')",
+  'there is exactly one window.open in the front end, behind that check');
+
+// The reason all of this is code execution rather than a defaced panel.  If
+// the renderer is ever hardened, this goes red and the assessment gets reread
+// — which is the point of asserting it rather than asserting nothing.
+assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
+  'src/frontend/index/install.nim:"nodeIntegration": true | '
+  + 'src/frontend/index/window.nim:"nodeIntegration": true',
+  'both BrowserWindows still run with nodeIntegration — the severity premise');
+
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ASSERTIONS = 115;
+const EXPECTED_ASSERTIONS = 157;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

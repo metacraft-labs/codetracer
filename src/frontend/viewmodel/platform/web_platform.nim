@@ -564,7 +564,16 @@ proc buildShell(web: WebPlatform; profile: PlatformProfile): ShellFacade =
     profile: profile,
     openExternalUrl: proc(url: string
                          ): PlatformFuture[PlatformOutcome[Nothing]] =
-      bridge.openExternalUrl(url),
+      # The allow-list belongs HERE and not only in `host/web_browser.nim`,
+      # because the bridge is pluggable: this is the `ShellFacade` the web
+      # instantiation hands to callers, and a bridge that forgot the check
+      # would inherit nothing.  Measured — `test_platform_web.nim`'s fake
+      # bridge accepted `javascript:` right through a guard that was only in
+      # the real one.
+      if not allowedExternalUrlScheme(url):
+        refuseExternalUrl(url)
+      else:
+        bridge.openExternalUrl(url),
     revealInFileManager: proc(path: string
                              ): PlatformFuture[PlatformOutcome[Nothing]] =
       resolvedUnsupported[Nothing]("revealing a file in a file manager"),
