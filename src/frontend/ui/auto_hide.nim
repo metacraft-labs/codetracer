@@ -1241,27 +1241,32 @@ proc revealOverlay*(panel: AutoHidePanel) =
 proc contentIcon*(content: Content): cstring =
   ## Return a Unicode icon character for a Content type, used in the
   ## status bar icon zone when strips are in collapsed mode.
+  ##
+  ## The characters are written out, NOT as `\x` escapes: `cstring"..."`
+  ## is a generalized RAW string literal (`ident"..."` means `ident(r"...")`),
+  ## so an escape here is never decoded — it reached the status bar as the
+  ## literal text `\xF0\x9F\x93\x81`.
   case content
   of Content.Filesystem:
-    cstring"\xF0\x9F\x93\x81" # file folder
+    cstring"📁" # file folder
   of Content.Calltrace:
-    cstring"\xF0\x9F\x94\x8D" # magnifying glass
+    cstring"🔍" # magnifying glass
   of Content.EventLog:
-    cstring"\xF0\x9F\x93\x8B" # clipboard
+    cstring"📋" # clipboard
   of Content.State:
-    cstring"\xF0\x9F\x94\xA2" # input numbers
+    cstring"🔢" # input numbers
   of Content.Build:
-    cstring"\xE2\x9A\x99" # gear
+    cstring"⚙" # gear
   of Content.BuildErrors:
-    cstring"\xE2\x9A\xA0" # warning sign
+    cstring"⚠" # warning sign
   of Content.SearchResults:
-    cstring"\xF0\x9F\x94\x8E" # magnifying glass right
+    cstring"🔎" # magnifying glass right
   of Content.TerminalOutput:
-    cstring"\xF0\x9F\x96\xA5" # desktop computer
+    cstring"🖥" # desktop computer
   of Content.Shell:
-    cstring"\xF0\x9F\x92\xBB" # laptop
+    cstring"💻" # laptop
   else:
-    cstring"\xE2\x96\xA3" # square with dot
+    cstring"▣" # square with dot
 
 
 proc sideAutoHideTabsModel*(edge: AutoHideEdge): tuple[
