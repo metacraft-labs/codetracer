@@ -412,6 +412,39 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+echo "Step 7: the deploy guard runs on the tree this script just assembled"
+echo "    Not because a local bundle is about to be published, but because"
+echo "    otherwise NOTHING COMPILES web_deploy_guard.nim except the deploy"
+echo "    workflow -- and a Nim file no lane compiles is this repository's"
+echo "    signature defect: host/web_browser.nim sat unparseable on dev for"
+echo "    days, and the renderer entry point did the same this week. A guard"
+echo "    that is only built at deploy time fails FOR THE FIRST TIME during a"
+echo "    deploy, which is the worst possible moment to discover it."
+echo
+echo "    It also means every push exercises the guard against a real,"
+echo "    correct publish directory -- so the 'a legitimate bundle is"
+echo "    rejected' failure mode is caught here rather than by whoever is"
+echo "    deploying."
+# ---------------------------------------------------------------------------
+if ! nim c --hints:off --warnings:off --nimcache:"${cache}/guard" \
+	-o:"${cache}/guard-bin" ci/test/web_deploy_guard.nim \
+	>"${cache}/guard-build.log" 2>&1; then
+	bad "ci/test/web_deploy_guard.nim does not compile"
+	grep -E 'Error:' "${cache}/guard-build.log" | head -3 | sed 's/^/      /'
+else
+	ok "the deploy guard compiles"
+	if "${cache}/guard-bin" "${out_dir}" >"${cache}/guard-run.log" 2>&1; then
+		ok "and it accepts the bundle this script assembled"
+		sed 's/^/      /' "${cache}/guard-run.log"
+	else
+		bad "the deploy guard REJECTS the bundle this script just assembled"
+		sed 's/^/      /' "${cache}/guard-run.log"
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
 echo "${checks} check(s), ${failures} failure(s), ${skips} skipped"
 if [ "${checks}" -eq 0 ]; then
 	echo "RESULT: FAILED — the gate asserted nothing"
