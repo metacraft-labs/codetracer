@@ -458,6 +458,15 @@ type
       ## Whether the run said anything about the program at all. False for
       ## four of the six outcomes, and the view says so in words when it is.
     rows*: seq[VerificationPanelRow]
+    modelAbsentReason*: string
+      ## The producer's own words for why this run's counterexample carries no
+      ## model, or `""`.
+      ##
+      ## Carried onto the panel so the *absence of the button* has an
+      ## explanation next to it. A payload that arrived, was believed, and has
+      ## `model.status == unavailable` is the case most likely to be read as a
+      ## broken feature, and it is the one where the producer has already
+      ## written down the reason.
     counterexampleOffers*: seq[CounterexampleOffer]
       ## Empty for every run without an *attached* payload carrying a
       ## *steppable* counterexample — which is every state VN-M3's
@@ -551,6 +560,11 @@ proc panelModel*(vm: VerificationVM): VerificationPanelModel =
     cancellable: vm.isCancellable.val,
     hasReport: vm.hasReport.val,
     counterexampleOffers: counterexampleOffers(vm),
+    modelAbsentReason:
+      if vm.payloadStatus.val == psAttached and vm.payload.val.isSome:
+        modelIsAbsentBecause(vm.payload.val.get)
+      else:
+        "",
   )
   let report = vm.report.val
   if report.isNone:
