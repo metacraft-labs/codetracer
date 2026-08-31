@@ -236,6 +236,30 @@ jobs:
           '
           ls -l noir-wasm-out
 
+      - name: Prove the modules RUN before publishing them
+        # `ci/test/noir-wasm-worker-e2e.sh` compiles and traces a real Noir
+        # package twice — in-process, and through the worker protocol the
+        # browser uses — and compares the two traces by digest AND for
+        # non-triviality. Both assertions are needed and catch different
+        # things: compiling without instrumentation produces a one-event trace
+        # whose digests still MATCH, because both paths agree on nothing.
+        #
+        # It has never run in CI. Its own header says why — "this SKIPS LOUDLY"
+        # without the two modules, "and no CI job delivers them" — and this is
+        # the first job that has them, because it just built them. Running it
+        # here means the bytes about to be uploaded are known to produce a real
+        # trace, not merely known to be 16 MB and to start with the wasm magic.
+        #
+        # This is the difference between "the artifact was published" and "the
+        # artifact works", and publishing the second is the entire point.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_NOIR_WASM_COMPILER="$(pwd)/noir-wasm-out/noir_wasm.wasm"
+            export CT_NOIR_WASM_TRACER="$(pwd)/noir-wasm-out/noir_tracer_wasm.wasm"
+            direnv exec "$(pwd)" bash ci/test/noir-wasm-worker-e2e.sh
+          '
+
       - name: Setup isonim siblings
         # The Noir Studio bundle carries the RENDERER, and `src/frontend/ui_js.nim`
         # reaches `isonim/dsl/tailwind`, which `staticRead`s
