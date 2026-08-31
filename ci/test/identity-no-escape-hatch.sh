@@ -56,7 +56,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}" || exit 2
 
 IDENTITY_DIR="src/frontend/viewmodel/identity"
-EXPECTED_MODULES=3
+EXPECTED_MODULES=4
 # `when defined(...)` is legitimate here — `webcrypto_verifier.nim` needs it to
 # tell a browser from a native build — but every one of them is a place where
 # two different behaviours ship, so the number is budgeted. A new one is then a
@@ -105,7 +105,7 @@ echo
 # ---------------------------------------------------------------------------
 echo "Step 1: the scan reaches the modules it claims to cover"
 echo "    A count, not a non-emptiness check: an existential control is"
-echo "    satisfied by one member of three (trap 4b)."
+echo "    satisfied by one member of four (trap 4b)."
 # ---------------------------------------------------------------------------
 mapfile -t modules < <(find "${IDENTITY_DIR}" -name '*.nim' -type f 2>/dev/null | sort)
 if [ "${#modules[@]}" -eq "${EXPECTED_MODULES}" ]; then

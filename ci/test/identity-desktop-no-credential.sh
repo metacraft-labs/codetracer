@@ -8,7 +8,7 @@
 #
 # ## The second half of that sentence is FALSE as written, and that is the finding
 #
-# Measured on `dev`: 50 source files contain a credential-shaped identifier.
+# Measured on `dev`: 52 source files contain a credential-shaped identifier.
 # None of them is a CodeTracer credential. They are
 #
 #   * a REPLAYED PROGRAM's sudo prompt — `wantsPassword`, `renderPasswordPrompt`.
@@ -48,8 +48,23 @@ cd "${repo_root}" || exit 2
 
 SIGNIN_PATH="src/ct/online_sharing/authenticate.nim"
 SIGNIN_SUPPORT="src/ct/online_sharing/remote_config.nim"
+DEVICE_GRANT="src/frontend/viewmodel/identity/device_grant.nim"
 IDENTITY_DIR="src/frontend/viewmodel/identity"
-EXPECTED_SURFACES=50
+EXPECTED_SURFACES=52
+
+# Credential-shaped NAMES the identity layer is allowed to carry, and why.
+# Budgeted rather than forbidden, because the layer legitimately holds bearer
+# secrets — that is what a token is. What it must never do is COLLECT one from
+# a person, which is the separate, absolute check in step 4a.
+#
+# One entry today:
+#   device_grant.nim  `secretDeviceCode` — RFC 8628's `device_code`. It IS a
+#                     bearer secret and the flow cannot work without holding
+#                     one. It is named conspicuously so that every call site
+#                     reads as handling a secret, and `displayPrompt` exists so
+#                     that no caller has to decide which of the two codes is
+#                     safe to show.
+EXPECTED_IDENTITY_CREDENTIAL_NAMES=1
 
 # POSIX ERE. `\b`/`\d`/`\w` are GNU-or-PCRE and the engine is part of the
 # scanner (Verification-Harness-Traps.md 4).
@@ -116,6 +131,7 @@ kind_of() {
 	src/frontend/types.nim) printf 'debuggee' ;;
 	src/frontend/ui/agent_activity.nim) printf 'debuggee' ;;
 	src/frontend/viewmodel/viewmodels/agent_activity_vm.nim) printf 'debuggee' ;;
+	src/frontend/viewmodel/identity/*) printf 'identitybearer' ;;
 	src/tests/gui/tests/agent-activity/*) printf 'debuggee' ;;
 	src/frontend/tests/*) printf 'platform' ;;
 	src/frontend/viewmodel/views/isonim_agent_activity_view.nim) printf 'provider' ;;
@@ -162,23 +178,27 @@ echo "Step 2: the sign-in path collects nothing and hosts no form"
 # ---------------------------------------------------------------------------
 signin_cred=""
 signin_collect=""
-for f in "${SIGNIN_PATH}" "${SIGNIN_SUPPORT}"; do
+for f in "${SIGNIN_PATH}" "${SIGNIN_SUPPORT}" "${DEVICE_GRANT}"; do
 	signin_cred="${signin_cred}$(scan_code "${f}" "${CREDENTIAL_PATTERN}")"
 	signin_collect="${signin_collect}$(scan_code "${f}" "${COLLECTION_PATTERN}")"
 done
 n_cred="$(count_of "${signin_cred}")"
 n_collect="$(count_of "${signin_collect}")"
 
-if [ "${n_cred}" -eq 0 ]; then
-	ok "the sign-in path names no credential in code"
+# BOTH desktop flows are scanned, because §5 now specifies both: loopback by
+# default, device grant when loopback cannot run. The property has to hold on
+# whichever one runs, or the fallback becomes the way to reintroduce what the
+# default forbids.
+if [ "${n_cred}" -le "${EXPECTED_IDENTITY_CREDENTIAL_NAMES}" ]; then
+	ok "the desktop sign-in paths name ${n_cred} credential(s) in code, within the declared budget of ${EXPECTED_IDENTITY_CREDENTIAL_NAMES}"
 else
-	bad "the sign-in path names a credential in ${n_cred} place(s):"
+	bad "the desktop sign-in paths name ${n_cred} credential(s) in code, budget is ${EXPECTED_IDENTITY_CREDENTIAL_NAMES}:"
 	printf '%s\n' "${signin_cred}" | sed 's/^/      /'
 fi
 if [ "${n_collect}" -eq 0 ]; then
-	ok "the sign-in path hosts no form and reads no password"
+	ok "neither desktop sign-in path hosts a form or reads a password"
 else
-	bad "the sign-in path collects a credential in ${n_collect} place(s):"
+	bad "a desktop sign-in path collects a credential in ${n_collect} place(s):"
 	printf '%s\n' "${signin_collect}" | sed 's/^/      /'
 fi
 echo
@@ -222,20 +242,38 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-echo "Step 4: the identity layer itself defines no credential field"
+echo "Step 4a: the identity layer COLLECTS no credential — absolute"
+echo "Step 4b: the credential-shaped names it does carry are budgeted"
+echo "    The two are different claims and only the first is absolute. The"
+echo "    layer legitimately holds bearer secrets — a token IS one, and RFC"
+echo "    8628's device_code is another. What it must never do is take one"
+echo "    from a person. Forbidding the word would have forced the device"
+echo "    grant to hide its own secret behind a euphemism, which is worse."
 # ---------------------------------------------------------------------------
-id_hits=0
+id_collect=0
+id_named=0
 for f in "${IDENTITY_DIR}"/*.nim; do
 	[ -f "${f}" ] || continue
-	n="$(count_of "$(scan_code "${f}" "${CREDENTIAL_PATTERN}")")"
-	if [ "${n}" -gt 0 ]; then
-		id_hits=$((id_hits + n))
-		bad "${f} names a credential in code:"
-		scan_code "${f}" "${CREDENTIAL_PATTERN}" | sed 's/^/      /'
+	c="$(count_of "$(scan_code "${f}" "${COLLECTION_PATTERN}")")"
+	if [ "${c}" -gt 0 ]; then
+		id_collect=$((id_collect + c))
+		bad "${f} COLLECTS a credential:"
+		scan_code "${f}" "${COLLECTION_PATTERN}" | sed 's/^/      /'
 	fi
+	n="$(count_of "$(scan_code "${f}" "${CREDENTIAL_PATTERN}")")"
+	id_named=$((id_named + n))
 done
-if [ "${id_hits}" -eq 0 ]; then
-	ok "no identity module defines a credential field — the token IS the credential, and it is verified rather than collected"
+if [ "${id_collect}" -eq 0 ]; then
+	ok "no identity module reads a password or hosts a form — a token is verified, never collected"
+fi
+if [ "${id_named}" -eq "${EXPECTED_IDENTITY_CREDENTIAL_NAMES}" ]; then
+	ok "the identity layer carries ${id_named} budgeted credential-shaped name(s)"
+else
+	bad "the identity layer names a credential in ${id_named} place(s), budget is ${EXPECTED_IDENTITY_CREDENTIAL_NAMES} — a new one is a decision about what this layer may hold, not an oversight"
+	for f in "${IDENTITY_DIR}"/*.nim; do
+		[ -f "${f}" ] || continue
+		scan_code "${f}" "${CREDENTIAL_PATTERN}" | sed "s|^|      ${f}:|"
+	done
 fi
 echo
 
@@ -265,6 +303,10 @@ for f in "${surfaces[@]}"; do
 		note "      deliverable 'no credential ever transits our process' is broken."
 		continue
 	fi
+	# NOTE the kind is `identitybearer`, not `identity`. The distinction is the
+	# whole point: the layer HOLDS a bearer secret (a token, a device code); it
+	# never COLLECTS a person's credential. Step 4a is what asserts the second
+	# half, and it is absolute.
 	[ "${k}" = "identity" ] && identity_surfaces=$((identity_surfaces + 1))
 	kind_counts["${k}"]=$((${kind_counts["${k}"]:-0} + 1))
 done

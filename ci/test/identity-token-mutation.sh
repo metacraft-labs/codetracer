@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# identity-token-mutation.sh — the mutation proof for ID1's verifier.
+# identity-token-mutation.sh — the mutation proof for the identity layer:
+# the verifier (ID1), the session (ID1) and the device grant (ID2).
 #
 # `src/frontend/viewmodel/identity/token.nim` decides whether a signed identity
 # token is accepted, which band of its life it is in, and whether a subject is
@@ -48,6 +49,8 @@ MODULE="src/frontend/viewmodel/identity/token.nim"
 SUITE="src/frontend/viewmodel/tests/unit/test_identity_token.nim"
 MODULE2="src/frontend/viewmodel/identity/session.nim"
 SUITE2="src/frontend/viewmodel/tests/unit/test_identity_session.nim"
+MODULE3="src/frontend/viewmodel/identity/device_grant.nim"
+SUITE3="src/frontend/viewmodel/tests/unit/test_device_grant.nim"
 
 # Which pair the arms below currently operate on. `use_pair` swaps both at
 # once, so an arm can never mutate one module and run the other's suite —
@@ -68,6 +71,11 @@ use_pair() {
 		active_suite="${SUITE2}"
 		active_cases=10
 		;;
+	devicegrant)
+		active_module="${MODULE3}"
+		active_suite="${SUITE3}"
+		active_cases=11
+		;;
 	esac
 }
 cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
@@ -84,6 +92,9 @@ cleanup() {
 	fi
 	if [ -f "${work}/session.nim.orig" ]; then
 		cp "${work}/session.nim.orig" "${MODULE2}" 2>/dev/null || true
+	fi
+	if [ -f "${work}/device_grant.nim.orig" ]; then
+		cp "${work}/device_grant.nim.orig" "${MODULE3}" 2>/dev/null || true
 	fi
 	rm -rf "${work}"
 }
@@ -114,6 +125,7 @@ command -v nim >/dev/null 2>&1 || {
 }
 cp "${MODULE}" "${work}/token.nim.orig"
 cp "${MODULE2}" "${work}/session.nim.orig"
+cp "${MODULE3}" "${work}/device_grant.nim.orig"
 
 # run_suite BACKEND -> transcript in ${work}/out.BACKEND ; echoes a state word
 #   ran      the suite compiled and produced case results
@@ -141,11 +153,11 @@ case_green() { grep -qF "[OK] $2" "${work}/out.$1"; }
 
 # mutate SED_SCRIPT — apply to the pristine module
 pristine_of() {
-	if [ "${active_module}" = "${MODULE2}" ]; then
-		printf '%s' "${work}/session.nim.orig"
-	else
-		printf '%s' "${work}/token.nim.orig"
-	fi
+	case "${active_module}" in
+	"${MODULE2}") printf '%s' "${work}/session.nim.orig" ;;
+	"${MODULE3}") printf '%s' "${work}/device_grant.nim.orig" ;;
+	*) printf '%s' "${work}/token.nim.orig" ;;
+	esac
 }
 mutate() {
 	local orig
@@ -429,10 +441,135 @@ arm "S8  the decision constructor stops coercing a forged acceptance" \
 	's/    kindField: (if kind == dkAccepted: dkMalformed else: kind),/    kindField: kind,/'
 active_module="${MODULE2}"
 
+# ---------------------------------------------------------------------------
+echo
+echo "Control arm: the unmutated device-grant module"
+# ---------------------------------------------------------------------------
+use_pair devicegrant
+control_ok=1
+for b in ${backends}; do
+	state="$(run_suite "${b}")"
+	if [ "${state}" != "ran" ]; then
+		printf '  [MISS]   control(device grant): the suite did not build on %s\n' "${b}"
+		tail -12 "${work}/out.${b}" | sed 's/^/    /'
+		control_ok=0
+		continue
+	fi
+	n_ok="$(grep -c '\[OK\]' "${work}/out.${b}" || true)"
+	n_bad="$(grep -c '\[FAILED\]' "${work}/out.${b}" || true)"
+	if [ "${n_bad}" -eq 0 ] && [ "${n_ok}" -eq "${active_cases}" ]; then
+		printf '  [OK]     control(device grant): %s backend, %s cases, 0 failures\n' "${b}" "${n_ok}"
+	else
+		printf '  [MISS]   control(device grant): %s backend, %s ok / %s failed (expected %s / 0)\n' \
+			"${b}" "${n_ok}" "${n_bad}" "${active_cases}"
+		control_ok=0
+	fi
+done
+arms=$((arms + 1))
+[ "${control_ok}" = "1" ] || misses=$((misses + 1))
+echo
+
+# ---------------------------------------------------------------------------
+echo "Mutation arms for ${MODULE3} — ID2's fallback flow"
+# ---------------------------------------------------------------------------
+
+# G1 IS THE DECISION ITSELF. The device grant is the flow for when loopback
+# CANNOT run; a selection that takes it while loopback works makes the weaker
+# flow reachable in the one state neither threat model covers.
+arm "G1  the fallback engages while loopback still works" \
+	"the fallback engages only when loopback cannot run" \
+	's/  if capability.canBindLoopback and capability.canLaunchBrowser:/  if capability.canBindLoopback or capability.canLaunchBrowser:/'
+
+# G2: a third field on the capability record is the configuration §5.3 refuses.
+arm "G2  the capability record grows a configuration field" \
+	"nothing but a measurement can select the flow" \
+	's/    canLaunchBrowser\*: bool/    canLaunchBrowser*: bool\n    forceDeviceGrant*: bool/'
+
+# G3: the device code is a bearer secret; the user code is not. Showing the
+# wrong one hands the session to anyone who reads the screen.
+arm "G3  the user-facing prompt leaks the device code" \
+	"the device code is never in what the user is shown" \
+	's/  "To sign in, visit " \& a.verificationUriField \&/  "To sign in, visit " \& a.deviceCodeField \&/'
+
+# G4: RFC 8628 §3.5 says the slow_down increase persists "for this and all
+# subsequent requests". Resetting on the next pending is the obvious
+# implementation and the wrong one.
+# G4's first writing used a two-line sed with an embedded \n — the same
+# mistake S6 made, and sed does not match that against the pattern space, so
+# it changed nothing and the harness said so rather than scoring a phantom
+# kill. THAT IS THE SECOND TIME IN THIS FILE; the rule is now explicit:
+# every arm here is a SINGLE-LINE substitution, and an arm that needs more
+# than one line is written longhand like M17 and G9.
+#
+# The single-line form computes the raise from the DEFAULT rather than from
+# the current interval, so a second slow_down returns 10 instead of 15 — the
+# rise stops persisting, which is exactly what RFC 8628 §3.5 forbids.
+arm "G4  the slow_down increase does not persist" \
+	"slow_down raises the interval and the rise persists" \
+	's/  min(current + SlowDownIncrement, MaxPollInterval)/  min(DefaultPollInterval + SlowDownIncrement, MaxPollInterval)/'
+
+# G5: our own deadline, not the server's. Off by one at the boundary.
+arm "G5  the poll window closes one second late" \
+	"polling stops at the deadline, on our own clock" \
+	's/  nowUnix >= auth.expiresAtField/  nowUnix > auth.expiresAtField/'
+
+# G6: trap 2, exactly. Success must be the PRESENCE of a token, never the
+# absence of an error — an empty object must not read as "signed in".
+arm "G6  an empty response reads as signed in" \
+	"poll responses classify to RFC 8628's outcomes" \
+	's/    if token.isNil or token.kind != JString or token.getStr.len == 0:/    if false:/'
+
+# G7: expires_in is RELATIVE. Storing it as absolute makes every deadline
+# 1970, so polling stops immediately — or, with the comparison flipped, never.
+arm "G7  expires_in is stored as though it were absolute" \
+	"a device authorization response is parsed into an absolute deadline" \
+	's/  auth.expiresAtField = nowUnix + expiresIn/  auth.expiresAtField = expiresIn/'
+
+# G8: RFC 8628 §3.2 — interval is OPTIONAL and defaults to 5. Defaulting to 0
+# is a busy-poll against the authorization server.
+arm "G8  a missing interval defaults to zero rather than five" \
+	"a device authorization response is parsed into an absolute deadline" \
+	's/    if interval <= 0: DefaultPollInterval else: int(interval)/    int(interval)/'
+
+# ---------------------------------------------------------------------------
+# G9 IS THE SECOND BACKEND-DIFFERENTIATED ARM, and it exists for the same
+# reason M17 does: this module parses attacker-shaped JSON off the network on
+# both backends, so narrowing its guards is invisible on C and fatal on JS.
+# Keeping one such arm per module that parses is the rule this campaign
+# arrived at; adding a parser without one would quietly drop the only
+# demonstration that the JS lane earns its runtime.
+# ---------------------------------------------------------------------------
+if [ "${backends}" = "c js" ]; then
+	label="G9  device_grant's JSON guards narrowed to except CatchableError"
+	want="parses nothing that is not a device authorization response"
+	if ! mutate 's/^  except:$/  except CatchableError:/'; then
+		miss "${label}: the mutation changed nothing"
+		restore
+	else
+		c_state="$(run_suite c)"
+		js_state="$(run_suite js)"
+		if [ "${c_state}" != "ran" ]; then
+			miss "${label}: the mutated module did not compile on C"
+		elif case_red c "${want}"; then
+			miss "${label}: the C backend ALSO reddened, so this is not the portability defect"
+		elif ! case_green c "${want}"; then
+			miss "${label}: the C backend neither passed nor failed the case"
+		elif case_red js "${want}" || grep -q 'SyntaxError' "${work}/out.js"; then
+			pass "${label}"
+			note "    C backend: GREEN, JS backend: RED — the same class as M17,"
+			note "    in the second module that parses network input."
+		else
+			miss "${label}: the JS backend did not redden \"${want}\""
+			grep '\[FAILED\]' "${work}/out.js" | sed 's/^/    /' | head -4
+		fi
+		restore
+	fi
+fi
+
 echo
 echo "${arms} arm(s), ${misses} miss(es)"
 if [ "${misses}" -gt 0 ]; then
 	echo "RESULT: FAILED — ${misses} arm(s) did not kill on their own case"
 	exit 1
 fi
-echo "RESULT: OK — every assertion family in ${MODULE} has a mutation that reddens it"
+echo "RESULT: OK — every assertion family in the identity layer (${MODULE}, ${MODULE2}, ${MODULE3}) has a mutation that reddens it"

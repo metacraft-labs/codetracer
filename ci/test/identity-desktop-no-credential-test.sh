@@ -23,6 +23,7 @@ cd "${repo_root}" || exit 2
 GATE="ci/test/identity-desktop-no-credential.sh"
 SIGNIN="src/ct/online_sharing/authenticate.nim"
 TOKEN="src/frontend/viewmodel/identity/token.nim"
+DEVICE_GRANT="src/frontend/viewmodel/identity/device_grant.nim"
 PLANTED="src/ct/planted_unclassified_surface.nim"
 
 work="$(mktemp -d)"
@@ -43,6 +44,7 @@ miss() {
 restore_all() {
 	[ -f "${work}/signin.orig" ] && cp "${work}/signin.orig" "${SIGNIN}" 2>/dev/null
 	[ -f "${work}/token.orig" ] && cp "${work}/token.orig" "${TOKEN}" 2>/dev/null
+	[ -f "${work}/devicegrant.orig" ] && cp "${work}/devicegrant.orig" "${DEVICE_GRANT}" 2>/dev/null
 	rm -f "${PLANTED}"
 	return 0
 }
@@ -58,6 +60,7 @@ trap cleanup EXIT INT TERM
 }
 cp "${SIGNIN}" "${work}/signin.orig"
 cp "${TOKEN}" "${work}/token.orig"
+cp "${DEVICE_GRANT}" "${work}/devicegrant.orig"
 
 run_gate() {
 	bash "${GATE}" >"${work}/out" 2>&1
@@ -92,9 +95,9 @@ arms=$((arms + 1))
 if [ "${rc}" = "0" ] && grep -q "RESULT: OK" "${work}/out"; then
 	n="$(grep -oE '^[0-9]+ check\(s\)' "${work}/out" | grep -oE '^[0-9]+')"
 	printf '  [OK]     control: the gate passes, %s checks\n' "${n}"
-	if [ "${n}" != "10" ]; then
+	if [ "${n}" != "11" ]; then
 		misses=$((misses + 1))
-		printf '  [MISS]   control: expected 10 checks, saw %s — an assertion appeared or vanished\n' "${n}"
+		printf '  [MISS]   control: expected 11 checks, saw %s — an assertion appeared or vanished\n' "${n}"
 	fi
 else
 	misses=$((misses + 1))
@@ -114,7 +117,7 @@ echo "Mutation arms"
 	printf '\nproc collectPassword*(): string =\n  readPasswordFromStdin("CodeTracer password: ")\n'
 } >"${SIGNIN}"
 expect_red "D1 the sign-in path collects a password" \
-	"the sign-in path collects a credential" "$(run_gate)"
+	"a desktop sign-in path collects a credential" "$(run_gate)"
 
 # D2: a credential surface nobody classified. The gate must refuse to guess.
 cat >"${PLANTED}" <<'EOF'
@@ -146,8 +149,18 @@ expect_red "D3 the sign-in path loses a loopback marker" \
 	cat "${work}/token.orig"
 	printf '\nvar cachedPassword*: string\n'
 } >"${TOKEN}"
-expect_red "D4 the identity layer defines a credential field" \
-	"names a credential in code" "$(run_gate)"
+expect_red "D4 the identity layer defines an unbudgeted credential name" \
+	"the identity layer names a credential in" "$(run_gate)"
+
+# D5: the DEVICE GRANT path starts collecting a credential. §5 now specifies
+# two desktop flows, and the fallback must not become the way to reintroduce
+# what the default forbids. Without step 2 scanning it, this would go unseen.
+{
+	cat "${work}/devicegrant.orig"
+	printf '\nproc collectPassword*(): string =\n  readPasswordFromStdin("code: ")\n'
+} >"${DEVICE_GRANT}"
+expect_red "D5 the device grant fallback collects a password" \
+	"a desktop sign-in path collects a credential" "$(run_gate)"
 
 # ---------------------------------------------------------------------------
 echo
@@ -157,6 +170,7 @@ arms=$((arms + 1))
 dirty=0
 cmp -s "${SIGNIN}" "${work}/signin.orig" || dirty=$((dirty + 1))
 cmp -s "${TOKEN}" "${work}/token.orig" || dirty=$((dirty + 1))
+cmp -s "${DEVICE_GRANT}" "${work}/devicegrant.orig" || dirty=$((dirty + 1))
 [ -f "${PLANTED}" ] && dirty=$((dirty + 1))
 if [ "${dirty}" -eq 0 ]; then
 	printf '  [OK]     every mutated file was restored and nothing was left planted\n'
