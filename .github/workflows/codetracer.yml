@@ -2531,11 +2531,44 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          ENDPOINT: ${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }}
+          BUCKET: ${{ vars.R2_CODETRACER_BUCKET_NAME }}
         run: |
           set -euo pipefail
-          nix develop .#devShells.x86_64-linux.default --command gpg --armor --detach-sign CodeTracer-Setup.exe
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-Setup.exe s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-win-x64.exe --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-Setup.exe.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-win-x64.exe.asc --checksum-algorithm CRC32
+          aws_cmd() {
+            nix develop .#devShells.x86_64-linux.default --command \
+              aws --endpoint-url="$ENDPOINT" "$@"
+          }
+          nix develop .#devShells.x86_64-linux.default --command \
+            gpg --armor --detach-sign CodeTracer-Setup.exe
+
+          # SELF-PROMOTION: this leg publishes the win installer to the
+          # per-`main`-build key AND to the `-<version>-` / `-latest-` release
+          # keys itself, rather than leaving the latter to create-release.
+          #
+          # The design once had create-release promote `-main-` -> `-latest-`/
+          # `-<tag>-` for every artifact (see its "Windows installer" block). But
+          # create-release is gated only on the four Linux/darwin build jobs via
+          # push-tag, while this Windows leg runs on the much slower eph-win-x64
+          # runner (queue + the full env.ps1 DIY toolchain bootstrap + the NSIS
+          # build). create-release therefore finishes, and runs its TOLERANT win
+          # promotion, long before `CodeTracer-main-win-x64.exe` exists — so the
+          # Windows installer was always skipped and only picked up "next
+          # release". Promoting here removes that one-release lag so
+          # get.codetracer.com/pwsh (which downloads CodeTracer-latest-win-x64.exe)
+          # resolves in the same release. Every push to `main` is a release, so
+          # advancing `-latest-` here matches the release model.
+          YEAR=$(grep 'CodeTracerYear\*' src/ct/version.nim | sed 's/.*= //' | tr -d '[:space:]')
+          MONTH=$(printf '%02d' "$(grep 'CodeTracerMonth\*' src/ct/version.nim | sed 's/.*= //' | tr -d '[:space:]')")
+          BUILD=$(grep 'CodeTracerBuild\*' src/ct/version.nim | sed 's/.*= //' | tr -d '[:space:]')
+          VERSION="$YEAR.$MONTH.$BUILD"
+
+          for slot in "${{ github.ref_name }}" "$VERSION" latest; do
+            aws_cmd s3 cp CodeTracer-Setup.exe \
+              "s3://$BUCKET/CodeTracer-$slot-win-x64.exe" --checksum-algorithm CRC32
+            aws_cmd s3 cp CodeTracer-Setup.exe.asc \
+              "s3://$BUCKET/CodeTracer-$slot-win-x64.exe.asc" --checksum-algorithm CRC32
+          done
 
   dmg-lib-check:
     # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
