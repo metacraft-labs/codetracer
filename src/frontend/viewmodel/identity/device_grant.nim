@@ -270,3 +270,88 @@ func terminalDetail*(outcome: PollOutcome): string =
   of poExpired: "the code expired before it was entered"
   of poMalformed: "the authorization server sent a response this client does not understand"
   of poPending, poSlowDown: ""
+
+# ---------------------------------------------------------------------------
+# THE PROBE'S ANSWER, WHICH HAS THREE VALUES AND NOT TWO.
+#
+# `DesktopCapability` is two booleans because that is what the DECISION needs.
+# A measurement is a different thing: it can fail to happen. "No browser could
+# be launched" and "we did not check" are different facts, and collapsing them
+# is how the fallback stops reaching the people it exists for — default an
+# unmeasured probe to "loopback works" and every headless and SSH user is
+# handed a flow that cannot run, with no way to tell.
+#
+# So the probe answers in three values, and `paUndetermined` is FIRST in the
+# enum on purpose: Nim zero-initialises, so a `CapabilityProbe` nobody filled
+# in reads as *undetermined*, never as *yes*. Forgetting to probe cannot
+# silently produce a working-looking answer. That is asserted, because it is a
+# property of the declaration order and would be lost by an innocent-looking
+# reorder.
+# ---------------------------------------------------------------------------
+type
+  ProbeAnswer* = enum
+    paUndetermined
+      ## FIRST DELIBERATELY — the zero value. Not measured, or measured and
+      ## inconclusive. Never treat as a yes.
+    paYes
+    paNo
+
+  CapabilityProbe* = object
+    ## Mirrors `DesktopCapability` field for field, and carries no more: the
+    ## value of a two-field record asserted at compile time is lost if the
+    ## probe grows a third input on the way in.
+    loopback*: ProbeAnswer
+    browser*: ProbeAnswer
+
+  ProbeVerdict* = enum
+    pvLoopback
+      ## Both measured yes.
+    pvDeviceGrant
+      ## At least one measured NO — we know loopback cannot run.
+    pvUndetermined
+      ## Nothing measured no, but something was not measured. We do not know,
+      ## and saying so is the whole point of this value.
+
+func verdict*(p: CapabilityProbe): ProbeVerdict =
+  ## A definite NO settles the question even when the other half is unmeasured:
+  ## if the browser cannot be launched it does not matter whether loopback
+  ## binds. Checking `paNo` before `paUndetermined` is what makes that true,
+  ## and reversing the two would report "we do not know" about a case we do.
+  if p.loopback == paNo or p.browser == paNo:
+    return pvDeviceGrant
+  if p.loopback == paUndetermined or p.browser == paUndetermined:
+    return pvUndetermined
+  pvLoopback
+
+func verdictReason*(p: CapabilityProbe): string =
+  ## What to tell the user. An undetermined verdict must name itself rather
+  ## than borrow the fallback's wording, or a host we failed to measure becomes
+  ## indistinguishable from one we measured and rejected.
+  case p.verdict
+  of pvLoopback: ""
+  of pvDeviceGrant:
+    if p.loopback == paNo and p.browser == paNo:
+      "no loopback address could be bound and no browser could be launched"
+    elif p.loopback == paNo:
+      "no loopback address could be bound"
+    else:
+      "no browser could be launched"
+  of pvUndetermined:
+    if p.loopback == paUndetermined and p.browser == paUndetermined:
+      "neither the loopback address nor the browser could be checked"
+    elif p.loopback == paUndetermined:
+      "whether a loopback address can be bound could not be checked"
+    else:
+      "whether a browser can be launched could not be checked"
+
+func determinedCapability*(p: CapabilityProbe;
+                           capability: var DesktopCapability): bool =
+  ## THE BRIDGE, and the only one. A `DesktopCapability` — the two booleans
+  ## `selectFlow` consumes — can be produced ONLY from a probe that determined
+  ## both halves. An undetermined probe yields nothing and returns false, so
+  ## there is no path by which "we did not check" becomes a flow.
+  if p.verdict == pvUndetermined:
+    return false
+  capability = DesktopCapability(canBindLoopback: p.loopback == paYes,
+                                 canLaunchBrowser: p.browser == paYes)
+  true

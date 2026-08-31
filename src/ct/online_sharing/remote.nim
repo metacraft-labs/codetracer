@@ -8,7 +8,7 @@ import
   std/[ os, osproc, options, sequtils, strutils ],
   ../../common/[ paths ],
   ../cli/[ logging ],
-  remote_config, authenticate as auth_module
+  remote_config, authenticate as auth_module, desktop_capability
 
 proc runCtRemote*(args: seq[string]): int {.deprecated: "Use native commands instead".} =
   ## Deprecated: shells out to the external ct-remote binary.
@@ -35,7 +35,45 @@ proc runCtRemote*(args: seq[string]): int {.deprecated: "Use native commands ins
     result = 1
 
 proc loginCommand*(defaultOrg: Option[string], baseUrl: Option[string] = none(string)) =
-  ## Authenticate via browser OAuth flow, optionally set default org.
+  ## Authenticate, by whichever flow this host can actually run.
+  ##
+  ## `CodeTracer-Identity.md` §5: loopback redirect by default, device
+  ## authorization grant where loopback CANNOT run. The choice is a
+  ## MEASUREMENT — `probeDesktopCapabilities` binds a real socket and looks for
+  ## a real browser — and there is deliberately no flag, environment variable
+  ## or config key that can override it. §5.3 gives the reason: an environment
+  ## variable that changes which authentication path runs is one line from one
+  ## that disables authentication.
+  ##
+  ## WHAT THIS FIXES TODAY, independently of the device grant. Before this,
+  ## `ct login` over SSH or in a container opened a browser that could not
+  ## appear and then BLOCKED on a loopback socket no browser could ever reach —
+  ## a hang with no diagnosis. It now says which half of the measurement
+  ## failed, before doing anything.
+  let probe = probeDesktopCapabilities()
+  var capability = DesktopCapability(canBindLoopback: false,
+                                     canLaunchBrowser: false)
+  if not probe.determinedCapability(capability):
+    # "We did not check" is not "it does not work", and defaulting to the
+    # browser flow here is exactly what would strand a headless user.
+    echo "Cannot determine how to sign in on this host: " &
+      probe.verdictReason() & "."
+    echo "Refusing to guess: the browser flow would block on a callback that"
+    echo "may never arrive. Please report this, with your platform."
+    quit(1)
+
+  case selectFlow(capability)
+  of sfDeviceGrant:
+    echo "This host cannot use the browser redirect sign-in: " &
+      probe.verdictReason() & "."
+    echo "The device authorization grant is the flow for exactly this case."
+    echo "Its client is implemented (RFC 8628) but the authorization server"
+    echo "endpoint does not exist yet — CodeTracer-Identity ID2. Until it does,"
+    echo "sign in on a machine with a browser and copy the remote config over."
+    quit(1)
+  of sfLoopbackRedirect:
+    discard
+
   let remoteConfig = initRemoteConfig()
   let resolvedBaseUrl = remoteConfig.resolveBaseRemoteUrl(
     baseUrl.get(""))

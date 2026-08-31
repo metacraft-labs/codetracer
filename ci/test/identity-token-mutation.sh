@@ -74,7 +74,7 @@ use_pair() {
 	devicegrant)
 		active_module="${MODULE3}"
 		active_suite="${SUITE3}"
-		active_cases=11
+		active_cases=14
 		;;
 	esac
 }

@@ -23,7 +23,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 109
+const ExpectedAssertions = 162
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -316,6 +316,126 @@ suite "device authorization grant (ID2)":
     counted terminalDetail(poDenied).len > 0
     counted terminalDetail(poExpired).len > 0
     counted terminalDetail(poMalformed).len > 0
+
+  # -------------------------------------------------------------------------
+  test "an unprobed capability reads as undetermined, never as yes":
+    ## THE ZERO-VALUE PROPERTY, and it is a property of the enum's declaration
+    ## order rather than of any code. Nim zero-initialises, so if `paYes` were
+    ## first, a `CapabilityProbe` nobody filled in would read as "loopback
+    ## works" — and every headless and SSH user would be handed a flow that
+    ## cannot run, with nothing anywhere saying the probe never happened.
+    ## An innocent-looking reorder of the enum would do it, so it is asserted.
+    counted CapabilityProbe().loopback == paUndetermined
+    counted CapabilityProbe().browser == paUndetermined
+    counted CapabilityProbe().verdict == pvUndetermined
+    counted CapabilityProbe().verdict != pvLoopback
+    counted ord(paUndetermined) == 0
+    counted ord(paUndetermined) < ord(paYes)
+
+    # And the probe record carries no more than the decision record does.
+    var probeFields = 0
+    for _, _ in CapabilityProbe().fieldPairs:
+      inc probeFields
+    counted probeFields == 2
+    counted not compiles(CapabilityProbe(loopback: paYes, browser: paYes,
+                                         forceDeviceGrant: true))
+
+  # -------------------------------------------------------------------------
+  test "a probe that could not measure says so instead of defaulting":
+    ## All nine combinations, with the count asserted — a three-valued pair has
+    ## nine cases and a table with a missing row is how a rule comes to have an
+    ## untested one.
+    var combos = 0
+    var loopbackVerdicts = 0
+    var deviceVerdicts = 0
+    var undeterminedVerdicts = 0
+    for lb in [paUndetermined, paYes, paNo]:
+      for br in [paUndetermined, paYes, paNo]:
+        inc combos
+        let p = CapabilityProbe(loopback: lb, browser: br)
+        let want =
+          if lb == paNo or br == paNo: pvDeviceGrant
+          elif lb == paUndetermined or br == paUndetermined: pvUndetermined
+          else: pvLoopback
+        counted p.verdict == want
+        case want
+        of pvLoopback: inc loopbackVerdicts
+        of pvDeviceGrant: inc deviceVerdicts
+        of pvUndetermined: inc undeterminedVerdicts
+    counted combos == 9
+    counted loopbackVerdicts == 1
+    counted deviceVerdicts == 5
+    counted undeterminedVerdicts == 3
+
+    # A definite NO outranks an unmeasured half: if the browser cannot be
+    # launched it does not matter whether loopback binds. Reversing the two
+    # checks would report "we do not know" about a case we do know.
+    counted CapabilityProbe(loopback: paUndetermined, browser: paNo).verdict == pvDeviceGrant
+    counted CapabilityProbe(loopback: paNo, browser: paUndetermined).verdict == pvDeviceGrant
+
+    # An undetermined verdict names ITSELF and never borrows the fallback's
+    # wording — "we did not check" must not read as "we checked and it failed".
+    let unchecked = CapabilityProbe(loopback: paUndetermined, browser: paYes)
+    counted unchecked.verdict == pvUndetermined
+    counted unchecked.verdictReason().contains("could not be checked")
+    counted not unchecked.verdictReason().contains("could be bound and")
+
+    let measuredNo = CapabilityProbe(loopback: paNo, browser: paYes)
+    counted measuredNo.verdictReason().contains("no loopback address could be bound")
+    counted not measuredNo.verdictReason().contains("could not be checked")
+    # The two are different sentences for the same half of the probe.
+    counted unchecked.verdictReason() != measuredNo.verdictReason()
+
+    # Every non-loopback verdict has a reason; the loopback one has none.
+    counted CapabilityProbe(loopback: paYes, browser: paYes).verdictReason().len == 0
+    var reasoned = 0
+    for lb in [paUndetermined, paYes, paNo]:
+      for br in [paUndetermined, paYes, paNo]:
+        let p = CapabilityProbe(loopback: lb, browser: br)
+        if p.verdict != pvLoopback:
+          inc reasoned
+          counted p.verdictReason().len > 0
+    counted reasoned == 8
+
+  # -------------------------------------------------------------------------
+  test "an undetermined probe cannot become a flow":
+    ## THE BRIDGE. `DesktopCapability` — the two booleans `selectFlow` consumes
+    ## — is producible ONLY from a probe that determined both halves, so there
+    ## is no path by which "we did not check" turns into a decision.
+    var cap = DesktopCapability(canBindLoopback: true, canLaunchBrowser: true)
+
+    counted not CapabilityProbe().determinedCapability(cap)
+    counted not CapabilityProbe(loopback: paYes,
+                                browser: paUndetermined).determinedCapability(cap)
+    counted not CapabilityProbe(loopback: paUndetermined,
+                                browser: paYes).determinedCapability(cap)
+
+    # Determined probes DO produce one, and it carries the measurement.
+    var got = DesktopCapability(canBindLoopback: false, canLaunchBrowser: false)
+    counted CapabilityProbe(loopback: paYes, browser: paYes).determinedCapability(got)
+    counted got.canBindLoopback
+    counted got.canLaunchBrowser
+    counted selectFlow(got) == sfLoopbackRedirect
+
+    counted CapabilityProbe(loopback: paNo, browser: paYes).determinedCapability(got)
+    counted not got.canBindLoopback
+    counted got.canLaunchBrowser
+    counted selectFlow(got) == sfDeviceGrant
+
+    # A NO on one side with the other unmeasured is DETERMINED — the verdict is
+    # device grant — so it does produce a capability.
+    counted CapabilityProbe(loopback: paNo,
+                            browser: paUndetermined).determinedCapability(got)
+    counted selectFlow(got) == sfDeviceGrant
+
+    # Count the determined ones: 6 of the 9 combinations.
+    var determined = 0
+    var scratch = DesktopCapability(canBindLoopback: false, canLaunchBrowser: false)
+    for lb in [paUndetermined, paYes, paNo]:
+      for br in [paUndetermined, paYes, paNo]:
+        if CapabilityProbe(loopback: lb, browser: br).determinedCapability(scratch):
+          inc determined
+    counted determined == 6
 
   # -------------------------------------------------------------------------
   test "assertion count":
