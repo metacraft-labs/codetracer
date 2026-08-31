@@ -2988,6 +2988,8 @@ test-identity:
   mkdir -p test-logs
   exec > >(tee test-logs/test-identity.log) 2>&1
   bash ci/test/identity-no-escape-hatch.sh
+  bash ci/test/identity-desktop-no-credential.sh
+  bash ci/test/identity-desktop-no-credential-test.sh
   bash ci/test/identity-webcrypto.sh
   bash ci/test/identity-token-mutation.sh
 

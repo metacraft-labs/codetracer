@@ -1795,7 +1795,7 @@ jobs:
         # longer dispatches.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
 
-      - name: Identity layer — escape hatch, WebCrypto seam, mutation proof (ID1/ID2)
+      - name: Identity layer — credentials, escape hatch, WebCrypto seam, mutation proofs (ID1/ID2)
         # `viewmodel/identity/token.nim` is the verification library ID1 asks
         # every product to link, and `test_identity_token.nim` runs in
         # `vm-unit` and `vm-unit-js` by the directory glob — this step is the
@@ -1814,6 +1814,16 @@ jobs:
         # identity token it is an authentication bypass, so its absence is
         # asserted rather than left to habit — with two positive controls, one
         # synthetic and one over the real binding that has the hatch.
+        #
+        # And `identity-desktop-no-credential.sh`, ID2's
+        # `test_desktop_never_handles_a_credential`. Its verification asks for
+        # "a build-time surface check asserting no credential field exists in
+        # the application", and that sentence is false as written: 50 files
+        # hold a credential-shaped field, none of them ours — a replayed
+        # program's sudo prompt, an LLM provider key, a share-artifact
+        # passphrase. So the check is that every one is CLASSIFIED and none is
+        # an identity credential, with the classification written down rather
+        # than implied by which words a pattern happens to match.
         #
         # And `identity-webcrypto.sh`, which drives the browser signature seam
         # under Node against REAL Ed25519. That path cannot be a `vm-unit-js`
