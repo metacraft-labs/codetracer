@@ -27,8 +27,20 @@
  *     Nothing pinned it.  `escape_html = false` is one line, and the library
  *     offers it.
  *
- * The fixes are `textContent` at 1 and 2, and an explicit `escape_html = true`
- * in `lib/ansi_html.nim` at 3.  This file is what keeps them.
+ *  4. `ui/layout.nim` wrote the GoldenLayout editor tab title with `innerHTML`
+ *     and interpolated a panel label into an unquoted `id=`; `ui/auto_hide.nim`
+ *     wrote the auto-hide overlay title the same way.  All three carry a
+ *     native absolute path.  None of them was on the list this file was
+ *     written for — arm S found them.
+ *
+ * The fixes are `textContent` at 1, 2 and 4, `createElement` + `setAttribute`
+ * for the `id=`, and an explicit `escape_html = true` in `lib/ansi_html.nim`
+ * at 3.  This file is what keeps them.
+ *
+ * Arm S2 covers the sinks that are fine BECAUSE their input cannot vary, and
+ * asserts the thing that makes it so — an `int` field type, a literal frame
+ * list, a closed set of call sites over four `const`s.  "It is a literal
+ * today" is exactly the reasoning that missed 4.
  *
  * EVERY negative below has a positive twin through the same code path: for
  * each hostile value, the PRE-FIX sink is exercised on the same DOM and MUST
@@ -385,6 +397,21 @@ function filesMatching(pattern) {
     .filter(([, text]) => pattern.test(text)).map(([rel]) => rel).sort().join(',');
 }
 
+/**
+ * Every match of `pattern` across the scan, as `file:match` strings.
+ *
+ * `filesMatching` answers "which files mention this"; this answers "and what
+ * exactly did they say".  It is what turns "the argument is a constant" from
+ * an assumption into a closed set — see the chevron block below.
+ */
+function matchesAcross(pattern) {
+  const out = [];
+  for (const [rel, text] of sources) {
+    for (const m of text.matchAll(pattern)) out.push(`${rel}:${m[0]}`);
+  }
+  return out.sort().join(' | ');
+}
+
 // --- site 2: BOTH copies of the menu renderer -------------------------------
 //
 // The behavioural arm above drives the `context_menu_bridge` copy.  The
@@ -437,9 +464,83 @@ assertEqual(filesMatching(/^ +result\.escape_html = true$/m),
 assertEqual(filesMatching(/escape_html\s*=\s*false/), '',
   'no source turns escape_html off');
 
+describe('S2. The other innerHTML sinks — each one\'s input, and what fixes it');
+
+// Everything below was read and set aside once already, on the assumption that
+// its input could not vary.  `ui/layout.nim` is why that assumption is not
+// worth much on its own: the tab title was assigned with `innerHTML` under
+// exactly the same reasoning, and it carries an absolute path.  So each of
+// these now records WHAT MAKES THE INPUT FIXED, as an assertion.
+
+// --- ui/auto_hide.nim: the overlay title.  NOT a literal. -------------------
+//
+// `pinPanel` builds `AutoHidePanel.title` from
+// `contentItem.tab.titleElement.textContent`, falling back to
+// `componentState.label`.  For a pinned EDITOR tab both of those are derived
+// from a native absolute path (`layout.nim`'s tab-title block, and
+// `pinnedDocumentPath`'s own docs).  Only the four standalone panels — BUILD,
+// PROBLEMS, FIND IN FILES, REQUESTS — are literals.
+//
+// Coverage here is scan-only: `ui/auto_hide.nim` imports
+// `isonim/web/web_renderer`, and requiring an isonim checkout to run
+// `just test-frontend-js` would cost more than it buys.  This is the same
+// treatment `renderer.nim`'s menu copy gets, and M3 is the evidence that a
+// scan with a positive control does catch that regression.
+assertEqual(filesMatching(/getElementById\(cstring"auto-hide-overlay-title"\)/),
+  'src/frontend/ui/auto_hide.nim',
+  'the scan finds the auto-hide overlay title element');
+assertEqual(filesMatching(/titleEl\.textContent = panel\.title/),
+  'src/frontend/ui/auto_hide.nim',
+  'and the title is written as text');
+assertEqual(filesMatching(/titleEl\.innerHTML/), '',
+  'and never as markup');
+// The origin claim itself, so that "it is only a literal" cannot be
+// re-asserted later without this line moving.
+assert(/let text = tab\.titleElement\.textContent/.test(
+  sources.get('src/frontend/ui/auto_hide.nim')),
+  'pinPanel still takes that title from the GoldenLayout tab, which carries a path');
+
+// --- ui/datatable.nim: two integers.  Enforced by the TYPE. ----------------
+assertEqual(matchesAcross(/innerHTML = cstring\(\$\(self\.[A-Za-z]+\)\)/g),
+  'src/frontend/ui/datatable.nim:innerHTML = cstring($(self.endRow)) | '
+  + 'src/frontend/ui/datatable.nim:innerHTML = cstring($(self.rowsCount))',
+  'datatable writes exactly two innerHTML values, both `$` of a field');
+assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
+  sources.get('src/frontend/types.nim')),
+  'and those fields are declared `int`, so `$` cannot produce a `<`');
+
+// --- ui/editor.nim: a three-frame literal animation ------------------------
+{
+  const editorNim = sources.get('src/frontend/ui/editor.nim');
+  assert(/let frames = \["Running\.  ", "Running\.\. ", "Running\.\.\."\]/.test(editorNim),
+    'the load animation still reads from a literal three-frame list');
+  assertEqual(matchesAcross(/el\.innerHTML = [A-Za-z]+\[i\]/g),
+    'src/frontend/ui/editor.nim:el.innerHTML = frames[i]',
+    'and that list is the only thing it assigns');
+}
+
+// --- the `setInnerHtml` helpers: a constant chevron, and a CLOSED call set --
+//
+// "The payload is a constant SVG" is only true while nothing else calls the
+// helper, so the assertion is the whole call set, not the constant.
+assertEqual(filesMatching(/proc setInnerHtml\(r: WebRenderer/),
+  'src/frontend/viewmodel/views/isonim_request_panel_view.nim,'
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim',
+  'the scan finds both setInnerHtml helpers');
+assertEqual(matchesAcross(/r\.setInnerHtml\([^)]*\)/g),
+  'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setInnerHtml(chevronHost, chevronSvg) | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:r.setInnerHtml(chevronHost, chevronSvg)',
+  'and every call passes chevronSvg — the call set is closed');
+assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
+  'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronDownSvg | '
+  + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronUpSvg | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:const chevronDownSvg | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:const chevronUpSvg',
+  'and chevronSvg is one of four compile-time `const`s, so it cannot vary');
+
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ASSERTIONS = 104;
+const EXPECTED_ASSERTIONS = 115;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

@@ -55,6 +55,38 @@ in errors: see `backend/worker_backend.nim`'s header for an engine that sent
 objects one way and JSON strings the other, and a reader that reported a
 timeout over an engine that had answered.
 
+### Frontend JS tests: `-d:nodejs` hands you a DOM that is not the DOM
+
+Every existing suite in `just test-frontend-js` compiles its Nim with
+`-d:nodejs`, and for a test of pure logic that is right. **For a test of the
+DOM it is a trap**, because karax's `kdom` selects an in-memory DOM emulation
+under that switch. `getElementById` becomes a hand-rolled tree walk, and
+`innerHTML` is a string field rather than a parse. A suite that asked "does
+this string become an element?" would be asking the emulation, and the answer
+would have nothing to do with the browser the renderer ships in.
+
+> **If the property under test is what a browser does with your string, drop
+> `-d:nodejs` and supply the globals from jsdom instead.**
+
+`nim js` without that switch emits code that reaches for `document`,
+`window` and friends; the `.mjs` that loads it installs them from jsdom first,
+so `innerHTML`, `textContent` and the HTML parser are all the real ones. See
+`src/frontend/tests/htmlSinks.test.mjs` and `html_sinks_probe.nim` for the
+shape: a small Nim probe that publishes the *shipped* procs on `globalThis`,
+and a `.mjs` that drives them and asserts. The rule generalises past the DOM —
+**run the code path you ship, and be suspicious of any switch that swaps an
+implementation out from under the thing you are measuring.**
+
+Two smaller hazards on the same road, both measured:
+
+- **Node 22 makes `globalThis.navigator` getter-only.** `globalThis.navigator =
+  x` throws there and works on Node 20, so a suite can be green locally and
+  never run in the devshell. Use `delete` + `Object.defineProperty`, as
+  `monaco-env.mjs` and `htmlSinks.test.mjs` both do.
+- **A pipeline's exit status is the last command's.** `node … | grep -v
+  ExperimentalWarning` reports grep's rc, so the test cannot fail its lane.
+  Use `node --no-warnings` instead.
+
 ### `ui:` views: a template parameter's name leaks into your attribute names
 
 Nim substitutes an `untyped` template argument **wherever the parameter's
