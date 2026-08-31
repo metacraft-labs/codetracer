@@ -769,6 +769,53 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Provision MSVC build environment
+        # The eph-win-x64 DIY runner does not auto-configure the MSVC / Windows
+        # SDK environment the way the GitHub-hosted windows-latest image did, so
+        # a bare `cargo test` links with rust-lld against an EMPTY `LIB` and dies
+        # with `rust-lld: error: could not open 'kernel32.lib'`. The other
+        # Windows jobs get this env because their `Setup dev env` step sources
+        # env.ps1, which in turn runs non-nix-build/windows/export-msvc-env.ps1
+        # against the runner's system Visual Studio and points cargo at link.exe.
+        # This lightweight job skips the full DIY bootstrap, so provision just
+        # the MSVC env the same way, in-workflow, via that same repo script --
+        # no ad-hoc, out-of-band runner state.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $blob = & pwsh -NoProfile -ExecutionPolicy Bypass -File `
+            "non-nix-build/windows/export-msvc-env.ps1"
+          $captured = @{}
+          foreach ($line in $blob) {
+            if ($line -match "^(?<key>[^=]+)=(?<value>.*)$") {
+              $captured[$matches.key] = $matches.value
+            }
+          }
+          if (-not $captured.ContainsKey("LIB")) {
+            throw ("export-msvc-env.ps1 did not emit LIB: no system Visual " +
+                   "Studio with the VC tools was found on this runner. The " +
+                   "MSVC toolchain is part of the eph-win-x64 base image and " +
+                   "must be present for the named-pipe transport link step.")
+          }
+          # Persist the compiler/linker search paths for the cargo test below.
+          foreach ($key in @("LIB", "INCLUDE", "LIBPATH")) {
+            if ($captured.ContainsKey($key)) {
+              Add-Content -Path $env:GITHUB_ENV -Value "$key=$($captured[$key])"
+            }
+          }
+          # Put link.exe / the MSVC bin dir on PATH (delta only, so we never
+          # clobber the existing PATH) and use link.exe rather than rust-lld,
+          # exactly as env.ps1 does for the other Windows jobs.
+          if ($captured.ContainsKey("MSVC_PATH_ADDITIONS")) {
+            foreach ($entry in ($captured["MSVC_PATH_ADDITIONS"] -split ";")) {
+              if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                Add-Content -Path $env:GITHUB_PATH -Value $entry
+              }
+            }
+          }
+          Add-Content -Path $env:GITHUB_ENV `
+            -Value "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=link.exe"
+
       - name: Run Windows named-pipe transport tests
         working-directory: src/tui
         shell: pwsh
