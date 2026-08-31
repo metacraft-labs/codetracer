@@ -1276,7 +1276,16 @@ test-frontend-js:
   node src/frontend/tests/nimMonarchDirect.test.mjs
   echo ""
   echo "Running Nim Monaco integration tests (real tokenizer)..."
-  node --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/nimMonacoTokenizer.test.mjs 2>&1 | grep -v "ExperimentalWarning"
+  # `--no-warnings` and NOT `| grep -v ExperimentalWarning`: a pipeline's exit
+  # status is the LAST command's, so the old form reported grep's rc and a
+  # failing test could not fail this lane.  The flag drops the same line and
+  # keeps node's rc, which `set -e` above then honours.
+  node --no-warnings --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/nimMonacoTokenizer.test.mjs
+  echo ""
+  # Does trace content reach monaco-editor 0.54.0's bundled DOMPurify 3.1.7?
+  # The file itself is the answer; this line is what keeps it answered.
+  echo "Running Monaco markdown sanitizer reachability tests..."
+  node --no-warnings --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/monacoMarkdownSanitizer.test.mjs
 
 test-e2e *args:
   #!/usr/bin/env bash
