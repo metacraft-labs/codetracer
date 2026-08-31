@@ -73,9 +73,19 @@ try {
       startOptions: document.querySelectorAll('.start-option').length,
       recentPanels:
         document.querySelectorAll('.recent-folders, .recent-traces').length,
-      // What a person reads off the screen.
+      // What a person reads off the screen. `innerText` is defined over the
+      // RENDERED text — it is the field that answers "is there a product on
+      // this page", and the only one of the two that a screenshot agrees with.
       visibleText: text.slice(0, 1200),
       visibleTextLength: text.length,
+      // ...and what the DOM merely CONTAINS. Reported beside it and asserted
+      // by nothing, because the pair is a diagnostic and not a verdict: when
+      // `domTextLength` is large and `visibleTextLength` is 0, the markup is
+      // right and the browser drew nothing, which is a fault in the machine
+      // running the check rather than in the thing being checked. Reading
+      // this one INSTEAD would make the gate pass over the blank page it
+      // exists to catch, so it stays out of every assertion.
+      domTextLength: (document.body.textContent || '').trim().length,
       title: document.title,
     };
   });

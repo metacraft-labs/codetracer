@@ -41,10 +41,20 @@
 #     WRITTEN FOR IT and named in the output. An arm that reddens some other
 #     check has not shown that this check works.
 #
+#   * A CHECK ON THE INSTRUMENT ITSELF (arm I, and it runs first). The text
+#     assertion reads `innerText`, which is the RENDERED text, so it is a
+#     statement about the browser as much as about the page. This gate's first
+#     run in CI blocked a deploy over a bundle that was correct — the runner's
+#     nix shell shipped Chromium with no fonts, it drew zero glyphs, and 46
+#     mounted elements reported 0 characters of text. Arm I measures a plain
+#     two-line fixture through the same server and probe, so that failure now
+#     names the environment instead of the product.
+#
 # NON-VACUITY. Every DOM assertion is guarded by `domRootPresent` being
 # reported first: a probe that failed to reach the page produces an empty
 # object, and "no `.welcome-screen-root` found" over nothing would otherwise be
-# indistinguishable from a blank product. Trap 4, the empty haystack.
+# indistinguishable from a blank product. Trap 4, the empty haystack. Arm I is
+# the same principle applied one level up, to the measuring device.
 #
 # NETWORK. The server here is a loopback static server over a directory this
 # script assembled; nothing is fetched from outside the machine. It does not
@@ -181,6 +191,36 @@ start_server() {
 }
 
 # ---------------------------------------------------------------------------
+# Serve a directory and probe it. Split out of `run_arm` so the INSTRUMENT arm
+# below can measure a two-line fixture through the same server, the same
+# browser and the same probe as the product — a self-check that reads a
+# different instrument than the one it is vouching for would vouch for nothing.
+# ---------------------------------------------------------------------------
+probe_dir() {
+	local label="$1" dir="$2"
+	if ! start_server "${dir}"; then
+		echo "  the static server did not start" >&2
+		return 2
+	fi
+	local shot=""
+	if [ -n "${CT_PROBE_SCREENSHOT_DIR:-}" ]; then
+		mkdir -p "${CT_PROBE_SCREENSHOT_DIR}"
+		shot="${CT_PROBE_SCREENSHOT_DIR}/${label}.png"
+	fi
+	CT_PROBE_SCREENSHOT="${shot}" \
+		node ci/test/web_renderer_probe.mjs "http://127.0.0.1:${port}/" \
+		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
+	local rc=$?
+	stop_server
+	if [ "${rc}" -ne 0 ] || [ ! -s "${cache}/${label}.json" ]; then
+		echo "  the probe did not produce a report for arm '${label}'" >&2
+		head -5 "${cache}/${label}.err" >&2
+		return 2
+	fi
+	return 0
+}
+
+# ---------------------------------------------------------------------------
 # One arm: copy, mutate, serve, probe, print the JSON to a file.
 # ---------------------------------------------------------------------------
 run_arm() {
@@ -213,26 +253,7 @@ run_arm() {
 			return 2
 		fi
 	fi
-	if ! start_server "${arm_dir}"; then
-		echo "  the static server did not start" >&2
-		return 2
-	fi
-	local shot=""
-	if [ -n "${CT_PROBE_SCREENSHOT_DIR:-}" ]; then
-		mkdir -p "${CT_PROBE_SCREENSHOT_DIR}"
-		shot="${CT_PROBE_SCREENSHOT_DIR}/${label}.png"
-	fi
-	CT_PROBE_SCREENSHOT="${shot}" \
-		node ci/test/web_renderer_probe.mjs "http://127.0.0.1:${port}/" \
-		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
-	local rc=$?
-	stop_server
-	if [ "${rc}" -ne 0 ] || [ ! -s "${cache}/${label}.json" ]; then
-		echo "  the probe did not produce a report for arm '${label}'" >&2
-		head -5 "${cache}/${label}.err" >&2
-		return 2
-	fi
-	return 0
+	probe_dir "${label}" "${arm_dir}"
 }
 
 # Read one field out of an arm's report. `json` is the only reader, so a
@@ -248,6 +269,30 @@ for key in sys.argv[2].split("."):
         sys.exit(0)
 print(d if not isinstance(d, list) else len(d))
 ' "${cache}/$1.json" "$2"
+}
+
+# Everything the probe collected and no assertion reads. Printed only when an
+# arm has already failed, because the previous version of this gate discarded
+# it: the run that blocked a deploy said `only 0 characters of text are on
+# screen` and nothing else, and the two facts that would have named the cause
+# in the log — that no request had 404'd, and that the DOM's own text was
+# present — were both sitting in the report it had just parsed.
+dump_arm() {
+	local label="$1"
+	printf '      --- what the probe saw on arm %s ---\n' "${label}"
+	python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+dom = d.get("dom", {})
+print("      title:            %r" % dom.get("title"))
+print("      loadError:        %r" % d.get("loadError"))
+print("      failedRequests:   %s" % (d.get("failedRequests") or "none"))
+print("      pageErrors:       %s" % (d.get("pageErrors") or "none"))
+print("      domTextLength:    %s (textContent: the DOM)" % dom.get("domTextLength"))
+print("      visibleTextLength:%s (innerText: what is DRAWN)" % dom.get("visibleTextLength"))
+print("      visibleText:      %r" % (dom.get("visibleText") or "")[:400])
+' "${cache}/${label}.json" 2>/dev/null ||
+		printf '      (the report could not be read)\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -298,6 +343,86 @@ for p in sys.argv[1:]:
     open(p, 'w').write(s[len('(function(){\n'):].rsplit('\n})();\n', 1)[0])
 PY
 }
+
+# ---------------------------------------------------------------------------
+echo "Arm I: THE INSTRUMENT — can this browser draw a letter at all?"
+echo '    Before the product is measured, the measurement is. `innerText` is'
+echo "    defined over RENDERED text, so a browser with no font reports an"
+echo "    empty page for correct markup — and this gate would blame the"
+echo "    product for its own runner."
+# ---------------------------------------------------------------------------
+#
+# THIS ARM IS THE REASON THE GATE IS TRUSTWORTHY AT ALL, and it exists because
+# the gate was wrong once in exactly this way. On 2026-08-31 it blocked a
+# deploy with `only 0 characters of text are on screen` over a bundle whose DOM
+# was byte-for-byte the one that renders correctly on a developer's machine:
+# 2337 bytes of markup, 46 elements, `.welcome-screen-root` mounted, five start
+# options, both panels, no page errors, both arms reporting `ok`. The runner's
+# Chromium came from `playwright-driver.browsers` in a nix shell that provided
+# no fonts and no fontconfig, so it laid out every string with zero glyphs.
+#
+# Traps doc 4, the empty haystack, one level up: a negative result over an
+# instrument that cannot produce a positive one is not evidence. So the
+# instrument gets a control (text renders) and a mutation (the same
+# measurement returns 0 when the text is genuinely gone), and if the control
+# fails this script says so about the ENVIRONMENT and does not pretend to have
+# measured a product.
+#
+# VERIFIED TO REDDEN. Serving the `yes` fixture with `visibility: hidden` on
+# its one element reproduces a browser that cannot draw: `domTextLength` stays
+# 47 and `visibleTextLength` goes to 0 — the CI signature exactly. The run
+# reddened THIS assertion, printed the pair, took the early exit, and reached
+# `expect_count 2` without a count mismatch. That is the whole failure path,
+# and it is the one that had never executed.
+instrument_dir="${cache}/instrument"
+rm -rf "${instrument_dir}"
+mkdir -p "${instrument_dir}/yes" "${instrument_dir}/no"
+# Deliberately plain: no webfont, no stylesheet, the default font stack. If
+# this does not render, nothing the product ships could have.
+cat >"${instrument_dir}/yes/index.html" <<'HTML'
+<!DOCTYPE html><meta charset="utf-8"><title>instrument</title>
+<div id="dom-root">the instrument can draw letters in this browser</div>
+HTML
+cat >"${instrument_dir}/no/index.html" <<'HTML'
+<!DOCTYPE html><meta charset="utf-8"><title>instrument</title>
+<div id="dom-root"></div>
+HTML
+
+instrument_ok=1
+if ! probe_dir instrument-yes "${instrument_dir}/yes"; then
+	ck fail "the instrument arm could not be measured"
+	instrument_ok=0
+else
+	i_text="$(json instrument-yes dom.visibleTextLength)"
+	if [ "${i_text:-0}" -ge 40 ] 2>/dev/null; then
+		ck ok "this browser renders text: ${i_text} characters off a plain page"
+	else
+		ck fail "this browser rendered ${i_text} characters of a 47-character page — it has no usable font, and every text check below would be measuring the RUNNER"
+		dump_arm instrument-yes
+		note "FIX THE ENVIRONMENT, NOT THE ASSERTION. nix/shells/ci-base.nix"
+		note "exports FONTCONFIG_FILE for exactly this; a shell without it gives"
+		note "Chromium no font to shape with."
+		instrument_ok=0
+	fi
+fi
+if ! probe_dir instrument-no "${instrument_dir}/no"; then
+	ck fail "the instrument's mutation arm could not be measured"
+else
+	i_blank="$(json instrument-no dom.visibleTextLength)"
+	if [ "${i_blank}" = "0" ]; then
+		ck ok "and it reports 0 for a page with no text, so the measurement is not a constant"
+	else
+		ck fail "the instrument reported ${i_blank} characters for an empty page; this measurement cannot distinguish a blank product from a rendered one"
+	fi
+fi
+if [ "${instrument_ok}" -eq 0 ]; then
+	echo
+	echo "RESULT: FAILED — the instrument is broken, so no verdict about the" >&2
+	echo "        product was reached. This is NOT 'the page is blank'." >&2
+	expect_count 2
+	exit 1
+fi
+echo
 
 # ---------------------------------------------------------------------------
 echo "Arm: CONTROL — the bundle as assembled"
@@ -362,6 +487,11 @@ if [ "${c_text:-0}" -gt 200 ] 2>/dev/null; then
 	ck ok "${c_text} characters of text are on screen"
 else
 	ck fail "only ${c_text} characters of text are on screen"
+	# Arm I has already established that this browser CAN draw letters, so
+	# this is the product. Print what the probe saw anyway: the difference
+	# between `domTextLength` and `visibleTextLength` says whether the markup
+	# is there and hidden, or not there at all.
+	dump_arm control
 fi
 
 # NO UNCAUGHT ERRORS. The defect was an exception nothing was listening for.
@@ -468,9 +598,10 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# 16 assertions, written from a run. See traps doc 4c: the count is what turns
-# "all green" into "all of them ran".
-expect_count 16
+# 18 assertions, written from a run. See traps doc 4c: the count is what turns
+# "all green" into "all of them ran". 16 over the product, plus the two that
+# vouch for the instrument doing the measuring.
+expect_count 18
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"
