@@ -79,6 +79,34 @@ let
     fenixPkgs.targets.wasm32-wasip1.stable.rust-std
     fenixPkgs.targets.x86_64-unknown-linux-gnu.stable.rust-std
   ];
+
+  # FONTS FOR THE HEADLESS BROWSER, and this is a correctness input rather
+  # than a cosmetic one.
+  #
+  # `playwright-driver.browsers` ships Chromium and nothing that tells it where
+  # a font lives. On a nix runner there is no /etc/fonts and no system font
+  # directory, so fontconfig matches NOTHING, Chromium lays out every string
+  # with zero glyphs, and `element.innerText` — which is defined over the
+  # RENDERED text and not over the DOM — comes back empty for a page whose
+  # markup is perfectly correct.
+  #
+  # That is not a hypothetical. `ci/test/web-renderer-mounts.sh` measured a
+  # Noir Studio bundle whose DOM was byte-identical to the one that renders
+  # correctly on a developer's machine (2337 bytes of markup, 46 elements, the
+  # renderer's own `.welcome-screen-root`, five start options, both panels) and
+  # reported `only 0 characters of text are on screen`, because the runner's
+  # browser could not draw a single letter. The screenshot it saved shows the
+  # welcome screen's boxes with every label missing.
+  #
+  # Two Latin families are enough for a UI check and cost ~10 MB; `noto-fonts`
+  # is deliberately not here (hundreds of MB for coverage no gate asserts).
+  # DejaVu supplies the serif/sans/mono generics, Liberation the Arial /
+  # Times / Courier metric aliases that web CSS asks for by name.
+  fontPackages = [
+    pkgs.dejavu_fonts
+    pkgs.liberation_ttf
+  ];
+  fontsConf = pkgs.makeFontsConf { fontDirectories = fontPackages; };
 in
 with pkgs;
 {
@@ -212,6 +240,14 @@ with pkgs;
     playwright-driver.browsers
     playwright
 
+    # ...and something for it to render text WITH. See `fontsConf` above:
+    # without these the browser is present, starts, loads the page, builds the
+    # DOM, and draws no letters.
+    fontconfig
+  ]
+  ++ fontPackages
+  ++ [
+
     # Recorders whose runtime compiler IS exercised today by the
     # CI lanes that ship in this repo. Add new ones here as they
     # come online; keep the dev-only lang compilers in main.nix.
@@ -340,6 +376,13 @@ with pkgs;
     # Playwright (M5 + codetracer's own TS e2e).
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+
+    # The font path for that browser. Only Linux reads it — macOS Chromium
+    # goes through CoreText and has the system's fonts either way, which is
+    # exactly why a check that passes on a laptop failed on a runner.
+    # Respect an existing FONTCONFIG_FILE (NixOS sets one) rather than
+    # overriding a host configuration that already works.
+    export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fontsConf}}"
 
     # Active build output directory. Linux defaults to the tup build
     # (src/build-<config>); macOS/Windows default to the reprobuild build
