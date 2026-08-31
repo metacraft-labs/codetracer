@@ -560,15 +560,23 @@ suite "VN-M4 a payload changes what is known, not what is promised":
     check withPayload.outcomeText.val == withoutPayload.outcomeText.val
     check panelModel(withPayload).rows.len == panelModel(withoutPayload).rows.len
 
-  test "even a payload carrying a full counterexample promises no replay":
-    # `not_proved_with_model.json` has model values, forced branches, a
-    # violated obligation and a proof-goal tree — everything VN-M5 will draw.
-    # None of it may reach the rendered panel yet, because nothing in VN-M4
-    # draws it, and a disabled affordance is still a promise.
-    const replayVocabulary = [
-      "replay", "step through", "step-through", "stepthrough",
-      "counterexample", "open trace", "open-trace", "opentrace",
+  test "a payload carrying a full counterexample promises exactly one thing":
+    # **This test was VN-M4's tripwire and is now VN-M5's boundary, and the
+    # change is recorded rather than made quietly.** It used to read "even a
+    # payload carrying a full counterexample promises no replay" and forbade
+    # twelve words outright, with a comment saying so *yet* and naming the
+    # tripwire VN-M5 would have to remove.
+    #
+    # VN-M5 removed exactly one word's worth of it. `not_proved_with_model.json`
+    # has model values, forced branches, a violated obligation and a proof-goal
+    # tree; the panel now offers **one** action over it — open the
+    # counterexample — and still promises none of the rest. Ten of the twelve
+    # words stay forbidden, and the two that are now allowed are *required*, so
+    # this is a narrower assertion than it was rather than a weaker one.
+    const stillForbidden = [
+      "replay", "open trace", "open-trace", "opentrace",
       "trace-id", "traceid", "debug session", "session-tab",
+      "recording", "recorded run",
     ]
     let vm = createVerificationVM()
     vm.start(verificationAction(),
@@ -583,13 +591,51 @@ suite "VN-M4 a payload changes what is known, not what is promised":
     var renderer: MockRenderer
     let node = renderVerificationPanel(renderer, panelModel(vm))
     let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
-    for word in replayVocabulary:
+    check haystack.len > 0                # the scan reached the tree
+    for word in stillForbidden:
       check(not haystack.contains(word))
       if haystack.contains(word):
-        echo "replay vocabulary \"", word, "\" leaked into the panel with a payload attached"
+        echo "vocabulary \"", word, "\" leaked into the panel with a payload attached"
 
-    # And the tripwire VN-M5 has to remove is still standing.
+    # The one thing it may say, and exactly once. A count rather than a
+    # presence check: a panel that offered the same walk twice, or offered one
+    # per finding regardless of which finding has a model, would pass a
+    # `contains`.
+    check haystack.contains("step through the counterexample")
+    check nodesWithAttribute(node, "data-ct-verification-action").len == 1
+    check panelModel(vm).counterexampleOffers.len == 1
+    check panelModel(vm).counterexampleOffers[0].findingId == "f0"
+
+    # And the tier's own tripwire is untouched: it is a statement about a run
+    # with no *attached* payload, which is every state VN-M3's own test drives.
     check ReplayIsNotOfferedHere
+    check CounterexampleIsOfferedOnlyWhenSteppable
+
+  test "a payload whose model is unavailable still promises nothing":
+    # The arm that keeps the test above from being a claim about *any* payload.
+    # `not_proved_assertion.json` is attached, believed, and carries a
+    # counterexample — with `model.status == unavailable` and no steps. The
+    # panel offers nothing over it, and the reason is the model rather than the
+    # absence of a payload.
+    const NotProvedAssertionJson =
+      staticRead("../fixtures/verno/payload/not_proved_assertion.json")
+    let vm = createVerificationVM()
+    vm.start(verificationAction(),
+             projectRoot = "test-programs/noir_verification_failing")
+    vm.finish(FailedAssertionOutput, some(1),
+              payloadText = NotProvedAssertionJson,
+              runStartedAtUnixMs = 1_787_970_124_574'i64)
+    check vm.payloadStatus.val == psAttached
+    check vm.currentPayload().get.counterexampleTraces.len == 1
+    check vm.currentPayload().get.counterexampleTraces[0].steps.len == 0
+    check counterexampleOffers(vm).len == 0
+
+    var renderer: MockRenderer
+    let node = renderVerificationPanel(renderer, panelModel(vm))
+    let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
+    check haystack.len > 0
+    check not haystack.contains("counterexample")
+    check not haystack.contains("step through")
 
   test "the results pane still cannot offer a trace, with a payload attached":
     # `toTestEvents` is built from the report, which the payload never enters —
