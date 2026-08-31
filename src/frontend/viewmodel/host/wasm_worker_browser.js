@@ -136,25 +136,72 @@ async function load(id) {
       `disagree; the module itself has not been reached.`);
   }
 
-  // The bytes are here. Everything from this point on is the module's own
-  // fault, and is reported as such.
+  // A 200 IS NOT PROOF THE MODULE IS THERE, and on this product's own host it
+  // frequently is not. Cloudflare Pages answers a request for an absent path
+  // with the entry document — `HTTP 200`, `content-type: text/html` — which was
+  // MEASURED against the live deployment, not assumed:
+  //
+  //   $ curl -sI https://web-codetracer.pages.dev/assets/noir_wasm.wasm
+  //     HTTP/2 200
+  //     content-type: text/html; charset=utf-8
+  //
+  // Without this branch that HTML reaches `WebAssembly.compile`, fails on the
+  // magic word, and is reported as BROKEN — "the module was served and is not
+  // usable" — when the truth is that it was never deployed. That is precisely
+  // the conflation of a missing asset with a broken feature that cost a sibling
+  // campaign hours, arriving through the CDN instead of through the code.
+  //
+  // So the response is classified before it is compiled. Streaming is kept for
+  // the good case, which is the one that matters for a 16 MB module: a correct
+  // `application/wasm` goes straight to `compileStreaming` and is never
+  // buffered.
+  const contentType = (response.headers && typeof response.headers.get === 'function'
+    ? response.headers.get('content-type') : '') || '';
+  const looksLikeWasm = contentType.includes('application/wasm');
+
   let exports;
+  let buffered = null;
+  if (!looksLikeWasm) {
+    // Not advertised as wasm. It may still BE wasm (a host serving
+    // `application/octet-stream`), so the magic word decides rather than the
+    // header — a header alone would turn a misconfigured but working host into
+    // a hard failure.
+    buffered = await response.arrayBuffer();
+    const magic = new Uint8Array(buffered, 0, Math.min(4, buffered.byteLength));
+    const isWasm = magic.length === 4 && magic[0] === 0x00 && magic[1] === 0x61 &&
+                   magic[2] === 0x73 && magic[3] === 0x6d;
+    if (!isWasm) {
+      throw loadFault(NOT_SERVED, id,
+        `\`${id}\` is declared at ${url} and this deployment answered with ` +
+        `${contentType || 'an unknown content type'} rather than a wasm ` +
+        `module (${buffered.byteLength} bytes). A static host commonly serves ` +
+        `its index page for a path it does not have, so this almost always ` +
+        `means the module was not published — not that it is broken.`);
+    }
+  }
+
+  // The bytes are here and they are wasm. Everything from this point on is the
+  // module's own fault, and is reported as such.
   try {
     let mod;
-    try {
-      mod = await WebAssembly.compileStreaming(response.clone());
-    } catch (e) {
-      // Wrong Content-Type, or an engine without streaming compile. Not worth
-      // surfacing on its own: the only observable difference is peak memory,
-      // and a genuinely bad module fails the buffered path too — where it is
-      // reported as BROKEN, below, rather than being blamed on the header.
-      mod = await WebAssembly.compile(await response.arrayBuffer());
+    if (buffered !== null) {
+      mod = await WebAssembly.compile(buffered);
+    } else {
+      try {
+        mod = await WebAssembly.compileStreaming(response.clone());
+      } catch (e) {
+        // An engine without streaming compile. Not worth surfacing on its own:
+        // the only observable difference is peak memory, and a genuinely bad
+        // module fails the buffered path too — where it is reported as BROKEN,
+        // below, rather than being blamed on the header.
+        mod = await WebAssembly.compile(await response.arrayBuffer());
+      }
     }
     ({ exports } = await WebAssembly.instantiate(mod, stubImports(mod)));
   } catch (e) {
     throw loadFault(BROKEN, id,
-      `\`${id}\` was served from ${url} but is not a usable wasm module: ` +
-      `${e && e.message ? e.message : e}`);
+      `\`${id}\` was served from ${url} as a wasm module and is not a usable ` +
+      `one: ${e && e.message ? e.message : e}`);
   }
   modules.set(id, exports);
   return exports;
