@@ -45,8 +45,8 @@ function joinBootstrap(origin: string) {
     traceIdentity: traceId,
     roomId,
     initialGrants: ["observe", "publishAwareness"],
-    webUiUrl: `https://web.codetracer.com/collab/join/${inviteToken}`,
-    nativeJoinUrl: `https://web.codetracer.com/collab/join/${inviteToken}`,
+    webUiUrl: `https://ide.codetracer.com/collab/join/${inviteToken}`,
+    nativeJoinUrl: `https://ide.codetracer.com/collab/join/${inviteToken}`,
     rendezvousUrl: `${origin}/api/v1/collab/rooms/${roomId}/rendezvous`,
     transportHints: ["control-plane-only", "control-plane-rendezvous", "browser-channel", "viewops-not-accepted"],
   };
@@ -71,7 +71,7 @@ test("e2e_collab_webui_invite_browser_ab_transport", async ({
       contentType: "application/json",
       body: JSON.stringify({
         inviteId: "33333333-3333-3333-3333-333333333333",
-        joinUrl: `https://web.codetracer.com/collab/join/${inviteToken}`,
+        joinUrl: `https://ide.codetracer.com/collab/join/${inviteToken}`,
         roomId,
         grantPreset: "Viewer",
         grants: ["observe", "publishAwareness"],
@@ -133,7 +133,7 @@ test("e2e_collab_webui_invite_browser_ab_transport", async ({
     [tenantId, replayId],
   );
   expect(invite).toMatchObject({
-    joinUrl: `https://web.codetracer.com/collab/join/${inviteToken}`,
+    joinUrl: `https://ide.codetracer.com/collab/join/${inviteToken}`,
     roomId,
     grantPreset: "Viewer",
   });

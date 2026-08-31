@@ -4,6 +4,17 @@
 ## actions.  The product-visible launch/open/switch/evidence/cancel lifecycle
 ## is owned by ``agentic_session_launcher`` on the active ``ReplayDataStore``.
 
+when defined(ctWeb):
+  {.error: "ui/agentic_worktree_test_hooks.nim is a DESKTOP TEST BRIDGE: it " &
+           "shells out to a native bridge executable, writing payloads into a " &
+           "repo worktree on the real filesystem. It is absent from a " &
+           "web build because `capProcessArbitraryPrograms` is absent there — a " &
+           "tab runs declared wasm modules, never an arbitrary executable — and " &
+           "because a test hook is not product surface in the first place. Not a " &
+           "migration target: the product-visible lifecycle it fronts already " &
+           "lives on `agentic_session_launcher` over the ReplayDataStore, which " &
+           "is platform-neutral and needs nothing from here." .}
+
 import std/json
 
 import ui_imports

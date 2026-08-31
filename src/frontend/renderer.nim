@@ -17,7 +17,14 @@ import
     event_log_service, debugger_service, editor_service,
     flow_service, search_service, shell_service
   ],
-  lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ],
+  # `electron_lib` is NOT here, and its absence is what makes this module
+  # web-buildable. It was imported for exactly one symbol — `inElectron`, read
+  # by the two `if inElectron:` blocks below — and pulling Electron's whole
+  # `fs` / `child_process` / `path` binding layer in to read one bool is what
+  # made `-d:ctWeb` builds of the renderer impossible: `electron_lib` is
+  # `{.error.}` on that arm by design. `lib/electron_presence` answers the same
+  # question by probing the runtime, and imports nothing.
+  lib/[ logging, monaco_lib, jslib, misc_lib, electron_presence ],
   platform_host,
   lsp_client, lsp_controller
 
@@ -42,7 +49,26 @@ var fuzzysort* {.importc.}: Fuzzysort # app-global
 var noUiSlider* {.importc.}: js # app-global
 var sharedDirectRedraw*: proc()
 proc wNumb*(options: js): js {.importc.}
-proc readFileUtf8*(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
+proc readFileUtf8*(path: cstring): Future[cstring] {.async.} =
+  ## A source file's text, through the platform facade — NS1's call-site
+  ## migration.
+  ##
+  ## This was `require('fs').promises.readFile`, which is a node call: on the
+  ## web it is a `ReferenceError`, not a refusal. Through the facade the same
+  ## five call sites read the project store in a tab and the disk on a desktop,
+  ## with no branch here.
+  ##
+  ## **The signature and the ERROR CONTRACT are both preserved, and the second
+  ## one is the part that is easy to lose.** `readFile` REJECTS when a file
+  ## cannot be read, and all five callers wrap this in `except:` and log a
+  ## warning naming the file. Returning `""` on failure would type-check and
+  ## satisfy four of them — the fifth guards only on `isNil`, so an unreadable
+  ## file would be cached as that file's contents and the editor would show it
+  ## blank, with the warning no longer printed because nothing raised. Hence
+  ## `ctOrRaise`, whose own doc comment carries this case and whose test pins
+  ## it (`tests/platform_bootstrap_test.nim`).
+  let outcome = await ctPlatform().fs.readText($path)
+  return ctOrRaise(outcome).cstring
 
 proc duration*(name: string) =
   echo &"TIME {name} {now() - start}"
@@ -1209,8 +1235,17 @@ proc onCommandSearch*(query: cstring) {.async.} =
   data.redraw()
 
 
-proc loadFileDialog*(options: js) =
-  electron.dialog.showOpenDialogSync(options)
+# `loadFileDialog` was here: a one-line `electron.dialog.showOpenDialogSync`.
+# It is DELETED rather than migrated onto `download.openFileDialog`, and the
+# reason is worth a note so it is not helpfully restored.
+#
+# It was called from nowhere — no `.nim`, `.js`, `.ts` or `.html` in the tree
+# referenced it — and it DISCARDED its own result: `showOpenDialogSync`
+# returns the chosen paths and this proc had no return type. So there was
+# nothing to preserve. Migrating it would have meant carrying a dialog that
+# opens and throws the answer away onto two more platforms, and the facade's
+# `download.openFileDialog` already exists for a caller that actually wants
+# one.
 
 proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
   cdebug fmt"search: {query}"

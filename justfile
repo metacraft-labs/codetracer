@@ -2765,6 +2765,210 @@ test-online-sharing-compile:
   exec > >(tee test-logs/test-online-sharing-compile.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh online-sharing-live --compile-only
 
+# The platform facade's two host instantiations, compiled on the backend they
+# ship on — Noir-Studio.milestones.org NS2, the first half of
+# `test_one_codebase_two_platforms` ("CI fails if either build breaks").
+#
+# THE HOLE THIS FILLS was measured, not predicted.  `host/web_browser.nim` and
+# `host/desktop_electron.nim` are `{.error.}` on the C backend, so `test-vm-unit`
+# cannot compile them; and no suite in `test-vm-unit-js` imports either, because
+# `platform/web_platform.nim` was deliberately built to reach no browser API and
+# therefore needs neither in order to be tested.  Both properties are correct on
+# their own and together they left the two most platform-specific modules in the
+# product compiled by NOTHING.
+#
+# `web_browser.nim` then landed on `dev` at ed9d6021 in a state that does not
+# compile at all — a doc comment after an object constructor's closing paren,
+# `Error: invalid indentation` — and the whole suite stayed green.  This lane
+# fails on exactly that, by file and line.
+#
+# Compile-only, for the same reason `test-online-sharing-compile` is: one module
+# needs a browser and the other needs Electron, so neither can run in CI.  The
+# weakest check that would have caught the defect costs seconds.
+#
+# It does NOT yet satisfy `test_one_codebase_two_platforms` in full.  That test
+# also asks that a pane added to one platform appear in the other, which needs a
+# web BUNDLE — an entry point that calls `boot()` — and there is still none.
+# This is the "either build breaks" half, and it is the half that was on fire.
+test-host-instantiations:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-host-instantiations.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh host-instantiations --compile-only
+
+# THE RENDERER, COMPILED BY CI AT LAST — both arms.
+#
+# The lane note in `host-instantiations` above recorded, honestly, that nothing
+# in CI compiled `renderer.nim`: the JS lane family passes `-d:nodejs`, under
+# which the renderer does not build at all (`kdom`'s `createElementNS` is a
+# browser binding and node is not a browser), so forcing it in would have gated
+# it in a configuration nothing ships. The only thing compiling the renderer
+# was the tup product build, at package time.
+#
+# THAT GAP COST A WORKING RENDERER ON `dev`. Commit 333ec709 removed
+# `ui/ui_imports.nim`'s blanket re-export of `electron_lib` after auditing its
+# exported symbols for uses "anywhere under `ui/`" — and `src/frontend/
+# ui_js.nim`, the renderer ENTRY POINT, is not under `ui/`. It read
+# `inElectron` from that re-export, stopped compiling, and no suite could see
+# it. Same shape as `web_browser.nim`, same week.
+#
+# The fix is a third backend rather than an exception: `js-browser` is `nim js`
+# with no `-d:nodejs`, compile-only by construction. See `test_lane_backend` in
+# ci/lib/test-lane-files.sh, and `ci/test/renderer-browser-build.sh` for the
+# property gate that proves the two arms are genuinely different builds.
+#
+# NEEDS isonim's `build/tailwind-styles.json`: `ui_js.nim` reaches
+# `isonim/dsl/tailwind`, which `staticRead`s it at compile time, and a missing
+# file is an uncatchable Nim error minutes in. `just build-tailwind` generates
+# it; CI seeds a `{}` placeholder in `.github/actions/setup-isonim-siblings`.
+test-renderer-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-browser.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh renderer-electron
+  bash ci/lib/run-nim-test-lane.sh renderer-web
+  bash ci/test/renderer-browser-build.sh
+
+# THE BUNDLE CARRIES THE RENDERER, THE WORKER AND THE MODULES — NS3's residual.
+#
+# `test-web-bundle` builds and boots the web INSTANTIATION. This assembles the
+# whole deployment: the renderer (newly possible), the entry point, the browser
+# wasm worker script, and the two Noir wasm modules when they are supplied.
+#
+# NS3 was never short of a loader. `host/web_browser.nim` has the registry, the
+# transport and `newBrowserWasmHost(registry, scriptUrl)`, all tested, and says
+# in its own doc comment that nothing calls them because "the worker script ...
+# is not in the bundle". The gap was DELIVERY, and this is the step that closes
+# it.
+#
+# The two modules are ~16 MB and ~4.6 MB and are not in the repo. Set
+# CT_NOIR_WASM_COMPILER and CT_NOIR_WASM_TRACER to include them; without them
+# the gate SKIPS those two loudly, prints the deployment consequence the
+# manifest declares for each, and still checks everything else.
+test-web-bundle-assets:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
+  bash ci/test/web-bundle-assets.sh
+
+# THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
+# which said in its own words: "no CI recipe produces a web bundle, so
+# `test_one_codebase_two_platforms` is unasserted, and nothing calls the web
+# instantiation's boot()".  This is that recipe, and `src/frontend/web_main.nim`
+# is the entry point that calls it.
+#
+# Three things are checked, and the middle one is the reason the other two are
+# worth anything:
+#
+#   1. the bundle BUILDS with `nim js`;
+#   2. it links NO host bindings — zero `require(`, no `child_process`, no
+#      `ipcRenderer`.  `web_main.nim` deliberately does not import
+#      `platform_host`, because that module imports `host/desktop_electron` on
+#      the JS backend; measured, importing and using it puts 43 `require(`
+#      calls into the bundle, so this check fails on the real regression rather
+#      than in principle;
+#   3. it BOOTS.  Under node there is no OPFS, so the run takes §4.2's third
+#      row — the in-memory volume — and the gate asserts that the session
+#      announces the coming loss before editing is possible, which is the
+#      product requirement rather than merely "it didn't crash".
+#
+# It does NOT satisfy `test_one_codebase_two_platforms` in full: that test also
+# wants a pane added to one platform to appear in the other, and rendering panes
+# means the renderer, which is still Electron-coupled through `platform_host`.
+# This is the build half.
+test-web-bundle:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-bundle.log) 2>&1
+  bash ci/test/web-bundle-smoke.sh
+
+# NS1's residual 1 as a ratchet: how many places in the renderer region still
+# reach node or Electron directly, per module, against a checked-in budget.
+#
+# THE SCRIPT IS THE COUNTING RULE, which is the point of it.  The rule used to
+# live in prose in the milestone file, and a looser grep over the same region
+# returns nearly half again as many hits — `require("tippy.js")`,
+# `require("js-yaml")` and an already-guarded `globalThis.process`, none of
+# which is host access.  Someone re-deriving the number from a plausible grep
+# chases modules that are already fine.  Now the rule runs, and the milestone
+# file points here instead of restating it.
+#
+# It fails in BOTH directions: up, because a new host call in a migrated module
+# is a regression; and down, because a migration whose budget was not lowered
+# is work that has not been recorded and can be silently re-grown.
+# NS3's loop across the worker boundary, compared BY DIGEST against the same
+# loop run directly.  A Noir package held only as an in-memory path->source map
+# is compiled by `noir_wasm.wasm` and traced by `noir_tracer_wasm.wasm`, twice:
+# once in-process, once through `worker_threads` and the JSON protocol
+# `platform/wasm_worker.nim` speaks.  The two traces must hash the same.
+#
+# TWO ASSERTIONS, because the digest alone is not enough and that is measured
+# rather than argued: compiling without instrumentation yields a trace of ONE
+# event and ZERO steps, and the digests STILL MATCH, because both paths agree
+# on nothing.  So the trace is also asserted non-trivial, and the two catch
+# different failures -- drop one event in the worker and the digest fails while
+# the non-trivial check passes.
+#
+# SKIPS LOUDLY without the modules; the two .wasm files are 16 MB and 4.6 MB
+# and are not in the repo.  Set CT_NOIR_WASM_COMPILER and CT_NOIR_WASM_TRACER.
+test-noir-wasm-worker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-wasm-worker.log) 2>&1
+  bash ci/test/noir-wasm-worker-e2e.sh
+
+test-renderer-host-budget:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-host-budget.log) 2>&1
+  bash ci/test/renderer-host-reach-budget.sh
+
+# NS2's SECOND half — "a pane added to one platform appears in the other".
+#
+# The first half ("CI fails if either build breaks") has been covered since
+# `test-host-instantiations` and `test-web-bundle`.  This is the other one, and
+# it was unassertable until the renderer built for a browser: you cannot compare
+# two pane sets with only one bundle.
+#
+# `renderer-browser-build.sh` already checks the NEGATIVE half — that
+# `panel_transfer` and `agentic_worktree_test_hooks` are absent from the web
+# bundle, by name.  Nothing checked the panes that are supposed to be on BOTH,
+# which is what the milestone actually claims.
+#
+# The registry is `makeComponent`'s arms, read from `src/frontend/utils.nim`;
+# presence is measured in the two BUILT bundles, because a pane whose arm exists
+# but whose module left the web import graph is exactly the failure this is for;
+# and the kinds are a checked-in budget that fails in both directions.  Three
+# independent sources, so no assertion compares a list against itself.
+test-renderer-pane-parity:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
+  bash ci/test/renderer-pane-parity.sh
+
+# NS7a's first verification: the development loop has no network surface, so
+# there is no request for a token to ride on. Runs the gate through its own
+# build path FIRST (no bundle variables set, so it compiles both arms exactly
+# as CI would), then hands those artifacts to the mutation proof rather than
+# rebuilding them twelve times.
+test-noir-studio-signed-out:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-studio-signed-out.log) 2>&1
+  bash ci/test/noir-studio-signed-out.sh
+  cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+  CT_WEB_ENTRY_BUNDLE="${cache}/nsso-loop/web.js" \
+  CT_RENDERER_WEB_BUNDLE="${cache}/nsso-renderer/ui.js" \
+    bash ci/test/noir-studio-signed-out-test.sh
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when

@@ -1,3 +1,15 @@
+when defined(ctWeb):
+  {.error: "lib/electron_lib.nim is Electron's binding layer: it loads the node " &
+           "filesystem, child-process and path modules, plus the helpers shim. " &
+           "It is ABSENT from a web build because there is no Electron in a " &
+           "browser tab, not because it has not been migrated yet: this module " &
+           "exists TO wrap the host, so putting it behind the platform facade " &
+           "would only move the same node calls one layer down. A web build that " &
+           "needs one of its capabilities should ask `ctPlatform()` for that " &
+           "capability instead. If you reached this error, something in the web " &
+           "build's import graph still depends on Electron — find that edge and " &
+           "cut it; do not relax this guard." .}
+
 import
   std/[ jsffi, asyncjs, strutils, strformat, os ],
   results,

@@ -423,6 +423,16 @@ impl CTFSTraceReader {
         self.lazy_steps.as_ref().map(|c| c.chunk_decompressions())
     }
 
+    /// Number of chunk-aligned RANGE FILLS the lazy step cache has driven, or
+    /// `None` when not on the lazy step path. Counter-proof that the per-slot
+    /// memo is actually CONSULTED: repeated reads of a populated slot must not
+    /// raise it. `lazy_steps_chunk_decompressions` cannot show this, because a
+    /// re-fill of the same chunk is served from the stream's one-chunk cache —
+    /// it re-decodes every record in the chunk while decompressing nothing.
+    pub fn lazy_steps_range_fills(&self) -> Option<u64> {
+        self.lazy_steps.as_ref().map(|c| c.range_fills())
+    }
+
     /// M24c-steps — `true` when the whole-table step view has already been
     /// materialized (a slice / line-map accessor was invoked). Lets a test prove
     /// that pure point-lookup navigation never triggers the full materialization.
@@ -3146,6 +3156,40 @@ impl TraceReader for CTFSTraceReader {
         // `steps_on_line` does; off it, it reads the eager `db.step_map`.
         self.steps_on_line(path_id, line)
             .map(|records| records.iter().map(|s| s.step_id).collect())
+    }
+
+    // ── M0/3 line-map accessors ──────────────────────────────────────
+    //
+    // `load_location` needs a function's LAST line, and used to get it by
+    // walking the current call's step run one step at a time. The two accessors
+    // below answer the same question from indices the reader already holds: the
+    // per-step call-key array the lazy step cache builds at open, and the
+    // prepopulated `step-map.ns` line index. Neither touches `steps.dat`.
+    //
+    // Each returns `None` when its index is absent, and the caller then walks
+    // the step stream exactly as before — a bundle without these indices is
+    // bit-for-bit unchanged.
+
+    fn call_run_end(&self, start: StepId, call_key: CallKey) -> Option<StepId> {
+        // The resident call-key array lives in the lazy step cache. Without it
+        // (eager `db.steps` bundles) there is no index to serve from.
+        let lazy = self.lazy_steps.as_ref()?;
+        if start.0 < 0 {
+            return None;
+        }
+        Some(StepId(lazy.call_run_end(start.0 as usize, call_key) as i64))
+    }
+
+    fn max_line_over_steps(&self, start: StepId, end: StepId) -> Option<i64> {
+        let step_map = self.step_map.as_ref()?;
+        // Only a COMPLETE index can answer a range maximum. A partial table
+        // would silently drop the steps it omits out of the maximum, which is a
+        // WRONG answer rather than a slow one — so refuse and let the caller
+        // walk the stream.
+        if !step_map.covers_all_steps(self.step_count()) {
+            return None;
+        }
+        Some(step_map.max_line_in_step_range(start, end) as i64)
     }
 
     // ── Iteration helpers ────────────────────────────────────────────

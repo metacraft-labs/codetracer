@@ -1,0 +1,54 @@
+# The two Noir wasm modules the Noir Studio web bundle fetches at run time.
+#
+# WHY A PIN FILE AND NOT `flake.nix`'s `noir` INPUT
+#
+# `flake.nix` already pins a `noir` (ref `codetracer-temp`, rev 5e98f904) and
+# that pin is NOT this one. It supplies the NATIVE `nargo` the recorder builds
+# against; these are `wasm32-unknown-unknown` builds of two different crates
+# from the `codetracer` branch, consumed by a browser and by nothing else.
+# Sharing one pin between them would couple a desktop toolchain bump to a web
+# deploy in both directions, which is worse than two pins that each say what
+# they are for.
+#
+# WHY PINNED AT ALL, rather than tracking the branch head. A deploy that
+# rebuilds from a moving ref cannot be reproduced, and the provenance string
+# the entry document carries — `noir@codetracer <rev> compiler/wasm` — would
+# name a commit that had already moved. The revision below is what the page
+# tells a user it is running.
+#
+# TO BUMP: change NOIR_REV, run `bash ci/deploy/build-noir-wasm.sh <out-dir>`,
+# and check the two sizes in the log against the ones recorded here.
+
+NOIR_REPO=https://github.com/metacraft-labs/noir
+NOIR_REF=codetracer
+NOIR_REV=6c590c77899379b7a06cc3953e3fb07b810fc4c8
+
+# The noir workspace resolves `codetracer_trace_types` and
+# `codetracer_trace_writer_nim` through PATH dependencies on a sibling checkout
+# (`../codetracer-trace-format`). Without it `cargo build` fails before
+# compiling anything, with an error naming a missing Cargo.toml rather than a
+# missing repository — so the sibling is pinned here too.
+TRACE_FORMAT_REPO=https://github.com/metacraft-labs/codetracer-trace-format
+TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
+
+# Measured at the revisions above (2026-08-31, aarch64-darwin).
+#
+# ADVISORY, AND THE BUILD SCRIPT ONLY REPORTS ON THEM. These are not
+# reproducible byte-for-byte and that was measured, not assumed: building the
+# same revision twice from two different checkout DIRECTORIES gave 15862494 vs
+# 15862541 and 4618464 vs 4619415. rustc embeds source paths, so the length of
+# the build directory reaches the artifact. A rustc bump moves them further.
+#
+# So an exact-match assertion here would fail every deploy for reasons that
+# have nothing to do with the product, and the first person to meet that would
+# delete the check. What it is good for is ORDER OF MAGNITUDE: a module that
+# arrives at 4 KB is a build that emitted an error page, and that shows up
+# against these numbers instantly.
+#
+# The check that actually protects a visitor is elsewhere and is exact:
+# `ci/test/web_deploy_guard.nim` compares the size the entry document DECLARES
+# against the file in the publish directory, and both come from the same
+# assembly run — so it catches a stale document over fresh bytes, which is the
+# failure that reached production in the sibling campaign.
+EXPECT_COMPILER_BYTES=15862494
+EXPECT_TRACER_BYTES=4618464

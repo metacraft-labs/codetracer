@@ -12,7 +12,7 @@ suite "collaborative ViewModel M6 invite bootstrap":
     var invite = createInviteDialogResult(cgpDriver, "ct_invite_test_token")
 
     check invite.preset == cgpDriver
-    check invite.joinUrl == "https://web.codetracer.com/collab/join/ct_invite_test_token"
+    check invite.joinUrl == "https://ide.codetracer.com/collab/join/ct_invite_test_token"
     check "mutateSharedViewState" in invite.grants
     check "controlDebugger" in invite.grants
     check not invite.revoked
@@ -22,7 +22,7 @@ suite "collaborative ViewModel M6 invite bootstrap":
 
   test "integration_collab_native_load_trace_url_joins_invite":
     let bootstrap = resolveNativeInviteLoadTraceUrl(
-      "https://web.codetracer.com/collab/join/native-token-1",
+      "https://ide.codetracer.com/collab/join/native-token-1",
       proc(inviteToken: string): CollabJoinBootstrap =
         check inviteToken == "native-token-1"
         CollabJoinBootstrap(
@@ -33,7 +33,7 @@ suite "collaborative ViewModel M6 invite bootstrap":
           initialGrants: @["observe", "publishAwareness"],
           webUiUrl: buildCollabJoinUrl(inviteToken),
           nativeJoinUrl: buildCollabJoinUrl(inviteToken),
-          rendezvousUrl: "https://web.codetracer.com/api/v1/collab/rooms/room-1/rendezvous",
+          rendezvousUrl: "https://ide.codetracer.com/api/v1/collab/rooms/room-1/rendezvous",
           transportHints: @[
             "control-plane-only",
             "control-plane-rendezvous",
@@ -42,7 +42,7 @@ suite "collaborative ViewModel M6 invite bootstrap":
         ))
 
     check bootstrap.roomId == "room-1"
-    check bootstrap.nativeJoinUrl == "https://web.codetracer.com/collab/join/native-token-1"
+    check bootstrap.nativeJoinUrl == "https://ide.codetracer.com/collab/join/native-token-1"
     check "viewops-not-accepted" in bootstrap.transportHints
 
   test "test_collab_webui_invite_bootstrap_parses_join_document":
@@ -56,7 +56,7 @@ suite "collaborative ViewModel M6 invite bootstrap":
       "initialGrants": ["observe", "publishAwareness"],
       "webUiUrl": invite.joinUrl,
       "nativeJoinUrl": invite.joinUrl,
-      "rendezvousUrl": "https://web.codetracer.com/api/v1/collab/rooms/room-browser-a/rendezvous",
+      "rendezvousUrl": "https://ide.codetracer.com/api/v1/collab/rooms/room-browser-a/rendezvous",
       "transportHints": ["control-plane-only", "control-plane-rendezvous", "browser-channel", "viewops-not-accepted"],
     }
     let bootstrap = parseJoinBootstrap($bootstrapJson)
@@ -74,9 +74,9 @@ suite "collaborative ViewModel M6 invite bootstrap":
       "roomId": "room-late",
       "principalId": "local-user",
       "initialGrants": ["observe", "publishAwareness", "mutateSharedViewState"],
-      "webUiUrl": "https://web.codetracer.com/collab/join/late-token",
-      "nativeJoinUrl": "https://web.codetracer.com/collab/join/late-token",
-      "rendezvousUrl": "https://web.codetracer.com/api/v1/collab/rooms/room-late/rendezvous",
+      "webUiUrl": "https://ide.codetracer.com/collab/join/late-token",
+      "nativeJoinUrl": "https://ide.codetracer.com/collab/join/late-token",
+      "rendezvousUrl": "https://ide.codetracer.com/api/v1/collab/rooms/room-late/rendezvous",
       "transportHints": ["snapshot-required", "tail-required", "viewops-not-accepted"],
     }
     let bootstrap = parseJoinBootstrap($bootstrapJson)
@@ -100,9 +100,9 @@ suite "collaborative ViewModel M6 invite bootstrap":
       "traceIdentity": "trace-no-ci-viewops",
       "roomId": "room-no-ci-viewops",
       "initialGrants": ["observe"],
-      "webUiUrl": "https://web.codetracer.com/collab/join/no-ci-viewops-token",
-      "nativeJoinUrl": "https://web.codetracer.com/collab/join/no-ci-viewops-token",
-      "rendezvousUrl": "https://web.codetracer.com/api/v1/collab/rooms/room-no-ci-viewops/rendezvous",
+      "webUiUrl": "https://ide.codetracer.com/collab/join/no-ci-viewops-token",
+      "nativeJoinUrl": "https://ide.codetracer.com/collab/join/no-ci-viewops-token",
+      "rendezvousUrl": "https://ide.codetracer.com/api/v1/collab/rooms/room-no-ci-viewops/rendezvous",
       "transportHints": ["control-plane-only", "control-plane-rendezvous", "browser-channel", "viewops-not-accepted"],
     }
     let bootstrap = parseJoinBootstrap($bootstrapJson)
@@ -135,9 +135,9 @@ suite "collaborative ViewModel M6 invite bootstrap":
       "roomId": "room-late",
       "principalId": "local-user",
       "initialGrants": ["observe", "publishAwareness", "mutateSharedViewState"],
-      "webUiUrl": "https://web.codetracer.com/collab/join/late-token",
-      "nativeJoinUrl": "https://web.codetracer.com/collab/join/late-token",
-      "rendezvousUrl": "https://web.codetracer.com/api/v1/collab/rooms/room-late/rendezvous",
+      "webUiUrl": "https://ide.codetracer.com/collab/join/late-token",
+      "nativeJoinUrl": "https://ide.codetracer.com/collab/join/late-token",
+      "rendezvousUrl": "https://ide.codetracer.com/api/v1/collab/rooms/room-late/rendezvous",
       "transportHints": ["control-plane-only", "control-plane-rendezvous", "browser-channel", "viewops-not-accepted"],
       "snapshot": snapshot.toJson,
       "tail": [

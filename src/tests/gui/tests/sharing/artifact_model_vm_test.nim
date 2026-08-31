@@ -39,7 +39,7 @@ const
   # A canonical UUIDv7, in the exact form the recorder mints at record start.
   SampleRecordingId = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
   SampleDatasetId = "0194a000-1111-7abc-8def-000000000001"
-  SampleBaseApiUrl = "https://web.codetracer.com/api/v1/"
+  SampleBaseApiUrl = "https://ide.codetracer.com/api/v1/"
   SampleTenantId = "tenant-123"
 
 proc sampleMetadata(kind: ArtifactKind): ArtifactMetadata =
@@ -186,23 +186,23 @@ suite "AS-1 — an already-uploaded trace remains downloadable after migration":
 
   test "upload-url path is character-identical to the pre-AS-1 path":
     check artifactUploadUrlPath(SampleBaseApiUrl, SampleTenantId, akRecording) ==
-      "https://web.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
+      "https://ide.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
 
   test "upload-session path is character-identical to the pre-AS-1 path":
     check artifactUploadSessionPath(
         SampleBaseApiUrl, SampleTenantId, akRecording) ==
-      "https://web.codetracer.com/api/v1/tenants/tenant-123/traces/upload-session"
+      "https://ide.codetracer.com/api/v1/tenants/tenant-123/traces/upload-session"
 
   test "confirm-upload path is character-identical to the pre-AS-1 path":
     check artifactConfirmUploadPath(
         SampleBaseApiUrl, recordingArtifactRef(SampleRecordingId)) ==
-      "https://web.codetracer.com/api/v1/traces/" &
+      "https://ide.codetracer.com/api/v1/traces/" &
         SampleRecordingId & "/confirm-upload"
 
   test "download-url path is character-identical to the pre-AS-1 path":
     check artifactDownloadUrlPath(
         SampleBaseApiUrl, recordingArtifactRef(SampleRecordingId)) ==
-      "https://web.codetracer.com/api/v1/traces/" &
+      "https://ide.codetracer.com/api/v1/traces/" &
         SampleRecordingId & "/download-url"
 
   test "the upload-url body still carries recordingId, not artifactId":
@@ -226,14 +226,14 @@ suite "AS-1 — an already-uploaded trace remains downloadable after migration":
     # The exact shape the service hands out: /{orgSlug}/{recordingId}/download.
     # It carries NO kind, which is precisely why it survives — the id is
     # unique across kinds, so nothing about the link has to be rewritten.
-    let issued = "https://web.codetracer.com/acme/" &
+    let issued = "https://ide.codetracer.com/acme/" &
       SampleRecordingId & "/download"
     let resolved = parseArtifactShareUrl(issued)
     check resolved.orgSlug == "acme"
     check resolved.artifactId == SampleRecordingId
 
   test "a share URL without the trailing /download still resolves":
-    let issued = "https://web.codetracer.com/acme/" & SampleRecordingId
+    let issued = "https://ide.codetracer.com/acme/" & SampleRecordingId
     let resolved = parseArtifactShareUrl(issued)
     check resolved.orgSlug == "acme"
     check resolved.artifactId == SampleRecordingId
@@ -268,7 +268,7 @@ suite "AS-1 — an already-uploaded trace remains downloadable after migration":
     let unknownKind = ArtifactRef(
       artifactId: SampleDatasetId, kind: none(ArtifactKind))
     check artifactDownloadUrlPath(SampleBaseApiUrl, unknownKind) ==
-      "https://web.codetracer.com/api/v1/artifacts/" &
+      "https://ide.codetracer.com/api/v1/artifacts/" &
         SampleDatasetId & "/download-url"
 
 suite "AS-1 — an unknown kind is refused rather than stored opaquely":

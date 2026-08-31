@@ -59,8 +59,28 @@ type
 
     # -- process ------------------------------------------------------------
     capProcessSpawn
+      ## Launch *something* and get output and an exit status back. Present on
+      ## the web from NS3 onwards, because §3.1's web column for process
+      ## execution is "wasm modules in the tab" and a registry of them is a
+      ## real answer to "can this platform run a command". What the web does
+      ## not have is the next capability.
+    capProcessArbitraryPrograms
+      ## Any program the user names, as opposed to a declared set. The exact
+      ## analogue of `capFilesystemArbitraryPaths`, and split off for the same
+      ## reason: collapsing it into `capProcessSpawn` forces a single answer to
+      ## two different questions, and the web's answers differ — it can run
+      ## `nargo`, it can never run `docker` or a project's own shell script.
+      ##
+      ## Getting this wrong in either direction is a shipped defect rather than
+      ## a modelling quibble. Absent-for-both hides the Run button on a
+      ## platform that can run the tests; present-for-both offers a terminal
+      ## that refuses every command a user types into it.
     capProcessSignal
-      ## Terminate / interrupt a running child.
+      ## Stop a running child at all.
+    capProcessGracefulSignal
+      ## Ask it to stop *cooperatively* — SIGINT — as opposed to terminating
+      ## it. A web worker has no such form: `terminate()` is immediate and
+      ## uninterceptable, so a run stopped that way establishes nothing.
     capProcessInteractiveStdin
     capProcessTerminal
       ## A pty, as opposed to pipes.
@@ -192,7 +212,8 @@ proc staleDegradations*(profile: PlatformProfile): seq[PlatformCapability] =
 const desktopCapabilities*: CapabilitySet = {
   capFilesystemRead, capFilesystemWrite, capFilesystemWatch,
   capFilesystemTemp, capFilesystemArbitraryPaths,
-  capProcessSpawn, capProcessSignal, capProcessInteractiveStdin,
+  capProcessSpawn, capProcessArbitraryPrograms,
+  capProcessSignal, capProcessGracefulSignal, capProcessInteractiveStdin,
   capProcessTerminal,
   capVcsRead, capVcsWrite, capVcsRemote,
   capSettingsRead, capSettingsWrite, capSecretStore,
@@ -212,6 +233,18 @@ const desktopCapabilities*: CapabilitySet = {
 
 const webCapabilities*: CapabilitySet = {
   capFilesystemRead, capFilesystemWrite, capFilesystemTemp,
+  # NS3, §3.1: the web column for process execution is "wasm modules in the
+  # tab", so a tab with a populated module registry genuinely can spawn, and
+  # can stop what it spawned. The two it still lacks —
+  # `capProcessArbitraryPrograms` and `capProcessGracefulSignal` — carry the
+  # sentences that used to hang off these two.
+  #
+  # This is the *reference* profile, from the specification. The web
+  # instantiation narrows it: `web_platform.newWebPlatform` removes both again
+  # when its `WasmHost` registry is empty, since a platform that can run
+  # nothing must not claim it can run something. That narrowing is asserted in
+  # both directions.
+  capProcessSpawn, capProcessSignal,
   capVcsRead, capVcsWrite,
   capSettingsRead, capSettingsWrite,
   capClipboardWrite,
@@ -223,7 +256,8 @@ const webCapabilities*: CapabilitySet = {
 const containerCapabilities*: CapabilitySet = {
   capFilesystemRead, capFilesystemWrite, capFilesystemWatch,
   capFilesystemTemp, capFilesystemArbitraryPaths,
-  capProcessSpawn, capProcessSignal, capProcessInteractiveStdin,
+  capProcessSpawn, capProcessArbitraryPrograms,
+  capProcessSignal, capProcessGracefulSignal, capProcessInteractiveStdin,
   capProcessTerminal,
   capVcsRead, capVcsWrite, capVcsRemote,
   capSettingsRead, capSettingsWrite,
@@ -236,7 +270,8 @@ const containerCapabilities*: CapabilitySet = {
 const headlessCapabilities*: CapabilitySet = {
   capFilesystemRead, capFilesystemWrite, capFilesystemTemp,
   capFilesystemArbitraryPaths,
-  capProcessSpawn, capProcessSignal, capProcessInteractiveStdin,
+  capProcessSpawn, capProcessArbitraryPrograms,
+  capProcessSignal, capProcessGracefulSignal, capProcessInteractiveStdin,
   capVcsRead, capVcsWrite,
   capSettingsRead, capSettingsWrite}
 
@@ -269,11 +304,11 @@ let webProfile* = PlatformProfile(
       "it is refused; opening work from elsewhere goes through the import " &
       "path (upload or a shared link) rather than a path box"),
     # -- process ----------------------------------------------------------
-    DegradationRule(capability: capProcessSpawn, behaviour:
+    DegradationRule(capability: capProcessArbitraryPrograms, behaviour:
       "declared commands run as wasm modules in a worker; a project script " &
       "with no wasm build is reported as unavailable by name, with the " &
       "command shown, rather than failing silently mid-run"),
-    DegradationRule(capability: capProcessSignal, behaviour:
+    DegradationRule(capability: capProcessGracefulSignal, behaviour:
       "cancelling terminates the worker, which is abrupt but complete; a " &
       "cancelled run therefore establishes nothing and produces no report"),
     DegradationRule(capability: capProcessInteractiveStdin, behaviour:

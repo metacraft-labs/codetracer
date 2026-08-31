@@ -67,6 +67,9 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ./generated_code_anchors
+
+export generated_code_anchors
 
 type
   LowLevelCodeVM* = ref object of ViewModel
@@ -80,8 +83,21 @@ type
     errorMessage*: Signal[string]
     noirProject*: Signal[bool]
 
+    # -- Anchoring (NS4, Generated-Code-Listing.md §3.1/§4) --
+    anchors*: Signal[seq[MappingAnchor]]
+      ## The installed mapping. EMPTY until a producer's anchors survive
+      ## `validate`; see `setAnchors`.
+    anchorDefects*: Signal[seq[AnchorDefect]]
+      ## Why the last `setAnchors` was refused, empty when it was accepted.
+      ## Kept as state rather than logged, because §4's requirement is that a
+      ## suspension be VISIBLE — a pane that silently shows no mapping is
+      ## indistinguishable from one whose producer is broken.
+    syncSettings*: Signal[SyncSettings]
+
     # -- Derived state --
     isEmpty*: Memo[bool]
+    hasAnchors*: Memo[bool]
+    anchorsRejected*: Memo[bool]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -162,9 +178,19 @@ proc clearInstructions*(vm: LowLevelCodeVM) =
   ## Reset the row list and the active-offset / error signals.  Called
   ## when starting a fresh asm-load so the previous run's rows do not
   ## bleed into the next.
+  ##
+  ## THE ANCHORS GO WITH THE ROWS.  Anchors are ranges of generated-row
+  ## INDICES, so a mapping outliving the listing it was produced for still
+  ## covers rows 0..n of whatever replaces it, and every synchronisation
+  ## decision it makes would be confidently wrong rather than suspended —
+  ## `Generated-Code-Listing.md` §4's exact failure.  The recorded defects go
+  ## too: they describe the previous artefact's producer, and leaving them set
+  ## would make the next artefact look rejected.
   vm.instructions.val = @[]
   vm.activeOffset.val = NO_ACTIVE_OFFSET
   vm.errorMessage.val = ""
+  vm.anchors.val = @[]
+  vm.anchorDefects.val = @[]
 
 proc loadAsmFor*(vm: LowLevelCodeVM; path: string; functionName: string;
                  key: string = ""; forceReload: bool = false) =
@@ -202,6 +228,79 @@ proc jumpToInstruction*(vm: LowLevelCodeVM; instr: LowLevelInstruction) =
   discard vm.store.backend.send("ct/asm-instruction-jump", args)
 
 # ---------------------------------------------------------------------------
+# Anchoring
+#
+# The pane's half of `generated_code_anchors`. The model decides what a mapping
+# may claim; this decides what the panel DOES with a mapping that claims it —
+# and the answer for a defective one is: refuse it, and say why.
+# ---------------------------------------------------------------------------
+
+proc setAnchors*(vm: LowLevelCodeVM; anchors: seq[MappingAnchor];
+                 support: ArtefactSupport): bool {.discardable.} =
+  ## Install a producer's anchors, or REFUSE them.
+  ##
+  ## Returns true when they were installed. A defective set is not installed
+  ## partially and not installed at all: `validate` catches claims that are
+  ## wrong by construction, and a pane showing the valid half of a mapping it
+  ## knows to be broken is making the same confident-wrong-answer error §4
+  ## warns about, only over fewer rows.
+  ##
+  ## The refusal is RECORDED, not just returned. `anchorDefects` drives the
+  ## pane's own "the mapping for this artefact was rejected" state; a caller
+  ## that ignores the bool still cannot end up with a silently empty listing
+  ## that looks like an artefact with no debug info.
+  let defects = validate(anchors, support)
+  if defects.len > 0:
+    vm.anchors.val = @[]
+    vm.anchorDefects.val = defects
+    return false
+  vm.anchors.val = anchors
+  vm.anchorDefects.val = @[]
+  true
+
+proc clearAnchors*(vm: LowLevelCodeVM) =
+  ## Drop the mapping and any recorded refusal. Called when a fresh artefact
+  ## is loaded, so a previous function's anchors cannot be synchronised
+  ## against the current listing — rows would still be covered and the
+  ## decisions would be confidently wrong.
+  vm.anchors.val = @[]
+  vm.anchorDefects.val = @[]
+
+proc setSyncEnabled*(vm: LowLevelCodeVM; enabled: bool) =
+  ## §3's toggle. Defaults on; turning it off yields `soDisabled` rather than
+  ## `soSuspended`, because "you turned it off" and "the mapping ran out here"
+  ## are different things for the pane to show.
+  vm.syncSettings.val = SyncSettings(enabled: enabled)
+
+proc syncFromGeneratedRow*(vm: LowLevelCodeVM; row: int): SyncDecision =
+  ## Generated row -> source, against the installed anchors.
+  syncFromGenerated(vm.anchors.val, row, vm.syncSettings.val)
+
+proc syncFromSourceLine*(vm: LowLevelCodeVM; path: string;
+                         line: int): SyncDecision =
+  ## Source line -> generated, the same rule in the other direction.
+  syncFromSource(vm.anchors.val, path, line, vm.syncSettings.val)
+
+proc sourcesFor*(vm: LowLevelCodeVM; decision: SyncDecision): seq[SourceRegion] =
+  ## Every contributing source for an aligned decision — a seq for all rungs,
+  ## so a caller wanting "the" source has to notice it may get more than one.
+  counterpartSources(vm.anchors.val, decision)
+
+proc rowsFor*(vm: LowLevelCodeVM; decision: SyncDecision): (int, int) =
+  ## The inclusive generated row range to reveal for an aligned decision.
+  counterpartRows(vm.anchors.val, decision)
+
+proc fidelityAtRow*(vm: LowLevelCodeVM; row: int): MappingFidelity =
+  ## The rung covering a generated row, for the pane's per-row fidelity badge.
+  ## A row no anchor covers is `mfUnmapped` — the same answer as an anchored
+  ## row with no debug info, and correctly so: in both cases nothing is known
+  ## about this row's source.
+  for a in vm.anchors.val:
+    if row >= a.generatedFirst and row <= a.generatedLast:
+      return a.fidelity
+  mfUnmapped
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -216,9 +315,21 @@ proc createLowLevelCodeVM*(store: ReplayDataStore): LowLevelCodeVM =
     let address = createSignal(0)
     let errorMessage = createSignal("")
     let noirProject = createSignal(false)
+    let anchors = createSignal(newSeq[MappingAnchor]())
+    let anchorDefects = createSignal(newSeq[AnchorDefect]())
+    let syncSettings = createSignal(DefaultSyncSettings)
 
     let isEmpty = createMemo[bool] proc(): bool =
       instructions.val.len == 0
+
+    let hasAnchors = createMemo[bool] proc(): bool =
+      anchors.val.len > 0
+
+    # DISTINCT from `not hasAnchors`, and that is the point: an artefact with
+    # no debug info and a producer whose mapping was REFUSED both leave the
+    # anchor list empty, and the pane must not show them the same way.
+    let anchorsRejected = createMemo[bool] proc(): bool =
+      anchorDefects.val.len > 0
 
     LowLevelCodeVM(
       store: store,
@@ -227,6 +338,11 @@ proc createLowLevelCodeVM*(store: ReplayDataStore): LowLevelCodeVM =
       address: address,
       errorMessage: errorMessage,
       noirProject: noirProject,
+      anchors: anchors,
+      anchorDefects: anchorDefects,
+      syncSettings: syncSettings,
       isEmpty: isEmpty,
+      hasAnchors: hasAnchors,
+      anchorsRejected: anchorsRejected,
       disposeProc: dispose,
     )

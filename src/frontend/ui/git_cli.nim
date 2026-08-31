@@ -18,9 +18,9 @@ import ui_imports
 # what makes `ui/vcs.nim` and `ui/unified_diff.nim` host-free too: they reach
 # the host only through this file.
 from ../platform_host import
-  ctPlatform, ctAwaitSync, can, capFilesystemRead, capProcessSpawn,
-  capVcsWrite, ProcessSpec, Platform, PlatformOutcome, process, fs, vcs,
-  succeededExit, `$`
+  ctPlatform, ctAwaitSync, can, canAll, capFilesystemRead, capProcessSpawn,
+  capProcessArbitraryPrograms, capVcsWrite, ProcessSpec, Platform,
+  PlatformOutcome, process, fs, vcs, succeededExit, `$`
 
 const gitTimeoutMs = 5000
 
@@ -38,13 +38,27 @@ proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
   ## removes the direct host call and is what makes `ui/vcs.nim` and
   ## `ui/unified_diff.nim` host-free for free — they only ever reached the host
   ## through this function. It does not yet make the web instantiation work:
-  ## a tab has no git binary, so `capProcessSpawn` is absent there and every
-  ## call below degrades to "". The remaining work is mapping `ui/vcs.nim`'s
-  ## fifteen git invocations onto `VcsFacade`'s operations, which is what lets
-  ## the browser serve them from a real object store (Noir-Studio.md §6.2a).
-  ## `viewmodel/platform/vcs.nim` already defines every operation that mapping
-  ## needs.
-  if not ctPlatform().can(capProcessSpawn):
+  ## a tab has no git binary, so every call below degrades to "". The
+  ## remaining work is mapping `ui/vcs.nim`'s fifteen git invocations onto
+  ## `VcsFacade`'s operations, which is what lets the browser serve them from a
+  ## real object store (Noir-Studio.md §6.2a). `viewmodel/platform/vcs.nim`
+  ## already defines every operation that mapping needs.
+  ##
+  ## ## Why the guard names TWO capabilities
+  ##
+  ## It used to be `capProcessSpawn` alone, with "a tab has no git binary" as
+  ## its stated meaning. NS3 made that stop being true without changing a type:
+  ## §3.1's web column is "wasm modules in the tab", so a web platform with a
+  ## populated module registry genuinely HAS `capProcessSpawn` — and this guard
+  ## would have opened, sent `git` to a registry that has no such module, and
+  ## turned a capability check into a per-call refusal. The sentence in the
+  ## comment would have been false while every signature still lined up.
+  ##
+  ## `capProcessArbitraryPrograms` is the one that carries the old meaning:
+  ## can this platform run a program it was not built knowing about? Both are
+  ## named rather than only the second, because "spawn at all" and "spawn
+  ## anything" are the two separate questions this call needs answered yes.
+  if not ctPlatform().canAll({capProcessSpawn, capProcessArbitraryPrograms}):
     return ("", false)
   var argv: seq[string] = @[]
   for arg in args:
@@ -147,12 +161,36 @@ proc isGitRepository*(cwd: cstring): bool =
   return result_str == cstring"true"
 
 proc gitWorkingDirectory*(data: Data): cstring =
-  ## Working directory for git commands: the opened project folder, falling
-  ## back to the process's own.
+  ## Working directory for git commands: the opened project folder, or empty to
+  ## mean **the platform's default**.
+  ##
+  ## ## This is a behaviour fix, not only a migration
+  ##
+  ## The fallback used to be `electronProcess.cwd()`, and `ProcessSpec.workingDir`
+  ## says that is wrong on every platform rather than merely unavailable on the
+  ## web: "Empty means the platform's default, which on the web is the project
+  ## store root and in a container is the workspace root. **Never the front
+  ## end's own cwd — a front end has no business having one.**" A renderer
+  ## reading `process.cwd()` is asserting that the process's directory is the
+  ## right place to run a user's git command, which is a fact about how the app
+  ## was launched, not about the project.
+  ##
+  ## **On the desktop the observable behaviour is unchanged**, and that is
+  ## checked rather than assumed: every consumer passes this value into a git
+  ## command's `cwd` and none of them branches on its emptiness or displays it,
+  ## `runGit` turns it into `ProcessSpec.workingDir`, and both desktop
+  ## instantiations resolve an empty one to the process's own directory —
+  ## `osproc.startProcess` by definition, and node's `execFileSync` through
+  ## `cwd: (# || undefined)`. So the deleted line was computing by hand exactly
+  ## what the platform already does. `test_empty_working_dir_is_the_platforms_default_not_the_callers_cwd`
+  ## in `test_platform_desktop_native.nim` pins that, in both directions.
+  ##
+  ## What changes is the web, where there is no process directory to read and
+  ## the store root is the right answer — and which platform decides.
   let folder = data.startOptions.folder
   if not folder.isNil and folder.len > 0:
     return folder
-  electronProcess.cwd()
+  cstring""
 
 proc gitRepositoryRoot*(data: Data): cstring =
   ## Absolute path of the git work tree root.

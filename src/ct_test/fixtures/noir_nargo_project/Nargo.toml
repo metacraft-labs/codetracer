@@ -1,0 +1,7 @@
+[package]
+name = "ct_test_noir_fixture"
+type = "bin"
+authors = [""]
+compiler_version = ">=0.30.0"
+
+[dependencies]

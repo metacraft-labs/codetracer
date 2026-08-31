@@ -1701,6 +1701,115 @@ jobs:
         # reading it too late.
         run: nix develop .#devShells.x86_64-linux.default --command just test-hostfree
 
+      - name: Compile the platform facade's host instantiations
+        # Noir-Studio.milestones.org NS2. The sibling of the gate above, and
+        # for a hole the gate above cannot see: `test-hostfree` proves that
+        # front-end code does not REACH the host, and this proves that the two
+        # modules whose whole job is reaching the host still BUILD.
+        #
+        # Nothing compiled them. `host/web_browser.nim` and
+        # `host/desktop_electron.nim` are `{.error.}` on the C backend so
+        # `test-vm` cannot, and no JS suite imports either, because
+        # `platform/web_platform.nim` was built to need neither. Both facts are
+        # correct; together they left these two uncompiled by any lane, and
+        # `web_browser.nim` duly reached `dev` in a state that does not compile
+        # at all while every suite stayed green.
+        #
+        # Placed before `test-vm` for the same reason `test-hostfree` is: this
+        # takes seconds and answers "does it build for anyone", which is not
+        # worth learning after twenty minutes of suites.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-host-instantiations
+
+      - name: Build and boot the web bundle
+        # NS2's second build. The lane above proves the web instantiation's
+        # modules compile; this proves they LINK into a bundle that contains no
+        # node module loader and that `boot()` actually completes — the
+        # sequence §4.2 and §4.5 specify, which until now nothing executed
+        # because nothing called it.
+        #
+        # Runs under node rather than a browser deliberately: with no OPFS the
+        # boot takes the in-memory path, which is a real product state (a user
+        # with storage disabled) and is asserted to announce the coming loss
+        # before editing is possible.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle
+
+      - name: Compile the renderer for a browser (both arms)
+        # THE THING NOTHING IN CI COMPILED. The two steps above cover the web
+        # instantiation's modules and its bundle; neither touches the renderer,
+        # and until now nothing else did either. `ci/lib/test-lane-files.sh`
+        # recorded why: every JS lane passes `-d:nodejs`, and the renderer does
+        # not compile under it — `kdom`'s `createElementNS` is a browser
+        # binding. The only gate was the tup product build, at package time.
+        #
+        # `dev` duly carried a renderer entry point that did not compile.
+        # Commit 333ec709 removed `ui_imports`' `electron_lib` re-export after
+        # auditing its symbols for uses "anywhere under `ui/`"; `ui_js.nim` is
+        # not under `ui/` and read `inElectron` from it. Every suite stayed
+        # green — the `web_browser.nim` shape again, one directory over.
+        #
+        # This step runs both arms on the `js-browser` backend (`nim js`, no
+        # `-d:nodejs`, compile-only) and then the property gate, which proves
+        # the arms are genuinely different builds and that the web one links no
+        # Electron. It needs the isonim tailwind placeholder this job's
+        # `setup-isonim-siblings` step already seeds.
+        #
+        # Before `test-vm` for the same reason the two steps above are: it
+        # answers "does the product's front end build at all", which nobody
+        # wants to learn after twenty minutes of suites.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
+
+      - name: Assemble the web bundle's runtime assets (NS3 delivery)
+        # NS3 was never short of a LOADER. `host/web_browser.nim` carries the
+        # registry, the worker transport and `newBrowserWasmHost`, all tested,
+        # and its own doc comment says nothing calls them because "the worker
+        # script that instantiates the Noir modules ... is not in the bundle".
+        # The gap was delivery, and this step is what closes it: the renderer
+        # (newly buildable, see the step above), the web entry point and the
+        # browser worker script are assembled and checked.
+        #
+        # The asset list is NOT in the shell script. `webRuntimeAssets()` in
+        # `platform/web_deployment.nim` is the one declaration, compiled on both
+        # backends and asserted by `test_platform_web.nim`; the gate reads it
+        # through a small Nim program so a third hand-written copy cannot drift.
+        #
+        # The two Noir wasm modules are ~16 MB and ~4.6 MB and are not in the
+        # repo, so their placement SKIPS LOUDLY here — printing the deployment
+        # consequence the manifest declares for each — rather than passing
+        # silently. Everything else is assembled and asserted.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle-assets
+
+      - name: Renderer host-reach budget (NS1 residual 1)
+        # The migration that stands between the web bundle and a rendered pane,
+        # as a ratchet rather than a plan. Fails when a module gains a host
+        # call, and equally when one loses a host call without the budget being
+        # lowered — an unrecorded migration is one that can be silently undone.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-host-budget
+
+      - name: Renderer pane parity (NS2's second half)
+        # "A pane added to one platform appears in the other" — the half of
+        # `test_one_codebase_two_platforms` that had no gate, because comparing
+        # two pane sets needs two bundles and until this week there was one.
+        # The registry is read from `makeComponent`, presence is measured in the
+        # two BUILT bundles, and the kinds are a budget that fails both ways: a
+        # new pane nobody decided about, and a budget entry the product no
+        # longer dispatches.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
+
+      - name: Noir Studio signed out (NS7a / Identity ID3)
+        # `test_development_loop_needs_no_account`, as a property of the built
+        # product: the arm that carries write, compile, run, record and export
+        # reaches NO network primitive, so there is no request for a token to
+        # ride on. The renderer arm's egress is budgeted per surface — lsp,
+        # visual-replay, agentic, collab — and fails in both directions, which
+        # is what catches ID3's named erosion ("one personalisation, one
+        # counter"; a counter is a fetch).
+        #
+        # This step runs the gate AND its mutation proof: eleven mutations,
+        # each verified to redden the assertion written for it. It lives in
+        # `viewmodel-tests`, which ci/verdict/required-jobs.txt already
+        # requires, rather than in a new job that file does not know about.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-noir-studio-signed-out
+
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
@@ -2232,7 +2341,6 @@ jobs:
               --icon CodeTracer.app 150 200 \
               --app-drop-link 450 200 \
               --sandbox-safe \
-              --hdiutil-retries 15 \
               CodeTracer.dmg \
               "$staging"
           '
@@ -2423,11 +2531,44 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          ENDPOINT: ${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }}
+          BUCKET: ${{ vars.R2_CODETRACER_BUCKET_NAME }}
         run: |
           set -euo pipefail
-          nix develop .#devShells.x86_64-linux.default --command gpg --armor --detach-sign CodeTracer-Setup.exe
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-Setup.exe s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-win-x64.exe --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-Setup.exe.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-win-x64.exe.asc --checksum-algorithm CRC32
+          aws_cmd() {
+            nix develop .#devShells.x86_64-linux.default --command \
+              aws --endpoint-url="$ENDPOINT" "$@"
+          }
+          nix develop .#devShells.x86_64-linux.default --command \
+            gpg --armor --detach-sign CodeTracer-Setup.exe
+
+          # SELF-PROMOTION: this leg publishes the win installer to the
+          # per-`main`-build key AND to the `-<version>-` / `-latest-` release
+          # keys itself, rather than leaving the latter to create-release.
+          #
+          # The design once had create-release promote `-main-` -> `-latest-`/
+          # `-<tag>-` for every artifact (see its "Windows installer" block). But
+          # create-release is gated only on the four Linux/darwin build jobs via
+          # push-tag, while this Windows leg runs on the much slower eph-win-x64
+          # runner (queue + the full env.ps1 DIY toolchain bootstrap + the NSIS
+          # build). create-release therefore finishes, and runs its TOLERANT win
+          # promotion, long before `CodeTracer-main-win-x64.exe` exists — so the
+          # Windows installer was always skipped and only picked up "next
+          # release". Promoting here removes that one-release lag so
+          # get.codetracer.com/pwsh (which downloads CodeTracer-latest-win-x64.exe)
+          # resolves in the same release. Every push to `main` is a release, so
+          # advancing `-latest-` here matches the release model.
+          YEAR=$(grep 'CodeTracerYear\*' src/ct/version.nim | sed 's/.*= //' | tr -d '[:space:]')
+          MONTH=$(printf '%02d' "$(grep 'CodeTracerMonth\*' src/ct/version.nim | sed 's/.*= //' | tr -d '[:space:]')")
+          BUILD=$(grep 'CodeTracerBuild\*' src/ct/version.nim | sed 's/.*= //' | tr -d '[:space:]')
+          VERSION="$YEAR.$MONTH.$BUILD"
+
+          for slot in "${{ github.ref_name }}" "$VERSION" latest; do
+            aws_cmd s3 cp CodeTracer-Setup.exe \
+              "s3://$BUCKET/CodeTracer-$slot-win-x64.exe" --checksum-algorithm CRC32
+            aws_cmd s3 cp CodeTracer-Setup.exe.asc \
+              "s3://$BUCKET/CodeTracer-$slot-win-x64.exe.asc" --checksum-algorithm CRC32
+          done
 
   dmg-lib-check:
     # CIP-5 Wave 4: migrated to the self-hosted nix-darwin runner. The DIY
@@ -2647,7 +2788,14 @@ jobs:
         # omission is invisible in review because `nix develop` reads as
         # self-contained. `ci/test/nix-provisioning-test.sh` now fails when a
         # job runs nix without provisioning it.
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
+        #
+        # This step (and Install AWS CLI below) used to be gated to `refs/tags/`
+        # while the Download AppImage + Smoke-test steps that DEPEND on them were
+        # not, so on every branch (main/dev) run those two ran without aws/nix
+        # installed and the job died at `aws: command not found` — the AppImage's
+        # off-nix portability went untested. Ungate them so the prerequisites
+        # match their consumers and the 5-distro smoke test actually runs against
+        # the `-<ref>-` AppImage that appimage-build just produced.
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
@@ -2655,7 +2803,6 @@ jobs:
           gh-token: ${{ github.token }}
 
       - name: Install AWS CLI
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
         # nixpkgs' awscli2 into the runner's nix profile (on PATH for the
         # download step) — snap/apt are unavailable on the NixOS runner.
         run: nix profile install nixpkgs#awscli2

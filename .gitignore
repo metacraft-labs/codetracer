@@ -357,6 +357,14 @@ src/ct/online_sharing/test_mcr_enrichment
 
 # Nim JS compilation output in ViewModel layer
 src/frontend/viewmodel/**/*.js
+# ...but `host/wasm_worker_browser.js` is HAND-WRITTEN SOURCE, not output. It is
+# the Web Worker script `host/web_browser.nim`'s `newBrowserWasmHost` starts by
+# URL, and it lives beside that module because the two are one mechanism: the
+# Nim side owns the protocol and the transport, this file is what runs on the
+# other end of it. Without this exception the rule above -- which is about
+# `nim js` artefacts -- would silently swallow a required runtime asset, and
+# the bundle would ship without the only thing that can load a wasm module.
+!src/frontend/viewmodel/host/wasm_worker_browser.js
 src/frontend/renderer.js
 src/frontend/types.js
 

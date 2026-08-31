@@ -81,6 +81,15 @@ lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
 
+# A browser lane is compile-only BY CONSTRUCTION, not by the caller remembering
+# a flag. Its output needs a browser: run under node it would die on `document`
+# — or, far worse, load far enough to report nothing and be scored `OK (0
+# tests)` by a runner that only knows "exit status 0". Forcing it here means
+# `just`, CI and a developer typing the command by hand cannot disagree.
+if [ "${backend}" = "js-browser" ]; then
+	compile_only=1
+fi
+
 mkdir -p test-logs "${cache_root}"
 
 echo "=== ${lane}: $(test_lane_description "${lane}") ==="
@@ -107,6 +116,14 @@ while read -r f; do
 		# .setProgramResult` is undeclared on the JS target, `std/unittest`
 		# substitutes a no-op, and node exits 0 even when a case fails.
 		compile_cmd=(nim js -d:nodejs --hints:off --warnings:off
+			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
+		artifact="${cache}/${name}.js"
+	elif [ "${backend}" = "js-browser" ]; then
+		# `nim js` WITHOUT `-d:nodejs`. See test_lane_backend's header: the
+		# define is required by every lane that RUNS its output under node, and
+		# is fatal for a browser module — `kdom`'s `createElementNS` is absent
+		# under it, so the renderer does not compile at all.
+		compile_cmd=(nim js --hints:off --warnings:off
 			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
 	else

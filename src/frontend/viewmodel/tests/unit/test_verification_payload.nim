@@ -6,21 +6,31 @@
 ##
 ## Verno's solver back end (`venir`) is Linux-only, so no run on this machine
 ## can produce a `proved` or a `not-proved`. That constraint is inherited from
-## VN-M3 and is not new. **What is new, and is not about this machine at all:**
+## VN-M3 and still stands.
 ##
-## > `venir` returns no counterexample model. Its entire output surface is four
-## > JSON shapes carrying five strings between them
-## > (`blocksense-network/Venir`, `src/stub_structs.rs`), and the
-## > `Option<Model>` that `air::context::ValidityResult::Invalid` hands it is
-## > discarded before its reporter ever sees it.
+## **A second constraint stood here through VN-M4 and has been removed** (VN-M5,
+## 2026-08-30). It read: `venir` returns no counterexample model, on any
+## platform. That was true and the reason was never `venir` — `air`'s
+## `smt_get_model` already parsed the solver's whole `(get-model)` response,
+## used it to find the failing label, and dropped it three lines later.
+## `blocksense-network/verus-lib` `vn-m5/counterexample-model` keeps it, `venir`
+## writes it, and Verno turns it into a `SolverCounterexampleTrace`.
 ##
-## So a Verno counterexample *on Linux, today* is a located obligation with
-## `model.status == "unavailable"` and a stated reason. That is what
-## `not_proved_assertion.json` is. The one fixture carrying model values,
-## `not_proved_with_model.json`, is hand-authored and labelled as hypothetical
-## in its own contents — `producer.version` is `"0.0.0-hypothetical"` and
-## `run.workspace_root` reads `NOT A RECORDING`, both asserted below so they
-## cannot be tidied away.
+## What that changes here, and what it does not:
+##
+## * `not_proved_assertion.json` is unchanged. It is still what a Linux run of
+##   the *old* `venir` would write, and the checks that pin its
+##   `model.status == "unavailable"` still pass, because a producer that cannot
+##   see a model must still say so.
+## * `not_proved_with_model.json` is unchanged **and still hand-authored**. The
+##   model was only ever half of what made it hypothetical; the other half is the
+##   envelope, and no run of `verno` with `venir` has happened on any machine
+##   yet. Its two markers — `producer.version` is `"0.0.0-hypothetical"` and
+##   `run.workspace_root` reads `NOT A RECORDING` — are still asserted below.
+## * `verno_emitted_solver_model.json` is new, and is the first document in this
+##   repository whose **model was produced by a solver**. It is Verno's own
+##   emitter output, and its envelope is synthetic and says so, with the same
+##   `NOT A RECORDING` marker asserted the same way.
 ##
 ## Test by test:
 ##
@@ -73,6 +83,13 @@ const
   NotProvedPayload = staticRead("../fixtures/verno/payload/not_proved_assertion.json")
   NotProvedWithModelPayload =
     staticRead("../fixtures/verno/payload/not_proved_with_model.json")
+  ## The document Verno's own emitter produces for a payload carrying a solver
+  ## model. Deliberately outside the shared corpus: it is not something the two
+  ## sides agree about, it is one side's output checked by the other. Its model
+  ## is a real z3 4.15.1 result; everything around the model is not. See
+  ## `../fixtures/verno/counterexample/PROVENANCE.md`.
+  VernoEmittedSolverModelPayload =
+    staticRead("../fixtures/verno/counterexample/verno_emitted_solver_model.json")
   TimedOutPayload = staticRead("../fixtures/verno/payload/timed_out_rlimit.json")
 
   RejectedMissingRunTrust =
@@ -356,11 +373,12 @@ suite "VN-M4 test_a_counterexample_payload_round_trips":
         echo name, " was refused: ", outcome.problems.join("; ")
       check outcome.ok
 
-  test "the payload a real Verno run can produce today has no model, and says so":
-    # This is the honest state of the world, asserted so it cannot drift
-    # unnoticed. `not_proved_assertion.json` is what a Linux run *would*
-    # produce: a located obligation, a counterexample object, and a model that
-    # states its own absence with the reason.
+  test "a producer that cannot see a model says so, and is not offered as steppable":
+    # `not_proved_assertion.json` is what a run of the *old* `venir` writes: a
+    # located obligation, a counterexample object, and a model that states its
+    # own absence with the reason. That case has not gone away — a `venir` older
+    # than VN-M5 still produces exactly this — and the gate must keep answering
+    # `false` for it.
     let payload = decoded(NotProvedPayload)
     let trace = counterexampleFor(payload, "f0").get
     check trace.model.status == pmsUnavailable
@@ -900,3 +918,144 @@ suite "VN-M4 the decoder's failure values are stated, not inherited":
     # a zero-byte file that exists is a producer that failed halfway.
     let refused = decodeVerificationPayload("")
     check not refused.ok
+
+# ---------------------------------------------------------------------------
+# VN-M5: a solver's model crosses the boundary
+# ---------------------------------------------------------------------------
+
+suite "VN-M5 the solver's model survives the producer boundary":
+  ## Every check here reads `verno_emitted_solver_model.json`, which **Verno's
+  ## own emitter produced** and whose model **a real z3 produced**. Neither half
+  ## was written on this side. A fixture written here alongside the decoder
+  ## would agree with the decoder whatever the producer actually emits, and the
+  ## one failure this product cannot ship is a confident answer that is
+  ## sometimes wrong.
+  ##
+  ## The query behind the model has a *unique* failing execution:
+  ##   n = 42;  total = n + 1 = 43;  doubled = total * 2 = 86;  assert doubled < 0
+  ## so "the values are right" is a comparison against an execution worked out
+  ## by hand, not against whatever the solver felt like returning.
+
+  test "it decodes, and it is the shape Verno emits":
+    let payload = decoded(VernoEmittedSolverModelPayload)
+    check payload.outcome == voNotProved
+    check payload.findings.len == 2
+    check payload.counterexampleTraces.len == 1
+    # The trace names the second finding, not the first. A payload with one
+    # finding could not tell "the finding named" from "the only finding".
+    check payload.counterexampleTraces[0].findingId == "f1"
+    check payload.findings[1].id == "f1"
+    check payload.findings[1].message == "assertion failed"
+
+  test "hasSteppableCounterexample answers true — VN-M5's gate opens":
+    # The affordance is gated on this and not on the presence of a
+    # counterexample object, because a counterexample with no model and no
+    # steps is a located obligation and nothing more. Both arms are here:
+    # the payload with a model opens the gate, the one without keeps it shut.
+    check hasSteppableCounterexample(decoded(VernoEmittedSolverModelPayload))
+    check not hasSteppableCounterexample(decoded(NotProvedPayload))
+    check modelIsAbsentBecause(decoded(VernoEmittedSolverModelPayload)) == ""
+    check modelIsAbsentBecause(decoded(NotProvedPayload)).len > 0
+
+  test "the values are the values the failing execution computes":
+    let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    check trace.model.status == pmsComplete
+    check trace.model.absentReason == ""
+
+    # The inputs the solver chose.
+    check trace.steps[0].kind == cskAssumption
+    check trace.steps[0].bindings.len == 1
+    check trace.steps[0].bindings[0].name == "n"
+    check trace.steps[0].bindings[0].value == "42"
+    check trace.steps[0].bindings[0].localId == some(1)
+    check trace.steps[0].bindings[0].typeName == "Int"
+
+    # After `total = n + 1`, with `doubled` still at its pre-assignment value.
+    check trace.steps[1].bindings[0].name == "total"
+    check trace.steps[1].bindings[0].value == "43"
+    check trace.steps[1].bindings[1].name == "doubled"
+    check trace.steps[1].bindings[1].value == "0"
+
+    # After `doubled = total * 2`.
+    check trace.steps[2].bindings[0].value == "43"
+    check trace.steps[2].bindings[1].name == "doubled"
+    check trace.steps[2].bindings[1].value == "86"
+
+    # And 86 is why `doubled < 0` failed.
+    check parseInt(trace.steps[2].bindings[1].value) >= 0
+
+  test "the names are the developer's, not the encoding's":
+    # The AIR names were `n~1@`, `total~2@`, `doubled~3@`. Anything carrying a
+    # `~` or an `@` here would mean the producer handed the encoding's
+    # vocabulary to a developer.
+    let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    # Positive control on the set before asserting a property of every member.
+    check trace.model.bindings.len == 5
+    for binding in trace.model.bindings:
+      check '~' notin binding.name
+      check '@' notin binding.name
+      check binding.name in ["n", "total", "doubled"]
+      check binding.localId.isSome
+
+  test "the steps are in the order the program reaches them":
+    # `after_doubled` sorts *before* `after_total`, so a producer that sorted
+    # its program points — or iterated a hash map — would step the program
+    # backwards and this check would see it.
+    let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    check trace.steps.len == 4
+    check trace.steps[1].description.contains("after_total")
+    check trace.steps[2].description.contains("after_doubled")
+    for i, step in trace.steps:
+      check step.index == i
+
+  test "the first violated obligation is marked exactly once":
+    let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    check trace.steps.len == 4
+    var violations = 0
+    for step in trace.steps:
+      if step.kind == cskViolation:
+        inc violations
+    check violations == 1
+    check trace.steps[^1].kind == cskViolation
+    check trace.hasViolatedObligation
+    check trace.violatedObligation.kind == pokAssertion
+    check trace.violatedObligation.rawKind == "assertion failed"
+
+  test "a solver model is never presented as a recorded execution":
+    let payload = decoded(VernoEmittedSolverModelPayload)
+    let trace = payload.counterexampleTraces[0]
+    check not trace.isRecordedExecution
+    check trace.trust.class == ptcDiagnosticOnly
+    check trace.trust.reason.len > 0
+    # And the same document with that one field flipped is refused, by name —
+    # so the check above is a property of the decoder and not of this fixture.
+    var doc = parseJson(VernoEmittedSolverModelPayload)
+    doc["counterexample_traces"][0]["is_recorded_execution"] = %true
+    let refused = decodeVerificationPayload($doc)
+    check not refused.ok
+    check anyProblemContains(refused.problems, "claims to be a recorded execution")
+
+  test "the envelope says in its own contents that it is not a recording":
+    # The same guard `not_proved_with_model.json` carries, for the same reason
+    # and asserted the same way: the model inside this document is real and the
+    # run around it is not, and a file that looks more like a recording than it
+    # is would be worse than one that carries no model at all.
+    let payload = decoded(VernoEmittedSolverModelPayload)
+    check payload.workspaceRoot.contains("NOT A RECORDING")
+    check payload.solverInvoked
+
+  test "a step with no location says nothing rather than guessing one":
+    # The snapshot-to-span map (`SnapPos`) is built inside `vir`/`rust_verify`
+    # and does not cross the `venir` boundary, so a program point has values and
+    # no position. A renderer must be able to tell that from "position 1:1".
+    let trace = decoded(VernoEmittedSolverModelPayload).counterexampleTraces[0]
+    # Positive control first. "every step has no location" is a universal
+    # quantification, and it is satisfied by a trace with no steps — see
+    # `Testing/Verification-Harness-Traps.md` trap 4. Without these two lines
+    # this check would stay green over a decoder that dropped every step.
+    check trace.steps.len == 4
+    check trace.model.bindings.len == 5
+    for step in trace.steps:
+      check not step.hasLocation
+    for binding in trace.model.bindings:
+      check not binding.hasLocation

@@ -132,6 +132,21 @@ impl std::error::Error for StepMapError {}
 pub struct StepMapNamespace {
     /// `path_id.0 → (line_number → ascending step_ids)`.
     by_path: HashMap<usize, HashMap<usize, Vec<StepId>>>,
+    /// M0/3 — `path_id.0 → line numbers in DESCENDING order`. The line-map
+    /// accessor [`Self::max_line_in_step_range`] walks lines from the highest
+    /// down and stops at the first one with a step in range, so it needs the
+    /// keys ordered; the `by_path` `HashMap` cannot supply that. Derived once at
+    /// parse — O(unique lines), no step-stream access.
+    lines_desc: HashMap<usize, Vec<usize>>,
+    /// M0/3 — total number of step ids across every `(path, line)` list, plus
+    /// the smallest and largest id seen. Together with the reader's step count
+    /// these are what [`Self::covers_all_steps`] checks before the line-map
+    /// accessor is allowed to answer.
+    total_step_ids: usize,
+    /// Smallest step id in the table (`i64::MAX` for an empty table).
+    min_step_id: i64,
+    /// Largest step id in the table (`i64::MIN` for an empty table).
+    max_step_id: i64,
 }
 
 /// Read a little-endian `u16` at `off`, bounds-checked.
@@ -186,6 +201,10 @@ impl StepMapNamespace {
         // ── Path table ──────────────────────────────────────────────────
         // Each entry: [path_id:u64][line_count:u32][lines_offset:u64] = 20 bytes.
         let mut by_path: HashMap<usize, HashMap<usize, Vec<StepId>>> = HashMap::with_capacity(path_count);
+        let mut lines_desc: HashMap<usize, Vec<usize>> = HashMap::with_capacity(path_count);
+        let mut total_step_ids = 0usize;
+        let mut min_step_id = i64::MAX;
+        let mut max_step_id = i64::MIN;
         for p in 0..path_count {
             let base = path_table_offset + p * 20;
             let path_id = read_u64(buf, base, "path_table.path_id")? as usize;
@@ -224,12 +243,29 @@ impl StepMapNamespace {
                         });
                     }
                 }
+                total_step_ids += step_ids.len();
+                if let (Some(first), Some(last)) = (step_ids.first(), step_ids.last()) {
+                    min_step_id = min_step_id.min(first.0);
+                    max_step_id = max_step_id.max(last.0);
+                }
                 by_line.insert(line, step_ids);
             }
+            // Descending line order for the M0/3 line-map accessor. The line
+            // entries were read in the spec's ascending order, so a reverse of
+            // the keys is enough — no sort.
+            let mut desc: Vec<usize> = by_line.keys().copied().collect();
+            desc.sort_unstable_by(|a, b| b.cmp(a));
+            lines_desc.insert(path_id, desc);
             by_path.insert(path_id, by_line);
         }
 
-        Ok(StepMapNamespace { by_path })
+        Ok(StepMapNamespace {
+            by_path,
+            lines_desc,
+            total_step_ids,
+            min_step_id,
+            max_step_id,
+        })
     }
 
     /// The ascending `step_id`s recorded on `(path_id, line)`, or `None` when
@@ -245,6 +281,82 @@ impl StepMapNamespace {
     /// confirm the namespace round-tripped the expected unique-line count.
     pub fn entry_count(&self) -> usize {
         self.by_path.values().map(|by_line| by_line.len()).sum()
+    }
+
+    /// M0/3 — total number of step ids the table records, across every
+    /// `(path, line)` entry.
+    pub fn total_step_ids(&self) -> usize {
+        self.total_step_ids
+    }
+
+    /// M0/3 — whether this table is a COMPLETE line index over `step_count`
+    /// steps: it records exactly `step_count` ids, the smallest is `0` and the
+    /// largest is `step_count - 1`.
+    ///
+    /// This is the precondition that makes [`Self::max_line_in_step_range`]
+    /// EXACTLY equivalent to walking `steps.dat` and taking the maximum of
+    /// `step.line` — every step is represented, so no step's line can be
+    /// missing from the maximum. A table that fails this check (a partial
+    /// index, a foreign table, a trace with marker steps the writer left out)
+    /// is refused for range queries and the caller keeps its step-by-step scan,
+    /// which is always correct.
+    ///
+    /// An empty table only "covers" an empty trace.
+    pub fn covers_all_steps(&self, step_count: usize) -> bool {
+        if self.total_step_ids == 0 {
+            return step_count == 0;
+        }
+        self.total_step_ids == step_count && self.min_step_id == 0 && self.max_step_id == step_count as i64 - 1
+    }
+
+    /// M0/3 — the LINE-MAP accessor: the greatest source line carrying a step in
+    /// the half-open step range `[start, end)`, across every path in the table.
+    ///
+    /// Returns `0` when the range holds no steps — `0` is the neutral element
+    /// for a maximum over recorded lines, which are never negative (a step with
+    /// no source line reconstructs to `Line(0)`).
+    ///
+    /// ## Why this replaces a scan
+    ///
+    /// `TraceReader::load_location` needs the greatest line over the SUFFIX of a
+    /// call's step run. It used to get it by walking the run one step at a time,
+    /// which is O(run length) point lookups into `steps.dat` — and on the
+    /// browser path, where the tree-sitter arm is never taken, that walk ran on
+    /// EVERY `load_location`.
+    ///
+    /// This answers the same question from the index instead. Lines are visited
+    /// from the highest down and each is tested with a binary search over its
+    /// ascending step-id list, so the walk stops at the first line that has a
+    /// step in range: the cost is O(lines above the answer x log steps-per-line)
+    /// per path, independent of the run's length.
+    pub fn max_line_in_step_range(&self, start: StepId, end: StepId) -> usize {
+        let mut best = 0usize;
+        if end.0 <= start.0 {
+            return best;
+        }
+        for (path_id, lines) in &self.lines_desc {
+            let Some(by_line) = self.by_path.get(path_id) else {
+                continue;
+            };
+            for &line in lines {
+                // `lines` is descending, so once we reach a line that cannot beat
+                // the running maximum no later line in this path can either.
+                if line <= best {
+                    break;
+                }
+                let Some(ids) = by_line.get(&line) else {
+                    continue;
+                };
+                // The first id at-or-after `start`; the line is in range when
+                // that id also falls before `end`.
+                let at = ids.partition_point(|id| id.0 < start.0);
+                if ids.get(at).is_some_and(|id| id.0 < end.0) {
+                    best = line;
+                    break;
+                }
+            }
+        }
+        best
     }
 
     /// Whether the table carries any line entry for `path_id`. The DAP

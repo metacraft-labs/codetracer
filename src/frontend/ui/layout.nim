@@ -6,11 +6,23 @@ import
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff,
   agent_activity, agent_workspace,
-  session_switch, panel_transfer, auto_hide, auto_hide_overlay,
+  session_switch, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config, utils ],
   ../index/layout_config_repair,
   ../lib/[ logging, misc_lib, jslib ]
+
+# `panel_transfer` moves a pane between APPLICATION WINDOWS over Electron IPC,
+# and its own guard declares it absent from a web build because `capMultiWindow`
+# is absent — not because its call sites await migration. A tab has no second
+# window to send a pane to.
+#
+# So this import is conditional rather than the module being ported, which is
+# what its guard asks for. `registerPanelAttachHandler` is the only symbol
+# `layout.nim` uses from it (one call site, guarded to match), so the web build
+# simply never installs a handler for an event no web build can raise.
+when not defined(ctWeb):
+  import panel_transfer
 
 import kdom except Location
 from dom import Element, getAttribute, Node, preventDefault, document,
@@ -1465,7 +1477,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   enforceMinStackWidth(layout)
 
   # M21: Register IPC handler for receiving panels from other windows.
-  registerPanelAttachHandler(layout)
+  # Desktop only: a web build has no second window to receive a pane FROM, so
+  # there is no event to handle. See this file's `panel_transfer` import.
+  when not defined(ctWeb):
+    registerPanelAttachHandler(layout)
 
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.

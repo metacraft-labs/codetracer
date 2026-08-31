@@ -144,7 +144,7 @@ type
       ## diagnostic and a slower one.
 
   ApiClient* = object
-    baseApiUrl*: string   ## e.g. "https://web.codetracer.com/api/v1/"
+    baseApiUrl*: string   ## e.g. "https://ide.codetracer.com/api/v1/"
     httpClient*: HttpClient
 
 proc initApiClient*(baseRemoteAddress: string): ApiClient =

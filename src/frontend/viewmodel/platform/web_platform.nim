@@ -52,6 +52,7 @@ import ./outcome
 import ./capabilities
 import ./fs
 import ./process
+import ./wasm_registry
 import ./vcs
 import ./settings
 import ./clipboard
@@ -63,7 +64,7 @@ import ./project_store
 import ./archive
 import ./paths
 
-export platform, project_store, archive
+export platform, project_store, archive, wasm_registry
 
 type
   BrowserBridge* {.requiresInit.} = ref object
@@ -114,6 +115,18 @@ type
       ## Configuration, never a constant. Empty means sharing is not
       ## configured for this deployment, which is a legitimate build (a local
       ## dev server) and must not be a compiled-in host name.
+    wasm*: WasmHost
+      ## NS3: the tab's answer to §3.1's "wasm modules in the tab".
+      ##
+      ## One field rather than four procs, and the registry travels with the
+      ## runner deliberately: a host that can run a module and a list of which
+      ## modules exist are the same fact, and splitting them is how a profile
+      ## comes to claim a capability whose modules were never loaded.
+      ##
+      ## `noWasmModules()` is a legitimate value — a deployment that ships no
+      ## toolchain — and `newWebPlatform` narrows the profile accordingly
+      ## rather than letting the platform claim `capProcessSpawn` and then
+      ## refuse every command.
 
   WebPlatform* = ref object
     ## The instantiation, plus the store it was built over, because the
@@ -394,16 +407,84 @@ proc buildSettings(web: WebPlatform; profile: PlatformProfile): SettingsFacade =
 # ---------------------------------------------------------------------------
 
 proc buildProcess(web: WebPlatform; profile: PlatformProfile): ProcessFacade =
-  ## Every operation refuses, and that is the *correct* web instantiation for
-  ## NS2 rather than a gap.
+  ## NS3: §3.1's web column for process execution — "wasm modules in the tab".
   ##
-  ## §3.1's table says the web column for process execution is "wasm modules in
-  ## the tab", and NS3 is the milestone that supplies them — the Noir compiler
-  ## and ACVM, driven from a worker. There is nothing to spawn until it lands.
-  ## What matters here is that `capProcessSpawn` is absent from the profile, so
-  ## a caller asks and is told before it tries, and the degradation sentence
-  ## `webProfile` already carries names what will happen instead.
-  unavailableProcess(profile)
+  ## The whole of the decision is `registry.resolve`, and none of it reaches a
+  ## browser: whether a command can run here is a question about a list, and
+  ## keeping it that way is what lets `vm-unit-js` assert the *product's*
+  ## answers rather than a fixture's. Only a resolved run reaches `web.wasm`.
+  ##
+  ## The invariant worth stating, because it is the one a refactor breaks
+  ## silently: **nothing below dispatches a command it did not resolve.** A
+  ## `run` that passed the spec straight to the host and let the host answer
+  ## would type-check, would pass a happy-path test, and would turn "nargo fmt
+  ## has no wasm build" back into the mid-run surprise §3.1 asks us to remove.
+  let host = web.bridge.wasm
+
+  proc refuse[T](command: string; args: seq[string]): PlatformOutcome[T] =
+    ## The empty outcome for an unresolvable command. Returns the resolution's
+    ## own error, so the four cases stay four cases all the way to the caller.
+    failed[T](host.registry.resolve(command, args).refusal)
+
+  proc resolvedModule(spec: ProcessSpec): WasmResolution =
+    host.registry.resolve(spec.command, spec.args)
+
+  ProcessFacade(
+    profile: profile,
+
+    run: proc(spec: ProcessSpec
+             ): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
+      let resolution = resolvedModule(spec)
+      if resolution.kind != wrResolved:
+        return resolved(refuse[ProcessRunResult](spec.command, spec.args))
+      host.run(resolution.module.moduleId, spec),
+
+    start: proc(spec: ProcessSpec;
+                onOutput: proc(chunk: ProcessOutputChunk);
+                onExit: proc(exit: ProcessExit)
+               ): PlatformFuture[PlatformOutcome[ProcessHandle]] =
+      let resolution = resolvedModule(spec)
+      if resolution.kind != wrResolved:
+        return resolved(refuse[ProcessHandle](spec.command, spec.args))
+      host.start(resolution.module.moduleId, spec, onOutput, onExit),
+
+    signal: proc(handle: ProcessHandle;
+                 signal: ProcessSignal): PlatformFuture[PlatformOutcome[Nothing]] =
+      # `capProcessGracefulSignal` is absent, and this is what that means:
+      # `worker.terminate()` is immediate and uninterceptable, so there is no
+      # honest implementation of "ask it to stop". Answering `sigInterrupt` by
+      # terminating would be worse than refusing — the caller would believe a
+      # cooperative shutdown had been requested and would attribute whatever
+      # half-written state it found to the program rather than to the kill.
+      case signal
+      of sigInterrupt:
+        resolvedUnsupported[Nothing](
+          "interrupting a run cooperatively; a worker can only be stopped " &
+          "outright, which is what Stop does")
+      of sigTerminate, sigKill:
+        host.terminate(handle),
+
+    writeStdin: proc(handle: ProcessHandle;
+                     text: string): PlatformFuture[PlatformOutcome[Nothing]] =
+      resolvedUnsupported[Nothing]("interactive input"),
+    closeStdin: proc(handle: ProcessHandle
+                    ): PlatformFuture[PlatformOutcome[Nothing]] =
+      resolvedUnsupported[Nothing]("interactive input"),
+
+    isRunning: proc(handle: ProcessHandle
+                   ): PlatformFuture[PlatformOutcome[bool]] =
+      host.isRunning(handle),
+
+    which: proc(program: string): PlatformFuture[PlatformOutcome[string]] =
+      # `process.nim`'s own note: this is "what makes 'this project script has
+      # no wasm build' a nameable outcome rather than a mid-run surprise". The
+      # answer is the module id, and the refusal carries the same four-case
+      # error `run` would have produced, so asking first and running anyway
+      # cannot disagree.
+      let resolution = host.registry.resolve(program)
+      if resolution.kind != wrResolved:
+        return resolved(failed[string](resolution.refusal))
+      resolvedOk($resolution.module.moduleId))
 
 proc buildVcs(web: WebPlatform; profile: PlatformProfile): VcsFacade =
   ## Also every operation refusing, and this one is a **finding rather than a
@@ -423,6 +504,15 @@ proc buildVcs(web: WebPlatform; profile: PlatformProfile): VcsFacade =
   ## changes, which is the test that the absence was modelled rather than
   ## papered over.
   unavailableVcs(profile)
+
+const webNoModulesLoaded* =
+  "this deployment ships no wasm toolchain modules, so nothing can be run in " &
+  "the tab: compiling and running tests need the Noir modules, which a " &
+  "deployment loads with the application bundle"
+  ## NS3. Not "the feature is missing" but "this build has no modules", which
+  ## is a different and more useful thing to read: the same code with a
+  ## populated registry runs, and the sentence tells a deployer which half is
+  ## theirs.
 
 const webVcsPending* =
   "version control is sequenced after launch (NS5): a browser tab has no git " &
@@ -513,6 +603,22 @@ proc newWebPlatform*(bridge: BrowserBridge; store: StoreSession): WebPlatform =
     capability: capVcsRead, behaviour: webVcsPending)
   degradations.add DegradationRule(
     capability: capVcsWrite, behaviour: webVcsPending)
+
+  # NS3: **the profile follows the registry.** A deployment whose `WasmHost`
+  # carries no modules can run nothing, and a profile claiming otherwise is
+  # exactly the "may I" / "did it work" disagreement `capabilities.nim` exists
+  # to remove — the same correction NS2 made for `capVcsRead` above.
+  #
+  # Written as a narrowing of the reference profile rather than as a build of
+  # its own, so the day the registry is populated this branch simply stops
+  # being taken and the spec's own sentences are what the product shows.
+  if bridge.wasm.registry.modules.len == 0:
+    capabilities = capabilities - {capProcessSpawn, capProcessSignal}
+    degradations.add DegradationRule(
+      capability: capProcessSpawn, behaviour: webNoModulesLoaded)
+    degradations.add DegradationRule(
+      capability: capProcessSignal, behaviour: webNoModulesLoaded)
+
   profile = profile.withCapabilities(capabilities, degradations)
 
   result = WebPlatform(

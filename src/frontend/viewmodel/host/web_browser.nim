@@ -42,6 +42,9 @@ import ../platform/memory_volume
 import ../platform/project_store
 import ../platform/web_platform
 import ../platform/web_entry
+import ../platform/wasm_worker
+import ../platform/noir_wasm_modules
+import ../platform/web_deployment
 import ./opfs_volume
 
 export web_platform, web_entry
@@ -169,11 +172,12 @@ proc jsShareOrigin(): cstring {.importjs: """
 })()""".}
   ## The sharing origin is read from the page, never compiled in.
   ##
-  ## `ide.codetracer.com` is where the hosted product is going and
-  ## `web.codetracer.com` is where `src/ct/online_sharing/remote_config.nim`
-  ## still points. Both are deployment facts. A build that hard-coded either
-  ## would need a rebuild to move, and the last two moves each found a constant
-  ## somebody had to hunt for — so this build has none, and a deployment that
+  ## `ide.codetracer.com` is the hosted product's host, and since the
+  ## 2026-08-29 rename `src/ct/online_sharing/remote_config.nim` names it too.
+  ## That is a deployment fact, and deployment facts move: the host has gone
+  ## `cloud` → `web` → `ide`, and each move found a constant somebody had to
+  ## hunt for. A build that hard-coded even the current one would need a
+  ## rebuild to follow the next — so this build has none, and a deployment that
   ## sets nothing gets `capShareLink` absent with the sentence
   ## `web_platform.webInstantiationProfile` supplies.
 
@@ -212,8 +216,17 @@ proc toJsBytes(content: seq[byte]): JsObject =
 # The bridge
 # ---------------------------------------------------------------------------
 
+proc browserWasmHost(delivered: seq[DeliveredWasmModule];
+                     moduleUrls: seq[tuple[id: string, url: string]] = @[]
+                    ): WasmHost
+  ## Forward-declared because the bridge is built above the Worker transport
+  ## it may need. Defined with `newBrowserWasmHost`, whose reasons it shares.
+
 proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
-                       persistenceAnswered: bool): BrowserBridge =
+                       persistenceAnswered: bool;
+                       deliveredWasmModules: seq[DeliveredWasmModule] = @[];
+                       wasmModuleUrls: seq[tuple[id: string, url: string]] = @[]
+                      ): BrowserBridge =
   BrowserBridge(
     volume: volume,
     persistenceGranted: persistenceGranted,
@@ -275,7 +288,202 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
         window.addEventListener('blur', function () { `deliver`(); });
       }
       """.},
-    shareLinkOrigin: $jsShareOrigin())
+    shareLinkOrigin: $jsShareOrigin(),
+    # NS3's seam, now DERIVED FROM THE DELIVERY rather than asserted empty.
+    #
+    # The old constant here said the registry was empty because "the worker
+    # script ... is not in the bundle". That reason expired at `dev` 07926277,
+    # which places the worker script as a required asset and the two Noir
+    # modules as optional fetched ones. The RULE underneath it did not expire:
+    # declaring `nargo` over modules that were never placed would put
+    # `capProcessSpawn` back on a profile whose every run fails, which is the
+    # exact thing `platform/wasm_registry.nim` exists to prevent.
+    #
+    # So the answer is computed from what a caller says was delivered.
+    # `deliveredWasmModules` defaults to `@[]`, and an empty delivery yields an
+    # empty registry — the same answer as before, reached by ASKING rather than
+    # by asserting, and one that changes on its own when a deployment starts
+    # placing the modules. A partial delivery is honoured too: the compiler
+    # alone declares `compile` and refuses `trace` by name, because
+    # `wasm_worker_browser.js` routes by subcommand and both modules are
+    # `required: false` in the manifest with their own absence sentences.
+    #
+    # WHAT IS STILL MISSING, precisely: nothing yet PROBES the deployment. The
+    # caller that can answer "were `assets/noir_wasm.wasm` and
+    # `assets/noir_tracer_wasm.wasm` actually served, and what were they built
+    # from?" does not exist, so every current call passes the default and this
+    # tab still ships no toolchain. That is a true statement about this
+    # deployment rather than a placeholder.
+    wasm: browserWasmHost(deliveredWasmModules, wasmModuleUrls))
+
+# ---------------------------------------------------------------------------
+# The wasm worker's transport
+# ---------------------------------------------------------------------------
+#
+# THE THIN HALF, deliberately. `platform/wasm_worker.nim` owns the protocol —
+# sequence allocation, correlation, output routing, teardown — and is tested on
+# both backends against a fake transport. What is left here is the part that
+# genuinely needs a browser: constructing a `Worker`, posting text to it, and
+# handing text back. That split is `backend/worker_backend.nim`'s, for its
+# reasons.
+#
+# TEXT IN BOTH DIRECTIONS, and the `String(...)` below is why this is written
+# out rather than assumed. `worker_backend.nim`'s header records an engine that
+# sent objects one way and JSON strings the other, with bare strings for
+# bootstrap, and a reader that classified by message type reporting a timeout
+# over an engine that had answered. The coercion makes the asymmetry
+# impossible to reintroduce from the worker's side: whatever the worker posts
+# arrives here as text, and `deliver` rejects anything that is not JSON by
+# name. That rejection is itself tested, and on the JS backend it was a real
+# defect — V8's `JSON.parse` throws a `SyntaxError` that `except
+# CatchableError` does not catch, so the narrow form crashed the tab.
+
+proc jsNewWorker(url: cstring): JsObject
+  {.importjs: "new Worker(#, { type: 'module' })".}
+proc jsWorkerPost(worker: JsObject; message: cstring)
+  {.importjs: "#.postMessage(#)".}
+proc jsWorkerTerminate(worker: JsObject)
+  {.importjs: "#.terminate()".}
+
+proc newWorkerTransport(scriptUrl: string;
+                        onText: proc(message: string)): WasmWorkerTransport =
+  ## A transport over a real `Worker`.
+  let worker = jsNewWorker(scriptUrl.cstring)
+  var deliverText = onText
+  proc receive(raw: cstring) =
+    deliverText($raw)
+  {.emit: """
+  `worker`.onmessage = function (event) {
+    `receive`(String(event.data));
+  };
+  `worker`.onerror = function (event) {
+    // An error event is not a message, and must not be silently dropped: the
+    // protocol's own failure path is the thing that stops a caller waiting
+    // forever, so a worker-level error is reported THROUGH it.
+    `receive`(JSON.stringify({
+      seq: 0, kind: "failed",
+      message: "the wasm worker failed: " + String(event.message || event)
+    }));
+  };
+  """.}
+  proc send(message: string) =
+    jsWorkerPost(worker, message.cstring)
+  proc terminateWorker() =
+    jsWorkerTerminate(worker)
+  WasmWorkerTransport(send: send, terminateWorker: terminateWorker)
+
+proc newBrowserWasmHost*(registry: WasmRegistry; scriptUrl: string;
+                         moduleUrls: seq[tuple[id: string, url: string]] = @[]
+                        ): WasmHost =
+  ## A `WasmHost` backed by a real `Worker` running `scriptUrl`.
+  ##
+  ## Called by `browserWasmHost` below whenever a delivery produced a non-empty
+  ## registry. The worker script IS in the bundle as of `dev` 07926277 —
+  ## `webRuntimeAssets()` declares it a REQUIRED asset at
+  ## `wasmWorkerScriptPath` — so the reason this used to go uncalled is gone.
+  ##
+  ## `moduleUrls` is where the worker's modules are, and it is sent
+  ## immediately. See `wasm_worker.configure`: the worker has always expected
+  ## this message and nothing sent it, so a correctly deployed pair of modules
+  ## would still have failed every run.
+  var worker: WasmWorker
+  proc onText(message: string) =
+    if not worker.isNil: worker.deliver(message)
+  let transport = newWorkerTransport(scriptUrl, onText)
+  worker = newWasmWorker(registry, transport)
+  worker.configure(moduleUrls)
+  worker.asWasmHost()
+
+proc browserWasmHost(delivered: seq[DeliveredWasmModule];
+                     moduleUrls: seq[tuple[id: string, url: string]] = @[]
+                    ): WasmHost =
+  ## The registry a delivery implies, behind a real Worker when there is
+  ## anything to run.
+  ##
+  ## An empty delivery keeps `noWasmModules()` rather than starting a Worker
+  ## over an empty registry: the two answer identically — `resolve` returns
+  ## `wrNoModulesLoaded` for every command either way — and spawning a worker
+  ## thread to host nothing is cost with no capability behind it. The choice is
+  ## therefore an optimisation over an equivalence, not a second behaviour.
+  let registry = noirWasmRegistry(delivered)
+  if registry.modules.len == 0:
+    return noWasmModules()
+  newBrowserWasmHost(registry, "/" & wasmWorkerScriptPath, moduleUrls)
+
+# ---------------------------------------------------------------------------
+# What THIS deployment delivered
+# ---------------------------------------------------------------------------
+#
+# The caller `browserWasmHost`'s comment said did not exist:
+#
+#   "nothing yet PROBES the deployment. The caller that can answer 'were
+#   `assets/noir_wasm.wasm` and `assets/noir_tracer_wasm.wasm` actually served,
+#   and what were they built from?' does not exist, so every current call
+#   passes the default and this tab still ships no toolchain."
+#
+# It exists now, and it answers by READING THE DOCUMENT THE DEPLOYMENT SERVED,
+# not by fetching and not by assuming. `web_deployment.renderEntryDocument`
+# writes a `<script type="application/json">` naming every module the assembly
+# step actually placed, measured from the files it uploaded; this reads it back.
+#
+# WHY NOT A `fetch`, which is the obvious design. Because
+# `ci/test/noir-studio-signed-out.sh` asserts the loop arm — this bundle — has
+# **zero network egress sites**, and that assertion is what makes the
+# development loop work with no account and no network. A probe request in
+# `boot()` would be the first egress site in the product, on the critical path,
+# for information the server could simply have written down. So it writes it
+# down.
+#
+# AND WHY THE ABSENT CASE IS NOT AN ERROR. A deployment that ships no modules
+# is a real configuration with a real, stated behaviour — `webRuntimeAssets()`
+# marks both modules `required: false` and gives each an `absenceBehaviour`
+# sentence. Reading no descriptor therefore yields no modules, which yields an
+# empty registry, which makes `resolve` answer `wrNoModulesLoaded`: "this build
+# ships no wasm toolchain modules". That is a different sentence from a module
+# that loaded and failed, and keeping the two apart is the whole point.
+
+proc jsDeploymentDescriptorText(elementId: cstring): cstring {.importjs: """
+(function (id) {
+  if (typeof document === 'undefined') { return ''; }
+  var el = document.getElementById(id);
+  return el && el.textContent ? el.textContent : '';
+})(#)
+""".}
+
+proc deploymentDescriptor*(): DeploymentDescriptor =
+  ## What the served document says this deployment delivered.
+  ##
+  ## Guarded on `typeof document` so the same bundle can be booted under node
+  ## by `ci/test/web-bundle-smoke.sh`, where there is no document and the
+  ## honest answer is "no modules".
+  parseDeploymentDescriptor(
+    $jsDeploymentDescriptorText(deploymentDescriptorElementId.cstring))
+
+proc describeToolchain*(delivered: seq[DeliveredWasmModule]): string =
+  ## The delivered toolchain as one clause for the boot line.
+  ##
+  ## Built from `noirWasmRegistry`, NOT from the delivery it was given, so a
+  ## module the registry drops — one with no provenance, or one the manifest
+  ## does not name — is absent from this string too. A report derived from the
+  ## input would say `nargo:compile+trace` about a tab that refuses both.
+  let registry = noirWasmRegistry(delivered)
+  if registry.modules.len == 0: return "(none)"
+  for module in registry.modules:
+    if result.len > 0: result.add " "
+    result.add module.command
+    for i, sub in module.subcommands:
+      result.add (if i == 0: ":" else: "+")
+      result.add sub
+
+proc deliveredModulesFrom*(descriptor: DeploymentDescriptor):
+    seq[DeliveredWasmModule] =
+  ## The descriptor, in the form `noirWasmRegistry` consumes.
+  ##
+  ## A pure function of the descriptor, separate from the DOM read above, so
+  ## `test_platform_web.nim` can drive every delivery shape — both modules, one
+  ## module, none, an unknown id — on both backends without a browser.
+  for module in descriptor.modules:
+    result.add DeliveredWasmModule(id: module.id, builtFrom: module.builtFrom)
 
 # ---------------------------------------------------------------------------
 # Boot
@@ -290,6 +498,18 @@ type
     refusal*: string
     condition*: StorageCondition
     announcement*: string
+    toolchain*: string
+      ## What the deployment delivered, as one readable clause for the boot
+      ## line — `nargo:compile+trace`, or `(none)`.
+      ##
+      ## Reported because "it loaded" is not evidence that anything works. The
+      ## sibling campaign's acceptance for a deployed replay engine was an
+      ## OBSERVED time progression, not a page that rendered; the equivalent
+      ## here is the tab naming the toolchain it can actually run. It is read
+      ## from the REGISTRY rather than from the descriptor, so it reports what
+      ## the product would honour and not what the document claimed — a module
+      ## dropped for missing provenance disappears from this string, which is
+      ## the fact worth seeing.
 
 proc currentEntryRequest*(): EntryRequest =
   ## The URL, as `web_entry` wants it: path and fragment, origin removed, query
@@ -317,14 +537,23 @@ proc boot*(): Future[WebBoot] {.async.} =
     # §4.2's third row. An in-memory store, and a session that says so.
     volume = newMemoryVolume().asVolume
 
-  let bridge = newBrowserBridge(volume, granted, answered)
+  # THE PROBE. Everything above this line existed and was tested; this is the
+  # call that connects it to a deployment. Without it `deliveredWasmModules`
+  # took its `@[]` default on every boot, so a tab served both Noir modules
+  # would still report that it ships no toolchain — the modules delivered,
+  # cached, and unreachable.
+  let deployment = deploymentDescriptor()
+  let delivered = deliveredModulesFrom(deployment)
+  let bridge = newBrowserBridge(volume, granted, answered, delivered,
+                                declaredModuleUrls(deployment))
   let opened = await openWebStore(bridge)
   if not opened.ok:
     return WebBoot(
       ok: false,
       refusal: opened.error.message,
       condition: conditionFor(volume, granted, answered),
-      announcement: "")
+      announcement: "",
+      toolchain: describeToolchain(delivered))
 
   let web = newWebPlatform(bridge, opened.value)
   web.install()
@@ -332,4 +561,5 @@ proc boot*(): Future[WebBoot] {.async.} =
     ok: true,
     web: web,
     condition: opened.value.durability.condition,
-    announcement: opened.value.announcement)
+    announcement: opened.value.announcement,
+    toolchain: describeToolchain(delivered))

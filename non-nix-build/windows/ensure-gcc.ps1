@@ -46,6 +46,55 @@ function Ensure-Gcc {
   }
 
   if ([string]::IsNullOrWhiteSpace($winlibsPackageDir)) {
+    # Winget-free fallback: fetch the pinned WinLibs UCRT build directly from its
+    # GitHub release, verify its SHA256, and extract it into the DIY cache. This
+    # is the path CI / self-hosted runners take, where winget is not installed
+    # (env.ps1 provisions Node/uv/TTD the same download-and-verify way). winget
+    # below stays as a last resort for interactive dev boxes that pin neither.
+    $winlibsUrl = $Toolchain["WINLIBS_GCC_URL"]
+    $winlibsSha = $Toolchain["WINLIBS_GCC_SHA256"]
+    if (-not [string]::IsNullOrWhiteSpace($winlibsUrl) -and
+        -not [string]::IsNullOrWhiteSpace($winlibsSha)) {
+      $normalizedSha = $winlibsSha.Trim().ToLowerInvariant()
+      if ($normalizedSha -notmatch '^[0-9a-f]{64}$') {
+        throw "WINLIBS_GCC_SHA256 must be a 64-character hexadecimal SHA256."
+      }
+      # The archive's top-level directory is `mingw64/`, so it extracts to
+      # $stageRoot/mingw64; the junction below points $gccRoot at that dir.
+      $stageRoot = Join-Path $Root "gcc/winlibs-$version"
+      $stagedMingw64 = Join-Path $stageRoot "mingw64"
+      $stagedGcc = Join-Path $stagedMingw64 "bin/gcc.exe"
+      if (-not (Test-Path -LiteralPath $stagedGcc -PathType Leaf)) {
+        Write-Host "Downloading WinLibs (GCC $version) from $winlibsUrl ..."
+        $tempZip = Join-Path $env:TEMP "codetracer-winlibs-$normalizedSha.zip"
+        Download-File -Url $winlibsUrl -OutFile $tempZip
+        try {
+          Assert-FileSha256 -Path $tempZip -Expected $normalizedSha
+          Ensure-CleanDirectory -Path $stageRoot
+          # bsdtar (System32 tar.exe) unpacks the .zip faster than Expand-Archive
+          # and without its MAX_PATH limits on WinLibs' deep mingw64 tree — the
+          # same extractor ensure-llvm / ensure-zlib use. Top-level dir: mingw64/.
+          $tarExe = Get-WindowsTarExe
+          & $tarExe -xf $tempZip -C $stageRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract WinLibs archive '$tempZip' with '$tarExe' (exit $LASTEXITCODE)."
+          }
+        }
+        finally {
+          Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+        }
+      }
+      if (Test-Path -LiteralPath $stagedGcc -PathType Leaf) {
+        $winlibsPackageDir = $stagedMingw64
+        Write-Host "Installed WinLibs (GCC $version) at $stagedMingw64"
+      }
+      else {
+        throw "WinLibs archive extracted to '$stageRoot' but gcc.exe not found at '$stagedGcc'."
+      }
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($winlibsPackageDir)) {
     # Try installing via winget.
     $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
     if ($null -eq $wingetCommand) {

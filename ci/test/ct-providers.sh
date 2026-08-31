@@ -124,6 +124,12 @@ echo "ct-providers: running cross-language provider suites"
 run_nim_test src/ct_test/cpp_providers_test.nim
 run_nim_test src/ct_test/m11_native_languages_test.nim
 run_nim_test src/ct_test/m12_fallback_languages_test.nim
+# Noir. `nargo` comes from `ourPkgs.noir` in nix/shells/ci-base.nix, which the
+# default dev shell composes, so this suite needs no sibling checkout — but it
+# DOES need the dev shell, which is why it is here and not in the
+# toolchain-light m16 gate. The suite hard-requires `nargo` on PATH and fails
+# (never skips) without it, matching this gate's stated policy.
+run_nim_test src/ct_test/noir_providers_test.nim
 run_nim_test src/ct_test/js_providers_test.nim
 run_nim_test src/ct_test/ruby_providers_test.nim
 

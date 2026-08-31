@@ -1,6 +1,23 @@
 import
-  std / [ jsffi, asyncjs ],
-  electron_lib
+  std / [ jsffi, asyncjs ]
+
+# `electron_lib` is imported ONLY on the arm that uses it.
+#
+# The single thing this module ever wanted from it is `require`, for the
+# `js-yaml` load below — and that branch is already `when not
+# defined(ctRenderer) and not defined(ctInExtension)`. So on every renderer
+# build the import was dead weight, and not harmless dead weight: `misc_lib` is
+# imported by `renderer.nim` and by `ui/ui_imports.nim`, which means this one
+# unconditional line put `electron_lib` into the import graph of all 46 modules
+# that reach `ui_imports` and of the renderer entry point itself.
+#
+# That is why removing `electron_lib` from `ui_imports`' own import and export
+# lists (NS1 residual 1) did not make the renderer web-buildable: the edge had
+# a second path through here, and `{.error.}` fires on the module being
+# compiled at all, not on a symbol being used. Narrowing the import to the
+# branch that needs it is what actually cuts it.
+when not defined(ctRenderer) and not defined(ctInExtension):
+  import electron_lib
 
 type
   Chalk* {.importc.} = ref object

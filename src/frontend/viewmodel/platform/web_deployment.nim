@@ -19,11 +19,15 @@
 ##
 ## ## The origin is a parameter with no default
 ##
-## `ide.codetracer.com` is where the product is going; `web.codetracer.com` is
-## where an earlier draft put it and where `src/ct/online_sharing/remote_config.nim`
-## still points. That disagreement is exactly why no default exists here: a
-## default is a constant with a friendly face, and the last two moves each
-## found one. Every proc that needs a host takes it.
+## `ide.codetracer.com` is the product's host, and as of the 2026-08-29 rename
+## `src/ct/online_sharing/remote_config.nim` agrees — the disagreement this
+## paragraph used to record is resolved. No default appears here anyway, and
+## the resolution is the reason rather than a reason against: the host has now
+## moved twice (`cloud` → `web` → `ide`) and each move found a constant
+## somebody had to hunt for. A default is a constant with a friendly face, so
+## every proc that needs a host takes it.
+
+import std/[json, strutils]
 
 import ./web_entry
 
@@ -142,6 +146,145 @@ proc pointerPath*(slug, projectId: string): string =
   ## §1b.1's `current.json`.
   projectPath(slug, projectId) & pointerObjectSuffix
 
+# ---------------------------------------------------------------------------
+# What the bundle must actually CARRY
+#
+# NS3's residual, in one sentence from `host/web_browser.nim`: the registry,
+# the protocol, the transport and `newBrowserWasmHost` all exist and are
+# tested, and none of it is reachable, because "the worker script that
+# instantiates the Noir modules and drives their `nv_*` / `ct_*` ABIs is not in
+# the bundle". NS3 moved from *nothing loads a module* to *nothing delivers
+# one*. This is the delivery manifest.
+#
+# WHY IT IS A VALUE HERE RATHER THAN A LIST IN A SHELL SCRIPT. The same
+# argument the header makes for `rewritePrefixes`: a hand-written list in the
+# assembly step cannot be made to agree with the product. `web_deployment.nim`
+# is compiled by `vm-unit` (C) and `vm-unit-js` (JS), so an asset added here is
+# type-checked on both backends and read by ONE assembly step and ONE gate,
+# rather than being spelled three times and drifting twice.
+#
+# THE THREE DELIVERY MODES ARE DIFFERENT DECISIONS AND ARE MODELLED AS SUCH.
+# "Bundle it, emit it, or fetch it" is not a matter of taste per asset:
+#
+#   damBundled   it is Nim compiled to JS and linked into an entry point. The
+#                renderer is this, and could not be anything else.
+#   damAsset     a file the deployment serves, loaded by URL at run time. The
+#                worker script is this BECAUSE `new Worker(url)` takes a URL
+#                and `newBrowserWasmHost(registry, scriptUrl)` already has the
+#                parameter. Inlining it and building a `blob:` URL would be
+#                rejected by any `Content-Security-Policy` worth setting and
+#                would be uncacheable besides.
+#   damFetched   a file fetched on first use and never at load. The two Noir
+#                wasm modules are this because they are ~16 MB and ~4.6 MB: a
+#                bundled copy inflates by a third as base64 AND must be parsed
+#                as JavaScript source before the first paint, for a capability
+#                most sessions never invoke. Fetched, they are `ccImmutable`
+#                and cached indefinitely.
+# ---------------------------------------------------------------------------
+
+type
+  DeliveryMode* = enum
+    damBundled
+    damAsset
+    damFetched
+    damEntryDocument
+      ## The document itself. Its own row, and not `damAsset`, because the two
+      ## differ in the one property the cache table is about: a `damAsset` is
+      ## content-addressed under `/assets/` and served `immutable`, and the
+      ## entry document is the mutable thing every rewrite in this file points
+      ## at. Filing it as an asset would have put a year's `immutable` on the
+      ## application shell, which is the failure `cacheClassFor`'s own header
+      ## already records once in the other direction.
+      ##
+      ## It is on the manifest at all because it was the asset nothing
+      ## produced. `renderRewriteConfig` emits `/index.html` as the target of
+      ## every prefix, `webRuntimeAssets()` did not name it, and so no
+      ## assembly step made one — the bundle carried a renderer, an entry
+      ## point and a worker, and no page to load any of them from. That is
+      ## this repository's signature defect (a thing that builds and is never
+      ## delivered) in the one place it could not be seen, because the gate
+      ## checked the manifest and the manifest did not mention the document.
+
+  RuntimeAsset* = object
+    ## One file a web deployment must carry for the product to work.
+    id*: string
+      ## Stable name. For a wasm module this is the registry id the worker
+      ## receives in its `configure` message, so the two cannot drift.
+    path*: string
+      ## Where the assembly step places it, relative to the bundle root.
+    mode*: DeliveryMode
+    required*: bool
+      ## False for an asset whose absence degrades rather than breaks. The two
+      ## wasm modules are optional in exactly the sense
+      ## `wasm_registry.noWasmModules()` already models: a deployment that
+      ## ships none is a TRUE statement about that deployment, and the user
+      ## reads `webNoModulesLoaded` rather than meeting a run that fails.
+    absenceBehaviour*: string
+      ## What a user gets when an optional asset is not shipped. Same rule as
+      ## `capabilities.degradedBehaviour`: an absence without a stated
+      ## consequence is a gap in the product, not a gap in the docs.
+
+const
+  entryDocumentPath* = "index.html"
+    ## The target `renderRewriteConfig` already emits for every prefix.
+  rendererBundlePath* = "ui.js"
+  webEntryBundlePath* = "web.js"
+  wasmWorkerScriptPath* = staticAssetPrefix[1 .. ^1] & "wasm-worker.js"
+  noirCompilerModuleId* = "noir-compiler"
+  noirTracerModuleId* = "noir-tracer"
+  noirCompilerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_wasm.wasm"
+  noirTracerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_tracer_wasm.wasm"
+
+proc webRuntimeAssets*(): seq[RuntimeAsset] =
+  ## Everything a web deployment serves, in delivery order.
+  @[
+    RuntimeAsset(
+      id: "entry-document", path: entryDocumentPath, mode: damEntryDocument,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "renderer", path: rendererBundlePath, mode: damBundled,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "web-entry", path: webEntryBundlePath, mode: damBundled,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "wasm-worker", path: wasmWorkerScriptPath, mode: damAsset,
+      required: true,
+      absenceBehaviour: ""),
+    RuntimeAsset(
+      id: noirCompilerModuleId, path: noirCompilerWasmPath, mode: damFetched,
+      required: false,
+      absenceBehaviour:
+        "Noir compilation is unavailable and `nargo compile` is reported as " &
+        "having no wasm build in this deployment, by name, rather than " &
+        "failing part-way through a run"),
+    RuntimeAsset(
+      id: noirTracerModuleId, path: noirTracerWasmPath, mode: damFetched,
+      required: false,
+      absenceBehaviour:
+        "a compiled Noir program cannot be traced in the tab, so replay is " &
+        "offered only for recordings produced elsewhere")]
+
+proc requiredRuntimeAssets*(): seq[RuntimeAsset] =
+  for asset in webRuntimeAssets():
+    if asset.required: result.add asset
+
+proc fetchedRuntimeAssets*(): seq[RuntimeAsset] =
+  ## The assets the worker resolves by URL. `wasm_worker_browser.js` receives
+  ## exactly these ids in its `configure` message.
+  for asset in webRuntimeAssets():
+    if asset.mode == damFetched: result.add asset
+
+proc undeclaredAbsences*(): seq[string] =
+  ## Every optional asset that does not say what its absence costs. The
+  ## assertion is `.len == 0` over this, mirroring
+  ## `capabilities.undeclaredDegradations` — a manifest that lets an optional
+  ## asset in without a consequence is a table that has stopped describing the
+  ## product.
+  for asset in webRuntimeAssets():
+    if not asset.required and asset.absenceBehaviour.len == 0:
+      result.add asset.id
+
 proc headerFor*(class: CacheClass): string =
   case class
   of ccEntryDocument: entryDocumentHeader
@@ -216,3 +359,262 @@ proc renderCacheConfig*(contract: DeploymentContract): string =
   for rule in contract.caches:
     result.add rule.pattern & "\n"
     result.add "  Cache-Control: " & rule.headerValue & "\n"
+
+# ---------------------------------------------------------------------------
+# WHAT A DEPLOYMENT SAYS IT DELIVERED
+#
+# `webRuntimeAssets()` above is a statement of INTENT — what a bundle must
+# carry. This section is the statement of FACT — what one particular deployment
+# actually placed, written by the assembly step from the bytes on disk and read
+# back by the running page.
+#
+# The two are deliberately different values, and conflating them is the defect
+# this whole section exists to prevent. `host/web_browser.nim` records the rule
+# it must not break: "declaring `nargo` over modules that were never placed
+# would put `capProcessSpawn` back on a profile whose every run fails". A page
+# that derived its capabilities from the INTENT manifest would do exactly that
+# — the manifest names both Noir modules on every build, including the builds
+# that ship neither.
+#
+# ## Why the descriptor travels IN the entry document and is not fetched
+#
+# This is the constraint that decided the design, and it is not a preference.
+# `ci/test/noir-studio-signed-out.sh` asserts that the loop arm — `web_main.nim`
+# -> `web.js`, which carries write, compile, run, record and export — contains
+# **zero network egress sites**, and that is what makes the development loop
+# work signed out and on a plane. A `fetch('/assets/deployment.json')` in
+# `boot()` would be the first one, and it would be an egress site on the
+# critical path of a product whose whole claim is that it has none.
+#
+# So the deployment describes itself in the document it is already serving. The
+# page reads a `<script type="application/json">` out of its own DOM — not a
+# request, not a redirect, and readable before the first paint. It is the same
+# shape BlockTracer's pages use for `data-replay-engine`, and it has the
+# property that matters here: the declaration and the bytes are published in
+# the same upload, so a deploy guard can check them against each other.
+#
+# ## The four states a module can be in, which must not collapse into one
+#
+#   not declared, not served   the deployment ships no toolchain. The registry
+#                              is empty and `resolve` answers
+#                              `wrNoModulesLoaded` — case (0), a fact about the
+#                              deployment.
+#   declared and served        it runs.
+#   declared, NOT served       a BROKEN DEPLOY. The document promises a module
+#                              the publish directory does not contain, so the
+#                              worker's fetch 404s. This is the state
+#                              `deployGuardDefects` below refuses to publish,
+#                              and the reason it is a distinct state rather
+#                              than "the module failed" is that a missing file
+#                              and a broken module need different people.
+#   served, not declared       dead weight: 16 MB nothing can reach. Also a
+#                              guard failure, in the other direction.
+# ---------------------------------------------------------------------------
+
+type
+  DeployedModule* = object
+    ## One wasm module a particular deployment placed AND declared.
+    id*: string
+      ## A `webRuntimeAssets()` asset id, so this cannot drift from the
+      ## manifest without `deployGuardDefects` saying so.
+    url*: string
+      ## Root-relative, and the exact string the worker receives in its
+      ## `configure` message.
+    bytes*: int
+      ## What the assembly step measured. Carried so the page can report a
+      ## size before it fetches, and so the guard can compare the document's
+      ## claim against the file it is about to upload — the "verify the
+      ## deployed artifact, not the green workflow" rule, applied to the bytes
+      ## rather than to a log line.
+    builtFrom*: string
+      ## Provenance, in `noir_wasm_modules.deliveredProvenance`'s form —
+      ## `noir@codetracer <rev> compiler/wasm`. A module that cannot say where
+      ## it came from is DROPPED by `registrableModules`, so this is not
+      ## decoration: an empty string here silently disables the module.
+
+  DeploymentDescriptor* = object
+    origin*: string
+    revision*: string
+      ## The codetracer commit the bundle was built from.
+    modules*: seq[DeployedModule]
+
+const
+  deploymentDescriptorElementId* = "codetracer-deployment"
+    ## The `<script type="application/json">` the page reads itself out of.
+    ## Exported because three things must agree on it: this renderer,
+    ## `host/web_browser.nim`'s DOM read, and the deploy guard's grep.
+
+proc jsonStringForHtml(node: JsonNode): string =
+  ## `$node`, made safe to place inside a `<script>` element.
+  ##
+  ## An HTML parser looks for the literal `</script` inside a script element's
+  ## text and ends the element there, whatever the JSON means. A provenance
+  ## string or a URL containing it would truncate the document — so `<` is
+  ## escaped to `<`, which is the same string to a JSON reader and inert
+  ## to an HTML one. `&` and `>` go with it for the usual belt-and-braces
+  ## reason.
+  ##
+  ## This is not a hypothetical tidy-up: the descriptor carries strings that
+  ## come from a build environment (a branch name reaches `revision`), and an
+  ## entry document that can be truncated by its own metadata is a page that
+  ## fails with a syntax error naming nothing.
+  result = $node
+  result = result.replace("<", "\\u003c")
+  result = result.replace(">", "\\u003e")
+  result = result.replace("&", "\\u0026")
+
+proc renderDeploymentDescriptor*(descriptor: DeploymentDescriptor): string =
+  ## The descriptor as the JSON text the entry document carries.
+  var modules = newJArray()
+  for module in descriptor.modules:
+    modules.add %*{
+      "id": module.id,
+      "url": module.url,
+      "bytes": module.bytes,
+      "builtFrom": module.builtFrom}
+  jsonStringForHtml(%*{
+    "origin": descriptor.origin,
+    "revision": descriptor.revision,
+    "modules": modules})
+
+proc parseDeploymentDescriptor*(text: string): DeploymentDescriptor =
+  ## The inverse, tolerant of everything except a lie.
+  ##
+  ## A DEPLOYMENT WITH NO DESCRIPTOR IS A LEGITIMATE DEPLOYMENT — an empty
+  ## result means "this deployment declares no modules", which is the true
+  ## answer for a bundle built without them and produces `noWasmModules()`
+  ## downstream. So malformed input yields the empty descriptor rather than an
+  ## exception: the failure mode of a page that throws during boot is a blank
+  ## screen, and the failure mode of this returning empty is the product
+  ## saying, by name, that it ships no toolchain. The second is better and it
+  ## is also true.
+  ##
+  ## What it will NOT do is invent a module. A module entry missing its id, its
+  ## url or its provenance is dropped, because each of those absences makes it
+  ## unusable and a half-declared module is the state that produces a run that
+  ## fails late instead of a capability that is honestly absent.
+  if text.strip().len == 0: return DeploymentDescriptor()
+  var parsed: JsonNode
+  try:
+    parsed = parseJson(text)
+  except:
+    # A bare `except` for the reason `wasm_worker.nim`'s `deliver` records at
+    # length: on the JS backend `parseJson` defers to V8's `JSON.parse`, which
+    # throws a raw `SyntaxError` that `except CatchableError` does not catch.
+    # The narrow form crashed the tab there while working on C.
+    return DeploymentDescriptor()
+  if parsed.kind != JObject: return DeploymentDescriptor()
+  result.origin = parsed{"origin"}.getStr
+  result.revision = parsed{"revision"}.getStr
+  let modules = parsed{"modules"}
+  if modules.isNil or modules.kind != JArray: return
+  for entry in modules:
+    if entry.kind != JObject: continue
+    let module = DeployedModule(
+      id: entry{"id"}.getStr,
+      url: entry{"url"}.getStr,
+      bytes: entry{"bytes"}.getInt,
+      builtFrom: entry{"builtFrom"}.getStr)
+    if module.id.len == 0 or module.url.len == 0 or module.builtFrom.len == 0:
+      continue
+    result.modules.add module
+
+proc declaredModuleUrls*(descriptor: DeploymentDescriptor):
+    seq[tuple[id: string, url: string]] =
+  ## What the worker's `configure` message needs, in declaration order.
+  for module in descriptor.modules:
+    result.add (id: module.id, url: module.url)
+
+proc deployGuardDefects*(descriptor: DeploymentDescriptor;
+                         servedPaths: seq[string]): seq[string] =
+  ## Everything wrong between what a document DECLARES and what a publish
+  ## directory CONTAINS, as sentences. Empty is the assertion the deploy makes
+  ## on the bytes it is about to upload.
+  ##
+  ## This is the check that would have caught the BlockTracer replay engine
+  ## going to production at 18 MB with no page referencing it, and the mirror
+  ## failure — a page referencing an engine nobody published — that cost a day
+  ## after it. Both directions, because they are different mistakes made by
+  ## different edits, and a guard that only ran one way would have been green
+  ## on one of the two.
+  ##
+  ## `servedPaths` are root-relative with a leading slash, as the URLs are.
+  let declarable = fetchedRuntimeAssets()
+  for module in descriptor.modules:
+    var known = false
+    for asset in declarable:
+      if asset.id == module.id: known = true
+    if not known:
+      result.add "the entry document declares wasm module `" & module.id &
+        "`, which the runtime asset manifest does not name"
+    if module.url notin servedPaths:
+      result.add "the entry document declares `" & module.id & "` at " &
+        module.url & ", which the publish directory does not contain"
+    if module.builtFrom.len == 0:
+      result.add "the entry document declares `" & module.id &
+        "` with no provenance, so the page would drop it and report no " &
+        "toolchain while serving one"
+  # The other direction. A module that is published and not declared is not a
+  # broken page — it is 16 MB of upload nothing can reach, which is precisely
+  # the "built, deployed, served and never referenced" state that made every
+  # BlockTracer session a still frame.
+  for asset in declarable:
+    let served = "/" & asset.path
+    if served notin servedPaths: continue
+    var declared = false
+    for module in descriptor.modules:
+      if module.url == served: declared = true
+    if not declared:
+      result.add "the publish directory contains " & served &
+        ", which the entry document does not declare, so nothing can load it"
+
+proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
+  ## The page. `renderRewriteConfig` points every prefix at this file, and
+  ## until now nothing produced it.
+  ##
+  ## ## Why the document is generated rather than checked in
+  ##
+  ## The same argument the header makes for `rewritePrefixes` and the asset
+  ## manifest, and it is load-bearing twice over here. The document has to name
+  ## the two bundles at the paths the manifest declares, and it has to carry
+  ## the descriptor of what this particular build delivered — neither of which
+  ## a checked-in file can know. A static `index.html` would be a fourth
+  ## hand-written copy of the asset list, and the one nobody would think to
+  ## update.
+  ##
+  ## ## The load order is the specification's, and the `defer` is not cosmetic
+  ##
+  ## `web.js` is the loop arm and installs the platform; `ui.js` is the
+  ## renderer. Both are `defer`, so the descriptor element is in the DOM before
+  ## either runs — `boot()` reads it synchronously and a script that ran first
+  ## would find nothing and report a deployment with no toolchain, which is the
+  ## failure that looks exactly like a correct empty deployment.
+  let json = renderDeploymentDescriptor(descriptor)
+  result = """<!DOCTYPE html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeTracer &mdash; Noir Studio</title>
+<!--
+  Generated by viewmodel/platform/web_deployment.nim. Do not edit.
+
+  The JSON below is what THIS deployment placed, measured from the files it
+  uploaded. It is read by `host/web_browser.nim` out of the DOM rather than
+  fetched, because the development loop is asserted to have zero network
+  egress sites (ci/test/noir-studio-signed-out.sh) and a request here would be
+  the first.
+-->
+<script type="application/json" id="""" & deploymentDescriptorElementId &
+    """">
+""" & json & """
+</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #1e1e1e; color: #d4d4d4;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #codetracer-boot { padding: 1.5rem; line-height: 1.6; }
+  #codetracer-boot .fault { color: #f44747; }
+</style>
+<div id="codetracer-boot">Starting CodeTracer&hellip;</div>
+<div id="dom-root"></div>
+<script src="/""" & webEntryBundlePath & """" defer></script>
+<script src="/""" & rendererBundlePath & """" defer></script>
+"""
