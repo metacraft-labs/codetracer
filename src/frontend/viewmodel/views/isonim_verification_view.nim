@@ -6,12 +6,25 @@
 ## **without claiming trace replay support**."
 ##
 ## So this view is deliberately, visibly poorer than the panes around it.
-## There is no "step through this counterexample" button, no trace link, no
-## model-value table, no proof-goal tree, and no disabled control hinting that
-## one is coming. The whole vocabulary of replay is absent from the markup —
-## not greyed out, absent — because a disabled affordance is still a promise,
-## and VN-M3 is the milestone that promises nothing about replay. VN-M4 earns
-## the payload and VN-M5 earns the affordance.
+## There is no trace link, no model-value table, no proof-goal tree, and no
+## disabled control hinting that one is coming. The whole vocabulary of replay
+## is absent from the markup — not greyed out, absent — because a disabled
+## affordance is still a promise, and VN-M3 is the milestone that promises
+## nothing about replay. VN-M4 earns the payload and VN-M5 earns the
+## affordance.
+##
+## **VN-M5 added exactly one thing, and it is data-gated.** A "Step through the
+## counterexample" button is rendered per entry of
+## `VerificationPanelModel.counterexampleOffers`, and that sequence is empty
+## unless a payload was *attached* and carries a counterexample with steps and
+## a model that is not `unavailable`. Every state the text tier can reach — no
+## payload, a refused payload, a payload whose model is absent — still renders
+## the markup the paragraph above describes, which is why
+## `test_the_text_tier_never_offers_replay` passes unchanged. The suite pairs
+## that negative with a positive over the same code path: the same renderer,
+## over a payload that opens the gate, *does* produce the button. A "must not
+## contain" check whose scanner cannot see is green forever
+## (`Testing/Verification-Harness-Traps.md`, trap 4a).
 ##
 ## Two things the markup does insist on:
 ##
@@ -70,6 +83,25 @@ template renderVerificationPanelImpl(r, model: untyped): untyped =
         tdiv(class = "ct-verification-correctness-note",
              `data-ct-verification-note` = "no-verdict"):
           text correctnessNote(model)
+      # VN-M5 deliverable 1. Rendered only when the payload carries a
+      # counterexample with values to walk; `counterexampleOffers` is empty in
+      # every state VN-M3's tier can reach, so the paragraph above about this
+      # view promising nothing still describes it whenever there is nothing to
+      # promise. There is no disabled variant of this control on purpose.
+      if model.counterexampleOffers.len > 0:
+        tdiv(class = "ct-verification-counterexamples",
+             `data-ct-verification-counterexamples` = $model.counterexampleOffers.len):
+          for offerIndex in 0 ..< model.counterexampleOffers.len:
+            let offer = model.counterexampleOffers[offerIndex]
+            button(class = "ct-verification-open-counterexample",
+                   `data-ct-verification-action` = "open-counterexample",
+                   `data-ct-verification-finding` = offer.findingId,
+                   `data-ct-verification-counterexample-steps` = $offer.stepCount,
+                   `data-ct-verification-counterexample-model` = offer.modelStatusLabel,
+                   `data-ct-verification-counterexample-location` = offer.location,
+                   `aria-label` = "Step through the counterexample for this " &
+                     offer.kindLabel):
+              text "Step through the counterexample"
       tdiv(class = "ct-verification-findings",
            `data-ct-verification-findings` = $model.rows.len):
         for rowIndex in 0 ..< model.rows.len:

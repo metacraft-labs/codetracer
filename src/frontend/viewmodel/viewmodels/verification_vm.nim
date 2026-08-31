@@ -38,6 +38,7 @@ import isonim/viewmodel
 import ./project_actions
 import ./verification_report
 import ./verification_payload
+import ./counterexample_session_vm
 
 type
   VerificationPhase* = enum
@@ -109,6 +110,27 @@ const ReplayIsNotOfferedHere* = true
   ## `verification_report.toTestEvents` emits no `recording-created` event, and
   ## `isonim_verification_view` renders no trace affordance — and asserted in
   ## `test_the_text_tier_never_offers_replay`.
+  ##
+  ## **VN-M5 did not weaken this, and the distinction is worth stating.** *This
+  ## tier* is the text tier: a run whose payload is absent or refused. That is
+  ## still every state VN-M3's test drives, and it still renders nothing about
+  ## replay. What VN-M5 adds is an affordance that exists only when a payload
+  ## has arrived, been believed, and been found to carry a model with steps —
+  ## see `counterexampleOffers` below, which is empty in all of those states by
+  ## the shape of the data rather than by a flag. `ReplayIsNotOfferedHere`
+  ## remains a true statement about the tier it names, and
+  ## `CounterexampleIsOfferedOnlyWhenSteppable` is its VN-M5 counterpart.
+
+const CounterexampleIsOfferedOnlyWhenSteppable* = true
+  ## VN-M5 deliverable 1's refusal half, named for the same reason its VN-M3
+  ## sibling is.
+  ##
+  ## The offer is gated on `counterexample_session_vm.canOpenCounterexample`,
+  ## which is `hasSteppableCounterexample`'s rule narrowed to one finding. A
+  ## counterexample with no steps or an unavailable model is a located
+  ## obligation and nothing more; a button over it would promise a walk the
+  ## payload does not describe, and a *disabled* button would promise one
+  ## later. Neither is rendered.
 
 # ---------------------------------------------------------------------------
 # Recognising a verification action
@@ -398,6 +420,30 @@ type
       ## True only for a failed obligation. The view has no other way to
       ## decide, on purpose.
 
+  CounterexampleOffer* = object
+    ## VN-M5 deliverable 1: the affordance that turns a failed obligation into
+    ## a session, and the thing the "one action" acts on.
+    ##
+    ## **Built from the payload's findings, not from the text tier's rows**,
+    ## and that is the load-bearing choice in this type. A counterexample names
+    ## a *payload* finding id. The panel's rows are parsed out of the
+    ## verifier's printed diagnostics and carry no such id, so pairing them
+    ## would mean matching on message text or on ordinal — a guess. Attaching a
+    ## counterexample to the wrong obligation is the same class of error the
+    ## producer's `demangle` refuses to make when it will not invent a
+    ## `LocalId`: a confident answer that is sometimes about the wrong thing.
+    ## So the offer sits beside the rows and names the finding the producer
+    ## named.
+    findingId*: string
+    kindLabel*: string
+    message*: string
+    location*: string
+      ## The finding's own location, or `""`. This is the finding's, not the
+      ## counterexample's — the obligation is located even when the steps that
+      ## reach it are not.
+    stepCount*: int
+    modelStatusLabel*: string
+
   VerificationPanelModel* = object
     phase*: VerificationPhase
     actionLabel*: string
@@ -412,6 +458,11 @@ type
       ## Whether the run said anything about the program at all. False for
       ## four of the six outcomes, and the view says so in words when it is.
     rows*: seq[VerificationPanelRow]
+    counterexampleOffers*: seq[CounterexampleOffer]
+      ## Empty for every run without an *attached* payload carrying a
+      ## *steppable* counterexample — which is every state VN-M3's
+      ## `test_the_text_tier_never_offers_replay` drives, and is why that test
+      ## still passes unchanged with this field in place.
 
 proc kindLabel*(kind: VerificationFindingKind): string =
   case kind
@@ -421,6 +472,70 @@ proc kindLabel*(kind: VerificationFindingKind): string =
   of vfkBudgetExhausted: "solver budget exhausted"
   of vfkSolverUnavailable: "solver unavailable"
   of vfkPipelineError: "pipeline error"
+
+proc payloadFindingKindLabel*(kind: PayloadFindingKind): string =
+  ## The payload's own finding kinds in words. Spelled to match `kindLabel`
+  ## above, because the two vocabularies are the same six and a developer
+  ## reading one row and one offer should not meet two names for one thing.
+  case kind
+  of pfkProved: "proved"
+  of pfkFailedObligation: "failed obligation"
+  of pfkLimitation: "verifier limitation"
+  of pfkBudgetExhausted: "solver budget exhausted"
+  of pfkSolverUnavailable: "solver unavailable"
+  of pfkPipelineError: "pipeline error"
+
+proc counterexampleOffers*(vm: VerificationVM): seq[CounterexampleOffer] =
+  ## Which of this run's findings can be opened as a counterexample session.
+  ##
+  ## Three conditions, all of them about the data:
+  ##
+  ## 1. a payload was attached — a rejected or absent one offers nothing;
+  ## 2. the finding has a counterexample trace naming it;
+  ## 3. that trace has steps and a model that is not `unavailable`.
+  ##
+  ## Condition 3 is `canOpenCounterexample`, which is
+  ## `hasSteppableCounterexample`'s rule narrowed to one finding, so the button
+  ## and the session it opens cannot disagree about what is openable.
+  if vm.payloadStatus.val != psAttached or vm.payload.val.isNone:
+    return @[]
+  let payload = vm.payload.val.get
+  for finding in payload.findings:
+    if not canOpenCounterexample(payload, finding.id):
+      continue
+    let trace = counterexampleFor(payload, finding.id).get
+    result.add CounterexampleOffer(
+      findingId: finding.id,
+      kindLabel: payloadFindingKindLabel(finding.kind),
+      message: finding.message,
+      location:
+        if finding.hasLocation:
+          finding.location.file & ":" &
+            $finding.location.range.startLine & ":" &
+            $finding.location.range.startColumn
+        else:
+          "",
+      stepCount: trace.steps.len,
+      modelStatusLabel: modelStatusLabel(trace.model.status))
+
+proc openCounterexample*(vm: VerificationVM;
+                         session: CounterexampleSessionVM;
+                         findingId: string): bool {.discardable.} =
+  ## **Deliverable 1, as one call.** From a failed obligation in the results
+  ## panel to a session sitting on the first step of its counterexample.
+  ##
+  ## There is no intermediate "load the trace" step and no second click,
+  ## because the payload is already in this VM: the run that produced the
+  ## obligation produced the model, and `attachPayload` accepted them together.
+  ##
+  ## Returns false, and closes any session that was open, when the payload is
+  ## absent or refused or the finding has nothing steppable — with
+  ## `session.refusalReason` saying which.
+  if vm.payloadStatus.val != psAttached or vm.payload.val.isNone:
+    session.close()
+    session.refusalReason.val = NoStepsToOpenReason
+    return false
+  session.openCounterexample(vm.payload.val.get, findingId)
 
 proc panelModel*(vm: VerificationVM): VerificationPanelModel =
   ## The whole panel as a plain record, so the view is a pure function of it
@@ -435,6 +550,7 @@ proc panelModel*(vm: VerificationVM): VerificationPanelModel =
     running: vm.isRunning.val,
     cancellable: vm.isCancellable.val,
     hasReport: vm.hasReport.val,
+    counterexampleOffers: counterexampleOffers(vm),
   )
   let report = vm.report.val
   if report.isNone:

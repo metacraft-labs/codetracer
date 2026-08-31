@@ -1,0 +1,183 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "hand-authored",
+    "version": "0.0.0-authored",
+    "source_language": "noir",
+    "language_release": "1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1756512000000,
+    "finished_at_unix_ms": 1756512004000,
+    "workspace_root": "<authored: NOT A RECORDING — no producer emits loop-iteration steps; see PROVENANCE.md>",
+    "package": "loops",
+    "entry_file": "src/main.nr",
+    "argv": ["verno", "verify"],
+    "solver": { "invoked": true, "name": "z3" }
+  },
+  "outcome": "not-proved",
+  "outcome_detail": "the loop invariant does not hold on the third iteration",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "an authored document: no verifier produced it and no solver produced its values"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "failed-obligation",
+      "message": "loop invariant not maintained",
+      "detail": "sum <= 3 * i",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 5,
+        "start_column": 9,
+        "end_line": 5,
+        "end_column": 21,
+        "byte_start": 96,
+        "byte_end": 108
+      },
+      "excerpt": "invariant sum <= 3 * i",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "authored"
+      }
+    }
+  ],
+  "counterexample_traces": [
+    {
+      "id": "cex-loop",
+      "finding_id": "f0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "authored values for a bounded unrolling; no solver produced them"
+      },
+      "model": {
+        "status": "complete",
+        "absent_reason": "",
+        "bindings": [
+          { "name": "n", "local_id": 0, "value": "3", "type_name": "u32" },
+          { "name": "sum", "local_id": 1, "value": "12", "type_name": "u32" }
+        ]
+      },
+      "steps": [
+        {
+          "index": 0,
+          "kind": "assumption",
+          "description": "the inputs the solver chose",
+          "bindings": [
+            { "name": "n", "local_id": 0, "value": "3", "type_name": "u32" }
+          ]
+        },
+        {
+          "index": 1,
+          "kind": "loop-iteration",
+          "iteration": 0,
+          "description": "iteration 0 of the unrolled loop",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 4,
+            "start_column": 5,
+            "end_line": 4,
+            "end_column": 24,
+            "byte_start": 60,
+            "byte_end": 79
+          },
+          "bindings": [
+            { "name": "i", "local_id": 2, "value": "0", "type_name": "u32" },
+            { "name": "sum", "local_id": 1, "value": "4", "type_name": "u32" }
+          ]
+        },
+        {
+          "index": 2,
+          "kind": "loop-iteration",
+          "iteration": 1,
+          "description": "iteration 1 of the unrolled loop",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 4,
+            "start_column": 5,
+            "end_line": 4,
+            "end_column": 24,
+            "byte_start": 60,
+            "byte_end": 79
+          },
+          "bindings": [
+            { "name": "i", "local_id": 2, "value": "1", "type_name": "u32" },
+            { "name": "sum", "local_id": 1, "value": "8", "type_name": "u32" }
+          ]
+        },
+        {
+          "index": 3,
+          "kind": "loop-iteration",
+          "iteration": 1,
+          "description": "iteration 1, after the accumulator is written back",
+          "bindings": [
+            { "name": "sum", "local_id": 1, "value": "8", "type_name": "u32" }
+          ]
+        },
+        {
+          "index": 4,
+          "kind": "loop-iteration",
+          "iteration": 2,
+          "description": "iteration 2 of the unrolled loop",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 4,
+            "start_column": 5,
+            "end_line": 4,
+            "end_column": 24,
+            "byte_start": 60,
+            "byte_end": 79
+          },
+          "bindings": [
+            { "name": "i", "local_id": 2, "value": "2", "type_name": "u32" },
+            { "name": "sum", "local_id": 1, "value": "12", "type_name": "u32" }
+          ]
+        },
+        {
+          "index": 5,
+          "kind": "violation",
+          "description": "invariant sum <= 3 * i does not hold with sum = 12 and i = 2",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 5,
+            "start_column": 9,
+            "end_line": 5,
+            "end_column": 21,
+            "byte_start": 96,
+            "byte_end": 108
+          },
+          "bindings": []
+        }
+      ],
+      "violated_obligation": {
+        "kind": "loop-invariant",
+        "raw_kind": "loop invariant not maintained",
+        "message": "loop invariant not maintained",
+        "location": {
+          "file": "src/main.nr",
+          "file_index": 0,
+          "start_line": 5,
+          "start_column": 9,
+          "end_line": 5,
+          "end_column": 21,
+          "byte_start": 96,
+          "byte_end": 108
+        }
+      },
+      "is_recorded_execution": false
+    }
+  ],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": [
+      { "index": 0, "path": "src/main.nr" }
+    ]
+  }
+}
