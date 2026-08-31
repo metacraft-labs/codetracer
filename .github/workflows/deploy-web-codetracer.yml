@@ -145,6 +145,46 @@ jobs:
             codetracer-native-recorder=dev
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
+            # THE ISONIM FAMILY, pinned to explicit commits.
+            #
+            # Needed because this is the first workflow that compiles the
+            # RENDERER: `src/frontend/ui_js.nim` reaches `isonim/dsl/tailwind`,
+            # and codetracer's `config.nims` puts each of these on the Nim
+            # search path.
+            #
+            # PINNED BY SHA RATHER THAN `=dev`, for two independent reasons and
+            # both were measured rather than assumed:
+            #
+            #  1. `.github/actions/setup-isonim-siblings` is the normal way in,
+            #     and it cannot be used here. Four of its nine entries are BARE,
+            #     which resolves them from the per-commit workspace lock — and
+            #     `cloud` is a merge branch whose commits carry no lock, so the
+            #     action fails outright: "No workspace lock for codetracer
+            #     (candidates: ...)". That is not a thing this workflow can fix;
+            #     it is a property of deploying from a branch the lock tooling
+            #     does not publish for.
+            #
+            #  2. `=dev` would work and would make things worse.
+            #     `ci/test/sibling-provisioning-test.sh` counts branch-tip pins
+            #     against a ceiling that "is lowered as blocks are converted and
+            #     is never raised"; `dev` already sits at 70 against a ceiling of
+            #     59, and nine more would take it to 79. An explicit 40-hex SHA
+            #     is what that gate asks for instead, and it is the better answer
+            #     on its own terms: a re-run of this deploy builds against the
+            #     same siblings it built against the first time, which `=dev`
+            #     cannot promise.
+            #
+            # TO REFRESH: `git ls-remote https://github.com/metacraft-labs/<repo>
+            # refs/heads/dev`. Resolved 2026-08-31.
+            isonim=2a24d9549543c2a894525f65c4e608f9881b7373
+            isonim-tui=229cf0e5fa3e1276a4f7259ef3b7032069bb2ce8
+            isonim-gpui=010b175d67333575385bd472425530238f89edd7
+            nim-everywhere=f15e23f02cd0d715a32877f77d97318397232117
+            nim-termctl=2600f444535e278aab564fd59400fcb6d19f2ccf
+            nim-pty=4efd335466dc28015445d78c134b97ff245e1c74
+            nim-acp=bb5b8a2c5c3805946847270c9eea39d718747c5e
+            nim-agent-harbor=0a1e06125daa5e33e09e1bab98edb6b811179a4e
+            nim-agents=31f88a36a8e65e0846e62b15515d3686bd78de5a
 
       - name: Allow direnv in this checkout and the recorder sibling
         # build-dist.sh runs `direnv exec <repo> bash build_wasm.sh`, which in
@@ -260,21 +300,22 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/noir-wasm-worker-e2e.sh
           '
 
-      - name: Setup isonim siblings
-        # The Noir Studio bundle carries the RENDERER, and `src/frontend/ui_js.nim`
-        # reaches `isonim/dsl/tailwind`, which `staticRead`s
-        # `isonim/build/tailwind-styles.json` at COMPILE time. Nim cannot catch a
-        # failing `staticRead`, so without this the assembly step dies several
-        # minutes in with an error naming neither this workflow nor the file's
-        # purpose — which is exactly what `ci/test/renderer-browser-build.sh`
-        # warns about and checks for before it builds anything.
-        #
-        # This deploy is the first workflow to compile the renderer, so it is the
-        # first to need the isonim family; `setup-dev-env` above provisions the
-        # db-backend siblings, which are a different set.
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+      - name: Seed isonim's tailwind-styles.json
+        # `src/frontend/ui_js.nim` reaches `isonim/dsl/tailwind`, which
+        # `staticRead`s this file at COMPILE time. Nim cannot catch a failing
+        # `staticRead`, so without it the renderer build dies several minutes in
+        # with an error naming neither this workflow nor the file's purpose —
+        # the trap `ci/test/renderer-browser-build.sh` documents and pre-checks.
+        # A `{}` placeholder is what `.github/actions/setup-isonim-siblings`
+        # seeds for every other job that compiles Nim outside the Nix sandbox;
+        # `isonim/dsl/tailwind.nim` falls through to its own `{}` fallback.
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/../isonim/build"
+          if [ ! -f "${{ github.workspace }}/../isonim/build/tailwind-styles.json" ]; then
+            echo '{}' > "${{ github.workspace }}/../isonim/build/tailwind-styles.json"
+          fi
+          ls -l "${{ github.workspace }}/../isonim/build/tailwind-styles.json"
 
       - name: Assemble the Noir Studio bundle
         # ONE assembly step, and it is the SAME script the `web-bundle-assets`
