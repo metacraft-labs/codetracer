@@ -319,6 +319,17 @@ proc edgeOverlayCssClass*(edge: AutoHideEdge): cstring =
 
 # Forward declarations — defined in the docked sidebar section below.
 # Placed here so pinPanel / unpinPanel can call them before they are defined.
+proc clearDockedFocusClass() =
+  ## Drop the selection class from every docked container.
+  ##
+  ## Only one panel is ever selected, and the three edges are independent
+  ## containers, so opening one must clear whichever other one held it.
+  for id in [cstring"auto-hide-docked-left", cstring"auto-hide-docked-right",
+             cstring"auto-hide-docked-bottom"]:
+    let el = document.getElementById(id)
+    if not el.isNil:
+      el.classList.remove(cstring"ct-docked-focused")
+
 proc hideDockedPanel*()
 proc cancelHoverPreview*()
 proc hideOverlay*()
@@ -643,6 +654,10 @@ proc hideDockedPanel*() =
     let containerEl = document.getElementById(dockedContainerId(panel.edge))
     if not containerEl.isNil:
       containerEl.classList.remove(cstring"docked-open")
+      # Hand the selection back to GoldenLayout: with no docked panel selected
+      # the outline builder resumes and re-outlines the focused stack.
+      containerEl.classList.remove(cstring"ct-docked-focused")
+      containerEl.removeAttribute(cstring"data-ct-docked-title")
 
   autoHideState.dockedPanel = nil
   autoHideState.dockedVisible = false
@@ -695,6 +710,22 @@ proc showDockedPanel*(panel: AutoHidePanel) =
     console.warn cstring"auto_hide: no live element for docked panel"
 
   containerEl.classList.add(cstring"docked-open")
+
+  # Opening a docked panel selects it — the user clicked its tab to work in it.
+  # `ct-docked-focused` is this panel's equivalent of GoldenLayout's
+  # `.lm_header.lm_focused`: the outline builder in `ui/layout.nim` stands down
+  # while it is set, so the docked panel carries the only selection outline.
+  clearDockedFocusClass()
+  containerEl.classList.add(cstring"ct-docked-focused")
+
+  # Which panel is docked here, for the outline builder in `ui/layout.nim`.
+  #
+  # It cannot read that off the strip: a tab is marked `active` when its panel
+  # is docked *or* when it is being previewed in the hover overlay, so during a
+  # hover two tabs carry the class and the outline would follow whichever came
+  # first.  The border marks the docked panel only, so the docked tab has to be
+  # named outright.
+  containerEl.setAttribute(cstring"data-ct-docked-title", panel.title)
 
   # Restore the remembered size so docked and overlay share the same dimensions.
   # Without this the CSS default (360px/280px) always wins on first dock.
@@ -1284,8 +1315,14 @@ when defined(js):
           showDockedPanel(target),
       onHoverEnter: proc(index: int) =
         if index >= 0 and index < panels.len:
-          # Don't show a hover preview for the panel that's already docked.
+          # Its panel is already on screen, docked, so there is nothing to
+          # preview here — and any preview still up belongs to another tab.
+          # Returning alone left that one hanging open while the pointer sat
+          # on the docked tab.
           if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
+            cancelHoverPreview()
+            if autoHideState.overlayVisible and not autoHideState.pinnedOpen:
+              hideOverlay()
             return
           # Suppress re-open if the panel was just explicitly closed; wait for
           # the mouse to leave and re-enter before allowing the hover preview.
@@ -1373,7 +1410,14 @@ when defined(js):
           unpinPanel(autoHideLayout, panels[index]),
       onHoverEnter: proc(index: int) =
         if index >= 0 and index < panels.len:
+          # Its panel is already on screen, docked, so there is nothing to
+          # preview here — and any preview still up belongs to another tab.
+          # Returning alone left that one hanging open while the pointer sat
+          # on the docked tab.
           if autoHideState.dockedVisible and autoHideState.dockedPanel == panels[index]:
+            cancelHoverPreview()
+            if autoHideState.overlayVisible and not autoHideState.pinnedOpen:
+              hideOverlay()
             return
           if suppressHoverAfterClose:
             return

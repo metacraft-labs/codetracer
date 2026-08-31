@@ -127,21 +127,71 @@ proc attachHoverZone(el: Element) =
     startDismissal())
   el.addEventListener(cstring"mouseenter", proc(ev: Event) = cancelDismissal())
 
+proc setupZoneTracking() =
+  ## Hold the overlay open while the pointer is anywhere in the hover zone — a
+  ## strip tab or the overlay itself — and dismiss it once the pointer is in
+  ## neither.
+  ##
+  ## By delegation on `document`, not a listener per strip.  The bottom strip
+  ## lives in the status bar and is rebuilt whenever that re-renders, so a
+  ## listener bound to the element is dropped without warning — which is why
+  ## leaving a status-bar tab never closed the preview while leaving a
+  ## side-strip tab did.  `mouseover` bubbles from every element the pointer
+  ## enters, so this sees the whole zone and never needs rebinding.
+  {.emit: """
+    // The tabs themselves, not the strips that hold them: a strip runs the
+    // full height (or width) of the window, so treating the whole thing as
+    // the zone kept a preview open while the pointer sat in empty space well
+    // away from any tab.
+    var CT_HOVER_ZONE = '#auto-hide-overlay, .auto-hide-strip-tab';
+    var ctInZone = false;
+
+    function ctZoneUpdate(target) {
+      var inZone = !!(target && target.closest && target.closest(CT_HOVER_ZONE));
+      // Only on a transition.  `startDismissal` restarts its timer each call,
+      // so running it on every mousemove would keep pushing the close back and
+      // the preview would hang about for as long as the pointer kept moving.
+      if (inZone === ctInZone) { return; }
+      ctInZone = inZone;
+      if (inZone) {
+        `cancelDismissal`();
+      } else {
+        `cancelHoverPreview`();
+        `startDismissal`();
+      }
+    }
+
+    // `mouseover` alone fires only when the pointer crosses into a different
+    // element, so a move that stays within one element is never re-judged.
+    // `mousemove` carries the same topmost target and covers the rest.
+    document.addEventListener('mouseover', function (ev) { ctZoneUpdate(ev.target); }, true);
+    document.addEventListener('mousemove', function (ev) { ctZoneUpdate(ev.target); }, true);
+
+    // Pointer off the window entirely: no further events are coming, so close
+    // rather than leave the preview stranded.
+    document.addEventListener('mouseout', function (ev) {
+      if (ev.relatedTarget === null) {
+        ctInZone = false;
+        `cancelHoverPreview`();
+        `startDismissal`();
+      }
+    }, true);
+  """.}
+
 proc setupMouseLeaveDismissal*() =
-  ## Cancel auto-hide whenever the mouse is inside the overlay OR either
-  ## side strip.  Moving between the strip tabs and the overlay content
-  ## must not trigger a close — all three elements form one logical zone.
+  ## Cancel auto-hide whenever the mouse is inside the overlay OR any strip.
+  ## Moving between the strip tabs and the overlay content must not trigger a
+  ## close — they form one logical zone.
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
   if not overlayEl.isNil:
     attachHoverZone(overlayEl)
 
-  let stripLeft = document.getElementById(cstring"auto-hide-strip-left")
-  if not stripLeft.isNil:
-    attachHoverZone(stripLeft)
-
-  let stripRight = document.getElementById(cstring"auto-hide-strip-right")
-  if not stripRight.isNil:
-    attachHoverZone(stripRight)
+  # The strips themselves are deliberately NOT hover zones.  Each one spans the
+  # whole side of the window, so holding the preview open for the entire strip
+  # kept it up while the pointer rested in empty space far from any tab.
+  # `setupZoneTracking` scopes the zone to the tabs instead, and covers the
+  # bottom strip too — which has no stable element to bind a listener to.
+  setupZoneTracking()
 
 # ---------------------------------------------------------------------------
 # Full overlay setup

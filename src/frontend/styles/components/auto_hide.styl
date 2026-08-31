@@ -87,7 +87,12 @@
   flex-direction: column
   flex-shrink: 0
   flex-grow: 0
-  background-color: transparent
+  // The panel surface, the same token `.lm_content` paints a GoldenLayout
+  // panel with — a docked panel is the same surface, just parked at an edge.
+  // Transparent here let the window background show through instead, so a
+  // docked panel came up darker than every other panel; the bottom docked
+  // container below always had this and the side ones did not.
+  background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
   position: relative
   // z-index: 5 creates a stacking context so GL children with high z-index
@@ -109,6 +114,37 @@
 
 // No border on docked panels — the resize handle acts as the divider,
 // matching GL's .lm_splitter which is a solid-background 4px wide element.
+
+// ---------------------------------------------------------------------------
+// Selected docked panel
+//
+// A docked panel is a panel like any other, so it carries the same selection
+// cue: one 1px line, on the same tokens as the GoldenLayout outline
+// (`SELECTED_PANEL_BORDER` / `_COLOR` in golden_layout.styl, imported ahead of
+// this file).  It needs no SVG — a docked panel is a plain rounded rectangle,
+// with none of the tab and connector geometry the GL path exists to trace, so
+// an inset shadow follows the shape exactly and costs nothing to keep in step
+// on resize.
+//
+// Inset rather than a border: the container's width is what the resize drag
+// writes to, and a border would add to it and shift the panel by a pixel on
+// every dock.  The class is set in `ui/auto_hide.nim` (on open) and
+// `ui/layout.nim` (on click), and only ever on one panel at a time.
+// ---------------------------------------------------------------------------
+// The outline itself is one stroked SVG path built in `ui/layout.nim`
+// (`setupSelectedPanelOutline`), exactly as it is for a GoldenLayout stack: the
+// strip tab and the docked panel are traced as a single shape so the line runs
+// around the tab rather than stopping at the panel's edge.  An inset shadow
+// cannot do that — it can only follow the one box it is set on.
+.ct-docked-outline
+  position: fixed
+  top: 0
+  left: 0
+  pointer-events: none
+  // Above the docked panel (101) and the side strip (100), so the line is not
+  // painted over by either of the two elements it runs around.
+  z-index: 202
+  overflow: visible
 
 #auto-hide-docked-left-content,
 #auto-hide-docked-right-content
@@ -591,8 +627,16 @@
 
 #auto-hide-overlay
   position: fixed
-  // z-index: 101 — above the backdrop (98) and the strips (100).
-  z-index: 101
+  // Above the backdrop (98), the strips (100), a docked panel (101) and the
+  // outline that traces one (202).
+  //
+  // It has to clear the outline, not just the panel: that outline must paint
+  // above the docked panel or the panel's own background hides it, and a docked
+  // panel and this overlay are both 101 — so no value sits between them.  The
+  // overlay is the transient thing floating over the layout, so it goes on top
+  // and the outline is occluded where the two meet, rather than the outline
+  // being drawn across a hovered panel's content.
+  z-index: 203
   background-color: colors-ui-surface-primary-default
   border: none
   border-radius: 0.36em

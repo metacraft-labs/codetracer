@@ -1,3 +1,15 @@
+// The space between two tabs.
+LAYOUT_TAB_GAP = 0.25em
+
+// The radius of the curve that joins a tab to its panel.
+//
+// This is the *painted* radius.  The connectors on a GoldenLayout tab are
+// box-shadows with a -0.25em spread, and a negative spread shrinks a shadow's
+// corners, so their 0.625em border-radius reaches the screen as 0.375em.  The
+// stroked outline used to trace the 0.625em instead and cut across the curve it
+// was meant to follow.  One value now, read by the CSS below and by the path
+// builder in `ui/layout.nim` through the custom property.
+LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
 
 .lm_goldenlayout
   background: colors-ui-surface-primary-default !important
@@ -30,6 +42,19 @@
 .lm_tabs
   width: 100%
   display: flex
+  // Tabs are separated with the flex container's `gap`, NOT margin-right.
+  //
+  // GoldenLayout totals the strip by reading the ACTIVE tab's `margin-right`
+  // and charging it to every tab, so any margin at all pushes the sum over the
+  // header width and a nested tab is banished to the overflow list (see
+  // `stackCreated` in `ui/layout.nim`).  Zeroing the active tab's margin to
+  // dodge that is what left it with no gap to its right neighbour — the two
+  // read as one fused tab.  `gap` is invisible to GL's arithmetic and applies
+  // to every pair regardless of which tab is active, so it settles both.
+  //
+  // `gap` also sits only BETWEEN tabs, so the last one still ends flush with
+  // the panel's right edge — which is what keeps that corner square.
+  gap: LAYOUT_TAB_GAP
 
 .lm_splitter.lm_dragging
   background: #444444;
@@ -56,7 +81,7 @@
   overflow: hidden
   border-radius: 0.36em
   // margin-left: 2px !important
-  margin-right: 0.24em !important
+  margin-right: 0 !important
   margin-bottom: 0px !important
   flex: 1
   text-align: center
@@ -134,7 +159,11 @@
   border-bottom-left-radius: 0em
   box-shadow: 0em 0.48em 0em 0em colors-ui-surface-base-panel !important
   overflow: visible !important
-
+  // The concave connectors that flare the active tab into its panel — the
+  // curve is part of the product's identity, so it is deliberate geometry, not
+  // decoration.  Each is a box-shadow bled off the side of the tab; where a tab
+  // is flush against the panel's edge there is no room for one and the rules
+  // further down switch that side off.
   &::before
     content: " ";
     pointer-events: none;
@@ -245,8 +274,8 @@
 // Selected panel
 //
 // Selection is shown by the outline alone — one stroked path around the tab,
-// both curved connectors and the panel body.  The surface is deliberately left
-// at its resting colour: the line carries the state on its own.
+// its connectors and the panel body.  The surface is deliberately left at its
+// resting colour: the line carries the state on its own.
 //
 // The geometry is generated in `ui/layout.nim` (`setupSelectedPanelOutline`),
 // because the tab's width and position are only known at runtime; the colour
@@ -258,10 +287,27 @@
 SELECTED_PANEL_BORDER = 0.0625rem
 SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
 
+// A last tab sits flush with its panel's right edge, so it runs straight down
+// into the body: there is no corner to round, and no room to its right for a
+// connector to curve into.  This is the rule that was missing — the right-hand
+// connector was drawn anyway, flaring past the panel's edge into the corner of
+// the window, which is the stray curl that showed at the end of the tab.
+//
+// The mirror of the first-child rule below; between them they switch off only
+// the connector that has nowhere to go.  A tab with panel either side keeps
+// both curves.
+.lm_stack:has(> .lm_header .lm_tabs > .lm_tab.lm_active:last-child)
+  > .lm_items,
+  > .lm_items .lm_content
+    border-top-right-radius: 0
+
+  > .lm_header .lm_tabs > .lm_tab.lm_active:last-child::after
+    display: none
+
 // A first tab sits flush with its panel's left edge, so the tab runs straight
-// down into the body and there is no corner to round and nothing for the left
-// connector to reach.  Leaving both in place puts a curve where the two meet —
-// the panel bending away from a tab that does not bend with it.
+// down into the body and there is nothing for the left connector to reach.
+// Leaving both in place puts a curve where the two meet — the panel bending
+// away from a tab that does not bend with it.
 //
 // Applies to every stack, not only the selected one: the seam is there whether
 // or not the panel is highlighted.
@@ -275,10 +321,10 @@ SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
   > .lm_header .lm_tabs > .lm_tab.lm_active:first-child::before
     display: none
 
-// The selected panel's outline — one stroked path covering the tab, both curved
-// connectors and the panel body as a single shape.  The geometry is generated in
-// `ui/layout.nim` (`setupSelectedPanelOutline`) because the tab's width and
-// position are only known at runtime; colour and weight stay here, on tokens.
+// The selected panel's outline — one stroked path covering the tab and the panel
+// body as a single shape.  The geometry is generated in `ui/layout.nim`
+// (`setupSelectedPanelOutline`) because the tab's width and position are only
+// known at runtime; colour and weight stay here, on tokens.
 //
 // The path is inset by half the stroke width, so the line falls inside the shape
 // rather than straddling its edge.  Unlike a CSS border, an SVG stroke is not
@@ -291,9 +337,19 @@ SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
   z-index: 6
   overflow: visible
 
+// Both outlines — the one around a GL stack and the one around a docked
+// auto-hide panel and its strip tab (`.ct-docked-outline`, positioned in
+// auto_hide.styl) — are the same line, so they are stroked from one rule.
+.ct-selected-outline,
+.ct-docked-outline
   path
     fill: none
     stroke: SELECTED_PANEL_BORDER_COLOR
     stroke-width: SELECTED_PANEL_BORDER
     // Rounded joins keep the corners continuous where the arcs meet the lines.
     stroke-linejoin: round
+    // Carries the connector radius to the path builder already resolved to
+    // pixels.  It has to ride on a real length property: `getComputedStyle`
+    // hands back a custom property's `em` token unresolved, and the builder
+    // needs pixels.  Draws nothing — an SVG path has no border to round.
+    border-top-left-radius: LAYOUT_TAB_CONNECTOR_RADIUS

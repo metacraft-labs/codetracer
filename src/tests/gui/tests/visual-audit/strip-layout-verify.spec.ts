@@ -21,7 +21,9 @@ import {
 const DIR = "/tmp/strip-layout-verify";
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// Helper: pin via JS (avoids dropdown blur race)
+// Helper: pin the stack's active tab via its right-click context menu.
+// The stack-header dropdown that used to carry these commands was removed;
+// `addPanelTransferContextMenu` in `ui/layout.nim` is now the only route.
 async function pinToEdge(
   page: import("@playwright/test").Page,
   edge: string,
@@ -29,23 +31,19 @@ async function pinToEdge(
 ) {
   const stacks = page.locator(".lm_stack");
   const stack = stacks.nth(stackIndex);
-  const toggle = stack.locator(".layout-buttons-container").first();
-  await toggle.click();
+  await stack.locator(".lm_tab.lm_active").first().click({ button: "right" });
   await wait(300);
-  await page.evaluate(
-    ([e, idx]) => {
-      const stacks = document.querySelectorAll(".lm_stack");
-      const s = stacks[Number(idx)];
-      if (!s) return;
-      for (const item of s.querySelectorAll(".layout-dropdown-node")) {
-        if (item.textContent?.trim() === `Pin to ${e}`) {
-          (item as HTMLElement).click();
-          return;
-        }
+  await page.evaluate((e) => {
+    const items = document.querySelectorAll(
+      "#context-menu-container .context-menu-item",
+    );
+    for (const item of items) {
+      if (item.textContent?.trim() === `Pin to ${e}`) {
+        (item as HTMLElement).click();
+        return;
       }
-    },
-    [edge, String(stackIndex)],
-  );
+    }
+  }, edge);
   await wait(1500);
 }
 
