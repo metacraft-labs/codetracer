@@ -2766,7 +2766,7 @@ impl Handler {
 
     pub fn event_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -2776,14 +2776,21 @@ impl Handler {
             self.replay.tracepoint_jump(&event)?;
         }
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false, sender)?;
+        self.complete_move(false, sender.clone())?;
 
+        // Same omission as `calltrace_jump`, found by reading the neighbours
+        // rather than by measuring: `ct/event-jump` is the Event Log's own
+        // row-click command and it had the identical shape — `_req` unused,
+        // events emitted, no response. Nothing in the suite that found the
+        // calltrace one exercises this command, so it would have kept waiting
+        // silently until an Event Log pane awaited it.
+        self.respond_dap(req, 0, sender)?;
         Ok(())
     }
 
     pub fn calltrace_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         location: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -2799,8 +2806,29 @@ impl Handler {
             let _ = self.replay.load_location(&mut self.expr_loader)?;
             self.step_id = self.replay.current_step_id();
         }
-        self.complete_move(false, sender)?;
+        self.complete_move(false, sender.clone())?;
 
+        // The RESPONSE, which this handler used to omit entirely.
+        //
+        // `complete_move` emits EVENTS (`stopped`, `ct/complete-move`), and an
+        // event is not a response: a DAP transport correlates a reply to a
+        // request by `request_seq`, so a request that only ever produces events
+        // is never settled. The caller does not get an error and does not get a
+        // refusal — it waits forever. Measured over the published wasm engine:
+        // `ct/calltrace-jump` was dispatched, moved the session, emitted its
+        // stopped event, and returned no response in 20 s while the worker
+        // stayed healthy and answered every later request.
+        //
+        // That is strictly worse than being unimplemented, because an
+        // unimplemented command is REFUSED BY NAME (the `handle_request`
+        // fallthrough returns "command … not supported here") and a caller can
+        // render that. A pane awaiting this one spins with nothing on screen to
+        // say why.
+        //
+        // `0` is the body every other move handler responds with — see
+        // `next_or_step_back_dap` — so this is the existing convention being
+        // applied, not a new one.
+        self.respond_dap(req, 0, sender)?;
         Ok(())
     }
 

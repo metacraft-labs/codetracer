@@ -845,7 +845,12 @@ impl CTFSTraceReader {
             Self::open_old_format(ctfs)?
         };
 
-        Self::attach_seekable_sources(reader, ctfs, Some(path), follow)
+        // The native path materializes column-aware steps eagerly (via the Nim
+        // FFI plus its own `GlobalPositionDecoder`), so the seekable stream it
+        // attaches here is only ever consulted for line-only containers and
+        // takes no decoder. This is the routing invariant the browser path
+        // used to violate silently.
+        Self::attach_seekable_sources(reader, ctfs, Some(path), follow, None)
     }
 
     /// Attach every SEEKABLE source the container advertises to an
@@ -862,11 +867,22 @@ impl CTFSTraceReader {
     /// thing — the `<ct>.step-map.ns` SIDECAR, which is a filesystem-only
     /// convenience. A path-less caller still gets the CONTAINER-INTERNAL
     /// `step-map.ns`.
+    /// `position_decoder` is the container's `global_position_index` decoder,
+    /// and it must be `Some` for exactly the column-aware containers. The
+    /// `steps.dat` source attached below decodes a `Step` record's `u64` one of
+    /// two incompatible ways depending on it, so a decoder that is dropped here
+    /// gives this reader a step stream that disagrees with its own lazy step
+    /// cache about where every step is. `None` — every old-format and line-only
+    /// container, including the instruction-level chain traces that legitimately
+    /// report `Line(pc)` — keeps the legacy decode untouched.
     fn attach_seekable_sources(
         mut reader: Self,
         ctfs: &mut CtfsReader,
         path: Option<&Path>,
         follow: bool,
+        position_decoder: Option<
+            std::sync::Arc<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder>,
+        >,
     ) -> Result<Self, Box<dyn Error>> {
 
         // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
@@ -906,10 +922,13 @@ impl CTFSTraceReader {
         // materialized `db.steps` fallback) rather than failing the open.
         reader.step_stream = match step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs) {
             Ok(Some(stream)) => {
+                let stream = stream.with_position_decoder(position_decoder.clone());
                 info!(
-                    "CTFS: seekable steps.dat attached ({} steps, chunk_size {}) — step lines served on-demand",
+                    "CTFS: seekable steps.dat attached ({} steps, chunk_size {}, column-aware {}) — \
+                     step lines served on-demand",
                     stream.step_count(),
                     stream.chunk_size(),
+                    stream.is_column_aware(),
                 );
                 Some(std::sync::Arc::new(stream))
             }
@@ -1106,15 +1125,19 @@ impl CTFSTraceReader {
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::from_bytes(data)?;
 
-        let reader = if is_new_format(&ctfs) {
+        let (reader, position_decoder) = if is_new_format(&ctfs) {
             info!("CTFS from_bytes: new (split-stream) format detected — opening via the pure-Rust reader");
             Self::open_new_format_rust(&mut ctfs)?
         } else {
             info!("CTFS from_bytes: old format detected — running postprocessing");
-            Self::open_old_format(&mut ctfs)?
+            // Old-format containers store raw events and are postprocessed into
+            // a materialized `Db`; they carry no `global_position_index` address
+            // space at all, so there is nothing to decode and nothing here
+            // changes for them.
+            (Self::open_old_format(&mut ctfs)?, None)
         };
 
-        Self::attach_seekable_sources(reader, &mut ctfs, None, false)
+        Self::attach_seekable_sources(reader, &mut ctfs, None, false, position_decoder)
     }
 
     /// Open a new-format (split-stream) CTFS container **in pure Rust**, with
@@ -1164,7 +1187,16 @@ impl CTFSTraceReader {
     /// that claims to be new-format and then cannot produce its steps is a
     /// corrupt container, and reporting that is better than opening an empty
     /// trace that looks like a program which did nothing.
-    fn open_new_format_rust(ctfs: &mut CtfsReader) -> Result<Self, Box<dyn Error>> {
+    #[allow(clippy::type_complexity)]
+    fn open_new_format_rust(
+        ctfs: &mut CtfsReader,
+    ) -> Result<
+        (
+            Self,
+            Option<std::sync::Arc<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder>>,
+        ),
+        Box<dyn Error>,
+    > {
         let meta_bytes = ctfs
             .read_file("meta.dat")
             .map_err(|e| format!("new-format container has no readable meta.dat: {e}"))?;
@@ -1198,6 +1230,38 @@ impl CTFSTraceReader {
         let tables = interning_tables::InterningTables::open_from_ctfs(ctfs)
             .map_err(|e| format!("interning tables unreadable: {e}"))?;
 
+        // The `global_position_index` decoder for a COLUMN-AWARE container.
+        //
+        // This is the fix for the browser's wrong-position defect. A `Step`
+        // record in `steps.dat` carries a single `u64`, and the container
+        // decides what it means: a line-only container packs
+        // `path_id << 32 | line` (M23a), a column-aware one stores a cumulative
+        // BYTE address across all files. This path used to read every container
+        // the first way, so a column-aware one — which is what `nargo trace`
+        // writes today — reported `paths[0]` at a four-digit "line" for every
+        // step, while the call tree (read from `calls.dat`, a different
+        // encoding) stayed correct. That split is what made it look like a
+        // frontend or DAP problem rather than a decode one.
+        //
+        // The NATIVE reader had already been fixed for this exact bug (see
+        // `tests/cairo_fixture_gli_decode.rs`), but it fixed it inside the
+        // column-aware branch of `open_new_format_nim`, which the browser never
+        // reaches: that path needs the Nim FFI to harvest per-file line lengths,
+        // and there is no FFI in wasm. So the tables are read from the container's
+        // own Layout A `paths.dat` records instead, which
+        // `InterningTables::line_lengths` now carries.
+        //
+        // Built from PRESENCE of Layout A data, not from the meta bit alone —
+        // the same judgement the cairo fix records, because a known recorder bug
+        // leaves `has_column_aware_steps` clear on traces that do carry the
+        // tables. An empty set of tables leaves this `None` and the legacy
+        // line-only decode entirely untouched, which is what keeps OLD-FORMAT
+        // containers (the Aztec chain traces, which report `Line(pc)` in a
+        // `.avm` path by design) reading exactly as they do today.
+        let mut position_decoder: Option<std::sync::Arc<
+            codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder,
+        >> = None;
+
         match tables {
             Some(tables) => {
                 info!(
@@ -1207,6 +1271,27 @@ impl CTFSTraceReader {
                     tables.types.len(),
                     tables.variable_names.len(),
                 );
+                if tables.line_lengths.iter().any(|lls| !lls.is_empty()) {
+                    let files_with_tables = tables.line_lengths.iter().filter(|lls| !lls.is_empty()).count();
+                    let decoder =
+                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_line_lengths(
+                            tables.line_lengths.clone(),
+                        );
+                    info!(
+                        "CTFS pure-Rust reader: column-aware container — global_position_index decoder built \
+                         from {} of {} paths' Layout A line tables ({} addressable positions); steps decode to \
+                         (file, line, column)",
+                        files_with_tables,
+                        tables.line_lengths.len(),
+                        decoder.total_positions(),
+                    );
+                    position_decoder = Some(std::sync::Arc::new(decoder));
+                } else {
+                    info!(
+                        "CTFS pure-Rust reader: line-only container — steps decode via the packed \
+                         global_line_index, columns stay None"
+                    );
+                }
                 for path in tables.paths {
                     db.paths.push(path.clone());
                     db.path_map.insert(path, PathId(db.paths.len() - 1));
@@ -1268,6 +1353,9 @@ impl CTFSTraceReader {
                         the container is inconsistent"
                 .into());
         };
+        // Tell the stream which encoding its records are in, BEFORE anything
+        // reads a step through it.
+        let step_source = step_source.with_position_decoder(position_decoder.clone());
         let step_count = step_source.step_count();
         let (step_to_call_key, step_to_global_call_key) = build_step_call_maps(&call_ranges, step_count);
         info!(
@@ -1338,7 +1426,7 @@ impl CTFSTraceReader {
         // answers it exactly, without decoding the rest.
         db.end_of_program = Self::end_of_program_from_last_event(ctfs, step_count);
 
-        Ok(CTFSTraceReader {
+        Ok((CTFSTraceReader {
             db,
             // The column-aware capability bits come from `meta.dat`'s flags.
             column_capabilities: ColumnAwareCapabilities {
@@ -1367,7 +1455,7 @@ impl CTFSTraceReader {
             #[cfg(feature = "nim-reader")]
             nim_reader: None,
             call_ranges,
-        })
+        }, position_decoder))
     }
 
     /// Decide `end_of_program` by reading ONLY the last I/O event.

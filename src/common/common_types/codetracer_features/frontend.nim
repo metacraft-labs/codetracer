@@ -211,7 +211,12 @@ type
     videoPlayerJumpStart,         # Home — Seek to first frame
     videoPlayerJumpEnd,           # End — Seek to last frame
     videoPlayerTogglePicker,      # P — Enter / exit picker mode
-    videoPlayerCancelPicker       # Esc (picker on) — Cancel picker without commit
+    videoPlayerCancelPicker,      # Esc (picker on) — Cancel picker without commit
+    # VN-M5. Open the verification panel. Appended at the end for the reason
+    # the two notes above give: the `actions` array in `ui_js.nim` is indexed
+    # positionally by this enum, so inserting anywhere but the end silently
+    # re-points every handler after the insertion.
+    aVerification                 # Open the Verification panel
 
   InputShortcutMap* = TableLike[langstring, langstring]
 
@@ -352,7 +357,19 @@ type
     ## of `VCS` because it is a *document*, keyed by its diff target, and
     ## shares nothing with the docked panel's branch picker and commit
     ## history.
-    UnifiedDiff = 46
+    UnifiedDiff = 46,
+    ## VN-M5. The verification panel: a Verno run's status and findings, and —
+    ## when the run's payload carries a counterexample with values in it — the
+    ## solver's counterexample, walked with the debugger's ordinary controls.
+    ##
+    ## **One content kind, not two, and that is the data-gating.** The
+    ## counterexample is not a panel a user can open: it is a region of this
+    ## one that exists only while a session is open, and a session opens only
+    ## from a finding whose payload passes `canOpenCounterexample`. A
+    ## `Content.Counterexample` with its own menu entry would be a standing
+    ## affordance for a thing that usually is not there — the promise this
+    ## campaign exists to avoid making.
+    Verification = 47
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

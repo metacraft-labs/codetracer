@@ -1795,6 +1795,20 @@ jobs:
         # longer dispatches.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
 
+      - name: Identity token mutation proof (ID1)
+        # `viewmodel/identity/token.nim` is the verification library ID1 asks
+        # every product to link, and `test_identity_token.nim` runs in
+        # `vm-unit` and `vm-unit-js` by the directory glob — this step is the
+        # evidence that its ten cases can go red: seventeen mutations, each
+        # verified to redden the case written for it.
+        #
+        # M17 is why it runs here rather than on one backend. It narrows the
+        # JSON guard to `except CatchableError` and requires the C backend to
+        # stay GREEN while the JS backend goes RED — CONTRIBUTING.md's
+        # portability rule, as a check. Both backends are needed for that arm
+        # to prove anything, so this step must never be reduced to one.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-identity-token-mutation
+
       - name: Noir Studio signed out (NS7a / Identity ID3)
         # `test_development_loop_needs_no_account`, as a property of the built
         # product: the arm that carries write, compile, run, record and export

@@ -746,6 +746,12 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
           element "Agent Activity", aAgentActivity
+          # VN-M5. The one reachable surface for verification and for the
+          # counterexample it produces. There is deliberately no "Counterexample"
+          # entry beside it: a counterexample is a region of this panel that
+          # exists only while a session is open, and a standing menu entry for
+          # it would promise a walk that usually is not there.
+          element "Verification", aVerification
           element "Start Agent Worktree Session", aStartAgenticWorktreeSession
           # element "Step List", aStepList
             # element "Shell", aShell
@@ -4391,6 +4397,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # videoPlayerCancelPicker
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaCancelPicker),
+  proc(actionData: JsObject) = # aVerification
+    data.openLayoutTab(Content.Verification),
 ]
 
 data.actions = actions

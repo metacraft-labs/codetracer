@@ -776,6 +776,23 @@ const
     # green, which is precisely the failure the shared corpus exists to
     # prevent.
     "src/frontend/viewmodel/tests/unit/test_verification_payload.nim",
+    # VN-M5's rendering half, registered for the sharpest version of the reason
+    # VN-M3 and VN-M4 are registered for.
+    #
+    # Its central property is not merely a negative — it is a negative whose
+    # *positive-looking* failure is the dangerous one. A step of a solver's
+    # counterexample carries values and no source position, because `SnapPos`
+    # does not cross the `venir` boundary. If the check that says so
+    # disappears, nothing looks broken: a renderer that resolves a missing span
+    # to line 1 shows a line number, in a real file, next to a real value, and
+    # a developer has no way to tell that the position was invented. A sibling
+    # milestone caught exactly that shape in a producer in the same week.
+    #
+    # It also carries the *control arm* for that check — the one document whose
+    # steps are mixed — without which "every step renders as unknown" is
+    # satisfied by a renderer that renders everything as unknown. Losing the
+    # file loses both halves of a self-controlling pair at once.
+    "src/frontend/viewmodel/tests/unit/test_counterexample_session.nim",
   ]
 
   CliRecordGateTests* = [

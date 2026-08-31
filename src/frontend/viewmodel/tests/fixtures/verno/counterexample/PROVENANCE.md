@@ -49,3 +49,61 @@ A Linux run of `tests/manual/verno_payload_end_to_end.nim` with `venir` against
 a real Noir package. That would produce the same shape with a real workspace, a
 real `venir` process, real source locations and a real obligation span — and it
 would then belong in the shared corpus rather than here.
+
+---
+
+# Provenance — `bounded_loop_model.json`
+
+**Authored here, and it is the only fixture in this directory that is.** That
+is a weakness, it is stated first, and it is why nothing in this document is
+trusted to be right about arithmetic — see "How it is kept honest" below.
+
+## Why it exists
+
+VN-M5 deliverable 4: "Loops from a bounded model driven through the **existing**
+loop controls, not a parallel mechanism." The contract has carried
+`StepKind::LoopIteration` and `iteration` since VN-M4, and **no producer emits
+either**: `air`'s snapshots do not distinguish an unrolled iteration from any
+other program point, so Verno has nothing to put in those fields, and the two
+real documents in this repository contain zero loop steps between them.
+
+Without this file the consumer half of deliverable 4 would be tested by
+quantifying over an empty set, which passes
+(`codetracer-specs/Testing/Verification-Harness-Traps.md`, trap 4). With it, the
+grouping, the iteration boundaries and the slider's end stops are exercised over
+a loop of known, asserted size.
+
+## What is real about it
+
+Nothing. There is no Noir package, no `venir` run, no solver and no z3. The
+values are consistent with the program they describe — `n = 3`, and an
+accumulator reaching `12` against an invariant of `sum <= 3 * i` — and they were
+worked out by hand, not found. `run.workspace_root` says so, in the file, in
+the same place and for the same reason `verno_emitted_solver_model.json` and
+`not_proved_with_model.json` say it.
+
+It is **not** part of the shared conformance corpus in `../payload/`, for the
+same reason its neighbour is not: that corpus is byte-identical in
+`blocksense-network/verno` and tied by a SHA-256 manifest, and this is not a
+document either side is asked to agree about.
+
+## How it is kept honest
+
+The loop checks in `../../unit/test_counterexample_session.nim` do not take this
+file's word for what an iteration is. Every answer the session gives about
+iterations is cross-asserted against **`src/frontend/ui/flow_loop_math.nim`** —
+`activeIterationForTicks`, `nextIteration`, `previousIteration` — which is the
+Omniscience flow panel's own loop arithmetic, written for a different panel and
+a different coordinate long before this milestone. `run-vnm5-render-mutations.py`
+arm `R10` mutates that module and requires the counterexample's loop check to
+redden, which is the demonstration that there is one loop control here and not
+two.
+
+The one thing this file is trusted for is its *shape*: which steps are loop
+iterations, and which iteration number each carries.
+
+## What would replace it
+
+A `venir` that distinguishes an unrolled iteration. That is a producer-side
+change nobody has made, it is named in VN-M5's deliverable 4, and until it
+exists this file is the only input deliverable 4's consumer half has.

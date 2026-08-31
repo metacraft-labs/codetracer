@@ -1276,7 +1276,16 @@ test-frontend-js:
   node src/frontend/tests/nimMonarchDirect.test.mjs
   echo ""
   echo "Running Nim Monaco integration tests (real tokenizer)..."
-  node --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/nimMonacoTokenizer.test.mjs 2>&1 | grep -v "ExperimentalWarning"
+  # `--no-warnings` and NOT `| grep -v ExperimentalWarning`: a pipeline's exit
+  # status is the LAST command's, so the old form reported grep's rc and a
+  # failing test could not fail this lane.  The flag drops the same line and
+  # keeps node's rc, which `set -e` above then honours.
+  node --no-warnings --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/nimMonacoTokenizer.test.mjs
+  echo ""
+  # Does trace content reach monaco-editor 0.54.0's bundled DOMPurify 3.1.7?
+  # The file itself is the answer; this line is what keeps it answered.
+  echo "Running Monaco markdown sanitizer reachability tests..."
+  node --no-warnings --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/monacoMarkdownSanitizer.test.mjs
 
 test-e2e *args:
   #!/usr/bin/env bash
@@ -2952,6 +2961,17 @@ test-renderer-pane-parity:
   mkdir -p test-logs
   exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
   bash ci/test/renderer-pane-parity.sh
+
+# ID1's verifier, proved by mutation. The suite itself runs in `vm-unit` and
+# `vm-unit-js` by the directory glob; this is the evidence that its assertions
+# can fail. M17 needs BOTH backends — it asserts green on C and red on JS — so
+# do not set CT_IDENTITY_ARMS here.
+test-identity-token-mutation:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-identity-token-mutation.log) 2>&1
+  bash ci/test/identity-token-mutation.sh
 
 # NS7a's first verification: the development loop has no network surface, so
 # there is no request for a token to ride on. Runs the gate through its own

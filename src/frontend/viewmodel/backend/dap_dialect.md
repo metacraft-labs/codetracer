@@ -506,6 +506,55 @@ Against a real adapter, an unlisted string reaches `dapCommandToEventKind`
 
 ---
 
+### 7a. Dispatched-but-silent — a category worse than unimplemented
+
+§7's nine commands are **unimplemented**: they reach no arm, and
+`handle_request`'s fallthrough refuses them by name with `command <x> not
+supported here`. A caller gets an error it can render.
+
+There is a second, worse category, and it is not visible from any mapping table
+because the commands *are* in one. These commands **are** dispatched, **do**
+their work, **do** emit their events — and never send a **response**. DAP
+correlates a reply to a request by `request_seq`; a handler that emits only
+events never settles the caller's future. There is no error, no refusal, and no
+timeout from the engine's side. The caller waits forever.
+
+Measured against the published wasm engine over `zk_shields.ct`:
+`ct/calltrace-jump` was dispatched, moved the session, emitted its `stopped`
+event, and returned nothing in 20 s while the worker stayed healthy and answered
+every later request on the same session.
+
+The cause is uniform and visible in the signature: the handler takes its request
+as `_req` — deliberately unused — and ends at `complete_move(...)` without the
+`respond_dap(req, 0, sender)` that every other move handler
+(`next_or_step_back_dap`, `dap_handler.rs`) ends with.
+
+| command | handler | status |
+| --- | --- | --- |
+| `ct/calltrace-jump` | `dap_handler.rs::calltrace_jump` | **fixed** — now responds |
+| `ct/event-jump` | `dap_handler.rs::event_jump` | **fixed** — now responds |
+| `restart` | `run_to_entry` | silent |
+| `ct/collapse-calls` | `collapse_calls` | silent — dispatched without a `sender` at all, so it *cannot* respond |
+| `ct/expand-calls` | `expand_calls` | silent — same |
+| `ct/history-jump` | `history_jump` | silent |
+| `ct/trace-jump` | `trace_jump` | silent |
+| `ct/tracepoint-delete` | `tracepoint_delete` | silent |
+| `ct/tracepoint-toggle` | `tracepoint_toggle` | silent |
+| `ct/local-step-jump` | `local_step_jump` | silent |
+| `ct/setup-trace-session` | `setup_trace_session` | silent |
+
+The two `*-jump` commands are fixed because they are the row-click commands a
+pane awaits directly. The remaining nine are recorded rather than changed: two of
+them are not even handed a `sender`, so fixing them is a dispatch-signature
+change rather than a one-line addition, and the rest want a caller that actually
+awaits them before their response shape is decided.
+
+**For consumers:** do not `await` any command in the "silent" rows above without
+your own deadline. `hydrate.nim` is unaffected today only because it uses
+`ct/goto-ticks` — which does respond — for call-trace row clicks.
+
+---
+
 ## 8. What is *not* a DAP command, contrary to a plausible grep
 
 `flow`, `sources`, `source`, `origin-patterns`, `codetracer-bundled-sources` and
@@ -625,6 +674,47 @@ rediscover:
    small because the fixture is shallow, not because the commands are close;
    it is reported rather than rounded away, and the probe says so explicitly
    when a fixture produces zero.
+
+### 9a. A zero that is about the ANCHORS — how to sweep for this correctly
+
+BlockTracer's port of these tests (`tests/e2e/noir_engine_dap.nim`, §9d) runs
+the same sweep over `zk_shields.ct` and measures `ct/reverseStepIn` differing
+from `stepBack` at **0 of 82 anchors** — and concludes the two are aliases. They
+are not. The anchor set is the problem, and the failure mode is worth recording
+because the suite explicitly argues it has ruled the possibility out.
+
+Its 82 anchors are the tick column of `client/fixtures/demo-session/flow.json` —
+the FLOW WINDOW's rows. Measured over the container directly:
+
+| anchors | count |
+| --- | --- |
+| total | 82 |
+| whose previous step is at a **shallower** depth (call ENTRY) | 13 |
+| whose previous step is at a **deeper** depth (call RETURN) | **0** |
+
+A call RETURN is the only place the two commands can differ — that is point 3
+above. At a call ENTRY, reverse-next and reverse-step-in both land on the
+caller's call site, identically and by construction. So a sweep with no return
+anchor cannot tell the commands apart no matter how many anchors it has.
+
+The reason there are none: a flow window's rows are the statement-level steps of
+the frame being viewed, and the step immediately following a return lands back on
+the line that made the call — a line the window already has a row for. The
+returns are real in the trace; they are simply not what `flow.json` enumerates.
+
+The positive twin, over the same container, sweeping the **79 real call-return
+steps** instead:
+
+    call-return steps in the trace:                        79
+    stepBack vs ct/reverseStepIn differ at:            79 of 79
+
+    step 94:  stepBack -> step 57  (iterate_asteroids, line 12)
+              ct/reverseStepIn -> step 93  (calculate_shield_regeneration, line 66)
+
+So on this container the two commands differ at **every** call return, and at
+none of the anchors the port happens to use. A sweep that wants to distinguish
+them must select anchors by DEPTH TRANSITION — steps whose predecessor is
+deeper — not by whatever row set a fixture happens to carry.
 
 **Status: recorded, not a defect, and nothing to fix.** Both commands are in
 `dap_commands.nim`'s `VALID_DAP_COMMANDS_SEQ`, both have a `CtEventKind` and a
