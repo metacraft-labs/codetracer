@@ -25,6 +25,7 @@ import
   # `{.error.}` on that arm by design. `lib/electron_presence` answers the same
   # question by probing the runtime, and imports nothing.
   lib/[ logging, monaco_lib, jslib, misc_lib, electron_presence ],
+  ui/file_conflict_dialog,
   platform_host,
   lsp_client, lsp_controller
 
@@ -1357,7 +1358,9 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     newElement.id = cstring(fmt"menu-item-{i}")
     let labelEl = kdom.document.createElement("span")
     labelEl.classList.add("ct-menu-item-label")
-    labelEl.innerHTML = option.name
+    # `textContent`, not `innerHTML` — see the twin of this loop in
+    # `viewmodel/views/context_menu_bridge.nim`.  A menu label is a label.
+    labelEl.textContent = option.name
     cast[dom.Element](newElement).append(cast[dom.Element](labelEl))
     newElement.onclick = proc(ev: Event) {.nimcall.} =
       let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
@@ -1370,7 +1373,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
       let hint = kdom.document.createElement("span")
       hint.classList.add("ct-menu-item-sublabel")
       hint.id = cstring(fmt"menu-hint-{i}")
-      hint.innerHTML = option.hint
+      hint.textContent = option.hint
       cast[dom.Element](newElement).append(cast[dom.Element](hint))
     cast[dom.Element](itemContainer).append(cast[dom.Element](newElement))
     container.append(cast[dom.Element](itemContainer))
@@ -1559,20 +1562,12 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
       cwarn fmt"external-change: failed to read changed file {path}: {getCurrentExceptionMsg()}"
       cstring""
 
-  let overlay = kdom.document.createElement(cstring"div")
-  overlay.class = cstring"file-conflict-dialog-backdrop"
-  overlay.innerHTML = cstring(&"""
-    <div class="file-conflict-dialog" role="dialog" aria-modal="true">
-      <h2>File changed on disk</h2>
-      <p>{path} changed on disk while the editor has unsaved changes.</p>
-      <div class="file-conflict-dialog-actions">
-        <button type="button" data-action="discard">Discard and reload</button>
-        <button type="button" data-action="save">Save in-memory version</button>
-        <button type="button" data-action="merge">Open three-way merge</button>
-        <button type="button" data-action="keep">Keep editing</button>
-      </div>
-    </div>
-  """)
+  # `ui/file_conflict_dialog` and not an `&"""..."""` here: this string used to
+  # interpolate `path` into `innerHTML`, and a path is not markup.  `<`, `>`,
+  # `"` and `'` are legal POSIX filename characters, and the path arriving on
+  # `CODETRACER::change-file` is whatever a trace, a workspace or an ACP agent
+  # named.  The builder writes it with `textContent`.
+  let overlay = buildFileConflictOverlay(path)
 
   proc closeDialog() =
     overlay.toJs.remove()

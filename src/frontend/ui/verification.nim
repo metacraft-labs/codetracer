@@ -32,8 +32,20 @@
 ## usually absent — which is the promise VN-M3's whole text tier was designed
 ## not to make, and which VN-M5 has no reason to start making.
 ##
-## So the reachable surface is exactly one: **View ▸ Verification**. What the
-## developer sees there depends only on what the run produced.
+## So the reachable surface is exactly one entry: **View ▸ Verification**. What
+## the developer sees there depends only on what the run produced.
+##
+## **On macOS that entry is reachable through the command palette, not the
+## menu, and the difference is not ours.** `electron_profile.nim` gives darwin
+## `capNativeMenuBar`, so `topbar_actions` withholds `tbaInPageMenu` and
+## `menu.nim` suppresses the in-page HTML menu; the *native* menu is only
+## registered under `-d:ctmacos`, which the nix/reprobuild build path never
+## passes (`repro.nim`'s `RendererDefines` is `chronicles_enabled=off` +
+## `ctRenderer`). The palette is unaffected: `ui_js.nim` builds its command list
+## from `getCommands(data.ui.menuNode)` — the same tree — whether or not that
+## tree is rendered. So one `element` declaration buys the menu on Linux and
+## Windows and the palette everywhere, and a UI test that drives the *menu* must
+## skip darwin the way `welcome-screen/launch_config.spec.ts` already does.
 ##
 ## ## What no lane runs
 ##

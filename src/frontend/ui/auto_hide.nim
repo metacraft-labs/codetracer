@@ -998,9 +998,23 @@ proc doShowOverlayImpl(panel: AutoHidePanel) =
     return
 
   # Set the title.
+  #
+  # `textContent`, not `innerHTML`, and NOT because panel titles are literals —
+  # four of them are, and the rest are not.  `pinPanel` above builds `title`
+  # from `contentItem.tab.titleElement.textContent`, falling back to
+  # `componentState.label`.  For a pinned EDITOR tab, `ui/layout.nim` sets that
+  # tab title from `state.label`, which is a native absolute path (see the
+  # comment there, and `pinnedDocumentPath`'s: "`openLayoutTab` puts
+  # `editorTabPath(path, editorView)` straight into the component state's
+  # `label`").  Every tab carries a pin button (`layout.injectPinButton`), so
+  # pinning an editor and opening its overlay is a two-click path from a path
+  # on disk to this assignment.  The title is also serialised into the saved
+  # layout and read back by `deserializeAutoHidePanel`, so it survives a
+  # restart.  `htmlSinks.test.mjs` asserts this line, the origin above it, and
+  # that no source writes this element as markup.
   let titleEl = document.getElementById(cstring"auto-hide-overlay-title")
   if not titleEl.isNil:
-    titleEl.innerHTML = panel.title
+    titleEl.textContent = panel.title
 
   # Apply edge-specific class and make visible.
   overlayEl.classList.remove(cstring"auto-hide-overlay-left")

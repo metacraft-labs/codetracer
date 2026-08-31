@@ -301,7 +301,11 @@ proc renderEventView(self: ShellComponent, event: SessionEvent, eventContainer: 
   let eventSummary = document.createElement("div")
 
   eventSummary.classList.add("shell-event-summary")
-  eventSummary.innerHTML = event.eventSummary()
+  # `textContent`, not `innerHTML`: `eventSummary` interpolates `event.program`,
+  # `event.binary`, `event.command`, `event.errorMessage` and a `recordingId`.
+  # A command line, a binary path and a compiler/linker error message are all
+  # things a recorded build controls, and none of them is markup.
+  eventSummary.textContent = cstring(event.eventSummary())
   eventRange.appendChild(eventSummary)
 
   let statusDom = self.renderEventStatusView(event)

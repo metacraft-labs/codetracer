@@ -586,13 +586,11 @@ proc electronShell(profile: PlatformProfile): ShellFacade =
     # The scheme allow-list is the facade's, not Electron's. `shell.openExternal`
     # with a `file:` or a registered handler scheme is a code-execution
     # primitive, and no front-end caller has a reason to reach one — so the
-    # refusal lives here rather than in each caller's head.
-    let lowered = url.toLowerAscii()
-    if not (lowered.startsWith("http://") or lowered.startsWith("https://") or
-            lowered.startsWith("mailto:")):
-      return resolvedErr[Nothing](
-        pkInvalidArgument,
-        "only http, https and mailto links can be opened externally", url)
+    # refusal lives in `platform/shell.allowedExternalUrlScheme` rather than
+    # here.  It used to be inline, and inline meant `web_browser.nim` did not
+    # have it.
+    if not allowedExternalUrlScheme(url):
+      return refuseExternalUrl(url)
     jsGuard:
       electronOpenExternal(url.cstring)
       resolvedOk()

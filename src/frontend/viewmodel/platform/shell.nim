@@ -19,6 +19,7 @@
 ## operations still return outcomes rather than nothing, because a container
 ## instantiation's window request crosses a wire and can fail in transit.
 
+import std/strutils
 import ./outcome
 import ./capabilities
 
@@ -44,6 +45,13 @@ type
       ## anything but `http`, `https` and `mailto`: `openExternal` with a
       ## `file:` or a shell-handler scheme is a code-execution primitive, and
       ## the front end never has a reason to reach one.
+      ##
+      ## **That rule is `allowedExternalUrlScheme` below, and not this
+      ## sentence.** It was a sentence, and it was honoured by exactly one of
+      ## the two implementations that can open anything: `desktop_electron`
+      ## checked, and `web_browser` handed the string straight to
+      ## `window.open`. A contract written only in prose is a contract with a
+      ## population of one enforcement site and no way to notice the second.
     revealInFileManager*: proc(path: string): PlatformFuture[PlatformOutcome[Nothing]]
 
     # -- window (capWindowControls / capWindowFullscreen) -------------------
@@ -61,6 +69,27 @@ type
 
     # -- multi-window (capMultiWindow) --------------------------------------
     openSessionWindow*: proc(sessionId: string): PlatformFuture[PlatformOutcome[Nothing]]
+
+const ExternalUrlSchemes* = ["http://", "https://", "mailto:"]
+  ## The complete set of schemes any `openExternalUrl` implementation may pass
+  ## on. Everything else — `file:`, `javascript:`, `data:`, and every scheme an
+  ## OS hands to a registered handler — is a code-execution primitive on at
+  ## least one platform, and no front-end caller has a reason to reach one.
+
+proc allowedExternalUrlScheme*(url: string): bool =
+  ## The whole of the rule on `ShellFacade.openExternalUrl`, in one place so
+  ## that "the implementations must refuse X" is a call rather than a claim.
+  let lowered = url.toLowerAscii()
+  for scheme in ExternalUrlSchemes:
+    if lowered.startsWith(scheme):
+      return true
+  false
+
+proc refuseExternalUrl*(url: string): PlatformFuture[PlatformOutcome[Nothing]] =
+  ## The shared refusal, so both implementations also give the same message.
+  resolvedErr[Nothing](
+    pkInvalidArgument,
+    "only http, https and mailto links can be opened externally", url)
 
 proc unavailableShell*(profile: PlatformProfile): ShellFacade =
   ShellFacade(

@@ -153,7 +153,14 @@ proc createViewZone(self: LowLevelCodeComponent, position: int, lineHeight: int,
 
   if not data.ui.editors[instruction.highLevelPath].tabInfo.isNil:
     let sourceCode = data.ui.editors[instruction.highLevelPath].tabInfo.sourceLines[highLevelLine-1]
-    textDom.innerHTML = fmt"{highLevelLine}| {sourceCode}"
+    # `textContent`, not `innerHTML`.  `sourceCode` is A LINE OF THE RECORDED
+    # PROGRAM'S OWN SOURCE — the most directly attacker-controlled string in
+    # this front end, and one that is markup by construction for any HTML,
+    # JSX, Vue, PHP or template file, and for any language whose string
+    # literals happen to contain a tag.  Written as markup it executed in an
+    # Electron renderer that runs with `nodeIntegration: true` the moment the
+    # low-level view drew this overlay.
+    textDom.textContent = cstring(fmt"{highLevelLine}| {sourceCode}")
     zoneDom.appendChild(textDom)
 
   let viewZone = js{

@@ -80,6 +80,8 @@ const
     staticRead("../fixtures/verno/counterexample/verno_emitted_solver_model.json")
   LoopModelPayload =
     staticRead("../fixtures/verno/counterexample/bounded_loop_model.json")
+  EndToEndPayload =
+    staticRead("../fixtures/verno/counterexample/verno_end_to_end_macos.json")
   MixedPositionsPayload =
     staticRead("../fixtures/verno/payload/not_proved_with_model.json")
   NoModelPayload =
@@ -896,3 +898,91 @@ suite "VN-M5 the panel is reachable, and only where the data allows":
     ck "data-ct-verification-no-model" in
       attributeNames(renderPanelLive(noModel, createCounterexampleSessionVM()))
     expectCount(7)
+
+# ---------------------------------------------------------------------------
+# The run nobody authored
+# ---------------------------------------------------------------------------
+
+suite "VN-M5 a real end-to-end run reaches the consumer's gate":
+  ## `verno_end_to_end_macos.json` is the first document here with no authored
+  ## part: a Noir program with two false postconditions, through Verno's Noir
+  ## front end, through `venir`, through `rust_verify`/`vir`/`air`, to a real
+  ## z3 4.12.5 — on aarch64-darwin, in 0.55 s. See its PROVENANCE.
+  ##
+  ## It does not replace either fixture beside it. Those answer "does the
+  ## emitter's document decode" and "are mixed positions rendered honestly";
+  ## this answers "does the whole chain, unassisted, open the gate".
+
+  test "the whole chain, with nothing authored, opens the gate":
+    startCount()
+    let payload = decoded(EndToEndPayload)
+    ck payload.outcome == voNotProved
+    ck payload.solverInvoked
+    ck payload.producerName == "verno"
+    ck payload.languageRelease == "v1.0.0-beta.26"
+    # Not a synthetic envelope, and it must not pretend to be one: the two
+    # authored fixtures carry `NOT A RECORDING` precisely because theirs are
+    # invented. This one's workspace root is a real path.
+    ck not payload.workspaceRoot.contains("NOT A RECORDING")
+    ck payload.workspaceRoot.len > 0
+    # Two false postconditions, two findings, two traces.
+    ck payload.findings.len == 2
+    ck payload.counterexampleTraces.len == 2
+    ck hasSteppableCounterexample(payload)
+    ck modelIsAbsentBecause(payload) == ""
+    for finding in payload.findings:
+      ck canOpenCounterexample(payload, finding.id)
+    expectCount(12)
+
+  test "the real run confirms the constraint the renderer was built around":
+    # This is the check the campaign has been standing on a fixture for.
+    # `SnapPos` does not cross the `venir` boundary, so a *program point* has
+    # values and no position — while the *obligation's* span does cross,
+    # because it travels on the message rather than on the snapshot map.
+    #
+    # Both states, in one document, from a real solver. Neither was arranged.
+    startCount()
+    let session = sessionOn(EndToEndPayload, "f1")
+    let model = sessionModel(session)
+    ck model.stepCount == 2                    # positive control
+    ck model.positionsKnown == 1
+    ck model.positionsUnknown == 1
+
+    # The program point: values, and the words rather than a line.
+    ck model.rows[0].kind == cskAssignment
+    ck not model.rows[0].position.isKnown
+    ck model.rows[0].positionText == UnknownPositionText
+    ck model.rows[0].bindings.len == 1
+    ck model.rows[0].bindings[0].name == "state"
+    ck model.rows[0].bindings[0].value == "0"
+
+    # The obligation: a real file, a real line, and one real editor anchor.
+    ck model.rows[1].isViolation
+    ck model.rows[1].position.isKnown
+    ck model.rows[1].position.file == "src/main.nr"
+    ck model.rows[1].position.line == 7
+    ck model.obligationKindLabel == "postcondition"
+    ck session.editorAnchors().len == 1
+    ck session.editorAnchors()[0].range.startLine == 7
+    ck positionSummary(model) == "1 of 2 steps have no source position"
+    expectCount(17)
+
+  test "real Verno emits no binding locations, whatever the fixtures suggest":
+    # A correction the real run forced, recorded as a check so it cannot be
+    # quietly re-assumed. `not_proved_with_model.json` gives its binding `x1` a
+    # declaration span, and a reader could take that for the producer's
+    # behaviour. It is not: every binding a real run emits is position-less.
+    #
+    # Both arms, so this says something rather than merely passing: the authored
+    # fixture does carry one, and the real document carries none.
+    startCount()
+    let authored = sessionModel(sessionOn(MixedPositionsPayload, "f0"))
+    ck authored.modelBindings.len == 2         # positive control
+    ck authored.modelBindings[0].position.isKnown
+
+    let real = sessionModel(sessionOn(EndToEndPayload, "f1"))
+    ck real.modelBindings.len == 1             # positive control
+    for binding in real.modelBindings:
+      ck not binding.position.isKnown
+      ck binding.position.line == 0
+    expectCount(5)

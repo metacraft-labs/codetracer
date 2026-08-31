@@ -437,6 +437,93 @@ when defined(js):
         ),
     )
 
+  proc mountWebWelcomeScreen*(): bool =
+    ## The web build's first rendered surface, and the reason it needs its own
+    ## entry rather than reusing `syncLegacyWelcomeScreenIntoVM`.
+    ##
+    ## ## What was wrong
+    ##
+    ## Every other path into this panel is driven by a HOST. The desktop's
+    ## `onWelcomeScreen` handler runs on `CODETRACER::welcome-screen`, which the
+    ## Electron main process sends; it fills `data.recentTraces`,
+    ## `data.config` and the rest out of the user's home directory, and only
+    ## then does `syncLegacyWelcomeScreenIntoVM` push those into the ViewModel.
+    ##
+    ## A statically hosted tab has no such process and never will — that is the
+    ## point of the deployment. So on the web that event never arrives, nothing
+    ## calls `tryMountIsoNimWelcomeScreen`, and the renderer sits fully loaded
+    ## with an empty document. `ui.js` was DELIVERED and never STARTED.
+    ##
+    ## ## Why this does not synthesise the host's message instead
+    ##
+    ## The obvious alternative is to fabricate a `CODETRACER::welcome-screen`
+    ## payload and feed it to the existing handler, so the web takes a code path
+    ## the desktop already exercises. It was rejected after reading what that
+    ## handler does: it assigns `data.config`, and `configureShortcuts()` then
+    ## indexes `config.shortcutMap.actionShortcuts[action]` for every
+    ## `ClientAction`. A fabricated config has an empty map, so the fabrication
+    ## has to be a COMPLETE one — a second, hand-written copy of
+    ## `default_config.yaml` living in the renderer, drifting from the real one,
+    ## and read by nothing that would notice. That is the third-copy shape
+    ## `web_deployment.nim`'s own header refuses for the asset list.
+    ##
+    ## This mounts the panel through the ViewModel directly, which is the same
+    ## thing `storybook_components.mountWelcome` does and for the same reason:
+    ## `ensureWelcomeScreenVm` already builds the store over a STUB backend that
+    ## resolves every command with `{}`. The panel has never needed a host; only
+    ## the legacy component wrapper did.
+    ##
+    ## ## What it deliberately does not claim
+    ##
+    ## This is a mounted welcome screen, not NS9. Noir-Studio.milestones.org's
+    ## NS9 asks that "the first screen is CodeTracer in Edit mode on a working
+    ## multi-file project — Filesystem, Editor, Test Results, Constraints — not
+    ## a landing page", and that milestone is `planned` and depends on NS1's
+    ## unfinished call-site migration. What this closes is the gap BELOW that
+    ## one: the renderer now runs and paints in a browser, so NS9 has a mounted
+    ## tree to put panes into instead of a blank `<div>`.
+    ##
+    ## Returns whether it mounted, so the caller can say so rather than assume.
+    ensureWelcomeScreenVm()
+    if welcomeScreenVMInstance.isNil:
+      return false
+
+    # No host, so no recents: an empty list is the TRUE answer here, not a
+    # placeholder. `setRecentTraces` is still called rather than left unset —
+    # an unset signal and an empty one render differently, and the second is
+    # what a first visit actually is.
+    welcomeScreenVMInstance.setRecentTraces(@[])
+    welcomeScreenVMInstance.setRecentFolders(@[])
+
+    # The start options a TAB can honour. `inactive` is the panel's own word
+    # for "shown and refused", and it is used here rather than dropping the
+    # rows: a user who cannot find "Record new trace" concludes the product is
+    # broken, and one who sees it greyed out learns what this surface is.
+    #
+    # Only "Open folder" is live, and it is live because NS2's project store
+    # (OPFS) is what `web.js` already booted — the same capability the boot
+    # line reports as `platform=pkWeb`.
+    welcomeScreenVMInstance.setStartOptions(@[
+      WelcomeStartOptionRecord(
+        key: optionKey("Open folder"), name: "Open folder", inactive: false),
+      WelcomeStartOptionRecord(
+        key: optionKey("Record new trace"), name: "Record new trace",
+        inactive: true),
+      WelcomeStartOptionRecord(
+        key: optionKey("Open local trace"), name: "Open local trace",
+        inactive: true),
+      WelcomeStartOptionRecord(
+        key: optionKey("Open online trace"), name: "Open online trace",
+        inactive: true),
+      WelcomeStartOptionRecord(
+        key: optionKey("CodeTracer shell"), name: "CodeTracer shell",
+        inactive: true),
+    ])
+    welcomeScreenVMInstance.setMode(wsmWelcome)
+
+    tryMountIsoNimWelcomeScreen()
+    isoNimWelcomeScreenMounted
+
   proc tryMountIsoNimWelcomeScreen*() =
     if welcomeScreenVMInstance.isNil:
       return

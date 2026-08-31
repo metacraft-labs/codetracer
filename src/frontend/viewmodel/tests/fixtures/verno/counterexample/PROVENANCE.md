@@ -107,3 +107,81 @@ iterations, and which iteration number each carries.
 A `venir` that distinguishes an unrolled iteration. That is a producer-side
 change nobody has made, it is named in VN-M5's deliverable 4, and until it
 exists this file is the only input deliverable 4's consumer half has.
+
+---
+
+# Provenance — `verno_end_to_end_macos.json`
+
+**The first document in this repository that nobody authored any part of.** No
+hand-written envelope, no substituted timestamps, no `NOT A RECORDING` marker —
+because it is not synthetic. Its two siblings above stay exactly as they are;
+this file does not replace either of them.
+
+## What produced it, end to end
+
+```
+verno fv        # blocksense-network/verno main cc90731, release build
+  -> Noir v1.0.0-beta.26 front end -> VIR
+  -> venir       # blocksense-network/Venir vn-m5/report-counterexample 7cc0e51
+  -> rust_verify + vir + air   # blocksense-network/verus-lib 15f7712a
+  -> z3 4.12.5 (arm64-osx, the version tools/get-z3.sh pins)
+```
+
+on **aarch64-apple-darwin**, 2026-08-31, against
+`test_programs/formal_verify_failure/verus_post_failure` — a Noir program with
+two false postconditions, ported from Verus' own `examples/basic_failure.rs`.
+Total wall clock for the run: **0.55 s**.
+
+`run.workspace_root` is a real absolute path on the machine that produced it.
+That is deliberate and is the point: the two files above say `NOT A RECORDING`
+because their envelopes are invented, and this one must not, because its
+envelope is not.
+
+## Why it exists next to the other two rather than instead of them
+
+Each answers a different question.
+
+* `verno_emitted_solver_model.json` — does the document Verno's *emitter*
+  produces decode here? Its model is a real z3 result; its envelope is
+  synthetic.
+* `not_proved_with_model.json` (in `../payload/`) — the shared, SHA-256-manifested
+  conformance corpus. It is the only document whose steps are **mixed**, and it
+  is the control arm for every "unknown position" assertion.
+* **This file** — does the whole chain, with nothing authored anywhere in it,
+  reach the consumer's gate?
+
+## What it establishes, and one thing it corrects
+
+`hasSteppableCounterexample` answers **true** for it. Opening `f1` gives a
+2-step session: one program point with values and **no** source position, and
+one violated obligation at `src/main.nr:7:12` producing one real editor anchor.
+`positionSummary` reads *"1 of 2 steps have no source position"*.
+
+So the campaign's central constraint is now confirmed **against real solver
+output** rather than against a fixture: `SnapPos` does not cross the `venir`
+boundary, so a program point carries values and no position, while the
+obligation's own span does cross — it travels on the message, not on the
+snapshot map.
+
+**The correction:** `not_proved_with_model.json` gives its model binding `x1` a
+declaration span. **Real Verno emits no binding locations at all** — every
+binding here is `noloc`. So any claim that a value can be shown against its
+declaration site rests on a fixture shape the producer does not yet produce.
+Recorded here rather than left to be discovered.
+
+## Two producer defects this run exposed, neither fixed here
+
+1. **An encoding-internal name reaches the developer.** Trace `cx0`'s model
+   shows a binding named `no%param`. `payload/counterexample.rs::demangle`
+   classifies a name as internal with `starts_with('%')`, and Verus also emits
+   `<word>%<word>` internals, which that test misses. The module's own rule is
+   "names the encoding owns rather than the developer are not shown"; this is
+   that rule failing on real output, visible only from a real run.
+2. **One corpus entry cannot be parsed.** `formal_verify_success/array_set_composite_types_3`
+   fails with *"Failed to deserialize the following lines"* — `venir` wrote an
+   output shape Verno's `SmtOutput` does not recognise. It is the second
+   `pipeline-error` in the run and is a real regression against the expectation
+   that the success half proves.
+
+Both belong to Verno and are reported rather than patched: PR #6 and the
+`derivation.nix` pin bump are being held deliberately.

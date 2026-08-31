@@ -342,6 +342,36 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/web-bundle-assets.sh
           '
 
+      - name: Prove the bundle MOUNTS before publishing it
+        # The acceptance criterion the previous deploy did not have, and the
+        # reason it shipped a blank page while reporting success at every step.
+        #
+        # The step above proves the bundle CARRIES a renderer. This loads it in
+        # a real browser and asserts that the renderer RUNS: the product's own
+        # `.welcome-screen-root` is mounted, its start options and panels are
+        # rendered, and there are zero uncaught page errors. On 2026-08-31 the
+        # first four were true and the fifth was not — `ui.js` died on
+        # `ReferenceError: monaco is not defined` — and nothing noticed.
+        #
+        # It runs the mutation arms too, which is deliberate at deploy time
+        # rather than wasteful: an assertion that cannot fail is the thing that
+        # let this through, so the deploy re-establishes that this one can.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            export CT_PROBE_SCREENSHOT_DIR="$(pwd)/mount-shots"
+            direnv exec "$(pwd)" bash ci/test/web-renderer-mounts.sh
+          '
+
+      - name: Upload what the pre-publish browser saw
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-publish-mount-screenshots
+          path: mount-shots/
+          if-no-files-found: ignore
+
       - name: Stage the publish directory
         # Both products into one tree. The engine keeps every path BlockTracer
         # fetches; Noir Studio takes `/`; the engine's manual test harness
@@ -557,3 +587,76 @@ jobs:
 
           [ "$fail" -eq 0 ] || { echo "the deployed artifact is not what was built" >&2; exit 1; }
           echo "the deployed bytes are the bytes that were built."
+
+      - name: Load the DEPLOYED page in a browser and assert the product is on it
+        # The last and least substitutable check. Everything above this line
+        # reasons about bytes: the right files, the right sizes, the right
+        # descriptor. A deployment can satisfy all of it and still paint
+        # nothing — that is not hypothetical, it is what the previous deploy
+        # did, and the step above it passed at the time.
+        #
+        # So the final acceptance is a browser on the real hostname, asserting
+        # the DOM. Not "boot reported ok": `.welcome-screen-root` present,
+        # start options rendered, and zero uncaught page errors.
+        #
+        # `web-codetracer.pages.dev` is REQUIRED and `ide.codetracer.com` is
+        # advisory, for the same propagation reason the size checks above draw
+        # that line: the two are one deployment and the custom domain has been
+        # observed to lag.
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p deployed-shots
+          fail=0
+          for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
+            required=required
+            [ "$base" = "https://ide.codetracer.com" ] && required=advisory
+            echo "== $base =="
+            report="deployed-shots/$(echo "$base" | tr -c 'a-z0-9' '-').json"
+            CT_PROBE_SCREENSHOT="deployed-shots/$(echo "$base" | tr -c 'a-z0-9' '-').png" \
+              nix develop .#ci --command \
+                node ci/test/web_renderer_probe.mjs "$base/" 12000 >"$report" || true
+            if [ ! -s "$report" ]; then
+              echo "  the probe produced no report for $base" >&2
+              [ "$required" = required ] && fail=1
+              continue
+            fi
+            verdict="$(python3 - "$report" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          dom = d.get("dom", {})
+          roots = dom.get("welcomeScreenRoots", 0)
+          opts = dom.get("startOptions", 0)
+          errs = d.get("pageErrors", [])
+          problems = []
+          if roots != 1:
+              problems.append(f"{roots} .welcome-screen-root on the page (want 1)")
+          if opts < 5:
+              problems.append(f"{opts} start options rendered (want >= 5)")
+          if errs:
+              problems.append("uncaught page errors: " + " | ".join(errs))
+          print("OK" if not problems else "FAIL: " + "; ".join(problems))
+          print("  renderer said: " + (d.get("rendererLine") or "(nothing)"))
+          print("  boot said:     " + (d.get("bootLine") or "(nothing)"))
+          print("  on screen:     " + (dom.get("visibleText") or "")[:200].replace("\n", " / "))
+          PY
+          )"
+            echo "$verdict" | sed 's/^/  /'
+            case "$verdict" in
+              OK*) : ;;
+              *) [ "$required" = required ] && fail=1 ;;
+            esac
+          done
+          [ "$fail" -eq 0 ] || {
+            echo "the deployed page does not show the product" >&2
+            exit 1
+          }
+          echo "a browser loaded the deployed page and found the product on it."
+
+      - name: Upload what the browser saw on the deployed page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-page-evidence
+          path: deployed-shots/
+          if-no-files-found: ignore

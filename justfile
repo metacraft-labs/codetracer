@@ -1231,7 +1231,8 @@ test-frontend-js:
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test"' EXIT
+  html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1286,6 +1287,18 @@ test-frontend-js:
   # The file itself is the answer; this line is what keeps it answered.
   echo "Running Monaco markdown sanitizer reachability tests..."
   node --no-warnings --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/monacoMarkdownSanitizer.test.mjs
+  echo ""
+  # The renderer's three non-Monaco `innerHTML` sinks: a workspace path in the
+  # file-conflict dialog, a context-menu label, and a recorded program's own
+  # output through ansi_up.  The probe is compiled WITHOUT `-d:nodejs` on
+  # purpose -- with it, karax's `kdom` binds to an in-memory DOM emulation and
+  # a test of what `innerHTML` does would be a test of the emulation.  Without
+  # it the code reaches for browser globals, which the `.mjs` supplies from
+  # jsdom, so the parser under test is a real one.
+  echo "Running renderer HTML sink tests..."
+  nim -d:chronicles_enabled=off -d:ctRenderer \
+    --out:"$html_sinks_probe" js src/frontend/tests/html_sinks_probe.nim
+  node --no-warnings src/frontend/tests/htmlSinks.test.mjs "$html_sinks_probe"
 
 test-e2e *args:
   #!/usr/bin/env bash
@@ -2863,6 +2876,30 @@ test-web-bundle-assets:
   exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
   bash ci/test/web-bundle-assets.sh
 
+# THE PAGE PAINTS — the assertion whose absence let a blank product reach
+# production with every check green.
+#
+# `test-web-bundle-assets` above proves the bundle CARRIES the renderer.  That
+# is not the same claim as the renderer RUNNING, and the difference was a week
+# of `ide.codetracer.com` serving a boot diagnostic and an empty `#dom-root`.
+# This loads the assembled bundle in a real headless browser and asserts the
+# DOM: the renderer's own `.welcome-screen-root`, its start options, its
+# panels, and zero uncaught page errors.
+#
+# It runs three mutation arms beside the control, each verified to redden the
+# assertion written for it — including the exact defect that shipped (publish
+# the bundle without the third-party bundle and the renderer dies on
+# `ReferenceError: monaco is not defined`).
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise.
+test-web-renderer-mounts:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-renderer-mounts.log) 2>&1
+  bash ci/test/web-renderer-mounts.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web
@@ -2962,15 +2999,22 @@ test-renderer-pane-parity:
   exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
   bash ci/test/renderer-pane-parity.sh
 
-# ID1's verifier, proved by mutation. The suite itself runs in `vm-unit` and
-# `vm-unit-js` by the directory glob; this is the evidence that its assertions
-# can fail. M17 needs BOTH backends — it asserts green on C and red on JS — so
-# do not set CT_IDENTITY_ARMS here.
-test-identity-token-mutation:
+# ID1's identity layer: the mutation proof, the WebCrypto seam executed under
+# Node, and the assertion that no environment variable can turn verification
+# off.
+#
+# The unit suites themselves run in `vm-unit` and `vm-unit-js` by the directory
+# glob; these three are the evidence around them. M17 needs BOTH backends — it
+# asserts green on C and red on JS — so do not set CT_IDENTITY_ARMS here.
+test-identity:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
-  exec > >(tee test-logs/test-identity-token-mutation.log) 2>&1
+  exec > >(tee test-logs/test-identity.log) 2>&1
+  bash ci/test/identity-no-escape-hatch.sh
+  bash ci/test/identity-desktop-no-credential.sh
+  bash ci/test/identity-desktop-no-credential-test.sh
+  bash ci/test/identity-webcrypto.sh
   bash ci/test/identity-token-mutation.sh
 
 # NS7a's first verification: the development loop has no network surface, so

@@ -76,13 +76,13 @@ proc wireOverlayButtons*(layout: GoldenLayout) =
 # Overlay content management
 # ---------------------------------------------------------------------------
 
-proc setOverlayContent*(html: cstring) =
-  ## Replace the overlay body with the given HTML string.
-  ## Prefer the live-element reparenting in showOverlay() — this fallback
-  ## is kept for panels restored from serialised state that lack a live element.
-  let contentEl = document.getElementById(cstring"auto-hide-overlay-content")
-  if not contentEl.isNil:
-    contentEl.innerHTML = html
+# `setOverlayContent(html: cstring)` was here: an exported proc whose entire
+# body assigned its argument to `innerHTML`, described as a fallback "kept for
+# panels restored from serialised state".  It had NO CALLERS — the restore path
+# rebuilds a live element instead — so what it actually was is a loaded markup
+# sink with a public name, waiting for the first caller to hand it a panel
+# title or a serialised label.  Deleted rather than fixed: there is nothing to
+# fix in a proc nobody calls, and `htmlSinks.test.mjs` asserts it stays gone.
 
 proc clearOverlayContent*() =
   ## Remove all content from the overlay body. Does NOT destroy live elements —

@@ -229,6 +229,40 @@ const
     ## The target `renderRewriteConfig` already emits for every prefix.
   rendererBundlePath* = "ui.js"
   webEntryBundlePath* = "web.js"
+
+  # THE THREE ASSETS THE RENDERER HAS ALWAYS NEEDED AND THIS MANIFEST NEVER
+  # NAMED, which is why a correct-looking deployment painted nothing.
+  #
+  # `ui.js` is not a self-contained program and never has been. On the desktop
+  # it is the LAST of three scripts in `src/frontend/index.html`: the webpack
+  # bundle publishes `monaco`, `GoldenLayout`, `Mousetrap`, `jQuery` and eight
+  # more onto `window` first, and only then does the renderer load. Delivered
+  # without it, `ui.js` throws
+  #
+  #     Uncaught ReferenceError: monaco is not defined
+  #
+  # during module initialisation — `ui/agent_activity.nim:46` builds two Monaco
+  # models at module scope — and dies about a quarter of the way through its
+  # own top-level code. Nothing downstream of that line ever ran, which is the
+  # whole of "the renderer was delivered and never started".
+  #
+  # It was invisible to every check because each of them was true: the bundle
+  # built, the document referenced it, the file was served at the size it was
+  # uploaded at, and the boot arm reported `ok`. None of them is *a page that
+  # paints*, and the manifest is where that difference has to be written down —
+  # `web-bundle-assets.sh` places what this names, so an asset absent from here
+  # is an asset no deployment carries.
+  #
+  # PATHS MIRROR THE DESKTOP TREE, deliberately. The compiled theme references
+  # `../../libs/codetracer-design-system/...` and the renderer requests
+  # `public/resources/shared/codetracer_welcome_logo.svg`; both are resolved
+  # relative to these locations. Relocating the CSS under `/assets/` for its
+  # cache class would silently 404 every font and the product logo, so the
+  # layout is kept and the cache class is the one `cacheClassFor` gives a
+  # non-`/assets/` path.
+  rendererThemeStylesPath* = "frontend/styles/default_dark_theme_electron.css"
+  rendererLoaderStylesPath* = "frontend/styles/loader.css"
+  thirdPartyBundlePath* = "public/dist/frontend_bundle.js"
   wasmWorkerScriptPath* = staticAssetPrefix[1 .. ^1] & "wasm-worker.js"
   noirCompilerModuleId* = "noir-compiler"
   noirTracerModuleId* = "noir-tracer"
@@ -247,6 +281,15 @@ proc webRuntimeAssets*(): seq[RuntimeAsset] =
     RuntimeAsset(
       id: "web-entry", path: webEntryBundlePath, mode: damBundled,
       required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "third-party-bundle", path: thirdPartyBundlePath, mode: damBundled,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "renderer-theme", path: rendererThemeStylesPath, mode: damBundled,
+      required: true, absenceBehaviour: ""),
+    RuntimeAsset(
+      id: "renderer-loader-styles", path: rendererLoaderStylesPath,
+      mode: damBundled, required: true, absenceBehaviour: ""),
     RuntimeAsset(
       id: "wasm-worker", path: wasmWorkerScriptPath, mode: damAsset,
       required: true,
@@ -607,14 +650,94 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
     """">
 """ & json & """
 </script>
+<link id="theme" rel="stylesheet" href="/""" & rendererThemeStylesPath & """">
+<link rel="stylesheet" href="/""" & rendererLoaderStylesPath & """">
+<link rel="stylesheet" href="/public/third_party/font-awesome.min.css">
+<link rel="stylesheet" href="/public/third_party/vex.css">
+<link rel="stylesheet" href="/public/third_party/vex-theme-os.css">
+<link rel="stylesheet" href="/public/third_party/golden-layout/dist/css/goldenlayout-base.css">
+<link rel="stylesheet" href="/public/third_party/golden-layout/dist/css/themes/goldenlayout-light-theme.css">
+<link rel="stylesheet" href="/public/third_party/jstree_default.css">
+<link rel="stylesheet" href="/public/third_party/nouislider.css">
 <style>
-  html, body { margin: 0; height: 100%; background: #1e1e1e; color: #d4d4d4;
-               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #codetracer-boot { padding: 1.5rem; line-height: 1.6; }
-  #codetracer-boot .fault { color: #f44747; }
+  html, body { margin: 0; height: 100%; }
+  /* The two arms' status lines. They are the product's only visible surface
+     until the renderer paints, and they are how a FAILED start says so — the
+     state this page shipped in reported nothing at all. `#codetracer-renderer`
+     is hidden by the renderer itself once a surface is mounted, so a working
+     page belongs entirely to the product. */
+  #codetracer-boot, #codetracer-renderer {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; line-height: 1.5; padding: 0.35rem 0.75rem;
+    color: #8a8a8a; background: #1e1e1e;
+  }
+  #codetracer-boot .fault, #codetracer-renderer .fault { color: #f44747; }
 </style>
 <div id="codetracer-boot">Starting CodeTracer&hellip;</div>
-<div id="dom-root"></div>
+<div id="codetracer-renderer">Starting the renderer&hellip;</div>
+<!--
+  THE RENDERER'S DOCUMENT, not a placeholder.
+
+  `#dom-root` used to be an empty div, and nothing in `src/frontend/` has ever
+  referenced that id — so even a renderer that started had nowhere to paint.
+  The ids below are the ones the renderer actually looks up: `ui/layout.nim`
+  resolves `ROOT` for the GoldenLayout tree, `ui/welcome_screen.nim` resolves
+  `welcomeScreen`, `ui/session_tabs.nim` renders into `menu`, and the IsoNim
+  app shell mounts at `isonim-app`. They are `src/frontend/index.html`'s
+  skeleton, kept structurally identical on purpose: Noir-Studio.md §1a.1 is
+  explicit that the web is a MODE of CodeTracer and that "no pane is invented
+  for the web", and two divergent documents would be the first place that stops
+  being true.
+
+  They are nested INSIDE `#dom-root` rather than replacing it so that the one
+  assertion worth making about this page — that the product mounted — has a
+  single subject: `#dom-root` is empty when nothing started and carries the
+  IDE when something did.
+-->
+<div id="dom-root">
+  <div id="menu" class="menu"></div>
+  <div id="isonim-app"></div>
+  <div id="welcomeScreen"></div>
+  <div id="root-container">
+    <div id="auto-hide-layout-row">
+      <div id="auto-hide-strip-left"></div>
+      <div id="ROOT">
+        <div id="context-menu-container" style="display: none;"></div>
+        <div id="fixed-search"></div>
+        <div id="session-container-0" class="session-container">
+          <section id="main"></section>
+        </div>
+      </div>
+      <div id="auto-hide-strip-right"></div>
+    </div>
+    <footer>
+      <div id="search-results"></div>
+      <div id="status"></div>
+    </footer>
+  </div>
+</div>
+<!--
+  LOAD ORDER, and every position in it is load-bearing.
+
+  1. The third-party bundle FIRST, because `ui.js` reads `monaco` at module
+     scope and a browser raises `ReferenceError` — not `undefined` — for a
+     global that was never assigned. This is the script whose absence made the
+     deployed page blank.
+  2. `web.js`, the loop arm: it installs the platform and reads the descriptor
+     above out of the DOM.
+  3. `ui.js`, the renderer, last.
+
+  All four are `defer`, which preserves document order and keeps a 13 MB
+  bundle off the parser's critical path. A `type="module"` would scope them
+  more strongly and was measured instead: it makes `ui.js` a `SyntaxError`
+  ("Identifier 'debugRepl' has already been declared"), because Nim's JS
+  backend emits declarations that are legal only in sloppy mode. The scoping
+  the two Nim bundles DO need is applied to the files themselves by
+  `ci/test/web-bundle-assets.sh`; see its header for what shares a global
+  scope and what that cost.
+-->
+<script src="/""" & thirdPartyBundlePath & """" defer></script>
+<script src="/public/third_party/jstree.min.js" defer></script>
 <script src="/""" & webEntryBundlePath & """" defer></script>
 <script src="/""" & rendererBundlePath & """" defer></script>
 """

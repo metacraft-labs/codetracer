@@ -1,0 +1,215 @@
+{
+  "schema": "codetracer.verification/v1",
+  "producer": {
+    "name": "verno",
+    "version": "0.1.0",
+    "source_language": "noir",
+    "language_release": "v1.0.0-beta.26"
+  },
+  "run": {
+    "started_at_unix_ms": 1788158645114,
+    "finished_at_unix_ms": 1788158645654,
+    "workspace_root": "/Users/zahary/m/dev/verno-e2e/test_programs/formal_verify_failure/verus_post_failure",
+    "package": "verus_post_failure",
+    "argv": [
+      "/Users/zahary/m/dev/verno-e2e/target/release/verno",
+      "fv"
+    ],
+    "solver": {
+      "invoked": true,
+      "name": "venir"
+    }
+  },
+  "outcome": "not-proved",
+  "outcome_detail": "postcondition not satisfied",
+  "trust": {
+    "class": "diagnostic-only",
+    "reason": "the solver did not discharge an obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+  },
+  "findings": [
+    {
+      "id": "f0",
+      "kind": "failed-obligation",
+      "message": "postcondition not satisfied",
+      "detail": "failed this postcondition",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 2,
+        "start_column": 12,
+        "end_line": 2,
+        "end_column": 25,
+        "byte_start": 60,
+        "byte_end": 73
+      },
+      "excerpt": "error: postcondition not satisfied\n  \u250c\u2500 src/main.nr:2:12\n  = failed this postcondition",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver did not discharge this obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+      }
+    },
+    {
+      "id": "f1",
+      "kind": "failed-obligation",
+      "message": "postcondition not satisfied",
+      "detail": "failed this postcondition",
+      "location": {
+        "file": "src/main.nr",
+        "file_index": 0,
+        "start_line": 7,
+        "start_column": 12,
+        "end_line": 7,
+        "end_column": 25,
+        "byte_start": 123,
+        "byte_end": 136
+      },
+      "excerpt": "error: postcondition not satisfied\n  \u250c\u2500 src/main.nr:7:12\n  = failed this postcondition",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the solver did not discharge this obligation; with quantifiers and a resource limit that is not a proof the program is wrong"
+      }
+    }
+  ],
+  "counterexample_traces": [
+    {
+      "id": "cx0",
+      "finding_id": "f0",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the values are the SMT solver's own model of the query, carried across unchanged; that the solver could not discharge the obligation is not a proof the program is wrong"
+      },
+      "model": {
+        "status": "partial",
+        "absent_reason": "1 of the solver's assignments name variables the VIR encoding introduced rather than variables the developer wrote (type parameters and `%`-prefixed internals) and are not shown",
+        "bindings": [
+          {
+            "name": "no%param",
+            "value": "0",
+            "type_name": "Int"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "index": 0,
+          "kind": "assumption",
+          "description": "the inputs the solver chose",
+          "bindings": [
+            {
+              "name": "no%param",
+              "value": "0",
+              "type_name": "Int"
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "kind": "violation",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 2,
+            "start_column": 12,
+            "end_line": 2,
+            "end_column": 25,
+            "byte_start": 60,
+            "byte_end": 73
+          },
+          "description": "failed this postcondition",
+          "bindings": []
+        }
+      ],
+      "violated_obligation": {
+        "kind": "postcondition",
+        "raw_kind": "failed this postcondition",
+        "location": {
+          "file": "src/main.nr",
+          "file_index": 0,
+          "start_line": 2,
+          "start_column": 12,
+          "end_line": 2,
+          "end_column": 25,
+          "byte_start": 60,
+          "byte_end": 73
+        },
+        "message": "failed this postcondition"
+      },
+      "is_recorded_execution": false
+    },
+    {
+      "id": "cx1",
+      "finding_id": "f1",
+      "trust": {
+        "class": "diagnostic-only",
+        "reason": "the values are the SMT solver's own model of the query, carried across unchanged; that the solver could not discharge the obligation is not a proof the program is wrong"
+      },
+      "model": {
+        "status": "complete",
+        "bindings": [
+          {
+            "name": "state",
+            "value": "0",
+            "type_name": "Int"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "index": 0,
+          "kind": "assignment",
+          "description": "at program point `snap%PRE`",
+          "bindings": [
+            {
+              "name": "state",
+              "value": "0",
+              "type_name": "Int"
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "kind": "violation",
+          "location": {
+            "file": "src/main.nr",
+            "file_index": 0,
+            "start_line": 7,
+            "start_column": 12,
+            "end_line": 7,
+            "end_column": 25,
+            "byte_start": 123,
+            "byte_end": 136
+          },
+          "description": "failed this postcondition",
+          "bindings": []
+        }
+      ],
+      "violated_obligation": {
+        "kind": "postcondition",
+        "raw_kind": "failed this postcondition",
+        "location": {
+          "file": "src/main.nr",
+          "file_index": 0,
+          "start_line": 7,
+          "start_column": 12,
+          "end_line": 7,
+          "end_column": 25,
+          "byte_start": 123,
+          "byte_end": 136
+        },
+        "message": "failed this postcondition"
+      },
+      "is_recorded_execution": false
+    }
+  ],
+  "goal_trees": [],
+  "solver_queries": [],
+  "source_map": {
+    "files": [
+      {
+        "index": 0,
+        "path": "src/main.nr",
+        "absolute_path": "/Users/zahary/m/dev/verno-e2e/test_programs/formal_verify_failure/verus_post_failure/src/main.nr"
+      }
+    ]
+  }
+}
