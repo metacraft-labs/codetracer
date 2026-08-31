@@ -363,11 +363,57 @@ jobs:
           chmod -R u+w site
 
           # 3. The merged header table: the engine's CORS rules first, then the
-          #    Studio's cache classes.
+          #    Studio's cache classes -- MINUS the `/*` catch-all.
+          #
+          # WHY THE CATCH-ALL IS DROPPED, measured on the live deployment
+          # rather than reasoned about. Cloudflare Pages does not pick the
+          # most specific matching `_headers` rule; it applies EVERY matching
+          # rule and concatenates the values. With the generated table's `/*`
+          # row present, a 16 MB wasm module came back as:
+          #
+          #   cache-control: public, max-age=60, must-revalidate,
+          #                  public, max-age=31536000, immutable
+          #
+          # -- two max-ages in one header, the 60-second one first, on the
+          # asset whose year-long `immutable` caching is the entire reason the
+          # Noir modules are FETCHED instead of bundled. The delivery decision
+          # was being silently undone by the header table meant to implement it.
+          #
+          # `renderCacheConfig` is not wrong: `/*` last is correct for a host
+          # that takes the first match, which is what `_redirects`-style files
+          # do and what the §1b.4 contract describes. It is wrong FOR THIS HOST,
+          # so the adaptation happens here, at the point where the file is
+          # written for Cloudflare, and not by changing a contract that other
+          # hosts read correctly.
+          #
+          # Dropping the row costs nothing and is strictly safer: Pages serves
+          # HTML it has no rule for as `public, max-age=0, must-revalidate`,
+          # which is MORE conservative than the 60 seconds the row asked for.
+          # The specific rows -- /assets/*, /s/*, /p/*/current.json -- do not
+          # overlap each other and are unaffected.
+          python3 - studio-bundle/_headers > site/_studio_headers <<'PY'
+          import sys
+          lines = open(sys.argv[1]).read().splitlines()
+          out, skip = [], False
+          for line in lines:
+              if line.startswith('/'):
+                  skip = (line.strip() == '/*')
+                  if skip:
+                      out.append('# `/*` intentionally omitted: Cloudflare Pages merges every')
+                      out.append('# matching rule, so a catch-all Cache-Control prepends a 60s')
+                      out.append('# max-age onto /assets/* and defeats `immutable`.')
+                      continue
+              elif skip:
+                  continue
+              out.append(line)
+          print('\n'.join(out))
+          PY
           {
             printf '%s\n\n' "$engine_headers"
-            cat studio-bundle/_headers
+            cat site/_studio_headers
           } > site/_headers
+          rm -f site/_studio_headers
+          echo "--- merged _headers ---"; cat site/_headers
 
           echo "staged $(find site -type f | wc -l) files, $(du -sh site | cut -f1)"
           find site -type f | sort | sed 's/^/  /'
